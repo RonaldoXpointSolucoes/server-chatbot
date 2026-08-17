@@ -907,6 +907,7 @@ class EventProcessor {
               }
              
              // Verifica quais conversas já existem no banco
+// Verifica quais conversas já existem no banco
              const contactIds = Array.from(new Set(Array.from(convMap.values()).map(c => c.contact_id)));
              const { data: existingConvs, error: existError } = await supabase.from('conversations')
                   .select('id, tenant_id, instance_id, contact_id, unread_count, status, ai_paused')
@@ -915,13 +916,9 @@ class EventProcessor {
              if(existError) throw new Error("Conversation Select Error: " + existError.message);
              
              const existingConvMap = new Map();
-             const existingConvByContactMap = new Map();
              for(const e of existingConvs) {
                  const instanceKey = e.instance_id || 'null_instance';
                  existingConvMap.set(`${e.tenant_id}_${instanceKey}_${e.contact_id}`, e);
-                 if (!existingConvByContactMap.has(`${e.tenant_id}_${e.contact_id}`)) {
-                     existingConvByContactMap.set(`${e.tenant_id}_${e.contact_id}`, e);
-                 }
              }
              
              const toInsertConvs = [];
@@ -931,7 +928,7 @@ class EventProcessor {
              const updatedAiPausedMap = new Map();
              
              for(const [key, data] of convMap.entries()) {
-                 const exist = existingConvMap.get(key) || existingConvByContactMap.get(`${data.tenant_id}_${data.contact_id}`);
+                 const exist = existingConvMap.get(key);
                  let finalStatus = 'bot';
                  let finalAiPaused = false;
                  
@@ -1015,15 +1012,15 @@ class EventProcessor {
              const insertedConvs = [];
               if(toInsertConvs.length > 0) {
                   const { data: res, error: errInst } = await supabase.from('conversations')
-                      .upsert(toInsertConvs, { onConflict: 'tenant_id, instance_id, contact_id' })
+                      .insert(toInsertConvs)
                       .select('id, tenant_id, contact_id, instance_id');
                       
                   if(errInst) {
-                        console.warn('[BatchProcessor] Upsert lote falhou, processando conversas individualmente:', errInst.message);
+                        console.warn('[BatchProcessor] Insert conversas em lote falhou, tentando individualmente:', errInst.message);
                         for (const item of toInsertConvs) {
                             try {
                                 const { data: itemRes } = await supabase.from('conversations')
-                                    .upsert(item, { onConflict: 'tenant_id, contact_id' })
+                                    .insert([item])
                                     .select('id, tenant_id, contact_id, instance_id');
                                 if (itemRes && itemRes.length > 0) insertedConvs.push(...itemRes);
                             } catch (sErr) {
@@ -1034,16 +1031,20 @@ class EventProcessor {
                         insertedConvs.push(...res);
                   }
               }
-             
-             if(toUpdateConvs.length > 0) {
-                 const { data: res, error: errUp } = await supabase.from('conversations').upsert(toUpdateConvs, { onConflict: 'id' }).select('id, tenant_id, contact_id, instance_id');
-                 if(errUp) console.warn('[BatchProcessor] Aviso: falha atualizando unread batch.', errUp.message);
-             }
-             
-             // Agrupa os IDs das conversas finais no MAPA
-             const finalConvIdMap = new Map();
-             for(const e of existingConvs) finalConvIdMap.set(`${e.tenant_id}_${e.instance_id || 'null_instance'}_${e.contact_id}`, e.id);
-             for(const e of insertedConvs) finalConvIdMap.set(`${e.tenant_id}_${e.instance_id || 'null_instance'}_${e.contact_id}`, e.id);
+              
+              if(toUpdateConvs.length > 0) {
+                  const { data: res, error: errUp } = await supabase.from('conversations').upsert(toUpdateConvs, { onConflict: 'id' }).select('id, tenant_id, contact_id, instance_id');
+                  if(errUp) console.warn('[BatchProcessor] Aviso: falha atualizando unread batch.', errUp.message);
+              }
+              
+              // Agrupa os IDs das conversas finais no MAPA ESTRITO POR INSTÂNCIA
+              const finalConvIdMap = new Map();
+              for(const e of existingConvs) finalConvIdMap.set(`${e.tenant_id}_${e.instance_id || 'null_instance'}_${e.contact_id}`, e.id);
+              for(const e of insertedConvs) finalConvIdMap.set(`${e.tenant_id}_${e.instance_id || 'null_instance'}_${e.contact_id}`, e.id);
+              for(const item of toInsertConvs) {
+                  const k = `${item.tenant_id}_${item.instance_id || 'null_instance'}_${item.contact_id}`;
+                  if (!finalConvIdMap.has(k)) finalConvIdMap.set(k, item.id);
+              }
              
              // 2.5 Resolve Duplicatas de Mensagens ANTES do processo pesado de mídias e inserções
              const allMessageIds = batch.map(b => b.rawMsg.key.id).filter(Boolean);
@@ -1091,18 +1092,27 @@ class EventProcessor {
                      cid = fallbackContact?.id || crypto.randomUUID();
                      contactIdMap.set(`${b.tenantId}_${b.phone}`, cid);
                  }
-                 b.conversationId = finalConvIdMap.get(`${b.tenantId}_${b.instanceId}_${cid}`) || finalConvIdMap.get(`${b.tenantId}_null_instance_${cid}`);
-
-                 if (!b.conversationId) {
-                     for (const [mapKey, convId] of finalConvIdMap.entries()) {
-                         if (mapKey.endsWith(`_${cid}`)) {
-                             b.conversationId = convId;
-                             break;
-                         }
-                     }
-                 }
 
                  const mapKey = `${b.tenantId}_${b.instanceId || 'null_instance'}_${cid}`;
+                 b.conversationId = finalConvIdMap.get(mapKey) || finalConvIdMap.get(`${b.tenantId}_null_instance_${cid}`);
+
+                 // Fallback isolado e seguro: se não tiver conversa mapeada, cria uma nova exclusiva desta instância
+                 if (!b.conversationId) {
+                     const fallbackConvId = crypto.randomUUID();
+                     finalConvIdMap.set(mapKey, fallbackConvId);
+                     b.conversationId = fallbackConvId;
+                     supabase.from('conversations').insert([{
+                         id: fallbackConvId,
+                         tenant_id: b.tenantId,
+                         instance_id: b.instanceId,
+                         contact_id: cid,
+                         status: 'bot',
+                         unread_count: 1,
+                         last_message_preview: Array.from(String(b.textMessage || '')).slice(0, 500).join(''),
+                         last_message_at: new Date(b.timestamp).toISOString()
+                     }]).then(() => {}).catch(e => console.error('[BatchProcessor] Erro no fallback de conversa isolada:', e));
+                 }
+                 
                  b.convStatus = updatedStatusMap.get(mapKey) || existingConvMap.get(`${b.tenantId}_${b.instanceId}_${cid}`)?.status || existingConvMap.get(`${b.tenantId}_null_instance_${cid}`)?.status || 'bot';
                  const isConvPaused = updatedAiPausedMap.has(mapKey) ? updatedAiPausedMap.get(mapKey) : (existingConvMap.get(`${b.tenantId}_${b.instanceId}_${cid}`)?.ai_paused || false);
                  const contactBotStatus = contactBotStatusMap.get(cid) || 'active';

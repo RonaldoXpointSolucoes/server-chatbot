@@ -4032,7 +4032,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         );
         const knownConvId = activeContactObj?.conv_id;
 
-        // 1. Tentar determinar o UUID do contato (contact_id)
+        // 1. Tentar determinar o UUID do contato (contact_id) e da instância alvo
         let targetContactUuid: string | null = null;
         if (isUuid(contactId)) {
             targetContactUuid = contactId;
@@ -4060,15 +4060,30 @@ export const useChatStore = create<ChatState>((set, get) => ({
             }
         }
 
-        // 2. Montar filtro de conversas ESTRITAMENTE com UUIDs válidos para evitar erro 400 no Postgres
-        const convQueryParts: string[] = [];
-        if (targetContactUuid) {
-            convQueryParts.push(`contact_id.eq.${targetContactUuid}`);
+        // Determina o instance_id alvo estrito
+        const activeFilter = get().activeChannelFilter;
+        let targetInstanceId: string | null = activeContactObj?.instance_id || null;
+        if (!targetInstanceId && instanceName) {
+            targetInstanceId = instanceCache.getId(instanceName) || (await resolveInstanceUuid(tenant.id, instanceName)) || instanceName;
         }
+        if (!targetInstanceId && activeFilter && activeFilter !== 'all' && activeFilter !== 'default') {
+            targetInstanceId = instanceCache.getId(activeFilter) || (await resolveInstanceUuid(tenant.id, activeFilter)) || activeFilter;
+        }
+        const hasValidInstanceId = targetInstanceId && isUuid(targetInstanceId);
+
+        // 2. Montar filtro de conversas ESTRITAMENTE com UUIDs válidos e isolado por instância
+        let convsQuery = supabase.from('conversations')
+            .select('id, status, last_message_at, updated_at, instance_id')
+            .eq('tenant_id', tenant.id);
+
         if (knownConvId && isUuid(knownConvId)) {
-            convQueryParts.push(`id.eq.${knownConvId}`);
+            convsQuery = convsQuery.eq('id', knownConvId);
+        } else if (targetContactUuid) {
+            convsQuery = convsQuery.eq('contact_id', targetContactUuid);
+            if (hasValidInstanceId) {
+                convsQuery = convsQuery.eq('instance_id', targetInstanceId);
+            }
         }
-        const convQueryFilter = convQueryParts.length > 0 ? convQueryParts.join(',') : null;
 
         // 3. Executar chamadas em paralelo (contact_notes, resolveInstanceUuid, conversas)
         const notesQuery = targetContactUuid
@@ -4079,22 +4094,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 .order('created_at', { ascending: true })
             : Promise.resolve({ data: [] });
 
-        const convsQuery = convQueryFilter
-            ? supabase.from('conversations')
-                .select('id, status, last_message_at, updated_at')
-                .eq('tenant_id', tenant.id)
-                .or(convQueryFilter)
-                .order('updated_at', { ascending: false })
-            : Promise.resolve({ data: [] });
-
         const [notesRes, resolvedInstanceId, allConvsRes] = await Promise.all([
              notesQuery,
              resolveInstanceUuid(tenant.id, instanceName),
-             convsQuery
+             convsQuery.order('updated_at', { ascending: false })
         ]);
 
         let dbNotes: any[] = notesRes.data || [];
-        const allConvs = allConvsRes.data || [];
+        const allConvs = (allConvsRes.data || []).filter(c => !hasValidInstanceId || c.instance_id === targetInstanceId);
         const conv = allConvs.length > 0 ? allConvs[0] : null;
         const convIds = Array.from(new Set([
             ...allConvs.map(c => c.id),
@@ -4206,33 +4213,53 @@ export const useChatStore = create<ChatState>((set, get) => ({
         
         let rawFetchedMsgs: any[] = [];
         if (convIds.length > 0) {
-            const { data, error: msgErr } = await supabase.from('messages')
+            let msgQuery = supabase.from('messages')
                    .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
                    .eq('tenant_id', tenant.id)
-                   .in('conversation_id', convIds)
+                   .in('conversation_id', convIds);
+            
+            if (hasValidInstanceId) {
+                msgQuery = msgQuery.eq('instance_id', targetInstanceId);
+            }
+
+            const { data, error: msgErr } = await msgQuery
                    .order('timestamp', { ascending: false })
                    .limit(500);
+
             if (msgErr) {
                 console.error("[loadHistoricalMessages] Erro ao buscar mensagens por conversation_id:", msgErr);
             }
             rawFetchedMsgs = data || [];
         }
         
-        // Fallback defensivo: Se a busca por conversation_id trouxer 0 mensagens, busca as conversas do contato pelo contact_id UUID
+        // Fallback defensivo: Se a busca por conversation_id trouxer 0 mensagens, busca as conversas do contato pelo contact_id UUID e instância
         if (rawFetchedMsgs.length === 0 && targetContactUuid) {
-            const { data: contactConvs } = await supabase.from('conversations')
+            let contactConvsQuery = supabase.from('conversations')
                    .select('id')
                    .eq('tenant_id', tenant.id)
                    .eq('contact_id', targetContactUuid);
+            
+            if (hasValidInstanceId) {
+                contactConvsQuery = contactConvsQuery.eq('instance_id', targetInstanceId);
+            }
+
+            const { data: contactConvs } = await contactConvsQuery;
                    
             const allContactConvIds = (contactConvs || []).map(c => c.id);
             if (allContactConvIds.length > 0) {
-                const { data, error: msgErr } = await supabase.from('messages')
+                let fallbackMsgQuery = supabase.from('messages')
                        .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
                        .eq('tenant_id', tenant.id)
-                       .in('conversation_id', allContactConvIds)
+                       .in('conversation_id', allContactConvIds);
+                
+                if (hasValidInstanceId) {
+                    fallbackMsgQuery = fallbackMsgQuery.eq('instance_id', targetInstanceId);
+                }
+
+                const { data, error: msgErr } = await fallbackMsgQuery
                        .order('timestamp', { ascending: false })
                        .limit(500);
+
                 if (msgErr) {
                     console.error("[loadHistoricalMessages] Erro ao buscar mensagens do contato:", msgErr);
                 } else if (data && data.length > 0) {
@@ -5234,7 +5261,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
         if (targetContactLocally) {
              targetContactId = targetContactLocally.id.split('_')[0];
-             convInstanceId = targetContactLocally.instance_id;
+             convInstanceId = m.instance_id || targetContactLocally.instance_id;
         }
 
         // 2. Se não achou localmente, busca o contact_id na tabela conversations
