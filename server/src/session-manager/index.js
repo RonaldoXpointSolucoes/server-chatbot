@@ -206,11 +206,8 @@ class SessionManager {
     }
 
     async getSocketOrWake(tenantId, instanceId, force = false) {
-        if (this.sessions.has(instanceId)) {
-            const session = this.sessions.get(instanceId);
-            if (session && session.sock && session.sock.ws && (session.sock.ws.isOpen || session.sock.ws.isConnecting)) {
-                return session.sock;
-            }
+        if (this.sessions.has(instanceId) && !force) {
+            return this.sessions.get(instanceId).sock;
         }
         try {
             console.log(`[SessionManager] getSocketOrWake: Acordando/recriando sessão para ${instanceId} (force: ${force})...`);
@@ -230,11 +227,8 @@ class SessionManager {
         }
 
         if (this.sessions.has(instanceId) && !force) {
-            const existing = this.sessions.get(instanceId);
-            if (existing && existing.sock && existing.sock.ws && (existing.sock.ws.isOpen || existing.sock.ws.isConnecting)) {
-                console.log(`[SessionManager] Sessão ${instanceId} já estava ativa e saudável em memória.`);
-                return existing.sock;
-            }
+            console.log(`[SessionManager] Sessão ${instanceId} já estava em memória.`);
+            return this.sessions.get(instanceId).sock;
         }
 
         if (this.connectingState.has(instanceId)) {
