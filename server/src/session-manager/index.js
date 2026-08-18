@@ -437,6 +437,7 @@ class SessionManager {
                         console.warn(`[SessionManager - Retry] Erro ao buscar mensagem em getMessage (${key.id}):`, err.message);
                     }
                     return undefined;
+                }
             });
 
             // Tratamento resiliente de oscilações e quedas no WebSocket (ECONNRESET, EPIPE, etc.)
