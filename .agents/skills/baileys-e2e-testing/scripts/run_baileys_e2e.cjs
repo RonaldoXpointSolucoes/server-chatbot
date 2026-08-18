@@ -2,9 +2,9 @@ const https = require('https');
 
 const args = process.argv.slice(2);
 const isAlpha = args.includes('--env') && args[args.indexOf('--env') + 1] === 'alpha';
-const ENGINE_URL = isAlpha ? 'https://api-alpha.xpointsolucoes.com' : 'https://owckk0k8w8soo40w40owc4ss.69.62.92.212.sslip.io';
+const ENGINE_URL = isAlpha ? 'https://wh1ss8sy848ufj6zh8t492y7.69.62.92.212.sslip.io' : 'https://owckk0k8w8soo40w40owc4ss.69.62.92.212.sslip.io';
 
-console.log(`[Baileys E2E] Executando bateria de testes contra o ambiente: ${isAlpha ? '🔴 ALFA (api-alpha.xpointsolucoes.com)' : '🟢 PRODUÇÃO (api.xpointsolucoes.com)'}`);
+console.log(`[Baileys E2E] Executando bateria de testes contra o ambiente: ${isAlpha ? '🔴 ALFA (wh1ss8sy848ufj6zh8t492y7.69.62.92.212.sslip.io)' : '🟢 PRODUÇÃO (api.xpointsolucoes.com)'}`);
 
 const SUPABASE_URL = 'https://yzbxsxabzncdzuxvlppt.supabase.co';
 const TENANT_ID = '8b1e427b-2321-4ea7-9d7e-90f7d5cbad21';
@@ -83,7 +83,8 @@ async function invokeSendMessage(instanceId, targetJid, text) {
     });
     const req = https.request(url, {
       method: 'POST',
-      headers
+      headers,
+      rejectUnauthorized: false
     }, res => {
       let data = '';
       res.on('data', chunk => data += chunk);
