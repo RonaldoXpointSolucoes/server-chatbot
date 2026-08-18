@@ -96,32 +96,26 @@ Essas regras são imutáveis e devem ser seguidas sem exceções para evitar que
 
 ### Fluxos de Deploy (Sugestão Proativa & Apenas Sob Demanda Explícita)
 
-Ao concluir e verificar qualquer desenvolvimento ou correção localmente, a IA **PODE e DEVE SUGERIR** o deploy ao usuário. Porém, nenhum deploy ou `git push origin main` deve ser executado automaticamente, evitando que os webhooks do GitHub disparem builds indesejados no Coolify ou Vercel enquanto o usuário estiver testando localmente.
+Ao concluir e verificar qualquer desenvolvimento ou correção localmente, a IA **PODE e DEVE SUGERIR** o deploy ao usuário. Porém, nenhum deploy ou `git push` deve ser executado automaticamente.
 
 1. **Sugestão de Deploy**:
-   - Ao finalizar a tarefa, a IA deve orientar: *"As alterações foram testadas localmente. Você pode escolher onde publicar: `Deploy` (Vercel Frontend), `Deploy Server` (Coolify 1 Backend), `Deploy1` (Coolify 2 Frontend - foodnext) ou `Deploy Server1` (Coolify 2 Backend - serverchat)."*
+   - Ao finalizar a tarefa, a IA deve orientar: *"As alterações foram testadas localmente. Você pode escolher: `Deploy` (Vercel Frontend) ou `Deploy Server` (Backend Node com Homologação, Testes E2E Automáticos e Produção)."*
 
 2. **Comando `Deploy`**:
    - **Alvo**: Frontend na **Vercel** (`chat-boot-theta.vercel.app`).
    - **Ação**: Incrementa o `patch` no `package.json` da raiz seguindo a regra de dígito único `X.Y.Z` (máximo `9`). Atualiza `VITE_PACKAGE_BUILD_DATE` no `.env` e roda `npm run deploy` (Vercel). Relata a nova versão no chat.
 
-3. **Comando `Deploy Server`**:
-   - **Alvo**: Backend Node no **1º Coolify** (`coolify.xpointsolucoes.com`).
-   - **Ação**: Incrementa a versão no `server/package.json` seguindo a regra de dígito único `X.Y.Z` (máximo `9`), realiza o commit e o push das alterações do servidor para o GitHub (`main`), disparando o build no 1º Coolify. Relata o status no chat.
+3. **Comando `Deploy Server` (Pipeline Único com Homologação Obrigatória & Testes E2E)**:
+   - **Alvo**: Backend Node no **Coolify** (`ServerChatBaileys-Alpha` ➔ `ServerChatBaileys-Produção`).
+   - **Etapa 1 - Homologação**: Incrementa a versão no `server/package.json` seguindo a regra de dígito único `X.Y.Z` (máximo `9`), atualiza as branches `develop` e `staging` (`git push origin main:develop`, `git push origin main:staging`) e dispara o deploy no Coolify Alpha (`ServerChatBaileys-Alpha` - UUID: `wh1ss8sy848ufj6zh8t492y7`), aguardando o build finalizar (`status: "finished"`).
+   - **Etapa 2 - Validação E2E Automática (Quality Gate)**: Executa o script oficial `node .agents/skills/baileys-e2e-testing/scripts/run_baileys_e2e.cjs --env alpha`, validando os 3 ciclos bidirecionais entre FoodNext (`11 94775-8860`) e Ronaldo-Web (`11 97596-0999`) com conferência de `messageId` oficial da Baileys e gravação no banco (`status: "sent"`).
+   - **Etapa 3 - Promoção para Produção (Somente com 100% de Sucesso)**: Se o teste for 100% aprovado, a IA envia o commit para a branch `main` (`git push origin main`), dispara o deploy de Produção no Coolify (`ServerChatBaileys-Produção` - UUID: `owckk0k8w8soo40w40owc4ss`), aguarda o build e relata a tabela de evidências.
+   - **Etapa 4 - Bloqueio de Segurança em caso de Falha**: Se o teste E2E falhar em homologação, o deploy para produção é sumariamente cancelado e o relatório de erro é exibido.
 
-4. **Comando `Deploy1`**:
-   - **Alvo**: Site Frontend no **2º Coolify** (`foodnext.xpointsolucoes.com.br` / `SiteFrontend-Web-V2` - UUID: `fqjnl7aw5bxgzf5ph7nblvsa`).
-   - **Ação**: Incrementa a versão no `package.json` da raiz seguindo a regra de dígito único `X.Y.Z`, atualiza `VITE_PACKAGE_BUILD_DATE` no `.env`, faz `git push` no GitHub e aciona o deploy via API no Coolify 2 (`POST /api/v1/deploy?uuid=fqjnl7aw5bxgzf5ph7nblvsa`). Relata a confirmação no chat.
+4. **Regra de Cancelamento de Deploys Anteriores**:
+   - Ao executar qualquer deploy no Coolify, a IA deve verificar se existem compilações anteriores em andamento (`in_progress`) ou na fila (`queued`) para a mesma aplicação e cancelá-las antes de iniciar o novo build.
 
-5. **Comando `Deploy Server1`**:
-   - **Alvo**: Servidor Backend Node no **2º Coolify** (`serverchat.xpointsolucoes.com.br` / `ServerChatBaileys-V2` - UUID: `fq2ailrq1q4smlsir1ackw5u`).
-   - **Ação**: Incrementa a versão no `server/package.json` seguindo a regra de dígito único `X.Y.Z`, realiza o commit/push no GitHub (`main`) e dispara o deploy via API no Coolify 2 (`POST /api/v1/deploy?uuid=fq2ailrq1q4smlsir1ackw5u`). Relata o status no chat.
-
-6. **Regra de Cancelamento de Deploys Anteriores (Prioridade do Novo Commit)**:
-   - Ao executar qualquer comando de deploy (`Deploy Server`, `Deploy Server1` ou via API), a IA deve obrigatoriamente verificar se existem compilações anteriores em andamento (`in_progress`) ou na fila (`queued`) para a mesma aplicação.
-   - Caso existam, a IA deve invocar o cancelamento (`deployment` -> `action: "cancel"`) dessas instâncias antigas antes de iniciar a nova build. Isso impede que commits mais novos fiquem travados aguardando builds obsoletos.
-
-7. **Se nenhum destes comandos for fornecido pelo usuário, nenhum git push ou deploy será efetuado.**
+5. **Se nenhum destes comandos for fornecido pelo usuário, nenhum git push ou deploy será efetuado.**
 
 ---
 

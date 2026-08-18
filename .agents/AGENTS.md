@@ -26,44 +26,40 @@ Sempre que o usuário solicitar a correção de um problema persistente ou que j
 
 ## Regras de Deploy e Versionamento (Sem Deploy Automático e Sem Push Automático)
 
-O deploy NUNCA deve ser executado de forma automática após alterações de código. O agente só poderá iniciar um deploy ou enviar commits para a branch principal (`git push origin main`) se o usuário explicitamente solicitar através de um dos 4 comandos de deploy.
+O deploy NUNCA deve ser executado de forma automática após alterações de código sem a solicitação explícita do usuário. O usuário dispõe de dois comandos oficiais de deploy: `Deploy` (Frontend) e `Deploy Server` (Backend com Pipeline Integrado de Homologação e Testes E2E).
 
 1. **Sugestão Proativa de Deploy**:
-   - Após concluir e verificar qualquer alteração de código ou correção de bug, a IA **PODE e DEVE SUGERIR** o deploy ao usuário, recomendando a homologação prévia no ambiente de Staging quando aplicável.
-   - A IA **NÃO DEVE** realizar o deploy nem executar `git push origin main` automaticamente sem a solicitação explícita do usuário.
+   - Após concluir e verificar qualquer alteração de código ou correção de bug, a IA **PODE e DEVE SUGERIR** o deploy ao usuário (`Deploy` para Frontend ou `Deploy Server` para Backend).
+   - A IA **NÃO DEVE** realizar deploy nem executar `git push` automaticamente sem a solicitação explícita do usuário através de um dos dois comandos.
 
 2. **Se o usuário digitar `Deploy`**:
    - **Alvo**: Frontend na **Vercel** (`chat-boot-theta.vercel.app`).
-   - Realiza o deploy do frontend na Vercel e atualiza a versão no `package.json` (apenas no frontend).
-   - O incremento da versão deve seguir a regra de dígito único `X.Y.Z` (0 a 9 em cada componente, ex: de `4.9.4` para `4.9.5`). O valor máximo de cada componente é `9`.
+   - Incrementa a versão no `package.json` da raiz seguindo a regra de dígito único `X.Y.Z` (0 a 9 em cada componente, ex: de `4.9.4` para `4.9.5`). O valor máximo de cada componente é `9`.
    - Atualiza a variável `VITE_PACKAGE_BUILD_DATE` no `.env` para a data/hora atual.
    - Executa o commit/push do frontend e a publicação na Vercel (`npm run deploy`).
    - Relata a versão gerada e o status da publicação no chat.
 
-3. **Se o usuário digitar `Deploy Server`**:
-   - **Alvo**: Servidor Backend Node no **1º Coolify** (`coolify.xpointsolucoes.com` -> `https://owckk0k8w8soo40w40owc4ss...`).
-   - Realiza o deploy do servidor de backend Node.js.
-   - Incrementa a versão no arquivo `server/package.json` seguindo a regra de dígito único `X.Y.Z`.
-   - Executa o commit e o push das alterações do servidor Node para o repositório GitHub (`main`), que por sua vez dispara o deploy automático no 1º Coolify.
-   - Relata o status do deploy no chat.
+3. **Se o usuário digitar `Deploy Server` (Pipeline Único com Homologação Obrigatória & Testes E2E)**:
+   - **Alvo**: Backend Node no **Coolify** (`ServerChatBaileys-Alpha` ➔ `ServerChatBaileys-Produção`).
+   - **Etapa 1 - Homologação**:
+     - Incrementa a versão no `server/package.json` seguindo a regra de dígito único `X.Y.Z`.
+     - Atualiza as branches `develop` e `staging` (`git push origin main:develop`, `git push origin main:staging`).
+     - Aciona o deploy da aplicação de Homologação no Coolify (`ServerChatBaileys-Alpha` - UUID: `wh1ss8sy848ufj6zh8t492y7`).
+     - Acompanha o build no Coolify até a conclusão (`status: "finished"`).
+   - **Etapa 2 - Validação E2E Automática (Quality Gate)**:
+     - Executa o script oficial da skill `baileys-e2e-testing`:
+       `node .agents/skills/baileys-e2e-testing/scripts/run_baileys_e2e.cjs --env alpha`
+     - Valida os 3 ciclos bidirecionais de envio e recebimento entre as caixas **FoodNext** (`11 94775-8860`) e **Ronaldo-Web** (`11 97596-0999`).
+     - Exige confirmação de `messageId` oficial da Baileys e gravação no banco (`status: "sent"`) para todas as 6 mensagens.
+   - **Etapa 3 - Promoção para Produção (Somente com 100% de Sucesso)**:
+     - Se todos os testes passarem com sucesso (TRUE), avança automaticamente para a produção:
+     - Executa o commit e push para a branch `main` (`git push origin main`), disparando o build no Coolify Produção (`ServerChatBaileys-Produção` - UUID: `owckk0k8w8soo40w40owc4ss`).
+     - Acompanha o deploy da produção até `finished`.
+     - Apresenta a tabela de evidências do teste E2E e confirma a versão ativa em Produção.
+   - **Etapa 4 - Bloqueio de Segurança em caso de Falha**:
+     - Se o teste E2E em Homologação reprovar ou apresentar qualquer erro de socket/envio, o deploy de Produção é **SUMARIAMENTE BLOQUEADO**, protegendo o ambiente real contra quebras e exibindo o diagnóstico das falhas ocorridas.
 
-4. **Se o usuário digitar `Deploy1`**:
-   - **Alvo**: Site Frontend Web no **2º Coolify** (`coolify.xpointsolucoes.com.br` -> `https://foodnext.xpointsolucoes.com.br` / `SiteFrontend-Web-V2` - UUID: `fqjnl7aw5bxgzf5ph7nblvsa`).
-   - Incrementa a versão no `package.json` da raiz seguindo a regra de dígito único `X.Y.Z`.
-   - Atualiza a variável `VITE_PACKAGE_BUILD_DATE` no `.env`.
-   - Executa o commit/push no GitHub e aciona o disparo da API do Coolify 2:
-     `POST https://coolify.xpointsolucoes.com.br/api/v1/deploy?uuid=fqjnl7aw5bxgzf5ph7nblvsa` (com Token Bearer do `.env`).
-   - Relata o status da fila de deploy do Coolify 2 no chat.
-
-5. **Se o usuário digitar `Deploy Server1`**:
-   - **Alvo**: Servidor Backend Node no **2º Coolify** (`coolify.xpointsolucoes.com.br` -> `https://serverchat.xpointsolucoes.com.br` / `ServerChatBaileys-V2` - UUID: `fq2ailrq1q4smlsir1ackw5u`).
-   - Incrementa a versão no `server/package.json` seguindo a regra de dígito único `X.Y.Z`.
-   - Executa o commit e push para a branch `main` no GitHub.
-   - Aciona o disparo via API do Coolify 2:
-     `POST https://coolify.xpointsolucoes.com.br/api/v1/deploy?uuid=fq2ailrq1q4smlsir1ackw5u` (com Token Bearer do `.env`).
-   - Relata o status da fila de deploy do Coolify 2 no chat.
-
-6. **Caso o usuário NÃO digite um destes comandos, o agente NÃO deve realizar git push nem deploy de nenhum tipo.**
+4. **Caso o usuário NÃO digite um destes comandos, o agente NÃO deve realizar git push nem deploy de nenhum tipo.**
 
 ## Regras de Execução e Testes do Servidor (Evitando Conflitos Concorrentes)
 
