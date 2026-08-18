@@ -107,7 +107,9 @@ const customAuthStorage = {
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     storage: customAuthStorage,
-    persistSession: true
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true
   },
   global: {
     fetch: customFetch
@@ -120,8 +122,16 @@ export const masterSupabase = createClient(supabaseUrl, MASTER_SERVICE_ROLE_KEY,
   global: { fetch: customFetch }
 });
 
-// Interceptador global de ciclo de vida de autenticação para evitar sessões zumbis
+// Interceptador global de ciclo de vida de autenticação para sincronizar Realtime e evitar sessões zumbis
 supabase.auth.onAuthStateChange((event, session) => {
+  if (session?.access_token) {
+    try {
+      supabase.realtime.setAuth(session.access_token);
+    } catch (realtimeErr) {
+      console.warn('[Supabase Realtime] Falha ao definir token de autenticação:', realtimeErr);
+    }
+  }
+
   if (event === 'SIGNED_OUT') {
     const isExplicitLogout = typeof window !== 'undefined' && sessionStorage.getItem('user_explicit_logout') === 'true';
     const isOffline = typeof window !== 'undefined' && !window.navigator.onLine;
@@ -171,6 +181,41 @@ supabase.auth.onAuthStateChange((event, session) => {
     }
   }
 });
+
+// Inicialização e Renovação Proativa do JWT para manter o Supabase Realtime perenemente conectado
+if (typeof window !== 'undefined') {
+  // Sincroniza o token inicial com o Realtime
+  supabase.auth.getSession().then(({ data: { session } }) => {
+    if (session?.access_token) {
+      try {
+        supabase.realtime.setAuth(session.access_token);
+      } catch (_) {}
+    }
+  }).catch(() => {});
+
+  // Monitor proativo a cada 5 minutos: renova a sessão antes do token expirar (evita InvalidJWTToken no Realtime)
+  setInterval(async () => {
+    try {
+      if (!window.navigator.onLine) return;
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        const expiresAt = session.expires_at ? session.expires_at * 1000 : 0;
+        const now = Date.now();
+        // Se o token expira em menos de 10 minutos (ou já expirou), renova proativamente
+        if (expiresAt && (expiresAt - now < 10 * 60 * 1000)) {
+          console.log('[Supabase Auth] Renovando sessão JWT proativamente antes da expiração...');
+          const { data: refreshData, error: refreshErr } = await supabase.auth.refreshSession();
+          if (!refreshErr && refreshData?.session?.access_token) {
+            supabase.realtime.setAuth(refreshData.session.access_token);
+            console.log('[Supabase Auth] Token JWT renovado e Supabase Realtime sincronizado com sucesso.');
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[Supabase Auth] Erro ao renovar token de sessão proativamente:', err);
+    }
+  }, 5 * 60 * 1000);
+}
 
 export type MessageRow = {
   id: string;

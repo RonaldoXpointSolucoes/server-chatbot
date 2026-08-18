@@ -205,7 +205,23 @@ class SessionManager {
         }, 30000);
     }
 
-    async createSession(tenantId, instanceId) {
+    async getSocketOrWake(tenantId, instanceId, force = false) {
+        if (this.sessions.has(instanceId)) {
+            const session = this.sessions.get(instanceId);
+            if (session && session.sock && session.sock.ws && (session.sock.ws.isOpen || session.sock.ws.isConnecting)) {
+                return session.sock;
+            }
+        }
+        try {
+            console.log(`[SessionManager] getSocketOrWake: Acordando/recriando sessão para ${instanceId} (force: ${force})...`);
+            return await this.createSession(tenantId, instanceId, force);
+        } catch (e) {
+            console.error(`[SessionManager] Falha em getSocketOrWake para ${instanceId}:`, e.message);
+            return null;
+        }
+    }
+
+    async createSession(tenantId, instanceId, force = false) {
         if (this.reconnectingTimers.has(instanceId)) {
             const timer = this.reconnectingTimers.get(instanceId);
             clearTimeout(timer);
@@ -213,18 +229,21 @@ class SessionManager {
             console.log(`[SessionManager] Antecipando/limpando timer de reconexão pendente para a instância ${instanceId}.`);
         }
 
-        if (this.sessions.has(instanceId)) {
-            console.log(`[SessionManager] Sessão ${instanceId} já estava em memória.`);
-            return this.sessions.get(instanceId).sock;
+        if (this.sessions.has(instanceId) && !force) {
+            const existing = this.sessions.get(instanceId);
+            if (existing && existing.sock && existing.sock.ws && (existing.sock.ws.isOpen || existing.sock.ws.isConnecting)) {
+                console.log(`[SessionManager] Sessão ${instanceId} já estava ativa e saudável em memória.`);
+                return existing.sock;
+            }
         }
 
         if (this.connectingState.has(instanceId)) {
             return this.connectingState.get(instanceId);
         }
 
-        console.log(`[SessionManager] Iniciando sessão para Instance: ${instanceId} | Tenant: ${tenantId}`);
+        console.log(`[SessionManager] Iniciando sessão para Instance: ${instanceId} | Tenant: ${tenantId} | Force: ${force}`);
 
-        const promise = this._createSessionInner(tenantId, instanceId);
+        const promise = this._createSessionInner(tenantId, instanceId, force);
         this.connectingState.set(instanceId, promise);
         
         try {
@@ -234,7 +253,7 @@ class SessionManager {
         }
     }
 
-    async _createSessionInner(tenantId, instanceId) {
+    async _createSessionInner(tenantId, instanceId, force = false) {
         try {
             // Aguarda que qualquer escrita pendente da sessão anterior no Supabase seja finalizada
             await flushPendingWrites(instanceId);
@@ -254,26 +273,57 @@ class SessionManager {
                 throw new Error(errorMsg);
             }
 
-            // 1. Verifica se há um lock ativo por outro worker
-            const { data: currentInstance } = await retryWithBackoff(() =>
-                supabase
-                    .from('whatsapp_instances')
-                    .select('assigned_node_id, lease_until, status, monitoring_until, settings')
-                    .eq('id', instanceId)
-                    .single()
-            );
+            // 1. Verifica se há um lock ativo por outro worker com retry e backoff exponencial
+            let currentInstance = null;
+            let lockAcquired = false;
+            let lockAttempts = 0;
+            const maxLockAttempts = 3;
 
-            const now = new Date();
-            const currentNodeId = String(NODE_ID).trim();
-            const assignedNodeId = currentInstance?.assigned_node_id ? String(currentInstance.assigned_node_id).trim() : null;
+            while (lockAttempts < maxLockAttempts && !lockAcquired) {
+                lockAttempts++;
+                const { data: inst } = await retryWithBackoff(() =>
+                    supabase
+                        .from('whatsapp_instances')
+                        .select('assigned_node_id, lease_until, status, monitoring_until, settings, updated_at')
+                        .eq('id', instanceId)
+                        .single()
+                );
+                currentInstance = inst;
 
-            if (currentInstance && currentInstance.lease_until && new Date(currentInstance.lease_until) > now) {
-                if (assignedNodeId && assignedNodeId !== currentNodeId) {
-                    const leaseExpiry = new Date(currentInstance.lease_until);
-                    const remainingSeconds = Math.max(1, Math.round((leaseExpiry - now) / 1000));
-                    const errorMsg = `Instância ${instanceId} já possui um lock ativo pelo worker ${assignedNodeId} (lease restante: ${remainingSeconds}s até ${currentInstance.lease_until}). Conexão negada.`;
-                    console.warn(`[SessionManager] Lock negado: ${errorMsg}`);
-                    throw new Error(errorMsg);
+                const now = new Date();
+                const currentNodeId = String(NODE_ID).trim();
+                const assignedNodeId = currentInstance?.assigned_node_id ? String(currentInstance.assigned_node_id).trim() : null;
+
+                if (currentInstance && currentInstance.lease_until && new Date(currentInstance.lease_until) > now) {
+                    if (assignedNodeId && assignedNodeId !== currentNodeId && !force) {
+                        const leaseExpiry = new Date(currentInstance.lease_until);
+                        const remainingSeconds = Math.max(1, Math.round((leaseExpiry - now) / 1000));
+                        
+                        // Se o registro não for atualizado há mais de 45 segundos ou o status for offline/paused, o worker que detinha o lock crashou/morreu
+                        const lastUpdated = currentInstance.updated_at ? new Date(currentInstance.updated_at) : null;
+                        const isStaleWorker = (lastUpdated && (now.getTime() - lastUpdated.getTime() > 45000)) || 
+                                              currentInstance.status === 'offline' || 
+                                              currentInstance.status === 'paused';
+                        
+                        if (!isStaleWorker) {
+                            if (lockAttempts < maxLockAttempts) {
+                                const backoffMs = lockAttempts * 2000;
+                                console.warn(`[SessionManager] Lock ativo na instância ${instanceId} por ${assignedNodeId} (lease restante: ${remainingSeconds}s). Aguardando e tentando novamente em ${backoffMs/1000}s (Tentativa ${lockAttempts}/${maxLockAttempts})...`);
+                                await new Promise(r => setTimeout(r, backoffMs));
+                                continue;
+                            }
+                            const errorMsg = `Instância ${instanceId} já possui um lock ativo pelo worker ${assignedNodeId} (lease restante: ${remainingSeconds}s até ${currentInstance.lease_until}). Conexão negada.`;
+                            console.warn(`[SessionManager] Lock negado após ${maxLockAttempts} tentativas: ${errorMsg}`);
+                            throw new Error(errorMsg);
+                        } else {
+                            console.warn(`[SessionManager] ⚠️ Worker ${assignedNodeId} inativo (>45s sem update ou status ${currentInstance.status}). Liberando lock obsoleto e assumindo controle da instância ${instanceId}.`);
+                            lockAcquired = true;
+                        }
+                    } else {
+                        lockAcquired = true;
+                    }
+                } else {
+                    lockAcquired = true;
                 }
             }
 
@@ -387,8 +437,19 @@ class SessionManager {
                         console.warn(`[SessionManager - Retry] Erro ao buscar mensagem em getMessage (${key.id}):`, err.message);
                     }
                     return undefined;
-                }
             });
+
+            // Tratamento resiliente de oscilações e quedas no WebSocket (ECONNRESET, EPIPE, etc.)
+            if (sock.ws) {
+                sock.ws.on('error', (wsErr) => {
+                    const msg = wsErr?.message || String(wsErr);
+                    if (msg.includes('ECONNRESET') || msg.includes('EPIPE') || msg.includes('ETIMEDOUT') || msg.includes('closed')) {
+                        console.warn(`[SessionManager/WebSocket] Oscilação transitória de conexão no socket ${instanceId}: ${msg}. O ciclo de reconexão Baileys estabilizará a sessão.`);
+                    } else {
+                        console.error(`[SessionManager/WebSocket] Erro capturado no socket ${instanceId}:`, msg);
+                    }
+                });
+            }
 
             sock.ev.on('creds.update', async () => {
                 await saveCreds();

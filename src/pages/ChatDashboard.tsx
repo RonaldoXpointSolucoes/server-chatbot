@@ -1523,7 +1523,16 @@ export default function ChatDashboard() {
   const [batchResolvedCount, setBatchResolvedCount] = useState(0);
   const [isProcessingBatchResolve, setIsProcessingBatchResolve] = useState(false);
   const undoTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const [messageFilter, setMessageFilter] = useState<'today' | 'all'>('all');
+  const [messageFilter, setMessageFilter] = useState<'today' | 'all'>(ticketMode ? 'today' : 'all');
+
+  // Sincroniza o filtro de mensagens sempre que o Modo Ticket for alternado
+  useEffect(() => {
+    if (ticketMode) {
+      setMessageFilter('today');
+    } else {
+      setMessageFilter('all');
+    }
+  }, [ticketMode]);
 
   // Helper de validação de Ticket Aberto para a caixa atual
   const isContactOpenTicket = React.useCallback((c: any) => {
@@ -2902,7 +2911,7 @@ export default function ChatDashboard() {
         setInputText('');
       }
       setReplyMessage(null); // Limpa rascunho de resposta (quote) ao trocar de conversa
-      setMessageFilter('all'); // Mantém histórico completo visível por padrão ao trocar de conversa
+      setMessageFilter(ticketMode ? 'today' : 'all'); // No Modo Ticket, foca nas mensagens de hoje por padrão
       prevActiveChatId.current = activeChatId || null;
     }
   }, [activeChatId]);
@@ -3107,7 +3116,7 @@ export default function ChatDashboard() {
     const existing = contacts.find(c => c.whatsapp_jid === jid || c.phone === cleanWaid);
     
     if (existing) {
-      setActiveChatId(existing.id);
+      setActiveChat(existing.id);
     } else {
       const tempId = `temp_${Date.now()}`;
       useChatStore.getState().upsertContactLocally({
@@ -3119,7 +3128,7 @@ export default function ChatDashboard() {
         messages: [],
         timestamp: Date.now()
       } as any);
-      setActiveChatId(tempId);
+      setActiveChat(tempId);
     }
 
     setTimeout(() => {
@@ -7606,6 +7615,17 @@ export default function ChatDashboard() {
             {(() => {
               const rawMsgs = activeChat.messages?.filter(m => Boolean(m.text || m.mediaUrl || m.isTask || m.sender || m.payload || m.id)) || [];
               const sortedRawMsgs = sortMessagesChronologically(rawMsgs);
+              
+              // Verifica se há mensagens gravadas de dias anteriores ao dia de hoje
+              const hasPreviousMessages = sortedRawMsgs.some(m => {
+                try {
+                  const d = m.timestamp instanceof Date ? m.timestamp : new Date(m.timestamp);
+                  return !isNaN(d.getTime()) && !isToday(d) && d.getTime() <= Date.now();
+                } catch (e) {
+                  return false;
+                }
+              });
+
               const msgsFilteredByMode = (ticketMode && messageFilter === 'today')
                 ? sortedRawMsgs.filter(m => {
                     try {
@@ -7661,9 +7681,10 @@ export default function ChatDashboard() {
                         <button
                           type="button"
                           onClick={() => setMessageFilter('all')}
-                          className="mt-1 px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl shadow-md transition-all active:scale-[0.98] cursor-pointer"
+                          className="mt-1 px-5 py-3 min-h-[48px] bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs rounded-xl shadow-md transition-all active:scale-[0.98] cursor-pointer flex items-center gap-2"
                         >
-                          Exibir Histórico Completo
+                          <History size={15} />
+                          <span>Mostrar Conversas Anteriores</span>
                         </button>
                       </div>
                     </div>
@@ -7689,60 +7710,90 @@ export default function ChatDashboard() {
                 );
               }
               
-              return dedupedMsgs.map((msg, index, arr) => {
-                const isMe = msg.sender === 'human' || msg.sender === 'bot';
-                
-                let showDateSeparator = false;
-                let dateSeparatorText = '';
-                
-                if (index === 0) {
-                   showDateSeparator = true;
-                } else {
-                   const prevMsg = arr[index - 1];
-                   const currentDay = format(new Date(msg.timestamp), 'yyyy-MM-dd');
-                   const prevDay = format(new Date(prevMsg.timestamp), 'yyyy-MM-dd');
-                   if (currentDay !== prevDay) {
-                      showDateSeparator = true;
-                   }
-                }
-                
-                if (showDateSeparator) {
-                   const date = new Date(msg.timestamp);
-                   const daysOfWeek = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
-                   if (isToday(date)) dateSeparatorText = 'HOJE';
-                   else if (isYesterday(date)) dateSeparatorText = 'ONTEM';
-                   else dateSeparatorText = `${daysOfWeek[date.getDay()]}, ${format(date, "dd/MM/yyyy")}`;
-                }
-                
-                return (
-                  <MessageBubble 
-                    key={msg.id}
-                    msg={msg}
-                    index={index}
-                    totalMessages={arr.length}
-                    activeChat={activeChat}
-                    activeMsgDropdown={activeMsgDropdown}
-                    setActiveMsgDropdown={setActiveMsgDropdown}
-                    setReplyMessage={setReplyMessage}
-                    textareaRef={textareaRef}
-                    handleAiReplySuggestion={handleAiReplySuggestion}
-                    setMessageToForward={setMessageToForward}
-                    setEditingMessage={setEditingMessage}
-                    setMessageToDelete={setMessageToDelete}
-                    setFullscreenImage={setFullscreenImage}
-                    handleTranscribeAudio={handleTranscribeAudio}
-                    transcribingIds={transcribingIds}
-                    handleOpenVCardContact={handleOpenVCardContact}
-                    renderMessageText={renderMessageText}
-                    showDateSeparator={showDateSeparator}
-                    dateSeparatorText={dateSeparatorText}
-                    onAlterarRaciocinio={handleOpenAlterarRaciocinio}
-                    ticketMode={ticketMode}
-                    messageFilter={messageFilter}
-                    setMessageFilter={setMessageFilter}
-                  />
-                );
-              });
+              return (
+                <>
+                  {/* Barra de Toggle de Conversas Anteriores no Modo Ticket */}
+                  {ticketMode && hasPreviousMessages && (
+                    <div className="sticky top-0 z-20 flex justify-center py-2 select-none animate-in fade-in duration-200">
+                      <button
+                        type="button"
+                        onClick={() => setMessageFilter(prev => prev === 'today' ? 'all' : 'today')}
+                        className={cn(
+                          "flex items-center justify-center gap-2.5 px-5 py-2.5 rounded-2xl text-xs font-black shadow-md backdrop-blur-md border transition-all duration-300 cursor-pointer min-h-[48px] active:scale-95",
+                          messageFilter === 'all'
+                            ? "bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white border-emerald-400/40 shadow-emerald-500/25 ring-2 ring-emerald-500/20"
+                            : "bg-white/90 dark:bg-[#202c33]/90 text-emerald-600 dark:text-emerald-300 border-emerald-500/30 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 shadow-emerald-500/10"
+                        )}
+                        title={messageFilter === 'today' ? 'Clique para carregar todo o histórico de conversas' : 'Clique para ocultar e exibir apenas as conversas de hoje'}
+                      >
+                        <Ticket size={15} className="text-emerald-500 dark:text-emerald-400 animate-pulse shrink-0" />
+                        <span>{messageFilter === 'today' ? 'Mostrar Conversas Anteriores' : 'Ocultar Conversas Anteriores'}</span>
+                        <span className={cn(
+                          "px-2 py-0.5 rounded-full text-[9.5px] font-black uppercase tracking-wider",
+                          messageFilter === 'all' ? "bg-white/20 text-white" : "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                        )}>
+                          {messageFilter === 'today' ? '▲ Histórico Completo' : '▼ Apenas Hoje'}
+                        </span>
+                      </button>
+                    </div>
+                  )}
+
+                  {dedupedMsgs.map((msg, index, arr) => {
+                    const isMe = msg.sender === 'human' || msg.sender === 'bot';
+                    
+                    let showDateSeparator = false;
+                    let dateSeparatorText = '';
+                    
+                    if (index === 0) {
+                       showDateSeparator = true;
+                    } else {
+                       const prevMsg = arr[index - 1];
+                       const currentDay = format(new Date(msg.timestamp), 'yyyy-MM-dd');
+                       const prevDay = format(new Date(prevMsg.timestamp), 'yyyy-MM-dd');
+                       if (currentDay !== prevDay) {
+                          showDateSeparator = true;
+                       }
+                    }
+                    
+                    if (showDateSeparator) {
+                       const date = new Date(msg.timestamp);
+                       const daysOfWeek = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+                       if (isToday(date)) dateSeparatorText = 'HOJE';
+                       else if (isYesterday(date)) dateSeparatorText = 'ONTEM';
+                       else dateSeparatorText = `${daysOfWeek[date.getDay()]}, ${format(date, "dd/MM/yyyy")}`;
+                    }
+                    
+                    return (
+                      <MessageBubble 
+                        key={msg.id}
+                        msg={msg}
+                        index={index}
+                        totalMessages={arr.length}
+                        activeChat={activeChat}
+                        activeMsgDropdown={activeMsgDropdown}
+                        setActiveMsgDropdown={setActiveMsgDropdown}
+                        setReplyMessage={setReplyMessage}
+                        textareaRef={textareaRef}
+                        handleAiReplySuggestion={handleAiReplySuggestion}
+                        setMessageToForward={setMessageToForward}
+                        setEditingMessage={setEditingMessage}
+                        setMessageToDelete={setMessageToDelete}
+                        setFullscreenImage={setFullscreenImage}
+                        handleTranscribeAudio={handleTranscribeAudio}
+                        transcribingIds={transcribingIds}
+                        handleOpenVCardContact={handleOpenVCardContact}
+                        renderMessageText={renderMessageText}
+                        showDateSeparator={showDateSeparator}
+                        dateSeparatorText={dateSeparatorText}
+                        onAlterarRaciocinio={handleOpenAlterarRaciocinio}
+                        ticketMode={ticketMode}
+                        messageFilter={messageFilter}
+                        setMessageFilter={setMessageFilter}
+                      />
+                    );
+                  })}
+                </>
+              );
             })()}
             <div ref={messagesEndRef} />
           </div>

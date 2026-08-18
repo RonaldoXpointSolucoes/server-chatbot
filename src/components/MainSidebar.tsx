@@ -71,6 +71,12 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
   const location = useLocation();
   const isAppEmbedded = location.pathname.startsWith('/apps/');
   const theme = useChatStore(state => state.theme);
+  const tenantInfo = useChatStore(state => state.tenantInfo);
+  const tenantIdFromStore = tenantInfo?.id;
+  const tenantId = tenantIdFromStore || (typeof window !== 'undefined' ? (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')) : null);
+  const currentUserEmail = typeof window !== 'undefined' ? (localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email')) : null;
+  const currentUserRole = typeof window !== 'undefined' ? (localStorage.getItem('current_user_role') || sessionStorage.getItem('current_user_role') || 'agent') : 'agent';
+  const currentUserId = (typeof window !== 'undefined' ? (localStorage.getItem('current_user_id') || sessionStorage.getItem('current_user_id') || currentUserEmail || '') : '') as string;
   const reopenedTicketToast = useChatStore(state => state.reopenedTicketToast);
   const setReopenedTicketToast = useChatStore(state => state.setReopenedTicketToast);
   const [isCreateInboxModalOpen, setIsCreateInboxModalOpen] = useState(false);
@@ -173,9 +179,6 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
   const storeNameFallback = useChatStore(state => state.tenantInfo?.users?.find(u => u.user_id === state.currentUser?.id)?.full_name);
   const agentName = localAgentName || storedName || storeNameFallback || 'Agente';
   const agentInitial = agentName ? agentName.substring(0, 1).toUpperCase() : 'A';
-  
-  const currentUserEmail = typeof window !== 'undefined' ? (localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email')) : null;
-  const currentUserRole = typeof window !== 'undefined' ? (localStorage.getItem('current_user_role') || sessionStorage.getItem('current_user_role') || 'agent') : 'agent';
 
   const activeChannelFilter = useChatStore(state => state.activeChannelFilter);
   const setActiveChannelFilter = useChatStore(state => state.setActiveChannelFilter);
@@ -187,11 +190,6 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
   const tenantLabels = useChatStore(state => state.tenantLabels);
   const instancesStatus = useChatStore(state => state.instancesStatus);
   const crmBoards = useChatStore(state => state.crmBoards) || [];
-  
-  const tenantInfo = useChatStore(state => state.tenantInfo);
-  const tenantIdFromStore = tenantInfo?.id;
-  const tenantId = tenantIdFromStore || (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
-  const currentUserId = (localStorage.getItem('current_user_id') || sessionStorage.getItem('current_user_id') || currentUserEmail || '') as string;
   const [instances, setInstances] = useState<any[]>([]);
 
   const currentAgent = agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail?.toLowerCase());

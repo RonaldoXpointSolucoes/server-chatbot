@@ -82,14 +82,12 @@ function formatAiMessageForWhatsApp(text) {
 
 function injectStoreId(payloadObj, storeId) {
     if (!payloadObj || typeof payloadObj !== 'object') return payloadObj;
-    const effectiveStoreId = storeId || payloadObj.AGuidEstab || payloadObj.AIdEstab || payloadObj.jsOrder?.fkStore || '';
+    const effectiveStoreId = storeId || payloadObj.AGuidEstab || payloadObj.AIdEstab || payloadObj.jsOrder?.fkStore || process.env.GASTROFOOD_GUID || process.env.GASTROFOOD_STORE_ID || "6D0187D9-E905-4479-AB15-B908F0222607";
     const clone = Array.isArray(payloadObj) ? [...payloadObj] : { ...payloadObj };
     
     if (!Array.isArray(clone)) {
-        if (effectiveStoreId) {
-            clone.AGuidEstab = effectiveStoreId;
-            clone.AIdEstab = effectiveStoreId;
-        }
+        clone.AGuidEstab = effectiveStoreId;
+        clone.AIdEstab = effectiveStoreId;
         
         if (clone.jsOrder && typeof clone.jsOrder === 'object') {
             clone.jsOrder = { 
@@ -374,9 +372,7 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
                         bodyObj = { AGuidEstab: cardapioPayload };
                     }
                 }
-                if (companySettings && companySettings.gfood_store_id) {
-                    bodyObj = injectStoreId(bodyObj, companySettings.gfood_store_id);
-                }
+                bodyObj = injectStoreId(bodyObj, companySettings?.gfood_store_id || companySettings?.gfood_guid || companySettings?.gastrofood_store_id || companySettings?.id_gastro_food);
                 
                 const headers = { 'Content-Type': 'application/json' };
                 if (cardapioToken) {
@@ -640,12 +636,17 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
             await new Promise(resolve => setTimeout(resolve, 3000));
             
             try {
+                let stepsPayload = { AIdProduto: product.id };
+                if (companySettings && companySettings.gfood_store_id) {
+                    stepsPayload = injectStoreId(stepsPayload, companySettings.gfood_store_id);
+                }
+
                 logGastrofoodCall({
                     direction: 'request',
                     action: 'Consultar Adicionais',
                     method: 'POST',
                     url: stepsUrl,
-                    payload: { AIdProduto: product.id }
+                    payload: stepsPayload
                 });
 
                 const resSteps = await fetch(stepsUrl, {
@@ -654,7 +655,7 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
                         'Content-Type': 'application/json',
                         'Authorization': cardapioToken.startsWith('Bearer ') ? cardapioToken : `Bearer ${cardapioToken}`
                     },
-                    body: JSON.stringify({ AIdProduto: product.id })
+                    body: JSON.stringify(stepsPayload)
                 });
                 
                 if (resSteps.ok) {

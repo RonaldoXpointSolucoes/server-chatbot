@@ -261,6 +261,7 @@ export default function CrmKanban() {
   const [board, setBoard] = useState<CRMBoard | null>(null);
   const [leads, setLeads] = useState<CRMLead[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
   const [draggedLeadId, setDraggedLeadId] = useState<string | null>(null);
   const [draggingOverStage, setDraggingOverStage] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -759,6 +760,108 @@ export default function CrmKanban() {
   useEffect(() => {
     fetchData();
   }, [boardId, tenantId]);
+
+  // Sincronização em Tempo Real Multi-dispositivos (Supabase Realtime)
+  useEffect(() => {
+    if (!boardId) return;
+
+    console.log(`[Kanban Realtime] Conectando canal para o quadro ${boardId}...`);
+
+    const channel = supabase.channel(`crm_kanban:${boardId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'crm_leads',
+          filter: `board_id=eq.${boardId}`
+        },
+        (payload) => {
+          console.log('[Kanban Realtime] Evento recebido em crm_leads:', payload.eventType, payload);
+
+          if (payload.eventType === 'INSERT') {
+            const newLead: CRMLead = {
+              ...payload.new as any,
+              tags: Array.isArray(payload.new.tags) ? payload.new.tags : [],
+              history: Array.isArray(payload.new.history) ? payload.new.history : []
+            };
+            setLeads(prev => {
+              if (prev.some(l => l.id === newLead.id)) {
+                return prev.map(l => l.id === newLead.id ? newLead : l);
+              }
+              return [...prev, newLead].sort((a, b) => (a.position || 0) - (b.position || 0));
+            });
+          } else if (payload.eventType === 'UPDATE') {
+            const updatedLead: CRMLead = {
+              ...payload.new as any,
+              tags: Array.isArray(payload.new.tags) ? payload.new.tags : [],
+              history: Array.isArray(payload.new.history) ? payload.new.history : []
+            };
+
+            setLeads(prev => {
+              const exists = prev.some(l => l.id === updatedLead.id);
+              if (!exists) {
+                return [...prev, updatedLead].sort((a, b) => (a.position || 0) - (b.position || 0));
+              }
+              return prev.map(l => l.id === updatedLead.id ? { ...l, ...updatedLead } : l)
+                .sort((a, b) => (a.position || 0) - (b.position || 0));
+            });
+
+            // Se o card atualizado estiver aberto no modal de detalhes, atualiza os dados em tempo real
+            setSelectedLead(currentSelected => {
+              if (currentSelected && currentSelected.id === updatedLead.id) {
+                return { ...currentSelected, ...updatedLead };
+              }
+              return currentSelected;
+            });
+          } else if (payload.eventType === 'DELETE') {
+            const oldId = payload.old?.id;
+            if (oldId) {
+              setLeads(prev => prev.filter(l => l.id !== oldId));
+              setSelectedLead(currentSelected => {
+                if (currentSelected && currentSelected.id === oldId) {
+                  return null;
+                }
+                return currentSelected;
+              });
+            }
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'crm_boards',
+          filter: `id=eq.${boardId}`
+        },
+        (payload) => {
+          console.log('[Kanban Realtime] Quadro atualizado em tempo real:', payload.new);
+          if (payload.new) {
+            setBoard(payload.new as any);
+            setEditBoardForm({
+              name: payload.new.name,
+              description: payload.new.config?.description || '',
+              stages: payload.new.config?.stages || []
+            });
+          }
+        }
+      )
+      .subscribe((status) => {
+        console.log(`[Kanban Realtime] Status do canal crm_kanban:${boardId}:`, status);
+        if (status === 'SUBSCRIBED') {
+          setIsRealtimeConnected(true);
+        } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
+          setIsRealtimeConnected(false);
+        }
+      });
+
+    return () => {
+      console.log(`[Kanban Realtime] Desconectando canal crm_kanban:${boardId}...`);
+      supabase.removeChannel(channel);
+    };
+  }, [boardId]);
 
   // Colunas do Pipeline
   const pipelineStages = useMemo(() => {
@@ -1476,6 +1579,20 @@ export default function CrmKanban() {
                 <span className="text-[10px] px-2.5 py-0.5 bg-slate-100/90 dark:bg-white/[0.06] text-slate-600 dark:text-slate-300 font-bold rounded-lg border border-slate-200/80 dark:border-white/[0.08]">
                   {leads.length} {leads.length === 1 ? 'cartão' : 'cartões'}
                 </span>
+                <span className={cn(
+                  "flex items-center gap-1.5 text-[9.5px] px-2.5 py-0.5 rounded-lg font-black border tracking-wider uppercase transition-colors shadow-xs",
+                  isRealtimeConnected 
+                    ? "bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 border-emerald-500/25"
+                    : "bg-amber-500/10 dark:bg-amber-500/20 text-amber-600 dark:text-amber-300 border-amber-500/25"
+                )}
+                title={isRealtimeConnected ? "Sincronização em tempo real ativa em todos os dispositivos" : "Conectando ao canal em tempo real..."}
+                >
+                  <span className={cn(
+                    "w-1.5 h-1.5 rounded-full",
+                    isRealtimeConnected ? "bg-emerald-500 animate-pulse" : "bg-amber-500 animate-ping"
+                  )} />
+                  <span>{isRealtimeConnected ? 'Realtime Ativo' : 'Sincronizando'}</span>
+                </span>
               </div>
               <p className="text-[11.5px] text-slate-500 dark:text-slate-400 font-sans font-medium mt-0.5 truncate max-w-2xl">
                 {board.config?.description || 'Arraste e solte cartões para gerenciar tarefas e avançar fluxos'}
@@ -1483,8 +1600,8 @@ export default function CrmKanban() {
             </div>
           </div>
 
-          {/* Botões de Ação Primária em Destaque (Mobile-First Responsivo WCAG 48px) */}
-          <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3 w-full md:w-auto shrink-0">
+          {/* Botões de Ação Primária em Destaque (Mobile-First Responsivo WCAG 48px lado a lado) */}
+          <div className="grid grid-cols-2 gap-2.5 w-full sm:w-auto sm:flex sm:items-center shrink-0">
             <button 
               onClick={() => {
                 setGeneratedPlan(null);
@@ -1492,11 +1609,11 @@ export default function CrmKanban() {
                 setSelectedTargetStage(pipelineStages[0]?.id || '');
                 setIsAiCardModalOpen(true);
               }}
-              className="flex items-center justify-center gap-2 px-5 py-3 md:py-2.5 bg-gradient-to-r from-violet-600 via-indigo-600 to-cyan-500 hover:from-violet-500 hover:to-cyan-400 text-white rounded-xl text-xs font-black shadow-lg shadow-indigo-500/25 hover:shadow-indigo-500/40 transition-all duration-200 hover:scale-[1.02] active:scale-95 cursor-pointer ring-2 ring-white/20 w-full md:w-auto min-h-[48px] md:min-h-0"
+              className="flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-violet-600 via-indigo-600 to-cyan-500 hover:from-violet-500 hover:to-cyan-400 text-white rounded-xl text-xs font-black shadow-lg shadow-indigo-500/25 hover:shadow-indigo-500/40 transition-all duration-200 hover:scale-[1.02] active:scale-95 cursor-pointer ring-2 ring-white/20 min-h-[48px] sm:min-h-0 flex-1 sm:flex-initial"
             >
-              <Mic size={15} className="text-amber-300 animate-pulse" />
-              <span>Criar com Áudio & IA</span>
-              <Sparkles size={13} className="text-amber-300" />
+              <Mic size={15} className="text-amber-300 animate-pulse shrink-0" />
+              <span className="truncate">Criar com Áudio & IA</span>
+              <Sparkles size={13} className="text-amber-300 shrink-0 hidden sm:inline" />
             </button>
 
             <button 
@@ -1504,37 +1621,37 @@ export default function CrmKanban() {
                 setLeadForm(prev => ({ ...prev, status: pipelineStages[0]?.id || '' }));
                 setIsAddLeadOpen(true);
               }}
-              className="flex items-center justify-center gap-2 px-5 py-3 md:py-2.5 bg-slate-900 dark:bg-white hover:bg-slate-800 dark:hover:bg-slate-100 text-white dark:text-slate-900 rounded-xl text-xs font-black shadow-md hover:shadow-lg transition-all duration-200 hover:scale-[1.02] active:scale-95 cursor-pointer w-full md:w-auto min-h-[48px] md:min-h-0"
+              className="flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-900 dark:bg-white hover:bg-slate-800 dark:hover:bg-slate-100 text-white dark:text-slate-900 rounded-xl text-xs font-black shadow-md hover:shadow-lg transition-all duration-200 hover:scale-[1.02] active:scale-95 cursor-pointer min-h-[48px] sm:min-h-0 flex-1 sm:flex-initial"
             >
-              <Plus size={15} strokeWidth={2.5} />
-              <span>Novo Cartão</span>
+              <Plus size={15} strokeWidth={2.5} className="shrink-0" />
+              <span className="truncate">Novo Cartão</span>
             </button>
           </div>
         </div>
 
-        {/* Linha 2: Barra de Ferramentas (Busca, Filtros, Configurações do Quadro) */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-slate-200/60 dark:border-white/[0.06]">
-          <div className="flex items-center gap-2.5 flex-wrap flex-1 min-w-0">
+        {/* Linha 2: Barra de Ferramentas em Linha Única (Busca, Filtros, IconButton de Configurações) */}
+        <div className="flex items-center justify-between gap-2.5 pt-3 border-t border-slate-200/60 dark:border-white/[0.06] flex-wrap sm:flex-nowrap">
+          <div className="flex items-center gap-2.5 flex-1 min-w-0">
             {/* Busca */}
-            <div className="relative flex-1 sm:flex-initial">
+            <div className="relative flex-1 min-w-[140px] sm:max-w-xs">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" size={14} />
               <input 
                 type="text" 
                 placeholder="Pesquisar cartão..." 
                 value={searchTerm}
                 onChange={e => setSearchTerm(e.target.value)}
-                className="pl-9 pr-4 py-2 w-full sm:w-[230px] bg-slate-100/90 dark:bg-[#182229]/70 border border-slate-200/80 dark:border-white/[0.08] rounded-xl text-xs font-medium focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 text-slate-800 dark:text-slate-200 transition-all duration-200"
+                className="pl-9 pr-3 py-2 w-full bg-slate-100/90 dark:bg-[#182229]/70 border border-slate-200/80 dark:border-white/[0.08] rounded-xl text-xs font-medium focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 text-slate-800 dark:text-slate-200 transition-all duration-200 shadow-xs"
               />
             </div>
 
             {/* Filtro de Agente */}
-            <div className="relative cursor-pointer select-none">
-              <div className="flex items-center gap-1.5 px-3 py-2 bg-slate-100/90 dark:bg-[#182229]/70 border border-slate-200/80 dark:border-white/[0.08] rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 hover:border-indigo-500/50 transition-colors">
-                <User size={13} className="text-slate-400" />
+            <div className="relative shrink-0 select-none">
+              <div className="flex items-center gap-1.5 px-3 py-2 bg-slate-100/90 dark:bg-[#182229]/70 border border-slate-200/80 dark:border-white/[0.08] rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 hover:border-indigo-500/50 transition-colors shadow-xs">
+                <User size={13} className="text-slate-400 shrink-0" />
                 <select 
                   value={selectedAgentFilter}
                   onChange={e => setSelectedAgentFilter(e.target.value)}
-                  className="bg-transparent text-xs font-semibold text-slate-700 dark:text-slate-300 focus:outline-none cursor-pointer pr-2"
+                  className="bg-transparent text-xs font-semibold text-slate-700 dark:text-slate-300 focus:outline-none cursor-pointer pr-1 max-w-[120px] sm:max-w-none truncate"
                 >
                   <option value="all">Todos os Agentes</option>
                   <option value="unassigned">Não Atribuídos</option>
@@ -1546,13 +1663,15 @@ export default function CrmKanban() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          {/* IconButton Configurações do Quadro */}
+          <div className="flex items-center shrink-0">
             <button
               onClick={() => setIsEditBoardOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-2 bg-slate-100/90 dark:bg-[#182229]/70 hover:bg-slate-200 dark:hover:bg-white/[0.08] border border-slate-200/80 dark:border-white/[0.08] text-slate-700 dark:text-slate-300 rounded-xl text-xs font-semibold transition-all duration-200 cursor-pointer"
+              className="p-2.5 bg-slate-100/90 dark:bg-[#182229]/70 hover:bg-slate-200 dark:hover:bg-white/[0.08] border border-slate-200/80 dark:border-white/[0.08] text-slate-700 dark:text-slate-300 rounded-xl transition-all duration-200 cursor-pointer shadow-xs hover:scale-105 active:scale-95"
+              title="Configurações do Quadro"
+              aria-label="Configurações do Quadro"
             >
-              <Settings size={13} />
-              <span>Configurações</span>
+              <Settings size={15} />
             </button>
           </div>
         </div>
