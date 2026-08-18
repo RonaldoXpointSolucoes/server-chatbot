@@ -3585,8 +3585,27 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
 
                                   {t.metadata?.summary && (
                                     <div className="bg-blue-500/5 p-2.5 rounded-xl border border-blue-500/10">
-                                      <span className="font-extrabold uppercase text-[9px] text-blue-600 dark:text-blue-400 block mb-0.5">Resumo IA:</span>
+                                      <div className="flex items-center justify-between mb-0.5">
+                                        <span className="font-extrabold uppercase text-[9px] text-blue-600 dark:text-blue-400">Resumo IA:</span>
+                                        {t.metadata?.sentiment && (
+                                          <span className={cn(
+                                            "text-[8.5px] font-black px-2 py-0.5 rounded-md uppercase",
+                                            t.metadata.sentiment === 'Positivo' ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20" :
+                                            t.metadata.sentiment === 'Insatisfeito' ? "bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/20" :
+                                            "bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20"
+                                          )}>
+                                            Sentimento: {t.metadata.sentiment}
+                                          </span>
+                                        )}
+                                      </div>
                                       <p className="text-[#111b21] dark:text-slate-350 leading-normal font-medium whitespace-pre-wrap">{t.metadata.summary}</p>
+                                    </div>
+                                  )}
+
+                                  {t.metadata?.root_cause && (
+                                    <div className="bg-amber-500/5 p-2.5 rounded-xl border border-amber-500/10">
+                                      <span className="font-extrabold uppercase text-[9px] text-amber-600 dark:text-amber-400 block mb-0.5">Causa Raiz (IA):</span>
+                                      <p className="text-[#111b21] dark:text-slate-350 leading-normal font-medium">{t.metadata.root_cause}</p>
                                     </div>
                                   )}
 
@@ -3594,6 +3613,28 @@ export function CompanyDetailsModal({ isOpen, onClose, contact, parentContact, o
                                     <div className="bg-emerald-500/5 p-2.5 rounded-xl border border-emerald-500/10">
                                       <span className="font-extrabold uppercase text-[9px] text-emerald-600 dark:text-emerald-450 block mb-0.5">Resolução:</span>
                                       <p className="text-[#111b21] dark:text-slate-350 leading-normal font-semibold whitespace-pre-wrap">{t.resolution_summary}</p>
+                                    </div>
+                                  )}
+
+                                  {t.metadata?.improvement_suggestions && t.metadata.improvement_suggestions.length > 0 && (
+                                    <div className="bg-purple-500/5 p-2.5 rounded-xl border border-purple-500/10 text-[10px]">
+                                      <span className="font-extrabold uppercase text-[9px] text-purple-600 dark:text-purple-400 block mb-1">💡 Sugestões de Melhoria (IA):</span>
+                                      <ul className="list-disc pl-4 space-y-0.5 text-slate-700 dark:text-slate-300">
+                                        {t.metadata.improvement_suggestions.map((sug: string, sIdx: number) => (
+                                          <li key={sIdx}>{sug}</li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  )}
+
+                                  {t.metadata?.key_learnings && t.metadata.key_learnings.length > 0 && (
+                                    <div className="bg-cyan-500/5 p-2.5 rounded-xl border border-cyan-500/10 text-[10px]">
+                                      <span className="font-extrabold uppercase text-[9px] text-cyan-600 dark:text-cyan-400 block mb-1">🧠 Aprendizados para RAG / Base:</span>
+                                      <ul className="list-disc pl-4 space-y-0.5 text-slate-700 dark:text-slate-300">
+                                        {t.metadata.key_learnings.map((lrn: string, lIdx: number) => (
+                                          <li key={lIdx}>{lrn}</li>
+                                        ))}
+                                      </ul>
                                     </div>
                                   )}
 
@@ -3642,7 +3683,7 @@ interface ResolveTicketModalProps {
   onClose: () => void;
   activeTicket: any;
   contact?: any;
-  onConfirm: (problemDesc: string, resolution: string, reactivateAi: boolean, summary: string, checklist: Array<{ text: string, resolved: boolean }>, errorLog?: string | null) => Promise<void>;
+  onConfirm: (problemDesc: string, resolution: string, reactivateAi: boolean, summary: string, checklist: Array<{ text: string, resolved: boolean }>, errorLog?: string | null, aiSummaryData?: any) => Promise<void>;
 }
 
 export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onConfirm }: ResolveTicketModalProps) {
@@ -3655,6 +3696,12 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
   const [isResolutionExpanded, setIsResolutionExpanded] = useState(false);
   const [checklist, setChecklist] = useState<Array<{ text: string, resolved: boolean }>>([]);
   const [errorLog, setErrorLog] = useState<string | null>(null);
+  const [aiSummaryData, setAiSummaryData] = useState<{
+    sentiment?: 'Positivo' | 'Neutro' | 'Insatisfeito';
+    root_cause?: string;
+    improvement_suggestions?: string[];
+    key_learnings?: string[];
+  } | null>(null);
 
   // Calculate session statistics and duration in real time
   const ticketStats = React.useMemo(() => {
@@ -3825,6 +3872,12 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
           if (result.problems_checklist) setChecklist(result.problems_checklist);
           if (result.resolution_summary) setResolution(result.resolution_summary);
           if (result.error_log) setErrorLog(result.error_log);
+          setAiSummaryData({
+            sentiment: result.sentiment,
+            root_cause: result.root_cause,
+            improvement_suggestions: result.improvement_suggestions,
+            key_learnings: result.key_learnings
+          });
         } catch (err: any) {
           console.error("Erro na análise automática do ticket:", err);
           setErrorLog(err?.message || String(err));
@@ -3849,7 +3902,7 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
     }
     setLoading(true);
     try {
-      await onConfirm(problemDesc, resolution, reactivateAi, summary, checklist, errorLog);
+      await onConfirm(problemDesc, resolution, reactivateAi, summary, checklist, errorLog, aiSummaryData);
     } catch (err) {
       console.error(err);
     } finally {
@@ -4662,6 +4715,10 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         ...(ticket.metadata || {}), 
         summary: result.summary || '', 
         checklist: result.problems_checklist || [],
+        sentiment: result.sentiment || 'Neutro',
+        root_cause: result.root_cause || undefined,
+        improvement_suggestions: result.improvement_suggestions || [],
+        key_learnings: result.key_learnings || [],
         error_log: result.error_log || null
       };
 
@@ -6193,15 +6250,67 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                   </div>
                 )}
 
-                {/* Smart Summary */}
+                {/* Smart Summary & AI Predictive Insights */}
                 {selectedTicket.metadata?.summary && (
                   <div className="flex flex-col gap-2 bg-blue-500/5 p-4 rounded-2xl border border-blue-500/15 dark:border-blue-500/10 shadow-xs border-l-[4px] border-l-blue-500">
-                    <span className="text-[10px] uppercase font-black text-blue-600 dark:text-blue-400 tracking-wider flex items-center gap-1.5">
-                      <Sparkles size={13} /> Resumo Inteligente I.A.
-                    </span>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] uppercase font-black text-blue-600 dark:text-blue-400 tracking-wider flex items-center gap-1.5">
+                        <Sparkles size={13} /> Resumo Inteligente I.A.
+                      </span>
+                      {selectedTicket.metadata?.sentiment && (
+                        <span className={cn(
+                          "text-[9px] font-black px-2.5 py-0.5 rounded-full uppercase border",
+                          selectedTicket.metadata.sentiment === 'Positivo' ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/20" :
+                          selectedTicket.metadata.sentiment === 'Insatisfeito' ? "bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/20" :
+                          "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/20"
+                        )}>
+                          Sentimento: {selectedTicket.metadata.sentiment}
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs text-slate-700 dark:text-slate-200 font-semibold leading-relaxed select-text whitespace-pre-line">
                       {selectedTicket.metadata.summary}
                     </p>
+                  </div>
+                )}
+
+                {/* Root Cause Analysis */}
+                {selectedTicket.metadata?.root_cause && (
+                  <div className="flex flex-col gap-1.5 bg-amber-500/5 p-4 rounded-2xl border border-amber-500/15 dark:border-amber-500/10 shadow-xs border-l-[4px] border-l-amber-500">
+                    <span className="text-[10px] uppercase font-black text-amber-600 dark:text-amber-400 tracking-wider flex items-center gap-1.5">
+                      <AlertCircle size={13} /> Causa Raiz Identificada (I.A.)
+                    </span>
+                    <p className="text-xs text-slate-700 dark:text-slate-200 font-semibold leading-relaxed select-text">
+                      {selectedTicket.metadata.root_cause}
+                    </p>
+                  </div>
+                )}
+
+                {/* AI Improvement Suggestions */}
+                {selectedTicket.metadata?.improvement_suggestions && selectedTicket.metadata.improvement_suggestions.length > 0 && (
+                  <div className="flex flex-col gap-2 bg-purple-500/5 p-4 rounded-2xl border border-purple-500/15 dark:border-purple-500/10 shadow-xs border-l-[4px] border-l-purple-500">
+                    <span className="text-[10px] uppercase font-black text-purple-600 dark:text-purple-400 tracking-wider flex items-center gap-1.5">
+                      💡 Sugestões de Melhoria Contínua (I.A.)
+                    </span>
+                    <ul className="list-disc pl-4 space-y-1 text-xs text-slate-700 dark:text-slate-300 font-medium">
+                      {selectedTicket.metadata.improvement_suggestions.map((sug: string, idx: number) => (
+                        <li key={idx} className="select-text">{sug}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* RAG Knowledge Extractions */}
+                {selectedTicket.metadata?.key_learnings && selectedTicket.metadata.key_learnings.length > 0 && (
+                  <div className="flex flex-col gap-2 bg-cyan-500/5 p-4 rounded-2xl border border-cyan-500/15 dark:border-cyan-500/10 shadow-xs border-l-[4px] border-l-cyan-500">
+                    <span className="text-[10px] uppercase font-black text-cyan-600 dark:text-cyan-400 tracking-wider flex items-center gap-1.5">
+                      🧠 Aprendizados Extraídos para Base RAG
+                    </span>
+                    <ul className="list-disc pl-4 space-y-1 text-xs text-slate-700 dark:text-slate-300 font-medium">
+                      {selectedTicket.metadata.key_learnings.map((lrn: string, idx: number) => (
+                        <li key={idx} className="select-text">{lrn}</li>
+                      ))}
+                    </ul>
                   </div>
                 )}
 

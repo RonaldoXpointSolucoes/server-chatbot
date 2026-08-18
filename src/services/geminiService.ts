@@ -847,7 +847,17 @@ Gere o JSON contendo exatamente as informações solicitadas no schema.`;
     operators: { name: string, count: number, percentage: number }[];
     closed_by: string;
     messages: { sender: string, text: string, timestamp: string }[];
-  }): Promise<{ problem_description: string, summary: string, problems_checklist: Array<{ text: string, resolved: boolean }>, resolution_summary: string }> {
+  }): Promise<{ 
+    problem_description: string; 
+    summary: string; 
+    problems_checklist: Array<{ text: string, resolved: boolean }>; 
+    resolution_summary: string;
+    sentiment?: 'Positivo' | 'Neutro' | 'Insatisfeito';
+    improvement_suggestions?: string[];
+    key_learnings?: string[];
+    root_cause?: string;
+    error_log?: string;
+  }> {
     if (!this.isConfigured()) {
       throw new Error('Chave de API do Gemini não configurada. Configure a sua chave de API nas Configurações.');
     }
@@ -860,25 +870,43 @@ Gere o JSON contendo exatamente as informações solicitadas no schema.`;
           properties: {
             problem_description: {
               type: "string",
-              description: "Escreva um resumo extremamente simplificado, focado UNICAMENTE na falha ou solicitação principal, sem termos como 'usuário', 'cliente' ou 'atendente' (máximo de 8 palavras, ex: 'Notas fiscais em contingência pendentes de reemissão')."
+              description: "Resumo extremamente simplificado focado na falha ou solicitação principal (máximo de 8 palavras, ex: 'Notas fiscais em contingência pendentes de reemissão')."
             },
             summary: {
               type: "string",
-              description: "Um resumo ultra-conciso (máximo de 25 palavras) de como a questão foi resolvida, focando na ação resolutiva final."
+              description: "Resumo conciso da ação resolutiva final tomada pelo suporte (máximo de 25 palavras)."
+            },
+            sentiment: {
+              type: "string",
+              description: "Sentimento geral do cliente ao final do atendimento: 'Positivo', 'Neutro' ou 'Insatisfeito'."
+            },
+            root_cause: {
+              type: "string",
+              description: "Causa raiz identificada para o problema relatado (1 frase técnica)."
+            },
+            improvement_suggestions: {
+              type: "array",
+              description: "Sugestões práticas de melhoria de processo, produto ou atendimento baseadas neste ticket.",
+              items: { type: "string" }
+            },
+            key_learnings: {
+              type: "array",
+              description: "Regras de negócio ou aprendizados chave extraídos para enriquecer a base de conhecimento RAG.",
+              items: { type: "string" }
             },
             problems_checklist: {
               type: "array",
-              description: "Lista de problemas REAIS E DISTINTOS relatados pelo cliente. ATENÇÃO: NUNCA gere múltiplos itens redundantes para o mesmo assunto/equipamento (ex: se relatou impressora não imprime fiscal, não imprime cupom, ou erro no spooler, UNIFIQUE em APENAS UM ITEM: 'Falha ou erro na impressão de cupons e documentos fiscais'). Cada item deve ser uma falha tecnicamente diferente.",
+              description: "Lista de problemas REAIS E DISTINTOS relatados pelo cliente.",
               items: {
                 type: "object",
                 properties: {
                   text: { 
                     type: "string", 
-                    description: "O problema ou dúvida citado pelo cliente, de forma simplificada e direta (máximo de 8 palavras)." 
+                    description: "O problema ou dúvida citado pelo cliente (máximo de 8 palavras)." 
                   },
                   resolved: { 
                     type: "boolean",
-                    description: "True se o problema foi resolvido ou respondido, false se ficou pendente ou sem solução." 
+                    description: "True se o problema foi resolvido, false se pendente." 
                   }
                 },
                 required: ["text", "resolved"]
@@ -886,7 +914,7 @@ Gere o JSON contendo exatamente as informações solicitadas no schema.`;
             },
             resolution_summary: {
               type: "string",
-              description: "Descrição detalhada do desenrolar do atendimento e a participação dos atendentes. Use parágrafos (\\n\\n) e marcadores (bullet points com hífens '- ') para listar as etapas de solução."
+              description: "Descrição detalhada do atendimento com etapas e marcadores (- )."
             }
           },
           required: ["problem_description", "summary", "problems_checklist", "resolution_summary"]
@@ -897,24 +925,27 @@ Gere o JSON contendo exatamente as informações solicitadas no schema.`;
     const opsText = params.operators.map(op => `${op.name} (${op.percentage}% de participação, ${op.count} msgs)`).join(', ');
     const historyText = params.messages.slice(-65).map(m => `[${m.timestamp}] ${m.sender === 'human' ? 'Atendente' : 'Cliente'}: ${m.text}`).join('\n');
 
-    const prompt = `Você é um analista de suporte especialista em auditoria e controle de qualidade de chamados (tickets).
-Sua missão é analisar o histórico de conversação de atendimento a seguir e preencher a descrição do problema, o resumo da solução, a lista de problemas discutidos e o relato detalhado da solução.
+    const prompt = `Você é um Engenheiro de Qualidade de Atendimento, Auditor e Especialista em IA para CRM/RAG.
+Sua missão é analisar profundamente o histórico de atendimento a seguir para:
+1. Extrair a descrição clara do problema e a resolução.
+2. Identificar a causa raiz técnica e o sentimento implícito do cliente ('Positivo', 'Neutro', 'Insatisfeito').
+3. Gerar sugestões de melhoria contínua de processos/produtos.
+4. Extrair aprendizados estruturados para enriquecer a base RAG.
 
---- REGRAS DE UNIFICAÇÃO DE CHECKLIST (CRÍTICO) ---
-1. Agrupe problemas do mesmo assunto ou equipamento em APENAS UM ITEM DO CHECKLIST.
-2. Exemplo: Se o cliente citar 'impressora não imprime fiscal', 'impressora não imprime cupom' e 'erro ao imprimir', NUNCA crie 3 itens parecidos. Crie um ÚNICO item consolidado: 'Falha ou erro na impressão de cupons e documentos fiscais'.
-3. O checklist deve conter apenas falhas categoricamente DISTINTAS ocorridas no chamado.
+--- REGRAS DE UNIFICAÇÃO DE CHECKLIST ---
+1. Agrupe problemas do mesmo assunto em APENAS UM ITEM DO CHECKLIST.
+2. O checklist deve conter apenas falhas categoricamente distintas.
 
 --- METADADOS DO CHAMADO ---
 - Horário de Abertura: ${params.opened_at}
-- Horário de Encerramento (Agora): ${params.closed_at}
-- Atendentes Participantes do Chamado: ${opsText || 'Nenhum atendente humano registrado'}
-- Encerrado por (Operador logado): ${params.closed_by}
+- Horário de Encerramento: ${params.closed_at}
+- Atendentes Participantes: ${opsText || 'Nenhum atendente humano'}
+- Encerrado por: ${params.closed_by}
 
 --- HISTÓRICO DE MENSAGENS DO TICKET ---
 ${historyText}
 
-    Gere o JSON contendo exatamente as informações solicitadas no schema.`;
+Gere o JSON contendo exatamente as informações solicitadas no schema.`;
 
     const result = await model.generateContent(prompt);
     const response = await result.response;
@@ -926,7 +957,11 @@ ${historyText}
         problem_description: parsed.problem_description || "Sem descrição",
         summary: parsed.summary || "Sem resumo",
         problems_checklist: parsed.problems_checklist || [],
-        resolution_summary: parsed.resolution_summary || "Sem detalhes"
+        resolution_summary: parsed.resolution_summary || "Sem detalhes",
+        sentiment: parsed.sentiment || "Neutro",
+        root_cause: parsed.root_cause || undefined,
+        improvement_suggestions: parsed.improvement_suggestions || [],
+        key_learnings: parsed.key_learnings || []
       };
     } catch (e: any) {
       console.error("Erro ao analisar ticket com Gemini:", text, e);
@@ -1077,6 +1112,97 @@ DIRETRIZES PARA A ANÁLISE:
       console.error("Erro ao analisar JSON retornado da IA:", text);
       throw new Error("Falha ao analisar a resposta da IA para os logs.");
     }
+  }
+
+  async enhanceCardText(params: {
+    content: string;
+    action: 'improve' | 'structure' | 'checklist' | 'suggest_tags' | 'fix_grammar';
+    cardTitle?: string;
+  }): Promise<{ result: string; suggestedTags?: string[]; suggestedPriority?: number }> {
+    if (!this.isConfigured()) {
+      throw new Error('Chave de API do Gemini não configurada. Por favor, adicione sua chave nas configurações.');
+    }
+
+    const model = this.getGenAI().getGenerativeModel({
+      model: "gemini-2.5-flash",
+      generationConfig: {
+        temperature: 0.3
+      }
+    });
+
+    let prompt = "";
+    if (params.action === 'structure') {
+      prompt = `Você é um Arquiteto de Software Sênior e Product Manager.
+Pegue o título e o conteúdo base abaixo e elabore um Plano Técnico de Engenharia estruturado em Markdown limpo, direto e profissional contendo as seções:
+🎯 **Objetivo & Visão Geral**
+📋 **Requisitos Funcionais & Regras de Negócio**
+🛠️ **Arquitetura & Passo a Passo de Implementação**
+🧪 **Critérios de Aceite & Validação**
+
+Título da Tarefa: "${params.cardTitle || 'Nova Funcionalidade'}"
+Texto Base / Rascunho:
+${params.content || params.cardTitle || 'Descrever objetivo e passos de implementação.'}
+
+Retorne APENAS o conteúdo formatado em Markdown, sem tags de código \`\`\` adicionais em volta do texto todo e sem comentários de abertura ou fechamento.`;
+    } else if (params.action === 'improve') {
+      prompt = `Você é um Engenheiro de Software Sênior especialista em documentação técnica e clareza.
+Reescreva e aprimore o texto abaixo tornando-o mais conciso, profissional, direto e bem estruturado em Markdown (usando negritos e marcadores onde couber). Mantenha rigorosamente o idioma Português (pt-BR).
+
+Texto Original:
+${params.content}
+
+Retorne APENAS o texto aprimorado em Markdown, sem introduções.`;
+    } else if (params.action === 'checklist') {
+      prompt = `Converta os tópicos e itens do texto abaixo em um checklist Markdown de tarefas acionáveis com caixas de seleção no formato:
+- [ ] Tarefa ou requisito 1
+- [ ] Tarefa ou requisito 2
+
+Texto Base:
+${params.content}
+
+Retorne APENAS a lista com as caixas de seleção Markdown (- [ ]).`;
+    } else if (params.action === 'fix_grammar') {
+      prompt = `Revise e corrija os erros de gramática, pontuação, acentuação e concordância do texto abaixo, mantendo rigorosamente o sentido e as marcações de Markdown:
+
+Texto:
+${params.content}
+
+Retorne APENAS o texto corrigido.`;
+    } else if (params.action === 'suggest_tags') {
+      prompt = `Analise o título e o conteúdo do cartão do CRM abaixo e sugira:
+1. Até 6 tags técnicas e funcionais pertinentes (ex: ["Frontend", "React", "Mobile-First", "UI/UX", "Bugfix", "IA"]).
+2. Um nível de prioridade sugerido (1 = Baixa, 2 = Média, 3 = Alta).
+3. Um resumo executivo conciso em 1 ou 2 frases.
+
+Título: ${params.cardTitle || ''}
+Conteúdo:
+${params.content}
+
+Responda ESTRITAMENTE em formato JSON:
+{
+  "tags": ["Tag1", "Tag2"],
+  "priority": 2,
+  "summary": "Resumo do que deve ser feito"
+}`;
+
+      const result = await model.generateContent(prompt);
+      const text = (await result.response).text().trim();
+      try {
+        const cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+        const parsed = JSON.parse(cleaned);
+        return {
+          result: parsed.summary || params.content,
+          suggestedTags: parsed.tags || [],
+          suggestedPriority: parsed.priority || 2
+        };
+      } catch (e) {
+        return { result: params.content, suggestedTags: [], suggestedPriority: 2 };
+      }
+    }
+
+    const result = await model.generateContent(prompt);
+    const text = (await result.response).text().trim();
+    return { result: text };
   }
 }
 

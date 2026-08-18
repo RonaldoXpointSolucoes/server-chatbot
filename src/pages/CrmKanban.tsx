@@ -60,6 +60,8 @@ import { useChatStore, instanceCache } from '../store/chatStore';
 import { supabase } from '../services/supabase';
 import { geminiService } from '../services/geminiService';
 import KanbanBoardCreator from '../components/KanbanBoardCreator';
+import RichTextEditor from '../components/RichTextEditor';
+import { CardMediaCarousel, extractCardMedia } from '../components/CardMediaCarousel';
 import { 
   CardMediaAttachment, 
   saveCardDraft, 
@@ -275,7 +277,45 @@ export default function CrmKanban() {
   const [isEditBoardOpen, setIsEditBoardOpen] = useState(false);
   const [isAddLeadOpen, setIsAddLeadOpen] = useState(false);
   const [selectedLead, setSelectedLead] = useState<CRMLead | null>(null);
-  const [collapsedStages, setCollapsedStages] = useState<Record<string, boolean>>({});
+  const [collapsedStages, setCollapsedStages] = useState<Record<string, boolean>>(() => {
+    if (typeof window !== 'undefined' && boardId) {
+      try {
+        const saved = localStorage.getItem(`crm_kanban_collapsed_stages_${boardId}`);
+        return saved ? JSON.parse(saved) : {};
+      } catch (e) {
+        return {};
+      }
+    }
+    return {};
+  });
+
+  // Função helper para alternar colapso de coluna com persistência imediata
+  const toggleStageCollapse = (stageId: string, forceState?: boolean) => {
+    setCollapsedStages(prev => {
+      const nextState = {
+        ...prev,
+        [stageId]: forceState !== undefined ? forceState : !prev[stageId]
+      };
+      if (boardId && typeof window !== 'undefined') {
+        try {
+          localStorage.setItem(`crm_kanban_collapsed_stages_${boardId}`, JSON.stringify(nextState));
+        } catch (e) {}
+      }
+      return nextState;
+    });
+  };
+
+  // Carregar preferências salvas sempre que o boardId mudar
+  useEffect(() => {
+    if (!boardId || typeof window === 'undefined') return;
+    try {
+      const saved = localStorage.getItem(`crm_kanban_collapsed_stages_${boardId}`);
+      if (saved) {
+        setCollapsedStages(JSON.parse(saved));
+      }
+    } catch (e) {}
+  }, [boardId]);
+
   const [activeDraggedLeadId, setActiveDraggedLeadId] = useState<string | null>(null);
 
   // Estados de formulário para Lead
@@ -288,7 +328,8 @@ export default function CrmKanban() {
     customer_id: '',
     agent_id: '',
     due_date: '',
-    tagsString: ''
+    tagsString: '',
+    notes: ''
   });
 
   // Estados para edição do Quadro
@@ -1026,6 +1067,7 @@ export default function CrmKanban() {
         estimated_revenue: leadForm.estimated_revenue,
         probability: leadForm.probability,
         priority: leadForm.priority,
+        notes: leadForm.notes || null,
         customer_id: leadForm.customer_id || null,
         agent_id: leadForm.agent_id || null,
         due_date: leadForm.due_date || null,
@@ -1051,7 +1093,8 @@ export default function CrmKanban() {
         customer_id: '',
         agent_id: '',
         due_date: '',
-        tagsString: ''
+        tagsString: '',
+        notes: ''
       });
     } catch (err) {
       console.error('Erro ao criar lead:', err);
@@ -1158,6 +1201,49 @@ export default function CrmKanban() {
       setSelectedLead(updatedLead);
     } catch (err) {
       console.error('Erro ao salvar edições do lead:', err);
+    }
+  };
+
+  // Upload de Mídia / Evidência para o Lead Selecionado
+  const handleUploadMediaToLead = async (file: File) => {
+    if (!selectedLead || !boardId) return;
+    try {
+      setIsUploadingMedia(true);
+      const fileExt = file.name.split('.').pop() || (file.type.startsWith('image/') ? 'png' : file.type.startsWith('video/') ? 'mp4' : 'mp3');
+      const safeName = `${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${fileExt}`;
+      const filePath = `crm_cards/${boardId}/${safeName}`;
+
+      const { data: uploadData, error: uploadErr } = await supabase.storage
+        .from('chat_media')
+        .upload(filePath, file, { contentType: file.type, upsert: true });
+
+      if (uploadErr) throw uploadErr;
+
+      const { data: { publicUrl } } = supabase.storage.from('chat_media').getPublicUrl(filePath);
+
+      let mdLink = '';
+      if (file.type.startsWith('image/')) {
+        mdLink = `![${file.name}](${publicUrl})`;
+      } else if (file.type.startsWith('video/')) {
+        mdLink = `🎥 [Vídeo: ${file.name}](${publicUrl})`;
+      } else {
+        mdLink = `🎙️ [Áudio: ${file.name}](${publicUrl})`;
+      }
+
+      const currentNotes = selectedLead.notes || '';
+      let newNotes = '';
+      if (currentNotes.includes('### 📎 Mídias & Evidências Anexadas')) {
+        newNotes = currentNotes.replace('### 📎 Mídias & Evidências Anexadas', `### 📎 Mídias & Evidências Anexadas\n${mdLink}`);
+      } else {
+        newNotes = `${currentNotes}\n\n---\n### 📎 Mídias & Evidências Anexadas\n${mdLink}`;
+      }
+
+      await handleSaveLeadEdits({ ...selectedLead, notes: newNotes });
+    } catch (err: any) {
+      console.error('Erro ao fazer upload da evidência:', err);
+      alert('Erro ao anexar mídia: ' + (err?.message || 'Falha no upload'));
+    } finally {
+      setIsUploadingMedia(false);
     }
   };
 
@@ -1397,8 +1483,8 @@ export default function CrmKanban() {
             </div>
           </div>
 
-          {/* Botões de Ação Primária em Destaque */}
-          <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap shrink-0">
+          {/* Botões de Ação Primária em Destaque (Mobile-First Responsivo WCAG 48px) */}
+          <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3 w-full md:w-auto shrink-0">
             <button 
               onClick={() => {
                 setGeneratedPlan(null);
@@ -1406,9 +1492,9 @@ export default function CrmKanban() {
                 setSelectedTargetStage(pipelineStages[0]?.id || '');
                 setIsAiCardModalOpen(true);
               }}
-              className="flex items-center gap-2 px-4.5 py-2.5 bg-gradient-to-r from-violet-600 via-indigo-600 to-cyan-500 hover:from-violet-500 hover:to-cyan-400 text-white rounded-xl text-xs font-black shadow-lg shadow-indigo-500/25 hover:shadow-indigo-500/40 transition-all duration-200 hover:scale-[1.02] active:scale-95 cursor-pointer ring-2 ring-white/20"
+              className="flex items-center justify-center gap-2 px-5 py-3 md:py-2.5 bg-gradient-to-r from-violet-600 via-indigo-600 to-cyan-500 hover:from-violet-500 hover:to-cyan-400 text-white rounded-xl text-xs font-black shadow-lg shadow-indigo-500/25 hover:shadow-indigo-500/40 transition-all duration-200 hover:scale-[1.02] active:scale-95 cursor-pointer ring-2 ring-white/20 w-full md:w-auto min-h-[48px] md:min-h-0"
             >
-              <Mic size={14} className="text-amber-300 animate-pulse" />
+              <Mic size={15} className="text-amber-300 animate-pulse" />
               <span>Criar com Áudio & IA</span>
               <Sparkles size={13} className="text-amber-300" />
             </button>
@@ -1418,10 +1504,10 @@ export default function CrmKanban() {
                 setLeadForm(prev => ({ ...prev, status: pipelineStages[0]?.id || '' }));
                 setIsAddLeadOpen(true);
               }}
-              className="flex items-center gap-1.5 px-4.5 py-2.5 bg-slate-900 dark:bg-white hover:bg-slate-800 dark:hover:bg-slate-100 text-white dark:text-slate-900 rounded-xl text-xs font-black shadow-md hover:shadow-lg transition-all duration-200 hover:scale-[1.02] active:scale-95 cursor-pointer"
+              className="flex items-center justify-center gap-2 px-5 py-3 md:py-2.5 bg-slate-900 dark:bg-white hover:bg-slate-800 dark:hover:bg-slate-100 text-white dark:text-slate-900 rounded-xl text-xs font-black shadow-md hover:shadow-lg transition-all duration-200 hover:scale-[1.02] active:scale-95 cursor-pointer w-full md:w-auto min-h-[48px] md:min-h-0"
             >
-              <Plus size={14} strokeWidth={2.5} />
-              Novo Cartão
+              <Plus size={15} strokeWidth={2.5} />
+              <span>Novo Cartão</span>
             </button>
           </div>
         </div>
@@ -1443,42 +1529,30 @@ export default function CrmKanban() {
 
             {/* Filtro de Agente */}
             <div className="relative cursor-pointer select-none">
-              <select 
-                value={selectedAgentFilter}
-                onChange={e => setSelectedAgentFilter(e.target.value)}
-                className="px-3.5 pr-8 py-2 bg-slate-100/90 dark:bg-[#182229]/70 border border-slate-200/80 dark:border-white/[0.08] rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 text-slate-700 dark:text-slate-300 cursor-pointer appearance-none shadow-sm"
-              >
-                <option value="all">👥 Todos os Agentes</option>
-                {agents.map(a => (
-                  <option key={a.id} value={a.id}>👤 {a.full_name?.split(' ')[0] || a.email}</option>
-                ))}
-              </select>
+              <div className="flex items-center gap-1.5 px-3 py-2 bg-slate-100/90 dark:bg-[#182229]/70 border border-slate-200/80 dark:border-white/[0.08] rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 hover:border-indigo-500/50 transition-colors">
+                <User size={13} className="text-slate-400" />
+                <select 
+                  value={selectedAgentFilter}
+                  onChange={e => setSelectedAgentFilter(e.target.value)}
+                  className="bg-transparent text-xs font-semibold text-slate-700 dark:text-slate-300 focus:outline-none cursor-pointer pr-2"
+                >
+                  <option value="all">Todos os Agentes</option>
+                  <option value="unassigned">Não Atribuídos</option>
+                  {agents.map(a => (
+                    <option key={a.id} value={a.id}>{a.full_name || a.email}</option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
 
-          {/* Ações de Gestão do Quadro */}
-          <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
-            <button 
-              onClick={() => setIsCreatorOpen(true)}
-              className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-100/90 dark:bg-[#182229]/70 text-slate-700 dark:text-slate-200 hover:text-slate-900 dark:hover:text-white border border-slate-200/80 dark:border-white/[0.08] rounded-xl text-xs font-bold transition-all hover:bg-slate-200/80 dark:hover:bg-white/10 active:scale-95 cursor-pointer shadow-sm"
-            >
-              <Plus size={13} strokeWidth={2.5} />
-              Novo Quadro
-            </button>
-            <button 
+          <div className="flex items-center gap-2">
+            <button
               onClick={() => setIsEditBoardOpen(true)}
-              className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-100/90 dark:bg-[#182229]/70 text-slate-700 dark:text-slate-200 hover:text-slate-900 dark:hover:text-white border border-slate-200/80 dark:border-white/[0.08] rounded-xl text-xs font-bold transition-all hover:bg-slate-200/80 dark:hover:bg-white/10 active:scale-95 cursor-pointer shadow-sm"
+              className="flex items-center gap-1.5 px-3 py-2 bg-slate-100/90 dark:bg-[#182229]/70 hover:bg-slate-200 dark:hover:bg-white/[0.08] border border-slate-200/80 dark:border-white/[0.08] text-slate-700 dark:text-slate-300 rounded-xl text-xs font-semibold transition-all duration-200 cursor-pointer"
             >
               <Settings size={13} />
-              Configurar
-            </button>
-            <button 
-              onClick={handleDeleteBoard}
-              className="flex items-center gap-1.5 px-3 py-2 text-rose-500 hover:text-rose-600 dark:text-rose-400 dark:hover:text-rose-300 hover:bg-rose-500/10 border border-transparent hover:border-rose-500/20 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer"
-              title="Excluir este quadro permanentemente"
-            >
-              <Trash2 size={13} />
-              Excluir
+              <span>Configurações</span>
             </button>
           </div>
         </div>
@@ -1497,7 +1571,7 @@ export default function CrmKanban() {
             return (
               <div 
                 key={stage.id}
-                onClick={() => setCollapsedStages(prev => ({ ...prev, [stage.id]: false }))}
+                onClick={() => toggleStageCollapse(stage.id, false)}
                 className={cn(
                   "w-[68px] shrink-0 flex flex-col h-full bg-white/60 dark:bg-[#111b21]/60 backdrop-blur-xl rounded-[28px] border border-slate-200/80 dark:border-white/[0.08] overflow-hidden transition-all duration-300 cursor-pointer hover:shadow-lg select-none hover:border-indigo-500/40"
                 )}
@@ -1561,7 +1635,7 @@ export default function CrmKanban() {
                   <button 
                     onClick={(e) => {
                       e.stopPropagation();
-                      setCollapsedStages(prev => ({ ...prev, [stage.id]: true }));
+                      toggleStageCollapse(stage.id, true);
                     }}
                     className="p-1.5 hover:bg-slate-200/70 dark:hover:bg-white/10 rounded-lg text-slate-400 hover:text-slate-800 dark:hover:text-white transition-colors cursor-pointer"
                     title="Dobrar Coluna"
@@ -1634,7 +1708,8 @@ export default function CrmKanban() {
 
                     const { category, cleanTitle } = parseCardHeaderInfo(lead.title);
                     const summarySnippet = getLeadSummarySnippet(lead.notes);
-                    const hasMedia = Boolean(lead.notes && (lead.notes.includes('chat_media') || lead.notes.includes('![') || lead.notes.includes('🎥') || lead.notes.includes('🎙️')));
+                    const cardMediaList = extractCardMedia(lead.notes);
+                    const hasMedia = cardMediaList.length > 0;
                     const hasTechnicalExecution = Boolean((lead.notes && (lead.notes.includes('DETALHAMENTO TÉCNICO') || lead.notes.includes('🛠️') || lead.notes.includes('Registro de Entrega'))) || lead.tags?.includes('IA-ENTREGUE') || lead.tags?.includes('DEV-EXECUTADO'));
                     const visibleTags = (lead.tags || []).filter(t => t !== 'IA-PLANO' && t !== 'IA-ENTREGUE' && t !== 'DEV-EXECUTADO' && t !== category);
                     const topTags = visibleTags.slice(0, 2);
@@ -1722,9 +1797,9 @@ export default function CrmKanban() {
                             )}
 
                             {hasMedia && (
-                              <span className="px-1.5 py-0.5 rounded-md bg-purple-500/10 dark:bg-purple-500/20 text-purple-600 dark:text-purple-300 border border-purple-500/20 text-[8.5px] font-bold flex items-center gap-1 shrink-0" title="Possui fotos, vídeos ou áudios anexados">
+                              <span className="px-1.5 py-0.5 rounded-md bg-purple-500/10 dark:bg-purple-500/20 text-purple-600 dark:text-purple-300 border border-purple-500/20 text-[8.5px] font-black flex items-center gap-1 shrink-0 shadow-xs" title={`${cardMediaList.length} mídia(s) anexada(s)`}>
                                 <Paperclip size={9.5} />
-                                <span>Mídia</span>
+                                <span>{cardMediaList.length} {cardMediaList.length === 1 ? 'Mídia' : 'Mídias'}</span>
                               </span>
                             )}
                           </div>
@@ -1765,6 +1840,32 @@ export default function CrmKanban() {
                               <p className="text-[11px] text-slate-600 dark:text-slate-300/90 font-sans font-normal leading-relaxed line-clamp-2 bg-slate-50/70 dark:bg-black/20 p-2 rounded-xl border border-slate-200/40 dark:border-white/5">
                                 {summarySnippet}
                               </p>
+                            </div>
+                          )}
+
+                          {/* Miniatura das Evidências Anexadas no Card */}
+                          {cardMediaList.length > 0 && (
+                            <div className="pl-2 pr-1 flex items-center gap-1.5 overflow-hidden">
+                              {cardMediaList.slice(0, 3).map((m, idx) => (
+                                <div key={idx} className="relative w-8 h-8 rounded-lg overflow-hidden border border-slate-200/80 dark:border-white/10 shrink-0 bg-slate-100 dark:bg-black/30">
+                                  {m.type === 'image' ? (
+                                    <img src={m.url} alt={m.name} className="w-full h-full object-cover" loading="lazy" />
+                                  ) : m.type === 'video' ? (
+                                    <div className="w-full h-full flex items-center justify-center text-amber-500 bg-black/40">
+                                      <Film size={12} />
+                                    </div>
+                                  ) : (
+                                    <div className="w-full h-full flex items-center justify-center text-purple-500 bg-black/40">
+                                      <Mic size={12} />
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                              {cardMediaList.length > 3 && (
+                                <div className="w-8 h-8 rounded-lg border border-slate-200/80 dark:border-white/10 shrink-0 bg-purple-500/10 dark:bg-purple-500/20 text-purple-600 dark:text-purple-300 flex items-center justify-center text-[9.5px] font-black">
+                                  +{cardMediaList.length - 3}
+                                </div>
+                              )}
                             </div>
                           )}
 
@@ -1942,16 +2043,19 @@ export default function CrmKanban() {
         })}
       </div>
 
-      {/* MODAL: Adicionar Oportunidade */}
+      {/* MODAL: Adicionar Oportunidade / Cartão */}
       {isAddLeadOpen && (
         <div className="fixed inset-0 bg-slate-900/60 dark:bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-[#111b21] w-full max-w-md rounded-[28px] border border-slate-200/50 dark:border-white/5 overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col max-h-[85vh]">
-            <div className="px-6 py-5 border-b border-slate-200/20 dark:border-white/5 flex items-center justify-between shrink-0">
+          <div className="bg-white dark:bg-[#111b21] w-full max-w-3xl rounded-[28px] border border-slate-200/50 dark:border-white/5 overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
+            <div className="px-6 py-5 border-b border-slate-200/20 dark:border-white/5 flex items-center justify-between shrink-0 bg-slate-50/50 dark:bg-white/[0.02]">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shadow-inner">
                   <Plus size={18} />
                 </div>
-                <h3 className="text-sm font-extrabold text-slate-800 dark:text-slate-100 font-sans uppercase tracking-wider">Nova Oportunidade</h3>
+                <div>
+                  <h3 className="text-sm font-extrabold text-slate-800 dark:text-slate-100 font-sans uppercase tracking-wider">Nova Oportunidade / Cartão</h3>
+                  <p className="text-[10px] text-slate-400 dark:text-slate-500 font-medium">Crie cards estruturados com suporte a texto rico e assistência de I.A</p>
+                </div>
               </div>
               <button 
                 onClick={() => setIsAddLeadOpen(false)} 
@@ -1964,18 +2068,45 @@ export default function CrmKanban() {
             <form onSubmit={handleCreateLead} className="flex flex-col flex-1 overflow-hidden">
               <div className="p-6 space-y-4 overflow-y-auto custom-scrollbar flex-1 text-xs text-left">
                 <div className="space-y-1">
-                  <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Título da Oportunidade *</label>
+                  <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Título da Oportunidade / Tarefa *</label>
                   <input 
                     type="text" 
                     required
-                    placeholder="Ex: Nome da Empresa ou Cliente"
+                    placeholder="Ex: [Frontend] Nova tela de relatórios ou Nome do Cliente"
                     value={leadForm.title}
                     onChange={e => setLeadForm({ ...leadForm, title: e.target.value })}
                     className="w-full px-4 py-2.5 bg-slate-100/60 dark:bg-[#202c33]/40 border border-slate-200/50 dark:border-white/5 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-200 transition-all duration-300"
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                {/* Editor de Texto Rico com IA Gemini */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">
+                      Descrição, Requisitos & Checklist
+                    </label>
+                    <span className="text-[9.5px] text-indigo-600 dark:text-indigo-400 font-bold flex items-center gap-1">
+                      <Sparkles size={11} /> IA Integrada
+                    </span>
+                  </div>
+                  <RichTextEditor
+                    value={leadForm.notes}
+                    onChange={notes => setLeadForm(prev => ({ ...prev, notes }))}
+                    cardTitle={leadForm.title}
+                    placeholder="Descreva detalhes, requisitos técnicos ou clique em 'Assistente IA' para estruturar o plano automaticamente..."
+                    minHeight="140px"
+                    maxHeight="240px"
+                    onSuggestTagsAndPriority={({ tags, priority }) => {
+                      setLeadForm(prev => ({
+                        ...prev,
+                        tagsString: Array.from(new Set([...(prev.tagsString ? prev.tagsString.split(',').map(t => t.trim()) : []), ...tags])).join(', '),
+                        priority: priority || prev.priority
+                      }));
+                    }}
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Faturamento Estimado</label>
                     <input 
@@ -2000,7 +2131,7 @@ export default function CrmKanban() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Estágio Inicial</label>
                     <select 
@@ -2014,7 +2145,7 @@ export default function CrmKanban() {
                     </select>
                   </div>
                   <div className="space-y-1">
-                    <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Prioridade (Estrelas)</label>
+                    <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Prioridade</label>
                     <select 
                       value={leadForm.priority}
                       onChange={e => setLeadForm({ ...leadForm, priority: Number(e.target.value) })}
@@ -2028,20 +2159,20 @@ export default function CrmKanban() {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Vincular Contato do WhatsApp</label>
+                  <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Vincular Contato do WhatsApp (Opcional)</label>
                   <select 
                     value={leadForm.customer_id}
                     onChange={e => setLeadForm({ ...leadForm, customer_id: e.target.value })}
                     className="w-full px-4 py-2.5 bg-slate-100/60 dark:bg-[#202c33]/40 border border-slate-200/50 dark:border-white/5 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-855 dark:text-slate-200 cursor-pointer appearance-none"
                   >
-                    <option value="">Nenhum contato</option>
+                    <option value="">Nenhum contato vinculado</option>
                     {contacts.map(c => (
                       <option key={c.id} value={c.id}>{c.custom_name || c.name} ({c.phone})</option>
                     ))}
                   </select>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Responsável (Agente)</label>
                     <select 
@@ -2070,7 +2201,7 @@ export default function CrmKanban() {
                   <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Tags (Separadas por vírgula)</label>
                   <input 
                     type="text" 
-                    placeholder="Ex: Totem, Sistema, Gastronomia"
+                    placeholder="Ex: Frontend, React, UI/UX"
                     value={leadForm.tagsString}
                     onChange={e => setLeadForm({ ...leadForm, tagsString: e.target.value })}
                     className="w-full px-4 py-2.5 bg-slate-100/60 dark:bg-[#202c33]/40 border border-slate-200/50 dark:border-white/5 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-200 transition-all duration-300"
@@ -2160,6 +2291,17 @@ export default function CrmKanban() {
                           <CheckCircle2 size={10} />
                           IA Entregue
                         </span>
+                      )}
+                      {extractCardMedia(selectedLead.notes).length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setLeadDetailTab('notes')}
+                          className="flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/30 hover:bg-purple-500/25 transition-all cursor-pointer shadow-xs"
+                          title="Clique para visualizar o carrossel de mídias e evidências"
+                        >
+                          <Paperclip size={10} />
+                          {extractCardMedia(selectedLead.notes).length} {extractCardMedia(selectedLead.notes).length === 1 ? 'Mídia' : 'Mídias'}
+                        </button>
                       )}
                       <span className="text-[10px] text-slate-400 font-mono font-bold">
                         #{selectedLead.id.slice(0, 8)}
@@ -2330,6 +2472,16 @@ export default function CrmKanban() {
                 >
                   <FileText size={14} />
                   <span>Briefing & Mídias</span>
+                  {extractCardMedia(selectedLead.notes).length > 0 && (
+                    <span className={cn(
+                      "px-1.5 py-0.2 rounded-full text-[9px] font-black",
+                      leadDetailTab === 'notes'
+                        ? "bg-white/20 text-white"
+                        : "bg-purple-500/15 text-purple-600 dark:text-purple-400"
+                    )}>
+                      {extractCardMedia(selectedLead.notes).length}
+                    </span>
+                  )}
                 </button>
 
                 <button
@@ -2518,6 +2670,32 @@ export default function CrmKanban() {
                         </div>
                       )}
                     </div>
+
+                    {/* Carrossel de Evidências Iniciais Anexadas */}
+                    {extractCardMedia(selectedLead.notes).length > 0 && (
+                      <div className="space-y-2 pt-3 border-t border-slate-200/60 dark:border-white/5">
+                        <div className="flex items-center justify-between">
+                          <label className="font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[9.5px] flex items-center gap-1.5">
+                            <Paperclip size={12} className="text-purple-500" />
+                            Evidências Iniciais & Capturas de Tela
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => setLeadDetailTab('notes')}
+                            className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer flex items-center gap-1"
+                          >
+                            <span>Ver no Briefing</span>
+                            <ArrowRight size={10} />
+                          </button>
+                        </div>
+                        <CardMediaCarousel 
+                          notes={selectedLead.notes} 
+                          cardTitle={selectedLead.title}
+                          onUploadMedia={handleUploadMediaToLead}
+                          isUploading={isUploadingMedia}
+                        />
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -2728,6 +2906,22 @@ export default function CrmKanban() {
                           </div>
                         </div>
 
+                        {/* Carrossel de Evidências Anexadas ao Card */}
+                        {extractCardMedia(selectedLead.notes).length > 0 && (
+                          <div className="space-y-2">
+                            <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px] flex items-center gap-1">
+                              <Paperclip size={12} className="text-purple-500" />
+                              Capturas e Evidências Iniciais da Demanda
+                            </label>
+                            <CardMediaCarousel 
+                              notes={selectedLead.notes} 
+                              cardTitle={selectedLead.title}
+                              onUploadMedia={handleUploadMediaToLead}
+                              isUploading={isUploadingMedia}
+                            />
+                          </div>
+                        )}
+
                         {/* Resumo da Solução */}
                         <div className="space-y-2">
                           <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px] flex items-center gap-1">
@@ -2800,40 +2994,47 @@ export default function CrmKanban() {
 
                 {/* ABA 3: BRIEFING, NOTAS & MÍDIAS */}
                 {leadDetailTab === 'notes' && (
-                  <div className="space-y-4 animate-in fade-in duration-200">
-                    <div className="flex justify-between items-center">
-                      <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Briefing, Requisitos e Observações</label>
-                      <button
-                        type="button"
-                        onClick={() => setIsEditingNotes(!isEditingNotes)}
-                        className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
-                      >
-                        {isEditingNotes ? "👁️ Visualizar Formatado" : "✏️ Modo Edição"}
-                      </button>
+                  <div className="space-y-5 animate-in fade-in duration-200">
+                    {/* Galeria / Carrossel Interativo de Mídias e Evidências Iniciais */}
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-center">
+                        <label className="font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[9.5px] flex items-center gap-1.5">
+                          <Paperclip size={12} className="text-purple-500" />
+                          Galeria de Evidências & Mídias Anexadas
+                        </label>
+                        <span className="text-[10px] text-purple-600 dark:text-purple-400 font-bold">
+                          {extractCardMedia(selectedLead.notes).length} {extractCardMedia(selectedLead.notes).length === 1 ? 'mídia anexada' : 'mídias anexadas'}
+                        </span>
+                      </div>
+
+                      <CardMediaCarousel 
+                        notes={selectedLead.notes} 
+                        cardTitle={selectedLead.title}
+                        onUploadMedia={handleUploadMediaToLead}
+                        isUploading={isUploadingMedia}
+                      />
                     </div>
 
-                    {isEditingNotes ? (
-                      <textarea 
-                        rows={12}
-                        placeholder="Adicione observações importantes, escopo técnico, dores do cliente ou histórico..."
-                        value={selectedLead.notes || ''}
-                        onChange={e => handleSaveLeadEdits({ ...selectedLead, notes: e.target.value })}
-                        className="w-full px-4 py-3 bg-slate-50 dark:bg-[#182229] border border-slate-200/80 dark:border-white/10 rounded-2xl text-xs font-medium focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white leading-relaxed custom-scrollbar font-mono"
-                      />
-                    ) : selectedLead.notes && selectedLead.notes.includes('<p>') ? (
-                      <div 
-                        className="p-5 bg-slate-50 dark:bg-[#182229] border border-slate-200/80 dark:border-white/10 rounded-2xl min-h-[140px] text-slate-800 dark:text-slate-100 leading-relaxed max-h-[420px] overflow-y-auto custom-scrollbar prose dark:prose-invert text-xs"
-                        dangerouslySetInnerHTML={{ __html: selectedLead.notes }}
-                      />
-                    ) : (
-                      <div className="p-5 bg-slate-50 dark:bg-[#182229] border border-slate-200/80 dark:border-white/10 rounded-2xl min-h-[140px] text-slate-800 dark:text-slate-100 leading-relaxed max-h-[420px] overflow-y-auto custom-scrollbar whitespace-pre-wrap font-sans text-xs">
-                        {selectedLead.notes || (
-                          <span className="text-slate-400 dark:text-slate-500 italic">
-                            Nenhuma nota cadastrada. Clique em "Modo Edição" para registrar o briefing deste lead.
-                          </span>
-                        )}
+                    {/* Editor de Texto Rico */}
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-center">
+                        <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">
+                          Briefing, Requisitos Técnicos & Checklist
+                        </label>
+                        <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold flex items-center gap-1">
+                          <Sparkles size={11} /> Editor com IA Gemini
+                        </span>
                       </div>
-                    )}
+
+                      <RichTextEditor
+                        value={selectedLead.notes || ''}
+                        onChange={notes => handleSaveLeadEdits({ ...selectedLead, notes })}
+                        cardTitle={selectedLead.title}
+                        placeholder="Adicione observações importantes, escopo técnico, checklist ou use a I.A para estruturar..."
+                        minHeight="220px"
+                        maxHeight="460px"
+                      />
+                    </div>
                   </div>
                 )}
 

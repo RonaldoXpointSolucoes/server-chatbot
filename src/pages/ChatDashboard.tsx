@@ -1380,6 +1380,41 @@ export default function ChatDashboard() {
     e.currentTarget.releasePointerCapture(e.pointerId);
   };
 
+  // Suporte a Pinch-to-Zoom e Arrastar Multi-toque no Visualizador de Imagens (Mobile)
+  const pinchStartDistanceRef = React.useRef<number | null>(null);
+  const pinchStartZoomRef = React.useRef<number>(1);
+
+  const handleTouchStart = (e: React.TouchEvent<HTMLImageElement>) => {
+    if (e.touches.length === 2) {
+      const t1 = e.touches[0];
+      const t2 = e.touches[1];
+      const dist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+      pinchStartDistanceRef.current = dist;
+      pinchStartZoomRef.current = fullscreenZoom;
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLImageElement>) => {
+    if (e.touches.length === 2 && pinchStartDistanceRef.current !== null) {
+      e.preventDefault();
+      const t1 = e.touches[0];
+      const t2 = e.touches[1];
+      const dist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+      const ratio = dist / pinchStartDistanceRef.current;
+      const newZoom = Math.min(Math.max(pinchStartZoomRef.current * ratio, 1), 5);
+      setFullscreenZoom(newZoom);
+      if (newZoom <= 1) {
+        setFullscreenPan({ x: 0, y: 0 });
+      }
+    }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent<HTMLImageElement>) => {
+    if (e.touches.length < 2) {
+      pinchStartDistanceRef.current = null;
+    }
+  };
+
   // Estados para Monitor de Saúde Premium e Internet
   const [isOnline, setIsOnline] = useState(typeof window !== 'undefined' ? navigator.onLine : true);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -4324,7 +4359,7 @@ export default function ChatDashboard() {
         onClose={() => setResolvingTicketContactId(null)}
         activeTicket={activeTicket}
         contact={activeChat}
-        onConfirm={async (problemDesc, resolution, reactivateAi, summaryText, problemsChecklist, errorLog) => {
+        onConfirm={async (problemDesc, resolution, reactivateAi, summaryText, problemsChecklist, errorLog, aiSummaryData) => {
           if (resolvingTicketContactId) {
             // Buscar o ticket ativo correspondente ao resolvingTicketContactId no Supabase
             const realContactId = resolvingTicketContactId.includes('_') ? resolvingTicketContactId.split('_')[0] : resolvingTicketContactId;
@@ -4347,7 +4382,11 @@ export default function ChatDashboard() {
               summary: summaryText, 
               checklist: problemsChecklist,
               closed_by: operatorName,
-              error_log: errorLog
+              error_log: errorLog,
+              sentiment: aiSummaryData?.sentiment || 'Neutro',
+              root_cause: aiSummaryData?.root_cause || undefined,
+              improvement_suggestions: aiSummaryData?.improvement_suggestions || [],
+              key_learnings: aiSummaryData?.key_learnings || []
             };
             if (dbTicket) {
               await useChatStore.getState().resolveActiveTicket(dbTicket.id, problemDesc, resolution, stats);
@@ -9426,6 +9465,10 @@ export default function ChatDashboard() {
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
               onPointerCancel={handlePointerUp}
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
+              onTouchCancel={handleTouchEnd}
               onClick={(e) => e.stopPropagation()}
               onContextMenu={(e) => e.stopPropagation()}
             />
