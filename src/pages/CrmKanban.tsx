@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { 
@@ -45,12 +45,27 @@ import {
   ArrowRight,
   ShieldCheck,
   Zap,
-  Code
+  Code,
+  Image as ImageIcon,
+  Video as VideoIcon,
+  Paperclip,
+  Upload,
+  Camera,
+  Play,
+  RotateCcw,
+  FileImage,
+  FileVideo
 } from 'lucide-react';
 import { useChatStore, instanceCache } from '../store/chatStore';
 import { supabase } from '../services/supabase';
 import { geminiService } from '../services/geminiService';
 import KanbanBoardCreator from '../components/KanbanBoardCreator';
+import { 
+  CardMediaAttachment, 
+  saveCardDraft, 
+  loadCardDraft, 
+  clearCardDraft 
+} from '../utils/cardDraftStorage';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { motion } from 'framer-motion';
@@ -65,68 +80,124 @@ const getColorClasses = (colorClass: string) => {
     case 'blue-500':
       return {
         text: 'text-blue-600 dark:text-blue-400',
-        border: 'border-blue-500/20 dark:border-blue-500/10',
+        border: 'border-blue-500/30 dark:border-blue-500/20',
         borderTop: 'border-t-blue-500',
         bgLight: 'bg-blue-500/10 dark:bg-blue-500/15',
-        badge: 'bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-300 border border-blue-500/20'
+        badge: 'bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-500/30 shadow-[0_0_10px_rgba(59,130,246,0.15)]',
+        dot: 'bg-blue-500 ring-4 ring-blue-500/20 shadow-[0_0_12px_rgba(59,130,246,0.5)]',
+        glowGradient: 'from-blue-500 via-cyan-400 to-indigo-500',
+        cardAccent: 'bg-blue-500 shadow-blue-500/30'
       };
     case 'emerald-500':
       return {
         text: 'text-emerald-600 dark:text-emerald-400',
-        border: 'border-emerald-500/20 dark:border-emerald-500/10',
+        border: 'border-emerald-500/30 dark:border-emerald-500/20',
         borderTop: 'border-t-emerald-500',
         bgLight: 'bg-emerald-500/10 dark:bg-emerald-500/15',
-        badge: 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-300 border border-emerald-500/20'
+        badge: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 shadow-[0_0_10px_rgba(16,185,129,0.15)]',
+        dot: 'bg-emerald-500 ring-4 ring-emerald-500/20 shadow-[0_0_12px_rgba(16,185,129,0.5)]',
+        glowGradient: 'from-emerald-500 via-teal-400 to-green-500',
+        cardAccent: 'bg-emerald-500 shadow-emerald-500/30'
       };
     case 'amber-500':
       return {
         text: 'text-amber-600 dark:text-amber-400',
-        border: 'border-amber-500/20 dark:border-amber-500/10',
+        border: 'border-amber-500/30 dark:border-amber-500/20',
         borderTop: 'border-t-amber-500',
         bgLight: 'bg-amber-500/10 dark:bg-amber-500/15',
-        badge: 'bg-amber-500/10 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300 border border-amber-500/20'
+        badge: 'bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/30 shadow-[0_0_10px_rgba(245,158,11,0.15)]',
+        dot: 'bg-amber-500 ring-4 ring-amber-500/20 shadow-[0_0_12px_rgba(245,158,11,0.5)]',
+        glowGradient: 'from-amber-500 via-orange-400 to-yellow-500',
+        cardAccent: 'bg-amber-500 shadow-amber-500/30'
       };
     case 'rose-500':
       return {
         text: 'text-rose-600 dark:text-rose-400',
-        border: 'border-rose-500/20 dark:border-rose-500/10',
+        border: 'border-rose-500/30 dark:border-rose-500/20',
         borderTop: 'border-t-rose-500',
         bgLight: 'bg-rose-500/10 dark:bg-rose-500/15',
-        badge: 'bg-rose-500/10 text-rose-700 dark:bg-rose-500/20 dark:text-rose-300 border border-rose-500/20'
+        badge: 'bg-rose-500/15 text-rose-800 dark:text-rose-300 border border-rose-500/30 shadow-[0_0_10px_rgba(244,63,94,0.15)]',
+        dot: 'bg-rose-500 ring-4 ring-rose-500/20 shadow-[0_0_12px_rgba(244,63,94,0.5)]',
+        glowGradient: 'from-rose-500 via-pink-400 to-red-500',
+        cardAccent: 'bg-rose-500 shadow-rose-500/30'
       };
     case 'violet-500':
       return {
         text: 'text-violet-600 dark:text-violet-400',
-        border: 'border-violet-500/20 dark:border-violet-500/10',
+        border: 'border-violet-500/30 dark:border-violet-500/20',
         borderTop: 'border-t-violet-500',
         bgLight: 'bg-violet-500/10 dark:bg-violet-500/15',
-        badge: 'bg-violet-500/10 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300 border border-violet-500/20'
+        badge: 'bg-violet-500/15 text-violet-800 dark:text-violet-300 border border-violet-500/30 shadow-[0_0_10px_rgba(139,92,246,0.15)]',
+        dot: 'bg-violet-500 ring-4 ring-violet-500/20 shadow-[0_0_12px_rgba(139,92,246,0.5)]',
+        glowGradient: 'from-violet-500 via-purple-400 to-indigo-500',
+        cardAccent: 'bg-violet-500 shadow-violet-500/30'
       };
     case 'fuchsia-500':
       return {
         text: 'text-fuchsia-600 dark:text-fuchsia-400',
-        border: 'border-fuchsia-500/20 dark:border-fuchsia-500/10',
+        border: 'border-fuchsia-500/30 dark:border-fuchsia-500/20',
         borderTop: 'border-t-fuchsia-500',
         bgLight: 'bg-fuchsia-500/10 dark:bg-fuchsia-500/15',
-        badge: 'bg-fuchsia-500/10 text-fuchsia-700 dark:bg-fuchsia-500/20 dark:text-fuchsia-300 border border-fuchsia-500/20'
+        badge: 'bg-fuchsia-500/15 text-fuchsia-800 dark:text-fuchsia-300 border border-fuchsia-500/30 shadow-[0_0_10px_rgba(217,70,239,0.15)]',
+        dot: 'bg-fuchsia-500 ring-4 ring-fuchsia-500/20 shadow-[0_0_12px_rgba(217,70,239,0.5)]',
+        glowGradient: 'from-fuchsia-500 via-pink-400 to-purple-500',
+        cardAccent: 'bg-fuchsia-500 shadow-fuchsia-500/30'
       };
     case 'slate-500':
       return {
         text: 'text-slate-600 dark:text-slate-400',
-        border: 'border-slate-500/20 dark:border-slate-500/10',
+        border: 'border-slate-500/30 dark:border-slate-500/20',
         borderTop: 'border-t-slate-500',
         bgLight: 'bg-slate-500/10 dark:bg-slate-500/15',
-        badge: 'bg-slate-500/10 text-slate-700 dark:bg-slate-500/20 dark:text-slate-300 border border-slate-500/20'
+        badge: 'bg-slate-500/15 text-slate-800 dark:text-slate-300 border border-slate-500/30 shadow-[0_0_10px_rgba(100,116,139,0.15)]',
+        dot: 'bg-slate-500 ring-4 ring-slate-500/20 shadow-[0_0_12px_rgba(100,116,139,0.5)]',
+        glowGradient: 'from-slate-500 via-gray-400 to-zinc-500',
+        cardAccent: 'bg-slate-500 shadow-slate-500/30'
       };
     default:
       return {
         text: 'text-indigo-600 dark:text-indigo-400',
-        border: 'border-indigo-500/20 dark:border-indigo-500/10',
+        border: 'border-indigo-500/30 dark:border-indigo-500/20',
         borderTop: 'border-t-indigo-500',
         bgLight: 'bg-indigo-500/10 dark:bg-indigo-500/15',
-        badge: 'bg-indigo-500/10 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300 border border-indigo-500/20'
+        badge: 'bg-indigo-500/15 text-indigo-800 dark:text-indigo-300 border border-indigo-500/30 shadow-[0_0_10px_rgba(99,102,241,0.15)]',
+        dot: 'bg-indigo-500 ring-4 ring-indigo-500/20 shadow-[0_0_12px_rgba(99,102,241,0.5)]',
+        glowGradient: 'from-indigo-500 via-purple-400 to-cyan-500',
+        cardAccent: 'bg-indigo-500 shadow-indigo-500/30'
       };
   }
+};
+
+// Utilitários para Extração Inteligente de Informações dos Cards
+const parseCardHeaderInfo = (title: string) => {
+  if (!title) return { category: null, cleanTitle: 'Sem título' };
+  const match = title.match(/^\[(.*?)\]/);
+  if (match) {
+    return {
+      category: match[1].trim(),
+      cleanTitle: title.replace(/^\[(.*?)\]\s*/, '').trim()
+    };
+  }
+  return {
+    category: null,
+    cleanTitle: title
+  };
+};
+
+const getLeadSummarySnippet = (notes?: string | null) => {
+  if (!notes) return null;
+  const clean = notes
+    .replace(/!\[.*?\]\(.*?\)/g, '')
+    .replace(/🎥\s*\[.*?\]\(.*?\)/g, '')
+    .replace(/🎙️\s*\[.*?\]\(.*?\)/g, '')
+    .replace(/^#+.*$/gm, '')
+    .replace(/---/g, '')
+    .replace(/<[^>]*>?/gm, '')
+    .trim();
+  const lines = clean.split('\n').map(l => l.trim()).filter(p => p.length > 0);
+  const firstParagraph = lines.find(p => !p.startsWith('🎯') && !p.startsWith('📋') && !p.startsWith('🛠️') && !p.startsWith('🧪') && !p.startsWith('📎')) || lines[0];
+  if (!firstParagraph) return null;
+  return firstParagraph.length > 130 ? firstParagraph.slice(0, 130) + '...' : firstParagraph;
 };
 
 // Interfaces do Kanban CRM
@@ -241,11 +312,16 @@ export default function CrmKanban() {
   const [techExecutorInput, setTechExecutorInput] = useState('');
   const [validationAlertMessage, setValidationAlertMessage] = useState<string | null>(null);
 
-  // Estados para Criação de Card com Áudio & IA
+  // Estados para Criação de Card com Áudio, Imagens, Vídeos & IA Multimodal
   const [isAiCardModalOpen, setIsAiCardModalOpen] = useState(false);
   const [isAiRecording, setIsAiRecording] = useState(false);
   const [aiRecordingSeconds, setAiRecordingSeconds] = useState(0);
   const [aiCardPrompt, setAiCardPrompt] = useState('');
+  const [recordedAudioBase64, setRecordedAudioBase64] = useState<string | null>(null);
+  const [recordedAudioMimeType, setRecordedAudioMimeType] = useState<string | null>(null);
+  const [aiMediaAttachments, setAiMediaAttachments] = useState<CardMediaAttachment[]>([]);
+  const [hasRecoveredDraft, setHasRecoveredDraft] = useState(false);
+  const [isUploadingMedia, setIsUploadingMedia] = useState(false);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
   const [generatedPlan, setGeneratedPlan] = useState<{
     title: string;
@@ -258,10 +334,163 @@ export default function CrmKanban() {
   } | null>(null);
   const [selectedTargetStage, setSelectedTargetStage] = useState<string>('');
 
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+
   const aiMediaRecorderRef = React.useRef<MediaRecorder | null>(null);
   const aiAudioChunksRef = React.useRef<Blob[]>([]);
   const aiTimerIntervalRef = React.useRef<any>(null);
 
+  // Utilitário para converter arquivo em base64
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => {
+        const res = reader.result as string;
+        resolve(res.split(',')[1] || '');
+      };
+      reader.onerror = error => reject(error);
+    });
+  };
+
+  // Manipular adição de arquivos de mídia (imagens e vídeos)
+  const handleAddMediaFiles = async (files: FileList | File[]) => {
+    const newAttachments: CardMediaAttachment[] = [];
+    setIsUploadingMedia(true);
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      if (!file) continue;
+
+      const isImg = file.type.startsWith('image/');
+      const isVid = file.type.startsWith('video/');
+      const isAud = file.type.startsWith('audio/');
+
+      if (!isImg && !isVid && !isAud) continue;
+
+      try {
+        const base64 = await fileToBase64(file);
+        const previewUrl = URL.createObjectURL(file);
+        const attachment: CardMediaAttachment = {
+          id: `media_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          name: file.name || (isImg ? 'screenshot.png' : 'video_demonstracao.mp4'),
+          type: isImg ? 'image' : isVid ? 'video' : 'audio',
+          mimeType: file.type || (isImg ? 'image/png' : isVid ? 'video/mp4' : 'audio/webm'),
+          size: file.size,
+          base64,
+          previewUrl,
+          file
+        };
+        newAttachments.push(attachment);
+      } catch (e) {
+        console.error('Erro ao converter arquivo em base64:', e);
+      }
+    }
+
+    if (newAttachments.length > 0) {
+      setAiMediaAttachments(prev => [...prev, ...newAttachments]);
+    }
+    setIsUploadingMedia(false);
+  };
+
+  // Remover anexo de mídia
+  const handleRemoveMediaAttachment = (id: string) => {
+    setAiMediaAttachments(prev => prev.filter(a => a.id !== id));
+  };
+
+  // Ouvinte de Colar (Ctrl+V / Clipboard Paste) para Prints e Screenshots
+  useEffect(() => {
+    if (!isAiCardModalOpen) return;
+
+    const handlePaste = async (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      const imageFiles: File[] = [];
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.type.indexOf('image') !== -1) {
+          const blob = item.getAsFile();
+          if (blob) {
+            const file = new File([blob], `print_${Date.now()}.png`, { type: blob.type });
+            imageFiles.push(file);
+          }
+        }
+      }
+
+      if (imageFiles.length > 0) {
+        e.preventDefault();
+        await handleAddMediaFiles(imageFiles);
+      }
+    };
+
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [isAiCardModalOpen]);
+
+  // Carregar rascunho do cache local ao abrir o modal
+  useEffect(() => {
+    if (!isAiCardModalOpen || !boardId) return;
+
+    const loadDraft = async () => {
+      const draft = await loadCardDraft(boardId);
+      if (draft && (draft.textPrompt || draft.audioBase64 || (draft.attachments && draft.attachments.length > 0) || draft.generatedPlan)) {
+        if (draft.textPrompt && !aiCardPrompt) setAiCardPrompt(draft.textPrompt);
+        if (draft.audioBase64 && !recordedAudioBase64) {
+          setRecordedAudioBase64(draft.audioBase64);
+          setRecordedAudioMimeType(draft.audioMimeType || 'audio/webm');
+        }
+        if (draft.attachments && draft.attachments.length > 0 && aiMediaAttachments.length === 0) {
+          setAiMediaAttachments(draft.attachments);
+        }
+        if (draft.generatedPlan && !generatedPlan) {
+          setGeneratedPlan(draft.generatedPlan);
+        }
+        if (draft.targetStage && !selectedTargetStage) {
+          setSelectedTargetStage(draft.targetStage);
+        }
+        setHasRecoveredDraft(true);
+      }
+    };
+
+    loadDraft();
+  }, [isAiCardModalOpen, boardId]);
+
+  // Salvar rascunho automaticamente com debounce de 800ms
+  useEffect(() => {
+    if (!isAiCardModalOpen || !boardId) return;
+
+    const timer = setTimeout(() => {
+      if (aiCardPrompt || recordedAudioBase64 || aiMediaAttachments.length > 0 || generatedPlan) {
+        saveCardDraft(boardId, {
+          textPrompt: aiCardPrompt,
+          audioBase64: recordedAudioBase64 || undefined,
+          audioMimeType: recordedAudioMimeType || undefined,
+          attachments: aiMediaAttachments,
+          generatedPlan,
+          targetStage: selectedTargetStage
+        });
+      }
+    }, 800);
+
+    return () => clearTimeout(timer);
+  }, [isAiCardModalOpen, boardId, aiCardPrompt, recordedAudioBase64, recordedAudioMimeType, aiMediaAttachments, generatedPlan, selectedTargetStage]);
+
+  // Limpar Rascunho
+  const handleClearDraft = async () => {
+    if (!boardId) return;
+    await clearCardDraft(boardId);
+    setAiCardPrompt('');
+    setRecordedAudioBase64(null);
+    setRecordedAudioMimeType(null);
+    setAiMediaAttachments([]);
+    setGeneratedPlan(null);
+    setHasRecoveredDraft(false);
+  };
+
+  // Gravação de Áudio
   const startAiAudioRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -281,27 +510,8 @@ export default function CrmKanban() {
         reader.readAsDataURL(audioBlob);
         reader.onloadend = async () => {
           const base64Audio = (reader.result as string).split(',')[1];
-          try {
-            setIsGeneratingPlan(true);
-            const plan = await geminiService.generateFeaturePlanFromAudioOrText({
-              audioBase64: base64Audio,
-              audioMimeType: 'audio/webm',
-              boardName: board?.name
-            });
-            setGeneratedPlan(plan);
-            if (pipelineStages.length > 0) {
-              const matched = pipelineStages.find(s => 
-                s.label.toLowerCase().includes(plan.suggested_stage_label.toLowerCase()) ||
-                plan.suggested_stage_label.toLowerCase().includes(s.label.toLowerCase())
-              );
-              setSelectedTargetStage(matched?.id || pipelineStages[0].id);
-            }
-          } catch (err: any) {
-            console.error('Erro ao gerar plano via áudio:', err);
-            alert('Falha ao processar áudio: ' + (err?.message || 'Tente gravar novamente.'));
-          } finally {
-            setIsGeneratingPlan(false);
-          }
+          setRecordedAudioBase64(base64Audio);
+          setRecordedAudioMimeType('audio/webm');
         };
         stream.getTracks().forEach(t => t.stop());
       };
@@ -328,14 +538,28 @@ export default function CrmKanban() {
     }
   };
 
-  const handleGeneratePlanFromText = async () => {
-    if (!aiCardPrompt.trim()) return;
+  // Geração Multimodal do Plano com Gemini
+  const handleGeneratePlanMultimodal = async () => {
+    if (!aiCardPrompt.trim() && !recordedAudioBase64 && aiMediaAttachments.length === 0) {
+      alert('Por favor, grave um áudio, envie fotos/vídeos ou digite o que precisa ser desenvolvido.');
+      return;
+    }
+
     try {
       setIsGeneratingPlan(true);
       const plan = await geminiService.generateFeaturePlanFromAudioOrText({
         textPrompt: aiCardPrompt,
+        audioBase64: recordedAudioBase64 || undefined,
+        audioMimeType: recordedAudioMimeType || 'audio/webm',
+        attachments: aiMediaAttachments.map(a => ({
+          base64: a.base64,
+          mimeType: a.mimeType,
+          fileName: a.name,
+          type: a.type
+        })),
         boardName: board?.name
       });
+
       setGeneratedPlan(plan);
       if (pipelineStages.length > 0) {
         const matched = pipelineStages.find(s => 
@@ -345,13 +569,14 @@ export default function CrmKanban() {
         setSelectedTargetStage(matched?.id || pipelineStages[0].id);
       }
     } catch (err: any) {
-      console.error('Erro ao gerar plano via texto:', err);
-      alert('Falha ao gerar plano: ' + (err?.message || 'Tente detalhar mais a ideia.'));
+      console.error('Erro ao gerar plano multimodal com IA:', err);
+      alert('Falha ao gerar plano: ' + (err?.message || 'Tente fornecer mais detalhes.'));
     } finally {
       setIsGeneratingPlan(false);
     }
   };
 
+  // Criação do Card no Supabase com Upload de Mídias
   const handleConfirmCreateAiCard = async () => {
     if (!generatedPlan || !boardId || !tenantId) return;
     try {
@@ -362,6 +587,49 @@ export default function CrmKanban() {
       if (colLeads.length > 0) {
         newPosition = (colLeads[colLeads.length - 1].position || 0) + 1000;
       }
+
+      // Fazer upload das mídias anexadas para o Supabase Storage (se houver)
+      let mediaMarkdownLinks = '';
+      if (aiMediaAttachments.length > 0) {
+        const uploadedLinks: string[] = [];
+        for (const att of aiMediaAttachments) {
+          try {
+            const byteCharacters = atob(att.base64);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+              byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            const byteArray = new Uint8Array(byteNumbers);
+            const blob = new Blob([byteArray], { type: att.mimeType });
+            const fileExt = att.name.split('.').pop() || (att.type === 'image' ? 'png' : 'mp4');
+            const safeName = `${Date.now()}_${Math.random().toString(36).substr(2, 6)}.${fileExt}`;
+            const filePath = `crm_cards/${boardId}/${safeName}`;
+
+            const { data: uploadData, error: uploadErr } = await supabase.storage
+              .from('chat_media')
+              .upload(filePath, blob, { contentType: att.mimeType, upsert: true });
+
+            if (!uploadErr && uploadData) {
+              const { data: { publicUrl } } = supabase.storage.from('chat_media').getPublicUrl(filePath);
+              if (att.type === 'image') {
+                uploadedLinks.push(`![${att.name}](${publicUrl})`);
+              } else if (att.type === 'video') {
+                uploadedLinks.push(`🎥 [Vídeo: ${att.name}](${publicUrl})`);
+              } else {
+                uploadedLinks.push(`🎙️ [Áudio: ${att.name}](${publicUrl})`);
+              }
+            }
+          } catch (uploadException) {
+            console.warn('Erro ao fazer upload da mídia anexada:', uploadException);
+          }
+        }
+
+        if (uploadedLinks.length > 0) {
+          mediaMarkdownLinks = `\n\n---\n### 📎 Mídias & Evidências Anexadas\n${uploadedLinks.join('\n\n')}`;
+        }
+      }
+
+      const fullNotes = `${generatedPlan.summary}\n\n${generatedPlan.technical_plan}${mediaMarkdownLinks}`;
 
       const payload = {
         tenant_id: tenantId,
@@ -376,7 +644,7 @@ export default function CrmKanban() {
         agent_id: null,
         due_date: null,
         tags: Array.from(new Set([...(generatedPlan.tags || []), generatedPlan.category, 'IA-PLANO'])),
-        notes: `${generatedPlan.summary}\n\n${generatedPlan.technical_plan}`
+        notes: fullNotes
       };
 
       const { data, error } = await supabase
@@ -388,9 +656,14 @@ export default function CrmKanban() {
       if (error) throw error;
 
       setLeads(prev => [...prev, data]);
+      await clearCardDraft(boardId);
       setIsAiCardModalOpen(false);
       setGeneratedPlan(null);
       setAiCardPrompt('');
+      setRecordedAudioBase64(null);
+      setRecordedAudioMimeType(null);
+      setAiMediaAttachments([]);
+      setHasRecoveredDraft(false);
     } catch (err: any) {
       console.error('Erro ao salvar card gerado por IA:', err);
       alert('Erro ao criar card: ' + (err?.message || 'Falha no banco'));
@@ -1097,28 +1370,28 @@ export default function CrmKanban() {
   return (
     <div className="flex flex-col h-full bg-slate-50 dark:bg-[#0c1317] overflow-hidden">
       
-      {/* Cabeçalho Kanban SaaS Premium (Estilo Linear / Notion / Vercel) */}
-      <header className="shrink-0 flex flex-col gap-3.5 px-6 lg:px-8 py-4.5 border-b border-slate-200/60 dark:border-white/10 bg-white/70 dark:bg-[#0c1317]/80 backdrop-blur-2xl select-none z-10 shadow-[0_4px_20px_rgba(0,0,0,0.03)]">
+      {/* Cabeçalho Kanban SaaS Premium (Apple / Linear / Vercel Level) */}
+      <header className="shrink-0 flex flex-col gap-4 px-6 lg:px-8 py-4 border-b border-slate-200/80 dark:border-white/[0.08] bg-white/80 dark:bg-[#0c1317]/85 backdrop-blur-2xl select-none z-10 shadow-[0_4px_24px_rgba(0,0,0,0.03)] dark:shadow-[0_4px_24px_rgba(0,0,0,0.2)]">
         {/* Linha 1: Identidade do Quadro & Botões Principais de Criação */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="flex items-center gap-3.5 min-w-0">
-            <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-purple-600 via-indigo-600 to-cyan-500 text-white flex items-center justify-center shadow-lg shadow-indigo-500/20 shrink-0 ring-4 ring-indigo-500/10">
-              <Sparkles size={20} className="animate-pulse" />
+            <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-violet-600 via-indigo-600 to-cyan-400 text-white flex items-center justify-center shadow-lg shadow-indigo-500/25 shrink-0 ring-4 ring-indigo-500/10">
+              <Sparkles size={20} className="animate-pulse text-amber-300" />
             </div>
             <div className="text-left min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-base lg:text-lg font-black tracking-tight text-slate-900 dark:text-white font-sans truncate">
+                <h1 className="text-lg lg:text-xl font-black tracking-tight text-slate-900 dark:text-white font-sans truncate">
                   {board.name}
                 </h1>
-                <span className="text-[9px] px-2.5 py-0.5 bg-gradient-to-r from-purple-500/10 to-indigo-500/10 dark:from-purple-500/20 dark:to-indigo-500/20 text-purple-600 dark:text-purple-300 font-black uppercase rounded-lg border border-purple-500/20 tracking-wider flex items-center gap-1">
-                  <Layers size={10} />
+                <span className="text-[9.5px] px-2.5 py-0.5 bg-gradient-to-r from-violet-500/10 via-indigo-500/10 to-cyan-500/10 dark:from-violet-500/20 dark:to-cyan-500/20 text-indigo-600 dark:text-indigo-300 font-black uppercase rounded-lg border border-indigo-500/25 tracking-wider flex items-center gap-1.5 shadow-sm">
+                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
                   Kanban
                 </span>
-                <span className="text-[9px] px-2 py-0.5 bg-slate-100 dark:bg-white/5 text-slate-500 dark:text-slate-400 font-bold rounded-lg border border-slate-200/60 dark:border-white/5">
+                <span className="text-[10px] px-2.5 py-0.5 bg-slate-100/90 dark:bg-white/[0.06] text-slate-600 dark:text-slate-300 font-bold rounded-lg border border-slate-200/80 dark:border-white/[0.08]">
                   {leads.length} {leads.length === 1 ? 'cartão' : 'cartões'}
                 </span>
               </div>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 font-sans font-medium mt-0.5 truncate max-w-2xl">
+              <p className="text-[11.5px] text-slate-500 dark:text-slate-400 font-sans font-medium mt-0.5 truncate max-w-2xl">
                 {board.config?.description || 'Arraste e solte cartões para gerenciar tarefas e avançar fluxos'}
               </p>
             </div>
@@ -1133,7 +1406,7 @@ export default function CrmKanban() {
                 setSelectedTargetStage(pipelineStages[0]?.id || '');
                 setIsAiCardModalOpen(true);
               }}
-              className="flex items-center gap-2 px-4.5 py-2.5 bg-gradient-to-r from-purple-600 via-indigo-600 to-cyan-500 hover:from-purple-500 hover:to-cyan-400 text-white rounded-xl text-xs font-black shadow-lg shadow-indigo-500/25 hover:shadow-indigo-500/40 transition-all duration-200 hover:scale-[1.02] active:scale-95 cursor-pointer ring-2 ring-white/10"
+              className="flex items-center gap-2 px-4.5 py-2.5 bg-gradient-to-r from-violet-600 via-indigo-600 to-cyan-500 hover:from-violet-500 hover:to-cyan-400 text-white rounded-xl text-xs font-black shadow-lg shadow-indigo-500/25 hover:shadow-indigo-500/40 transition-all duration-200 hover:scale-[1.02] active:scale-95 cursor-pointer ring-2 ring-white/20"
             >
               <Mic size={14} className="text-amber-300 animate-pulse" />
               <span>Criar com Áudio & IA</span>
@@ -1145,7 +1418,7 @@ export default function CrmKanban() {
                 setLeadForm(prev => ({ ...prev, status: pipelineStages[0]?.id || '' }));
                 setIsAddLeadOpen(true);
               }}
-              className="flex items-center gap-1.5 px-4 py-2.5 bg-slate-900 dark:bg-white hover:bg-slate-800 dark:hover:bg-slate-100 text-white dark:text-slate-900 rounded-xl text-xs font-black shadow-md transition-all duration-200 hover:scale-[1.02] active:scale-95 cursor-pointer"
+              className="flex items-center gap-1.5 px-4.5 py-2.5 bg-slate-900 dark:bg-white hover:bg-slate-800 dark:hover:bg-slate-100 text-white dark:text-slate-900 rounded-xl text-xs font-black shadow-md hover:shadow-lg transition-all duration-200 hover:scale-[1.02] active:scale-95 cursor-pointer"
             >
               <Plus size={14} strokeWidth={2.5} />
               Novo Cartão
@@ -1154,17 +1427,17 @@ export default function CrmKanban() {
         </div>
 
         {/* Linha 2: Barra de Ferramentas (Busca, Filtros, Configurações do Quadro) */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pt-2 border-t border-slate-100 dark:border-white/5">
-          <div className="flex items-center gap-2 flex-wrap flex-1 min-w-0">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-slate-200/60 dark:border-white/[0.06]">
+          <div className="flex items-center gap-2.5 flex-wrap flex-1 min-w-0">
             {/* Busca */}
             <div className="relative flex-1 sm:flex-initial">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" size={13} />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" size={14} />
               <input 
                 type="text" 
                 placeholder="Pesquisar cartão..." 
                 value={searchTerm}
                 onChange={e => setSearchTerm(e.target.value)}
-                className="pl-8.5 pr-4 py-1.5 w-full sm:w-[210px] bg-slate-100/80 dark:bg-[#182229]/60 border border-slate-200/60 dark:border-white/10 rounded-xl text-xs font-medium focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/10 text-slate-800 dark:text-slate-200 transition-all duration-200"
+                className="pl-9 pr-4 py-2 w-full sm:w-[230px] bg-slate-100/90 dark:bg-[#182229]/70 border border-slate-200/80 dark:border-white/[0.08] rounded-xl text-xs font-medium focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 text-slate-800 dark:text-slate-200 transition-all duration-200"
               />
             </div>
 
@@ -1173,7 +1446,7 @@ export default function CrmKanban() {
               <select 
                 value={selectedAgentFilter}
                 onChange={e => setSelectedAgentFilter(e.target.value)}
-                className="px-3 pr-7 py-1.5 bg-slate-100/80 dark:bg-[#182229]/60 border border-slate-200/60 dark:border-white/10 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/10 text-slate-700 dark:text-slate-300 cursor-pointer appearance-none"
+                className="px-3.5 pr-8 py-2 bg-slate-100/90 dark:bg-[#182229]/70 border border-slate-200/80 dark:border-white/[0.08] rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 text-slate-700 dark:text-slate-300 cursor-pointer appearance-none shadow-sm"
               >
                 <option value="all">👥 Todos os Agentes</option>
                 {agents.map(a => (
@@ -1184,27 +1457,27 @@ export default function CrmKanban() {
           </div>
 
           {/* Ações de Gestão do Quadro */}
-          <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto">
+          <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
             <button 
               onClick={() => setIsCreatorOpen(true)}
-              className="flex items-center gap-1 px-3 py-1.5 bg-slate-100/80 dark:bg-[#182229]/60 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200/60 dark:border-white/10 rounded-xl text-xs font-bold transition-all hover:bg-slate-200/60 dark:hover:bg-white/10 active:scale-95 cursor-pointer"
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-100/90 dark:bg-[#182229]/70 text-slate-700 dark:text-slate-200 hover:text-slate-900 dark:hover:text-white border border-slate-200/80 dark:border-white/[0.08] rounded-xl text-xs font-bold transition-all hover:bg-slate-200/80 dark:hover:bg-white/10 active:scale-95 cursor-pointer shadow-sm"
             >
-              <Plus size={12} strokeWidth={2.5} />
+              <Plus size={13} strokeWidth={2.5} />
               Novo Quadro
             </button>
             <button 
               onClick={() => setIsEditBoardOpen(true)}
-              className="flex items-center gap-1 px-3 py-1.5 bg-slate-100/80 dark:bg-[#182229]/60 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200/60 dark:border-white/10 rounded-xl text-xs font-bold transition-all hover:bg-slate-200/60 dark:hover:bg-white/10 active:scale-95 cursor-pointer"
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-100/90 dark:bg-[#182229]/70 text-slate-700 dark:text-slate-200 hover:text-slate-900 dark:hover:text-white border border-slate-200/80 dark:border-white/[0.08] rounded-xl text-xs font-bold transition-all hover:bg-slate-200/80 dark:hover:bg-white/10 active:scale-95 cursor-pointer shadow-sm"
             >
-              <Settings size={12} />
+              <Settings size={13} />
               Configurar
             </button>
             <button 
               onClick={handleDeleteBoard}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-rose-500/80 hover:text-rose-600 dark:text-rose-400/80 dark:hover:text-rose-400 hover:bg-rose-500/10 border border-transparent hover:border-rose-500/20 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-2 text-rose-500 hover:text-rose-600 dark:text-rose-400 dark:hover:text-rose-300 hover:bg-rose-500/10 border border-transparent hover:border-rose-500/20 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer"
               title="Excluir este quadro permanentemente"
             >
-              <Trash2 size={12} />
+              <Trash2 size={13} />
               Excluir
             </button>
           </div>
@@ -1226,22 +1499,23 @@ export default function CrmKanban() {
                 key={stage.id}
                 onClick={() => setCollapsedStages(prev => ({ ...prev, [stage.id]: false }))}
                 className={cn(
-                  "w-[64px] shrink-0 flex flex-col h-full bg-slate-100/40 dark:bg-[#182229]/20 backdrop-blur-md rounded-[28px] border border-slate-200/50 dark:border-white/5 overflow-hidden transition-all duration-300 cursor-pointer hover:shadow-md select-none"
+                  "w-[68px] shrink-0 flex flex-col h-full bg-white/60 dark:bg-[#111b21]/60 backdrop-blur-xl rounded-[28px] border border-slate-200/80 dark:border-white/[0.08] overflow-hidden transition-all duration-300 cursor-pointer hover:shadow-lg select-none hover:border-indigo-500/40"
                 )}
               >
-                <div className={cn("flex-1 flex flex-col items-center justify-between py-6 h-full relative border-t-4", colors.borderTop)}>
+                <div className="h-1.5 w-full bg-gradient-to-r from-indigo-500 to-purple-500" />
+                <div className="flex-1 flex flex-col items-center justify-between py-6 h-full relative">
                   <div className="flex flex-col items-center gap-4">
-                    <ChevronRight size={14} strokeWidth={3} className={colors.text} />
-                    <span className={cn("text-[9px] font-black px-2 py-0.5 rounded-lg border", colors.badge)}>
+                    <ChevronRight size={16} strokeWidth={3} className={colors.text} />
+                    <span className={cn("text-[9.5px] font-black px-2 py-0.5 rounded-full border", colors.badge)}>
                       {colLeads.length}
                     </span>
                   </div>
                   
-                  <div className={cn("rotate-90 origin-center whitespace-nowrap text-[10px] font-black uppercase tracking-wider py-4 my-auto select-none", colors.text)}>
+                  <div className={cn("rotate-90 origin-center whitespace-nowrap text-[11px] font-black uppercase tracking-wider py-4 my-auto select-none", colors.text)}>
                     {stage.label}
                   </div>
                   
-                  <div className="text-[8px] tracking-widest font-black text-slate-400 dark:text-slate-500">
+                  <div className="text-[8.5px] tracking-widest font-black text-slate-400 dark:text-slate-500 uppercase">
                     EXPANDIR
                   </div>
                 </div>
@@ -1256,28 +1530,26 @@ export default function CrmKanban() {
               onDragEnter={e => e.preventDefault()}
               onDrop={e => handleDrop(e, stage.id)}
               className={cn(
-                "w-[300px] shrink-0 flex flex-col h-full bg-slate-100/70 dark:bg-[#182229]/40 backdrop-blur-xl rounded-[28px] border border-slate-200/60 dark:border-white/10 overflow-hidden transition-all duration-300 shadow-sm",
-                isOver && "border-indigo-500/50 dark:border-indigo-500/40 bg-indigo-500/[0.02] dark:bg-indigo-500/[0.04]"
+                "w-[315px] shrink-0 flex flex-col h-full bg-slate-100/80 dark:bg-[#111b21]/75 backdrop-blur-2xl rounded-[28px] border border-slate-200/80 dark:border-white/[0.08] overflow-hidden transition-all duration-300 shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.35)]",
+                isOver && "border-indigo-500/60 dark:border-indigo-400/60 bg-indigo-500/[0.04] dark:bg-indigo-500/[0.06] shadow-[0_0_30px_rgba(99,102,241,0.15)]"
               )}
             >
+              {/* Top Accent Gradient Line */}
+              <div className={cn("h-1.5 w-full bg-gradient-to-r", colors.glowGradient)} />
+
               {/* Cabeçalho da Coluna - Minimalist Premium */}
-              <div 
-                className={cn(
-                  "p-4 flex items-center justify-between shrink-0 select-none border-b border-slate-200/50 dark:border-white/5 transition-all relative border-t-4",
-                  colors.borderTop
-                )}
-              >
+              <div className="p-4 flex items-center justify-between shrink-0 select-none border-b border-slate-200/60 dark:border-white/[0.06] bg-white/40 dark:bg-white/[0.02]">
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <span className={cn("w-2.5 h-2.5 rounded-full shrink-0 shadow-sm ring-2 ring-white/20", stage.color || "bg-indigo-500")} />
+                  <span className={cn("w-2.5 h-2.5 rounded-full shrink-0", colors.dot)} />
                   <div className="min-w-0 text-left">
-                    <h3 className="text-xs font-black truncate font-sans tracking-wide leading-tight flex items-center gap-1.5 text-slate-900 dark:text-slate-100">
+                    <h3 className="text-[13px] font-black truncate font-sans tracking-tight leading-tight flex items-center gap-2 text-slate-900 dark:text-white">
                       {stage.label}
-                      <span className={cn("px-2 py-0.5 rounded-lg text-[9px] font-black shrink-0", colors.badge)}>
+                      <span className={cn("px-2.5 py-0.5 rounded-full text-[9.5px] font-black shrink-0", colors.badge)}>
                         {colLeads.length}
                       </span>
                     </h3>
                     {stage.subtitle && (
-                      <p className="text-[9px] text-slate-400 dark:text-slate-500 truncate leading-tight mt-0.5 font-bold uppercase tracking-wide">
+                      <p className="text-[9.5px] text-slate-400 dark:text-slate-500 truncate leading-tight mt-0.5 font-bold uppercase tracking-wider">
                         {stage.subtitle}
                       </p>
                     )}
@@ -1285,16 +1557,16 @@ export default function CrmKanban() {
                 </div>
                 
                 {/* Ações da Coluna */}
-                <div className="flex items-center gap-0.5 shrink-0">
+                <div className="flex items-center gap-1 shrink-0">
                   <button 
                     onClick={(e) => {
                       e.stopPropagation();
                       setCollapsedStages(prev => ({ ...prev, [stage.id]: true }));
                     }}
-                    className="p-1 hover:bg-slate-200/60 dark:hover:bg-white/5 rounded-md text-slate-400 hover:text-slate-800 dark:hover:text-white transition-colors cursor-pointer"
+                    className="p-1.5 hover:bg-slate-200/70 dark:hover:bg-white/10 rounded-lg text-slate-400 hover:text-slate-800 dark:hover:text-white transition-colors cursor-pointer"
                     title="Dobrar Coluna"
                   >
-                    <ChevronLeft size={12} strokeWidth={2.5} />
+                    <ChevronLeft size={13} strokeWidth={2.5} />
                   </button>
                   <button 
                     onClick={(e) => {
@@ -1306,10 +1578,10 @@ export default function CrmKanban() {
                       });
                       setIsEditBoardOpen(true);
                     }}
-                    className="p-1 hover:bg-slate-200/60 dark:hover:bg-white/5 rounded-md text-slate-400 hover:text-slate-800 dark:hover:text-white transition-colors cursor-pointer"
+                    className="p-1.5 hover:bg-slate-200/70 dark:hover:bg-white/10 rounded-lg text-slate-400 hover:text-slate-800 dark:hover:text-white transition-colors cursor-pointer"
                     title="Editar Etapa"
                   >
-                    <Sliders size={12} strokeWidth={2.5} />
+                    <Sliders size={13} strokeWidth={2.5} />
                   </button>
                   <button 
                     onClick={(e) => {
@@ -1317,10 +1589,10 @@ export default function CrmKanban() {
                       setLeadForm(prev => ({ ...prev, status: stage.id }));
                       setIsAddLeadOpen(true);
                     }}
-                    className="p-1 hover:bg-slate-200/60 dark:hover:bg-white/5 rounded-md text-slate-400 hover:text-slate-800 dark:hover:text-white transition-colors cursor-pointer"
-                    title="Criar Oportunidade"
+                    className="p-1.5 hover:bg-slate-200/70 dark:hover:bg-white/10 rounded-lg text-slate-400 hover:text-slate-800 dark:hover:text-white transition-colors cursor-pointer"
+                    title="Criar Cartão"
                   >
-                    <Plus size={12} strokeWidth={2.5} />
+                    <Plus size={13} strokeWidth={2.5} />
                   </button>
                 </div>
               </div>
@@ -1330,7 +1602,7 @@ export default function CrmKanban() {
                 onDragOver={e => handleDragOver(e, stage.id)}
                 onDragEnter={e => e.preventDefault()}
                 onDrop={e => handleDrop(e, stage.id)}
-                className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar flex flex-col"
+                className="flex-1 overflow-y-auto p-3 space-y-3.5 custom-scrollbar flex flex-col"
               >
                 {(() => {
                   const itemsToRender: React.ReactNode[] = [];
@@ -1345,7 +1617,7 @@ export default function CrmKanban() {
                           layout
                           key="dnd-placeholder" 
                           data-placeholder="true"
-                          className="border-2 border-dashed border-indigo-550/40 dark:border-indigo-400/30 bg-indigo-50/10 dark:bg-indigo-950/5 h-[110px] rounded-2xl animate-pulse transition-all duration-200" 
+                          className="border-2 border-dashed border-indigo-500/50 dark:border-indigo-400/40 bg-indigo-50/20 dark:bg-indigo-950/20 h-[115px] rounded-2xl animate-pulse transition-all duration-200" 
                         />
                       );
                     }
@@ -1354,11 +1626,19 @@ export default function CrmKanban() {
                     const agentObj = agents.find(a => a.id === lead.agent_id);
                     const isBeingDragged = draggedLeadId === lead.id;
 
-                    const priorityBorder = lead.priority === 3 
-                      ? "border-l-[3.5px] border-l-rose-500" 
+                    const priorityAccent = lead.priority === 3 
+                      ? "bg-gradient-to-b from-rose-500 to-pink-600 shadow-[0_0_10px_rgba(244,63,94,0.4)]" 
                       : lead.priority === 2 
-                        ? "border-l-[3.5px] border-l-amber-500" 
-                        : "border-l-[3.5px] border-l-indigo-500/20 dark:border-l-indigo-500/10";
+                        ? "bg-gradient-to-b from-amber-400 to-orange-500 shadow-[0_0_10px_rgba(245,158,11,0.4)]" 
+                        : "bg-gradient-to-b from-indigo-400/60 to-purple-500/40";
+
+                    const { category, cleanTitle } = parseCardHeaderInfo(lead.title);
+                    const summarySnippet = getLeadSummarySnippet(lead.notes);
+                    const hasMedia = Boolean(lead.notes && (lead.notes.includes('chat_media') || lead.notes.includes('![') || lead.notes.includes('🎥') || lead.notes.includes('🎙️')));
+                    const hasTechnicalExecution = Boolean((lead.notes && (lead.notes.includes('DETALHAMENTO TÉCNICO') || lead.notes.includes('🛠️') || lead.notes.includes('Registro de Entrega'))) || lead.tags?.includes('IA-ENTREGUE') || lead.tags?.includes('DEV-EXECUTADO'));
+                    const visibleTags = (lead.tags || []).filter(t => t !== 'IA-PLANO' && t !== 'IA-ENTREGUE' && t !== 'DEV-EXECUTADO' && t !== category);
+                    const topTags = visibleTags.slice(0, 2);
+                    const remainingTagsCount = visibleTags.length - topTags.length;
 
                     itemsToRender.push(
                       <motion.div 
@@ -1374,20 +1654,22 @@ export default function CrmKanban() {
                           onDragOver={e => handleCardDragOver(e, lead.id)}
                           onClick={() => setSelectedLead(lead)}
                           className={cn(
-                            "group/card bg-white/90 dark:bg-[#111b21]/80 backdrop-blur-md p-4.5 rounded-2xl border border-slate-200/60 dark:border-white/5 shadow-sm hover:shadow-[0_12px_24px_rgba(0,0,0,0.06)] dark:hover:shadow-[0_12px_24px_rgba(0,0,0,0.3)] hover:border-slate-300 dark:hover:border-indigo-500/30 hover:-translate-y-0.5 transition-all duration-300 cursor-grab active:cursor-grabbing relative overflow-hidden",
-                            priorityBorder,
-                            isBeingDragged && "border-2 border-dashed border-indigo-500/40 dark:border-indigo-400/30 bg-indigo-50/40 dark:bg-indigo-950/20 opacity-40 shadow-inner rotate-[1.5deg] scale-[0.98]"
+                            "group/card bg-white/95 dark:bg-[#182229]/90 backdrop-blur-xl p-4 rounded-2xl border border-slate-200/80 dark:border-white/[0.08] shadow-[0_4px_16px_rgba(0,0,0,0.03)] dark:shadow-[0_4px_24px_rgba(0,0,0,0.25)] hover:shadow-[0_16px_36px_rgba(0,0,0,0.08)] dark:hover:shadow-[0_16px_40px_rgba(0,0,0,0.4)] hover:border-indigo-500/40 dark:hover:border-indigo-400/40 hover:-translate-y-1 transition-all duration-300 cursor-grab active:cursor-grabbing relative overflow-hidden flex flex-col gap-2.5",
+                            isBeingDragged && "border-2 border-dashed border-indigo-500/50 dark:border-indigo-400/40 bg-indigo-50/40 dark:bg-indigo-950/30 opacity-40 shadow-inner rotate-[1.5deg] scale-[0.98]"
                           )}
                         >
+                          {/* Priority Indicator Pill Strip (Esquerda) */}
+                          <div className={cn("absolute left-0 top-3 bottom-3 w-1.5 rounded-r-full", priorityAccent)} />
+
                           {/* Hover Action Toolbar */}
-                          <div className="opacity-0 group-hover/card:opacity-100 transition-all absolute top-2.5 right-2.5 flex bg-slate-900/90 dark:bg-black/90 backdrop-blur-md px-2 py-1.5 rounded-xl gap-2.5 z-10 text-white shadow-lg border border-white/10 scale-90 group-hover/card:scale-100 duration-200 ease-out">
+                          <div className="opacity-0 group-hover/card:opacity-100 transition-all absolute top-2.5 right-2.5 flex bg-slate-900/90 dark:bg-black/90 backdrop-blur-md px-2 py-1.5 rounded-xl gap-2 z-10 text-white shadow-xl border border-white/15 scale-90 group-hover/card:scale-100 duration-200 ease-out">
                             <button 
                               onClick={(e) => {
                                 e.stopPropagation();
                                 handleDeleteLead(lead.id);
                               }}
-                              className="p-1 hover:text-red-400 transition-colors cursor-pointer"
-                              title="Excluir Oportunidade"
+                              className="p-1 hover:text-rose-400 transition-colors cursor-pointer"
+                              title="Excluir Card"
                             >
                               <Trash2 size={12} />
                             </button>
@@ -1397,7 +1679,7 @@ export default function CrmKanban() {
                                 handleCopyLead(lead);
                               }}
                               className="p-1 hover:text-indigo-400 transition-colors cursor-pointer"
-                              title="Copiar Oportunidade"
+                              title="Copiar Card"
                             >
                               <Copy size={12} />
                             </button>
@@ -1426,105 +1708,140 @@ export default function CrmKanban() {
                             </button>
                           </div>
 
-                          {/* Header do Cartão: Prazo de Vencimento/Criação */}
-                          <div className="flex justify-between items-center mb-3">
-                            <div className="flex items-center gap-1.5 px-2 py-0.5 bg-slate-100 dark:bg-white/[0.04] text-slate-400 dark:text-slate-500 text-[9px] rounded-lg border border-slate-200/20 dark:border-white/[0.02] font-bold">
-                              <Clock size={10} />
-                              <span>{lead.created_at ? format(new Date(lead.created_at), 'dd/MM/yy • HH:mm') : '--/--/--'}</span>
+                          {/* Linha 1: Data de Criação + Badges de Categoria & Mídia */}
+                          <div className="flex items-center gap-1.5 flex-wrap pl-2 pr-6">
+                            <div className="flex items-center gap-1 px-2 py-0.5 bg-slate-100/90 dark:bg-white/[0.05] text-slate-500 dark:text-slate-400 text-[9px] rounded-md border border-slate-200/50 dark:border-white/[0.05] font-semibold shrink-0">
+                              <Clock size={9.5} className="text-indigo-500" />
+                              <span>{lead.created_at ? format(new Date(lead.created_at), 'dd/MM • HH:mm') : '--/--'}</span>
                             </div>
+
+                            {category && (
+                              <span className="px-2 py-0.5 rounded-md bg-indigo-500/10 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-300 border border-indigo-500/25 font-black text-[8.5px] uppercase tracking-wider truncate max-w-[150px]">
+                                {category}
+                              </span>
+                            )}
+
+                            {hasMedia && (
+                              <span className="px-1.5 py-0.5 rounded-md bg-purple-500/10 dark:bg-purple-500/20 text-purple-600 dark:text-purple-300 border border-purple-500/20 text-[8.5px] font-bold flex items-center gap-1 shrink-0" title="Possui fotos, vídeos ou áudios anexados">
+                                <Paperclip size={9.5} />
+                                <span>Mídia</span>
+                              </span>
+                            )}
                           </div>
 
-                          {/* Corpo do Cartão: Avatar + Info */}
-                          <div className="flex gap-3 items-start pl-0.5">
-                            {/* Avatar do Cliente */}
-                            <div className="relative shrink-0 select-none">
+                          {/* Linha 2: Avatar + Título Principal */}
+                          <div className="flex gap-2.5 items-start pl-2">
+                            {/* Avatar do Contato / Inicial */}
+                            <div className="relative shrink-0 select-none mt-0.5">
                               {clientContact?.profile_picture_url ? (
                                 <img 
                                   src={clientContact.profile_picture_url} 
                                   alt={lead.title}
-                                  className="w-8 h-8 rounded-xl object-cover border border-slate-200/20 dark:border-white/5"
+                                  className="w-8 h-8 rounded-xl object-cover border border-slate-200/60 dark:border-white/10 shadow-sm"
                                 />
                               ) : (
-                                <div className="w-8 h-8 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 text-xs font-black uppercase flex items-center justify-center border border-indigo-500/15">
-                                  {lead.title.split(' ').map(n => n[0]).slice(0, 2).join('') || 'C'}
+                                <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-indigo-500/15 to-purple-500/15 text-indigo-600 dark:text-indigo-300 text-xs font-black uppercase flex items-center justify-center border border-indigo-500/25 shadow-sm">
+                                  {cleanTitle.split(' ').map(n => n[0]).slice(0, 2).join('') || 'C'}
                                 </div>
                               )}
-                              <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full bg-[#00a884] border-2 border-white dark:border-[#111b21] flex items-center justify-center shadow-sm">
-                                <svg viewBox="0 0 24 24" className="w-2 h-2 text-white fill-current">
+                              <span className="absolute -bottom-1 -right-1 w-3 h-3 rounded-full bg-[#00a884] border-2 border-white dark:border-[#182229] flex items-center justify-center shadow-sm">
+                                <svg viewBox="0 0 24 24" className="w-1.5 h-1.5 text-white fill-current">
                                   <path d="M12.012 2C6.48 2 2 6.48 2 12.012c0 1.767.46 3.427 1.264 4.887L2 22l5.244-1.378a9.96 9.96 0 004.768 1.205C17.52 21.827 22 17.348 22 11.816 22 6.48 17.52 2 12.012 2zm5.727 14.152c-.244.69-1.42 1.264-1.94 1.31-.444.04-1.012.064-2.825-.69-2.31-.96-3.8-3.32-3.916-3.48-.117-.16-.94-1.258-.94-2.4 0-1.144.597-1.706.812-1.942.215-.236.467-.294.622-.294.156 0 .313 0 .445.006.14.006.33.006.505.428.182.434.622 1.517.676 1.63.053.112.09.243.013.397-.076.155-.117.25-.235.39-.117.14-.244.31-.35.42-.116.12-.238.25-.102.484.137.234.61 1.008 1.31 1.63.9.799 1.656 1.047 1.89 1.164.234.118.39.176.446.275.059.098.059.569-.185 1.259z" />
                                 </svg>
                               </span>
                             </div>
 
-                            {/* Título & Detalhes */}
+                            {/* Título */}
                             <div className="flex-1 min-w-0 text-left">
-                              <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 leading-snug line-clamp-2">
-                                {lead.title}
+                              <h4 className="text-[13px] font-extrabold text-slate-900 dark:text-slate-100 leading-snug tracking-tight line-clamp-2">
+                                {cleanTitle}
                               </h4>
-                              
-                              {/* Priority e Probability */}
-                              <div className="flex items-center gap-3 mt-2">
-                                <div className="flex shrink-0">
-                                  {Array.from({ length: 3 }).map((_, i) => (
-                                    <Star 
-                                      key={i} 
-                                      size={10} 
-                                      className={cn(
-                                        "shrink-0",
-                                        i < lead.priority 
-                                          ? "fill-amber-400 text-amber-400" 
-                                          : "text-slate-200 dark:text-slate-800"
-                                      )} 
-                                    />
-                                  ))}
-                                </div>
-
-                                {board.config?.features?.probability && (
-                                  <span className="text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider text-[8px]">
-                                    📈 {lead.probability}% PROB.
-                                  </span>
-                                )}
-                              </div>
                             </div>
                           </div>
 
-                          {/* Informações de Faturamento (se houver valor) */}
-                          {Number(lead.estimated_revenue || 0) > 0 && (
-                            <div className="flex items-center justify-between mt-3 pl-1 text-[10px]">
-                              <span className="text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider text-[8px]">
-                                Faturamento
-                              </span>
-                              <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-black text-[10px] rounded-lg border border-emerald-500/15 shrink-0">
-                                R$ {Number(lead.estimated_revenue || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                              </span>
+                          {/* Linha 3: Resumo Executivo / O que o card faz (Sem precisar abrir) */}
+                          {summarySnippet && (
+                            <div className="pl-2 pr-1">
+                              <p className="text-[11px] text-slate-600 dark:text-slate-300/90 font-sans font-normal leading-relaxed line-clamp-2 bg-slate-50/70 dark:bg-black/20 p-2 rounded-xl border border-slate-200/40 dark:border-white/5">
+                                {summarySnippet}
+                              </p>
                             </div>
                           )}
 
-                          {/* Tags */}
-                          {lead.tags && lead.tags.length > 0 && (
-                            <div className="flex items-center gap-1.5 flex-wrap mt-3 pl-1">
-                              {lead.tags.map((t, idx) => (
-                                <span 
-                                  key={idx} 
-                                  className="px-2 py-0.5 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/15 text-[8.5px] font-black uppercase rounded-md tracking-wide"
-                                >
-                                  {t}
-                                </span>
+                          {/* Linha 4: Micro-Badges de Status (Prioridade, Probabilidade, Entrega Técnica, Faturamento) */}
+                          <div className="flex items-center gap-1.5 flex-wrap pl-2 pt-0.5">
+                            {/* Estrelas de Prioridade */}
+                            <div className="flex items-center gap-0.5 px-1.5 py-0.5 bg-slate-100/80 dark:bg-white/[0.04] rounded-md border border-slate-200/40 dark:border-white/5">
+                              {Array.from({ length: 3 }).map((_, i) => (
+                                <Star 
+                                  key={i} 
+                                  size={10} 
+                                  className={cn(
+                                    "shrink-0",
+                                    i < lead.priority 
+                                      ? "fill-amber-400 text-amber-400" 
+                                      : "text-slate-200 dark:text-slate-700"
+                                  )} 
+                                />
                               ))}
                             </div>
+
+                            {/* Selo Técnico / IA Entregue */}
+                            {hasTechnicalExecution && (
+                              <span className="px-1.5 py-0.5 rounded-md bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/25 text-[8.5px] font-black uppercase tracking-wider flex items-center gap-1 shadow-xs">
+                                <CheckCircle2 size={10} />
+                                Técnico OK
+                              </span>
+                            )}
+
+                            {/* Probabilidade */}
+                            {board.config?.features?.probability && (
+                              <span className="text-slate-500 dark:text-slate-400 font-black uppercase tracking-wider text-[8.5px] px-1.5 py-0.5 bg-slate-100 dark:bg-white/[0.04] rounded-md border border-slate-200/40 dark:border-white/5">
+                                📈 {lead.probability}%
+                              </span>
+                            )}
+
+                            {/* Faturamento (se houver) */}
+                            {Number(lead.estimated_revenue || 0) > 0 && (
+                              <span className="px-1.5 py-0.5 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-black text-[9px] rounded-md border border-emerald-500/25 shrink-0">
+                                R$ {Number(lead.estimated_revenue || 0).toLocaleString('pt-BR', { minimumFractionDigits: 0 })}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Linha 5: Tags Resumidas Inteligentes (+N mais) */}
+                          {visibleTags.length > 0 && (
+                            <div className="flex items-center gap-1 flex-wrap pl-2">
+                              {topTags.map((t, idx) => (
+                                <span 
+                                  key={idx} 
+                                  className="px-1.5 py-0.5 bg-slate-100/90 dark:bg-white/[0.06] text-slate-600 dark:text-slate-300 border border-slate-200/60 dark:border-white/[0.08] text-[8.5px] font-black uppercase rounded-md tracking-wider truncate max-w-[120px]"
+                                >
+                                  #{t}
+                                </span>
+                              ))}
+                              {remainingTagsCount > 0 && (
+                                <span 
+                                  className="px-1.5 py-0.5 bg-indigo-500/10 text-indigo-600 dark:text-indigo-300 border border-indigo-500/20 text-[8px] font-black uppercase rounded-md tracking-wider"
+                                  title={visibleTags.slice(2).join(', ')}
+                                >
+                                  +{remainingTagsCount}
+                                </span>
+                              )}
+                            </div>
                           )}
 
-                          {/* Footer do Cartão: Agente & Prazo */}
-                          <div className="mt-3.5 pt-2.5 border-t border-slate-200/50 dark:border-white/5 flex items-center justify-between pl-1">
-                            <div className="flex items-center gap-2 text-slate-400 dark:text-slate-500 text-[9px] font-bold">
-                              <Calendar size={11} />
-                              <span>{lead.due_date ? format(new Date(lead.due_date), 'dd/MM/yyyy') : 'Sem prazo'}</span>
+                          {/* Linha 6: Rodapé com Prazo, Agente e Botão Avançar */}
+                          <div className="mt-1 pt-2 border-t border-slate-200/60 dark:border-white/[0.06] flex items-center justify-between pl-2">
+                            <div className="flex items-center gap-1.5 text-slate-400 dark:text-slate-500 text-[9px] font-semibold">
+                              <Calendar size={10.5} className="text-slate-400" />
+                              <span>{lead.due_date ? format(new Date(lead.due_date), 'dd/MM/yy') : 'Sem prazo'}</span>
                             </div>
 
                             <div className="flex items-center gap-2">
                               {agentObj && (
                                 <span 
-                                  className="w-5 h-5 rounded-full bg-gradient-to-tr from-indigo-500 to-indigo-600 text-white text-[9px] font-black uppercase flex items-center justify-center border border-white dark:border-[#111b21] shadow-md shadow-indigo-500/10"
+                                  className="w-5 h-5 rounded-full bg-gradient-to-tr from-violet-600 to-indigo-600 text-white text-[8.5px] font-black uppercase flex items-center justify-center border border-white dark:border-[#182229] shadow-sm"
                                   title={`Responsável: ${agentObj.full_name || agentObj.email}`}
                                 >
                                   {agentObj.full_name?.split(' ').map(n => n[0]).slice(0, 2).join('') || 'AG'}
@@ -1537,9 +1854,10 @@ export default function CrmKanban() {
                                     e.stopPropagation();
                                     handleAdvanceLead(lead);
                                   }}
-                                  className="text-[9.5px] font-black uppercase text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 flex items-center gap-0.5 hover:scale-105 active:scale-95 transition-all cursor-pointer"
+                                  className="group/btn text-[9.5px] font-black uppercase text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 flex items-center gap-1 hover:scale-105 active:scale-95 transition-all cursor-pointer bg-indigo-500/10 dark:bg-indigo-500/15 hover:bg-indigo-500/20 px-2 py-1 rounded-lg border border-indigo-500/20"
                                 >
-                                  Avançar <ChevronRight size={10} strokeWidth={3} />
+                                  <span>Avançar</span>
+                                  <ChevronRight size={10} strokeWidth={3} className="transition-transform group-hover/btn:translate-x-0.5" />
                                 </button>
                               )}
                             </div>
@@ -1555,7 +1873,7 @@ export default function CrmKanban() {
                           layout
                           key="dnd-placeholder" 
                           data-placeholder="true"
-                          className="border-2 border-dashed border-indigo-550/40 dark:border-indigo-400/30 bg-indigo-50/10 dark:bg-indigo-950/5 h-[110px] rounded-2xl animate-pulse transition-all duration-200" 
+                          className="border-2 border-dashed border-indigo-500/50 dark:border-indigo-400/40 bg-indigo-50/20 dark:bg-indigo-950/20 h-[115px] rounded-2xl animate-pulse transition-all duration-200" 
                         />
                       );
                     }
@@ -1570,19 +1888,19 @@ export default function CrmKanban() {
                           setLeadForm(prev => ({ ...prev, status: stage.id }));
                           setIsAddLeadOpen(true);
                         }}
-                        className="my-auto py-8 px-4 border-2 border-dashed border-slate-200/80 dark:border-white/10 rounded-2xl flex flex-col items-center justify-center text-center cursor-pointer hover:border-indigo-500/40 hover:bg-indigo-500/[0.02] dark:hover:bg-indigo-500/[0.04] transition-all group/empty"
+                        className="my-auto py-9 px-4 border-2 border-dashed border-slate-200/80 dark:border-white/[0.08] rounded-2xl flex flex-col items-center justify-center text-center cursor-pointer hover:border-indigo-500/50 hover:bg-indigo-500/[0.04] dark:hover:bg-indigo-500/[0.06] transition-all group/empty"
                       >
-                        <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-white/5 flex items-center justify-center text-slate-400 dark:text-slate-500 group-hover/empty:scale-110 group-hover/empty:text-indigo-500 transition-all mb-2">
-                          <Layers size={18} />
+                        <div className="w-11 h-11 rounded-2xl bg-white/80 dark:bg-white/[0.06] flex items-center justify-center text-slate-400 dark:text-slate-500 group-hover/empty:scale-110 group-hover/empty:text-indigo-500 transition-all mb-2.5 shadow-sm border border-slate-200/60 dark:border-white/[0.06]">
+                          <Layers size={20} />
                         </div>
-                        <p className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                        <p className="text-xs font-black text-slate-800 dark:text-slate-200">
                           Nenhum item nesta etapa
                         </p>
-                        <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
+                        <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 font-medium">
                           Arraste ou clique para criar
                         </p>
-                        <span className="mt-3 inline-flex items-center gap-1 text-[9px] font-black uppercase text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-500/10 px-2.5 py-1 rounded-lg border border-indigo-500/20 group-hover/empty:bg-indigo-500 group-hover/empty:text-white transition-all">
-                          <Plus size={10} strokeWidth={3} />
+                        <span className="mt-3.5 inline-flex items-center gap-1.5 text-[9.5px] font-black uppercase text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 px-3 py-1.5 rounded-xl border border-indigo-500/25 group-hover/empty:bg-indigo-600 group-hover/empty:text-white transition-all shadow-xs">
+                          <Plus size={11} strokeWidth={3} />
                           Criar Cartão
                         </span>
                       </div>
@@ -1595,7 +1913,7 @@ export default function CrmKanban() {
                         layout
                         key="dnd-placeholder" 
                         data-placeholder="true"
-                        className="border-2 border-dashed border-indigo-550/40 dark:border-indigo-400/30 bg-indigo-50/10 dark:bg-indigo-950/5 h-[110px] rounded-2xl animate-pulse transition-all duration-200" 
+                        className="border-2 border-dashed border-indigo-500/50 dark:border-indigo-400/40 bg-indigo-50/20 dark:bg-indigo-950/20 h-[115px] rounded-2xl animate-pulse transition-all duration-200" 
                       />
                     );
                   }
@@ -1605,16 +1923,16 @@ export default function CrmKanban() {
               </div>
 
               {/* Rodapé da Coluna Inteligente */}
-              <div className="p-3.5 border-t border-slate-200/40 dark:border-white/5 bg-slate-50/50 dark:bg-white/[0.01] shrink-0 flex items-center justify-between text-[10px]">
-                <span className="text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider text-[8.5px]">
+              <div className="p-3.5 border-t border-slate-200/60 dark:border-white/[0.06] bg-white/30 dark:bg-white/[0.02] shrink-0 flex items-center justify-between text-[10px]">
+                <span className="text-slate-400 dark:text-slate-500 font-black uppercase tracking-wider text-[9px]">
                   {colRevenue > 0 ? 'Total Estimado' : 'Total de Itens'}
                 </span>
                 {colRevenue > 0 ? (
-                  <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-black rounded-lg border border-emerald-500/20">
+                  <span className="px-2.5 py-0.5 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-black rounded-lg border border-emerald-500/25 shadow-xs">
                     R$ {colRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                   </span>
                 ) : (
-                  <span className="font-extrabold text-slate-600 dark:text-slate-400 text-[10px]">
+                  <span className="font-black text-slate-600 dark:text-slate-400 text-[10.5px]">
                     {colLeads.length} {colLeads.length === 1 ? 'item' : 'itens'}
                   </span>
                 )}
@@ -1806,31 +2124,31 @@ export default function CrmKanban() {
 
         return (
           <div className="fixed inset-0 bg-slate-900/60 dark:bg-black/85 backdrop-blur-md z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 transition-all duration-300">
-            <div className="bg-white dark:bg-[#111b21] w-full max-w-3xl rounded-t-[32px] sm:rounded-[28px] border border-slate-200/80 dark:border-white/10 overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col max-h-[92vh] sm:max-h-[88vh]">
+            <div className="bg-white dark:bg-[#111b21] w-full max-w-4xl rounded-t-[32px] sm:rounded-[28px] border border-slate-200/80 dark:border-white/10 overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col max-h-[94vh] sm:max-h-[90vh]">
               
-              {/* Top Banner com Gradiente e Identificação do Estágio */}
-              <div className="px-6 pt-5 pb-4 border-b border-slate-200/50 dark:border-white/5 flex items-center justify-between shrink-0 bg-slate-50/50 dark:bg-black/20">
-                <div className="flex items-center gap-3 min-w-0">
+              {/* Header do Dashboard Executivo */}
+              <div className="px-5 sm:px-6 pt-5 pb-4 border-b border-slate-200/50 dark:border-white/5 flex items-center justify-between shrink-0 bg-slate-50/70 dark:bg-[#0c1317]/80 backdrop-blur-xl">
+                <div className="flex items-center gap-3.5 min-w-0">
                   <div className={cn(
-                    "w-10 h-10 rounded-2xl flex items-center justify-center shadow-md shrink-0",
+                    "w-11 h-11 rounded-2xl flex items-center justify-center shadow-lg shrink-0",
                     selectedLead.status === 'testing'
-                      ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20"
+                      ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/25 shadow-amber-500/10"
                       : selectedLead.status === 'development'
-                        ? "bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20"
+                        ? "bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border border-indigo-500/25 shadow-indigo-500/10"
                         : selectedLead.status === 'analysis'
-                          ? "bg-sky-500/15 text-sky-600 dark:text-sky-400 border border-sky-500/20"
-                          : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
+                          ? "bg-sky-500/15 text-sky-600 dark:text-sky-400 border border-sky-500/25 shadow-sky-500/10"
+                          : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25 shadow-emerald-500/10"
                   )}>
                     {selectedLead.status === 'testing' ? (
-                      <Cpu size={20} className="animate-pulse" />
+                      <Cpu size={22} className="animate-pulse" />
                     ) : selectedLead.status === 'development' ? (
-                      <Wand2 size={20} />
+                      <Wand2 size={22} />
                     ) : (
-                      <FileText size={20} />
+                      <Sparkles size={22} />
                     )}
                   </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
+                  <div className="min-w-0 text-left">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className={cn(
                         "px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider border",
                         currentStageObj ? getColorClasses(currentStageObj.color).badge : "bg-slate-100 text-slate-600 border-slate-200"
@@ -1838,13 +2156,16 @@ export default function CrmKanban() {
                         {currentStageObj?.label || selectedLead.status}
                       </span>
                       {hasDeliveryInfo && (
-                        <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                        <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
                           <CheckCircle2 size={10} />
                           IA Entregue
                         </span>
                       )}
+                      <span className="text-[10px] text-slate-400 font-mono font-bold">
+                        #{selectedLead.id.slice(0, 8)}
+                      </span>
                     </div>
-                    <h3 className="text-sm font-extrabold text-slate-800 dark:text-slate-100 truncate mt-0.5">
+                    <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-slate-100 truncate mt-0.5 font-sans">
                       {selectedLead.title}
                     </h3>
                   </div>
@@ -1852,18 +2173,36 @@ export default function CrmKanban() {
 
                 <div className="flex items-center gap-1.5 shrink-0">
                   <button 
+                    onClick={handleCopyDeliveryText}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 dark:bg-indigo-500/10 hover:bg-indigo-100 dark:hover:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs"
+                    title="Copiar Relatório Completo para Dev"
+                  >
+                    {copiedDelivery ? (
+                      <>
+                        <CheckCheck size={13} className="text-emerald-500" />
+                        <span className="text-emerald-600 dark:text-emerald-400">Copiado!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy size={13} />
+                        <span className="hidden sm:inline">Copiar Relatório</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button 
                     onClick={() => handleCopyLead(selectedLead)}
                     className="p-2 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-white/5 rounded-xl transition-all cursor-pointer"
                     title="Duplicar Card"
                   >
-                    <Copy size={16} />
+                    <Copy size={15} />
                   </button>
                   <button 
                     onClick={() => handleDeleteLead(selectedLead.id)}
                     className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-xl transition-all cursor-pointer"
-                    title="Excluir Oportunidade"
+                    title="Excluir Card"
                   >
-                    <Trash2 size={16} />
+                    <Trash2 size={15} />
                   </button>
                   <button 
                     onClick={() => setSelectedLead(null)} 
@@ -1875,34 +2214,105 @@ export default function CrmKanban() {
                 </div>
               </div>
 
+              {/* Top KPI Banner (4 Mini-Dashboards Organizados) */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 p-4 sm:p-5 bg-slate-100/50 dark:bg-[#0c1317]/50 border-b border-slate-200/50 dark:border-white/5 shrink-0 text-left">
+                {/* KPI 1: Estágio do Fluxo */}
+                <div className="p-3 bg-white dark:bg-[#182229] rounded-2xl border border-slate-200/60 dark:border-white/5 shadow-xs flex flex-col justify-between">
+                  <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 flex items-center gap-1">
+                    <Layers size={11} className="text-indigo-500" />
+                    Coluna / Estágio
+                  </span>
+                  <div className="mt-1.5 flex items-center justify-between">
+                    <span className="text-xs font-black text-slate-800 dark:text-slate-100 truncate">
+                      {currentStageObj?.label || selectedLead.status}
+                    </span>
+                    <span className={cn("w-2.5 h-2.5 rounded-full shrink-0", currentStageObj ? getColorClasses(currentStageObj.color).dot : "bg-indigo-500")} />
+                  </div>
+                </div>
+
+                {/* KPI 2: Validação & Build */}
+                <div className="p-3 bg-white dark:bg-[#182229] rounded-2xl border border-slate-200/60 dark:border-white/5 shadow-xs flex flex-col justify-between">
+                  <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 flex items-center gap-1">
+                    <ShieldCheck size={11} className="text-emerald-500" />
+                    Validação Técnica
+                  </span>
+                  <div className="mt-1.5 flex items-center gap-1.5">
+                    <CheckCircle2 size={13} className="text-emerald-500 shrink-0" />
+                    <span className="text-xs font-black text-emerald-600 dark:text-emerald-400 truncate">
+                      {deliveryReport?.validation?.type_checking || 'TypeScript: 0 Erros'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* KPI 3: Prioridade & Probabilidade */}
+                <div className="p-3 bg-white dark:bg-[#182229] rounded-2xl border border-slate-200/60 dark:border-white/5 shadow-xs flex flex-col justify-between">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 flex items-center gap-1">
+                      <Star size={11} className="text-amber-500 fill-amber-400" />
+                      Prioridade
+                    </span>
+                    <span className="text-[9px] font-black text-indigo-600 dark:text-indigo-400">
+                      {selectedLead.probability}%
+                    </span>
+                  </div>
+                  <div className="mt-1.5 flex items-center justify-between">
+                    <span className={cn(
+                      "text-[10px] font-black uppercase px-2 py-0.5 rounded-md",
+                      selectedLead.priority === 3 ? "bg-rose-500/15 text-rose-600 dark:text-rose-400" : selectedLead.priority === 2 ? "bg-amber-500/15 text-amber-600 dark:text-amber-400" : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                    )}>
+                      {selectedLead.priority === 3 ? "🔴 Alta" : selectedLead.priority === 2 ? "🟡 Média" : "🟢 Baixa"}
+                    </span>
+                    <div className="w-16 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                      <div className="h-full bg-gradient-to-r from-indigo-500 to-cyan-400 rounded-full" style={{ width: `${selectedLead.probability}%` }} />
+                    </div>
+                  </div>
+                </div>
+
+                {/* KPI 4: Responsável & Prazo */}
+                <div className="p-3 bg-white dark:bg-[#182229] rounded-2xl border border-slate-200/60 dark:border-white/5 shadow-xs flex flex-col justify-between">
+                  <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 flex items-center gap-1">
+                    <User size={11} className="text-cyan-500" />
+                    Responsável / Prazo
+                  </span>
+                  <div className="mt-1.5 flex items-center justify-between gap-1">
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">
+                      {agents.find(a => a.id === selectedLead.agent_id)?.full_name?.split(' ')[0] || 'Sem responsável'}
+                    </span>
+                    <span className="text-[9.5px] font-semibold text-slate-400 dark:text-slate-500 shrink-0">
+                      {selectedLead.due_date ? format(new Date(selectedLead.due_date), 'dd/MM/yy') : 'Sem prazo'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
               {/* Segmented Controls / Abas de Navegação */}
-              <div className="px-6 pt-3 pb-2 border-b border-slate-200/40 dark:border-white/5 flex items-center gap-1.5 overflow-x-auto custom-scrollbar bg-slate-50/30 dark:bg-black/10">
+              <div className="px-5 sm:px-6 pt-3 pb-2 border-b border-slate-200/40 dark:border-white/5 flex items-center gap-2 overflow-x-auto custom-scrollbar bg-slate-50/30 dark:bg-black/10 shrink-0">
                 <button
                   type="button"
                   onClick={() => setLeadDetailTab('overview')}
                   className={cn(
-                    "px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition-all duration-200 flex items-center gap-1.5 shrink-0 cursor-pointer",
+                    "px-4 py-2 rounded-xl text-xs font-black transition-all duration-200 flex items-center gap-2 shrink-0 cursor-pointer",
                     leadDetailTab === 'overview'
-                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-500/20"
+                      ? "bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-indigo-500/20"
                       : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5"
                   )}
                 >
-                  <Sliders size={13} />
-                  Geral & Comercial
+                  <Sliders size={14} />
+                  <span>Dashboard & Geral</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setLeadDetailTab('technical')}
                   className={cn(
-                    "px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition-all duration-200 flex items-center gap-1.5 shrink-0 cursor-pointer relative",
+                    "px-4 py-2 rounded-xl text-xs font-black transition-all duration-200 flex items-center gap-2 shrink-0 cursor-pointer relative",
                     leadDetailTab === 'technical'
-                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-500/20"
+                      ? "bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-indigo-500/20"
                       : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5"
                   )}
                 >
-                  <Cpu size={13} />
-                  Execução & Entrega IA
+                  <Cpu size={14} />
+                  <span>Execução & Engenharia IA</span>
                   {hasDeliveryInfo && (
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                   )}
@@ -1912,57 +2322,57 @@ export default function CrmKanban() {
                   type="button"
                   onClick={() => setLeadDetailTab('notes')}
                   className={cn(
-                    "px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition-all duration-200 flex items-center gap-1.5 shrink-0 cursor-pointer",
+                    "px-4 py-2 rounded-xl text-xs font-black transition-all duration-200 flex items-center gap-2 shrink-0 cursor-pointer",
                     leadDetailTab === 'notes'
-                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-500/20"
+                      ? "bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-indigo-500/20"
                       : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5"
                   )}
                 >
-                  <FileText size={13} />
-                  Notas & Briefing
+                  <FileText size={14} />
+                  <span>Briefing & Mídias</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setLeadDetailTab('history')}
                   className={cn(
-                    "px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition-all duration-200 flex items-center gap-1.5 shrink-0 cursor-pointer",
+                    "px-4 py-2 rounded-xl text-xs font-black transition-all duration-200 flex items-center gap-2 shrink-0 cursor-pointer",
                     leadDetailTab === 'history'
-                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-500/20"
+                      ? "bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-indigo-500/20"
                       : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5"
                   )}
                 >
-                  <History size={13} />
-                  Histórico ({selectedLead.history?.length || 0})
+                  <History size={14} />
+                  <span>Linha do Tempo ({selectedLead.history?.length || 0})</span>
                 </button>
               </div>
 
               {/* Conteúdo da Aba Ativa */}
-              <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar text-xs text-left bg-white dark:bg-[#111b21]">
+              <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-6 custom-scrollbar text-xs text-left bg-white dark:bg-[#111b21]">
                 
-                {/* ABA 1: GERAL & COMERCIAL */}
+                {/* ABA 1: DASHBOARD GERAL & COMERCIAL */}
                 {leadDetailTab === 'overview' && (
                   <div className="space-y-6 animate-in fade-in duration-200">
                     {/* Título & Faturamento */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                      <div className="space-y-1.5">
-                        <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Nome / Título do Lead</label>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="space-y-1.5 md:col-span-2">
+                        <label className="font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[9.5px]">Título do Card / Oportunidade</label>
                         <input 
                           type="text" 
                           value={selectedLead.title}
                           onChange={e => handleSaveLeadEdits({ ...selectedLead, title: e.target.value })}
-                          className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#1a242c] border border-slate-200/80 dark:border-white/10 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white transition-all"
+                          className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#182229] border border-slate-200/80 dark:border-white/10 rounded-2xl text-xs font-extrabold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white transition-all shadow-xs"
                         />
                       </div>
                       <div className="space-y-1.5">
-                        <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Faturamento Estimado (R$)</label>
+                        <label className="font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[9.5px]">Faturamento Estimado (R$)</label>
                         <div className="relative">
                           <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xs">R$</span>
                           <input 
                             type="number" 
                             value={selectedLead.estimated_revenue}
                             onChange={e => handleSaveLeadEdits({ ...selectedLead, estimated_revenue: Number(e.target.value) })}
-                            className="w-full pl-9 pr-4 py-2.5 bg-slate-50 dark:bg-[#1a242c] border border-slate-200/80 dark:border-white/10 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white transition-all"
+                            className="w-full pl-9 pr-4 py-2.5 bg-slate-50 dark:bg-[#182229] border border-slate-200/80 dark:border-white/10 rounded-2xl text-xs font-extrabold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white transition-all shadow-xs"
                           />
                         </div>
                       </div>
@@ -2002,13 +2412,13 @@ export default function CrmKanban() {
                     )}
 
                     {/* Status, Prioridade e Probabilidade */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div className="space-y-1.5">
-                        <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Coluna / Estágio</label>
+                        <label className="font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[9.5px]">Coluna / Estágio no Quadro</label>
                         <select 
                           value={selectedLead.status}
                           onChange={e => handleSaveLeadEdits({ ...selectedLead, status: e.target.value })}
-                          className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#1a242c] border border-slate-200/80 dark:border-white/10 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white cursor-pointer"
+                          className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#182229] border border-slate-200/80 dark:border-white/10 rounded-2xl text-xs font-bold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white cursor-pointer shadow-xs"
                         >
                           {pipelineStages.map(s => (
                             <option key={s.id} value={s.id} className="dark:bg-[#111b21]">{s.label}</option>
@@ -2017,21 +2427,21 @@ export default function CrmKanban() {
                       </div>
 
                       <div className="space-y-1.5">
-                        <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Prioridade</label>
-                        <div className="flex items-center gap-2 h-[42px] px-3 bg-slate-50 dark:bg-[#1a242c] border border-slate-200/80 dark:border-white/10 rounded-xl">
+                        <label className="font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[9.5px]">Nível de Prioridade</label>
+                        <div className="flex items-center gap-1.5 h-[42px] px-2 bg-slate-50 dark:bg-[#182229] border border-slate-200/80 dark:border-white/10 rounded-2xl shadow-xs">
                           {[1, 2, 3].map(p => (
                             <button
                               key={p}
                               type="button"
                               onClick={() => handleSaveLeadEdits({ ...selectedLead, priority: p })}
                               className={cn(
-                                "flex-1 py-1 rounded-lg text-[10px] font-black transition-all flex items-center justify-center gap-1 cursor-pointer",
+                                "flex-1 py-1.5 rounded-xl text-[10px] font-black transition-all flex items-center justify-center gap-1 cursor-pointer",
                                 selectedLead.priority === p
                                   ? p === 3 
-                                    ? "bg-rose-500 text-white shadow-sm"
+                                    ? "bg-rose-500 text-white shadow-md shadow-rose-500/30"
                                     : p === 2
-                                      ? "bg-amber-500 text-white shadow-sm"
-                                      : "bg-emerald-500 text-white shadow-sm"
+                                      ? "bg-amber-500 text-white shadow-md shadow-amber-500/30"
+                                      : "bg-emerald-500 text-white shadow-md shadow-emerald-500/30"
                                   : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-200/50 dark:hover:bg-white/5"
                               )}
                             >
@@ -2044,8 +2454,8 @@ export default function CrmKanban() {
 
                       <div className="space-y-1.5">
                         <div className="flex justify-between items-center">
-                          <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Probabilidade de Sucesso</label>
-                          <span className="font-black text-indigo-600 dark:text-indigo-400 text-[10px]">{selectedLead.probability}%</span>
+                          <label className="font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[9.5px]">Probabilidade de Sucesso</label>
+                          <span className="font-black text-indigo-600 dark:text-indigo-400 text-[11px]">{selectedLead.probability}%</span>
                         </div>
                         <input 
                           type="range" 
@@ -2059,45 +2469,54 @@ export default function CrmKanban() {
                     </div>
 
                     {/* Responsável e Data */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="space-y-1.5">
-                        <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Agente / Responsável</label>
+                        <label className="font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[9.5px]">Agente / Responsável</label>
                         <select 
                           value={selectedLead.agent_id || ''}
                           onChange={e => handleSaveLeadEdits({ ...selectedLead, agent_id: e.target.value || null })}
-                          className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#1a242c] border border-slate-200/80 dark:border-white/10 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white cursor-pointer"
+                          className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#182229] border border-slate-200/80 dark:border-white/10 rounded-2xl text-xs font-bold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white cursor-pointer shadow-xs"
                         >
                           <option value="" className="dark:bg-[#111b21]">Sem responsável atribuído</option>
                           {agents.map(a => (
-                            <option key={a.id} value={a.id} className="dark:bg-[#111b21]">{a.full_name || a.email}</option>
+                            <option key={a.id} value={a.id} className="dark:bg-[#111b21]">👤 {a.full_name || a.email}</option>
                           ))}
                         </select>
                       </div>
 
                       <div className="space-y-1.5">
-                        <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Prazo Limite / Vencimento</label>
+                        <label className="font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[9.5px]">Prazo Limite / Vencimento</label>
                         <input 
                           type="date" 
                           value={selectedLead.due_date || ''}
                           onChange={e => handleSaveLeadEdits({ ...selectedLead, due_date: e.target.value || null })}
-                          className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#1a242c] border border-slate-200/80 dark:border-white/10 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white transition-all"
+                          className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#182229] border border-slate-200/80 dark:border-white/10 rounded-2xl text-xs font-bold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white transition-all shadow-xs"
                         />
                       </div>
                     </div>
 
                     {/* Tags / Marcadores */}
                     <div className="space-y-1.5">
-                      <label className="font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-[9px]">Tags & Marcadores (separados por vírgula)</label>
+                      <label className="font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[9.5px]">Tags & Marcadores Técnicos</label>
                       <input 
                         type="text" 
                         value={(selectedLead.tags || []).join(', ')}
-                        placeholder="ex: URGENTE, SISTEMA, BUGFIX, GASTROFOOD"
+                        placeholder="ex: BACKEND, NODE.JS, SESSION-MANAGER, BAILEYS"
                         onChange={e => {
                           const newTags = e.target.value.split(',').map(t => t.trim()).filter(Boolean);
                           handleSaveLeadEdits({ ...selectedLead, tags: newTags });
                         }}
-                        className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#1a242c] border border-slate-200/80 dark:border-white/10 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white transition-all"
+                        className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#182229] border border-slate-200/80 dark:border-white/10 rounded-2xl text-xs font-bold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white transition-all shadow-xs"
                       />
+                      {selectedLead.tags && selectedLead.tags.length > 0 && (
+                        <div className="flex gap-1.5 flex-wrap pt-1.5">
+                          {selectedLead.tags.map((t, idx) => (
+                            <span key={idx} className="text-[9.5px] font-black uppercase px-2.5 py-0.5 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-300 border border-indigo-500/20">
+                              #{t}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -2126,7 +2545,7 @@ export default function CrmKanban() {
 
                     {/* Modo Edição Manual do Detalhamento Técnico */}
                     {isEditingTechnical ? (
-                      <div className="p-5 bg-slate-50 dark:bg-[#1a242c] border border-indigo-500/30 rounded-2xl space-y-4 shadow-sm">
+                      <div className="p-5 bg-slate-50 dark:bg-[#182229] border border-indigo-500/30 rounded-2xl space-y-4 shadow-sm">
                         <div className="flex items-center justify-between border-b border-slate-200 dark:border-white/5 pb-3">
                           <div className="flex items-center gap-2">
                             <Code size={18} className="text-indigo-500" />
@@ -2266,7 +2685,7 @@ export default function CrmKanban() {
                               <button
                                 type="button"
                                 onClick={handleCopyDeliveryText}
-                                className="px-3.5 py-2 bg-white dark:bg-[#1a242c] hover:bg-slate-100 dark:hover:bg-[#222e38] text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-white/10 rounded-xl text-xs font-bold shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
+                                className="px-3.5 py-2 bg-white dark:bg-[#182229] hover:bg-slate-100 dark:hover:bg-[#222e38] text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-white/10 rounded-xl text-xs font-bold shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
                               >
                                 {copiedDelivery ? (
                                   <>
@@ -2285,7 +2704,7 @@ export default function CrmKanban() {
 
                           {/* Metadados da Entrega */}
                           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-4 text-[10.5px]">
-                            <div className="p-3 bg-white/60 dark:bg-[#1a242c]/60 rounded-xl border border-slate-200/50 dark:border-white/5">
+                            <div className="p-3 bg-white/60 dark:bg-[#182229]/60 rounded-xl border border-slate-200/50 dark:border-white/5">
                               <span className="text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider text-[8.5px] block">📅 Data & Hora do Registro</span>
                               <span className="font-extrabold text-slate-800 dark:text-slate-200 mt-0.5 block">
                                 {deliveryReport?.executed_at 
@@ -2293,13 +2712,13 @@ export default function CrmKanban() {
                                   : selectedLead.created_at ? format(new Date(selectedLead.created_at), 'dd/MM/yyyy HH:mm:ss') : 'Hoje'}
                               </span>
                             </div>
-                            <div className="p-3 bg-white/60 dark:bg-[#1a242c]/60 rounded-xl border border-slate-200/50 dark:border-white/5">
+                            <div className="p-3 bg-white/60 dark:bg-[#182229]/60 rounded-xl border border-slate-200/50 dark:border-white/5">
                               <span className="text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider text-[8.5px] block">🤖 Executor da Codificação</span>
                               <span className="font-extrabold text-indigo-600 dark:text-indigo-400 mt-0.5 block truncate">
                                 {deliveryReport?.executor || 'Desenvolvedor / Antigravity AI'}
                               </span>
                             </div>
-                            <div className="p-3 bg-white/60 dark:bg-[#1a242c]/60 rounded-xl border border-slate-200/50 dark:border-white/5">
+                            <div className="p-3 bg-white/60 dark:bg-[#182229]/60 rounded-xl border border-slate-200/50 dark:border-white/5">
                               <span className="text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider text-[8.5px] block">🔍 Validação & Build</span>
                               <span className="font-extrabold text-emerald-600 dark:text-emerald-400 mt-0.5 flex items-center gap-1">
                                 <CheckCircle2 size={12} />
@@ -2315,7 +2734,7 @@ export default function CrmKanban() {
                             <Sparkles size={12} className="text-amber-500" />
                             Resumo Executivo do que foi Codificado & Implementado
                           </label>
-                          <div className="p-4 bg-slate-50 dark:bg-[#1a242c] border border-slate-200/80 dark:border-white/10 rounded-2xl text-slate-800 dark:text-slate-200 text-xs leading-relaxed whitespace-pre-wrap">
+                          <div className="p-4 bg-slate-50 dark:bg-[#182229] border border-slate-200/80 dark:border-white/10 rounded-2xl text-slate-800 dark:text-slate-200 text-xs leading-relaxed whitespace-pre-wrap font-sans">
                             {deliveryReport?.summary || selectedLead.technical_execution_details || (
                               selectedLead.notes && selectedLead.notes.includes('### 🚀 Registro de Entrega & Execução Técnica')
                                 ? selectedLead.notes.split('### 🚀 Registro de Entrega & Execução Técnica')[1].trim()
@@ -2334,7 +2753,7 @@ export default function CrmKanban() {
                           {deliveryReport?.files_modified && deliveryReport.files_modified.length > 0 ? (
                             <div className="space-y-3">
                               {deliveryReport.files_modified.map((item: any, idx: number) => (
-                                <div key={idx} className="p-4 bg-slate-50 dark:bg-[#1a242c] border border-slate-200/80 dark:border-white/10 rounded-2xl space-y-2">
+                                <div key={idx} className="p-4 bg-slate-50 dark:bg-[#182229] border border-slate-200/80 dark:border-white/10 rounded-2xl space-y-2">
                                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/50 dark:border-white/5 pb-2">
                                     <div className="flex items-center gap-2 font-mono text-[11px] font-extrabold text-indigo-600 dark:text-indigo-400">
                                       <FileCode2 size={14} />
@@ -2348,14 +2767,14 @@ export default function CrmKanban() {
                                       ))}
                                     </div>
                                   </div>
-                                  <p className="text-slate-600 dark:text-slate-300 text-[11px] leading-relaxed">
+                                  <p className="text-slate-600 dark:text-slate-300 text-[11px] leading-relaxed font-sans">
                                     {item.description}
                                   </p>
                                 </div>
                               ))}
                             </div>
                           ) : (
-                            <div className="p-6 bg-slate-50 dark:bg-[#1a242c] border border-slate-200/80 dark:border-white/10 rounded-2xl text-center space-y-3">
+                            <div className="p-6 bg-slate-50 dark:bg-[#182229] border border-slate-200/80 dark:border-white/10 rounded-2xl text-center space-y-3">
                               <FileCode2 size={24} className="mx-auto text-slate-400" />
                               <p className="text-xs text-slate-500 dark:text-slate-400">
                                 Nenhum arquivo modificado foi listado explicitamente para este cartão.
@@ -2379,7 +2798,7 @@ export default function CrmKanban() {
                   </div>
                 )}
 
-                {/* ABA 3: NOTAS & BRIEFING */}
+                {/* ABA 3: BRIEFING, NOTAS & MÍDIAS */}
                 {leadDetailTab === 'notes' && (
                   <div className="space-y-4 animate-in fade-in duration-200">
                     <div className="flex justify-between items-center">
@@ -2395,19 +2814,19 @@ export default function CrmKanban() {
 
                     {isEditingNotes ? (
                       <textarea 
-                        rows={10}
+                        rows={12}
                         placeholder="Adicione observações importantes, escopo técnico, dores do cliente ou histórico..."
                         value={selectedLead.notes || ''}
                         onChange={e => handleSaveLeadEdits({ ...selectedLead, notes: e.target.value })}
-                        className="w-full px-4 py-3 bg-slate-50 dark:bg-[#1a242c] border border-slate-200/80 dark:border-white/10 rounded-2xl text-xs font-medium focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white leading-relaxed custom-scrollbar font-mono"
+                        className="w-full px-4 py-3 bg-slate-50 dark:bg-[#182229] border border-slate-200/80 dark:border-white/10 rounded-2xl text-xs font-medium focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white leading-relaxed custom-scrollbar font-mono"
                       />
                     ) : selectedLead.notes && selectedLead.notes.includes('<p>') ? (
                       <div 
-                        className="p-5 bg-slate-50 dark:bg-[#1a242c] border border-slate-200/80 dark:border-white/10 rounded-2xl min-h-[140px] text-slate-800 dark:text-slate-100 leading-relaxed max-h-[380px] overflow-y-auto custom-scrollbar prose dark:prose-invert text-xs"
+                        className="p-5 bg-slate-50 dark:bg-[#182229] border border-slate-200/80 dark:border-white/10 rounded-2xl min-h-[140px] text-slate-800 dark:text-slate-100 leading-relaxed max-h-[420px] overflow-y-auto custom-scrollbar prose dark:prose-invert text-xs"
                         dangerouslySetInnerHTML={{ __html: selectedLead.notes }}
                       />
                     ) : (
-                      <div className="p-5 bg-slate-50 dark:bg-[#1a242c] border border-slate-200/80 dark:border-white/10 rounded-2xl min-h-[140px] text-slate-800 dark:text-slate-100 leading-relaxed max-h-[380px] overflow-y-auto custom-scrollbar whitespace-pre-wrap font-sans text-xs">
+                      <div className="p-5 bg-slate-50 dark:bg-[#182229] border border-slate-200/80 dark:border-white/10 rounded-2xl min-h-[140px] text-slate-800 dark:text-slate-100 leading-relaxed max-h-[420px] overflow-y-auto custom-scrollbar whitespace-pre-wrap font-sans text-xs">
                         {selectedLead.notes || (
                           <span className="text-slate-400 dark:text-slate-500 italic">
                             Nenhuma nota cadastrada. Clique em "Modo Edição" para registrar o briefing deste lead.
@@ -2440,7 +2859,7 @@ export default function CrmKanban() {
                                 isAi ? "bg-emerald-500 ring-4 ring-emerald-500/20" : "bg-indigo-500 ring-4 ring-indigo-500/20"
                               )} />
 
-                              <div className="p-3.5 bg-slate-50 dark:bg-[#1a242c] border border-slate-200/60 dark:border-white/5 rounded-xl space-y-1.5">
+                              <div className="p-3.5 bg-slate-50 dark:bg-[#182229] border border-slate-200/60 dark:border-white/5 rounded-xl space-y-1.5">
                                 <div className="flex flex-wrap items-center justify-between gap-2">
                                   <div className="flex items-center gap-1.5 text-xs font-extrabold text-slate-800 dark:text-slate-100">
                                     <span className="px-2 py-0.5 rounded-md bg-slate-200 dark:bg-white/10 text-[9.5px]">{fromStage}</span>
@@ -2472,7 +2891,7 @@ export default function CrmKanban() {
               </div>
 
               {/* Footer fixado com Ações */}
-              <div className="px-6 py-4 border-t border-slate-200/50 dark:border-white/5 bg-slate-50/60 dark:bg-black/20 shrink-0 flex items-center justify-between gap-3">
+              <div className="px-5 sm:px-6 py-4 border-t border-slate-200/50 dark:border-white/5 bg-slate-50/70 dark:bg-[#0c1317]/80 shrink-0 flex items-center justify-between gap-3">
                 {selectedLead.customer_id ? (
                   <button 
                     onClick={() => {
@@ -2482,20 +2901,33 @@ export default function CrmKanban() {
                     className="flex items-center gap-1.5 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-extrabold shadow-md shadow-emerald-500/15 hover:shadow-emerald-500/25 transition-all active:scale-95 cursor-pointer"
                   >
                     <MessageSquare size={14} />
-                    Abrir Chat do WhatsApp
+                    <span>Abrir WhatsApp</span>
                   </button>
                 ) : (
-                  <span className="text-[9.5px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider">
+                  <span className="text-[9.5px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider hidden sm:inline">
                     Sem contato vinculado
                   </span>
                 )}
 
                 <div className="flex items-center gap-2">
+                  {pipelineStages.findIndex(s => s.id === selectedLead.status) < pipelineStages.length - 1 && (
+                    <button 
+                      onClick={() => {
+                        handleAdvanceLead(selectedLead);
+                        setSelectedLead(null);
+                      }}
+                      className="px-4 py-2.5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-black rounded-xl text-xs shadow-md shadow-indigo-500/20 flex items-center gap-1.5 active:scale-95 transition-all cursor-pointer uppercase tracking-wider"
+                    >
+                      <span>Avançar Etapa</span>
+                      <ChevronRight size={13} strokeWidth={3} />
+                    </button>
+                  )}
+
                   <button 
                     onClick={() => setSelectedLead(null)}
-                    className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 font-bold rounded-xl transition-all active:scale-95 cursor-pointer text-xs"
+                    className="px-5 py-2.5 bg-slate-200/80 hover:bg-slate-300 dark:bg-white/5 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 font-bold rounded-xl transition-all active:scale-95 cursor-pointer text-xs uppercase tracking-wider"
                   >
-                    Fechar Painel
+                    Fechar
                   </button>
                 </div>
               </div>
@@ -2685,26 +3117,67 @@ export default function CrmKanban() {
         </div>
       )}
 
-      {/* MODAL: Criação Inteligente com Áudio & IA Gemini */}
+      {/* MODAL: Criação Inteligente com Áudio, Fotos, Vídeos & IA Gemini Multimodal (Mobile First) */}
       {isAiCardModalOpen && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-[#111b21] w-full max-w-2xl rounded-[32px] border border-slate-200/50 dark:border-white/10 overflow-hidden shadow-[0_25px_60px_-15px_rgba(0,0,0,0.5)] flex flex-col max-h-[90vh] transition-all">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-[#111b21] w-full max-w-2xl rounded-t-[32px] sm:rounded-[28px] border-t sm:border border-slate-200/50 dark:border-white/10 overflow-hidden shadow-[0_25px_60px_-15px_rgba(0,0,0,0.5)] flex flex-col max-h-[94vh] transition-all">
             
+            {/* Handle do Mobile (Bottom Sheet) */}
+            <div className="w-12 h-1.5 bg-slate-300 dark:bg-slate-700 rounded-full mx-auto mt-2.5 sm:hidden shrink-0" />
+
+            {/* Inputs Ocultos de Mídia */}
+            <input 
+              ref={photoInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={e => {
+                if (e.target.files && e.target.files.length > 0) {
+                  handleAddMediaFiles(e.target.files);
+                }
+              }}
+            />
+            <input 
+              ref={videoInputRef}
+              type="file"
+              accept="video/*"
+              multiple
+              className="hidden"
+              onChange={e => {
+                if (e.target.files && e.target.files.length > 0) {
+                  handleAddMediaFiles(e.target.files);
+                }
+              }}
+            />
+            <input 
+              ref={cameraInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={e => {
+                if (e.target.files && e.target.files.length > 0) {
+                  handleAddMediaFiles(e.target.files);
+                }
+              }}
+            />
+
             {/* Header */}
-            <div className="px-6 py-5 border-b border-slate-200/20 dark:border-white/5 bg-gradient-to-r from-purple-500/10 via-indigo-500/10 to-transparent flex items-center justify-between shrink-0">
+            <div className="px-5 sm:px-6 py-4 border-b border-slate-200/20 dark:border-white/5 bg-gradient-to-r from-purple-500/10 via-indigo-500/10 to-transparent flex items-center justify-between shrink-0">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-purple-600 to-indigo-600 text-white flex items-center justify-center shadow-lg shadow-indigo-500/20">
-                  <Mic size={20} className="animate-pulse" />
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-purple-600 to-indigo-600 text-white flex items-center justify-center shadow-lg shadow-indigo-500/20 shrink-0">
+                  <Sparkles size={20} className="animate-pulse" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-black text-slate-900 dark:text-white font-sans uppercase tracking-wider flex items-center gap-2">
-                    Criar Card com Áudio & IA
-                    <span className="text-[9px] px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-400 font-extrabold border border-indigo-500/30">
-                      Gemini 2.5 Pro
+                  <h3 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white font-sans uppercase tracking-wider flex items-center gap-2 flex-wrap">
+                    Criar Card Multimodal & IA
+                    <span className="text-[9px] px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-400 font-extrabold border border-indigo-500/30">
+                      Gemini 2.5 Multimodal
                     </span>
                   </h3>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Fale ou digite sua ideia de funcionalidade. A IA criará o plano de engenharia e estruturará o card.
+                  <p className="text-[10px] sm:text-[11px] text-slate-500 dark:text-slate-400">
+                    Grave áudio, anexe fotos/prints ou vídeos. A IA estruturará o plano de engenharia.
                   </p>
                 </div>
               </div>
@@ -2713,106 +3186,224 @@ export default function CrmKanban() {
                   stopAiAudioRecording();
                   setIsAiCardModalOpen(false);
                 }} 
-                className="p-2 text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl transition-all"
+                className="p-2 text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl transition-all cursor-pointer"
               >
                 <X size={20} />
               </button>
             </div>
 
+            {/* Banner de Rascunho Salvo em Cache */}
+            {hasRecoveredDraft && (
+              <div className="px-5 py-2 bg-indigo-500/10 border-b border-indigo-500/20 flex items-center justify-between text-[11px] text-indigo-300">
+                <span className="flex items-center gap-1.5 font-semibold">
+                  <RotateCcw size={13} className="text-indigo-400" />
+                  Rascunho recuperado automaticamente do cache local
+                </span>
+                <button
+                  type="button"
+                  onClick={handleClearDraft}
+                  className="text-xs font-bold text-indigo-400 hover:text-indigo-200 underline cursor-pointer"
+                >
+                  Limpar Rascunho
+                </button>
+              </div>
+            )}
+
             {/* Conteúdo Rolável */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar text-xs">
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5 custom-scrollbar text-xs">
               
-              {/* Gravador de Áudio */}
-              <div className="p-5 rounded-2xl border border-dashed border-indigo-500/30 bg-gradient-to-br from-indigo-500/[0.04] via-purple-500/[0.02] to-transparent flex flex-col sm:flex-row items-center justify-between gap-4">
-                <div className="flex items-center gap-3.5">
+              {/* 1. Gravador de Áudio */}
+              <div className="p-4 sm:p-5 rounded-2xl border border-dashed border-indigo-500/30 bg-gradient-to-br from-indigo-500/[0.04] via-purple-500/[0.02] to-transparent flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div className="flex items-center gap-3.5 w-full sm:w-auto">
                   <div className={cn(
-                    "w-12 h-12 rounded-2xl flex items-center justify-center transition-all",
+                    "w-12 h-12 rounded-2xl flex items-center justify-center transition-all shrink-0",
                     isAiRecording 
                       ? "bg-rose-500 text-white animate-pulse shadow-lg shadow-rose-500/40 ring-4 ring-rose-500/20" 
-                      : "bg-gradient-to-tr from-purple-500/20 to-indigo-500/20 text-indigo-400 border border-indigo-500/30"
+                      : recordedAudioBase64
+                        ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-sm"
+                        : "bg-gradient-to-tr from-purple-500/20 to-indigo-500/20 text-indigo-400 border border-indigo-500/30"
                   )}>
-                    {isAiRecording ? <Radio size={24} /> : <Mic size={24} />}
+                    {isAiRecording ? <Radio size={24} /> : recordedAudioBase64 ? <Check size={22} /> : <Mic size={24} />}
                   </div>
-                  <div>
+                  <div className="flex-1 min-w-0">
                     <h5 className="font-black text-xs text-slate-900 dark:text-white flex items-center gap-2">
                       {isAiRecording ? (
                         <>
                           <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
                           Gravando Áudio... ({aiRecordingSeconds}s)
                         </>
+                      ) : recordedAudioBase64 ? (
+                        'Áudio Gravado & Salvo no Cache'
                       ) : (
                         'Gravar Ideia por Áudio'
                       )}
                     </h5>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 truncate">
                       {isAiRecording 
-                        ? 'Descreva a funcionalidade para o sistema ou chat e clique em concluir' 
-                        : 'Clique para falar pelo microfone e deixar a IA transcrever e planejar'}
+                        ? 'Descreva a funcionalidade e clique em Concluir' 
+                        : recordedAudioBase64
+                          ? 'Áudio pronto para análise com IA. Você pode regravar se quiser.'
+                          : 'Fale pelo microfone para a IA transcrever e estruturar'}
                     </p>
                   </div>
                 </div>
 
-                {isAiRecording ? (
+                <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                  {isAiRecording ? (
+                    <button
+                      type="button"
+                      onClick={stopAiAudioRecording}
+                      className="w-full sm:w-auto px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-black shadow-lg shadow-rose-500/25 flex items-center justify-center gap-2 text-xs transition-all active:scale-95 cursor-pointer uppercase tracking-wider min-h-[44px]"
+                    >
+                      <Square size={14} />
+                      Concluir Áudio
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={isGeneratingPlan}
+                      onClick={startAiAudioRecording}
+                      className="w-full sm:w-auto px-5 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white rounded-xl font-black shadow-md shadow-indigo-500/20 flex items-center justify-center gap-2 text-xs transition-all active:scale-95 cursor-pointer uppercase tracking-wider min-h-[44px]"
+                    >
+                      <Mic size={14} />
+                      {recordedAudioBase64 ? 'Regravar Áudio' : 'Gravar por Voz'}
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* 2. Anexos de Prints, Fotos e Vídeos (Multimodal) */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="font-black text-slate-600 dark:text-slate-300 uppercase tracking-wider text-[10px] flex items-center gap-1.5">
+                    <Paperclip size={13} className="text-indigo-400" />
+                    Anexar Prints, Fotos ou Vídeos ({aiMediaAttachments.length})
+                  </label>
+                  <span className="text-[10px] text-slate-400 hidden sm:inline">
+                    Cole com <kbd className="px-1.5 py-0.5 bg-white/10 rounded border border-white/10 font-mono text-[9px]">Ctrl+V</kbd>
+                  </span>
+                </div>
+
+                {/* Botões de Ação para Adicionar Mídia (Mobile-Friendly) */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   <button
                     type="button"
-                    onClick={stopAiAudioRecording}
-                    className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-black shadow-lg shadow-rose-500/25 flex items-center gap-2 text-xs transition-all active:scale-95 cursor-pointer uppercase tracking-wider"
+                    onClick={() => photoInputRef.current?.click()}
+                    disabled={isUploadingMedia || isGeneratingPlan}
+                    className="p-3 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 border border-slate-200 dark:border-white/10 rounded-2xl flex items-center justify-center gap-2 font-bold text-slate-700 dark:text-slate-200 text-xs transition-all active:scale-95 cursor-pointer min-h-[46px]"
                   >
-                    <Square size={14} />
-                    Parar e Criar Plano
+                    <ImageIcon size={16} className="text-indigo-400" />
+                    <span>Fotos / Prints</span>
                   </button>
-                ) : (
+
                   <button
                     type="button"
-                    disabled={isGeneratingPlan}
-                    onClick={startAiAudioRecording}
-                    className="px-5 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white rounded-xl font-black shadow-md shadow-indigo-500/20 flex items-center gap-2 text-xs transition-all active:scale-95 cursor-pointer uppercase tracking-wider"
+                    onClick={() => videoInputRef.current?.click()}
+                    disabled={isUploadingMedia || isGeneratingPlan}
+                    className="p-3 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 border border-slate-200 dark:border-white/10 rounded-2xl flex items-center justify-center gap-2 font-bold text-slate-700 dark:text-slate-200 text-xs transition-all active:scale-95 cursor-pointer min-h-[46px]"
                   >
-                    <Mic size={14} />
-                    Gravar por Voz
+                    <VideoIcon size={16} className="text-purple-400" />
+                    <span>Vídeos</span>
                   </button>
+
+                  <button
+                    type="button"
+                    onClick={() => cameraInputRef.current?.click()}
+                    disabled={isUploadingMedia || isGeneratingPlan}
+                    className="p-3 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 border border-slate-200 dark:border-white/10 rounded-2xl flex items-center justify-center gap-2 font-bold text-slate-700 dark:text-slate-200 text-xs transition-all active:scale-95 cursor-pointer col-span-2 sm:col-span-1 min-h-[46px]"
+                  >
+                    <Camera size={16} className="text-cyan-400" />
+                    <span>Câmera (Mobile)</span>
+                  </button>
+                </div>
+
+                {/* Grade de Miniaturas de Mídias Anexadas */}
+                {aiMediaAttachments.length > 0 && (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-2">
+                    {aiMediaAttachments.map(att => (
+                      <div 
+                        key={att.id} 
+                        className="relative group rounded-2xl overflow-hidden border border-slate-200 dark:border-white/10 bg-slate-100 dark:bg-black/30 p-1.5 flex flex-col gap-1 shadow-sm"
+                      >
+                        <div className="h-20 sm:h-24 w-full rounded-xl overflow-hidden bg-slate-200 dark:bg-[#1a242c] flex items-center justify-center relative">
+                          {att.type === 'image' ? (
+                            <img 
+                              src={att.previewUrl || `data:${att.mimeType};base64,${att.base64}`} 
+                              alt={att.name}
+                              className="w-full h-full object-cover" 
+                            />
+                          ) : att.type === 'video' ? (
+                            <div className="flex flex-col items-center justify-center text-purple-400 gap-1">
+                              <FileVideo size={28} />
+                              <span className="text-[9px] font-bold uppercase tracking-wider">Vídeo</span>
+                            </div>
+                          ) : (
+                            <div className="flex flex-col items-center justify-center text-indigo-400 gap-1">
+                              <Mic size={28} />
+                              <span className="text-[9px] font-bold uppercase tracking-wider">Áudio</span>
+                            </div>
+                          )}
+
+                          {/* Botão de Remover */}
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveMediaAttachment(att.id)}
+                            className="absolute top-1 right-1 p-1 bg-black/70 hover:bg-rose-600 text-white rounded-lg transition-all shadow-md cursor-pointer"
+                            title="Remover anexo"
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+
+                        <div className="px-1 py-0.5">
+                          <p className="text-[10px] font-bold text-slate-800 dark:text-slate-200 truncate">{att.name}</p>
+                          <p className="text-[9px] text-slate-400">{(att.size / 1024).toFixed(0)} KB</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 )}
               </div>
 
-              {/* Entrada de Texto Alternativa */}
+              {/* 3. Entrada de Texto / Descrição Complementar */}
               <div className="space-y-2">
                 <label className="font-black text-slate-600 dark:text-slate-300 uppercase tracking-wider text-[10px]">
-                  Ou digite o que precisa ser desenvolvido / corrigido:
+                  Descreva o que precisa ser desenvolvido ou corrigido:
                 </label>
                 <textarea 
                   rows={3}
                   value={aiCardPrompt}
                   onChange={e => setAiCardPrompt(e.target.value)}
-                  placeholder="Ex: Quero adicionar no chat um botão de envio de áudio gravado que seja automaticamente salvo no banco e gere transcrição em tempo real..."
-                  className="w-full px-4 py-3 bg-slate-50 dark:bg-[#1a242c] border border-slate-200 dark:border-white/10 rounded-2xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500/30 text-slate-900 dark:text-white leading-relaxed custom-scrollbar transition-all"
+                  placeholder="Ex: No chat, ao clicar no botão de foto, quero abrir a câmera no mobile e permitir envio direto com pré-visualização no layout..."
+                  className="w-full px-4 py-3 bg-slate-50 dark:bg-[#1a242c] border border-slate-200 dark:border-white/10 rounded-2xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500/30 text-slate-900 dark:text-white leading-relaxed custom-scrollbar transition-all min-h-[85px]"
                 />
                 
                 <button
                   type="button"
-                  disabled={isGeneratingPlan || !aiCardPrompt.trim() || isAiRecording}
-                  onClick={handleGeneratePlanFromText}
-                  className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow-md shadow-indigo-500/15 flex items-center justify-center gap-2 text-xs transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
+                  disabled={isGeneratingPlan || (!aiCardPrompt.trim() && !recordedAudioBase64 && aiMediaAttachments.length === 0) || isAiRecording}
+                  onClick={handleGeneratePlanMultimodal}
+                  className="w-full py-3.5 bg-gradient-to-r from-purple-600 via-indigo-600 to-indigo-700 hover:from-purple-700 hover:to-indigo-800 text-white rounded-2xl font-bold shadow-lg shadow-indigo-500/20 flex items-center justify-center gap-2 text-xs transition-all active:scale-95 disabled:opacity-50 cursor-pointer min-h-[48px]"
                 >
                   {isGeneratingPlan ? (
                     <>
-                      <Loader2 size={15} className="animate-spin" />
-                      Analisando e Gerando Plano de Desenvolvimento com IA...
+                      <Loader2 size={16} className="animate-spin" />
+                      Analisando Áudios, Imagens, Vídeos e Gerando Plano Sênior com IA...
                     </>
                   ) : (
                     <>
-                      <Sparkles size={15} />
-                      Gerar Plano Técnico com IA
+                      <Sparkles size={16} />
+                      Gerar Plano de Engenharia com IA (Multimodal)
                     </>
                   )}
                 </button>
               </div>
 
-              {/* Plano Gerado / Preview Estruturado */}
+              {/* 4. Plano Gerado / Preview Estruturado */}
               {generatedPlan && (
-                <div className="p-5 bg-gradient-to-br from-indigo-500/[0.06] via-purple-500/[0.03] to-transparent border border-indigo-500/25 rounded-2xl space-y-4 animate-in fade-in zoom-in-95 duration-200">
+                <div className="p-4 sm:p-5 bg-gradient-to-br from-indigo-500/[0.06] via-purple-500/[0.03] to-transparent border border-indigo-500/25 rounded-2xl space-y-4 animate-in fade-in zoom-in-95 duration-200">
                   <div className="flex items-center justify-between border-b border-indigo-500/15 pb-3">
                     <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-lg bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
-                      🎯 Plano de Engenharia Estruturado
+                      🎯 Plano de Engenharia Sênior Estruturado
                     </span>
                     <span className="text-[10px] font-bold text-slate-400">
                       Prioridade: {generatedPlan.priority === 3 ? '🔴 Alta' : generatedPlan.priority === 2 ? '🟡 Média' : '🟢 Normal'}
@@ -2827,7 +3418,7 @@ export default function CrmKanban() {
                         type="text" 
                         value={generatedPlan.title}
                         onChange={e => setGeneratedPlan({ ...generatedPlan, title: e.target.value })}
-                        className="w-full px-3.5 py-2 bg-white dark:bg-[#1a242c] border border-slate-200 dark:border-white/10 rounded-xl text-xs font-bold text-slate-900 dark:text-white"
+                        className="w-full px-3.5 py-2.5 bg-white dark:bg-[#1a242c] border border-slate-200 dark:border-white/10 rounded-xl text-xs font-bold text-slate-900 dark:text-white"
                       />
                     </div>
                     <div className="space-y-1">
@@ -2835,7 +3426,7 @@ export default function CrmKanban() {
                       <select 
                         value={selectedTargetStage}
                         onChange={e => setSelectedTargetStage(e.target.value)}
-                        className="w-full px-3.5 py-2 bg-white dark:bg-[#1a242c] border border-slate-200 dark:border-white/10 rounded-xl text-xs font-bold text-slate-900 dark:text-white cursor-pointer"
+                        className="w-full px-3.5 py-2.5 bg-white dark:bg-[#1a242c] border border-slate-200 dark:border-white/10 rounded-xl text-xs font-bold text-slate-900 dark:text-white cursor-pointer"
                       >
                         {pipelineStages.map(s => (
                           <option key={s.id} value={s.id} className="dark:bg-[#111b21]">{s.label}</option>
@@ -2873,14 +3464,14 @@ export default function CrmKanban() {
             </div>
 
             {/* Footer */}
-            <div className="px-6 py-4 border-t border-slate-200/20 dark:border-white/5 bg-slate-50/50 dark:bg-black/10 shrink-0 flex gap-3 justify-end">
+            <div className="px-5 sm:px-6 py-4 border-t border-slate-200/20 dark:border-white/5 bg-slate-50/50 dark:bg-black/10 shrink-0 flex flex-col-reverse sm:flex-row gap-2.5 sm:gap-3 justify-end">
               <button 
                 type="button" 
                 onClick={() => {
                   stopAiAudioRecording();
                   setIsAiCardModalOpen(false);
                 }}
-                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 text-slate-600 dark:text-slate-300 font-bold rounded-xl transition-all duration-200 text-xs active:scale-95 cursor-pointer uppercase tracking-wider"
+                className="w-full sm:w-auto px-5 py-3 bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 text-slate-600 dark:text-slate-300 font-bold rounded-xl transition-all duration-200 text-xs active:scale-95 cursor-pointer uppercase tracking-wider min-h-[44px]"
               >
                 Cancelar
               </button>
@@ -2888,16 +3479,16 @@ export default function CrmKanban() {
                 type="button"
                 disabled={!generatedPlan || loading}
                 onClick={handleConfirmCreateAiCard}
-                className="px-6 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-black rounded-xl shadow-lg shadow-indigo-500/25 transition-all duration-200 text-xs active:scale-95 disabled:opacity-50 cursor-pointer uppercase tracking-wider flex items-center gap-2"
+                className="w-full sm:w-auto px-6 py-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-black rounded-xl shadow-lg shadow-indigo-500/25 transition-all duration-200 text-xs active:scale-95 disabled:opacity-50 cursor-pointer uppercase tracking-wider flex items-center justify-center gap-2 min-h-[44px]"
               >
                 {loading ? (
                   <>
-                    <Loader2 size={14} className="animate-spin" />
-                    Salvando no Quadro...
+                    <Loader2 size={15} className="animate-spin" />
+                    Salvando Mídias e Card no Kanban...
                   </>
                 ) : (
                   <>
-                    <CheckCircle2 size={14} />
+                    <CheckCircle2 size={15} />
                     Confirmar e Criar Card no Kanban
                   </>
                 )}

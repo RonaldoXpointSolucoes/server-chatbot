@@ -4778,7 +4778,55 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
       const { supabase } = await import('../services/supabase');
       const tenantId = tenantInfo?.id || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
 
-      // 1. Buscar tickets resolvidos
+      // Helper para buscar em lotes seguros e evitar URLs excessivamente longas (HTTP 414 / URI too large)
+      const fetchInBatches = async (table: string, ids: string[], selectCols: string, idCol = 'id', batchSize = 50) => {
+        const results: any[] = [];
+        for (let i = 0; i < ids.length; i += batchSize) {
+          const chunk = ids.slice(i, i + batchSize);
+          if (chunk.length === 0) continue;
+          const { data } = await supabase
+            .from(table)
+            .select(selectCols)
+            .in(idCol, chunk);
+          if (Array.isArray(data)) results.push(...data);
+        }
+        return results;
+      };
+
+      const validateUuid = (uuid: any) => typeof uuid === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(uuid);
+
+      // 1. Calcular faixa de data precisa
+      let startIso: string | null = null;
+      let endIso: string | null = null;
+
+      if (dateFilter === 'today') {
+        const targetDate = new Date(selectedDate || new Date());
+        const startOfDay = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate(), 0, 0, 0, 0);
+        const endOfDay = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate(), 23, 59, 59, 999);
+        startIso = startOfDay.toISOString();
+        endIso = endOfDay.toISOString();
+      } else if (dateFilter === 'yesterday') {
+        const yesterday = new Date(selectedDate || new Date());
+        yesterday.setDate(yesterday.getDate() - 1);
+        const startOfDay = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 0, 0, 0, 0);
+        const endOfDay = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 23, 59, 59, 999);
+        startIso = startOfDay.toISOString();
+        endIso = endOfDay.toISOString();
+      } else if (dateFilter === 'week') {
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        const startOfDay = new Date(sevenDaysAgo.getFullYear(), sevenDaysAgo.getMonth(), sevenDaysAgo.getDate(), 0, 0, 0, 0);
+        startIso = startOfDay.toISOString();
+        endIso = new Date().toISOString();
+      } else if (dateFilter === 'month') {
+        const startOfMonth = new Date();
+        startOfMonth.setDate(1);
+        const startOfDay = new Date(startOfMonth.getFullYear(), startOfMonth.getMonth(), startOfMonth.getDate(), 0, 0, 0, 0);
+        startIso = startOfDay.toISOString();
+        endIso = new Date().toISOString();
+      }
+
+      // 2. Buscar tickets oficiais na tabela chat_tickets
       let resolvedQuery = supabase
         .from('chat_tickets')
         .select('*')
@@ -4788,64 +4836,20 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         resolvedQuery = resolvedQuery.eq('tenant_id', tenantId);
       }
 
-      // 1.5. Busca conversas com status 'resolved' ou 'closed' como fallback
-      let convResolvedQuery = supabase
-        .from('conversations')
-        .select('id, contact_id, status, updated_at, assigned_to, instance_id')
-        .in('status', ['resolved', 'closed']);
-
-      if (tenantId) {
-        convResolvedQuery = convResolvedQuery.eq('tenant_id', tenantId);
-      }
-
-      const validateUuid = (uuid: any) => typeof uuid === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(uuid);
-
-      if (selectedInstanceId && selectedInstanceId !== 'all' && validateUuid(selectedInstanceId)) {
-        convResolvedQuery = convResolvedQuery.eq('instance_id', selectedInstanceId);
-      }
-
-      // Aplicar filtros de data diretamente nas queries de banco de dados
-      if (dateFilter === 'today') {
-        const targetDate = new Date(selectedDate || new Date());
-        const startOfDay = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate(), 0, 0, 0, 0);
-        const endOfDay = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate(), 23, 59, 59, 999);
-
-        resolvedQuery = resolvedQuery.gte('closed_at', startOfDay.toISOString()).lte('closed_at', endOfDay.toISOString());
-        convResolvedQuery = convResolvedQuery.gte('updated_at', startOfDay.toISOString()).lte('updated_at', endOfDay.toISOString());
-      } else if (dateFilter === 'yesterday') {
-        const yesterday = new Date();
-        yesterday.setDate(yesterday.getDate() - 1);
-        const startOfDay = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 0, 0, 0, 0);
-        const endOfDay = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 23, 59, 59, 999);
-
-        resolvedQuery = resolvedQuery.gte('closed_at', startOfDay.toISOString()).lte('closed_at', endOfDay.toISOString());
-        convResolvedQuery = convResolvedQuery.gte('updated_at', startOfDay.toISOString()).lte('updated_at', endOfDay.toISOString());
-      } else if (dateFilter === 'week') {
-        const sevenDaysAgo = new Date();
-        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-        const startOfDay = new Date(sevenDaysAgo.getFullYear(), sevenDaysAgo.getMonth(), sevenDaysAgo.getDate(), 0, 0, 0, 0);
-
-        resolvedQuery = resolvedQuery.gte('closed_at', startOfDay.toISOString());
-        convResolvedQuery = convResolvedQuery.gte('updated_at', startOfDay.toISOString());
-      } else if (dateFilter === 'month') {
-        const startOfMonth = new Date();
-        startOfMonth.setDate(1);
-        const startOfDay = new Date(startOfMonth.getFullYear(), startOfMonth.getMonth(), startOfMonth.getDate(), 0, 0, 0, 0);
-
-        resolvedQuery = resolvedQuery.gte('closed_at', startOfMonth.toISOString());
-        convResolvedQuery = convResolvedQuery.gte('updated_at', startOfMonth.toISOString());
+      if (startIso && endIso) {
+        resolvedQuery = resolvedQuery.gte('closed_at', startIso).lte('closed_at', endIso);
+      } else if (startIso) {
+        resolvedQuery = resolvedQuery.gte('closed_at', startIso);
       } else {
-        // limit to 200 on 'all' to prevent HTTP 400 URI too large on contact details
-        resolvedQuery = resolvedQuery.limit(200);
-        convResolvedQuery = convResolvedQuery.limit(200);
+        resolvedQuery = resolvedQuery.order('closed_at', { ascending: false }).limit(200);
       }
 
       const { data: resolvedData, error: resolvedErr } = await resolvedQuery.order('closed_at', { ascending: false });
-      if (resolvedErr) throw resolvedErr;
+      if (resolvedErr) console.error('Erro na query de chat_tickets:', resolvedErr);
 
-      const resolvedList = [...(resolvedData || [])];
-      const { data: resolvedConvs } = await convResolvedQuery;
+      const resolvedList: any[] = [...(resolvedData || [])];
 
+      const existingConvIds = new Set(resolvedList.map(t => t.conversation_id).filter(Boolean));
       const existingTicketContactDateSet = new Set(
         resolvedList.map(t => {
           const dt = t.closed_at || t.opened_at;
@@ -4854,31 +4858,88 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
         })
       );
 
-      if (resolvedConvs && resolvedConvs.length > 0) {
-        resolvedConvs.forEach(conv => {
-          const dt = conv.updated_at || new Date().toISOString();
-          const dStr = dt.split('T')[0];
-          const key = `${conv.contact_id}_${dStr}`;
-          
-          if (!existingTicketContactDateSet.has(key) && conv.contact_id) {
-            existingTicketContactDateSet.add(key);
-            resolvedList.push({
-              id: `conv_${conv.id.substring(0, 8)}`,
-              tenant_id: tenantId,
-              contact_id: conv.contact_id,
-              conversation_id: conv.id,
-              status: 'resolved',
-              opened_at: conv.updated_at || dt,
-              closed_at: dt,
-              problem_description: 'Atendimento finalizado pelo atendente',
-              resolution_summary: 'Resolvido pelo atendente.',
-              metadata: { synthetic: true },
-              instance_id: conv.instance_id
-            });
-          }
-        });
+      // 3. Buscar mensagens de resolução emitidas no chat pelo atendente ("✅ Resolvido por [Nome]")
+      let msgQuery = supabase
+        .from('messages')
+        .select('id, conversation_id, text_content, timestamp, instance_id')
+        .ilike('text_content', '%Resolvido por%')
+        .order('timestamp', { ascending: false });
+
+      if (tenantId) {
+        msgQuery = msgQuery.eq('tenant_id', tenantId);
       }
 
+      if (selectedInstanceId && selectedInstanceId !== 'all' && validateUuid(selectedInstanceId)) {
+        msgQuery = msgQuery.eq('instance_id', selectedInstanceId);
+      }
+
+      if (startIso && endIso) {
+        msgQuery = msgQuery.gte('timestamp', startIso).lte('timestamp', endIso);
+      } else if (startIso) {
+        msgQuery = msgQuery.gte('timestamp', startIso);
+      } else {
+        msgQuery = msgQuery.limit(200);
+      }
+
+      const { data: resolutionMsgs } = await msgQuery;
+
+      if (resolutionMsgs && resolutionMsgs.length > 0) {
+        const newConvIds = Array.from(new Set(
+          resolutionMsgs
+            .map((m: any) => m.conversation_id)
+            .filter((id: any) => id && validateUuid(id) && !existingConvIds.has(id))
+        ));
+
+        if (newConvIds.length > 0) {
+          const convsData = await fetchInBatches(
+            'conversations', 
+            newConvIds as string[], 
+            'id, contact_id, instance_id, last_message_at, updated_at, assigned_to'
+          );
+          const convsMap = new Map(convsData.map((c: any) => [c.id, c]));
+
+          const latestMsgByConv = new Map<string, any>();
+          resolutionMsgs.forEach((m: any) => {
+            if (!latestMsgByConv.has(m.conversation_id)) {
+              latestMsgByConv.set(m.conversation_id, m);
+            }
+          });
+
+          latestMsgByConv.forEach((msg, convId) => {
+            const conv = convsMap.get(convId);
+            if (!conv || !conv.contact_id) return;
+
+            const closed_at = msg.timestamp || conv.updated_at || new Date().toISOString();
+            const dStr = closed_at.split('T')[0];
+            const key = `${conv.contact_id}_${dStr}`;
+
+            if (!existingTicketContactDateSet.has(key)) {
+              existingTicketContactDateSet.add(key);
+
+              let opName = 'Atendente';
+              const match = (msg.text_content || '').match(/Resolvido por (.*?) dia/i);
+              if (match && match[1]) opName = match[1].trim();
+
+              resolvedList.push({
+                id: `conv_${conv.id.substring(0, 8)}`,
+                tenant_id: tenantId,
+                contact_id: conv.contact_id,
+                conversation_id: conv.id,
+                status: 'resolved',
+                opened_at: conv.last_message_at || closed_at,
+                closed_at: closed_at,
+                problem_description: 'Atendimento finalizado pelo atendente',
+                resolution_summary: `Resolvido por ${opName}.`,
+                operatorName: opName,
+                metadata: { closed_by: opName, synthetic: true },
+                instance_id: msg.instance_id || conv.instance_id || null
+              });
+            }
+          });
+        }
+      }
+
+      // 4. Buscar contatos vinculados em lotes seguros
       const contactIds = Array.from(
         new Set(
           resolvedList
@@ -4891,42 +4952,28 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
       const companiesMap = new Map<string, any>();
 
       if (contactIds.length > 0) {
-        const { data: contactsData } = await supabase
-          .from('contacts')
-          .select('id, name, custom_name, phone, profile_picture_url, exclude_reports, company_ids, fantasy_name, instance_id')
-          .in('id', contactIds);
+        const contactsData = await fetchInBatches(
+          'contacts',
+          contactIds,
+          'id, name, custom_name, phone, profile_picture_url, exclude_reports, company_ids, fantasy_name, instance_id'
+        );
 
-        if (contactsData && contactsData.length > 0) {
-          contactsData.forEach(c => contactsMap.set(c.id, c));
+        contactsData.forEach((c: any) => contactsMap.set(c.id, c));
 
-          const allCompanyIds = Array.from(
-            new Set(contactsData.flatMap(c => c.company_ids || []).filter(validateUuid))
+        const allCompanyIds = Array.from(
+          new Set(contactsData.flatMap((c: any) => c.company_ids || []).filter(validateUuid))
+        );
+        if (allCompanyIds.length > 0) {
+          const compData = await fetchInBatches(
+            'contacts',
+            allCompanyIds as string[],
+            'id, name, fantasy_name'
           );
-          if (allCompanyIds.length > 0) {
-            const { data: compData } = await supabase
-              .from('contacts')
-              .select('id, name, fantasy_name')
-              .in('id', allCompanyIds);
-            if (compData) {
-              compData.forEach(comp => companiesMap.set(comp.id, comp));
-            }
-          }
+          compData.forEach((comp: any) => companiesMap.set(comp.id, comp));
         }
       }
 
-      // Mapeamento de operadores e conversas por contato
-      const operatorFallbacks = new Map<string, string>();
-      const contactToConvMap = new Map<string, string>();
-      
-      let allConvsData: any[] = [];
-      if (contactIds.length > 0) {
-        const { data: convsData } = await supabase
-          .from('conversations')
-          .select('id, contact_id, assigned_to')
-          .in('contact_id', contactIds);
-        if (convsData) allConvsData = convsData;
-      }
-        
+      // 5. Mapear operadores do tenant
       let tenantUsersData: any[] = [];
       if (tenantId) {
         const { data: uData } = await supabase
@@ -4935,53 +4982,8 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
           .eq('tenant_id', tenantId);
         if (uData) tenantUsersData = uData;
       }
-      
-      if (allConvsData.length > 0) {
-        allConvsData.forEach(c => {
-          if (c.contact_id) {
-            if (c.id) contactToConvMap.set(c.contact_id, c.id);
-            let opName = 'Atendente';
-            if (c.assigned_to) {
-              const matchedUser = tenantUsersData.find(u => u.id === c.assigned_to);
-              if (matchedUser) {
-                opName = matchedUser.full_name || matchedUser.email || 'Atendente';
-              }
-            }
-            operatorFallbacks.set(c.contact_id, opName);
-          }
-        });
-      }
 
-      // 1.8. Buscar primeira mensagem (opened_at) e última mensagem (closed_at) reais de cada atendimento
-      const targetConvIds = Array.from(new Set(
-        resolvedList
-          .map(t => t.conversation_id || contactToConvMap.get(t.contact_id))
-          .filter(validateUuid)
-      ));
-
-      const messageTimeBounds = new Map<string, { firstMsgAt: string; lastMsgAt: string }>();
-
-      if (targetConvIds.length > 0) {
-        const { data: msgTimeList } = await supabase
-          .from('messages')
-          .select('conversation_id, timestamp')
-          .in('conversation_id', targetConvIds)
-          .order('timestamp', { ascending: true });
-
-        if (msgTimeList && msgTimeList.length > 0) {
-          msgTimeList.forEach(m => {
-            if (!m.conversation_id || !m.timestamp) return;
-            const existing = messageTimeBounds.get(m.conversation_id);
-            if (!existing) {
-              messageTimeBounds.set(m.conversation_id, { firstMsgAt: m.timestamp, lastMsgAt: m.timestamp });
-            } else {
-              existing.lastMsgAt = m.timestamp;
-            }
-          });
-        }
-      }
-
-      // Map resolved tickets
+      // 6. Mapeamento final dos tickets
       const mapped = resolvedList.map(t => {
         const c = contactsMap.get(t.contact_id);
         if (c?.exclude_reports) return null;
@@ -5004,23 +5006,21 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
           companyFantasyName = companyName;
         }
 
-        const fallbackOp = operatorFallbacks.get(t.contact_id) || 'Atendente';
-        const operatorName = t.metadata?.closed_by || (t.metadata?.operators && t.metadata.operators[0]?.name) || fallbackOp;
-        
-        const convIdKey = t.conversation_id || contactToConvMap.get(t.contact_id);
-        const msgBounds = convIdKey ? messageTimeBounds.get(convIdKey) : null;
+        let operatorName = t.operatorName || t.metadata?.closed_by || (t.metadata?.operators && t.metadata.operators[0]?.name);
+        if (!operatorName && t.assigned_to) {
+          const matchedUser = tenantUsersData.find(u => u.id === t.assigned_to);
+          if (matchedUser) operatorName = matchedUser.full_name || matchedUser.email;
+        }
+        if (!operatorName) operatorName = 'Atendente';
 
         let opened_at = t.opened_at;
-        let closed_at = t.closed_at || t.updated_at || new Date().toISOString();
-
-        if (msgBounds) {
-          if (msgBounds.firstMsgAt) opened_at = msgBounds.firstMsgAt;
-          if (msgBounds.lastMsgAt) closed_at = msgBounds.lastMsgAt;
-        }
+        let closed_at = t.closed_at || new Date().toISOString();
 
         if (opened_at && closed_at && new Date(opened_at).getTime() >= new Date(closed_at).getTime()) {
           if (t.created_at && new Date(t.created_at).getTime() < new Date(closed_at).getTime()) {
             opened_at = t.created_at;
+          } else {
+            opened_at = new Date(new Date(closed_at).getTime() - 60000).toISOString();
           }
         }
 
@@ -5355,12 +5355,12 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
   }, [filteredTickets]);
 
   const stats = useMemo(() => {
-    const closed = filteredTickets.length; // Manter o total de chamados individuais para precisão de métricas
+    const closed = groupedTickets.length; // Quantidade real de cards/atendimentos fechados exibidos
     const open = openContactsFiltered.length;
     const total = closed + open;
 
     let healthyCount = 0;
-    filteredTickets.forEach(t => {
+    groupedTickets.forEach(t => {
       const hasAiError = t.metadata?.error_log || t.problem_description === "Erro no processamento do problema.";
       const checklist = t.metadata?.checklist || [];
       const allChecklistResolved = checklist.length === 0 || checklist.every((item: any) => item.resolved);
@@ -5373,7 +5373,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
     const health = closed > 0 ? Math.round((healthyCount / closed) * 100) : 100;
 
     return { total, closed, open, health };
-  }, [filteredTickets, openContactsFiltered]);
+  }, [groupedTickets, openContactsFiltered]);
 
   const columns = useMemo(() => {
     const rapido: any[] = [];

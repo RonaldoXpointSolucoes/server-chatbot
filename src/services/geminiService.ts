@@ -652,6 +652,12 @@ Gere o JSON contendo exatamente as informações solicitadas no schema.`;
     textPrompt?: string;
     audioBase64?: string;
     audioMimeType?: string;
+    attachments?: Array<{
+      base64: string;
+      mimeType: string;
+      fileName?: string;
+      type: 'image' | 'video' | 'audio';
+    }>;
     boardName?: string;
   }): Promise<{
     title: string;
@@ -674,11 +680,11 @@ Gere o JSON contendo exatamente as informações solicitadas no schema.`;
           properties: {
             title: {
               type: "string",
-              description: "Título curto, claro e profissional da funcionalidade ou melhoria (ex: '[Chat] Envio de Áudio com Transcrição')."
+              description: "Título curto, claro e profissional da funcionalidade, melhoria ou correção (ex: '[Chat] Envio de Áudio com Transcrição e Fotos')."
             },
             category: {
               type: "string",
-              description: "Categoria principal: 'Chat', 'Sistema / SaaS', 'Backend / API', 'I.A / Gemini', 'Integração' ou 'Correção'."
+              description: "Categoria principal: 'Chat', 'Sistema / SaaS', 'Backend / API', 'I.A / Gemini', 'Integração', 'UI/UX' ou 'Correção'."
             },
             priority: {
               type: "integer",
@@ -686,20 +692,20 @@ Gere o JSON contendo exatamente as informações solicitadas no schema.`;
             },
             tags: {
               type: "array",
-              description: "Lista de 3 a 5 tags curtas (ex: ['Frontend', 'Chat', 'IA', 'Supabase']).",
+              description: "Lista de 3 a 6 tags curtas e técnicas (ex: ['Frontend', 'Mobile-First', 'Supabase', 'IA', 'Video', 'UI/UX']).",
               items: { type: "string" }
             },
             summary: {
               type: "string",
-              description: "Resumo executivo de 1 a 2 linhas explicando o que será feito e o valor agregado."
+              description: "Resumo executivo de 1 a 3 linhas explicando com precisão o que será feito e o valor agregado para o usuário/negócio."
             },
             suggested_stage_label: {
               type: "string",
-              description: "Etapa recomendada para o card (ex: 'Backlog / Ideias' ou 'Em Análise')."
+              description: "Etapa recomendada para o card (ex: 'Backlog / Ideias', 'Em Análise' ou 'Em Desenvolvimento')."
             },
             technical_plan: {
               type: "string",
-              description: "Plano técnico completo e estruturado em Markdown contendo: 🎯 Objetivo, 📋 Requisitos e Regras de Negócio, 🛠️ Passo a Passo Técnico de Implementação (arquivos e lógica a alterar), 🧪 Critérios de Aceite & Testes."
+              description: "Plano técnico completo e altamente estruturado em Markdown contendo: 🎯 Objetivo, 📋 Requisitos e Regras de Negócio, 🛠️ Passo a Passo Técnico de Implementação (arquivos e lógica a alterar no React, Node.js e Supabase), 🧪 Critérios de Aceite & Validação."
             }
           },
           required: ["title", "category", "priority", "tags", "summary", "suggested_stage_label", "technical_plan"]
@@ -707,23 +713,39 @@ Gere o JSON contendo exatamente as informações solicitadas no schema.`;
       }
     });
 
-    const systemPrompt = `Você é um Engenheiro de Software Sênior & Arquiteto de Sistemas Fullstack especializado em SaaS, Chatbots WhatsApp, React, Node.js e Inteligência Artificial.
-Sua missão é ouvir o áudio ou ler o texto do desenvolvedor/gestor que descreve uma nova funcionalidade, ideia, melhoria ou correção para o sistema ou chat, e gerar um plano técnico de desenvolvimento de software de altíssimo nível.
+    const systemPrompt = `Você é um Engenheiro de Software Sênior & Arquiteto de Sistemas Fullstack com mais de 25 anos de experiência em plataformas SaaS, Chatbots WhatsApp, React, Node.js, Supabase, TailwindCSS, Mobile-First e Inteligência Artificial.
+
+Sua missão é analisar de forma profunda e abrangente todos os dados fornecidos pelo usuário (áudios gravados, textos descritivos, imagens/prints de tela e vídeos de demonstração de comportamento) para criar um Plano de Engenharia e Especificação Técnica de altíssimo nível.
 
 Quadro de destino: ${params.boardName || 'Desenvolvimento & Roadmap'}
-${params.textPrompt ? `Instrução ou descrição fornecida: "${params.textPrompt}"` : 'Analise o áudio anexo com a instrução do desenvolvedor.'}
+${params.textPrompt ? `Descrição ou instruções fornecidas pelo usuário: "${params.textPrompt}"` : ''}
 
-REGRAS PARA O PLANO TÉCNICO (technical_plan em Markdown):
-1. Use emojis para destacar cada seção.
-2. Divida claramente em:
-   - 🎯 **Objetivo & Visão Geral**
-   - 📋 **Requisitos Funcionais & Regras de Negócio**
-   - 🛠️ **Arquitetura & Passo a Passo de Código** (componentes frontend, endpoints backend, banco Supabase se necessário)
-   - 🧪 **Critérios de Aceite & Validação**
-3. Seja extremamente prático, direto e com código/arquitetura limpa.`;
+DIRETRIZES DE PROCESSAMENTO MULTIMODAL AVANÇADO:
+1. 🎙️ **ANÁLISE DE ÁUDIO**:
+   - Transcreva e processe o áudio eliminando completamente vícios de linguagem ("ééé", "tipo assim", "aí", pausas, repetições e hesitações).
+   - Extraia a verdadeira intenção e necessidade por trás do que foi falado pelo desenvolvedor ou gestor.
+2. 🖼️ **ANÁLISE DE PRINTS & FOTOS (SCREENSHOTS / UI)**:
+   - Se houver imagens anexadas, inspecione minuciosamente todos os detalhes visuais: textos na tela, botões, modais, erros de console/telas, elementos sobrepostos, espaçamentos ou telas que precisam de melhoria.
+   - Integre o contexto das imagens diretamente no plano de código.
+3. 🎥 **ANÁLISE DE VÍDEOS**:
+   - Se houver vídeos anexados, mapeie a sequência exata de ações, fluxos de tela demonstrados, bugs ocorridos e transições gravadas.
+4. 📱 **DIRETRIZ MOBILE-FIRST & USABILIDADE**:
+   - Todo plano deve garantir ergonomia e responsividade impecáveis para dispositivos móveis (toque mínimo 48px, zero overflow horizontal, carregamento fluido).
+
+ESTRUTURA OBRIGATÓRIA DO PLANO TÉCNICO (technical_plan em Markdown):
+1. 🎯 **Objetivo & Visão Geral**: O problema resolvido e o resultado esperado.
+2. 📋 **Requisitos Funcionais & Regras de Negócio**: Lista detalhada de itens que devem funcionar.
+3. 🛠️ **Arquitetura & Passo a Passo de Implementação**:
+   - Componentes Frontend a criar ou editar (React / TypeScript / Tailwind)
+   - Serviços, APIs e endpoints de Backend (se aplicável)
+   - Estrutura de banco e storage (Supabase, policies, buckets)
+4. 🧪 **Critérios de Aceite & Validação**: Checklist prático de testes e homologação para QA.
+
+Seja extremamente prático, direto, profissional e com foco em código limpo, seguro e escalável.`;
 
     const parts: any[] = [{ text: systemPrompt }];
 
+    // Adiciona áudio principal se houver
     if (params.audioBase64) {
       parts.push({
         inlineData: {
@@ -733,6 +755,20 @@ REGRAS PARA O PLANO TÉCNICO (technical_plan em Markdown):
       });
     }
 
+    // Adiciona anexos multimodais adicionais (fotos, prints, vídeos, áudios)
+    if (params.attachments && params.attachments.length > 0) {
+      for (const att of params.attachments) {
+        if (att.base64 && att.mimeType) {
+          parts.push({
+            inlineData: {
+              mimeType: att.mimeType,
+              data: att.base64
+            }
+          });
+        }
+      }
+    }
+
     const result = await model.generateContent(parts);
     const response = await result.response;
     const text = response.text().trim();
@@ -740,8 +776,8 @@ REGRAS PARA O PLANO TÉCNICO (technical_plan em Markdown):
       const cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();
       return JSON.parse(cleaned);
     } catch (e) {
-      console.error("Erro no parse do plano técnico:", text);
-      throw new Error("Falha ao estruturar o plano técnico com a IA.");
+      console.error("Erro no parse do plano técnico multimodal:", text);
+      throw new Error("Falha ao estruturar o plano técnico multimodal com a IA.");
     }
   }
 

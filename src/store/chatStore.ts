@@ -2946,18 +2946,38 @@ export const useChatStore = create<ChatState>((set, get) => ({
             }).in('id', allConvIds);
         }
 
-        // Encerra também tickets no chat_tickets se existirem
+        // Encerra ou registra ticket em chat_tickets
         try {
-          await supabase.from('chat_tickets')
-            .update({ 
-              status: 'resolved', 
-              closed_at: new Date().toISOString(),
-              resolution_summary: `Resolvido por ${agentName}`
-            })
+          const { data: openTickets } = await supabase.from('chat_tickets')
+            .select('id')
             .eq('tenant_id', tenantInfo.id)
             .eq('status', 'open')
             .eq('contact_id', realContactId);
-        } catch (err) {}
+
+          if (openTickets && openTickets.length > 0) {
+            const openIds = openTickets.map((t: any) => t.id);
+            await supabase.from('chat_tickets')
+              .update({ 
+                status: 'resolved', 
+                closed_at: new Date().toISOString(),
+                resolution_summary: `Resolvido por ${agentName}`
+              })
+              .in('id', openIds);
+          } else {
+            await supabase.from('chat_tickets').insert({
+              tenant_id: tenantInfo.id,
+              contact_id: realContactId,
+              status: 'resolved',
+              opened_at: conv?.last_message_at || new Date().toISOString(),
+              closed_at: new Date().toISOString(),
+              problem_description: 'Atendimento finalizado pelo atendente',
+              resolution_summary: `Resolvido por ${agentName}`,
+              metadata: { closed_by: agentName, instance_id: conv?.instance_id || resolvedInstId }
+            });
+          }
+        } catch (err) {
+          console.error('Erro ao sincronizar chat_tickets:', err);
+        }
 
         // 4. Atualização local do estado para TODOS os cards do contato sumirem da lista e fechar o chat ativo
         set((state) => ({
