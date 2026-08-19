@@ -163,7 +163,7 @@ class SessionManager {
 
         this.logger = pino({ level: 'info' }, pinoStream);
 
-        // Loop de renovação do Lease (Heartbeat) - roda a cada 30 segundos
+        // Loop de renovação do Lease (Heartbeat) - roda a cada 15 segundos
         setInterval(async () => {
             const activeIds = Array.from(this.sessions.keys());
             if (activeIds.length > 0) {
@@ -179,7 +179,7 @@ class SessionManager {
                                 .update({
                                     status: activeStatus,
                                     last_error: null,
-                                    lease_until: new Date(Date.now() + 90000).toISOString(),
+                                    lease_until: new Date(Date.now() + 45000).toISOString(),
                                     updated_at: new Date().toISOString()
                                 })
                                 .in('id', authenticatedIds)
@@ -192,7 +192,7 @@ class SessionManager {
                         await retryWithBackoff(() =>
                             supabase.from('whatsapp_instances')
                                 .update({
-                                    lease_until: new Date(Date.now() + 90000).toISOString(),
+                                    lease_until: new Date(Date.now() + 45000).toISOString(),
                                     updated_at: new Date().toISOString()
                                 })
                                 .in('id', unauthenticatedIds)
@@ -203,7 +203,7 @@ class SessionManager {
                     console.error("[SessionManager/Heartbeat] Erro ao renovar leases:", e.message);
                 }
             }
-        }, 30000);
+        }, 15000);
     }
 
     async createSession(tenantId, instanceId, force = false) {
@@ -257,13 +257,13 @@ class SessionManager {
                 throw new Error(errorMsg);
             }
 
-            // 1. Verifica se há um lock ativo por outro worker com retry e backoff inteligente
+            // 1. Verifica se há um lock ativo por outro worker com retry, detecção de stale e takeover inteligente
             let currentInstance = null;
             let lockAcquired = false;
             let lockAttempts = 0;
-            const maxLockAttempts = 5;
+            const maxLockAttempts = 4;
 
-            while (lockAttempts < maxLockAttempts && !lockAcquired) {
+            while (lockAttempts <= maxLockAttempts && !lockAcquired) {
                 lockAttempts++;
                 const { data: inst } = await retryWithBackoff(() =>
                     supabase
@@ -292,11 +292,15 @@ class SessionManager {
                     const lastUpdated = currentInstance.updated_at ? new Date(currentInstance.updated_at) : null;
                     const timeSinceLastUpdate = lastUpdated ? (now.getTime() - lastUpdated.getTime()) : Infinity;
                     
-                    // Critérios de Worker Inativo / Zumbi:
-                    // 1) Não atualiza heartbeat há mais de 25s
-                    // 2) Status não é estritamente 'connected' ou 'connected_local' (ex: offline, paused, connecting, error)
-                    const isStaleWorker = (timeSinceLastUpdate > 25000) || 
-                                          (currentInstance.status !== 'connected' && currentInstance.status !== 'connected_local');
+                    // Critérios de Worker Inativo / Stale / Zumbi:
+                    // 1) Status explicitamente offline/inativo: offline, paused, disconnected, bad_session, logged_out
+                    // 2) Não atualiza heartbeat há mais de 35s (> 2 ciclos de heartbeat de 15s perdidos)
+                    // 3) Status intermediário (ex: connecting, reconnecting) sem atualização há mais de 15s
+                    const isExplicitlyDeadStatus = ['offline', 'paused', 'disconnected', 'bad_session', 'logged_out'].includes(currentInstance.status);
+                    const isMissedHeartbeat = timeSinceLastUpdate > 35000;
+                    const isDeadInterim = (currentInstance.status !== 'connected' && currentInstance.status !== 'connected_local') && (timeSinceLastUpdate > 15000);
+                    
+                    const isStaleWorker = isExplicitlyDeadStatus || isMissedHeartbeat || isDeadInterim;
                     
                     if (isStaleWorker) {
                         console.warn(`[SessionManager] ⚠️ Worker anterior ${assignedNodeId} inativo (${Math.round(timeSinceLastUpdate/1000)}s sem heartbeat ou status '${currentInstance.status}'). Assumindo controle e renovando lock da instância ${instanceId}.`);
@@ -311,9 +315,10 @@ class SessionManager {
                         continue;
                     }
 
-                    const errorMsg = `Instância ${instanceId} já possui um lock ativo pelo worker ${assignedNodeId} (lease restante: ${remainingSeconds}s até ${currentInstance.lease_until}). Conexão negada.`;
-                    console.warn(`[SessionManager] Lock negado após ${maxLockAttempts} tentativas: ${errorMsg}`);
-                    throw new Error(errorMsg);
+                    // Se atingiu o limite de tentativas e o lock não foi liberado, assume controle via Force Takeover
+                    console.warn(`[SessionManager] ⚠️ Force Takeover ativado para instância ${instanceId}: Assumindo controle e liberando lock retido por ${assignedNodeId} (após ${maxLockAttempts} tentativas).`);
+                    lockAcquired = true;
+                    break;
                 } else {
                     // Lease expirado no banco
                     lockAcquired = true;
@@ -332,13 +337,14 @@ class SessionManager {
                     supabase.from('whatsapp_instances').update({
                         status: 'paused',
                         assigned_node_id: null,
-                        lease_until: null
+                        lease_until: null,
+                        updated_at: new Date().toISOString()
                     }).eq('id', instanceId)
                 );
                 throw ipErr;
             }
 
-            // 3. Assume o lease/lock da sessão com 90 segundos de TTL (preservando o status connected se já estiver ativo)
+            // 3. Assume o lease/lock da sessão com 45 segundos de TTL (preservando o status connected se já estiver ativo)
             const isAlreadyActive = currentInstance?.status === 'connected' || currentInstance?.status === 'connected_local';
             const nextStatus = isAlreadyActive ? currentInstance.status : 'connecting';
 
@@ -346,7 +352,7 @@ class SessionManager {
                 supabase.from('whatsapp_instances').update({
                     status: nextStatus,
                     assigned_node_id: NODE_ID,
-                    lease_until: new Date(Date.now() + 90000).toISOString(),
+                    lease_until: new Date(Date.now() + 45000).toISOString(),
                     updated_at: new Date().toISOString()
                 }).eq('id', instanceId)
             );
@@ -718,7 +724,7 @@ class SessionManager {
                         clearInstanceMemoryCache(instanceId);
                         setTimeout(() => {
                             if (!this.sessions.has(instanceId)) {
-                                this.createSession(tenantId, instanceId).catch(err => {
+                                this.createSession(tenantId, instanceId, true).catch(err => {
                                     console.error(`[SessionManager] Erro ao reconectar pós restartRequired/428 para ${instanceId}:`, err.message);
                                 });
                             }
@@ -744,7 +750,7 @@ class SessionManager {
                         clearInstanceMemoryCache(instanceId);
                         setTimeout(() => {
                             if (!this.sessions.has(instanceId)) {
-                                this.createSession(tenantId, instanceId).catch(err => {
+                                this.createSession(tenantId, instanceId, true).catch(err => {
                                     console.error(`[SessionManager] Erro na reconexão automática de oscilação (${reason || status}) para ${instanceId}:`, err.message);
                                 });
                             }
@@ -854,7 +860,7 @@ class SessionManager {
                                 
                                 const timer = setTimeout(() => {
                                     this.reconnectTimeouts.delete(instanceId);
-                                    this.createSession(tenantId, instanceId);
+                                    this.createSession(tenantId, instanceId, true);
                                 }, delay);
                                 this.reconnectTimeouts.set(instanceId, timer);
                             }
@@ -919,7 +925,7 @@ class SessionManager {
                             console.warn(`[SessionManager] CONFLITO detectado na instância ${instanceId} (Tentativa ${cAttempts}/3). Outro dispositivo conectou? Aguardando 30s antes de tentar novamente...`);
                             const timer = setTimeout(() => {
                                 this.reconnectingTimers.delete(instanceId);
-                                this.createSession(tenantId, instanceId);
+                                this.createSession(tenantId, instanceId, true);
                             }, 30000);
                             this.reconnectingTimers.set(instanceId, timer);
                         }
@@ -975,7 +981,7 @@ class SessionManager {
 
                             const timer = setTimeout(() => {
                                 this.reconnectingTimers.delete(instanceId);
-                                this.createSession(tenantId, instanceId);
+                                this.createSession(tenantId, instanceId, true);
                             }, delay);
                             this.reconnectingTimers.set(instanceId, timer);
                         }
@@ -1165,7 +1171,8 @@ class SessionManager {
             await retryWithBackoff(() =>
                 supabase.from('whatsapp_instances').update({
                     assigned_node_id: NODE_ID,
-                    lease_until: new Date(Date.now() + 60000).toISOString()
+                    lease_until: new Date(Date.now() + 45000).toISOString(),
+                    updated_at: new Date().toISOString()
                 }).eq('id', instanceId)
             );
 
@@ -1224,7 +1231,7 @@ class SessionManager {
                 // Se a instância já possui um lock ativo por outro worker com lease válido e não é force
                 if (assignedNodeId && assignedNodeId !== currentNodeId && data.lease_until && new Date(data.lease_until) > now && !force) {
                     const lastUpdated = data.updated_at ? new Date(data.updated_at) : null;
-                    const isStale = lastUpdated && (now.getTime() - lastUpdated.getTime() > 25000);
+                    const isStale = !lastUpdated || (now.getTime() - lastUpdated.getTime() > 35000);
                     if (!isStale && (data.status === 'connected' || data.status === 'connected_local')) {
                         console.log(`[SessionManager] Instância ${instanceId} está sob lock ativo do worker ${assignedNodeId} (lease até ${data.lease_until}). Ignorando wake local.`);
                         return null;
@@ -1247,6 +1254,29 @@ class SessionManager {
         }
         
         return null;
+    }
+
+    async forceReleaseLock(instanceId) {
+        console.log(`[SessionManager] Forçando liberação de lock para instância ${instanceId}...`);
+        return await retryWithBackoff(() =>
+            supabase.from('whatsapp_instances').update({
+                assigned_node_id: null,
+                lease_until: null,
+                updated_at: new Date().toISOString()
+            }).eq('id', instanceId)
+        );
+    }
+
+    async takeoverLock(tenantId, instanceId) {
+        console.log(`[SessionManager] Executando takeover explícito de lock para instância ${instanceId} pelo nó ${NODE_ID}...`);
+        await retryWithBackoff(() =>
+            supabase.from('whatsapp_instances').update({
+                assigned_node_id: NODE_ID,
+                lease_until: new Date(Date.now() + 45000).toISOString(),
+                updated_at: new Date().toISOString()
+            }).eq('id', instanceId)
+        );
+        return this.createSession(tenantId, instanceId, true);
     }
 
     async closeSession(instanceId) {
@@ -1289,9 +1319,9 @@ class SessionManager {
                 supabase.from('whatsapp_instances').update({
                     status: 'offline',
                     assigned_node_id: null,
-                    lease_until: null
+                    lease_until: null,
+                    updated_at: new Date().toISOString()
                 }).eq('id', instanceId)
-                .eq('assigned_node_id', NODE_ID)
             );
         }
     }

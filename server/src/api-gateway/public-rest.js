@@ -133,7 +133,7 @@ router.post('/instance/create', requireApiKey, async (req, res) => {
              // Inicia se não estiver rodando (opcional, só p/ não dar erro de já existe)
              if (existing.status === 'offline') {
                  await supabase.from('whatsapp_instances').update({ status: 'connecting' }).eq('id', existing.id);
-                 sessionManager.createSession(tenantId, existing.id).catch(console.error);
+                 sessionManager.createSession(tenantId, existing.id, true).catch(console.error);
              }
              return res.json({ instance: existing });
         }
@@ -151,7 +151,7 @@ router.post('/instance/create', requireApiKey, async (req, res) => {
         if (error) throw error;
 
         // Tenta bootar
-        sessionManager.createSession(tenantId, newInstance.id).catch(console.error);
+        sessionManager.createSession(tenantId, newInstance.id, true).catch(console.error);
 
         res.json({
             instance: {
@@ -723,7 +723,7 @@ router.put('/instance/:name/restart', requireApiKey, async (req, res) => {
         }
         
         // Chama a inicialização
-        sessionManager.createSession(tenant_id, id).catch(console.error);
+        sessionManager.createSession(tenant_id, id, true).catch(console.error);
 
         res.json({ status: 'SUCCESS', error: false, message: 'Instance restarting' });
     } catch(e) {

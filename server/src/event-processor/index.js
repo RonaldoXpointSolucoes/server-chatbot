@@ -1866,8 +1866,7 @@ class EventProcessor {
                 const errMsg = "Chave de Acesso (Passkey) Ativa: A conexão falhou porque há uma Chave de Acesso ativa nesta conta. Por segurança do WhatsApp, vinculações automatizadas não funcionam com chaves de acesso ativas. Se o aplicativo do celular forçar a criação de uma chave para conectar dispositivos (Catch-22), as soluções recomendadas são: 1) Migrar a conta para o WhatsApp Business; 2) Deixar a conta sem tentativas por 48h a 72h (Período de Resfriamento) para reduzir o score de risco; ou 3) Limpar o cache/reinstalar o WhatsApp no celular principal.";
                 await supabase.from('whatsapp_instances')
                     .update({ status: 'offline', last_error: errMsg })
-                    .eq('id', instanceId)
-                    .eq('assigned_node_id', NODE_ID);
+                    .eq('id', instanceId);
                 
                 await supabase.from('whatsapp_instance_runtime')
                     .update({ pairing_code: 'PASSKEY_BLOCKED', last_error: errMsg })
@@ -1965,8 +1964,7 @@ class EventProcessor {
                     }
                     await supabase.from('whatsapp_instances')
                         .update({ status: 'connecting', last_error: `Reconnecting (Code: ${reason})` })
-                        .eq('id', instanceId)
-                        .eq('assigned_node_id', NODE_ID);
+                        .eq('id', instanceId);
                     payload.status = 'connecting';
                     payload.reason = reason;
                 } else {
@@ -1975,8 +1973,7 @@ class EventProcessor {
                         : `Code: ${reason}`;
                     await supabase.from('whatsapp_instances')
                         .update({ status: 'offline', last_error: errMsg })
-                        .eq('id', instanceId)
-                        .eq('assigned_node_id', NODE_ID);
+                        .eq('id', instanceId);
                     payload.status = 'offline';
                     payload.reason = reason;
                     if(loggedOut) payload.loggedOut = true;
@@ -1990,8 +1987,7 @@ class EventProcessor {
 
                 await supabase.from('whatsapp_instances')
                     .update({ status: 'connecting', last_error: null })
-                    .eq('id', instanceId)
-                    .eq('assigned_node_id', NODE_ID);
+                    .eq('id', instanceId);
                 payload.status = 'connecting';
                 if (update.pairingSuccess) {
                     payload.pairingSuccess = true;

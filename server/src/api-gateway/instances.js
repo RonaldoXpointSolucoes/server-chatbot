@@ -111,7 +111,7 @@ router.post('/instances/:instanceId/connect', requireTenant, async (req, res) =>
             .eq('id', instanceId)
             .eq('tenant_id', tenantId);
 
-        sessionManager.createSession(tenantId, instanceId).catch(console.error);
+        sessionManager.createSession(tenantId, instanceId, true).catch(console.error);
 
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
         res.setHeader('Pragma', 'no-cache');
@@ -164,7 +164,7 @@ router.post('/instances/:instanceId/pairing-code', requireTenant, async (req, re
                 .eq('tenant_id', tenantId);
 
             console.log(`[API] Criando sessão Baileys para Pairing Code...`);
-            activeSock = await sessionManager.createSession(tenantId, instanceId);
+            activeSock = await sessionManager.createSession(tenantId, instanceId, true);
         }
 
         if (!activeSock) {
@@ -638,7 +638,7 @@ router.post('/instances/:instanceId/:action', requireTenant, async (req, res) =>
         
         if (action === 'reconnect') {
             await sessionManager.closeSession(instanceId);
-            sessionManager.createSession(req.tenantId, instanceId).catch(console.error);
+            sessionManager.createSession(req.tenantId, instanceId, true).catch(console.error);
             return res.json({ ok: true, message: 'Reconectando...' });
         }
         

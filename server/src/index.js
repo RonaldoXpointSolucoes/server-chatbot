@@ -554,10 +554,11 @@ app.listen(PORT, '0.0.0.0', async () => {
                 console.log(`[Worker Boot] Retomando ${activeLeases.length} sockets...`);
                 for (const instance of activeLeases) {
                     const startSessionWithRetry = (attempt = 1) => {
-                        sessionManager.createSession(instance.tenant_id, instance.id).catch(e => {
+                        const forceTakeover = attempt >= 2;
+                        sessionManager.createSession(instance.tenant_id, instance.id, forceTakeover).catch(e => {
                              const isLockError = e.message && (e.message.includes('lock ativo') || e.message.includes('Lock negado') || e.message.includes('Conexão negada'));
                              if (isLockError && attempt < 3) {
-                                 console.log(`[Worker Boot] Instância ${instance.id} sob lease de outro nó. Agendando retentativa silenciosa (${attempt}/3) em 35s...`);
+                                 console.log(`[Worker Boot] Instância ${instance.id} sob lease de outro nó. Agendando retentativa com takeover (${attempt}/3) em 35s...`);
                                  setTimeout(() => startSessionWithRetry(attempt + 1), 35000);
                              } else if (isLockError) {
                                  console.log(`[Worker Boot] Instância ${instance.id} permanece sob responsabilidade de outro nó ativo.`);
