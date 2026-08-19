@@ -102,30 +102,52 @@ async function invokeSendMessage(instanceId, targetJid, text) {
   });
 }
 
-function verifyDeliveryInDb(instanceId, textMatch) {
-  return new Promise((resolve) => {
-    const queryPath = `/rest/v1/wa_outgoing_messages?instance_id=eq.${instanceId}&body=like.*${encodeURIComponent(textMatch)}*&select=id,status,last_error,sent_at`;
-    const url = new URL(queryPath, SUPABASE_URL);
-    const req = https.request(url, {
-      method: 'GET',
-      headers: {
-        'apikey': SERVICE_KEY,
-        'Authorization': `Bearer ${SERVICE_KEY}`
-      }
-    }, res => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        try {
-          const parsed = JSON.parse(data);
-          const msg = parsed && parsed[0];
-          resolve(msg || null);
-        } catch (e) { resolve(null); }
+async function verifyDeliveryInDb(instanceId, textMatch, messageId) {
+  let uuid = null;
+  if (messageId && messageId.startsWith('EDGE_')) {
+    const raw = messageId.slice(5);
+    if (raw.length === 32) {
+      uuid = `${raw.slice(0,8)}-${raw.slice(8,12)}-${raw.slice(12,16)}-${raw.slice(16,20)}-${raw.slice(20)}`;
+    }
+  }
+
+  let lastFound = null;
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const msg = await new Promise((resolve) => {
+      const queryPath = uuid 
+        ? `/rest/v1/wa_outgoing_messages?id=eq.${uuid}&select=id,status,last_error,sent_at`
+        : `/rest/v1/wa_outgoing_messages?instance_id=eq.${instanceId}&select=id,status,last_error,sent_at&order=created_at.desc&limit=1`;
+      const url = new URL(queryPath, SUPABASE_URL);
+      const req = https.request(url, {
+        method: 'GET',
+        headers: {
+          'apikey': SERVICE_KEY,
+          'Authorization': `Bearer ${SERVICE_KEY}`
+        }
+      }, res => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(data);
+            const item = Array.isArray(parsed) ? parsed[0] : parsed;
+            resolve(item || null);
+          } catch (e) { resolve(null); }
+        });
       });
+      req.on('error', () => resolve(null));
+      req.end();
     });
-    req.on('error', () => resolve(null));
-    req.end();
-  });
+
+    if (msg) {
+      lastFound = msg;
+      if (msg.status === 'sent' || msg.status === 'delivered') {
+        return msg;
+      }
+    }
+    if (attempt < 9) await delay(2000);
+  }
+  return lastFound;
 }
 
 function delay(ms) {
@@ -136,12 +158,6 @@ async function runFullE2ETest() {
   const ts = new Date().toISOString().replace(/[-:T.]/g, '').substring(0, 14);
   const nowMs = Date.now().toString().slice(-4);
   
-  console.log("=== LIMPEZA DE LEASES DE CONCORRÊNCIA EM WHATSAPP_INSTANCES ===");
-  await patchSupabase(`/rest/v1/whatsapp_instances?tenant_id=eq.${TENANT_ID}`, {
-    assigned_node_id: null,
-    lease_until: null
-  });
-
   const fnSent = [];
   const rwReply = [];
 
@@ -158,22 +174,23 @@ async function runFullE2ETest() {
     const result = await invokeSendMessage(FOODNEXT_INSTANCE_ID, RONALDO_WEB_JID, text);
     console.log(`[ENVIANDO ${i}/3] Retorno API Baileys:`, JSON.stringify(result, null, 2));
 
-    await delay(3000);
-
-    const dbVerif = await verifyDeliveryInDb(FOODNEXT_INSTANCE_ID, text);
+    const msgId = result.body?.result?.key?.id || null;
+    const dbVerif = await verifyDeliveryInDb(FOODNEXT_INSTANCE_ID, text, msgId);
     console.log(`[ENVIANDO ${i}/3] Verificação no Banco (wa_outgoing_messages):`, JSON.stringify(dbVerif, null, 2));
 
     fnSent.push({
       step: i,
       text,
-      messageId: result.body?.result?.key?.id || 'unknown',
+      messageId: msgId || 'unknown',
       remoteJid: RONALDO_WEB_JID,
       dbStatus: dbVerif?.status || 'unknown',
       sentAt: dbVerif?.sent_at || null
     });
+
+    await delay(2000);
   }
 
-  await delay(4000);
+  await delay(3000);
 
   // FASE 2: Ronaldo-Web responde 3 mensagens em sequência para FoodNext
   console.log(`\n======================================================`);
@@ -188,19 +205,20 @@ async function runFullE2ETest() {
     const result = await invokeSendMessage(RONALDO_WEB_INSTANCE_ID, FOODNEXT_JID, text);
     console.log(`[RESPONDENDO ${i}/3] Retorno API Baileys:`, JSON.stringify(result, null, 2));
 
-    await delay(3000);
-
-    const dbVerif = await verifyDeliveryInDb(RONALDO_WEB_INSTANCE_ID, text);
+    const msgId = result.body?.result?.key?.id || null;
+    const dbVerif = await verifyDeliveryInDb(RONALDO_WEB_INSTANCE_ID, text, msgId);
     console.log(`[RESPONDENDO ${i}/3] Verificação no Banco (wa_outgoing_messages):`, JSON.stringify(dbVerif, null, 2));
 
     rwReply.push({
       step: i,
       text,
-      messageId: result.body?.result?.key?.id || 'unknown',
+      messageId: msgId || 'unknown',
       remoteJid: FOODNEXT_JID,
       dbStatus: dbVerif?.status || 'unknown',
       sentAt: dbVerif?.sent_at || null
     });
+
+    await delay(2000);
   }
 
   console.log("\n\n======================================================");
