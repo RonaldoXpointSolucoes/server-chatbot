@@ -88,7 +88,9 @@ class SessionManager {
         this.consecutiveForbiddenAttempts = new Map();
         this.consecutiveBadSessionAttempts = new Map();
         this.oscillationAttempts = new Map();
-        
+        this.inProgressLocks = new Map();
+        this.startHeartbeat();
+
         // Pino stream configurado para enviar logs para nosso SSE e para o stdout
         const pinoStream = {
             write: (msg) => {
@@ -205,19 +207,6 @@ class SessionManager {
         }, 30000);
     }
 
-    async getSocketOrWake(tenantId, instanceId, force = false) {
-        if (this.sessions.has(instanceId) && !force) {
-            return this.sessions.get(instanceId).sock;
-        }
-        try {
-            console.log(`[SessionManager] getSocketOrWake: Acordando/recriando sessão para ${instanceId} (force: ${force})...`);
-            return await this.createSession(tenantId, instanceId, force);
-        } catch (e) {
-            console.error(`[SessionManager] Falha em getSocketOrWake para ${instanceId}:`, e.message);
-            return null;
-        }
-    }
-
     async createSession(tenantId, instanceId, force = false) {
         if (this.reconnectingTimers.has(instanceId)) {
             const timer = this.reconnectingTimers.get(instanceId);
@@ -232,6 +221,7 @@ class SessionManager {
         }
 
         if (this.connectingState.has(instanceId)) {
+            console.log(`[SessionManager] Sessão ${instanceId} já está em processo de conexão. Reutilizando Promise em andamento.`);
             return this.connectingState.get(instanceId);
         }
 
@@ -244,6 +234,7 @@ class SessionManager {
             return await promise;
         } finally {
             this.connectingState.delete(instanceId);
+            this.inProgressLocks.delete(instanceId);
         }
     }
 
@@ -267,11 +258,11 @@ class SessionManager {
                 throw new Error(errorMsg);
             }
 
-            // 1. Verifica se há um lock ativo por outro worker com retry e backoff exponencial
+            // 1. Verifica se há um lock ativo por outro worker com retry e backoff inteligente
             let currentInstance = null;
             let lockAcquired = false;
             let lockAttempts = 0;
-            const maxLockAttempts = 3;
+            const maxLockAttempts = 5;
 
             while (lockAttempts < maxLockAttempts && !lockAcquired) {
                 lockAttempts++;
@@ -288,36 +279,46 @@ class SessionManager {
                 const currentNodeId = String(NODE_ID).trim();
                 const assignedNodeId = currentInstance?.assigned_node_id ? String(currentInstance.assigned_node_id).trim() : null;
 
-                if (currentInstance && currentInstance.lease_until && new Date(currentInstance.lease_until) > now) {
-                    if (assignedNodeId && assignedNodeId !== currentNodeId && !force) {
-                        const leaseExpiry = new Date(currentInstance.lease_until);
-                        const remainingSeconds = Math.max(1, Math.round((leaseExpiry - now) / 1000));
-                        
-                        // Se o registro não for atualizado há mais de 45 segundos ou o status for offline/paused, o worker que detinha o lock crashou/morreu
-                        const lastUpdated = currentInstance.updated_at ? new Date(currentInstance.updated_at) : null;
-                        const isStaleWorker = (lastUpdated && (now.getTime() - lastUpdated.getTime() > 45000)) || 
-                                              currentInstance.status === 'offline' || 
-                                              currentInstance.status === 'paused';
-                        
-                        if (!isStaleWorker) {
-                            if (lockAttempts < maxLockAttempts) {
-                                const backoffMs = lockAttempts * 2000;
-                                console.warn(`[SessionManager] Lock ativo na instância ${instanceId} por ${assignedNodeId} (lease restante: ${remainingSeconds}s). Aguardando e tentando novamente em ${backoffMs/1000}s (Tentativa ${lockAttempts}/${maxLockAttempts})...`);
-                                await new Promise(r => setTimeout(r, backoffMs));
-                                continue;
-                            }
-                            const errorMsg = `Instância ${instanceId} já possui um lock ativo pelo worker ${assignedNodeId} (lease restante: ${remainingSeconds}s até ${currentInstance.lease_until}). Conexão negada.`;
-                            console.warn(`[SessionManager] Lock negado após ${maxLockAttempts} tentativas: ${errorMsg}`);
-                            throw new Error(errorMsg);
-                        } else {
-                            console.warn(`[SessionManager] ⚠️ Worker ${assignedNodeId} inativo (>45s sem update ou status ${currentInstance.status}). Liberando lock obsoleto e assumindo controle da instância ${instanceId}.`);
-                            lockAcquired = true;
-                        }
-                    } else {
-                        lockAcquired = true;
-                    }
-                } else {
+                // Caso 1: Instância livre ou lock já pertence a este mesmo nó ou conexão forçada
+                if (!assignedNodeId || assignedNodeId === currentNodeId || force) {
                     lockAcquired = true;
+                    break;
+                }
+
+                // Caso 2: Instância possui lease_until no futuro com outro nó
+                if (currentInstance && currentInstance.lease_until && new Date(currentInstance.lease_until) > now) {
+                    const leaseExpiry = new Date(currentInstance.lease_until);
+                    const remainingSeconds = Math.max(1, Math.round((leaseExpiry - now) / 1000));
+                    
+                    const lastUpdated = currentInstance.updated_at ? new Date(currentInstance.updated_at) : null;
+                    const timeSinceLastUpdate = lastUpdated ? (now.getTime() - lastUpdated.getTime()) : Infinity;
+                    
+                    // Critérios de Worker Inativo / Zumbi:
+                    // 1) Não atualiza heartbeat há mais de 25s
+                    // 2) Status não é estritamente 'connected' ou 'connected_local' (ex: offline, paused, connecting, error)
+                    const isStaleWorker = (timeSinceLastUpdate > 25000) || 
+                                          (currentInstance.status !== 'connected' && currentInstance.status !== 'connected_local');
+                    
+                    if (isStaleWorker) {
+                        console.warn(`[SessionManager] ⚠️ Worker anterior ${assignedNodeId} inativo (${Math.round(timeSinceLastUpdate/1000)}s sem heartbeat ou status '${currentInstance.status}'). Assumindo controle e renovando lock da instância ${instanceId}.`);
+                        lockAcquired = true;
+                        break;
+                    }
+
+                    if (lockAttempts < maxLockAttempts) {
+                        const backoffMs = lockAttempts * 1500;
+                        console.warn(`[SessionManager] Lock ativo na instância ${instanceId} por ${assignedNodeId} (lease restante: ${remainingSeconds}s, status: ${currentInstance.status}). Aguardando liberação em ${backoffMs/1000}s (Tentativa ${lockAttempts}/${maxLockAttempts})...`);
+                        await new Promise(r => setTimeout(r, backoffMs));
+                        continue;
+                    }
+
+                    const errorMsg = `Instância ${instanceId} já possui um lock ativo pelo worker ${assignedNodeId} (lease restante: ${remainingSeconds}s até ${currentInstance.lease_until}). Conexão negada.`;
+                    console.warn(`[SessionManager] Lock negado após ${maxLockAttempts} tentativas: ${errorMsg}`);
+                    throw new Error(errorMsg);
+                } else {
+                    // Lease expirado no banco
+                    lockAcquired = true;
+                    break;
                 }
             }
 
@@ -1198,16 +1199,16 @@ class SessionManager {
         return sock;
     }
 
-    async getSocketOrWake(tenantId, instanceId, requireAuthenticated = false) {
+    async getSocketOrWake(tenantId, instanceId, requireAuthenticated = false, force = false) {
         let sock = this.getSocket(instanceId, requireAuthenticated);
-        if (sock) return sock;
+        if (sock && !force) return sock;
 
         // Fallback para acordar a instância (Lazy Load) se o Node foi reiniciado
         try {
             const { data } = await retryWithBackoff(() => 
                 supabase
                     .from('whatsapp_instances')
-                    .select('status, assigned_node_id, lease_until')
+                    .select('status, assigned_node_id, lease_until, updated_at')
                     .eq('id', instanceId)
                     .single()
             );
@@ -1221,14 +1222,18 @@ class SessionManager {
                 const currentNodeId = String(NODE_ID).trim();
                 const assignedNodeId = data.assigned_node_id ? String(data.assigned_node_id).trim() : null;
 
-                // Se a instância já possui um lock ativo por outro worker com lease válido, não devemos acordá-la neste nó
-                if (assignedNodeId && assignedNodeId !== currentNodeId && data.lease_until && new Date(data.lease_until) > now) {
-                    console.log(`[SessionManager] Instância ${instanceId} está sob lock ativo do worker ${assignedNodeId} (lease até ${data.lease_until}). Ignorando wake local.`);
-                    return null;
+                // Se a instância já possui um lock ativo por outro worker com lease válido e não é force
+                if (assignedNodeId && assignedNodeId !== currentNodeId && data.lease_until && new Date(data.lease_until) > now && !force) {
+                    const lastUpdated = data.updated_at ? new Date(data.updated_at) : null;
+                    const isStale = lastUpdated && (now.getTime() - lastUpdated.getTime() > 25000);
+                    if (!isStale && (data.status === 'connected' || data.status === 'connected_local')) {
+                        console.log(`[SessionManager] Instância ${instanceId} está sob lock ativo do worker ${assignedNodeId} (lease até ${data.lease_until}). Ignorando wake local.`);
+                        return null;
+                    }
                 }
 
-                console.log(`[SessionManager] Lazy loading instance ${instanceId} (DB status: ${data.status})...`);
-                const createdSock = await this.createSession(tenantId, instanceId);
+                console.log(`[SessionManager] Lazy loading instance ${instanceId} (DB status: ${data.status}, force: ${force})...`);
+                const createdSock = await this.createSession(tenantId, instanceId, force);
                 if (requireAuthenticated) {
                     const meId = createdSock?.user?.id || createdSock?.authState?.creds?.me?.id;
                     if (!meId || !createdSock?.ws || !createdSock.ws.isOpen) {

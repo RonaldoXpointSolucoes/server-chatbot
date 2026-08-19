@@ -1,8 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useChatStore } from '../../store/chatStore';
-import { Settings2, Save, Link as LinkIcon, Briefcase, Store, MapPin, Clock, Plus, Trash2, Camera, Video, Utensils, Smartphone, Wifi, Battery, Signal, Home, Search, ClipboardList, User, ChevronLeft, ArrowLeft, Minus, ChevronDown, ChevronUp, Sparkles, QrCode, UserPlus, Truck } from 'lucide-react';
+import { Settings2, Save, Link as LinkIcon, Briefcase, Store, MapPin, Clock, Plus, Trash2, Camera, Video, Utensils, Smartphone, Wifi, Battery, Signal, Home, Search, ClipboardList, User, ChevronLeft, ArrowLeft, Minus, ChevronDown, ChevronUp, Sparkles, QrCode, UserPlus, Truck, BookOpen } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { supabase } from '../../services/supabase';
+import { GastrofoodAPIDocumentationModal } from '../../components/GastrofoodAPIDocumentationModal';
+
+const ZERO_VALUE_EXCEPTIONS = [
+  'catchup', 'ketchup', 'guardanapo', 'molho', 'maionese', 
+  'mostarda', 'barbecue', 'brinde', 'cortesia', 'adicional', 
+  'sachê', 'sache', 'canudo', 'talher', 'limão', 'limao', 'gelo', 'copo'
+];
+
+const isLegitimateZeroValueItem = (name: string, description?: string) => {
+  const text = `${name || ''} ${description || ''}`.toLowerCase();
+  return ZERO_VALUE_EXCEPTIONS.some(term => text.includes(term));
+};
 
 interface HorarioPeriodo {
   inicio: string;
@@ -369,6 +381,7 @@ export default function AccountSettings() {
   // Estados para controle de colapso
   const [isHorariosExpanded, setIsHorariosExpanded] = useState(false);
   const [isCardapioExpanded, setIsCardapioExpanded] = useState(false);
+  const [isDocModalOpen, setIsDocModalOpen] = useState(false);
   const [isCepExpanded, setIsCepExpanded] = useState(false);
   const [isClienteExpanded, setIsClienteExpanded] = useState(false);
   const [isPedidoExpanded, setIsPedidoExpanded] = useState(false);
@@ -652,9 +665,32 @@ export default function AccountSettings() {
       if (errGrupos) throw errGrupos;
       addLog(`Grupos salvos com sucesso (${gruposToUpsert.length} itens).`);
 
-      // 2. Salvar os produtos no Supabase
-      addLog('Salvando produtos no Supabase...');
-      const produtosToUpsert = produtos.map((p: any) => ({
+      // 2. Filtrar itens com preço zero indevido e salvar os produtos no Supabase
+      addLog('Filtrando produtos com valor zero indevido e preparando salvamento...');
+      
+      let zeroValFilteredCount = 0;
+      let zeroValKeptCount = 0;
+      
+      const validProdutos = produtos.filter((p: any) => {
+        const price = Number(p.price || p.Preco || p.preco || 0);
+        if (price > 0) return true;
+        
+        const isException = isLegitimateZeroValueItem(p.name || p.Descricao || p.descricao, p.description || p.Observacao || p.observacao);
+        if (isException) {
+          zeroValKeptCount++;
+          return true;
+        } else {
+          zeroValFilteredCount++;
+          return false;
+        }
+      });
+
+      if (zeroValFilteredCount > 0) {
+        addLog(`🛡️ Filtro de Preço Zero: Descartados ${zeroValFilteredCount} produtos sem valor comercial. Mantidos ${zeroValKeptCount} itens de cortesia/adicionais.`);
+      }
+      
+      addLog(`Salvando ${validProdutos.length} produtos válidos no Supabase...`);
+      const produtosToUpsert = validProdutos.map((p: any) => ({
         id: p.id,
         tenant_id: currentTenantId,
         grupo_id: p.groupId,
@@ -689,14 +725,14 @@ export default function AccountSettings() {
         }
       }
 
-      const total = produtos.length;
+      const total = validProdutos.length;
       for (let i = 0; i < total; i++) {
         if (cancelMappingRef.current) {
           addLog('Mapeamento cancelado pelo usuário.');
           break;
         }
 
-        const product = produtos[i];
+        const product = validProdutos[i];
         const indexNum = i + 1;
 
         // Atualiza progresso e estimativa
@@ -1684,6 +1720,14 @@ export default function AccountSettings() {
                       )}
                     >
                       {isMapping ? 'Cancelar Mapeamento' : 'Mapear Cardápio'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsDocModalOpen(true)}
+                      className="px-6 py-2.5 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white font-semibold rounded-xl shadow-lg shadow-orange-500/20 flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95"
+                    >
+                      <BookOpen size={16} />
+                      Ver Documentação da API GastroFood
                     </button>
                   </div>
 
@@ -2816,6 +2860,11 @@ export default function AccountSettings() {
  
         </div>
       </div>
+
+      <GastrofoodAPIDocumentationModal 
+        isOpen={isDocModalOpen} 
+        onClose={() => setIsDocModalOpen(false)} 
+      />
     </div>
   );
 }

@@ -40,9 +40,20 @@ function splitTextIntoChunks(text, chunkSize = 150, overlap = 20) {
   return chunks;
 }
 
+const ZERO_VALUE_EXCEPTIONS = [
+  'catchup', 'ketchup', 'guardanapo', 'molho', 'maionese', 
+  'mostarda', 'barbecue', 'brinde', 'cortesia', 'adicional', 
+  'sachê', 'sache', 'canudo', 'talher', 'limão', 'limao', 'gelo', 'copo'
+];
+
+function isLegitimateZeroValueItem(name, description) {
+  const text = `${name || ''} ${description || ''}`.toLowerCase();
+  return ZERO_VALUE_EXCEPTIONS.some(term => text.includes(term));
+}
+
 async function run() {
   try {
-    console.log("1. Fetching groups/categories and products from database...");
+    console.log("1. Fetching groups/categories, products, and steps from database...");
     
     // Fetch all active categories
     const { data: categories, error: errCats } = await supabase
@@ -63,24 +74,83 @@ async function run() {
 
     if (errProds) throw errProds;
 
-    console.log(`Fetched ${categories.length} categories and ${products.length} products.`);
+    // Fetch passos and opcoes
+    const { data: dbPassos } = await supabase
+      .from('cardapio_passos')
+      .select('id, produto_id, pergunta, sub_titulo')
+      .eq('tenant_id', tenantId)
+      .eq('ativo', true);
+
+    const { data: dbOpcoes } = await supabase
+      .from('cardapio_opcoes')
+      .select('id, passo_id, descricao, preco')
+      .eq('tenant_id', tenantId)
+      .eq('ativo', true);
+
+    const opcoesByPasso = new Map();
+    if (dbOpcoes) {
+      dbOpcoes.forEach(opt => {
+        if (!opcoesByPasso.has(opt.passo_id)) opcoesByPasso.set(opt.passo_id, []);
+        opcoesByPasso.get(opt.passo_id).push(opt);
+      });
+    }
+
+    const passosByProduto = new Map();
+    if (dbPassos) {
+      dbPassos.forEach(pas => {
+        if (!passosByProduto.has(pas.produto_id)) passosByProduto.set(pas.produto_id, []);
+        passosByProduto.get(pas.produto_id).push({
+          ...pas,
+          opcoes: opcoesByPasso.get(pas.id) || []
+        });
+      });
+    }
+
+    // Filter zero price items
+    const validProducts = (products || []).filter(p => {
+      const price = Number(p.price || 0);
+      if (price > 0) return true;
+      return isLegitimateZeroValueItem(p.name, p.description);
+    });
+
+    console.log(`Fetched ${categories.length} categories and ${validProducts.length} valid products.`);
 
     // 2. Format cardapio text
     let cardapioText = `LINK DO CARDÁPIO DIGITAL: https://www.burguerplus.com.br\n\n=== MENU DE PRODUTOS COMPLETO BURGUER PLUS ===\n\n`;
 
+    const formatProductRAG = (p) => {
+      let itemStr = `${p.name.toUpperCase()}\n`;
+      if (p.description) {
+        itemStr += `Descrição: ${p.description}\n`;
+      }
+      itemStr += `Preço: R$ ${parseFloat(p.price || 0).toFixed(2).replace('.', ',')}\n`;
+      
+      const productSteps = passosByProduto.get(p.id) || [];
+      if (productSteps.length > 0) {
+        itemStr += `Opções, Sabores e Adicionais:\n`;
+        for (const st of productSteps) {
+          if (st.opcoes && st.opcoes.length > 0) {
+            for (const op of st.opcoes) {
+              const addPrice = Number(op.preco || 0);
+              const priceTag = addPrice > 0 ? ` (+R$ ${addPrice.toFixed(2).replace('.', ',')})` : '';
+              itemStr += `  - [${st.pergunta}] ${op.descricao}${priceTag}\n`;
+            }
+          }
+        }
+      }
+      itemStr += `\n`;
+      return itemStr;
+    };
+
     for (const cat of categories) {
-      const catProducts = products.filter(p => p.grupo_id === cat.id);
+      const catProducts = validProducts.filter(p => p.grupo_id === cat.id);
       if (catProducts.length === 0) continue;
 
       cardapioText += `CATEGORIA: ${cat.descricao.toUpperCase()}\n`;
       cardapioText += `------------------------------------------------\n`;
 
       for (const p of catProducts) {
-        cardapioText += `${p.name.toUpperCase()}\n`;
-        if (p.description) {
-          cardapioText += `Descrição: ${p.description}\n`;
-        }
-        cardapioText += `Preço: R$ ${parseFloat(p.price).toFixed(2).replace('.', ',')}\n\n`;
+        cardapioText += formatProductRAG(p);
       }
       cardapioText += `\n`;
     }

@@ -533,6 +533,17 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
     });
 }
 
+const ZERO_VALUE_EXCEPTIONS = [
+    'catchup', 'ketchup', 'guardanapo', 'molho', 'maionese', 
+    'mostarda', 'barbecue', 'brinde', 'cortesia', 'adicional', 
+    'sachê', 'sache', 'canudo', 'talher', 'limão', 'limao', 'gelo', 'copo'
+];
+
+function isLegitimateZeroValueItem(name, description) {
+    const text = `${name || ''} ${description || ''}`.toLowerCase();
+    return ZERO_VALUE_EXCEPTIONS.some(term => text.includes(term));
+}
+
 const activeAutoHealingTenants = new Set();
 
 async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
@@ -563,11 +574,30 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
         }
     }
     
-    // 2. Salvar os produtos no Supabase
-    console.log(`[AutoHealing] Salvando ${produtos.length} produtos no Supabase...`);
+    // 2. Filtrar produtos com preço zero indevido e salvar no Supabase
+    let zeroValFilteredCount = 0;
+    let zeroValKeptCount = 0;
+    const validProdutos = produtos.filter(p => {
+        const price = Number(p.price || p.Preco || p.preco || 0);
+        if (price > 0) return true;
+        const isException = isLegitimateZeroValueItem(p.name || p.Descricao || p.descricao, p.description || p.Observacao || p.observacao);
+        if (isException) {
+            zeroValKeptCount++;
+            return true;
+        } else {
+            zeroValFilteredCount++;
+            return false;
+        }
+    });
+
+    if (zeroValFilteredCount > 0) {
+        console.log(`[AutoHealing] 🛡️ Filtro Preço Zero: Descartados ${zeroValFilteredCount} produtos sem valor comercial. Mantidos ${zeroValKeptCount} itens de cortesia/adicionais.`);
+    }
+
+    console.log(`[AutoHealing] Salvando ${validProdutos.length} produtos válidos no Supabase...`);
     const { error: errP } = await supabase
         .from('cardapio_produtos')
-        .upsert(produtos, { onConflict: 'tenant_id,id' });
+        .upsert(validProdutos, { onConflict: 'tenant_id,id' });
     if (errP) {
         console.error(`[AutoHealing] Erro ao salvar produtos no Supabase:`, errP);
     }
@@ -789,15 +819,64 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
         
         let cardapioText = `LINK DO CARDÁPIO DIGITAL: ${companySettings.link_cardapio || 'https://www.burguerplus.com.br'}\n\n=== MENU DE PRODUTOS COMPLETO ===\n\n`;
         
-        const categoriasMap = {};
-        if (grupos) {
-            grupos.forEach(g => {
-                categoriasMap[g.id] = g.descricao;
+        // Busca passos e opções salvos no Supabase para incluir sabores, sub-itens e adicionais no RAG
+        const { data: dbPassos } = await supabase
+            .from('cardapio_passos')
+            .select('id, produto_id, pergunta, sub_titulo')
+            .eq('tenant_id', tenantId)
+            .eq('ativo', true);
+
+        const { data: dbOpcoes } = await supabase
+            .from('cardapio_opcoes')
+            .select('id, passo_id, descricao, preco')
+            .eq('tenant_id', tenantId)
+            .eq('ativo', true);
+
+        const opcoesByPasso = new Map();
+        if (dbOpcoes) {
+            dbOpcoes.forEach(opt => {
+                if (!opcoesByPasso.has(opt.passo_id)) opcoesByPasso.set(opt.passo_id, []);
+                opcoesByPasso.get(opt.passo_id).push(opt);
             });
         }
-        
-        const produtosAtivos = produtos.filter(p => p.ativo);
-        const gruposAtivos = grupos ? grupos.filter(g => g.ativo) : [];
+
+        const passosByProduto = new Map();
+        if (dbPassos) {
+            dbPassos.forEach(pas => {
+                if (!passosByProduto.has(pas.produto_id)) passosByProduto.set(pas.produto_id, []);
+                passosByProduto.get(pas.produto_id).push({
+                    ...pas,
+                    opcoes: opcoesByPasso.get(pas.id) || []
+                });
+            });
+        }
+
+        const formatProductRAG = (p) => {
+            let itemStr = `${p.name.toUpperCase()}\n`;
+            if (p.description) {
+                itemStr += `Descrição: ${p.description}\n`;
+            }
+            itemStr += `Preço: R$ ${parseFloat(p.price || 0).toFixed(2).replace('.', ',')}\n`;
+            
+            const productSteps = passosByProduto.get(p.id) || [];
+            if (productSteps.length > 0) {
+                itemStr += `Opções, Sabores e Adicionais:\n`;
+                for (const st of productSteps) {
+                    if (st.opcoes && st.opcoes.length > 0) {
+                        for (const op of st.opcoes) {
+                            const addPrice = Number(op.preco || 0);
+                            const priceTag = addPrice > 0 ? ` (+R$ ${addPrice.toFixed(2).replace('.', ',')})` : '';
+                            itemStr += `  - [${st.pergunta}] ${op.descricao}${priceTag}\n`;
+                        }
+                    }
+                }
+            }
+            itemStr += `\n`;
+            return itemStr;
+        };
+
+        const produtosAtivos = validProdutos.filter(p => p.ativo !== false);
+        const gruposAtivos = grupos ? grupos.filter(g => g.ativo !== false) : [];
         
         if (gruposAtivos.length > 0) {
             for (const cat of gruposAtivos) {
@@ -807,22 +886,14 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
                 cardapioText += `CATEGORIA: ${cat.descricao.toUpperCase()}\n`;
                 cardapioText += `------------------------------------------------\n`;
                 for (const p of catProducts) {
-                    cardapioText += `${p.name.toUpperCase()}\n`;
-                    if (p.description) {
-                        cardapioText += `Descrição: ${p.description}\n`;
-                    }
-                    cardapioText += `Preço: R$ ${parseFloat(p.price).toFixed(2).replace('.', ',')}\n\n`;
+                    cardapioText += formatProductRAG(p);
                 }
                 cardapioText += `\n`;
             }
         } else {
             cardapioText += `PRODUTOS:\n`;
             for (const p of produtosAtivos) {
-                cardapioText += `${p.name.toUpperCase()}\n`;
-                if (p.description) {
-                    cardapioText += `Descrição: ${p.description}\n`;
-                }
-                cardapioText += `Preço: R$ ${parseFloat(p.price).toFixed(2).replace('.', ',')}\n\n`;
+                cardapioText += formatProductRAG(p);
             }
         }
         
