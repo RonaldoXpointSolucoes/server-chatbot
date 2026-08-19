@@ -309,13 +309,19 @@ class SessionManager {
                     }
 
                     if (lockAttempts < maxLockAttempts) {
-                        const backoffMs = lockAttempts * 1500;
+                        const backoffMs = lockAttempts * 2000;
                         console.warn(`[SessionManager] Lock ativo na instância ${instanceId} por ${assignedNodeId} (lease restante: ${remainingSeconds}s, status: ${currentInstance.status}). Aguardando liberação em ${backoffMs/1000}s (Tentativa ${lockAttempts}/${maxLockAttempts})...`);
                         await new Promise(r => setTimeout(r, backoffMs));
                         continue;
                     }
 
-                    // Se atingiu o limite de tentativas e o lock não foi liberado, assume controle via Force Takeover
+                    // Se o worker remoto ainda está ativamente saudável (heartbeat recente e status connected), respeita a exclusividade da sessão
+                    if (currentInstance.status === 'connected' && timeSinceLastUpdate <= 35000) {
+                        console.log(`[SessionManager] Instância ${instanceId} está ativamente conectada no nó ${assignedNodeId} (heartbeat há ${Math.round(timeSinceLastUpdate/1000)}s). Preservando propriedade exclusiva para evitar conflito (status 440).`);
+                        throw new Error(`Instância ${instanceId} possui lock ativo e saudável no nó ${assignedNodeId}`);
+                    }
+
+                    // Se atingiu o limite de tentativas e o lock não foi renovado/liberado, assume controle via Force Takeover
                     console.warn(`[SessionManager] ⚠️ Force Takeover ativado para instância ${instanceId}: Assumindo controle e liberando lock retido por ${assignedNodeId} (após ${maxLockAttempts} tentativas).`);
                     lockAcquired = true;
                     break;
@@ -713,9 +719,15 @@ class SessionManager {
                         return;
                     }
 
-                    const isRestartRequired = (status === 515 || status === 428 || status === 1006 || status === DisconnectReason.restartRequired || reason.toLowerCase().includes('restart required') || reason.toLowerCase().includes('precondition required') || reason.toLowerCase().includes('connection closed') || reason.toLowerCase().includes('connection terminated') || reason.toLowerCase().includes('stream errored')) && isFullyAuthenticated;
+                    const loggedOut = status === DisconnectReason.loggedOut;
+                    const isConflict = status === 440 || status === DisconnectReason.connectionReplaced || status === 409 || reason.toLowerCase().includes('conflict') || reason.toLowerCase().includes('replaced');
+                    const isBlocked12h = reason.toLowerCase().includes('blocked') || reason.toLowerCase().includes('12h') || status === 410 || status === 429;
+                    const isForbidden = (status === 403 || reason.toLowerCase().includes('forbidden')) && status !== 503 && status !== 502 && status !== 504;
+                    const isBadSession = (status === 500 || reason.toLowerCase().includes('bad session')) && status !== 503 && status !== 502 && status !== 504 && !isConflict;
+
+                    const isRestartRequired = !isConflict && (status === 515 || status === 428 || status === 1006 || status === DisconnectReason.restartRequired || reason.toLowerCase().includes('restart required') || reason.toLowerCase().includes('precondition required') || reason.toLowerCase().includes('connection closed') || (reason.toLowerCase().includes('stream errored') && !reason.toLowerCase().includes('conflict'))) && isFullyAuthenticated;
                     if (isRestartRequired) {
-                        console.log(`[SessionManager] WhatsApp solicitou reinicialização/estabilização pós-pareamento (status ${status} / ${reason}) para a instância ${instanceId}. Reciclando chaves em RAM e reconectando imediatamente em 500ms com as novas chaves...`);
+                        console.log(`[SessionManager] WhatsApp solicitou reinicialização/estabilização pós-pareamento (status ${status} / ${reason}) para a instância ${instanceId}. Reciclando chaves em RAM e reconectando em 1s com as novas chaves...`);
                         try {
                             if (sock?.ws) sock.ws.close();
                             if (sock?.end) sock.end();
@@ -728,11 +740,11 @@ class SessionManager {
                                     console.error(`[SessionManager] Erro ao reconectar pós restartRequired/428 para ${instanceId}:`, err.message);
                                 });
                             }
-                        }, 500);
+                        }, 1000);
                         return;
                     }
 
-                    const isStreamOscillation = status === 503 || status === 502 || status === 504 || status === 408 || status === 405 || reason.toLowerCase().includes('connection terminated') || reason.toLowerCase().includes('connection lost');
+                    const isStreamOscillation = !isConflict && (status === 503 || status === 502 || status === 504 || status === 408 || status === 405 || reason.toLowerCase().includes('connection terminated') || reason.toLowerCase().includes('connection lost'));
 
                     if (isStreamOscillation && isFullyAuthenticated) {
                         const attempts = (this.oscillationAttempts.get(instanceId) || 0) + 1;
@@ -767,12 +779,6 @@ class SessionManager {
                         clearTimeout(this.reconnectTimeouts.get(instanceId));
                         this.reconnectTimeouts.delete(instanceId);
                     }
-
-                    const loggedOut = status === DisconnectReason.loggedOut;
-                    const isConflict = status === 440 || reason.toLowerCase().includes('conflict') || reason.toLowerCase().includes('replaced');
-                    const isBlocked12h = reason.toLowerCase().includes('blocked') || reason.toLowerCase().includes('12h') || status === 410 || status === 429;
-                    const isForbidden = (status === 403 || reason.toLowerCase().includes('forbidden')) && status !== 503 && status !== 502 && status !== 504;
-                    const isBadSession = (status === 500 || reason.toLowerCase().includes('bad session')) && status !== 503 && status !== 502 && status !== 504;
 
                     this.logMonitoringEvent(instanceId, 'connection_lost', { reason: reason || `status_${status}`, status_code: status }).catch(()=>{});
                     this.sessions.delete(instanceId);
@@ -901,32 +907,52 @@ class SessionManager {
                         this.conflictAttempts.set(instanceId, cAttempts);
                         this.reconnectAttempts.delete(instanceId);
 
+                        // Encerra socket local e limpa cache de chaves imediatamente
+                        try {
+                            if (sock?.ws) sock.ws.close();
+                            if (sock?.end) sock.end();
+                        } catch (e) {}
+                        this.sessions.delete(instanceId);
+                        clearInstanceMemoryCache(instanceId);
+
                         if (cAttempts >= 3 || isLocal) {
-                            console.error(`[SessionManager] ${isLocal ? 'Ambiente local detectado. Cancelando reconexão de conflito imediatamente para não derrubar a produção.' : `Limite de conflitos atingido na instância ${instanceId}. Interrompendo reconexão automática para evitar banimento.`}`);
+                            console.error(`[SessionManager] ${isLocal ? 'Ambiente local detectado. Cancelando reconexão de conflito imediatamente para não concorrer com a produção.' : `Limite de conflitos de sessão atingido na instância ${instanceId} (tentativa ${cAttempts}/3). Interrompendo reconexão automática para evitar concorrência/banimento.`}`);
                             
                             if (!isLocal) {
                                 await retryWithBackoff(() =>
                                     supabase.from('whatsapp_instances')
                                         .update({ 
                                             status: 'offline', 
-                                            last_error: 'Desconectado por conflito. Outro dispositivo se conectou a esta conta de WhatsApp. O sistema interrompeu as reconexões automáticas para evitar banimento. Reconecte manualmente no painel.' 
+                                            assigned_node_id: null,
+                                            lease_until: null,
+                                            last_error: 'Desconectado por conflito de sessão (Stream Errored / status 440). Outro dispositivo ou worker assumiu este número no WhatsApp. Reconexão suspensa para evitar sobrecarga. Clique em Reconectar no painel quando desejar.',
+                                            last_disconnected_at: new Date().toISOString(),
+                                            last_disconnect_reason: 'conflict_440'
                                         })
                                         .eq('id', instanceId)
-                                        .eq('assigned_node_id', NODE_ID)
                                 );
                             }
                             
+                            await this.logConnectionEvent(tenantId, instanceId, 'conflict_440', 'close', reason, null, null);
+
                             // Publica evento de status offline para o frontend
                             await eventProcessor.handleConnectionUpdate(tenantId, instanceId, { 
                                 connection: 'close', 
-                                lastDisconnect: { error: { output: { statusCode: 409 } } } 
+                                lastDisconnect: { error: { output: { statusCode: 440 } } } 
                             });
                         } else {
-                            console.warn(`[SessionManager] CONFLITO detectado na instância ${instanceId} (Tentativa ${cAttempts}/3). Outro dispositivo conectou? Aguardando 30s antes de tentar novamente...`);
+                            const delays = [20000, 45000, 90000];
+                            const delay = delays[Math.min(cAttempts - 1, delays.length - 1)];
+                            console.warn(`[SessionManager] ⚠️ CONFLITO de sessão detectado na instância ${instanceId} (${reason || status}, tentativa ${cAttempts}/3). Aguardando ${delay / 1000}s de backoff antes de revalidar posse...`);
                             const timer = setTimeout(() => {
                                 this.reconnectingTimers.delete(instanceId);
-                                this.createSession(tenantId, instanceId, true);
-                            }, 30000);
+                                if (!this.sessions.has(instanceId)) {
+                                    // Passa force = false para respeitar lease ativo se outro worker assumiu legitimamente
+                                    this.createSession(tenantId, instanceId, false).catch(err => {
+                                        console.error(`[SessionManager] Erro na retentativa pós-conflito para ${instanceId}:`, err.message);
+                                    });
+                                }
+                            }, delay);
                             this.reconnectingTimers.set(instanceId, timer);
                         }
                     } else {
