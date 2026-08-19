@@ -89,7 +89,6 @@ class SessionManager {
         this.consecutiveBadSessionAttempts = new Map();
         this.oscillationAttempts = new Map();
         this.inProgressLocks = new Map();
-        this.startHeartbeat();
 
         // Pino stream configurado para enviar logs para nosso SSE e para o stdout
         const pinoStream = {
