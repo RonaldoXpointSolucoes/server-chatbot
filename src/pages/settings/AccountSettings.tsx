@@ -1,9 +1,87 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useChatStore } from '../../store/chatStore';
-import { Settings2, Save, Link as LinkIcon, Briefcase, Store, MapPin, Clock, Plus, Trash2, Camera, Video, Utensils, Smartphone, Wifi, Battery, Signal, Home, Search, ClipboardList, User, ChevronLeft, ArrowLeft, Minus, ChevronDown, ChevronUp, Sparkles, QrCode, UserPlus, Truck, BookOpen } from 'lucide-react';
+import { Settings2, Save, Link as LinkIcon, Briefcase, Store, MapPin, Clock, Plus, Trash2, Camera, Video, Utensils, Smartphone, Wifi, Battery, Signal, Home, Search, ClipboardList, User, ChevronLeft, ArrowLeft, Minus, ChevronDown, ChevronUp, Sparkles, QrCode, UserPlus, Truck, BookOpen, GripVertical, ArrowUpDown, RotateCcw, FileText, Copy, Check } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { supabase } from '../../services/supabase';
 import { GastrofoodAPIDocumentationModal } from '../../components/GastrofoodAPIDocumentationModal';
+
+export type SectionId = 
+  | 'variaveis'
+  | 'horarios'
+  | 'cardapio'
+  | 'cep'
+  | 'cliente'
+  | 'pedido'
+  | 'statusPedido'
+  | 'pagamentoPix'
+  | 'cadastroCliente'
+  | 'taxaEntrega'
+  | 'geoloc';
+
+
+export const DEFAULT_ENDPOINT_INSTRUCTIONS: Record<SectionId, string> = {
+  variaveis: `📌 Instruções de Uso das Variáveis da Empresa:
+- Nome da Empresa / IA: Identificação utilizada pela Luna na saudação e assinatura.
+- Link do Cardápio Digital: Link compartilhado quando o cliente solicitar o cardápio.
+- ID Loja gFood: UUID do estabelecimento no Gastrofood injetado automaticamente nos payloads.`,
+
+  horarios: `📌 Instruções do Horário de Funcionamento:
+- Define a grade semanal de atendimento.
+- A Luna IA consulta esta programação para informar se o estabelecimento está aberto ou fechado em tempo real.`,
+
+  cardapio: `📌 Instruções do Cardápio JSON (ProdutoPdvService & ProdutoComPassos):
+- GetCardapioCompleto: Sincroniza grupos e produtos de primeiro nível.
+- ProdutoComPassos: Sincroniza adicionais, variações e complementos.
+- Utilizado pelo motor de busca RAG da Luna IA para tirar dúvidas e sugerir pratos.`,
+
+  cep: `📌 Instruções da Consulta de CEP:
+- Serviço: NuvemEnderecoService / ConsultaCEP
+- Uso: Valida o CEP informado pelo cliente no chat e retorna logradouro, bairro e cidade.`,
+
+    cliente: `📌 Instruções da Central de Clientes & Logística gFood:
+- ConsultaCliente: Verifica se o número de telefone já possui cadastro no Gastrofood e recupera dados.
+- CadastrarCliente: Realiza o cadastro de novos clientes com nome, telefone e endereço.
+- TaxaEntrega: Calcula o valor da entrega e tempo estimado por bairro ou distância.
+- Geolocalização: Obtém latitude e longitude para precisão de rotas e cálculo de frete.`,
+
+  pedido: `📌 Instruções do Envio de Pedido:
+- Serviço: NuvemPedidoService / FinalizeOrder
+- Uso: Envia o pedido com itens, adicionais, taxa de entrega, forma de pagamento e endereço para o PDV.`,
+
+  statusPedido: `📌 Instruções do Status do Pedido:
+- Serviço: NuvemPedidoService / StatusPedido
+- Uso: Permite consultar se o pedido está recebido, em produção, em trânsito ou finalizado.`,
+
+  pagamentoPix: `📌 Instruções do Pagamento-PIX:
+- Serviço: NuvemPagamentoService / GerarPix
+- Uso: Gera o QR Code e chave copia-e-cola PIX para liquidação instantânea do pedido.`,
+
+  cadastroCliente: `📌 Instruções do Cadastro de Cliente:
+- Serviço: NuvemClienteService / CadastrarCliente
+- Uso: Cria um novo cadastro de cliente com nome, WhatsApp e endereço no Gastrofood.`,
+
+  taxaEntrega: `📌 Instruções da Taxa de Entrega:
+- Serviço: NuvemEntregaService / CalcularTaxa
+- Uso: Calcula o frete e estimativa de entrega com base na distância ou bairro informado.`,
+
+  geoloc: `📌 Instruções de Geolocalização:
+- Serviço: NuvemGeolocService / ObterCoordenadas
+- Uso: Obtém latitude e longitude para validação de raio de entrega e rotas.`
+};
+
+const DEFAULT_SECTIONS_ORDER: SectionId[] = [
+  'variaveis',
+  'horarios',
+  'cardapio',
+  'cep',
+  'cliente',
+  'pedido',
+  'statusPedido',
+  'pagamentoPix',
+  'cadastroCliente',
+  'taxaEntrega',
+  'geoloc'
+];
 
 const ZERO_VALUE_EXCEPTIONS = [
   'catchup', 'ketchup', 'guardanapo', 'molho', 'maionese', 
@@ -384,8 +462,142 @@ export default function AccountSettings() {
   const [isDocModalOpen, setIsDocModalOpen] = useState(false);
   const [isCepExpanded, setIsCepExpanded] = useState(false);
   const [isClienteExpanded, setIsClienteExpanded] = useState(false);
+  // Estados para Submenus internos de Consulta/Gestão de Cliente
+  const [isConsultaClienteSubExpanded, setIsConsultaClienteSubExpanded] = useState(true);
+  const [isCepSubExpanded, setIsCepSubExpanded] = useState(false);
+  const [isCadastroClienteSubExpanded, setIsCadastroClienteSubExpanded] = useState(false);
+  const [isTaxaEntregaSubExpanded, setIsTaxaEntregaSubExpanded] = useState(false);
+  const [isGeolocSubExpanded, setIsGeolocSubExpanded] = useState(false);
+
   const [isPedidoExpanded, setIsPedidoExpanded] = useState(false);
   const [isVariaveisExpanded, setIsVariaveisExpanded] = useState(false);
+  // Estados para Submenus internos de Variáveis Globais
+  const [isRedesSociaisSubExpanded, setIsRedesSociaisSubExpanded] = useState(false);
+  const [isHorariosSubExpanded, setIsHorariosSubExpanded] = useState(false);
+
+
+  // Estados e Funções de Drag & Drop para Reordenação de Seções
+  
+  // Estados e Funções para Instruções Manuais de Cada Endpoint
+  const [copiedSectionId, setCopiedSectionId] = useState<SectionId | null>(null);
+  const [endpointInstructions, setEndpointInstructions] = useState<Record<string, string>>(() => {
+    try {
+      const tenantId = tenantInfo?.id || localStorage.getItem('current_tenant_id') || 'default';
+      const saved = localStorage.getItem(`endpoint_instructions_${tenantId}`);
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch (e) {}
+    return DEFAULT_ENDPOINT_INSTRUCTIONS;
+  });
+
+  const handleUpdateInstruction = (id: SectionId, value: string) => {
+    const updated = { ...endpointInstructions, [id]: value };
+    setEndpointInstructions(updated);
+    try {
+      const tenantId = tenantInfo?.id || localStorage.getItem('current_tenant_id') || 'default';
+      localStorage.setItem(`endpoint_instructions_${tenantId}`, JSON.stringify(updated));
+    } catch (e) {}
+  };
+
+  const handleInsertTemplate = (id: SectionId) => {
+    const template = DEFAULT_ENDPOINT_INSTRUCTIONS[id] || '';
+    handleUpdateInstruction(id, template);
+  };
+
+  const handleCopyInstruction = (id: SectionId) => {
+    const text = endpointInstructions[id] || '';
+    if (text) {
+      navigator.clipboard.writeText(text);
+      setCopiedSectionId(id);
+      setTimeout(() => setCopiedSectionId(null), 2000);
+    }
+  };
+
+  const [sectionsOrder, setSectionsOrder] = useState<SectionId[]>(() => {
+    try {
+      const tenantId = tenantInfo?.id || localStorage.getItem('current_tenant_id') || 'default';
+      const saved = localStorage.getItem(`account_sections_order_${tenantId}`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const valid = parsed.filter(s => DEFAULT_SECTIONS_ORDER.includes(s));
+          const missing = DEFAULT_SECTIONS_ORDER.filter(s => !valid.includes(s));
+          return [...valid, ...missing];
+        }
+      }
+    } catch (e) {}
+    return DEFAULT_SECTIONS_ORDER;
+  });
+
+  const [draggedSection, setDraggedSection] = useState<SectionId | null>(null);
+  const [dragOverSection, setDragOverSection] = useState<SectionId | null>(null);
+
+  const saveSectionsOrder = (newOrder: SectionId[]) => {
+    setSectionsOrder(newOrder);
+    try {
+      const tenantId = tenantInfo?.id || localStorage.getItem('current_tenant_id') || 'default';
+      localStorage.setItem(`account_sections_order_${tenantId}`, JSON.stringify(newOrder));
+    } catch (e) {}
+  };
+
+  const handleResetSectionsOrder = () => {
+    saveSectionsOrder(DEFAULT_SECTIONS_ORDER);
+  };
+
+  const handleDragStart = (e: React.DragEvent, sectionId: SectionId) => {
+    setDraggedSection(sectionId);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', sectionId);
+  };
+
+  const handleDragOver = (e: React.DragEvent, sectionId: SectionId) => {
+    e.preventDefault();
+    if (draggedSection && draggedSection !== sectionId) {
+      setDragOverSection(sectionId);
+    }
+  };
+
+  const handleDragLeave = () => {
+    setDragOverSection(null);
+  };
+
+  const handleDrop = (e: React.DragEvent, targetSectionId: SectionId) => {
+    e.preventDefault();
+    setDragOverSection(null);
+    if (!draggedSection || draggedSection === targetSectionId) {
+      setDraggedSection(null);
+      return;
+    }
+
+    const currentOrder = [...sectionsOrder];
+    const dragIndex = currentOrder.indexOf(draggedSection);
+    const targetIndex = currentOrder.indexOf(targetSectionId);
+
+    if (dragIndex !== -1 && targetIndex !== -1) {
+      currentOrder.splice(dragIndex, 1);
+      currentOrder.splice(targetIndex, 0, draggedSection);
+      saveSectionsOrder(currentOrder);
+    }
+
+    setDraggedSection(null);
+  };
+
+  const handleMoveSection = (sectionId: SectionId, direction: 'up' | 'down') => {
+    const currentOrder = [...sectionsOrder];
+    const index = currentOrder.indexOf(sectionId);
+    if (index === -1) return;
+
+    if (direction === 'up' && index > 0) {
+      const [item] = currentOrder.splice(index, 1);
+      currentOrder.splice(index - 1, 0, item);
+      saveSectionsOrder(currentOrder);
+    } else if (direction === 'down' && index < currentOrder.length - 1) {
+      const [item] = currentOrder.splice(index, 1);
+      currentOrder.splice(index + 1, 0, item);
+      saveSectionsOrder(currentOrder);
+    }
+  };
 
   // Estados para Consulta de CEP
   const [cepJsonUrl, setCepJsonUrl] = useState(CEP_DEFAULT_URL);
@@ -938,6 +1150,9 @@ export default function AccountSettings() {
       setGeolocJsonToken(settings.geoloc_json_token || GASTROFOOD_DEFAULT_TOKEN);
       setGeolocJsonPayload(settings.geoloc_json_payload || DEFAULT_GEOLOC_PAYLOAD);
       
+      if (settings.endpoint_instructions) {
+        setEndpointInstructions(settings.endpoint_instructions);
+      }
       if (settings.horarios_estrutura) {
         setDiasHorarios(settings.horarios_estrutura);
       } else {
@@ -989,7 +1204,8 @@ export default function AccountSettings() {
         taxa_entrega_json_payload: taxaEntregaJsonPayload,
         geoloc_json_url: geolocJsonUrl,
         geoloc_json_token: geolocJsonToken,
-        geoloc_json_payload: geolocJsonPayload
+        geoloc_json_payload: geolocJsonPayload,
+        endpoint_instructions: endpointInstructions
       });
       console.log("Save concluído!");
       setSuccess(true);
@@ -1315,71 +1531,219 @@ export default function AccountSettings() {
     }));
   };
 
-  return (
-    <div className="flex-1 flex flex-col h-full bg-[#f0f2f5] dark:bg-[#111b21] overflow-hidden">
-      
-      {/* Header Premium */}
-      <div className="h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex items-center justify-between px-8 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 z-10 shadow-sm relative">
-        <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white shadow-lg shadow-indigo-500/20">
-            <Briefcase size={24} />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
-              Conta {tenantInfo?.name && <span className="text-indigo-500 dark:text-indigo-400 text-base font-normal">({tenantInfo.name})</span>}
-            </h1>
-            <p className="text-sm text-gray-500 dark:text-[#aebac1]">
-              Gerencie as configurações e variáveis globais da sua empresa.
-            </p>
-          </div>
-        </div>
+  
 
-        <div>
-          <button 
-            onClick={handleSave}
-            disabled={saving}
-            className="px-6 py-2.5 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-semibold rounded-xl shadow-lg shadow-indigo-500/20 flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+  const renderDraggableCard = (
+    id: SectionId,
+    index: number,
+    title: string,
+    subtitle: string,
+    icon: React.ReactNode,
+    iconBg: string,
+    isExpanded: boolean,
+    onToggle: () => void,
+    children: React.ReactNode
+  ) => {
+    const isDragging = draggedSection === id;
+    const isDragOver = dragOverSection === id;
+
+    return (
+      <div
+        key={id}
+        draggable
+        onDragStart={(e) => handleDragStart(e, id)}
+        onDragOver={(e) => handleDragOver(e, id)}
+        onDragLeave={handleDragLeave}
+        onDrop={(e) => handleDrop(e, id)}
+        onDragEnd={() => { setDraggedSection(null); setDragOverSection(null); }}
+        className={cn(
+          "bg-white dark:bg-[#202c33] rounded-[24px] shadow-sm border transition-all duration-200 overflow-hidden",
+          isDragging 
+            ? "opacity-40 scale-[0.98] border-dashed border-2 border-indigo-500 bg-indigo-50/20 dark:bg-indigo-950/20 shadow-2xl" 
+            : isDragOver
+            ? "border-indigo-500 ring-2 ring-indigo-500/50 shadow-xl scale-[1.01]"
+            : "border-gray-100 dark:border-[#222d34] hover:border-indigo-500/30"
+        )}
+      >
+        <div className="flex items-center justify-between p-6 sm:p-8 hover:bg-gray-50/50 dark:hover:bg-black/10 transition-colors">
+          <div 
+            onClick={onToggle}
+            className="flex items-center gap-3 sm:gap-4 flex-1 cursor-pointer select-none"
           >
-            <Save size={18} className={cn(saving && "animate-pulse")} />
-            {saving ? 'Salvando...' : 'Salvar Alterações'}
-          </button>
-        </div>
-      </div>
-
-      {/* Main Content */}
-      <div className="flex-1 overflow-y-auto p-8 relative">
-        <div className="max-w-4xl mx-auto space-y-6">
-          
-          {success && (
-            <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 px-4 py-3 rounded-xl animate-in slide-in-from-top-2 duration-300">
-              Configurações salvas com sucesso!
+            {/* Grip Handle para Drag and Drop */}
+            <div 
+              className="p-1.5 -ml-2 text-gray-400 hover:text-indigo-600 dark:text-gray-500 dark:hover:text-indigo-400 cursor-grab active:cursor-grabbing rounded-lg hover:bg-indigo-50 dark:hover:bg-white/5 transition-all"
+              title="Clique e arraste para reordenar"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <GripVertical size={20} />
             </div>
-          )}
 
-          {/* Seção Variáveis Globais da Empresa */}
-          <div className="bg-white dark:bg-[#202c33] rounded-[24px] shadow-sm border border-gray-100 dark:border-[#222d34] overflow-hidden animate-in fade-in zoom-in-95 duration-500">
+            {/* Badge de Posição / Índice */}
+            <span className="w-5 h-5 rounded-md bg-gray-100 dark:bg-slate-800 text-[10px] font-mono font-bold text-gray-500 dark:text-gray-400 flex items-center justify-center shrink-0">
+              {index + 1}
+            </span>
+
+            {/* Ícone da Seção */}
+            <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center shrink-0", iconBg)}>
+              {icon}
+            </div>
+
+            {/* Título e Subtítulo */}
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-base sm:text-lg font-bold text-gray-800 dark:text-gray-100 truncate">
+                  {title}
+                </h2>
+                {(id === 'variaveis' || id === 'cardapio') && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-gradient-to-r from-purple-500/15 to-indigo-500/15 text-purple-600 dark:text-purple-300 font-bold uppercase border border-purple-500/30 flex items-center gap-1 shadow-sm shrink-0 animate-in fade-in">
+                    <Sparkles size={10} className="text-purple-500" />
+                    Base Global da IA
+                  </span>
+                )}
+              </div>
+              <p className="text-xs sm:text-sm text-gray-500 dark:text-[#aebac1] line-clamp-1">
+                {subtitle}
+              </p>
+            </div>
+          </div>
+
+          {/* Controles da Direita: Mover Cima/Baixo + Chevron Colapso */}
+          <div className="flex items-center gap-1 sm:gap-2 shrink-0 pl-2">
+            {/* Botões Mover Subir/Descer */}
+            <div className="flex items-center bg-gray-100 dark:bg-slate-800/80 rounded-xl p-0.5 border border-gray-200/50 dark:border-white/5">
+              <button
+                type="button"
+                disabled={index === 0}
+                onClick={(e) => { e.stopPropagation(); handleMoveSection(id, 'up'); }}
+                title="Mover para cima"
+                className="p-1.5 text-gray-400 hover:text-indigo-600 dark:text-gray-400 dark:hover:text-indigo-400 disabled:opacity-20 disabled:cursor-not-allowed hover:bg-white dark:hover:bg-slate-700 rounded-lg transition-all"
+              >
+                <ChevronUp size={15} />
+              </button>
+              <button
+                type="button"
+                disabled={index === sectionsOrder.length - 1}
+                onClick={(e) => { e.stopPropagation(); handleMoveSection(id, 'down'); }}
+                title="Mover para baixo"
+                className="p-1.5 text-gray-400 hover:text-indigo-600 dark:text-gray-400 dark:hover:text-indigo-400 disabled:opacity-20 disabled:cursor-not-allowed hover:bg-white dark:hover:bg-slate-700 rounded-lg transition-all"
+              >
+                <ChevronDown size={15} />
+              </button>
+            </div>
+
+            {/* Botão de Expandir / Recolher */}
             <button
               type="button"
-              onClick={() => setIsVariaveisExpanded(!isVariaveisExpanded)}
-              className="w-full flex items-center justify-between p-8 text-left outline-none hover:bg-gray-50/50 dark:hover:bg-black/10 transition-colors"
+              onClick={onToggle}
+              className="p-2 text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 rounded-xl hover:bg-gray-100 dark:hover:bg-white/5 transition-colors"
             >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center text-indigo-500">
-                  <Settings2 size={20} />
-                </div>
-                <div>
-                  <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100">Variáveis Globais da Empresa (Luna IA)</h2>
-                  <p className="text-sm text-gray-500 dark:text-[#aebac1]">Configure os dados da sua empresa que serão inseridos de forma dinâmica nos prompts da Luna.</p>
-                </div>
-              </div>
-              <div className="text-gray-400 dark:text-gray-500 pr-2">
-                {isVariaveisExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
-              </div>
+              {isExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
             </button>
+          </div>
+        </div>
 
-            {isVariaveisExpanded && (
-              <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
-                <div className="space-y-6 max-w-2xl">
+        {isExpanded && (
+          <div className="px-6 sm:px-8 pb-8 pt-4 border-t border-gray-100 dark:border-[#222d34]/60 animate-in fade-in slide-in-from-top-2 duration-300">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+              {/* Coluna Principal: Configurações & Testes do Endpoint */}
+              <div className="lg:col-span-7 xl:col-span-8 space-y-6">
+                {children}
+              </div>
+
+              {/* Coluna Lateral: Caixa de Texto de Instruções de Uso */}
+              <div className="lg:col-span-5 xl:col-span-4 bg-slate-50/90 dark:bg-[#182229]/90 border border-slate-200/80 dark:border-[#2a3942] rounded-2xl p-4 sm:p-5 flex flex-col justify-between space-y-3.5 shadow-sm backdrop-blur-sm sticky top-4">
+                <div className="flex items-center justify-between gap-2 border-b border-slate-200/60 dark:border-white/5 pb-3">
+                  <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400">
+                    <FileText size={16} />
+                    <span className="text-xs font-bold uppercase tracking-wider">Instruções de Uso</span>
+                  </div>
+                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full font-medium flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                    Salvo
+                  </span>
+                </div>
+
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                  Escreva instruções manuais, regras de negócio ou exemplos de uso para este endpoint. O conteúdo é salvo automaticamente.
+                </p>
+
+                <textarea
+                  value={endpointInstructions[id] || ''}
+                  onChange={(e) => handleUpdateInstruction(id, e.target.value)}
+                  placeholder={`Digite as instruções de uso para ${title}...`}
+                  rows={10}
+                  className="w-full bg-white dark:bg-[#202c33] border border-slate-200 dark:border-[#304046] rounded-xl p-3 text-xs text-slate-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 resize-y min-h-[160px] font-sans leading-relaxed shadow-inner"
+                />
+
+                <div className="flex items-center justify-between gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => handleInsertTemplate(id)}
+                    className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 flex items-center gap-1 hover:underline transition-all"
+                    title="Preencher com modelo sugerido de instruções"
+                  >
+                    <Sparkles size={13} />
+                    Inserir Modelo
+                  </button>
+
+                  {endpointInstructions[id] && (
+                    <button
+                      type="button"
+                      onClick={() => handleCopyInstruction(id)}
+                      className="text-[11px] text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 flex items-center gap-1 transition-all"
+                      title="Copiar instruções"
+                    >
+                      {copiedSectionId === id ? (
+                        <>
+                          <Check size={13} className="text-emerald-500" />
+                          <span className="text-emerald-500 font-semibold">Copiado!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy size={13} />
+                          Copiar
+                        </>
+                      )}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderSection = (id: SectionId, index: number) => {
+    switch (id) {
+            case 'variaveis':
+        return renderDraggableCard(
+          'variaveis',
+          index,
+          'Variáveis Globais da Empresa (Luna IA)',
+          'Configure dados da empresa, redes sociais e horários de funcionamento para os prompts da Luna.',
+          <Settings2 size={20} />,
+          'bg-indigo-500/10 text-indigo-500',
+          isVariaveisExpanded,
+          () => setIsVariaveisExpanded(!isVariaveisExpanded),
+          <div className="space-y-6">
+            {/* Banner de Inteligência Global da IA */}
+            <div className="bg-gradient-to-r from-indigo-500/10 via-purple-500/10 to-transparent p-4 rounded-2xl border border-indigo-500/20 flex items-center gap-3 text-xs text-indigo-900 dark:text-indigo-200">
+              <div className="p-2 rounded-xl bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 shrink-0">
+                <Sparkles size={18} />
+              </div>
+              <div>
+                <span className="font-bold block">Base de Conhecimento Institucional Global da Luna IA</span>
+                <span className="text-gray-600 dark:text-gray-300 text-[11px]">
+                  Estes dados são injetados automaticamente em todas as conversas do WhatsApp para responder perguntas sobre o nome da loja, endereço, se está aberto/fechado, horários e redes sociais.
+                </span>
+              </div>
+            </div>
+
+            {/* Informações Principais da Empresa */}
+            <div className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                   <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
@@ -1453,222 +1817,239 @@ export default function AccountSettings() {
                   Será substituído no token <code className="bg-gray-200 dark:bg-black/30 px-1 py-0.5 rounded font-mono text-[10px] text-indigo-500 dark:text-indigo-300">[ENDERECO_DA_EMPRESA]</code>.
                 </p>
               </div>
-
-              {/* Redes Sociais e Mapas */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-6 border-t border-gray-100 dark:border-[#222d34]/60">
-                <div>
-                  <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
-                    <Camera size={16} className="text-pink-500" />
-                    Link do Instagram
-                  </label>
-                  <input 
-                    type="url"
-                    value={instagram}
-                    onChange={(e) => setInstagram(e.target.value)}
-                    placeholder="https://instagram.com/sua-empresa"
-                    className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400"
-                  />
-                  <p className="text-xs text-gray-500 dark:text-[#8696a0] mt-2">
-                    Será substituído no token <code className="bg-gray-200 dark:bg-black/30 px-1 py-0.5 rounded font-mono text-[10px] text-indigo-500 dark:text-indigo-300">[LINK_INSTAGRAM]</code>.
-                  </p>
-                </div>
-
-                <div>
-                  <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
-                    <MapPin size={16} className="text-emerald-500" />
-                    Link do Google Maps
-                  </label>
-                  <input 
-                    type="url"
-                    value={googleMaps}
-                    onChange={(e) => setGoogleMaps(e.target.value)}
-                    placeholder="https://maps.google.com/?q=sua-empresa"
-                    className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400"
-                  />
-                  <p className="text-xs text-gray-500 dark:text-[#8696a0] mt-2">
-                    Será substituído no token <code className="bg-gray-200 dark:bg-black/30 px-1 py-0.5 rounded font-mono text-[10px] text-indigo-500 dark:text-indigo-300">[LINK_GOOGLE_MAPS]</code>.
-                  </p>
-                </div>
-
-                <div>
-                  <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
-                    <Video size={16} className="text-red-500" />
-                    Link do YouTube
-                  </label>
-                  <input 
-                    type="url"
-                    value={youtube}
-                    onChange={(e) => setYoutube(e.target.value)}
-                    placeholder="https://youtube.com/c/sua-empresa"
-                    className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400"
-                  />
-                  <p className="text-xs text-gray-500 dark:text-[#8696a0] mt-2">
-                    Será substituído no token <code className="bg-gray-200 dark:bg-black/30 px-1 py-0.5 rounded font-mono text-[10px] text-indigo-500 dark:text-indigo-300">[LINK_YOUTUBE]</code>.
-                  </p>
-                </div>
-
-                <div>
-                  <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
-                    <LinkIcon size={16} className="text-purple-400" />
-                    Link do TikTok
-                  </label>
-                  <input 
-                    type="url"
-                    value={tiktok}
-                    onChange={(e) => setTiktok(e.target.value)}
-                    placeholder="https://tiktok.com/@sua-empresa"
-                    className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400"
-                  />
-                  <p className="text-xs text-gray-500 dark:text-[#8696a0] mt-2">
-                    Será substituído no token <code className="bg-gray-200 dark:bg-black/30 px-1 py-0.5 rounded font-mono text-[10px] text-indigo-500 dark:text-indigo-300">[LINK_TIKTOK]</code>.
-                  </p>
-                </div>
-              </div>
             </div>
-            </div>
-            )}
-          </div>
 
-          {/* Seção Horário de Funcionamento (Configurador Semanal) - Agora colapsável */}
-          <div className="bg-white dark:bg-[#202c33] rounded-[24px] shadow-sm border border-gray-100 dark:border-[#222d34] overflow-hidden animate-in fade-in zoom-in-95 duration-500">
-            <button
-              type="button"
-              onClick={() => setIsHorariosExpanded(!isHorariosExpanded)}
-              className="w-full flex items-center justify-between p-8 text-left outline-none hover:bg-gray-50/50 dark:hover:bg-black/10 transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center text-indigo-500">
-                  <Clock size={20} />
+            {/* SUBMENU 1: Redes Sociais & Links Externos */}
+            <div className="bg-[#f8f9fa] dark:bg-[#182229] border border-gray-200/70 dark:border-[#222d34] rounded-2xl overflow-hidden transition-all shadow-sm">
+              <button
+                type="button"
+                onClick={() => setIsRedesSociaisSubExpanded(!isRedesSociaisSubExpanded)}
+                className="w-full flex items-center justify-between p-4 sm:p-5 text-left outline-none hover:bg-gray-100/60 dark:hover:bg-black/20 transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-pink-500/10 text-pink-500 flex items-center justify-center">
+                    <Camera size={16} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
+                      Redes Sociais & Links Externos
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-pink-500/10 text-pink-500 dark:text-pink-400 font-semibold uppercase">Submenu</span>
+                    </h3>
+                    <p className="text-xs text-gray-500 dark:text-[#aebac1]">Configure os links de Instagram, Google Maps, YouTube e TikTok.</p>
+                  </div>
                 </div>
-                <div>
-                  <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100">Horário de Funcionamento (Configurador Semanal)</h2>
-                  <p className="text-sm text-gray-500 dark:text-[#aebac1]">Configure o cronograma semanal de funcionamento da sua empresa.</p>
+                <div className="text-gray-400 dark:text-gray-500 pr-1">
+                  {isRedesSociaisSubExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
                 </div>
-              </div>
-              <div className="text-gray-400 dark:text-gray-500 pr-2">
-                {isHorariosExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
-              </div>
-            </button>
+              </button>
 
-            {isHorariosExpanded && (
-              <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
-                <div className="space-y-4 bg-[#f8f9fa] dark:bg-[#182229] border border-gray-200/50 dark:border-[#222d34] rounded-2xl p-6 shadow-inner">
-                  {diasHorarios.map((d, dIdx) => (
-                    <div key={d.dia} className="flex flex-col md:flex-row md:items-center justify-between gap-4 py-3 border-b border-gray-100 dark:border-[#222d34]/60 last:border-b-0">
-                      {/* Nome do dia e Toggle */}
-                      <div className="flex items-center justify-between md:justify-start gap-4 min-w-[200px]">
-                        <span className="text-sm font-bold text-gray-800 dark:text-gray-200 w-28">{d.dia}</span>
-                        <div className="flex items-center gap-3">
-                          <button
-                            type="button"
-                            onClick={() => handleToggleDia(dIdx)}
-                            className={cn(
-                              "w-11 h-6 rounded-full relative transition-colors duration-200 outline-none focus:ring-2 focus:ring-indigo-500/50 shadow-inner",
-                              d.aberto ? "bg-emerald-500" : "bg-gray-300 dark:bg-gray-700"
-                            )}
-                          >
-                            <span 
-                              className={cn(
-                                "w-5 h-5 bg-white rounded-full absolute top-0.5 left-0.5 transition-transform duration-200 shadow-sm",
-                                d.aberto ? "translate-x-5" : "translate-x-0"
-                              )}
-                            />
-                          </button>
-                          <span className={cn(
-                            "text-[10px] font-black uppercase tracking-wider select-none w-14",
-                            d.aberto ? "text-emerald-500" : "text-gray-500 dark:text-gray-400"
-                          )}>
-                            {d.aberto ? 'ABERTO' : 'FECHADO'}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Períodos de funcionamento */}
-                      {d.aberto ? (
-                        <div className="flex-1 flex flex-col gap-2.5">
-                          {d.periodos.map((p, pIdx) => (
-                            <div key={pIdx} className="flex items-center gap-2 animate-in slide-in-from-left-2 duration-200">
-                              <div className="flex items-center bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-3 py-1.5 shadow-sm">
-                                <span className="text-[10px] uppercase font-bold text-gray-400 dark:text-gray-500 mr-2">Início</span>
-                                <input
-                                  type="time"
-                                  value={p.inicio}
-                                  onChange={(e) => handleChangePeriodo(dIdx, pIdx, 'inicio', e.target.value)}
-                                  className="bg-transparent border-none text-xs text-gray-800 dark:text-gray-100 outline-none w-16"
-                                />
-                              </div>
-                              <span className="text-xs font-semibold text-gray-400 dark:text-gray-500 px-1">às</span>
-                              <div className="flex items-center bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-3 py-1.5 shadow-sm">
-                                <span className="text-[10px] uppercase font-bold text-gray-400 dark:text-gray-500 mr-2">Fim</span>
-                                <input
-                                  type="time"
-                                  value={p.fim}
-                                  onChange={(e) => handleChangePeriodo(dIdx, pIdx, 'fim', e.target.value)}
-                                  className="bg-transparent border-none text-xs text-gray-800 dark:text-gray-100 outline-none w-16"
-                                />
-                              </div>
-
-                              {d.periodos.length > 1 && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleRemovePeriodo(dIdx, pIdx)}
-                                  className="p-2 text-rose-500 hover:bg-rose-500/10 rounded-xl transition-all"
-                                  title="Remover período"
-                                >
-                                  <Trash2 size={14} />
-                                </button>
-                              )}
-                            </div>
-                          ))}
-                          
-                          <button
-                            type="button"
-                            onClick={() => handleAddPeriodo(dIdx)}
-                            className="flex items-center gap-1 text-[11px] font-bold text-indigo-500 dark:text-indigo-400 hover:text-indigo-600 w-fit mt-1 px-2 py-1 rounded bg-indigo-500/5 hover:bg-indigo-500/10 transition-all border border-indigo-500/10"
-                          >
-                            <Plus size={12} />
-                            Adicionar Turno
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex-1 flex items-center h-9 text-xs font-semibold text-gray-400 dark:text-gray-500">
-                          Luna responderá que a empresa está fechada neste dia.
-                        </div>
-                      )}
+              {isRedesSociaisSubExpanded && (
+                <div className="p-4 sm:p-5 border-t border-gray-200/60 dark:border-[#222d34] bg-white/50 dark:bg-black/10 space-y-4 animate-in fade-in slide-in-from-top-1 duration-200">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-1.5">
+                        <Camera size={14} className="text-pink-500" />
+                        Link do Instagram
+                      </label>
+                      <input 
+                        type="url"
+                        value={instagram}
+                        onChange={(e) => setInstagram(e.target.value)}
+                        placeholder="https://instagram.com/sua-empresa"
+                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-3.5 py-2.5 text-xs text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-pink-500/50 transition-all placeholder:text-gray-400"
+                      />
+                      <p className="text-[11px] text-gray-500 dark:text-[#8696a0] mt-1">
+                        Token: <code className="bg-gray-200 dark:bg-black/30 px-1 py-0.5 rounded font-mono text-[9px] text-pink-500 dark:text-pink-300">[LINK_INSTAGRAM]</code>
+                      </p>
                     </div>
-                  ))}
-                </div>
 
-                <p className="text-xs text-gray-500 dark:text-[#8696a0] mt-3 leading-relaxed">
-                  Os horários configurados serão consolidados automaticamente em texto legível para a inteligência artificial substituir no token <code className="bg-gray-200 dark:bg-black/30 px-1 py-0.5 rounded font-mono text-[10px] text-indigo-500 dark:text-indigo-300">[HORARIO_FUNCIONAMENTO]</code>.
-                </p>
-              </div>
-            )}
+                    <div>
+                      <label className="text-xs font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-1.5">
+                        <MapPin size={14} className="text-emerald-500" />
+                        Link do Google Maps
+                      </label>
+                      <input 
+                        type="url"
+                        value={googleMaps}
+                        onChange={(e) => setGoogleMaps(e.target.value)}
+                        placeholder="https://maps.google.com/?q=sua-empresa"
+                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-3.5 py-2.5 text-xs text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all placeholder:text-gray-400"
+                      />
+                      <p className="text-[11px] text-gray-500 dark:text-[#8696a0] mt-1">
+                        Token: <code className="bg-gray-200 dark:bg-black/30 px-1 py-0.5 rounded font-mono text-[9px] text-emerald-500 dark:text-emerald-300">[LINK_GOOGLE_MAPS]</code>
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-1.5">
+                        <Video size={14} className="text-red-500" />
+                        Link do YouTube
+                      </label>
+                      <input 
+                        type="url"
+                        value={youtube}
+                        onChange={(e) => setYoutube(e.target.value)}
+                        placeholder="https://youtube.com/c/sua-empresa"
+                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-3.5 py-2.5 text-xs text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-red-500/50 transition-all placeholder:text-gray-400"
+                      />
+                      <p className="text-[11px] text-gray-500 dark:text-[#8696a0] mt-1">
+                        Token: <code className="bg-gray-200 dark:bg-black/30 px-1 py-0.5 rounded font-mono text-[9px] text-red-500 dark:text-red-300">[LINK_YOUTUBE]</code>
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-1.5">
+                        <LinkIcon size={14} className="text-purple-400" />
+                        Link do TikTok
+                      </label>
+                      <input 
+                        type="url"
+                        value={tiktok}
+                        onChange={(e) => setTiktok(e.target.value)}
+                        placeholder="https://tiktok.com/@sua-empresa"
+                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-3.5 py-2.5 text-xs text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-purple-500/50 transition-all placeholder:text-gray-400"
+                      />
+                      <p className="text-[11px] text-gray-500 dark:text-[#8696a0] mt-1">
+                        Token: <code className="bg-gray-200 dark:bg-black/30 px-1 py-0.5 rounded font-mono text-[9px] text-purple-500 dark:text-purple-300">[LINK_TIKTOK]</code>
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* SUBMENU 2: Horário de Funcionamento Semanal */}
+            <div className="bg-[#f8f9fa] dark:bg-[#182229] border border-gray-200/70 dark:border-[#222d34] rounded-2xl overflow-hidden transition-all shadow-sm">
+              <button
+                type="button"
+                onClick={() => setIsHorariosSubExpanded(!isHorariosSubExpanded)}
+                className="w-full flex items-center justify-between p-4 sm:p-5 text-left outline-none hover:bg-gray-100/60 dark:hover:bg-black/20 transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-indigo-500/10 text-indigo-500 flex items-center justify-center">
+                    <Clock size={16} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
+                      Horário de Funcionamento (Configurador Semanal)
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-500 dark:text-indigo-400 font-semibold uppercase">Submenu</span>
+                    </h3>
+                    <p className="text-xs text-gray-500 dark:text-[#aebac1]">Configure a programação semanal de dias e turnos de atendimento.</p>
+                  </div>
+                </div>
+                <div className="text-gray-400 dark:text-gray-500 pr-1">
+                  {isHorariosSubExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                </div>
+              </button>
+
+              {isHorariosSubExpanded && (
+                <div className="p-4 sm:p-5 border-t border-gray-200/60 dark:border-[#222d34] bg-white/50 dark:bg-black/10 space-y-4 animate-in fade-in slide-in-from-top-1 duration-200">
+                  <div className="space-y-3">
+                    {diasHorarios.map((d, dIdx) => (
+                      <div key={d.dia} className="flex flex-col md:flex-row md:items-center justify-between gap-3 py-2.5 border-b border-gray-100 dark:border-[#222d34]/60 last:border-b-0">
+                        {/* Nome do dia e Toggle */}
+                        <div className="flex items-center justify-between md:justify-start gap-3 min-w-[180px]">
+                          <span className="text-xs font-bold text-gray-800 dark:text-gray-200 w-24">{d.dia}</span>
+                          <div className="flex items-center gap-2.5">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleDia(dIdx)}
+                              className={cn(
+                                "w-10 h-5 rounded-full relative transition-colors duration-200 outline-none focus:ring-2 focus:ring-indigo-500/50 shadow-inner",
+                                d.aberto ? "bg-emerald-500" : "bg-gray-300 dark:bg-gray-700"
+                              )}
+                            >
+                              <span 
+                                className={cn(
+                                  "w-4 h-4 bg-white rounded-full absolute top-0.5 left-0.5 transition-transform duration-200 shadow-sm",
+                                  d.aberto ? "translate-x-5" : "translate-x-0"
+                                )}
+                              />
+                            </button>
+                            <span className={cn(
+                              "text-[9px] font-black uppercase tracking-wider select-none w-12",
+                              d.aberto ? "text-emerald-500" : "text-gray-500 dark:text-gray-400"
+                            )}>
+                              {d.aberto ? 'ABERTO' : 'FECHADO'}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Períodos de funcionamento */}
+                        {d.aberto ? (
+                          <div className="flex-1 flex flex-col gap-2">
+                            {d.periodos.map((p, pIdx) => (
+                              <div key={pIdx} className="flex items-center gap-2 animate-in slide-in-from-left-2 duration-200">
+                                <div className="flex items-center bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-2.5 py-1 shadow-sm">
+                                  <span className="text-[9px] uppercase font-bold text-gray-400 dark:text-gray-500 mr-1.5">Início</span>
+                                  <input
+                                    type="time"
+                                    value={p.inicio}
+                                    onChange={(e) => handleChangePeriodo(dIdx, pIdx, 'inicio', e.target.value)}
+                                    className="bg-transparent border-none text-xs text-gray-800 dark:text-gray-100 outline-none w-16"
+                                  />
+                                </div>
+                                <span className="text-xs font-semibold text-gray-400 dark:text-gray-500 px-0.5">às</span>
+                                <div className="flex items-center bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-2.5 py-1 shadow-sm">
+                                  <span className="text-[9px] uppercase font-bold text-gray-400 dark:text-gray-500 mr-1.5">Fim</span>
+                                  <input
+                                    type="time"
+                                    value={p.fim}
+                                    onChange={(e) => handleChangePeriodo(dIdx, pIdx, 'fim', e.target.value)}
+                                    className="bg-transparent border-none text-xs text-gray-800 dark:text-gray-100 outline-none w-16"
+                                  />
+                                </div>
+
+                                {d.periodos.length > 1 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemovePeriodo(dIdx, pIdx)}
+                                    className="p-1.5 text-rose-500 hover:bg-rose-500/10 rounded-xl transition-all"
+                                    title="Remover período"
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                            
+                            <button
+                              type="button"
+                              onClick={() => handleAddPeriodo(dIdx)}
+                              className="flex items-center gap-1 text-[10px] font-bold text-indigo-500 dark:text-indigo-400 hover:text-indigo-600 w-fit mt-0.5 px-2 py-0.5 rounded bg-indigo-500/5 hover:bg-indigo-500/10 transition-all border border-indigo-500/10"
+                            >
+                              <Plus size={11} />
+                              Adicionar Turno
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex-1 flex items-center h-8 text-xs font-semibold text-gray-400 dark:text-gray-500">
+                            Luna responderá que o estabelecimento está fechado neste dia.
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  <p className="text-[11px] text-gray-500 dark:text-[#8696a0] mt-2 leading-relaxed">
+                    Os horários configurados serão consolidados automaticamente no token <code className="bg-gray-200 dark:bg-black/30 px-1 py-0.5 rounded font-mono text-[9px] text-indigo-500 dark:text-indigo-300">[HORARIO_FUNCIONAMENTO]</code>.
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
-
-          {/* Seção Cardápio JSON Online (Integração de Produtos) - Agora colapsável */}
-          <div className="bg-white dark:bg-[#202c33] rounded-[24px] shadow-sm border border-gray-100 dark:border-[#222d34] overflow-hidden animate-in fade-in zoom-in-95 duration-500">
-            <button
-              type="button"
-              onClick={() => setIsCardapioExpanded(!isCardapioExpanded)}
-              className="w-full flex items-center justify-between p-8 text-left outline-none hover:bg-gray-50/50 dark:hover:bg-black/10 transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-purple-500/10 flex items-center justify-center text-purple-500">
-                  <LinkIcon size={20} />
-                </div>
-                <div>
-                  <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100">Cardápio JSON Online</h2>
-                  <p className="text-sm text-gray-500 dark:text-[#aebac1]">Configure a busca e consulta de produtos diretamente via API JSON.</p>
-                </div>
-              </div>
-              <div className="text-gray-400 dark:text-gray-500 pr-2">
-                {isCardapioExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
-              </div>
-            </button>
-
-            {isCardapioExpanded && (
-              <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
+        );
+      case 'cardapio':
+        return renderDraggableCard(
+          'cardapio',
+          index,
+          'Cardápio JSON Online',
+          'Configure a busca e consulta de produtos diretamente via API JSON.',
+          <LinkIcon size={20} />,
+          'bg-purple-500/10 text-purple-500',
+          isCardapioExpanded,
+          () => setIsCardapioExpanded(!isCardapioExpanded),
+          <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
                 <div className="space-y-6 max-w-2xl">
                   <div>
                     <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
@@ -2228,115 +2609,46 @@ export default function AccountSettings() {
                   )}
                 </div>
               </div>
-            )}
-          </div>
-
-          {/* Seção Consulta de CEP - Colapsável */}
-          <div className="bg-white dark:bg-[#202c33] rounded-[24px] shadow-sm border border-gray-100 dark:border-[#222d34] overflow-hidden animate-in fade-in zoom-in-95 duration-500">
-            <button
-              type="button"
-              onClick={() => setIsCepExpanded(!isCepExpanded)}
-              className="w-full flex items-center justify-between p-8 text-left outline-none hover:bg-gray-50/50 dark:hover:bg-black/10 transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-500">
-                  <MapPin size={20} />
-                </div>
-                <div>
-                  <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100">Consulta de CEP</h2>
-                  <p className="text-sm text-gray-500 dark:text-[#aebac1]">Configure a consulta de CEP e busca de endereços no Gastrofood.</p>
-                </div>
-              </div>
-              <div className="text-gray-400 dark:text-gray-500 pr-2">
-                {isCepExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
-              </div>
-            </button>
-
-            {isCepExpanded && (
-              <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
-                <div className="space-y-6 max-w-2xl">
-                  <div>
-                    <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
-                      Corpo da Requisição (JSON Payload)
-                    </label>
-                    <textarea 
-                      value={cepJsonPayload}
-                      onChange={(e) => setCepJsonPayload(e.target.value)}
-                      placeholder='{"ACep": "06764365"}'
-                      rows={3}
-                      className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
-                    />
+        );
+      case 'cliente':
+        return renderDraggableCard(
+          'cliente',
+          index,
+          'Consulta & Gestão de Clientes gFood',
+          'Consulta de clientes, cadastro, taxa de entrega e geolocalização no Gastrofood.',
+          <User size={20} />,
+          'bg-blue-500/10 text-blue-500',
+          isClienteExpanded,
+          () => setIsClienteExpanded(!isClienteExpanded),
+          <div className="space-y-4">
+            {/* SUBMENU 1: Consulta de Cliente */}
+            <div className="bg-[#f8f9fa] dark:bg-[#182229] border border-gray-200/70 dark:border-[#222d34] rounded-2xl overflow-hidden transition-all shadow-sm">
+              <button
+                type="button"
+                onClick={() => setIsConsultaClienteSubExpanded(!isConsultaClienteSubExpanded)}
+                className="w-full flex items-center justify-between p-4 sm:p-5 text-left outline-none hover:bg-gray-100/60 dark:hover:bg-black/20 transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-blue-500/10 text-blue-500 flex items-center justify-center">
+                    <User size={16} />
                   </div>
-
-                  <div className="pt-4 flex flex-wrap items-center gap-4">
-                    <button
-                      type="button"
-                      onClick={() => handleTestGeneric(cepJsonUrl, cepJsonToken, cepJsonPayload, setCepLoading, setCepResult, setCepError)}
-                      disabled={cepLoading || !cepJsonUrl}
-                      className="px-6 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-semibold rounded-xl shadow-lg shadow-emerald-500/20 flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {cepLoading ? 'Testando...' : 'Testar Requisição'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleCleanAndFormatJson(cepJsonPayload, setCepJsonPayload, setCepError)}
-                      className="px-6 py-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 hover:border-emerald-500/40 text-emerald-600 dark:text-emerald-400 font-semibold rounded-xl flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95"
-                    >
-                      <Sparkles size={14} />
-                      Organizar e Validar JSON
-                    </button>
-                  </div>
-
-                  {cepError && (
-                    <div className="bg-rose-500/10 border border-rose-500/20 text-rose-500 p-4 rounded-xl text-sm animate-in fade-in duration-300 font-mono whitespace-pre-wrap">
-                      <strong>Erro no teste:</strong> {cepError}
-                    </div>
-                  )}
-
-                  {cepResult && (
-                    <div className="bg-slate-50 dark:bg-[#182229] border border-slate-200 dark:border-[#222d34] p-6 rounded-2xl space-y-4 animate-in fade-in duration-300">
-                      <div className="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-[#222d34]/60">
-                        <span className="text-xs font-bold text-gray-500 dark:text-gray-400">Resultado da Consulta:</span>
-                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-500">
-                          Status: {cepResult.status}
-                        </span>
-                      </div>
-                      <div className="max-h-80 overflow-y-auto whitespace-pre-wrap leading-relaxed text-xs font-mono text-gray-700 dark:text-[#d1d7db] bg-slate-100/50 dark:bg-black/30 p-4 rounded-xl border border-slate-200/50 dark:border-[#304046]/30">
-                        {JSON.stringify(cepResult.data, null, 2)}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Seção Consulta de Cliente - Colapsável */}
-          <div className="bg-white dark:bg-[#202c33] rounded-[24px] shadow-sm border border-gray-100 dark:border-[#222d34] overflow-hidden animate-in fade-in zoom-in-95 duration-500">
-            <button
-              type="button"
-              onClick={() => setIsClienteExpanded(!isClienteExpanded)}
-              className="w-full flex items-center justify-between p-8 text-left outline-none hover:bg-gray-50/50 dark:hover:bg-black/10 transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-500">
-                  <User size={20} />
-                </div>
-                <div>
-                  <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100">Consulta de Cliente</h2>
-                  <p className="text-sm text-gray-500 dark:text-[#aebac1]">Valide se o cliente possui cadastro no Gastrofood via telefone.</p>
-                </div>
-              </div>
-              <div className="text-gray-400 dark:text-gray-500 pr-2">
-                {isClienteExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
-              </div>
-            </button>
-
-            {isClienteExpanded && (
-              <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
-                <div className="space-y-6 max-w-2xl">
                   <div>
-                    <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
+                    <h3 className="text-sm font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
+                      Consulta de Cliente
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-500 dark:text-blue-400 font-semibold uppercase">Submenu</span>
+                    </h3>
+                    <p className="text-xs text-gray-500 dark:text-[#aebac1]">Valide se o cliente possui cadastro no Gastrofood via telefone.</p>
+                  </div>
+                </div>
+                <div className="text-gray-400 dark:text-gray-500 pr-1">
+                  {isConsultaClienteSubExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                </div>
+              </button>
+
+              {isConsultaClienteSubExpanded && (
+                <div className="p-4 sm:p-5 border-t border-gray-200/60 dark:border-[#222d34] bg-white/50 dark:bg-black/10 space-y-4 animate-in fade-in slide-in-from-top-1 duration-200">
+                  <div>
+                    <label className="text-xs font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-1.5">
                       Corpo da Requisição (JSON Payload)
                     </label>
                     <textarea 
@@ -2344,76 +2656,390 @@ export default function AccountSettings() {
                       onChange={(e) => setClienteJsonPayload(e.target.value)}
                       placeholder='{"ATelefone": "973933247"}'
                       rows={3}
-                      className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
+                      className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-3.5 py-2.5 text-xs text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-blue-500/50 transition-all placeholder:text-gray-400 font-mono"
                     />
                   </div>
 
-                  <div className="pt-4 flex flex-wrap items-center gap-4">
+                  <div className="pt-2 flex flex-wrap items-center gap-3">
                     <button
                       type="button"
                       onClick={() => handleTestGeneric(clienteJsonUrl, clienteJsonToken, clienteJsonPayload, setClienteLoading, setClienteResult, setClienteError)}
                       disabled={clienteLoading || !clienteJsonUrl}
-                      className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold rounded-xl shadow-lg shadow-blue-500/20 flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="px-5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-semibold rounded-xl shadow-md shadow-blue-500/20 flex items-center gap-1.5 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      {clienteLoading ? 'Testando...' : 'Testar Requisição'}
+                      {clienteLoading ? 'Testando...' : 'Testar Consulta'}
                     </button>
                     <button
                       type="button"
                       onClick={() => handleCleanAndFormatJson(clienteJsonPayload, setClienteJsonPayload, setClienteError)}
-                      className="px-6 py-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 hover:border-emerald-500/40 text-emerald-600 dark:text-emerald-400 font-semibold rounded-xl flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95"
+                      className="px-5 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 hover:border-emerald-500/40 text-emerald-600 dark:text-emerald-400 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all transform hover:scale-105 active:scale-95"
                     >
-                      <Sparkles size={14} />
-                      Organizar e Validar JSON
+                      <Sparkles size={13} />
+                      Validar JSON
                     </button>
                   </div>
 
                   {clienteError && (
-                    <div className="bg-rose-500/10 border border-rose-500/20 text-rose-500 p-4 rounded-xl text-sm animate-in fade-in duration-300 font-mono whitespace-pre-wrap">
-                      <strong>Erro no teste:</strong> {clienteError}
+                    <div className="bg-rose-500/10 border border-rose-500/20 text-rose-500 p-3.5 rounded-xl text-xs animate-in fade-in duration-300 font-mono whitespace-pre-wrap">
+                      <strong>Erro:</strong> {clienteError}
                     </div>
                   )}
 
                   {clienteResult && (
-                    <div className="bg-slate-50 dark:bg-[#182229] border border-slate-200 dark:border-[#222d34] p-6 rounded-2xl space-y-4 animate-in fade-in duration-300">
-                      <div className="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-[#222d34]/60">
+                    <div className="bg-slate-50 dark:bg-[#182229] border border-slate-200 dark:border-[#222d34] p-4 rounded-xl space-y-2.5 animate-in fade-in duration-300">
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-[#222d34]/60">
                         <span className="text-xs font-bold text-gray-500 dark:text-gray-400">Resultado da Consulta:</span>
-                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-500/10 text-blue-500">
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-500/10 text-blue-500">
                           Status: {clienteResult.status}
                         </span>
                       </div>
-                      <div className="max-h-80 overflow-y-auto whitespace-pre-wrap leading-relaxed text-xs font-mono text-gray-700 dark:text-[#d1d7db] bg-slate-100/50 dark:bg-black/30 p-4 rounded-xl border border-slate-200/50 dark:border-[#304046]/30">
+                      <div className="max-h-60 overflow-y-auto whitespace-pre-wrap leading-relaxed text-xs font-mono text-gray-700 dark:text-[#d1d7db] bg-slate-100/50 dark:bg-black/30 p-3 rounded-lg border border-slate-200/50 dark:border-[#304046]/30">
                         {JSON.stringify(clienteResult.data, null, 2)}
                       </div>
                     </div>
                   )}
                 </div>
-              </div>
-            )}
+              )}
+            </div>
+
+            
+            {/* SUBMENU 2: Consulta de CEP */}
+            <div className="bg-[#f8f9fa] dark:bg-[#182229] border border-gray-200/70 dark:border-[#222d34] rounded-2xl overflow-hidden transition-all shadow-sm">
+              <button
+                type="button"
+                onClick={() => setIsCepSubExpanded(!isCepSubExpanded)}
+                className="w-full flex items-center justify-between p-4 sm:p-5 text-left outline-none hover:bg-gray-100/60 dark:hover:bg-black/20 transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
+                    <MapPin size={16} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
+                      Consulta de CEP
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 font-semibold uppercase">Submenu</span>
+                    </h3>
+                    <p className="text-xs text-gray-500 dark:text-[#aebac1]">Configure a consulta de CEP e busca de endereços no Gastrofood.</p>
+                  </div>
+                </div>
+                <div className="text-gray-400 dark:text-gray-500 pr-1">
+                  {isCepSubExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                </div>
+              </button>
+
+              {isCepSubExpanded && (
+                <div className="p-4 sm:p-5 border-t border-gray-200/60 dark:border-[#222d34] bg-white/50 dark:bg-black/10 space-y-4 animate-in fade-in slide-in-from-top-1 duration-200">
+                  <div>
+                    <label className="text-xs font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-1.5">
+                      Corpo da Requisição (JSON Payload)
+                    </label>
+                    <textarea 
+                      value={cepJsonPayload}
+                      onChange={(e) => setCepJsonPayload(e.target.value)}
+                      placeholder='{"ACep": "06764365"}'
+                      rows={3}
+                      className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-3.5 py-2.5 text-xs text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all placeholder:text-gray-400 font-mono"
+                    />
+                  </div>
+
+                  <div className="pt-2 flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => handleTestGeneric(cepJsonUrl, cepJsonToken, cepJsonPayload, setCepLoading, setCepResult, setCepError)}
+                      disabled={cepLoading || !cepJsonUrl}
+                      className="px-5 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white text-xs font-semibold rounded-xl shadow-md shadow-emerald-500/20 flex items-center gap-1.5 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {cepLoading ? 'Testando...' : 'Testar Consulta CEP'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleCleanAndFormatJson(cepJsonPayload, setCepJsonPayload, setCepError)}
+                      className="px-5 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 hover:border-emerald-500/40 text-emerald-600 dark:text-emerald-400 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all transform hover:scale-105 active:scale-95"
+                    >
+                      <Sparkles size={13} />
+                      Validar JSON
+                    </button>
+                  </div>
+
+                  {cepError && (
+                    <div className="bg-rose-500/10 border border-rose-500/20 text-rose-500 p-3.5 rounded-xl text-xs animate-in fade-in duration-300 font-mono whitespace-pre-wrap">
+                      <strong>Erro:</strong> {cepError}
+                    </div>
+                  )}
+
+                  {cepResult && (
+                    <div className="bg-slate-50 dark:bg-[#182229] border border-slate-200 dark:border-[#222d34] p-4 rounded-xl space-y-2.5 animate-in fade-in duration-300">
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-[#222d34]/60">
+                        <span className="text-xs font-bold text-gray-500 dark:text-gray-400">Resultado da Consulta:</span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-500">
+                          Status: {cepResult.status}
+                        </span>
+                      </div>
+                      <div className="max-h-60 overflow-y-auto whitespace-pre-wrap leading-relaxed text-xs font-mono text-gray-700 dark:text-[#d1d7db] bg-slate-100/50 dark:bg-black/30 p-3 rounded-lg border border-slate-200/50 dark:border-[#304046]/30">
+                        {JSON.stringify(cepResult.data, null, 2)}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* SUBMENU 3: Cadastro Cliente gFood */}
+
+            <div className="bg-[#f8f9fa] dark:bg-[#182229] border border-gray-200/70 dark:border-[#222d34] rounded-2xl overflow-hidden transition-all shadow-sm">
+              <button
+                type="button"
+                onClick={() => setIsCadastroClienteSubExpanded(!isCadastroClienteSubExpanded)}
+                className="w-full flex items-center justify-between p-4 sm:p-5 text-left outline-none hover:bg-gray-100/60 dark:hover:bg-black/20 transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-indigo-500/10 text-indigo-500 flex items-center justify-center">
+                    <UserPlus size={16} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
+                      Cadastro Cliente gFood
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-500 dark:text-indigo-400 font-semibold uppercase">Submenu</span>
+                    </h3>
+                    <p className="text-xs text-gray-500 dark:text-[#aebac1]">Configure o cadastro de novos clientes diretamente no Gastrofood.</p>
+                  </div>
+                </div>
+                <div className="text-gray-400 dark:text-gray-500 pr-1">
+                  {isCadastroClienteSubExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                </div>
+              </button>
+
+              {isCadastroClienteSubExpanded && (
+                <div className="p-4 sm:p-5 border-t border-gray-200/60 dark:border-[#222d34] bg-white/50 dark:bg-black/10 space-y-4 animate-in fade-in slide-in-from-top-1 duration-200">
+                  <div>
+                    <label className="text-xs font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-1.5">
+                      Corpo da Requisição (JSON Payload)
+                    </label>
+                    <textarea 
+                      value={cadastroClienteJsonPayload}
+                      onChange={(e) => setCadastroClienteJsonPayload(e.target.value)}
+                      placeholder="Corpo da Requisição (JSON)"
+                      rows={5}
+                      className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-3.5 py-2.5 text-xs text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono"
+                    />
+                  </div>
+
+                  <div className="pt-2 flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => handleTestGeneric(cadastroClienteJsonUrl, cadastroClienteJsonToken, cadastroClienteJsonPayload, setCadastroClienteLoading, setCadastroClienteResult, setCadastroClienteError, 'POST')}
+                      disabled={cadastroClienteLoading || !cadastroClienteJsonUrl}
+                      className="px-5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-semibold rounded-xl shadow-md shadow-blue-500/20 flex items-center gap-1.5 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {cadastroClienteLoading ? 'Testando...' : 'Testar Cadastro'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleCleanAndFormatJson(cadastroClienteJsonPayload, setCadastroClienteJsonPayload, setCadastroClienteError)}
+                      className="px-5 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 hover:border-emerald-500/40 text-emerald-600 dark:text-emerald-400 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all transform hover:scale-105 active:scale-95"
+                    >
+                      <Sparkles size={13} />
+                      Validar JSON
+                    </button>
+                  </div>
+
+                  {cadastroClienteError && (
+                    <div className="bg-rose-500/10 border border-rose-500/20 text-rose-500 p-3.5 rounded-xl text-xs animate-in fade-in duration-300 font-mono whitespace-pre-wrap">
+                      <strong>Erro:</strong> {cadastroClienteError}
+                    </div>
+                  )}
+
+                  {cadastroClienteResult && (
+                    <div className="bg-slate-50 dark:bg-[#182229] border border-slate-200 dark:border-[#222d34] p-4 rounded-xl space-y-2.5 animate-in fade-in duration-300">
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-[#222d34]/60">
+                        <span className="text-xs font-bold text-gray-500 dark:text-gray-400">Resultado do Cadastro:</span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-500/10 text-blue-500">
+                          Status: {cadastroClienteResult.status}
+                        </span>
+                      </div>
+                      <div className="max-h-60 overflow-y-auto whitespace-pre-wrap leading-relaxed text-xs font-mono text-gray-700 dark:text-[#d1d7db] bg-slate-100/50 dark:bg-black/30 p-3 rounded-lg border border-slate-200/50 dark:border-[#304046]/30">
+                        {JSON.stringify(cadastroClienteResult.data, null, 2)}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* SUBMENU 4: Taxa de Entrega gFood */}
+            <div className="bg-[#f8f9fa] dark:bg-[#182229] border border-gray-200/70 dark:border-[#222d34] rounded-2xl overflow-hidden transition-all shadow-sm">
+              <button
+                type="button"
+                onClick={() => setIsTaxaEntregaSubExpanded(!isTaxaEntregaSubExpanded)}
+                className="w-full flex items-center justify-between p-4 sm:p-5 text-left outline-none hover:bg-gray-100/60 dark:hover:bg-black/20 transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
+                    <Truck size={16} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
+                      Taxa de Entrega gFood
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 font-semibold uppercase">Submenu</span>
+                    </h3>
+                    <p className="text-xs text-gray-500 dark:text-[#aebac1]">Configure a consulta de taxa de entrega, distância e tempo no Gastrofood.</p>
+                  </div>
+                </div>
+                <div className="text-gray-400 dark:text-gray-500 pr-1">
+                  {isTaxaEntregaSubExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                </div>
+              </button>
+
+              {isTaxaEntregaSubExpanded && (
+                <div className="p-4 sm:p-5 border-t border-gray-200/60 dark:border-[#222d34] bg-white/50 dark:bg-black/10 space-y-4 animate-in fade-in slide-in-from-top-1 duration-200">
+                  <div>
+                    <label className="text-xs font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-1.5">
+                      Corpo da Requisição (JSON Payload)
+                    </label>
+                    <textarea 
+                      value={taxaEntregaJsonPayload}
+                      onChange={(e) => setTaxaEntregaJsonPayload(e.target.value)}
+                      placeholder="Corpo da Requisição (JSON)"
+                      rows={5}
+                      className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-3.5 py-2.5 text-xs text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all placeholder:text-gray-400 font-mono"
+                    />
+                  </div>
+
+                  <div className="pt-2 flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => handleTestGeneric(taxaEntregaJsonUrl, taxaEntregaJsonToken, taxaEntregaJsonPayload, setTaxaEntregaLoading, setTaxaEntregaResult, setTaxaEntregaError, 'POST')}
+                      disabled={taxaEntregaLoading || !taxaEntregaJsonUrl}
+                      className="px-5 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white text-xs font-semibold rounded-xl shadow-md shadow-emerald-500/20 flex items-center gap-1.5 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {taxaEntregaLoading ? 'Testando...' : 'Testar Taxa'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleCleanAndFormatJson(taxaEntregaJsonPayload, setTaxaEntregaJsonPayload, setTaxaEntregaError)}
+                      className="px-5 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 hover:border-emerald-500/40 text-emerald-600 dark:text-emerald-400 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all transform hover:scale-105 active:scale-95"
+                    >
+                      <Sparkles size={13} />
+                      Validar JSON
+                    </button>
+                  </div>
+
+                  {taxaEntregaError && (
+                    <div className="bg-rose-500/10 border border-rose-500/20 text-rose-500 p-3.5 rounded-xl text-xs animate-in fade-in duration-300 font-mono whitespace-pre-wrap">
+                      <strong>Erro:</strong> {taxaEntregaError}
+                    </div>
+                  )}
+
+                  {taxaEntregaResult && (
+                    <div className="bg-slate-50 dark:bg-[#182229] border border-slate-200 dark:border-[#222d34] p-4 rounded-xl space-y-2.5 animate-in fade-in duration-300">
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-[#222d34]/60">
+                        <span className="text-xs font-bold text-gray-500 dark:text-gray-400">Resultado do Frete:</span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-500">
+                          Status: {taxaEntregaResult.status}
+                        </span>
+                      </div>
+                      <div className="max-h-60 overflow-y-auto whitespace-pre-wrap leading-relaxed text-xs font-mono text-gray-700 dark:text-[#d1d7db] bg-slate-100/50 dark:bg-black/30 p-3 rounded-lg border border-slate-200/50 dark:border-[#304046]/30">
+                        {JSON.stringify(taxaEntregaResult.data, null, 2)}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* SUBMENU 5: Geolocalização (Lat/Lon) gFood */}
+            <div className="bg-[#f8f9fa] dark:bg-[#182229] border border-gray-200/70 dark:border-[#222d34] rounded-2xl overflow-hidden transition-all shadow-sm">
+              <button
+                type="button"
+                onClick={() => setIsGeolocSubExpanded(!isGeolocSubExpanded)}
+                className="w-full flex items-center justify-between p-4 sm:p-5 text-left outline-none hover:bg-gray-100/60 dark:hover:bg-black/20 transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-purple-500/10 text-purple-500 flex items-center justify-center">
+                    <MapPin size={16} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
+                      Geolocalização (Lat/Lon) gFood
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-500 dark:text-purple-400 font-semibold uppercase">Submenu</span>
+                    </h3>
+                    <p className="text-xs text-gray-500 dark:text-[#aebac1]">Configure a consulta de coordenadas geográficas de endereços no Gastrofood.</p>
+                  </div>
+                </div>
+                <div className="text-gray-400 dark:text-gray-500 pr-1">
+                  {isGeolocSubExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                </div>
+              </button>
+
+              {isGeolocSubExpanded && (
+                <div className="p-4 sm:p-5 border-t border-gray-200/60 dark:border-[#222d34] bg-white/50 dark:bg-black/10 space-y-4 animate-in fade-in slide-in-from-top-1 duration-200">
+                  <div>
+                    <label className="text-xs font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-1.5">
+                      Corpo da Requisição (JSON Payload)
+                    </label>
+                    <textarea 
+                      value={geolocJsonPayload}
+                      onChange={(e) => setGeolocJsonPayload(e.target.value)}
+                      placeholder="Corpo da Requisição (JSON)"
+                      rows={5}
+                      className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-3.5 py-2.5 text-xs text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-purple-500/50 transition-all placeholder:text-gray-400 font-mono"
+                    />
+                  </div>
+
+                  <div className="pt-2 flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => handleTestGeneric(geolocJsonUrl, geolocJsonToken, geolocJsonPayload, setGeolocLoading, setGeolocResult, setGeolocError, 'POST')}
+                      disabled={geolocLoading || !geolocJsonUrl}
+                      className="px-5 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white text-xs font-semibold rounded-xl shadow-md shadow-purple-500/20 flex items-center gap-1.5 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {geolocLoading ? 'Testando...' : 'Testar Coordenadas'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleCleanAndFormatJson(geolocJsonPayload, setGeolocJsonPayload, setGeolocError)}
+                      className="px-5 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 hover:border-emerald-500/40 text-emerald-600 dark:text-emerald-400 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all transform hover:scale-105 active:scale-95"
+                    >
+                      <Sparkles size={13} />
+                      Validar JSON
+                    </button>
+                  </div>
+
+                  {geolocError && (
+                    <div className="bg-rose-500/10 border border-rose-500/20 text-rose-500 p-3.5 rounded-xl text-xs animate-in fade-in duration-300 font-mono whitespace-pre-wrap">
+                      <strong>Erro:</strong> {geolocError}
+                    </div>
+                  )}
+
+                  {geolocResult && (
+                    <div className="bg-slate-50 dark:bg-[#182229] border border-slate-200 dark:border-[#222d34] p-4 rounded-xl space-y-2.5 animate-in fade-in duration-300">
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-[#222d34]/60">
+                        <span className="text-xs font-bold text-gray-500 dark:text-gray-400">Resultado das Coordenadas:</span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-500/10 text-purple-500">
+                          Status: {geolocResult.status}
+                        </span>
+                      </div>
+                      <div className="max-h-60 overflow-y-auto whitespace-pre-wrap leading-relaxed text-xs font-mono text-gray-700 dark:text-[#d1d7db] bg-slate-100/50 dark:bg-black/30 p-3 rounded-lg border border-slate-200/50 dark:border-[#304046]/30">
+                        {JSON.stringify(geolocResult.data, null, 2)}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
-
-          {/* Seção Envio de Pedido - Colapsável */}
-          <div className="bg-white dark:bg-[#202c33] rounded-[24px] shadow-sm border border-gray-100 dark:border-[#222d34] overflow-hidden animate-in fade-in zoom-in-95 duration-500">
-            <button
-              type="button"
-              onClick={() => setIsPedidoExpanded(!isPedidoExpanded)}
-              className="w-full flex items-center justify-between p-8 text-left outline-none hover:bg-gray-50/50 dark:hover:bg-black/10 transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-rose-500/10 flex items-center justify-center text-rose-500">
-                  <ClipboardList size={20} />
-                </div>
-                <div>
-                  <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100">Envio de Pedido</h2>
-                  <p className="text-sm text-gray-500 dark:text-[#aebac1]">Configure a finalização e integração de pedidos diretamente no Gastrofood.</p>
-                </div>
-              </div>
-              <div className="text-gray-400 dark:text-gray-500 pr-2">
-                {isPedidoExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
-              </div>
-            </button>
-
-            {isPedidoExpanded && (
-              <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
+        );
+      case 'pedido':
+        return renderDraggableCard(
+          'pedido',
+          index,
+          'Envio de Pedido',
+          'Configure a finalização e integração de pedidos diretamente no Gastrofood.',
+          <ClipboardList size={20} />,
+          'bg-rose-500/10 text-rose-500',
+          isPedidoExpanded,
+          () => setIsPedidoExpanded(!isPedidoExpanded),
+          <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
                 <div className="space-y-6 max-w-2xl">
                   <div>
                     <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
@@ -2468,32 +3094,18 @@ export default function AccountSettings() {
                   )}
                 </div>
               </div>
-            )}
-          </div>
-
-          {/* Seção Status Pedido gFood - Colapsável */}
-          <div className="bg-white dark:bg-[#202c33] rounded-[24px] shadow-sm border border-gray-100 dark:border-[#222d34] overflow-hidden animate-in fade-in zoom-in-95 duration-500">
-            <button
-              type="button"
-              onClick={() => setIsStatusPedidoExpanded(!isStatusPedidoExpanded)}
-              className="w-full flex items-center justify-between p-8 text-left outline-none hover:bg-gray-50/50 dark:hover:bg-black/10 transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center text-amber-500">
-                  <Search size={20} />
-                </div>
-                <div>
-                  <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100">Status Pedido gFood</h2>
-                  <p className="text-sm text-gray-500 dark:text-[#aebac1]">Configure a busca de status de pedidos diretamente no Gastrofood.</p>
-                </div>
-              </div>
-              <div className="text-gray-400 dark:text-gray-500 pr-2">
-                {isStatusPedidoExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
-              </div>
-            </button>
-
-            {isStatusPedidoExpanded && (
-              <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
+        );
+      case 'statusPedido':
+        return renderDraggableCard(
+          'statusPedido',
+          index,
+          'Status Pedido gFood',
+          'Configure a busca de status de pedidos diretamente no Gastrofood.',
+          <Search size={20} />,
+          'bg-amber-500/10 text-amber-500',
+          isStatusPedidoExpanded,
+          () => setIsStatusPedidoExpanded(!isStatusPedidoExpanded),
+          <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
                 <div className="space-y-6 max-w-2xl">
                   <p className="text-xs text-gray-500 dark:text-[#8696a0] leading-relaxed">
                     Este endpoint utiliza o método <strong>POST</strong>. O teste será realizado utilizando os parâmetros padrões configurados no código.
@@ -2531,32 +3143,18 @@ export default function AccountSettings() {
                   )}
                 </div>
               </div>
-            )}
-          </div>
-
-          {/* Seção Pagamento-PIX gFood - Colapsável */}
-          <div className="bg-white dark:bg-[#202c33] rounded-[24px] shadow-sm border border-gray-100 dark:border-[#222d34] overflow-hidden animate-in fade-in zoom-in-95 duration-500">
-            <button
-              type="button"
-              onClick={() => setIsPagamentoPixExpanded(!isPagamentoPixExpanded)}
-              className="w-full flex items-center justify-between p-8 text-left outline-none hover:bg-gray-50/50 dark:hover:bg-black/10 transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center text-indigo-500">
-                  <QrCode size={20} />
-                </div>
-                <div>
-                  <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100">Pagamento-PIX gFood</h2>
-                  <p className="text-sm text-gray-500 dark:text-[#aebac1]">Configure a geração e consulta de QR Code PIX para pagamentos no Gastrofood.</p>
-                </div>
-              </div>
-              <div className="text-gray-400 dark:text-gray-500 pr-2">
-                {isPagamentoPixExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
-              </div>
-            </button>
-
-            {isPagamentoPixExpanded && (
-              <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
+        );
+      case 'pagamentoPix':
+        return renderDraggableCard(
+          'pagamentoPix',
+          index,
+          'Pagamento-PIX gFood',
+          'Configure a geração e consulta de QR Code PIX para pagamentos no Gastrofood.',
+          <QrCode size={20} />,
+          'bg-indigo-500/10 text-indigo-500',
+          isPagamentoPixExpanded,
+          () => setIsPagamentoPixExpanded(!isPagamentoPixExpanded),
+          <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
                 <div className="space-y-6 max-w-2xl">
 
                   <div>
@@ -2612,252 +3210,77 @@ export default function AccountSettings() {
                   )}
                 </div>
               </div>
-            )}
-          </div>
+        );
+      default:
+        return null;
+    }
+  };
 
-          {/* Seção Cadastro Cliente gFood - Colapsável */}
-          <div className="bg-white dark:bg-[#202c33] rounded-[24px] shadow-sm border border-gray-100 dark:border-[#222d34] overflow-hidden animate-in fade-in zoom-in-95 duration-500">
+  return (
+    <div className="flex-1 flex flex-col h-full bg-[#f0f2f5] dark:bg-[#111b21] overflow-hidden">
+      
+      {/* Header Premium */}
+      <div className="h-20 bg-white/50 dark:bg-[#202c33]/80 backdrop-blur-xl flex items-center justify-between px-8 border-b border-[#d1d7db] dark:border-[#222d34] flex-shrink-0 z-10 shadow-sm relative">
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white shadow-lg shadow-indigo-500/20">
+            <Briefcase size={24} />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
+              Conta {tenantInfo?.name && <span className="text-indigo-500 dark:text-indigo-400 text-base font-normal">({tenantInfo.name})</span>}
+            </h1>
+            <p className="text-sm text-gray-500 dark:text-[#aebac1]">
+              Gerencie as configurações e variáveis globais da sua empresa.
+            </p>
+          </div>
+        </div>
+
+        <div>
+          <button 
+            onClick={handleSave}
+            disabled={saving}
+            className="px-6 py-2.5 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-semibold rounded-xl shadow-lg shadow-indigo-500/20 flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Save size={18} className={cn(saving && "animate-pulse")} />
+            {saving ? 'Salvando...' : 'Salvar Alterações'}
+          </button>
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div className="flex-1 overflow-y-auto p-8 relative">
+        <div className="max-w-4xl mx-auto space-y-6">
+          
+          {success && (
+            <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 px-4 py-3 rounded-xl animate-in slide-in-from-top-2 duration-300">
+              Configurações salvas com sucesso!
+            </div>
+          )}
+
+          {/* Banner de Ajuda & DND Control */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-gradient-to-r from-indigo-500/10 via-purple-500/10 to-transparent p-4 rounded-2xl border border-indigo-500/20 text-xs text-slate-600 dark:text-slate-300 animate-in fade-in duration-300">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-xl bg-indigo-500/20 text-indigo-500 dark:text-indigo-400">
+                <ArrowUpDown size={16} />
+              </div>
+              <div>
+                <span className="font-bold text-slate-800 dark:text-slate-100 block">Personalização de Menus (Drag & Drop)</span>
+                <span className="text-slate-500 dark:text-slate-400">Arraste os cards pelas alças laterais ou use as setas para definir sua ordem de preferência.</span>
+              </div>
+            </div>
             <button
               type="button"
-              onClick={() => setIsCadastroClienteExpanded(!isCadastroClienteExpanded)}
-              className="w-full flex items-center justify-between p-8 text-left outline-none hover:bg-gray-50/50 dark:hover:bg-black/10 transition-colors"
+              onClick={handleResetSectionsOrder}
+              className="px-3 py-1.5 bg-white dark:bg-[#182229] hover:bg-slate-100 dark:hover:bg-[#202c33] text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-[#222d34] rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm shrink-0 hover:scale-105 active:scale-95"
+              title="Restaurar a ordem original de fábrica"
             >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-500">
-                  <UserPlus size={20} />
-                </div>
-                <div>
-                  <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100">Cadastro Cliente gFood</h2>
-                  <p className="text-sm text-gray-500 dark:text-[#aebac1]">Configure o cadastro de novos clientes diretamente no Gastrofood.</p>
-                </div>
-              </div>
-              <div className="text-gray-400 dark:text-gray-500 pr-2">
-                {isCadastroClienteExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
-              </div>
+              <RotateCcw size={13} />
+              Restaurar Ordem Padrão
             </button>
-
-            {isCadastroClienteExpanded && (
-              <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
-                <div className="space-y-6 max-w-2xl">
-
-                  <div>
-                    <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
-                      Corpo da Requisição (JSON Payload)
-                    </label>
-                    <textarea 
-                      value={cadastroClienteJsonPayload}
-                      onChange={(e) => setCadastroClienteJsonPayload(e.target.value)}
-                      placeholder="Corpo da Requisição (JSON)"
-                      rows={6}
-                      className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
-                    />
-                  </div>
-
-                  <div className="pt-4 flex flex-wrap items-center gap-4">
-                    <button
-                      type="button"
-                      onClick={() => handleTestGeneric(cadastroClienteJsonUrl, cadastroClienteJsonToken, cadastroClienteJsonPayload, setCadastroClienteLoading, setCadastroClienteResult, setCadastroClienteError, 'POST')}
-                      disabled={cadastroClienteLoading || !cadastroClienteJsonUrl}
-                      className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold rounded-xl shadow-lg shadow-blue-500/20 flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {cadastroClienteLoading ? 'Testando...' : 'Testar Requisição'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleCleanAndFormatJson(cadastroClienteJsonPayload, setCadastroClienteJsonPayload, setCadastroClienteError)}
-                      className="px-6 py-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 hover:border-emerald-500/40 text-emerald-600 dark:text-emerald-400 font-semibold rounded-xl flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95"
-                    >
-                      <Sparkles size={14} />
-                      Organizar e Validar JSON
-                    </button>
-                  </div>
-
-                  {cadastroClienteError && (
-                    <div className="bg-rose-500/10 border border-rose-500/20 text-rose-500 p-4 rounded-xl text-sm animate-in fade-in duration-300 font-mono whitespace-pre-wrap">
-                      <strong>Erro no teste:</strong> {cadastroClienteError}
-                    </div>
-                  )}
-
-                  {cadastroClienteResult && (
-                    <div className="bg-slate-50 dark:bg-[#182229] border border-slate-200 dark:border-[#222d34] p-6 rounded-2xl space-y-4 animate-in fade-in duration-300">
-                      <div className="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-[#222d34]/60">
-                        <span className="text-xs font-bold text-gray-500 dark:text-gray-400">Resultado do Cadastro:</span>
-                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-500/10 text-blue-500">
-                          Status: {cadastroClienteResult.status}
-                        </span>
-                      </div>
-                      <div className="max-h-80 overflow-y-auto whitespace-pre-wrap leading-relaxed text-xs font-mono text-gray-700 dark:text-[#d1d7db] bg-slate-100/50 dark:bg-black/30 p-4 rounded-xl border border-slate-200/50 dark:border-[#304046]/30">
-                        {JSON.stringify(cadastroClienteResult.data, null, 2)}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
           </div>
 
-          {/* Seção Taxa de Entrega gFood - Colapsável */}
-          <div className="bg-white dark:bg-[#202c33] rounded-[24px] shadow-sm border border-gray-100 dark:border-[#222d34] overflow-hidden animate-in fade-in zoom-in-95 duration-500">
-            <button
-              type="button"
-              onClick={() => setIsTaxaEntregaExpanded(!isTaxaEntregaExpanded)}
-              className="w-full flex items-center justify-between p-8 text-left outline-none hover:bg-gray-50/50 dark:hover:bg-black/10 transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-500">
-                  <Truck size={20} />
-                </div>
-                <div>
-                  <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100">Taxa de Entrega gFood</h2>
-                  <p className="text-sm text-gray-500 dark:text-[#aebac1]">Configure a consulta de taxa de entrega, distância e tempo de entrega no Gastrofood.</p>
-                </div>
-              </div>
-              <div className="text-gray-400 dark:text-gray-500 pr-2">
-                {isTaxaEntregaExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
-              </div>
-            </button>
-
-            {isTaxaEntregaExpanded && (
-              <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
-                <div className="space-y-6 max-w-2xl">
-
-                  <div>
-                    <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
-                      Corpo da Requisição (JSON Payload)
-                    </label>
-                    <textarea 
-                      value={taxaEntregaJsonPayload}
-                      onChange={(e) => setTaxaEntregaJsonPayload(e.target.value)}
-                      placeholder="Corpo da Requisição (JSON)"
-                      rows={6}
-                      className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
-                    />
-                  </div>
-
-                  <div className="pt-4 flex flex-wrap items-center gap-4">
-                    <button
-                      type="button"
-                      onClick={() => handleTestGeneric(taxaEntregaJsonUrl, taxaEntregaJsonToken, taxaEntregaJsonPayload, setTaxaEntregaLoading, setTaxaEntregaResult, setTaxaEntregaError, 'POST')}
-                      disabled={taxaEntregaLoading || !taxaEntregaJsonUrl}
-                      className="px-6 py-2.5 bg-gradient-to-r from-indigo-500 to-blue-600 hover:from-indigo-600 hover:to-blue-700 text-white font-semibold rounded-xl shadow-lg shadow-indigo-500/20 flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {taxaEntregaLoading ? 'Testando...' : 'Testar Requisição'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleCleanAndFormatJson(taxaEntregaJsonPayload, setTaxaEntregaJsonPayload, setTaxaEntregaError)}
-                      className="px-6 py-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 hover:border-emerald-500/40 text-emerald-600 dark:text-emerald-400 font-semibold rounded-xl flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95"
-                    >
-                      <Sparkles size={14} />
-                      Organizar e Validar JSON
-                    </button>
-                  </div>
-
-                  {taxaEntregaError && (
-                    <div className="bg-rose-500/10 border border-rose-500/20 text-rose-500 p-4 rounded-xl text-sm animate-in fade-in duration-300 font-mono whitespace-pre-wrap">
-                      <strong>Erro no teste:</strong> {taxaEntregaError}
-                    </div>
-                  )}
-
-                  {taxaEntregaResult && (
-                    <div className="bg-slate-50 dark:bg-[#182229] border border-slate-200 dark:border-[#222d34] p-6 rounded-2xl space-y-4 animate-in fade-in duration-300">
-                      <div className="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-[#222d34]/60">
-                        <span className="text-xs font-bold text-gray-500 dark:text-gray-400">Resultado da Consulta:</span>
-                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-500">
-                          Status: {taxaEntregaResult.status}
-                        </span>
-                      </div>
-                      <div className="max-h-80 overflow-y-auto whitespace-pre-wrap leading-relaxed text-xs font-mono text-gray-700 dark:text-[#d1d7db] bg-slate-100/50 dark:bg-black/30 p-4 rounded-xl border border-slate-200/50 dark:border-[#304046]/30">
-                        {JSON.stringify(taxaEntregaResult.data, null, 2)}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Seção Geolocalização (Lat/Lon) gFood - Colapsável */}
-          <div className="bg-white dark:bg-[#202c33] rounded-[24px] shadow-sm border border-gray-100 dark:border-[#222d34] overflow-hidden animate-in fade-in zoom-in-95 duration-500">
-            <button
-              type="button"
-              onClick={() => setIsGeolocExpanded(!isGeolocExpanded)}
-              className="w-full flex items-center justify-between p-8 text-left outline-none hover:bg-gray-50/50 dark:hover:bg-black/10 transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center text-indigo-500">
-                  <MapPin size={20} />
-                </div>
-                <div>
-                  <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100">Geolocalização (Lat/Lon) gFood</h2>
-                  <p className="text-sm text-gray-500 dark:text-[#aebac1]">Configure a consulta de coordenadas geográficas (latitude/longitude) de endereços no Gastrofood.</p>
-                </div>
-              </div>
-              <div className="text-gray-400 dark:text-gray-500 pr-2">
-                {isGeolocExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
-              </div>
-            </button>
-
-            {isGeolocExpanded && (
-              <div className="px-8 pb-8 pt-2 border-t border-gray-100 dark:border-[#222d34]/60 space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
-                <div className="space-y-6 max-w-2xl">
-
-                  <div>
-                    <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
-                      Corpo da Requisição (JSON Payload)
-                    </label>
-                    <textarea 
-                      value={geolocJsonPayload}
-                      onChange={(e) => setGeolocJsonPayload(e.target.value)}
-                      placeholder="Corpo da Requisição (JSON)"
-                      rows={6}
-                      className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400 font-mono text-xs"
-                    />
-                  </div>
-
-                  <div className="pt-4 flex flex-wrap items-center gap-4">
-                    <button
-                      type="button"
-                      onClick={() => handleTestGeneric(geolocJsonUrl, geolocJsonToken, geolocJsonPayload, setGeolocLoading, setGeolocResult, setGeolocError, 'POST')}
-                      disabled={geolocLoading || !geolocJsonUrl}
-                      className="px-6 py-2.5 bg-gradient-to-r from-indigo-500 to-blue-600 hover:from-indigo-600 hover:to-blue-700 text-white font-semibold rounded-xl shadow-lg shadow-indigo-500/20 flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {geolocLoading ? 'Testando...' : 'Testar Requisição'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleCleanAndFormatJson(geolocJsonPayload, setGeolocJsonPayload, setGeolocError)}
-                      className="px-6 py-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 hover:border-emerald-500/40 text-emerald-600 dark:text-emerald-400 font-semibold rounded-xl flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95"
-                    >
-                      <Sparkles size={14} />
-                      Organizar e Validar JSON
-                    </button>
-                  </div>
-
-                  {geolocError && (
-                    <div className="bg-rose-500/10 border border-rose-500/20 text-rose-500 p-4 rounded-xl text-sm animate-in fade-in duration-300 font-mono whitespace-pre-wrap">
-                      <strong>Erro no teste:</strong> {geolocError}
-                    </div>
-                  )}
-
-                  {geolocResult && (
-                    <div className="bg-slate-50 dark:bg-[#182229] border border-slate-200 dark:border-[#222d34] p-6 rounded-2xl space-y-4 animate-in fade-in duration-300">
-                      <div className="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-[#222d34]/60">
-                        <span className="text-xs font-bold text-gray-500 dark:text-gray-400">Resultado da Consulta:</span>
-                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-500">
-                          Status: {geolocResult.status}
-                        </span>
-                      </div>
-                      <div className="max-h-80 overflow-y-auto whitespace-pre-wrap leading-relaxed text-xs font-mono text-gray-700 dark:text-[#d1d7db] bg-slate-100/50 dark:bg-black/30 p-4 rounded-xl border border-slate-200/50 dark:border-[#304046]/30">
-                        {JSON.stringify(geolocResult.data, null, 2)}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
- 
+          {/* Renderização Ordenada Dinâmica dos Cards */}
+          {sectionsOrder.map((sectionId, index) => renderSection(sectionId, index))}
         </div>
       </div>
 

@@ -101,7 +101,7 @@ async function getDevQueue(action = 'list', cardIdToMove = null, targetStatus = 
         .update(updatePayload)
         .eq('id', cardIdToMove)
         .select()
-        .single();
+        .maybeSingle();
 
       if (updateErr) {
         console.error(JSON.stringify({ success: false, error: updateErr.message }));
