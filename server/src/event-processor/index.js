@@ -569,10 +569,11 @@ class EventProcessor {
                     isHistory: Boolean(m.type === 'append' || m.type === 'reconcile' || (tsDate && (Date.now() - tsDate.getTime() > 60000)))
                 });
 
-                // Otimização: Se a mensagem for enviada por um humano (atendente),
-                // força o flush imediato da fila para reduzir a latência percebida na tela do CRM.
-                if (senderType === 'human') {
-                    setTimeout(() => this.flushQueue(), 0);
+                // Otimização de Baixa Latência (<1s): Força flush imediato da fila para mensagens em tempo real
+                // (tanto mensagens do cliente no WhatsApp quanto do atendente no CRM)
+                const isLiveRealtime = !Boolean(m.type === 'append' || m.type === 'reconcile' || (tsDate && (Date.now() - tsDate.getTime() > 60000)));
+                if (senderType === 'human' || isLiveRealtime) {
+                    setTimeout(() => this.flushQueue(), 10);
                 }
 
             } catch (e) {

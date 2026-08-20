@@ -64,16 +64,32 @@ const app = express();
 const PORT = process.env.PORT || 9000;
 
 process.on('uncaughtException', (err) => {
-    // Silencia erros inofensivos do undici/fetch ao abortar conexões (TypeError: terminated)
-    if (err && (err.message === 'terminated' || err.message === 'fetch failed' || err.stack?.includes('onAborted') || err.stack?.includes('undici'))) {
-        console.warn('[Fetch/Undici] Conexão cancelada ou abortada pelo cliente/servidor (TypeError: terminated).');
+    // Silencia erros inofensivos do undici/fetch, WebSockets ou requisições abortadas pelo cliente
+    if (err && (
+        err.message === 'terminated' ||
+        err.message === 'fetch failed' ||
+        err.message?.includes('WebSocket was closed before') ||
+        err.message?.includes('Request aborted') ||
+        err.message?.includes('request aborted') ||
+        err.stack?.includes('onAborted') ||
+        err.stack?.includes('undici')
+    )) {
+        console.warn(`[Process Safe Guard] Exceção transiente suprimida com segurança: ${err.message}`);
         return;
     }
     console.error('Uncaught Exception:', err);
 });
 process.on('unhandledRejection', (reason, promise) => {
-    if (reason && (reason.message === 'terminated' || reason.message === 'fetch failed' || reason.stack?.includes('onAborted') || reason.stack?.includes('undici'))) {
-        console.warn('[Fetch/Undici] Rejeição de conexão cancelada ou abortada pelo cliente/servidor (TypeError: terminated).');
+    if (reason && (
+        reason.message === 'terminated' ||
+        reason.message === 'fetch failed' ||
+        reason.message?.includes('WebSocket was closed before') ||
+        reason.message?.includes('Request aborted') ||
+        reason.message?.includes('request aborted') ||
+        reason.stack?.includes('onAborted') ||
+        reason.stack?.includes('undici')
+    )) {
+        console.warn(`[Process Safe Guard] Rejeição transiente suprimida com segurança: ${reason.message || reason}`);
         return;
     }
     console.error('Unhandled Rejection at:', promise, 'reason:', reason);
@@ -501,7 +517,7 @@ async function runMigrations() {
     }
 }
 
-app.listen(PORT, '0.0.0.0', async () => {
+const server = app.listen(PORT, '0.0.0.0', async () => {
     console.log(`[Antigravity V2] Node.js Server online na porta ${PORT}`);
     
     const isLocalDev = process.env.IS_LOCAL_DEV === 'true' || process.env.DISABLE_AUTO_START_SESSIONS === 'true';
@@ -688,6 +704,11 @@ app.listen(PORT, '0.0.0.0', async () => {
         console.error("[Worker Boot] Erro ao assinar realtime conversations:", err.message);
     }
 });
+
+// Configuração robusta de timeouts HTTP (prevenindo 'Request aborted' prematuro em uploads grandes e instabilidade de rede)
+server.keepAliveTimeout = 65000;
+server.headersTimeout = 66000;
+server.requestTimeout = 300000; // 5 minutos para streams de mídia/arquivos grandes
 
 // Desligamento gracioso: encerra sockets, libera locks distribuídos e sincroniza chaves Signal
 const gracefulShutdown = async (signal) => {

@@ -276,9 +276,20 @@ class SessionManager {
                     if (typeof sock.ws.removeAllListeners === 'function') {
                         sock.ws.removeAllListeners();
                     }
-                    sock.ws.close();
-                    if (typeof sock.ws.terminate === 'function') {
-                        sock.ws.terminate();
+                    if (typeof sock.ws.on === 'function') {
+                        sock.ws.on('error', () => {});
+                    }
+                    if (sock.ws.readyState === 1) { // OPEN
+                        try { sock.ws.close(); } catch (e) {}
+                    } else if (sock.ws.readyState === 0) { // CONNECTING
+                        if (typeof sock.ws.terminate === 'function') {
+                            try { sock.ws.terminate(); } catch (e) {}
+                        } else {
+                            try { sock.ws.close(); } catch (e) {}
+                        }
+                    }
+                    if (typeof sock.ws.terminate === 'function' && sock.ws.readyState !== 3) {
+                        try { sock.ws.terminate(); } catch (tErr) {}
                     }
                 }
             } catch (e) {}
