@@ -39,6 +39,10 @@ interface MessageBubbleProps {
   ticketMode?: boolean;
   messageFilter?: 'today' | 'all';
   setMessageFilter?: (val: 'today' | 'all') => void;
+  onStartAddToRag?: (msg: any) => void;
+  isRagSelectionMode?: boolean;
+  isRagSelectedQuestion?: boolean;
+  onSelectRagAnswer?: (msg: any) => void;
 }
 
 export const MessageBubble = memo(({
@@ -64,7 +68,11 @@ export const MessageBubble = memo(({
   onAlterarRaciocinio,
   ticketMode,
   messageFilter,
-  setMessageFilter
+  setMessageFilter,
+  onStartAddToRag,
+  isRagSelectionMode,
+  isRagSelectedQuestion,
+  onSelectRagAnswer
 }: MessageBubbleProps) => {
   const agents = useChatStore(state => state.agents);
   const toggleChecklistItem = useChatStore(state => state.toggleChecklistItem);
@@ -449,8 +457,17 @@ export const MessageBubble = memo(({
           activeMsgDropdown === msg.id ? "z-[99999] relative" : "z-10 relative"
         }`}
       >
-      <div className={cn(
+      <div 
+        onClick={(e) => {
+          if (isRagSelectionMode && !isRagSelectedQuestion && onSelectRagAnswer) {
+            e.stopPropagation();
+            onSelectRagAnswer(msg);
+          }
+        }}
+        className={cn(
         "pl-3 pr-8 pb-3 pt-1.5 min-w-[120px] min-h-[48px] rounded-2xl shadow-sm max-w-[85%] md:max-w-[65%] relative group animate-in fade-in slide-in-from-bottom-2 backdrop-blur-md transition-all duration-300",
+        isRagSelectionMode && !isRagSelectedQuestion && "cursor-pointer hover:ring-2 hover:ring-purple-400 hover:scale-[1.01]",
+        isRagSelectedQuestion && "ring-4 ring-purple-500/50 border-purple-500 shadow-[0_0_20px_rgba(168,85,247,0.35)]",
         msg.status === 'deleted'
           ? (isMe 
               ? "bg-[#d9fdd3]/40 dark:bg-[#005c4b]/20 text-[#111b21]/50 dark:text-[#e9edef]/40 rounded-tr-sm border border-dashed border-[#00a884]/30"
@@ -459,6 +476,19 @@ export const MessageBubble = memo(({
               ? "bg-[#d9fdd3]/90 dark:bg-[#005c4b]/95 text-[#111b21] dark:text-[#e9edef] rounded-tr-sm" 
               : "bg-white/95 dark:bg-[#202c33]/90 text-[#111b21] dark:text-[#e9edef] rounded-tl-sm border border-black/5 dark:border-white/5 border-l-4 border-l-[#00a884]")
       )}>
+         {/* Badge Indicador de Seleção RAG */}
+         {isRagSelectedQuestion && (
+           <div className="absolute -top-3 left-3 bg-purple-600 text-white text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full shadow-md flex items-center gap-1 z-20 animate-bounce">
+             <BrainCircuit size={12} />
+             Pergunta Selecionada
+           </div>
+         )}
+         {isRagSelectionMode && !isRagSelectedQuestion && (
+           <div className="hidden group-hover:flex absolute -top-3 right-3 bg-purple-600 text-white text-[10px] font-bold px-2.5 py-0.5 rounded-full shadow-md items-center gap-1 z-20 animate-in fade-in">
+             <Check size={12} />
+             Selecionar como Resposta
+           </div>
+         )}
          {/* Menu de Três Pontinhos para Responder/Encaminhar */}
          {msg.status !== 'deleted' && (
            <div 
@@ -519,6 +549,17 @@ export const MessageBubble = memo(({
                     className="w-full text-left px-4 py-2 hover:bg-[#d9fdd3]/50 dark:hover:bg-[#005c4b]/30 flex items-center gap-3 transition-all duration-300 text-[14px] text-[#00a884] font-medium"
                   >
                     <Sparkles size={16} className="text-[#00a884] animate-pulse" /> Responder com I.A
+                  </button>
+                  <button 
+                    onClick={() => {
+                      if (onStartAddToRag) {
+                        onStartAddToRag(msg);
+                      }
+                      setActiveMsgDropdown(null);
+                    }}
+                    className="w-full text-left px-4 py-2 hover:bg-purple-50 dark:hover:bg-purple-950/30 flex items-center gap-3 transition-all duration-300 text-[14px] text-purple-600 dark:text-purple-400 font-medium"
+                  >
+                    <BrainCircuit size={16} className="text-purple-500 animate-pulse" /> Adicionar ao RAG
                   </button>
                   {msg.text && (
                     <button 

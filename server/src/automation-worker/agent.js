@@ -1836,6 +1836,15 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                               `Esperamos seu pedido! 😋"\n` +
                               `(Substitua [Primeiro Nome do Cliente] EXCLUSIVAMENTE pelo primeiro nome do cliente (ex: Vanessa ou Tatiane - NUNCA use sobrenome), [NOME_DA_EMPRESA] pelo nome da empresa e [LINK_CARDAPIO] pelo link oficial do cardápio).\n` +
                               `Além disso, se houver um bloco de texto customizado sob a tag '[PRIMEIRA MENSSAGEM A SER ENVIADA]' ou '[PRIMEIRA MENSAGEM A SER ENVIADA]' no seu prompt de sistema, você DEVE retornar o texto daquele bloco como sua resposta inicial.\n`;
+            } else {
+                basePrompt += `\n\n### DIRETRIZES DE MENSAGENS EM CONVERSA EM ANDAMENTO (NÃO REPETIR BOAS-VINDAS) ###\n` +
+                              `1. CONVERSA EM ANDAMENTO: Esta NÃO é a primeira mensagem da conversa. As boas-vindas já foram enviadas anteriormente.\n` +
+                              `2. PROIBIÇÃO ABSOLUTA DE REPETIR BOAS-VINDAS: NUNCA repita saudações longas ou textos formais de abertura (como "Seja muito bem-vindo(a)", "Agradecemos pelo seu contato", "Olá, tudo bem? Aqui é a Luna"). Vá direto ao assunto de forma calorosa, ágil e educada.\n` +
+                              `3. SOLICITAÇÃO DE CARDÁPIO EM CONVERSA EXISTENTE: Se o cliente pedir o cardápio ou menu agora (ex: "cardápio", "menu", "quero ver as opções"), envie uma resposta curta, direta e amigável com o link isolado sem textões de boas-vindas. Exemplo:\n` +
+                              `   "Com certeza, [Primeiro Nome do Cliente]! Segue o link do nosso cardápio digital completo para você escolher:\n\n` +
+                              `   🍔 [LINK_CARDAPIO]\n\n` +
+                              `   Se quiser alguma recomendação ou tirar dúvidas sobre os lanches e combos, é só me falar! 😉"\n` +
+                              `4. NÃO REPETIR LINKS EM SEQUÊNCIA: Se você já enviou o link do cardápio na mensagem anterior e o cliente apenas comentou algo ou fez uma pergunta pontual (ex: "tem refrigerante?"), responda à pergunta diretamente sem reenviar o link do cardápio desnecessariamente.\n`;
             }
 
             if (botInstructions && botInstructions.trim().length > 0) {

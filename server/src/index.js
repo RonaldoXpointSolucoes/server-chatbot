@@ -689,22 +689,26 @@ app.listen(PORT, '0.0.0.0', async () => {
     }
 });
 
-// Desligamento gracioso: sincroniza as chaves do Baileys pendentes na RAM para o Supabase antes de sair
+// Desligamento gracioso: encerra sockets, libera locks distribuídos e sincroniza chaves Signal
 const gracefulShutdown = async (signal) => {
     console.log(`[Antigravity Boot] Recebido sinal ${signal}. Iniciando desligamento gracioso...`);
     try {
-        console.log(`[Antigravity Boot] Liberando locks de instâncias para o NODE_ID: ${NODE_ID}`);
-        await supabase.from('whatsapp_instances')
-            .update({
-                assigned_node_id: null,
-                lease_until: null,
-                status: 'offline'
-            })
-            .eq('assigned_node_id', NODE_ID);
+        console.log(`[Antigravity Boot] Encerrando sessões ativas e liberando locks para o NODE_ID: ${NODE_ID}`);
+        if (sessionManager && typeof sessionManager.closeAllSessions === 'function') {
+            await sessionManager.closeAllSessions();
+        } else {
+            await supabase.from('whatsapp_instances')
+                .update({
+                    assigned_node_id: null,
+                    lease_until: null,
+                    updated_at: new Date().toISOString()
+                })
+                .eq('assigned_node_id', NODE_ID);
+        }
             
         const { flushAllPendingWrites } = await import('./session-manager/auth.js');
         await flushAllPendingWrites();
-        console.log(`[Antigravity Boot] Sincronização de chaves concluída com sucesso.`);
+        console.log(`[Antigravity Boot] Sincronização de chaves e encerramento de sockets concluídos com sucesso.`);
     } catch (err) {
         console.error(`[Antigravity Boot] Erro durante o desligamento gracioso:`, err.message || err);
     }

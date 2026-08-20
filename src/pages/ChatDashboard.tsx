@@ -21,6 +21,7 @@ import { format, isToday, isYesterday } from 'date-fns';
 import { formatDocumentNumber } from '../utils/format';
 import { useShallow } from 'zustand/react/shallow';
 import { MessageBubble } from '../components/chat/MessageBubble';
+import { AddRagModal } from '../components/chat/AddRagModal';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { supabase } from '../services/supabase';
@@ -2004,6 +2005,7 @@ export default function ChatDashboard() {
     formattedPhone: string;
     instanceId?: string | null;
   } | null>(null);
+  const [isCreatingContact, setIsCreatingContact] = useState(false);
 
   // Estados para Drag and Drop de Arquivos
   const [isDraggingFile, setIsDraggingFile] = useState(false);
@@ -2015,6 +2017,14 @@ export default function ChatDashboard() {
   const [extractedRules, setExtractedRules] = useState<Array<{ text: string; checked: boolean; similarity: number | null; matchContent: string | null }>>([]);
   const [saveFileName, setSaveFileName] = useState('');
   const [isSavingToRag, setIsSavingToRag] = useState(false);
+
+  // Estados para Adicionar Mensagens ao RAG / Q&A Diretamente do Chat
+  const [isRagSelectionMode, setIsRagSelectionMode] = useState(false);
+  const [ragQuestionMsg, setRagQuestionMsg] = useState<any | null>(null);
+  const [ragAnswerMsg, setRagAnswerMsg] = useState<any | null>(null);
+  const [isAddRagModalOpen, setIsAddRagModalOpen] = useState(false);
+  const [ragModalInitialType, setRagModalInitialType] = useState<'qa' | 'knowledge'>('qa');
+
   const [mobileHeaderMenuOpen, setMobileHeaderMenuOpen] = useState(false);
   const [activeMsgDropdown, setActiveMsgDropdown] = useState<string | null>(null);
   const [messageToForward, setMessageToForward] = useState<any | null>(null);
@@ -2663,7 +2673,7 @@ export default function ChatDashboard() {
     await executeResolve(contactId, true);
   };
 
-  const handlePrepareDraftChat = (phoneNumber: string, targetInstance?: string | null) => {
+  const handlePrepareDraftChat = async (phoneNumber: string, targetInstance?: string | null) => {
     let cleanPhone = phoneNumber.replace(/\D/g, '');
     if (!cleanPhone) return;
     
@@ -2676,8 +2686,8 @@ export default function ChatDashboard() {
     const jid = `${cleanPhone}@s.whatsapp.net`;
     const properInstance = targetInstance || activeChannelFilter || connectedInstanceName;
 
-    // Se o contato já existe nos contatos carregados, seleciona direto
-    const existingInStore = contacts.find(c => c.phone === cleanPhone || c.whatsapp_jid === jid);
+    // 1. Se o contato já existe na memória local, seleciona direto
+    const existingInStore = contacts.find(c => c.phone === cleanPhone || c.whatsapp_jid === jid || c.id === cleanPhone || c.id.startsWith(cleanPhone));
     if (existingInStore) {
       setActiveChat(existingInStore.id);
       const instToLoad = properInstance || getStrictInstance(existingInStore) || connectedInstanceName;
@@ -2686,22 +2696,86 @@ export default function ChatDashboard() {
       }
       setSearchTerm('');
       setDraftNewChat(null);
+      setTimeout(() => {
+        textareaRef.current?.focus();
+      }, 150);
       return;
     }
 
-    // Prepara a tela em modo rascunho sem criar contatos/conversas no Supabase ou na lista lateral
-    const formatted = formatPhoneNumber(cleanPhone.length > 11 ? cleanPhone.slice(2) : cleanPhone) || cleanPhone;
-    setDraftNewChat({
-      phone: cleanPhone,
-      formattedPhone: formatted,
-      instanceId: properInstance || null
-    });
-    useChatStore.setState({ activeChatId: null });
-    setSearchTerm('');
+    setIsCreatingContact(true);
+    try {
+      const tenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id') || tenantInfo?.id;
+      let contactToSelect: any = null;
 
-    setTimeout(() => {
-      textareaRef.current?.focus();
-    }, 150);
+      if (tenantId) {
+        // 2. Consulta a existência do contato no banco de dados Supabase
+        const { data: dbContact } = await supabase
+          .from('contacts')
+          .select('*')
+          .eq('tenant_id', tenantId)
+          .or(`phone.eq.${cleanPhone},whatsapp_jid.eq.${jid}`)
+          .maybeSingle();
+
+        if (dbContact) {
+          contactToSelect = dbContact;
+        } else {
+          // 3. Cria automaticamente o contato no banco de dados se não existir
+          const formatted = formatPhoneNumber(cleanPhone.length > 11 ? cleanPhone.slice(2) : cleanPhone) || cleanPhone;
+          const { data: newContact, error: insertErr } = await supabase
+            .from('contacts')
+            .insert({
+              tenant_id: tenantId,
+              instance_id: properInstance || null,
+              name: formatted,
+              phone: cleanPhone,
+              whatsapp_jid: jid,
+              bot_status: 'active'
+            })
+            .select()
+            .maybeSingle();
+
+          if (newContact && !insertErr) {
+            contactToSelect = newContact;
+          }
+        }
+      }
+
+      if (contactToSelect) {
+        useChatStore.getState().upsertContactLocally(contactToSelect);
+        setActiveChat(contactToSelect.id);
+        const instToLoad = properInstance || contactToSelect.instance_id || connectedInstanceName;
+        if (instToLoad) {
+          useChatStore.getState().loadHistoricalMessages(contactToSelect.id, instToLoad);
+        }
+        setSearchTerm('');
+        setDraftNewChat(null);
+      } else {
+        // Fallback em modo rascunho temporário caso a persistência direta falhe
+        const formatted = formatPhoneNumber(cleanPhone.length > 11 ? cleanPhone.slice(2) : cleanPhone) || cleanPhone;
+        setDraftNewChat({
+          phone: cleanPhone,
+          formattedPhone: formatted,
+          instanceId: properInstance || null
+        });
+        useChatStore.setState({ activeChatId: null });
+        setSearchTerm('');
+      }
+    } catch (err) {
+      console.error('[handlePrepareDraftChat] Erro ao buscar ou criar contato:', err);
+      const formatted = formatPhoneNumber(cleanPhone.length > 11 ? cleanPhone.slice(2) : cleanPhone) || cleanPhone;
+      setDraftNewChat({
+        phone: cleanPhone,
+        formattedPhone: formatted,
+        instanceId: properInstance || null
+      });
+      useChatStore.setState({ activeChatId: null });
+      setSearchTerm('');
+    } finally {
+      setIsCreatingContact(false);
+      setTimeout(() => {
+        textareaRef.current?.focus();
+      }, 150);
+    }
   };
 
   const handleSendDraftMessage = async (e: React.FormEvent) => {
@@ -3373,6 +3447,42 @@ export default function ChatDashboard() {
     } finally {
       setIsSavingToRag(false);
     }
+  };
+
+  // Handlers para Seleção e Inserção de Mensagens no RAG
+  const handleStartAddToRag = (msg: any) => {
+    setRagQuestionMsg(msg);
+    setRagAnswerMsg(null);
+    setIsRagSelectionMode(true);
+  };
+
+  const handleSelectRagAnswer = (msg: any) => {
+    if (!ragQuestionMsg) {
+      setRagQuestionMsg(msg);
+      return;
+    }
+    if (ragQuestionMsg.id === msg.id) {
+      // Se clicou na mesma mensagem, abre direto como conhecimento avulso
+      handleSaveStandaloneKnowledge();
+      return;
+    }
+    setRagAnswerMsg(msg);
+    setIsRagSelectionMode(false);
+    setRagModalInitialType('qa');
+    setIsAddRagModalOpen(true);
+  };
+
+  const handleSaveStandaloneKnowledge = () => {
+    setIsRagSelectionMode(false);
+    setRagAnswerMsg(null);
+    setRagModalInitialType('knowledge');
+    setIsAddRagModalOpen(true);
+  };
+
+  const handleCancelRagSelection = () => {
+    setIsRagSelectionMode(false);
+    setRagQuestionMsg(null);
+    setRagAnswerMsg(null);
   };
 
   const handleSendHuman = async (e: React.FormEvent) => {
@@ -6310,11 +6420,21 @@ export default function ChatDashboard() {
                   
                   {searchTerm.replace(/\D/g, '').length >= 8 && (
                     <button
+                      disabled={isCreatingContact}
                       onClick={() => handlePrepareDraftChat(searchTerm.replace(/\D/g, ''))}
-                      className="w-full flex items-center justify-center gap-2.5 px-5 py-3.5 bg-[#00a884] hover:bg-[#008f70] text-white rounded-2xl shadow-lg hover:shadow-emerald-500/20 font-semibold text-sm transition-all active:scale-95 hover:scale-[1.02] duration-200"
+                      className="w-full flex items-center justify-center gap-2.5 px-5 py-3.5 bg-[#00a884] hover:bg-[#008f70] disabled:opacity-75 text-white rounded-2xl shadow-lg hover:shadow-emerald-500/20 font-semibold text-sm transition-all active:scale-95 hover:scale-[1.02] duration-200 cursor-pointer"
                     >
-                      <MessageSquarePlus size={18} className="shrink-0" />
-                      <span>Enviar mensagem para {formatPhoneNumber(searchTerm.replace(/\D/g, ''))}</span>
+                      {isCreatingContact ? (
+                        <>
+                          <Loader2 size={18} className="animate-spin shrink-0" />
+                          <span>Garantindo contato...</span>
+                        </>
+                      ) : (
+                        <>
+                          <MessageSquarePlus size={18} className="shrink-0" />
+                          <span>Enviar mensagem para {formatPhoneNumber(searchTerm.replace(/\D/g, ''))}</span>
+                        </>
+                      )}
                     </button>
                   )}
                 </div>
@@ -7615,16 +7735,6 @@ export default function ChatDashboard() {
             {(() => {
               const rawMsgs = activeChat.messages?.filter(m => Boolean(m.text || m.mediaUrl || m.isTask || m.sender || m.payload || m.id)) || [];
               const sortedRawMsgs = sortMessagesChronologically(rawMsgs);
-              
-              // Verifica se há mensagens gravadas de dias anteriores ao dia de hoje
-              const hasPreviousMessages = sortedRawMsgs.some(m => {
-                try {
-                  const d = m.timestamp instanceof Date ? m.timestamp : new Date(m.timestamp);
-                  return !isNaN(d.getTime()) && !isToday(d) && d.getTime() <= Date.now();
-                } catch (e) {
-                  return false;
-                }
-              });
 
               const msgsFilteredByMode = (ticketMode && messageFilter === 'today')
                 ? sortedRawMsgs.filter(m => {
@@ -7712,31 +7822,45 @@ export default function ChatDashboard() {
               
               return (
                 <>
-                  {/* Barra de Toggle de Conversas Anteriores no Modo Ticket */}
-                  {ticketMode && hasPreviousMessages && (
-                    <div className="sticky top-0 z-20 flex justify-center py-2 select-none animate-in fade-in duration-200">
-                      <button
-                        type="button"
-                        onClick={() => setMessageFilter(prev => prev === 'today' ? 'all' : 'today')}
-                        className={cn(
-                          "flex items-center justify-center gap-2.5 px-5 py-2.5 rounded-2xl text-xs font-black shadow-md backdrop-blur-md border transition-all duration-300 cursor-pointer min-h-[48px] active:scale-95",
-                          messageFilter === 'all'
-                            ? "bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white border-emerald-400/40 shadow-emerald-500/25 ring-2 ring-emerald-500/20"
-                            : "bg-white/90 dark:bg-[#202c33]/90 text-emerald-600 dark:text-emerald-300 border-emerald-500/30 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 shadow-emerald-500/10"
-                        )}
-                        title={messageFilter === 'today' ? 'Clique para carregar todo o histórico de conversas' : 'Clique para ocultar e exibir apenas as conversas de hoje'}
-                      >
-                        <Ticket size={15} className="text-emerald-500 dark:text-emerald-400 animate-pulse shrink-0" />
-                        <span>{messageFilter === 'today' ? 'Mostrar Conversas Anteriores' : 'Ocultar Conversas Anteriores'}</span>
-                        <span className={cn(
-                          "px-2 py-0.5 rounded-full text-[9.5px] font-black uppercase tracking-wider",
-                          messageFilter === 'all' ? "bg-white/20 text-white" : "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
-                        )}>
-                          {messageFilter === 'today' ? '▲ Histórico Completo' : '▼ Apenas Hoje'}
-                        </span>
-                      </button>
+                  {/* Banner do Modo de Seleção RAG (Floating Top Banner) */}
+                  {isRagSelectionMode && (
+                    <div className="sticky top-2 z-40 mx-2 sm:mx-4 my-2 p-3.5 bg-gradient-to-r from-purple-900/95 via-indigo-900/95 to-purple-900/95 text-white rounded-2xl shadow-xl border border-purple-400/40 backdrop-blur-xl flex flex-col sm:flex-row items-center justify-between gap-3 animate-in slide-in-from-top-4 duration-300">
+                      <div className="flex items-center gap-3 w-full sm:w-auto">
+                        <div className="w-9 h-9 rounded-xl bg-purple-500/30 border border-purple-400/40 flex items-center justify-center text-purple-300 shrink-0 shadow-inner animate-pulse">
+                          <BrainCircuit size={20} />
+                        </div>
+                        <div className="text-left flex-1">
+                          <p className="text-xs font-black tracking-wide flex items-center gap-2">
+                            <span>🎯 Modo de Treinamento RAG</span>
+                            <span className="text-[10px] bg-purple-500/40 border border-purple-300/30 px-2 py-0.5 rounded-md uppercase font-bold">Passo 2 de 2</span>
+                          </p>
+                          <p className="text-[11px] text-purple-200/90 leading-tight mt-0.5">
+                            Clique na mensagem de <strong>Resposta</strong> no chat para formar o par Q&A ou salve apenas a pergunta como conhecimento avulso.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 w-full sm:w-auto justify-end shrink-0">
+                        <button
+                          type="button"
+                          onClick={handleSaveStandaloneKnowledge}
+                          className="px-3.5 py-2 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded-xl transition-all shadow-md active:scale-95 flex items-center gap-1.5 cursor-pointer min-h-[40px]"
+                        >
+                          <FileText size={14} />
+                          Salvar Conhecimento Avulso
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleCancelRagSelection}
+                          className="px-3.5 py-2 bg-black/40 hover:bg-black/60 text-purple-200 hover:text-white text-xs font-bold rounded-xl transition-all active:scale-95 flex items-center gap-1 cursor-pointer min-h-[40px]"
+                        >
+                          <X size={14} />
+                          Cancelar
+                        </button>
+                      </div>
                     </div>
                   )}
+
+
 
                   {dedupedMsgs.map((msg, index, arr) => {
                     const isMe = msg.sender === 'human' || msg.sender === 'bot';
@@ -7789,6 +7913,10 @@ export default function ChatDashboard() {
                         ticketMode={ticketMode}
                         messageFilter={messageFilter}
                         setMessageFilter={setMessageFilter}
+                        onStartAddToRag={handleStartAddToRag}
+                        isRagSelectionMode={isRagSelectionMode}
+                        isRagSelectedQuestion={ragQuestionMsg?.id === msg.id}
+                        onSelectRagAnswer={handleSelectRagAnswer}
                       />
                     );
                   })}
@@ -10609,6 +10737,23 @@ export default function ChatDashboard() {
       <CreateInboxModal 
         isOpen={isCreateInboxModalOpen} 
         onClose={() => setIsCreateInboxModalOpen(false)} 
+      />
+
+      {/* Modal: Adicionar ao RAG / Q&A Diretamente do Chat */}
+      <AddRagModal
+        isOpen={isAddRagModalOpen}
+        onClose={() => {
+          setIsAddRagModalOpen(false);
+          setRagQuestionMsg(null);
+          setRagAnswerMsg(null);
+        }}
+        initialQuestion={ragQuestionMsg?.transcription || ragQuestionMsg?.text || ''}
+        initialAnswer={ragAnswerMsg?.transcription || ragAnswerMsg?.text || ''}
+        initialType={ragModalInitialType}
+        sourceMessageIds={[
+          ...(ragQuestionMsg?.id ? [ragQuestionMsg.id] : []),
+          ...(ragAnswerMsg?.id ? [ragAnswerMsg.id] : [])
+        ]}
       />
     </div>
   );

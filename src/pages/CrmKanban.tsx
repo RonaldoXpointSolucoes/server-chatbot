@@ -54,7 +54,8 @@ import {
   Play,
   RotateCcw,
   FileImage,
-  FileVideo
+  FileVideo,
+  Tag
 } from 'lucide-react';
 import { useChatStore, instanceCache } from '../store/chatStore';
 import { supabase } from '../services/supabase';
@@ -278,6 +279,26 @@ export default function CrmKanban() {
   const [isEditBoardOpen, setIsEditBoardOpen] = useState(false);
   const [isAddLeadOpen, setIsAddLeadOpen] = useState(false);
   const [selectedLead, setSelectedLead] = useState<CRMLead | null>(null);
+
+  // Permissões de Usuário & Administrador
+  const currentUserEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
+  const currentUserRole = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
+  const currentUserId = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_id') || localStorage.getItem('current_user_id')) : null;
+  const currentUserName = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_name') || localStorage.getItem('current_user_name') || currentUserEmail) : 'Usuário';
+
+  const isRonaldo = currentUserEmail?.toLowerCase() === 'ronaldo.xpointsolucoes@gmail.com';
+  const isAdmin = isRonaldo || currentUserRole === 'owner' || currentUserRole === 'admin' || currentUserRole === 'master' || currentUserRole === 'superadmin' || !currentUserRole;
+
+  // Estados de Exclusão Segura do Quadro (Auditoria & Confirmação Multi-Camadas)
+  const [isDeleteBoardModalOpen, setIsDeleteBoardModalOpen] = useState(false);
+  const [deleteConfirmInput, setDeleteConfirmInput] = useState('');
+  const [isDeletingBoard, setIsDeletingBoard] = useState(false);
+  const [deleteErrorMessage, setDeleteErrorMessage] = useState<string | null>(null);
+
+  const isDeleteMatch = Boolean(
+    board && 
+    deleteConfirmInput.trim().toLowerCase() === `excluir ${board.name.trim()}`.toLowerCase()
+  );
   const [collapsedStages, setCollapsedStages] = useState<Record<string, boolean>>(() => {
     if (typeof window !== 'undefined' && boardId) {
       try {
@@ -375,6 +396,31 @@ export default function CrmKanban() {
     suggested_stage_label: string;
   } | null>(null);
   const [selectedTargetStage, setSelectedTargetStage] = useState<string>('');
+  const [newTagInput, setNewTagInput] = useState('');
+
+  const CARD_CATEGORIES = ['Chat', 'Sistema / SaaS', 'Backend / API', 'I.A / Gemini', 'Integração', 'UI/UX', 'Correção'];
+
+  const handleAddPlanTag = (e?: React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'key' in e && e.key !== 'Enter') return;
+    if (e && 'preventDefault' in e) e.preventDefault();
+    if (!generatedPlan || !newTagInput.trim()) return;
+    const clean = newTagInput.trim().replace(/^#/, '');
+    if (clean && !generatedPlan.tags.includes(clean)) {
+      setGeneratedPlan({
+        ...generatedPlan,
+        tags: [...generatedPlan.tags, clean]
+      });
+    }
+    setNewTagInput('');
+  };
+
+  const handleRemovePlanTag = (tagToRemove: string) => {
+    if (!generatedPlan) return;
+    setGeneratedPlan({
+      ...generatedPlan,
+      tags: generatedPlan.tags.filter(t => t !== tagToRemove)
+    });
+  };
 
   const photoInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
@@ -1251,26 +1297,90 @@ export default function CrmKanban() {
     }
   };
 
-  // Deletar Quadro CRM
-  const handleDeleteBoard = async () => {
-    if (!board) return;
-    if (!confirm(`Deseja realmente excluir permanentemente o quadro "${board.name}" e todas as suas oportunidades? Esta ação não pode ser desfeita.`)) return;
-    
+  // Executar Exclusão Segura de Quadro com Auditoria e Cascata
+  const handleExecuteBoardDeletion = async () => {
+    if (!board || !tenantId) return;
+
+    if (!isAdmin) {
+      setDeleteErrorMessage('Apenas administradores têm permissão para excluir este quadro.');
+      return;
+    }
+
+    const expectedText = `excluir ${board.name.trim()}`.toLowerCase();
+    if (deleteConfirmInput.trim().toLowerCase() !== expectedText) {
+      setDeleteErrorMessage(`O texto digitado não coincide com "excluir ${board.name}".`);
+      return;
+    }
+
     try {
-      const { error } = await supabase
+      setIsDeletingBoard(true);
+      setDeleteErrorMessage(null);
+
+      const totalLeadsCount = leads.length;
+
+      // 1. Exclusão em Cascata dos leads e cartões vinculados a este quadro
+      const { error: leadsDeleteErr } = await supabase
+        .from('crm_leads')
+        .delete()
+        .eq('board_id', board.id);
+
+      if (leadsDeleteErr) {
+        console.warn('[CrmKanban] Aviso ao remover leads em cascata:', leadsDeleteErr);
+      }
+
+      // 2. Exclusão do quadro principal
+      const { error: boardDeleteErr } = await supabase
         .from('crm_boards')
         .delete()
         .eq('id', board.id);
 
-      if (error) throw error;
-      
-      // Atualizar a lista de quadros na sidebar
-      useChatStore.getState().fetchCrmBoards();
-      
-      // Navegar para o painel estratégico
-      navigate('/crm');
+      if (boardDeleteErr) throw boardDeleteErr;
+
+      // 3. Registro no Log de Auditoria do Sistema (system_logs)
+      const auditPayload = {
+        action: 'board_deleted',
+        board_id: board.id,
+        board_name: board.name,
+        board_description: board.config?.description || '',
+        stages_count: board.config?.stages?.length || 0,
+        total_leads_deleted: totalLeadsCount,
+        user_id: currentUserId || null,
+        user_email: currentUserEmail || null,
+        user_name: currentUserName || null,
+        user_role: currentUserRole || 'admin',
+        user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : 'Unknown',
+        deleted_at: new Date().toISOString()
+      };
+
+      await supabase.from('system_logs').insert([{
+        type: 'CRM Board Deletion',
+        message: `Quadro "${board.name}" (ID: ${board.id}) e ${totalLeadsCount} leads foram permanentemente excluídos por ${currentUserName} (${currentUserEmail || 'admin'}).`,
+        level: 'warn',
+        payload: auditPayload,
+        company_id: tenantId,
+        created_at: new Date().toISOString()
+      }]).catch(logErr => console.warn('[CrmKanban] Falha silenciosa no audit log:', logErr));
+
+      // 4. Limpeza de rascunhos locais e preferências de colapso de colunas
+      try {
+        localStorage.removeItem(`crm_kanban_collapsed_stages_${board.id}`);
+        await clearCardDraft(board.id);
+      } catch (cleanErr) {
+        console.warn('[CrmKanban] Aviso ao limpar rascunho local:', cleanErr);
+      }
+
+      // 5. Atualizar lista de quadros na sidebar global
+      await useChatStore.getState().fetchCrmBoards();
+
+      // 6. Fechar modais e redirecionar para a visão estratégica do CRM
+      setIsDeleteBoardModalOpen(false);
+      setIsEditBoardOpen(false);
+      navigate('/crm', { replace: true });
     } catch (err: any) {
-      alert('Erro ao excluir quadro: ' + err.message);
+      console.error('[CrmKanban] Erro ao excluir quadro:', err);
+      setDeleteErrorMessage('Falha ao excluir quadro: ' + (err?.message || 'Erro de permissão ou banco de dados.'));
+    } finally {
+      setIsDeletingBoard(false);
     }
   };
 
@@ -3395,21 +3505,39 @@ export default function CrmKanban() {
                 </div>
 
                 {/* Zona de Perigo (Danger Zone) */}
-                <div className="mt-6 pt-4 border-t border-rose-550/10 space-y-2">
-                  <h4 className="font-extrabold text-rose-600 uppercase tracking-wider text-[9px]">Zona de Perigo</h4>
-                  <div className="flex justify-between items-center bg-rose-500/[0.02] border border-rose-500/10 p-3.5 rounded-2xl">
+                <div className="mt-6 pt-4 border-t border-rose-500/10 dark:border-rose-500/20 space-y-2">
+                  <div className="flex items-center gap-1.5">
+                    <AlertTriangle size={13} className="text-rose-500" />
+                    <h4 className="font-extrabold text-rose-600 dark:text-rose-400 uppercase tracking-wider text-[10px]">Zona de Perigo</h4>
+                  </div>
+                  <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 bg-rose-500/[0.04] dark:bg-rose-500/10 border border-rose-500/20 p-4 rounded-2xl">
                     <div>
-                      <p className="font-bold text-slate-800 dark:text-slate-200 text-xs">Excluir este quadro</p>
-                      <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">Excluirá permanentemente o quadro e todos os seus leads.</p>
+                      <p className="font-bold text-slate-800 dark:text-slate-100 text-xs">Excluir este quadro</p>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                        Ação irreversível: remove o quadro, todas as colunas e todos os {leads.length} cartões/leads associados.
+                      </p>
+                      {!isAdmin && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-md mt-1.5">
+                          🔒 Requer permissão de Administrador
+                        </span>
+                      )}
                     </div>
                     <button
                       type="button"
+                      disabled={!isAdmin}
                       onClick={() => {
-                        setIsEditBoardOpen(false);
-                        handleDeleteBoard();
+                        setDeleteConfirmInput('');
+                        setDeleteErrorMessage(null);
+                        setIsDeleteBoardModalOpen(true);
                       }}
-                      className="px-3.5 py-2 bg-rose-500 hover:bg-rose-600 text-white rounded-xl text-[10px] font-black uppercase shadow-sm active:scale-95 transition-all duration-200 cursor-pointer"
+                      className={cn(
+                        "px-4 py-2.5 rounded-xl text-xs font-black uppercase shadow-sm transition-all duration-200 shrink-0 flex items-center justify-center gap-1.5 min-h-[44px]",
+                        isAdmin 
+                          ? "bg-rose-500 hover:bg-rose-600 active:scale-95 text-white cursor-pointer shadow-rose-500/20" 
+                          : "bg-slate-200 dark:bg-white/5 text-slate-400 cursor-not-allowed opacity-60"
+                      )}
                     >
+                      <Trash2 size={13} />
                       Excluir Quadro
                     </button>
                   </div>
@@ -3433,6 +3561,199 @@ export default function CrmKanban() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Exclusão Segura de Quadro com Confirmação Textual Multi-Camadas e Auditoria */}
+      {isDeleteBoardModalOpen && board && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[60] flex items-center justify-center p-4 select-none animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-[#111b21] w-full max-w-lg rounded-[28px] border border-rose-500/30 dark:border-rose-500/20 overflow-hidden shadow-[0_25px_60px_-15px_rgba(225,29,72,0.3)] flex flex-col max-h-[90vh] transition-all animate-in zoom-in-95 duration-200">
+            
+            {/* Header com Alerta de Perigo */}
+            <div className="px-6 py-5 border-b border-rose-500/15 dark:border-rose-500/15 bg-gradient-to-r from-rose-500/10 via-rose-500/5 to-transparent flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-rose-500/20 text-rose-600 dark:text-rose-400 flex items-center justify-center shadow-inner ring-4 ring-rose-500/10">
+                  <AlertTriangle size={20} className="animate-bounce" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-rose-600 dark:text-rose-400 font-sans uppercase tracking-wider">
+                    Exclusão Permanente do Quadro
+                  </h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+                    Confirmação de segurança com registro de auditoria
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => {
+                  if (isDeletingBoard) return;
+                  setIsDeleteBoardModalOpen(false);
+                }}
+                disabled={isDeletingBoard}
+                className="p-2 hover:bg-slate-100 dark:hover:bg-white/5 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Corpo do Modal */}
+            <div className="p-6 space-y-4 overflow-y-auto custom-scrollbar flex-1 text-xs text-left">
+              
+              {/* Banner de Impacto Irreversível */}
+              <div className="bg-rose-500/10 dark:bg-rose-500/15 border border-rose-500/25 p-4 rounded-2xl space-y-2">
+                <div className="flex items-center gap-2 text-rose-600 dark:text-rose-400 font-black text-xs">
+                  <ShieldCheck size={16} />
+                  <span>Atenção: Esta ação é definitiva e irreversível!</span>
+                </div>
+                <p className="text-slate-600 dark:text-slate-300 text-[11px] leading-relaxed">
+                  Ao excluir o quadro <strong className="text-slate-900 dark:text-white font-black">"{board.name}"</strong>, todos os dados abaixo serão <strong className="text-rose-600 dark:text-rose-400">permanentemente destruídos</strong>:
+                </p>
+                <ul className="grid grid-cols-2 gap-2 text-[11px] text-slate-700 dark:text-slate-300 font-semibold pt-1">
+                  <li className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                    {leads.length} Oportunidade(s) / Cartões
+                  </li>
+                  <li className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                    {board.config?.stages?.length || 0} Colunas / Etapas
+                  </li>
+                  <li className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                    Histórico & Linha do Tempo
+                  </li>
+                  <li className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                    Logs de auditoria e métricas
+                  </li>
+                </ul>
+              </div>
+
+              {/* Instrução de Confirmação Textual */}
+              <div className="space-y-2 pt-1">
+                <label className="block font-bold text-slate-700 dark:text-slate-300 text-xs">
+                  Para confirmar, digite exatamente <span className="text-rose-600 dark:text-rose-400 font-black select-all">excluir {board.name}</span> no campo abaixo:
+                </label>
+                
+                <div className="flex items-center gap-2 p-2.5 bg-slate-100 dark:bg-[#182229] border border-slate-200 dark:border-white/10 rounded-xl">
+                  <code className="text-xs font-mono font-bold text-rose-600 dark:text-rose-400 flex-1 truncate select-all">
+                    excluir {board.name}
+                  </code>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(`excluir ${board.name}`);
+                      setDeleteConfirmInput(`excluir ${board.name}`);
+                    }}
+                    className="text-[10px] font-bold text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-slate-200 dark:hover:bg-white/5 transition-all cursor-pointer"
+                    title="Copiar e preencher frase"
+                  >
+                    <Copy size={12} />
+                    Copiar
+                  </button>
+                </div>
+
+                <div className="space-y-1">
+                  <input 
+                    type="text"
+                    autoFocus
+                    disabled={isDeletingBoard}
+                    placeholder={`Digite: excluir ${board.name}`}
+                    value={deleteConfirmInput}
+                    onChange={e => {
+                      setDeleteConfirmInput(e.target.value);
+                      if (deleteErrorMessage) setDeleteErrorMessage(null);
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && isDeleteMatch && !isDeletingBoard) {
+                        e.preventDefault();
+                        handleExecuteBoardDeletion();
+                      }
+                    }}
+                    className={cn(
+                      "w-full px-4 py-3 bg-white dark:bg-[#202c33]/70 border rounded-xl text-xs font-semibold focus:outline-none transition-all duration-200",
+                      isDeleteMatch
+                        ? "border-emerald-500/50 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/15 text-slate-900 dark:text-white"
+                        : deleteConfirmInput.length > 0
+                          ? "border-amber-500/50 focus:border-rose-500 focus:ring-4 focus:ring-rose-500/15 text-slate-900 dark:text-white"
+                          : "border-slate-300 dark:border-white/10 focus:border-rose-500 focus:ring-4 focus:ring-rose-500/10 text-slate-900 dark:text-white"
+                    )}
+                  />
+
+                  {/* Validação Dinâmica */}
+                  <div className="pt-1">
+                    {isDeleteMatch ? (
+                      <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+                        <CheckCircle2 size={14} />
+                        <span>Confirmação reconhecida. Exclusão desbloqueada.</span>
+                      </div>
+                    ) : deleteConfirmInput.length > 0 ? (
+                      <div className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-600 dark:text-amber-400">
+                        <AlertTriangle size={14} />
+                        <span>Texto digitado ainda não coincide exatamente com a frase exigida.</span>
+                      </div>
+                    ) : (
+                      <p className="text-[10px] text-slate-400 dark:text-slate-500">
+                        O botão de exclusão só será ativado após digitar a frase completa.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Mensagem de Erro se houver */}
+              {deleteErrorMessage && (
+                <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-[11px] font-bold text-rose-600 dark:text-rose-400 flex items-center gap-2">
+                  <AlertTriangle size={14} className="shrink-0" />
+                  <span>{deleteErrorMessage}</span>
+                </div>
+              )}
+
+              {/* Informações de Auditoria */}
+              <div className="pt-2 text-[10px] text-slate-400 dark:text-slate-500 flex items-center justify-between border-t border-slate-200/40 dark:border-white/5">
+                <span>Executor: <strong className="text-slate-700 dark:text-slate-300">{currentUserName}</strong> ({currentUserRole || 'admin'})</span>
+                <span>Ação auditada no sistema</span>
+              </div>
+            </div>
+
+            {/* Footer com Ações */}
+            <div className="px-6 py-4 border-t border-slate-200/20 dark:border-white/5 bg-slate-50/50 dark:bg-black/10 shrink-0 flex gap-3 justify-end items-center">
+              <button 
+                type="button"
+                disabled={isDeletingBoard}
+                onClick={() => {
+                  setIsDeleteBoardModalOpen(false);
+                  setDeleteConfirmInput('');
+                  setDeleteErrorMessage(null);
+                }}
+                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 text-slate-600 dark:text-slate-300 font-bold rounded-xl transition-all duration-200 text-xs active:scale-95 cursor-pointer min-h-[44px]"
+              >
+                Cancelar
+              </button>
+              <button 
+                type="button"
+                disabled={!isDeleteMatch || isDeletingBoard}
+                onClick={handleExecuteBoardDeletion}
+                className={cn(
+                  "px-6 py-2.5 font-black uppercase rounded-xl transition-all duration-200 text-xs flex items-center justify-center gap-2 min-h-[44px]",
+                  isDeleteMatch && !isDeletingBoard
+                    ? "bg-rose-600 hover:bg-rose-700 text-white shadow-lg shadow-rose-600/30 active:scale-95 cursor-pointer hover:scale-[1.02]"
+                    : "bg-slate-200 dark:bg-white/5 text-slate-400 cursor-not-allowed opacity-50"
+                )}
+              >
+                {isDeletingBoard ? (
+                  <>
+                    <Loader2 size={15} className="animate-spin" />
+                    Excluindo Dados...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 size={15} />
+                    Excluir Definitivamente
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -3720,33 +4041,46 @@ export default function CrmKanban() {
 
               {/* 4. Plano Gerado / Preview Estruturado */}
               {generatedPlan && (
-                <div className="p-4 sm:p-5 bg-gradient-to-br from-indigo-500/[0.06] via-purple-500/[0.03] to-transparent border border-indigo-500/25 rounded-2xl space-y-4 animate-in fade-in zoom-in-95 duration-200">
+                <div className="p-4 sm:p-5 bg-gradient-to-br from-indigo-500/[0.08] via-purple-500/[0.04] to-transparent border border-indigo-500/30 rounded-3xl space-y-4 animate-in fade-in zoom-in-95 duration-200 shadow-xl shadow-indigo-500/5">
                   <div className="flex items-center justify-between border-b border-indigo-500/15 pb-3">
-                    <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-lg bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
-                      🎯 Plano de Engenharia Sênior Estruturado
-                    </span>
-                    <span className="text-[10px] font-bold text-slate-400">
-                      Prioridade: {generatedPlan.priority === 3 ? '🔴 Alta' : generatedPlan.priority === 2 ? '🟡 Média' : '🟢 Normal'}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10.5px] font-black uppercase tracking-wider px-3 py-1 rounded-xl bg-gradient-to-r from-indigo-500/20 to-purple-500/20 text-indigo-400 border border-indigo-500/30 flex items-center gap-1.5 shadow-sm">
+                        <Sparkles size={13} className="text-amber-400 animate-pulse" />
+                        Sugestões Inteligentes Geradas por IA
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setGeneratedPlan(null)}
+                      className="text-[11px] font-bold text-slate-400 hover:text-rose-400 transition-colors flex items-center gap-1 cursor-pointer px-2 py-1 rounded-lg hover:bg-rose-500/10"
+                      title="Descartar sugestões e recomeçar"
+                    >
+                      <RotateCcw size={12} />
+                      <span>Descartar</span>
+                    </button>
                   </div>
 
                   {/* Título & Coluna de Destino */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <label className="font-black text-slate-600 dark:text-slate-400 uppercase tracking-wider text-[9px]">Título do Card</label>
+                    <div className="space-y-1.5">
+                      <label className="font-black text-slate-600 dark:text-slate-400 uppercase tracking-wider text-[9.5px] flex items-center justify-between">
+                        <span>Título do Card</span>
+                        <span className="text-[9px] text-indigo-400 font-semibold">Editável</span>
+                      </label>
                       <input 
                         type="text" 
                         value={generatedPlan.title}
                         onChange={e => setGeneratedPlan({ ...generatedPlan, title: e.target.value })}
-                        className="w-full px-3.5 py-2.5 bg-white dark:bg-[#1a242c] border border-slate-200 dark:border-white/10 rounded-xl text-xs font-bold text-slate-900 dark:text-white"
+                        placeholder="[Contexto] Título descritivo do card"
+                        className="w-full px-3.5 py-2.5 bg-white dark:bg-[#1a242c] border border-slate-200 dark:border-white/10 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500/30 focus:outline-none transition-all"
                       />
                     </div>
-                    <div className="space-y-1">
-                      <label className="font-black text-slate-600 dark:text-slate-400 uppercase tracking-wider text-[9px]">Coluna no Quadro</label>
+                    <div className="space-y-1.5">
+                      <label className="font-black text-slate-600 dark:text-slate-400 uppercase tracking-wider text-[9.5px]">Coluna no Quadro</label>
                       <select 
                         value={selectedTargetStage}
                         onChange={e => setSelectedTargetStage(e.target.value)}
-                        className="w-full px-3.5 py-2.5 bg-white dark:bg-[#1a242c] border border-slate-200 dark:border-white/10 rounded-xl text-xs font-bold text-slate-900 dark:text-white cursor-pointer"
+                        className="w-full px-3.5 py-2.5 bg-white dark:bg-[#1a242c] border border-slate-200 dark:border-white/10 rounded-xl text-xs font-bold text-slate-900 dark:text-white cursor-pointer focus:ring-2 focus:ring-indigo-500/30 focus:outline-none transition-all"
                       >
                         {pipelineStages.map(s => (
                           <option key={s.id} value={s.id} className="dark:bg-[#111b21]">{s.label}</option>
@@ -3755,28 +4089,142 @@ export default function CrmKanban() {
                     </div>
                   </div>
 
-                  {/* Tags */}
-                  <div className="flex gap-1.5 flex-wrap">
-                    {generatedPlan.tags.map((t, idx) => (
-                      <span key={idx} className="text-[9px] font-black uppercase px-2.5 py-0.5 rounded-md bg-white dark:bg-white/10 text-indigo-600 dark:text-indigo-300 border border-indigo-500/20">
-                        #{t}
-                      </span>
-                    ))}
-                  </div>
-
-                  {/* Resumo */}
-                  <div className="p-3 bg-white/60 dark:bg-black/20 rounded-xl border border-black/5 dark:border-white/5">
-                    <p className="text-[11px] font-bold text-slate-800 dark:text-slate-200 leading-relaxed">
-                      {generatedPlan.summary}
-                    </p>
-                  </div>
-
-                  {/* Plano Detalhado em Markdown */}
+                  {/* Categoria Sugerida (Chips Interativos) */}
                   <div className="space-y-1.5">
-                    <label className="font-black text-slate-600 dark:text-slate-400 uppercase tracking-wider text-[9px]">Especificação Técnica & Requisitos</label>
-                    <div className="p-4 bg-white dark:bg-[#0c1317] border border-slate-200 dark:border-white/10 rounded-xl max-h-[220px] overflow-y-auto custom-scrollbar text-[11px] text-slate-800 dark:text-slate-200 whitespace-pre-wrap font-mono leading-relaxed select-text">
-                      {generatedPlan.technical_plan}
+                    <label className="font-black text-slate-600 dark:text-slate-400 uppercase tracking-wider text-[9.5px] flex items-center gap-1">
+                      <Layers size={11} className="text-indigo-400" />
+                      Categoria Sugerida (Clique para alternar)
+                    </label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {CARD_CATEGORIES.map(cat => {
+                        const isSelected = generatedPlan.category === cat;
+                        return (
+                          <button
+                            key={cat}
+                            type="button"
+                            onClick={() => setGeneratedPlan({ ...generatedPlan, category: cat })}
+                            className={cn(
+                              "px-3 py-1.5 rounded-xl text-[10.5px] font-bold transition-all duration-150 cursor-pointer flex items-center gap-1.5 border active:scale-95",
+                              isSelected 
+                                ? "bg-gradient-to-r from-indigo-600 to-purple-600 text-white border-indigo-400/50 shadow-md shadow-indigo-500/25 ring-2 ring-indigo-500/20" 
+                                : "bg-white/80 dark:bg-white/5 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/10"
+                            )}
+                          >
+                            {isSelected && <Sparkles size={11} className="text-amber-300 shrink-0" />}
+                            <span>{cat}</span>
+                          </button>
+                        );
+                      })}
                     </div>
+                  </div>
+
+                  {/* Prioridade Sugerida (Seletor 1 a 3) */}
+                  <div className="space-y-1.5">
+                    <label className="font-black text-slate-600 dark:text-slate-400 uppercase tracking-wider text-[9.5px] flex items-center gap-1">
+                      <Sliders size={11} className="text-indigo-400" />
+                      Prioridade
+                    </label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        { level: 1, label: 'Normal', icon: '🟢', style: 'border-emerald-500/40 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10' },
+                        { level: 2, label: 'Média', icon: '🟡', style: 'border-amber-500/40 text-amber-600 dark:text-amber-400 bg-amber-500/10' },
+                        { level: 3, label: 'Alta / Crítica', icon: '🔴', style: 'border-rose-500/40 text-rose-600 dark:text-rose-400 bg-rose-500/10' }
+                      ].map(p => {
+                        const isSelected = generatedPlan.priority === p.level;
+                        return (
+                          <button
+                            key={p.level}
+                            type="button"
+                            onClick={() => setGeneratedPlan({ ...generatedPlan, priority: p.level })}
+                            className={cn(
+                              "py-2 px-3 rounded-xl text-xs font-bold transition-all border flex items-center justify-center gap-1.5 cursor-pointer active:scale-95",
+                              isSelected 
+                                ? `${p.style} ring-2 ring-indigo-500/30 font-black shadow-sm` 
+                                : "bg-white/60 dark:bg-white/5 border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-400 opacity-70 hover:opacity-100"
+                            )}
+                          >
+                            <span>{p.icon}</span>
+                            <span>{p.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Tags Interativas (Remover & Adicionar) */}
+                  <div className="space-y-1.5">
+                    <label className="font-black text-slate-600 dark:text-slate-400 uppercase tracking-wider text-[9.5px] flex items-center justify-between">
+                      <span className="flex items-center gap-1">
+                        <Tag size={11} className="text-indigo-400" />
+                        Tags Sugeridas ({generatedPlan.tags.length})
+                      </span>
+                      <span className="text-[9px] text-slate-400">Clique no X para remover</span>
+                    </label>
+                    
+                    <div className="flex flex-wrap items-center gap-1.5 p-2 bg-white/60 dark:bg-[#1a242c]/60 rounded-xl border border-slate-200 dark:border-white/10 min-h-[42px]">
+                      {generatedPlan.tags.map((t, idx) => (
+                        <span 
+                          key={idx} 
+                          className="inline-flex items-center gap-1 text-[10px] font-black uppercase pl-2.5 pr-1.5 py-1 rounded-lg bg-indigo-500/10 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-300 border border-indigo-500/30 group animate-in zoom-in-95 duration-150"
+                        >
+                          <span>#{t}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemovePlanTag(t)}
+                            className="p-0.5 hover:bg-rose-500 hover:text-white rounded transition-colors text-slate-400 cursor-pointer"
+                            title={`Remover tag #${t}`}
+                          >
+                            <X size={11} />
+                          </button>
+                        </span>
+                      ))}
+
+                      {/* Input de Nova Tag */}
+                      <div className="inline-flex items-center gap-1 min-w-[110px] flex-1">
+                        <input
+                          type="text"
+                          value={newTagInput}
+                          onChange={e => setNewTagInput(e.target.value)}
+                          onKeyDown={handleAddPlanTag}
+                          placeholder="+ Nova tag (Enter)"
+                          className="w-full bg-transparent text-[11px] font-medium text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none px-1.5 py-0.5"
+                        />
+                        {newTagInput.trim() && (
+                          <button
+                            type="button"
+                            onClick={() => handleAddPlanTag()}
+                            className="px-2 py-0.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-[10px] font-bold cursor-pointer"
+                          >
+                            Adicionar
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Resumo Executivo Editável */}
+                  <div className="space-y-1.5">
+                    <label className="font-black text-slate-600 dark:text-slate-400 uppercase tracking-wider text-[9.5px]">Resumo Executivo</label>
+                    <textarea 
+                      rows={2}
+                      value={generatedPlan.summary}
+                      onChange={e => setGeneratedPlan({ ...generatedPlan, summary: e.target.value })}
+                      className="w-full p-3 bg-white/80 dark:bg-[#1a242c] rounded-xl border border-slate-200 dark:border-white/10 text-[11.5px] font-semibold text-slate-800 dark:text-slate-200 leading-relaxed focus:ring-2 focus:ring-indigo-500/30 focus:outline-none custom-scrollbar"
+                    />
+                  </div>
+
+                  {/* Plano Detalhado em Markdown (Editável) */}
+                  <div className="space-y-1.5">
+                    <label className="font-black text-slate-600 dark:text-slate-400 uppercase tracking-wider text-[9.5px] flex items-center justify-between">
+                      <span>Especificação Técnica & Requisitos (Markdown)</span>
+                      <span className="text-[9px] text-indigo-400 font-semibold">Editável</span>
+                    </label>
+                    <textarea
+                      rows={6}
+                      value={generatedPlan.technical_plan}
+                      onChange={e => setGeneratedPlan({ ...generatedPlan, technical_plan: e.target.value })}
+                      className="w-full p-3.5 bg-white dark:bg-[#0c1317] border border-slate-200 dark:border-white/10 rounded-xl text-[11px] text-slate-800 dark:text-slate-200 font-mono leading-relaxed select-text focus:ring-2 focus:ring-indigo-500/30 focus:outline-none custom-scrollbar"
+                    />
                   </div>
                 </div>
               )}
@@ -3795,6 +4243,17 @@ export default function CrmKanban() {
               >
                 Cancelar
               </button>
+              {generatedPlan && (
+                <button
+                  type="button"
+                  disabled={isGeneratingPlan || loading}
+                  onClick={handleGeneratePlanMultimodal}
+                  className="w-full sm:w-auto px-4 py-3 bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-600 dark:text-indigo-300 font-bold rounded-xl border border-indigo-500/30 transition-all duration-200 text-xs active:scale-95 cursor-pointer uppercase tracking-wider flex items-center justify-center gap-1.5 min-h-[44px]"
+                >
+                  <Sparkles size={14} className="text-amber-400" />
+                  <span>Regenerar com IA</span>
+                </button>
+              )}
               <button 
                 type="button"
                 disabled={!generatedPlan || loading}
