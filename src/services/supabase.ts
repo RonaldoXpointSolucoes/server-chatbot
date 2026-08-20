@@ -109,7 +109,21 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     storage: customAuthStorage,
     persistSession: true,
     autoRefreshToken: true,
-    detectSessionInUrl: true
+    detectSessionInUrl: true,
+    lock: async (name: string, acquireTimeout: number, fn: () => Promise<any>) => {
+      // Lock resiliente: previne o erro "Lock was released because another request stole it"
+      if (typeof navigator !== 'undefined' && (navigator as any).locks) {
+        try {
+          return await (navigator as any).locks.request(name, { mode: 'exclusive' }, async () => {
+            return await fn();
+          });
+        } catch (err: any) {
+          // Se o lock expirou ou foi cancelado por concorrência entre abas, executa a função pacificamente
+          return await fn();
+        }
+      }
+      return await fn();
+    }
   },
   global: {
     fetch: customFetch

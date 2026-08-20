@@ -30,7 +30,9 @@ if (!supabaseUrl || !supabaseKey) {
 // Injetamos um transport WebSocket válido globalmente/locamente
 export const supabase = createClient(supabaseUrl, supabaseKey, {
   auth: {
-    persistSession: false
+    persistSession: false,
+    autoRefreshToken: false,
+    detectSessionInUrl: false
   },
   global: {
     fetch: (url, options) => fetch(url, { ...options, keepalive: true })

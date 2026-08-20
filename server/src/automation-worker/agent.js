@@ -1120,31 +1120,44 @@ class AutomationWorker {
                     if (!cardapioUrl) {
                         continue;
                     }
-                    
-                    console.log(`[CardapioSync] Sincronizando cardápio para a empresa ${company.name} (${tenantId})...`);
-                    
-                    // Limpa caches anteriores para forçar a API externa
-                    this.clearCardapioCache(tenantId);
-                    
-                    const mockBotSettings = {
-                        cardapio_origem: 'api',
-                        cardapio_json_url: cardapioUrl,
-                        cardapio_json_token: companySettings.cardapio_json_token,
-                        cardapio_json_payload: companySettings.cardapio_json_payload
-                    };
+
+                    if (!AutomationWorker.cardapioSyncInProgress) {
+                        AutomationWorker.cardapioSyncInProgress = new Set();
+                    }
+                    if (AutomationWorker.cardapioSyncInProgress.has(tenantId)) {
+                        console.log(`[CardapioSync] Sincronização já em andamento para o tenant ${tenantId}. Ignorando ciclo concorrente.`);
+                        continue;
+                    }
+                    AutomationWorker.cardapioSyncInProgress.add(tenantId);
                     
                     try {
-                        const cache = await getOrUpdateCardapioCache(tenantId, companySettings, mockBotSettings);
-                        if (cache && cache.produtos && cache.produtos.length > 0) {
-                            console.log(`[CardapioSync] Salvando/Atualizando cardápio no Supabase para ${company.name}...`);
-                            await autoHealAndIndexCardapio(tenantId, companySettings, {
-                                grupos: cache.grupos,
-                                produtos: cache.produtos
-                            });
+                        console.log(`[CardapioSync] Sincronizando cardápio para a empresa ${company.name} (${tenantId})...`);
+                        
+                        // Limpa caches anteriores para forçar a API externa
+                        this.clearCardapioCache(tenantId);
+                        
+                        const mockBotSettings = {
+                            cardapio_origem: 'api',
+                            cardapio_json_url: cardapioUrl,
+                            cardapio_json_token: companySettings.cardapio_json_token,
+                            cardapio_json_payload: companySettings.cardapio_json_payload
+                        };
+                        
+                        try {
+                            const cache = await getOrUpdateCardapioCache(tenantId, companySettings, mockBotSettings);
+                            if (cache && cache.produtos && cache.produtos.length > 0) {
+                                console.log(`[CardapioSync] Salvando/Atualizando cardápio no Supabase para ${company.name}...`);
+                                await autoHealAndIndexCardapio(tenantId, companySettings, {
+                                    grupos: cache.grupos,
+                                    produtos: cache.produtos
+                                });
+                            }
+                            console.log(`[CardapioSync] Sincronização concluída para ${company.name}. Origem: ${cache.origem}. Produtos: ${cache.produtos?.length || 0}`);
+                        } catch (syncErr) {
+                            console.error(`[CardapioSync] Erro ao sincronizar cardápio de ${company.name}:`, syncErr.message);
                         }
-                        console.log(`[CardapioSync] Sincronização concluída para ${company.name}. Origem: ${cache.origem}. Produtos: ${cache.produtos?.length || 0}`);
-                    } catch (syncErr) {
-                        console.error(`[CardapioSync] Erro ao sincronizar cardápio de ${company.name}:`, syncErr.message);
+                    } finally {
+                        AutomationWorker.cardapioSyncInProgress.delete(tenantId);
                     }
                     
                     // Delay de 5 segundos entre empresas para preservar recursos
