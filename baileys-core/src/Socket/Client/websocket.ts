@@ -45,15 +45,26 @@ export class WebSocketClient extends AbstractSocketClient {
 			return
 		}
 
-		const closePromise = new Promise<void>(resolve => {
-			this.socket?.once('close', resolve)
-		})
-
-		this.socket.close()
-
-		await closePromise
-
+		const ws = this.socket
 		this.socket = null
+
+		try {
+			if (typeof (ws as any).on === 'function') {
+				(ws as any).on('error', () => {})
+			}
+			if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+				const closePromise = new Promise<void>(resolve => {
+					ws.once('close', () => resolve())
+					setTimeout(() => resolve(), 1000)
+				})
+				try { ws.close() } catch (errClose) {}
+				await closePromise
+			} else if (typeof (ws as any).terminate === 'function') {
+				try { (ws as any).terminate() } catch (errTerm) {}
+			}
+		} catch (e) {
+			// Ignora erros ao fechar socket em estado de transição
+		}
 	}
 	send(str: string | Uint8Array, cb?: (err?: Error) => void): boolean {
 		this.socket?.send(str, cb)

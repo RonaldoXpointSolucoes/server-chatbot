@@ -358,6 +358,9 @@ class SessionManager {
                 } else if (updatedInst) {
                     console.log(`[SessionManager/Lock] ✅ Lock adquirido com sucesso para instância ${instanceId} no nó ${currentNodeId} (lease até ${leaseUntil}).`);
                     return updatedInst;
+                } else {
+                    console.log(`[SessionManager/Lock] ✅ Lock atualizado com sucesso (fallback) para instância ${instanceId} no nó ${currentNodeId}.`);
+                    return { ...inst, assigned_node_id: currentNodeId, lease_until: leaseUntil, status: nextStatus, updated_at: updatedAt };
                 }
             }
 
