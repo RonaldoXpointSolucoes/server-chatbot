@@ -222,6 +222,23 @@ class SessionManager {
                 }
             }
         }, 15000);
+
+        // Limpeza periódica preventiva de locks órfãos/expirados no banco de dados (a cada 60s)
+        setInterval(async () => {
+            try {
+                const now = new Date().toISOString();
+                await supabase
+                    .from('whatsapp_instances')
+                    .update({
+                        assigned_node_id: null,
+                        lease_until: null,
+                        updated_at: now
+                    })
+                    .lt('lease_until', now)
+                    .neq('status', 'connected')
+                    .not('assigned_node_id', 'is', null);
+            } catch (errClean) {}
+        }, 60000);
     }
 
     async destroyExistingSession(instanceId, reason = 'reconnect') {
@@ -304,10 +321,19 @@ class SessionManager {
             const isLeaseActive = leaseExpiry && leaseExpiry > new Date();
 
             const isExplicitlyDeadStatus = ['offline', 'paused', 'disconnected', 'bad_session', 'logged_out'].includes(inst.status);
-            const isStaleWorker = timeSinceLastUpdate > 35000;
+            const isStaleWorker = timeSinceLastUpdate > 30000;
             const isDeadInterim = (inst.status !== 'connected' && inst.status !== 'connected_local') && (timeSinceLastUpdate > 15000);
 
-            const canTakeover = force || !assignedNodeId || assignedNodeId === currentNodeId || !isLeaseActive || isExplicitlyDeadStatus || isStaleWorker || isDeadInterim || (attempt === maxLockAttempts);
+            // Permite assumir o lock se:
+            // 1. Forçado explicitamente (force)
+            // 2. Não possui nó atribuído
+            // 3. Já pertence ao nó atual
+            // 4. O lease expirou
+            // 5. O status é explicitamente inativo
+            // 6. O worker proprietário está sem heartbeat há mais de 30s
+            // 7. Última tentativa de backoff atingida e o nó não está com heartbeat recente (< 20s)
+            const isOtherHeartbeatFresh = assignedNodeId && assignedNodeId !== currentNodeId && isLeaseActive && timeSinceLastUpdate <= 20000;
+            const canTakeover = force || !assignedNodeId || assignedNodeId === currentNodeId || !isLeaseActive || isExplicitlyDeadStatus || isStaleWorker || isDeadInterim || (attempt === maxLockAttempts && !isOtherHeartbeatFresh);
 
             if (canTakeover) {
                 const leaseUntil = new Date(Date.now() + 45000).toISOString();
@@ -335,13 +361,18 @@ class SessionManager {
                 }
             }
 
-            if (inst.status === 'connected' && assignedNodeId && assignedNodeId !== currentNodeId && timeSinceLastUpdate <= 35000 && !force) {
-                console.log(`[SessionManager/Lock] Instância ${instanceId} está ativamente conectada no nó ${assignedNodeId} (heartbeat há ${Math.round(timeSinceLastUpdate / 1000)}s). Preservando propriedade exclusiva para evitar conflito (status 440).`);
-                throw new Error(`Instância ${instanceId} possui lock ativo e saudável no nó ${assignedNodeId}`);
+            // Se for a última tentativa e o outro nó ainda estiver com heartbeat super ativo (< 20s), lança erro informativo
+            if (attempt === maxLockAttempts) {
+                if (inst.status === 'connected' && assignedNodeId && assignedNodeId !== currentNodeId && timeSinceLastUpdate <= 20000 && !force) {
+                    console.log(`[SessionManager/Lock] Instância ${instanceId} está ativamente conectada no nó ${assignedNodeId} (heartbeat há ${Math.round(timeSinceLastUpdate / 1000)}s). Preservando propriedade exclusiva para evitar conflito.`);
+                    throw new Error(`Instância ${instanceId} possui lock ativo e saudável no nó ${assignedNodeId}`);
+                }
+                throw new Error(`Não foi possível adquirir lock para a instância ${instanceId} após ${maxLockAttempts} tentativas.`);
             }
 
             const backoffMs = attempt * 2000;
-            console.warn(`[SessionManager/Lock] Aguardando liberação do lock da instância ${instanceId} (nó atual: ${assignedNodeId || 'nenhum'}, tentativa ${attempt}/${maxLockAttempts}) em ${backoffMs / 1000}s...`);
+            const remainingLease = leaseExpiry ? Math.max(0, Math.round((leaseExpiry.getTime() - Date.now()) / 1000)) : 0;
+            console.warn(`[SessionManager/Lock] Aguardando liberação do lock da instância ${instanceId} (nó atual: ${assignedNodeId || 'nenhum'}, heartbeat há ${Math.round(timeSinceLastUpdate / 1000)}s, lease restante: ${remainingLease}s, tentativa ${attempt}/${maxLockAttempts}) em ${backoffMs / 1000}s...`);
             await new Promise(r => setTimeout(r, backoffMs));
         }
 
@@ -366,7 +397,6 @@ class SessionManager {
             supabase.from('whatsapp_instances')
                 .update(updatePayload)
                 .eq('id', instanceId)
-                .eq('assigned_node_id', NODE_ID)
         );
     }
 
