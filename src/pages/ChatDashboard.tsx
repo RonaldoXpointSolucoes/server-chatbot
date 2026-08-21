@@ -7354,26 +7354,25 @@ export default function ChatDashboard() {
                 </button>
               )}
 
-              <div className="hidden lg:flex items-center gap-2">
-                {/* Botão de Controle da I.A (Desktop) - Exibido apenas quando o Robô I.A estiver ativo globalmente */}
-                {globalAiEnabled && (
-                  <div className="relative" ref={pauseMenuRef}>
-                    <button 
+              {/* Botão de Controle da I.A (Visível em Mobile, Tablet e Desktop quando globalAiEnabled estiver ativo) */}
+              {globalAiEnabled && (
+                <div className="relative shrink-0" ref={pauseMenuRef}>
+                  <button 
                     onClick={() => setShowPauseMenu(!showPauseMenu)}
                     className={cn(
                       "flex items-center justify-center gap-1.5 h-8 w-8 xl:w-auto xl:px-3 rounded-full transition-all duration-300 text-xs font-semibold border shadow-sm hover:scale-105 active:scale-95 whitespace-nowrap",
                       !activeChat.ai_paused 
-                        ? "bg-indigo-500/10 hover:bg-indigo-500/20 border-indigo-500/30 text-indigo-600 dark:text-indigo-400 shadow-[0_0_15px_rgba(99,102,241,0.1)]"
+                        ? "bg-indigo-500/10 hover:bg-indigo-500/20 border-indigo-500/30 text-indigo-600 dark:text-indigo-400 shadow-[0_0_15px_rgba(99,102,241,0.15)]"
                         : "bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/30 text-amber-600 dark:text-amber-400"
                     )}
-                    title="Opções da Inteligência Artificial"
+                    title={!activeChat.ai_paused ? "I.A Ativa para este contato (Clique para gerenciar/pausar)" : "I.A Pausada para este contato (Clique para retomar)"}
                   >
                     <div className="relative flex items-center justify-center">
-                      <BrainCircuit size={14} className={cn(!activeChat.ai_paused && "animate-pulse")} />
+                      <BrainCircuit size={15} className={cn(!activeChat.ai_paused && "animate-pulse")} />
                       {!activeChat.ai_paused && (
-                        <span className="absolute -top-1 -right-1 flex h-1.5 w-1.5">
+                        <span className="absolute -top-1 -right-1 flex h-2 w-2">
                           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-indigo-500"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
                         </span>
                       )}
                     </div>
@@ -7388,11 +7387,11 @@ export default function ChatDashboard() {
                         animate={{ opacity: 1, y: 0, scale: 1 }}
                         exit={{ opacity: 0, y: 10, scale: 0.95 }}
                         transition={{ duration: 0.15 }}
-                        className="absolute right-0 top-full mt-2 w-56 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700/50 py-2 z-[60]"
+                        className="absolute right-0 top-full mt-2 w-56 sm:w-60 bg-white/95 dark:bg-slate-800/95 backdrop-blur-md rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700/60 py-2 z-[70] overflow-hidden"
                       >
                         {activeChat.ai_paused ? (
                           <button
-                            className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-emerald-600 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors"
+                            className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-emerald-600 dark:text-emerald-400 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors active:scale-98"
                             onClick={() => {
                                useChatStore.getState().updateConversationField(activeChat.id, { 
                                  ai_paused: false,
@@ -7402,18 +7401,18 @@ export default function ChatDashboard() {
                                setShowPauseMenu(false);
                             }}
                           >
-                            <Play size={16} />
+                            <Play size={16} className="text-emerald-500 fill-emerald-500" />
                             <span>Retomar I.A Imediatamente</span>
                           </button>
                         ) : (
                           <>
-                            <div className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                            <div className="px-4 py-2 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
                               Pausar Temporariamente
                             </div>
                             {[10, 60, 720].map((mins) => (
                               <button
                                 key={mins}
-                                className="w-full flex items-center gap-3 px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors"
+                                className="w-full flex items-center gap-3 px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors active:scale-98"
                                 onClick={() => {
                                    const pauseUntil = new Date(Date.now() + mins * 60000).toISOString();
                                    useChatStore.getState().updateConversationField(activeChat.id, { 
@@ -7424,13 +7423,13 @@ export default function ChatDashboard() {
                                    setShowPauseMenu(false);
                                 }}
                               >
-                                <Clock size={16} className="text-indigo-500" />
+                                <Clock size={15} className="text-indigo-500 shrink-0" />
                                 <span>Por {mins === 60 ? '1 hora' : mins === 720 ? '12 horas' : `${mins} minutos`}</span>
                               </button>
                             ))}
                             <div className="my-1 border-t border-slate-200 dark:border-slate-700/50"></div>
                             <button
-                                className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-amber-600 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors"
+                                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-medium text-amber-600 dark:text-amber-400 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors active:scale-98"
                                 onClick={() => {
                                    useChatStore.getState().updateConversationField(activeChat.id, { 
                                      ai_paused: true,
@@ -7440,7 +7439,7 @@ export default function ChatDashboard() {
                                    setShowPauseMenu(false);
                                 }}
                             >
-                                <StopCircle size={16} />
+                                <StopCircle size={16} className="text-amber-500 shrink-0" />
                                 <span>Pausar Definitivamente</span>
                             </button>
                           </>
@@ -7448,8 +7447,10 @@ export default function ChatDashboard() {
                       </motion.div>
                     )}
                   </AnimatePresence>
-                  </div>
-                )}
+                </div>
+              )}
+
+              <div className="hidden lg:flex items-center gap-2">
 
                 {activeChat.conv_status === 'resolved' ? (
                   <button 
