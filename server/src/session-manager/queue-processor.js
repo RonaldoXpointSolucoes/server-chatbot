@@ -3,6 +3,7 @@ import { supabase, NODE_ID, retryWithBackoff, resolveTargetJid } from '../supaba
 class QueueProcessor {
     constructor() {
         this.activeProcessors = new Set();
+        this.pendingTriggers = new Set();
         this.running = false;
         this.timer = null;
     }
@@ -68,8 +69,8 @@ class QueueProcessor {
             }
         }
 
-        // Agenda a próxima execução após 3 segundos
-        this.timer = setTimeout(() => this.loop(), 3000);
+        // Agenda a próxima execução após 1.5 segundos para máxima agilidade
+        this.timer = setTimeout(() => this.loop(), 1500);
     }
 
     async processInstanceQueue(tenantId, instanceId) {
@@ -124,16 +125,40 @@ class QueueProcessor {
 
                 // 2. Obtém o socket da instância ativa ou desperta a sessão se necessário (Importação dinâmica)
                 const sock = await sessionManager.getSocketOrWake(tenantId, instanceId);
-                const isSocketReady = sock && (!sock.ws || sock.ws.readyState === 1 || sock.ws.isOpen);
-                const meId = sock?.user?.id || sock?.authState?.creds?.me?.id;
+                const isOperator = (msg.priority || 1) < 5;
+
+                let isSocketReady = sock && (!sock.ws || sock.ws.readyState === 1 || sock.ws.isOpen);
+                let meId = sock?.user?.id || sock?.authState?.creds?.me?.id;
+
+                // Se o socket estiver em processo de abertura/handshake, aguarda até 2.5s antes de postergar
+                if (sock && (!isSocketReady || !meId)) {
+                    try {
+                        await new Promise((res) => {
+                            if (!sock.ws) return res(true);
+                            if (sock.ws.isOpen || sock.ws.readyState === 1) return res(true);
+                            const t = setTimeout(() => res(false), 2500);
+                            const onUpdate = (u) => {
+                                if (u.connection === 'open') {
+                                    clearTimeout(t);
+                                    sock.ev?.off('connection.update', onUpdate);
+                                    res(true);
+                                }
+                            };
+                            sock.ev?.on('connection.update', onUpdate);
+                        });
+                        isSocketReady = sock && (!sock.ws || sock.ws.readyState === 1 || sock.ws.isOpen);
+                        meId = sock?.user?.id || sock?.authState?.creds?.me?.id;
+                    } catch (e) {}
+                }
 
                 if (!sock || !isSocketReady || !meId) {
-                    console.log(`[QueueProcessor] Socket/Autenticação da instância ${instanceId} está indisponível/reconectando. Reagendando mensagem ${msg.id} em 10s...`);
+                    const retryDelayMs = isOperator ? 1500 : 8000;
+                    console.log(`[QueueProcessor] Socket/Autenticação da instância ${instanceId} está indisponível/reconectando. Reagendando mensagem ${msg.id} em ${retryDelayMs / 1000}s...`);
                     await supabase
                         .from('wa_outgoing_messages')
                         .update({ 
                             status: 'pending',
-                            scheduled_at: new Date(Date.now() + 10000).toISOString()
+                            scheduled_at: new Date(Date.now() + retryDelayMs).toISOString()
                         })
                         .eq('id', msg.id);
                     continue;
@@ -331,6 +356,8 @@ class QueueProcessor {
                     const newAttempts = (msg.attempts || 0) + 1;
                     const maxAttempts = 3;
                     const newStatus = newAttempts >= maxAttempts ? 'failed' : 'pending';
+                    const isOperator = (msg.priority || 1) < 5;
+                    const retryDelayMs = isOperator ? 2000 : 12000;
 
                     try {
                         const { default: sManager } = await import('./index.js');
@@ -348,7 +375,7 @@ class QueueProcessor {
                             status: newStatus,
                             attempts: newAttempts,
                             last_error: errMsg || 'Erro de conexão/envio',
-                            scheduled_at: new Date(Date.now() + 15000).toISOString() // Retenta em 15s
+                            scheduled_at: new Date(Date.now() + retryDelayMs).toISOString()
                         })
                         .eq('id', msg.id);
                 } else {
@@ -365,11 +392,18 @@ class QueueProcessor {
 
     trigger(tenantId, instanceId) {
         if (!this.running) return;
-        if (this.activeProcessors.has(instanceId)) return;
+        if (this.activeProcessors.has(instanceId)) {
+            this.pendingTriggers.add(instanceId);
+            return;
+        }
 
         this.activeProcessors.add(instanceId);
         this.processInstanceQueue(tenantId, instanceId).finally(() => {
             this.activeProcessors.delete(instanceId);
+            if (this.pendingTriggers.has(instanceId)) {
+                this.pendingTriggers.delete(instanceId);
+                this.trigger(tenantId, instanceId);
+            }
         });
     }
 }

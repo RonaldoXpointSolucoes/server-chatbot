@@ -311,8 +311,44 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                     }
                 }
 
+                if (content.edit && typeof content.edit === 'object') {
+                    if (!content.edit.remoteJid) {
+                        content.edit.remoteJid = targetJid;
+                    }
+
+                    // Se o ID for um ID temporário EDGE_... atualiza a wa_outgoing_messages se ainda pendente
+                    if (content.edit.id && String(content.edit.id).startsWith('EDGE_')) {
+                        const rawUuid = String(content.edit.id).replace('EDGE_', '');
+                        const formattedUuid = rawUuid.length === 32 ? 
+                            `${rawUuid.slice(0,8)}-${rawUuid.slice(8,12)}-${rawUuid.slice(12,16)}-${rawUuid.slice(16,20)}-${rawUuid.slice(20)}` : rawUuid;
+                        
+                        try {
+                            const { data: outboxMsg } = await supabase
+                                .from('wa_outgoing_messages')
+                                .select('*')
+                                .eq('id', formattedUuid)
+                                .maybeSingle();
+
+                            if (outboxMsg && (outboxMsg.status === 'pending' || outboxMsg.status === 'processing')) {
+                                await supabase
+                                    .from('wa_outgoing_messages')
+                                    .update({ body: content.text })
+                                    .eq('id', formattedUuid);
+                                console.log(`[Invoke Edit] Mensagem pendente na fila ${formattedUuid} atualizada para novo texto.`);
+                            }
+                        } catch (e) {}
+                    }
+                }
+
                 console.log(`[Invoke] Executando ${content.delete ? 'DELETE/REVOKE' : 'EDIT'} de mensagem na instância ${instanceId}:`, content);
-                const sent = await sock.sendMessage(targetJid, content);
+                
+                // Se o WebSocket estiver em handshaking, aguarda brevemente (até 1s)
+                if (sock.ws && !sock.ws.isOpen && sock.ws.readyState !== 1) {
+                    await new Promise(r => setTimeout(r, 1000));
+                }
+
+                const sendFn = sock.originalSendMessage || sock.sendMessage;
+                const sent = await sendFn(targetJid, content);
                 
                 // Se for exclusão de mensagem, atualiza o status na tabela messages do Supabase
                 if (content.delete && content.delete.id) {
@@ -344,6 +380,50 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                     targetJid = await resolveTargetJid(null, jid, req.tenantId);
                 }
 
+                // FAST-PATH: Se o socket da instância já estiver na memória e conectado, envia IMEDIATAMENTE (< 300ms)
+                const activeSock = sessionManager.sessions.get(instanceId)?.sock;
+                const isSockConnected = activeSock && (!activeSock.ws || activeSock.ws.isOpen || activeSock.ws.readyState === 1) && (activeSock.user?.id || activeSock.authState?.creds?.me?.id);
+
+                if (isSockConnected && messageType === 'text') {
+                    try {
+                        const sendFn = activeSock.originalSendMessage || activeSock.sendMessage;
+                        const sentResult = await sendFn(targetJid, content);
+                        
+                        // Grava no outbox já como 'sent' para histórico e auditoria
+                        supabase.from('wa_outgoing_messages').insert({
+                            instance_id: instanceId,
+                            tenant_id: req.tenantId,
+                            chat_jid: targetJid,
+                            message_type: messageType,
+                            body: body,
+                            media_url: mediaUrl,
+                            status: 'sent',
+                            sent_at: new Date().toISOString(),
+                            priority: 1
+                        }).then(() => {}).catch(() => {});
+
+                        // Sincroniza com o eventProcessor
+                        try {
+                            const { default: eventProcessor } = await import('../event-processor/index.js');
+                            if (eventProcessor && sentResult && sentResult.key) {
+                                eventProcessor.handleMessageUpsert(req.tenantId, instanceId, activeSock, {
+                                    messages: [sentResult],
+                                    type: 'notify'
+                                }).catch(() => {});
+                            }
+                        } catch (e) {}
+
+                        return res.json({ 
+                            ok: true, 
+                            result: sentResult,
+                            key: sentResult?.key 
+                        });
+                    } catch (fastErr) {
+                        console.warn(`[Invoke/FastPath] Falha ao enviar via Fast-Path, delegando para outbox queue:`, fastErr.message);
+                    }
+                }
+
+                // Fallback para Outbox Queue Resiliente
                 const { data: newOutbox, error: outboxErr } = await supabase
                     .from('wa_outgoing_messages')
                     .insert({
