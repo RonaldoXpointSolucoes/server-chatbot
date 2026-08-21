@@ -11,14 +11,19 @@ function enqueueWrite(instanceId, writeFn) {
         writeQueues.set(instanceId, Promise.resolve());
     }
     const currentQueue = writeQueues.get(instanceId);
-    const nextPromise = currentQueue.then(async () => {
-        try {
-            await writeFn();
-        } catch (err) {
-            console.error(`[SessionManager] Erro na fila de escrita para instância ${instanceId}:`, err.message);
-            throw err;
-        }
-    });
+    // Encadeia com .catch() para que um erro pontual anterior não trave indefinidamente as escritas subsequentes
+    const nextPromise = currentQueue
+        .catch((prevErr) => {
+            console.warn(`[SessionManager/AuthQueue] Auto-recuperando fila de escrita após erro anterior na instância ${instanceId}:`, prevErr?.message || prevErr);
+        })
+        .then(async () => {
+            try {
+                await writeFn();
+            } catch (err) {
+                console.error(`[SessionManager] Erro na fila de escrita para instância ${instanceId}:`, err.message);
+                throw err;
+            }
+        });
     writeQueues.set(instanceId, nextPromise);
     return nextPromise;
 }

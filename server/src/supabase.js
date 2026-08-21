@@ -26,8 +26,55 @@ if (!supabaseUrl || !supabaseKey) {
   console.error("ERRO: SUPABASE_URL ou SUPABASE_SERVICE_ROLE_KEY não definidos no .env");
 }
 
+/**
+ * Fetch resiliente com retry, jitter exponencial e tratamento de falhas de conexão / 5xx
+ * para comunicação transparente e ininterrupta do Node.js com a API Supabase Cloud.
+ */
+async function resilientFetch(url, options = {}, retries = 4, delay = 800) {
+  try {
+    const response = await fetch(url, { ...options, keepalive: true });
+    
+    // Tratamento de instabilidade HTTP 5xx do gateway / servidor Supabase Cloud (500, 502, 503, 504, 520-524)
+    if (response.status >= 500 && retries > 0) {
+      const jitter = Math.floor(Math.random() * 300);
+      const waitTime = delay + jitter;
+      console.warn(`[Supabase/HTTP] Erro HTTP ${response.status} na API Supabase. Retentando em ${waitTime}ms... (${retries} retentativas restantes)`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+      return resilientFetch(url, options, retries - 1, Math.min(delay * 2, 6000));
+    }
+    
+    return response;
+  } catch (error) {
+    const errorMsg = error?.message || String(error);
+    const errorCode = error?.code || '';
+    
+    const isTransientNetworkError = 
+      errorMsg.includes('fetch failed') ||
+      errorMsg.includes('Timeout') ||
+      errorMsg.includes('timeout') ||
+      errorMsg.includes('ECONNRESET') ||
+      errorMsg.includes('ETIMEDOUT') ||
+      errorMsg.includes('EPIPE') ||
+      errorMsg.includes('ENOTFOUND') ||
+      errorCode === 'UND_ERR_CONNECT_TIMEOUT' ||
+      errorCode === 'UND_ERR_SOCKET' ||
+      errorMsg.includes('ConnectTimeoutError') ||
+      errorMsg.includes('database connection');
+
+    if (isTransientNetworkError && retries > 0) {
+      const jitter = Math.floor(Math.random() * 350);
+      const waitTime = delay + jitter;
+      console.warn(`[Supabase/Network] Oscilação transitória de conexão (${errorMsg || errorCode}). Auto-recuperando em ${waitTime}ms... (${retries} retentativas restantes)`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+      return resilientFetch(url, options, retries - 1, Math.min(delay * 2, 6000));
+    }
+    
+    throw error;
+  }
+}
+
 // Para prevenir o TypeError: connToClose.close is not a function do realtime-js
-// Injetamos um transport WebSocket válido globalmente/locamente
+// Injetamos um transport WebSocket válido globalmente/locamente e fetch resiliente com retentativas
 export const supabase = createClient(supabaseUrl, supabaseKey, {
   auth: {
     persistSession: false,
@@ -35,7 +82,7 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
     detectSessionInUrl: false
   },
   global: {
-    fetch: (url, options) => fetch(url, { ...options, keepalive: true })
+    fetch: resilientFetch
   },
   realtime: {
     transport: WebSocket
@@ -45,23 +92,34 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
 export const NODE_ID = (process.env.NODE_ID || `worker-local-${Math.random().toString(36).substring(7)}`).trim();
 console.log(`[Worker Boot] Inicializado com NODE_ID: ${NODE_ID}`);
 
-export async function retryWithBackoff(fn, retries = 3, delay = 1000) {
+export async function retryWithBackoff(fn, retries = 4, delay = 800) {
   try {
     return await fn();
   } catch (error) {
+    const errorMsg = error?.message || String(error);
+    const errorCode = error?.code || '';
+    const status = error?.status || error?.statusCode;
+
     const isNetworkError = 
-      error.message?.includes('fetch failed') ||
-      error.message?.includes('Timeout') ||
-      error.message?.includes('timeout') ||
-      error.code === 'UND_ERR_CONNECT_TIMEOUT' ||
-      error.message?.includes('ConnectTimeoutError') ||
-      error.message?.includes('database connection') ||
-      error.status >= 500;
+      errorMsg.includes('fetch failed') ||
+      errorMsg.includes('Timeout') ||
+      errorMsg.includes('timeout') ||
+      errorCode === 'UND_ERR_CONNECT_TIMEOUT' ||
+      errorCode === 'UND_ERR_SOCKET' ||
+      errorMsg.includes('ConnectTimeoutError') ||
+      errorMsg.includes('database connection') ||
+      errorMsg.includes('ECONNRESET') ||
+      errorMsg.includes('ETIMEDOUT') ||
+      errorMsg.includes('EPIPE') ||
+      errorMsg.includes('ENOTFOUND') ||
+      (typeof status === 'number' && status >= 500);
         
     if (retries > 0 && isNetworkError) {
-      console.info(`[Supabase/Network] Oscilação temporária de rede (${error.message || error}). Auto-recuperando em ${delay}ms... (${retries} retentativas)`);
-      await new Promise(resolve => setTimeout(resolve, delay));
-      return retryWithBackoff(fn, retries - 1, delay * 2);
+      const jitter = Math.floor(Math.random() * 300);
+      const nextDelay = delay + jitter;
+      console.info(`[Supabase/Network] Oscilação temporária de banco/rede (${errorMsg || errorCode}). Auto-recuperando em ${nextDelay}ms... (${retries} retentativas)`);
+      await new Promise(resolve => setTimeout(resolve, nextDelay));
+      return retryWithBackoff(fn, retries - 1, Math.min(delay * 2, 8000));
     }
     throw error;
   }

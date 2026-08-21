@@ -19,8 +19,10 @@ const customFetch = async (input: RequestInfo | URL, init?: RequestInit, retries
     // Identificar erros HTTP 5xx de servidor/infraestrutura Supabase
     if (response.status >= 500) {
       if (retries > 0) {
-        console.warn(`[Supabase Cloud] Erro HTTP ${response.status} no servidor Supabase. Retentando em ${delay}ms... (Tentativas restantes: ${retries})`);
-        await new Promise(resolve => setTimeout(resolve, delay));
+        const jitter = Math.floor(Math.random() * 250);
+        const waitTime = delay + jitter;
+        console.warn(`[Supabase Cloud] Erro HTTP ${response.status} no servidor Supabase. Retentando em ${waitTime}ms... (Tentativas restantes: ${retries})`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
         return customFetch(input, init, retries - 1, Math.min(delay * 2, 5000));
       }
 
