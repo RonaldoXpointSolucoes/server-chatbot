@@ -335,16 +335,32 @@ class SessionManager {
             const isStaleWorker = timeSinceLastUpdate > 30000;
             const isDeadInterim = (inst.status !== 'connected' && inst.status !== 'connected_local') && (timeSinceLastUpdate > 15000);
 
+            // Precedência de Produção: Se o nó atual for Produção (production-worker ou APP_ENV=production)
+            // e o nó detentor do lock for homologação/staging/alpha ou worker local,
+            // o nó de produção DEVE assumir o lock IMEDIATAMENTE (Master Takeover)!
+            const isNonProductionOwner = assignedNodeId && (
+                assignedNodeId.includes('alpha') ||
+                assignedNodeId.includes('staging') ||
+                assignedNodeId.includes('local') ||
+                assignedNodeId.startsWith('worker-local')
+            );
+            const isProductionMaster = currentNodeId === 'production-worker' || (process.env.APP_ENV || '').toLowerCase() === 'production';
+            const isMasterTakeover = isProductionMaster && isNonProductionOwner;
+
+            const isAlphaWorker = currentNodeId.includes('alpha') || (process.env.APP_ENV || '').toLowerCase() === 'alpha';
+            const isProductionOwner = assignedNodeId && (assignedNodeId === 'production-worker' || assignedNodeId.includes('prod'));
+
             // Permite assumir o lock se:
             // 1. Forçado explicitamente (force)
-            // 2. Não possui nó atribuído
-            // 3. Já pertence ao nó atual
-            // 4. O lease expirou
-            // 5. O status é explicitamente inativo
-            // 6. O worker proprietário está sem heartbeat há mais de 30s
-            // 7. Última tentativa de backoff atingida e o nó não está com heartbeat recente (< 20s)
+            // 2. Precedência de Produção (isMasterTakeover)
+            // 3. Não possui nó atribuído
+            // 4. Já pertence ao nó atual
+            // 5. O lease expirou
+            // 6. O status é explicitamente inativo
+            // 7. O worker proprietário está sem heartbeat há mais de 30s
+            // 8. Última tentativa de backoff atingida e o nó não está com heartbeat recente (< 20s) E não é Alpha tentando roubar Produção
             const isOtherHeartbeatFresh = assignedNodeId && assignedNodeId !== currentNodeId && isLeaseActive && timeSinceLastUpdate <= 20000;
-            const canTakeover = force || !assignedNodeId || assignedNodeId === currentNodeId || !isLeaseActive || isExplicitlyDeadStatus || isStaleWorker || isDeadInterim || (attempt === maxLockAttempts && !isOtherHeartbeatFresh);
+            const canTakeover = force || isMasterTakeover || !assignedNodeId || assignedNodeId === currentNodeId || !isLeaseActive || isExplicitlyDeadStatus || isStaleWorker || isDeadInterim || (attempt === maxLockAttempts && !isOtherHeartbeatFresh && (!isAlphaWorker || !isProductionOwner));
 
             if (canTakeover) {
                 const leaseUntil = new Date(Date.now() + 45000).toISOString();
@@ -375,9 +391,13 @@ class SessionManager {
                 }
             }
 
-            // Se for a última tentativa e o outro nó ainda estiver com heartbeat super ativo (< 20s), lança erro informativo
+            // Se for a última tentativa e o outro nó for Produção legítima com heartbeat super ativo (< 20s), informa e preserva
             if (attempt === maxLockAttempts) {
                 if (inst.status === 'connected' && assignedNodeId && assignedNodeId !== currentNodeId && timeSinceLastUpdate <= 20000 && !force) {
+                    if (isAlphaWorker && isProductionOwner) {
+                        console.log(`[SessionManager/Lock/Alpha] Instância ${instanceId} pertence ao nó de produção ${assignedNodeId}. O nó Alpha não interferirá.`);
+                        throw new Error(`Instância ${instanceId} pertence ao nó de produção ${assignedNodeId}`);
+                    }
                     console.log(`[SessionManager/Lock] Instância ${instanceId} está ativamente conectada no nó ${assignedNodeId} (heartbeat há ${Math.round(timeSinceLastUpdate / 1000)}s). Preservando propriedade exclusiva para evitar conflito.`);
                     throw new Error(`Instância ${instanceId} possui lock ativo e saudável no nó ${assignedNodeId}`);
                 }
@@ -1029,7 +1049,10 @@ class SessionManager {
                         const lastUp = dbInst?.updated_at ? new Date(dbInst.updated_at).getTime() : 0;
                         const isOtherActive = isOwnedByOther && (Date.now() - lastUp < 35000);
 
-                        if (isOtherActive) {
+                        const isProductionMaster = currentNodeId === 'production-worker' || (process.env.APP_ENV || '').toLowerCase() === 'production';
+                        const isNonProductionRemote = remoteNodeId && (remoteNodeId.includes('alpha') || remoteNodeId.includes('staging') || remoteNodeId.includes('local') || remoteNodeId.startsWith('worker-local'));
+
+                        if (isOtherActive && !(isProductionMaster && isNonProductionRemote)) {
                             console.warn(`[SessionManager] ⚠️ Conflito de sessão na instância ${instanceId}: O nó remoto '${remoteNodeId}' assumiu a posse ativa. Cedendo controle local para evitar colisões.`);
                             this.conflictAttempts.delete(instanceId);
                             return;
@@ -1405,11 +1428,17 @@ class SessionManager {
 
                 // Se a instância já possui um lock ativo por outro worker com lease válido e não é force
                 if (assignedNodeId && assignedNodeId !== currentNodeId && data.lease_until && new Date(data.lease_until) > now && !force) {
-                    const lastUpdated = data.updated_at ? new Date(data.updated_at) : null;
-                    const isStale = !lastUpdated || (now.getTime() - lastUpdated.getTime() > 35000);
-                    if (!isStale && (data.status === 'connected' || data.status === 'connected_local')) {
-                        console.log(`[SessionManager] Instância ${instanceId} está sob lock ativo do worker ${assignedNodeId} (lease até ${data.lease_until}). Ignorando wake local.`);
-                        return null;
+                    const isProductionMaster = currentNodeId === 'production-worker' || (process.env.APP_ENV || '').toLowerCase() === 'production';
+                    const isNonProductionOwner = assignedNodeId.includes('alpha') || assignedNodeId.includes('staging') || assignedNodeId.includes('local') || assignedNodeId.startsWith('worker-local');
+
+                    // Se não for o Production Master reassumindo controle de um worker não-produção:
+                    if (!(isProductionMaster && isNonProductionOwner)) {
+                        const lastUpdated = data.updated_at ? new Date(data.updated_at) : null;
+                        const isStale = !lastUpdated || (now.getTime() - lastUpdated.getTime() > 35000);
+                        if (!isStale && (data.status === 'connected' || data.status === 'connected_local')) {
+                            console.log(`[SessionManager] Instância ${instanceId} está sob lock ativo do worker ${assignedNodeId} (lease até ${data.lease_until}). Ignorando wake local.`);
+                            return null;
+                        }
                     }
                 }
 

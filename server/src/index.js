@@ -560,31 +560,56 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
         if (process.env.DISABLE_AUTO_START_SESSIONS === 'true') {
             console.log("[Worker Boot] Auto-start de instâncias desabilitado via configuração (DISABLE_AUTO_START_SESSIONS=true).");
         } else {
-            console.log("[Worker Boot] Buscando instâncias pendentes...");
-            const { data: activeLeases } = await supabase
-                .from('whatsapp_instances')
-                .select('id, tenant_id')
-                .in('status', ['connected', 'connecting', 'qr_ready', 'reconnecting', 'reconnecting_local']);
-                
-            if (activeLeases && activeLeases.length > 0) {
-                console.log(`[Worker Boot] Retomando ${activeLeases.length} sockets...`);
-                for (const instance of activeLeases) {
-                    const startSessionWithRetry = (attempt = 1) => {
-                        const forceTakeover = attempt >= 2;
-                        sessionManager.createSession(instance.tenant_id, instance.id, forceTakeover).catch(e => {
-                             const isLockError = e.message && (e.message.includes('lock ativo') || e.message.includes('Lock negado') || e.message.includes('Conexão negada'));
-                             if (isLockError && attempt < 3) {
-                                 console.log(`[Worker Boot] Instância ${instance.id} sob lease de outro nó. Agendando retentativa com takeover (${attempt}/3) em 35s...`);
-                                 setTimeout(() => startSessionWithRetry(attempt + 1), 35000);
-                             } else if (isLockError) {
-                                 console.log(`[Worker Boot] Instância ${instance.id} permanece sob responsabilidade de outro nó ativo.`);
-                             } else {
-                                 console.error(`Falha Auto-Restart (Tentativa ${attempt}): ${instance.id} - ${e.message}`);
-                             }
+            const isAlphaWorker = APP_ENV === 'alpha' || NODE_ID.includes('alpha');
+            
+            if (isAlphaWorker && process.env.AUTO_START_ALPHA_ALL !== 'true') {
+                console.log("[Worker Boot/Alpha] Nó de Homologação/Alpha detectado. Auto-start restrito exclusivamente a instâncias de teste homologadas (FoodNext / Ronaldo-Web)...");
+                const testInstanceIds = [
+                    'cc4efe36-f391-4b3d-a24c-ddcd8a293cf6', // FoodNext (11 94775-8860)
+                    '5c78d358-d449-41c4-b396-a04ab20a39e4'  // Ronaldo-Web (11 97596-0999)
+                ];
+                const { data: testLeases } = await supabase
+                    .from('whatsapp_instances')
+                    .select('id, tenant_id')
+                    .in('id', testInstanceIds)
+                    .in('status', ['connected', 'connecting', 'qr_ready', 'reconnecting', 'reconnecting_local']);
+
+                if (testLeases && testLeases.length > 0) {
+                    console.log(`[Worker Boot/Alpha] Retomando ${testLeases.length} sockets de teste homologados...`);
+                    for (const instance of testLeases) {
+                        sessionManager.createSession(instance.tenant_id, instance.id, false).catch(e => {
+                            console.warn(`[Worker Boot/Alpha] Aviso ao iniciar socket de teste ${instance.id}: ${e.message}`);
                         });
-                    };
-                    startSessionWithRetry();
-                    await new Promise(r => setTimeout(r, 1500));
+                        await new Promise(r => setTimeout(r, 1000));
+                    }
+                }
+            } else {
+                console.log("[Worker Boot/Produção] Buscando instâncias ativas para retomada de sockets...");
+                const { data: activeLeases } = await supabase
+                    .from('whatsapp_instances')
+                    .select('id, tenant_id')
+                    .in('status', ['connected', 'connecting', 'qr_ready', 'reconnecting', 'reconnecting_local']);
+                    
+                if (activeLeases && activeLeases.length > 0) {
+                    console.log(`[Worker Boot/Produção] Retomando ${activeLeases.length} sockets em produção...`);
+                    for (const instance of activeLeases) {
+                        const startSessionWithRetry = (attempt = 1) => {
+                            const forceTakeover = attempt >= 2;
+                            sessionManager.createSession(instance.tenant_id, instance.id, forceTakeover).catch(e => {
+                                 const isLockError = e.message && (e.message.includes('lock ativo') || e.message.includes('Lock negado') || e.message.includes('Conexão negada'));
+                                 if (isLockError && attempt < 3) {
+                                     console.log(`[Worker Boot] Instância ${instance.id} sob lease de outro nó. Agendando retentativa com takeover (${attempt}/3) em 35s...`);
+                                     setTimeout(() => startSessionWithRetry(attempt + 1), 35000);
+                                 } else if (isLockError) {
+                                     console.log(`[Worker Boot] Instância ${instance.id} permanece sob responsabilidade de outro nó ativo.`);
+                                 } else {
+                                     console.error(`Falha Auto-Restart (Tentativa ${attempt}): ${instance.id} - ${e.message}`);
+                                 }
+                            });
+                        };
+                        startSessionWithRetry();
+                        await new Promise(r => setTimeout(r, 1200));
+                    }
                 }
             }
         }

@@ -139,6 +139,8 @@ export async function useSupabaseAuthState(tenantId, instanceId, forceCleanState
             keys: {
                 get: async (type, ids) => {
                     const data = {};
+                    const missingKeys = [];
+                    const missingIdMap = new Map();
                     
                     for (const id of ids) {
                         const name = `${type}-${id}`;
@@ -150,31 +152,44 @@ export async function useSupabaseAuthState(tenantId, instanceId, forceCleanState
                             }
                             data[id] = cv;
                         } else {
-                            // Fallback para o Banco de Dados se não encontrado em memória
-                            try {
-                                const { data: dbKey } = await retryWithBackoff(() =>
+                            missingKeys.push(name);
+                            missingIdMap.set(name, id);
+                        }
+                    }
+
+                    // Fallback em LOTE para o Banco de Dados para todas as chaves ausentes da RAM
+                    if (missingKeys.length > 0) {
+                        try {
+                            const CHUNK_SIZE = 100;
+                            for (let i = 0; i < missingKeys.length; i += CHUNK_SIZE) {
+                                const chunk = missingKeys.slice(i, i + CHUNK_SIZE);
+                                const { data: dbKeys, error } = await retryWithBackoff(() =>
                                     supabase
                                         .from('wa_auth_keys')
-                                        .select('key_data')
+                                        .select('key_name, key_data')
                                         .eq('instance_id', instanceId)
-                                        .eq('key_name', name)
-                                        .maybeSingle()
+                                        .in('key_name', chunk)
                                 );
                                 
-                                if (dbKey && dbKey.key_data) {
-                                    const parsed = JSON.parse(JSON.stringify(dbKey.key_data), BufferJSON.reviver);
-                                    memCache.set(name, parsed);
-                                    
-                                     let cv = parsed;
-                                     if (type === 'app-state-sync-key' && cv && cv.target) {
-                                         cv = { ...cv, target: Buffer.from(cv.target, 'base64') };
-                                     }
-                                    data[id] = cv;
-                                    console.log(`[SessionManager] Chave recuperada via DB Fallback: ${name}`);
+                                if (error) {
+                                    console.error(`[SessionManager] Erro no DB Fallback para ${chunk.length} chaves Signal:`, error.message);
+                                } else if (dbKeys && dbKeys.length > 0) {
+                                    for (const row of dbKeys) {
+                                        const parsed = JSON.parse(JSON.stringify(row.key_data), BufferJSON.reviver);
+                                        memCache.set(row.key_name, parsed);
+                                        const origId = missingIdMap.get(row.key_name);
+                                        if (origId) {
+                                            let cv = parsed;
+                                            if (type === 'app-state-sync-key' && cv && cv.target) {
+                                                cv = { ...cv, target: Buffer.from(cv.target, 'base64') };
+                                            }
+                                            data[origId] = cv;
+                                        }
+                                    }
                                 }
-                            } catch (err) {
-                                console.error(`[SessionManager] Erro no DB Fallback para chave ${name}:`, err.message);
                             }
+                        } catch (err) {
+                            console.error(`[SessionManager] Exceção no DB Fallback de chaves Signal (${type}):`, err.message);
                         }
                     }
 
