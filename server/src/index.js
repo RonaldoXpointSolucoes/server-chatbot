@@ -1,6 +1,11 @@
 import { config } from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import dns from 'dns';
+
+try {
+  dns.setDefaultResultOrder('ipv4first');
+} catch (e) {}
 
 const __dirname_env = path.dirname(fileURLToPath(import.meta.url));
 config({ path: path.resolve(__dirname_env, '../../.env') });

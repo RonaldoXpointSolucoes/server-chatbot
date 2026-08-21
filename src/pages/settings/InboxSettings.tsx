@@ -60,6 +60,7 @@ export default function InboxSettings() {
   const [botTestNumbers, setBotTestNumbers] = useState('');
   const [botDelay, setBotDelay] = useState<number>(5);
   const [botInstructions, setBotInstructions] = useState('');
+  const [enableAssociateCompany, setEnableAssociateCompany] = useState<boolean>(true);
   const [previousSettings, setPreviousSettings] = useState<any>(null);
   const [toast, setToast] = useState<{ message: string; isSuccess: boolean; showUndo?: boolean } | null>(null);
   const [notifPref, setNotifPref] = useState<UserInboxNotificationPreference | null>(null);
@@ -129,6 +130,7 @@ export default function InboxSettings() {
           setBotTestNumbers(data.settings?.bot_test_numbers || '');
           setBotDelay(data.settings?.bot_delay ?? 5);
           setBotInstructions(data.settings?.bot_instructions || '');
+          setEnableAssociateCompany(data.settings?.enable_associate_company !== false);
 
           if (tenantId) {
             fetchUserInboxNotificationPreferences(tenantId, currentUserId).then(map => {
@@ -204,7 +206,8 @@ export default function InboxSettings() {
         bot_active: botActive,
         bot_test_numbers: botTestNumbers,
         bot_delay: botDelay,
-        bot_instructions: botInstructions
+        bot_instructions: botInstructions,
+        enable_associate_company: enableAssociateCompany
       };
 
       const instBefore = { ...instance };
@@ -267,6 +270,7 @@ export default function InboxSettings() {
       setBotTestNumbers(previousSettings.settings.bot_test_numbers || '');
       setBotDelay(previousSettings.settings.bot_delay ?? 5);
       setBotInstructions(previousSettings.settings.bot_instructions || '');
+      setEnableAssociateCompany(previousSettings.settings?.enable_associate_company !== false);
       
       setInstance({ 
         ...instance, 
@@ -607,6 +611,31 @@ export default function InboxSettings() {
                           <p className="text-xs text-gray-400">
                              💡 Ao alterar a empresa vinculada, esta caixa de entrada deixará de aparecer no painel da empresa anterior e passará a pertencer exclusivamente à empresa selecionada.
                           </p>
+                        </div>
+
+                        {/* Toggle de Habilitação de Associação de Empresa no Chat */}
+                        <div className="flex items-center justify-between p-4 bg-[#182229] border border-white/10 rounded-2xl shadow-lg mt-4 hover:border-white/20 transition-all">
+                           <div className="flex items-center gap-3.5">
+                              <div className="p-2.5 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400">
+                                 <Building2 size={20} />
+                              </div>
+                              <div className="flex flex-col">
+                                 <span className="text-sm font-semibold text-white">Habilitar Associação de Empresa no Chat</span>
+                                 <span className="text-xs text-gray-400">Exibe o botão "+ Empresa" no cabeçalho das conversas desta caixa de entrada</span>
+                              </div>
+                           </div>
+                           <button
+                              type="button"
+                              onClick={() => setEnableAssociateCompany(!enableAssociateCompany)}
+                              className="focus:outline-none transition-transform active:scale-95 cursor-pointer"
+                              title={enableAssociateCompany ? 'Desativar associação de empresa' : 'Ativar associação de empresa'}
+                           >
+                              {enableAssociateCompany ? (
+                                 <ToggleRight size={36} className="text-emerald-500 hover:text-emerald-400 transition-colors" />
+                              ) : (
+                                 <ToggleLeft size={36} className="text-gray-500 hover:text-gray-400 transition-colors" />
+                              )}
+                           </button>
                         </div>
 
                        <div className="flex flex-col gap-2 mt-4">

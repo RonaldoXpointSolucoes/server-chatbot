@@ -7213,20 +7213,26 @@ export default function ChatDashboard() {
                                 </button>
                               ))}
 
-                              {/* Botão + Empresa (Apenas se NÃO houver nenhuma empresa e NENHUM grupo empresarial associado) */}
-                              {!hasAssociatedEntity && (
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setCompanyDetailsOpen(activeChat);
-                                  }}
-                                  className="flex items-center gap-1 bg-gray-500/10 hover:bg-[#00a884]/15 px-2 py-0.5 rounded-full border border-dashed border-gray-400/40 hover:border-[#00a884]/40 text-gray-500 dark:text-gray-400 hover:text-[#00a884] text-[10.5px] font-medium transition-all duration-200 active:scale-95"
-                                  title="Associar Empresa a este Contato"
-                                >
-                                  <Building2 size={10} className="shrink-0" />
-                                  <span>+ Empresa</span>
-                                </button>
-                              )}
+                              {/* Botão + Empresa (Apenas se NÃO houver nenhuma empresa e NENHUM grupo empresarial associado E habilitado na caixa) */}
+                              {!hasAssociatedEntity && (() => {
+                                const currentInst = getStrictInstance(activeChat) || activeChannelFilter;
+                                const isAssociateCompanyEnabled = instanceCache.isAssociateCompanyEnabled(currentInst);
+                                if (!isAssociateCompanyEnabled) return null;
+
+                                return (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setCompanyDetailsOpen(activeChat);
+                                    }}
+                                    className="flex items-center gap-1 bg-gray-500/10 hover:bg-[#00a884]/15 px-2 py-0.5 rounded-full border border-dashed border-gray-400/40 hover:border-[#00a884]/40 text-gray-500 dark:text-gray-400 hover:text-[#00a884] text-[10.5px] font-medium transition-all duration-200 active:scale-95"
+                                    title="Associar Empresa a este Contato"
+                                  >
+                                    <Building2 size={10} className="shrink-0" />
+                                    <span>+ Empresa</span>
+                                  </button>
+                                );
+                              })()}
 
                               {/* Grupos Empresariais */}
                               {matchingGroups.map((g: any) => (

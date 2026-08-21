@@ -212,14 +212,16 @@ export const instanceCache = {
   byId: {} as Record<string, string>,     // id -> display_name
   apiKeys: {} as Record<string, string>,  // id -> api_key
   phoneNumbers: {} as Record<string, string>, // id -> phone_number
-  
-  set(id: string, name: string, apiKey: string, phoneNumber?: string) {
+  settings: {} as Record<string, any>,   // id -> settings
+
+  set(id: string, name: string, apiKey: string, phoneNumber?: string, settings?: any) {
     if (name) {
       this.byName[name.toLowerCase()] = id;
       this.byId[id] = name;
     }
     if (apiKey) this.apiKeys[id] = apiKey;
     if (phoneNumber) this.phoneNumbers[id] = phoneNumber;
+    if (settings !== undefined) this.settings[id] = settings;
   },
   
   getId(name: string): string | null {
@@ -236,6 +238,20 @@ export const instanceCache = {
 
   getPhoneNumber(id: string): string | null {
     return this.phoneNumbers[id] || null;
+  },
+
+  getSettings(idOrName?: string | null): any {
+    if (!idOrName) return null;
+    const resolvedId = this.getId(idOrName) || idOrName;
+    return this.settings[resolvedId] || null;
+  },
+
+  isAssociateCompanyEnabled(idOrName?: string | null): boolean {
+    if (!idOrName) return true;
+    const resolvedId = this.getId(idOrName) || idOrName;
+    const instSettings = this.settings[resolvedId];
+    if (!instSettings) return true;
+    return instSettings.enable_associate_company !== false;
   },
 
   getUuid(identifier: string): string | null {
@@ -3961,13 +3977,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
         try {
            const { data: instances } = await supabase
               .from('whatsapp_instances')
-              .select('id, display_name, api_key, status, phone_number')
+              .select('id, display_name, api_key, status, phone_number, settings')
               .eq('tenant_id', currentTenantId);
 
            if (instances) {
               const statusUpdates: Record<string, string> = {};
               instances.forEach(inst => {
-                 instanceCache.set(inst.id, inst.display_name || '', inst.api_key || '', inst.phone_number || '');
+                 instanceCache.set(inst.id, inst.display_name || '', inst.api_key || '', inst.phone_number || '', inst.settings || {});
                  if (inst.status === 'connected') {
                     statusUpdates[inst.id] = 'connected';
                  } else if (inst.status) {
