@@ -5,7 +5,7 @@ import {
   MessageSquareReply, Camera, Video, VideoOff, Mic, 
   FileText, MapPin, Sparkles, Check, CheckCheck, RefreshCw,
   LayoutTemplate, Smartphone, Eye, EyeOff, ClipboardList, CheckSquare,
-  UserCheck, Copy, Ticket, BrainCircuit, Calendar, Zap
+  UserCheck, Copy, Ticket, BrainCircuit, Calendar, Zap, ExternalLink
 } from 'lucide-react';
 import { format, isToday, isYesterday } from 'date-fns';
 import { cn, getContactDisplayName, formatPhoneNumber } from '../../pages/ChatDashboard';
@@ -1059,6 +1059,49 @@ export const MessageBubble = memo(({
                      );
                    })()
                 )}
+
+                {/* Botão Condicional 'Ver Nota Fiscal' no Card de Pedido / Automação */}
+                {(() => {
+                  const invoiceUrl = msg.payload?.nota_fiscal_url || 
+                                     msg.payload?.invoice_url || 
+                                     msg.payload?.pdf_url || 
+                                     msg.payload?.nfe_url ||
+                                     msg.payload?.notaFiscalUrl ||
+                                     msg.payload?.danfe_url;
+
+                  const hasInvoiceInText = !invoiceUrl && (
+                    (msg.text?.includes('nota fiscal') || msg.text?.includes('Nota Fiscal') || msg.text?.includes('DANFE') || msg.text?.includes('danfe') || msg.text?.includes('NF-e') || msg.text?.includes('nfe')) &&
+                    msg.text?.match(/https?:\/\/[^\s]+(?:\.pdf|[^\s]*invoice|[^\s]*nota|[^\s]*danfe)/i)
+                  );
+
+                  const detectedUrl = invoiceUrl || (hasInvoiceInText ? msg.text?.match(/https?:\/\/[^\s]+/)?.[0] : null);
+
+                  const isOrderMessage = msg.sender === 'automation' || 
+                                         msg.sender === 'bot' ||
+                                         msg.text?.includes('Segue seu pedido') ||
+                                         msg.text?.includes('Pedido Nº') ||
+                                         msg.text?.includes('Pedido N°') ||
+                                         Boolean(invoiceUrl);
+
+                  if (detectedUrl && isOrderMessage) {
+                    return (
+                      <div className="mt-2.5 pt-2 border-t border-black/10 dark:border-white/10 w-full animate-in fade-in slide-in-from-top-1 duration-200">
+                        <a
+                          href={detectedUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="flex items-center justify-center gap-2 w-full py-2.5 px-4 bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 text-white font-bold text-xs sm:text-[13px] rounded-xl shadow-md hover:shadow-lg transition-all duration-200 cursor-pointer min-h-[44px] select-none"
+                        >
+                          <FileText size={16} className="shrink-0" />
+                          <span>Ver Nota Fiscal (PDF)</span>
+                          <ExternalLink size={14} className="opacity-90 shrink-0 ml-0.5" />
+                        </a>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
 
                {msg.buttons && msg.buttons.length > 0 && (
                   <div className="flex flex-col gap-1.5 mt-2 w-full pt-1 pb-4">

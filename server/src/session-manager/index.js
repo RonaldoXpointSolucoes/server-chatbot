@@ -172,21 +172,31 @@ class SessionManager {
                     const activeStatus = isLocalDev ? 'connected_local' : 'connected';
 
                     const healthyIds = [];
-                    const zombieIds = [];
+                    const zombieEntries = [];
 
                     for (const [id, sessionData] of activeEntries) {
                         const sock = sessionData?.sock;
                         if (sock && sock.ws && sock.ws.isOpen) {
                             healthyIds.push(id);
                         } else {
-                            zombieIds.push(id);
+                            zombieEntries.push({ id, tenantId: sessionData?.tenantId });
                         }
                     }
 
-                    // Limpa sockets zumbis que perderam o WebSocket
-                    for (const zId of zombieIds) {
-                        console.warn(`[SessionManager/Heartbeat] Detectado socket zumbi sem WebSocket aberto para ${zId}. Destruindo sessão...`);
-                        this.destroyExistingSession(zId, 'zombie_heartbeat').catch(() => {});
+                    // Limpa e auto-reconecta sockets zumbis que perderam o WebSocket
+                    for (const z of zombieEntries) {
+                        console.warn(`[SessionManager/Heartbeat] Detectado socket zumbi sem WebSocket aberto para ${z.id}. Destruindo sessão e reconectando...`);
+                        const wasAuth = this.authenticatedSessions.has(z.id);
+                        this.destroyExistingSession(z.id, 'zombie_heartbeat').catch(() => {});
+                        if (z.tenantId && wasAuth && !isLocalDev) {
+                            setTimeout(() => {
+                                if (!this.sessions.has(z.id)) {
+                                    this.createSession(z.tenantId, z.id, true).catch(err => {
+                                        console.error(`[SessionManager/Heartbeat] Erro na auto-reconexão pós-zumbi para ${z.id}:`, err.message);
+                                    });
+                                }
+                            }, 2000);
+                        }
                     }
 
                     const authenticatedIds = healthyIds.filter(id => this.authenticatedSessions.has(id) && !this.pairingPendingSync.get(id));
@@ -223,10 +233,51 @@ class SessionManager {
             }
         }, 15000);
 
+        // Supervisor de Auto-Healing Proativo (a cada 20 segundos)
+        // Garante que nenhuma instância que deveria estar conectada permaneça offline/órfã
+        setInterval(async () => {
+            try {
+                const isLocalDev = process.env.DISABLE_AUTO_START_SESSIONS === 'true';
+                if (isLocalDev) return;
+
+                const { data: dbInstances, error } = await supabase
+                    .from('whatsapp_instances')
+                    .select('id, tenant_id, status, assigned_node_id, lease_until, updated_at')
+                    .in('status', ['connected', 'reconnecting', 'connecting']);
+
+                if (error || !dbInstances || dbInstances.length === 0) return;
+
+                const now = Date.now();
+                for (const inst of dbInstances) {
+                    const hasSessionInRam = this.sessions.has(inst.id);
+                    const isConnecting = this.connectingState.has(inst.id);
+                    if (isConnecting) continue;
+
+                    const sessionData = this.sessions.get(inst.id);
+                    const sock = sessionData?.sock;
+                    const isWsOpen = Boolean(sock?.ws && sock?.ws?.isOpen);
+
+                    const isLeaseExpired = !inst.lease_until || (new Date(inst.lease_until).getTime() < now);
+                    const isAssignedToThisNode = inst.assigned_node_id === NODE_ID;
+
+                    // Se a instância não está ativa na RAM deste nó e o lease expirou ou está atribuída a este nó
+                    if ((!hasSessionInRam || !isWsOpen) && (isAssignedToThisNode || isLeaseExpired)) {
+                        console.warn(`[SessionManager/AutoHealing] 🩺 Detectada instância ${inst.id} desincronizada (RAM: ${hasSessionInRam ? 'Presente (WS fechado)' : 'Ausente'}, Lease Expirado: ${isLeaseExpired}). Revivendo conexão...`);
+                        this.createSession(inst.tenant_id, inst.id, true).catch(err => {
+                            console.error(`[SessionManager/AutoHealing] Falha ao reviver instância ${inst.id}:`, err.message);
+                        });
+                    }
+                }
+            } catch (healErr) {
+                console.error('[SessionManager/AutoHealing] Erro no ciclo de auto-healing:', healErr.message);
+            }
+        }, 20000);
+
         // Limpeza periódica preventiva de locks órfãos/expirados no banco de dados (a cada 60s)
         setInterval(async () => {
             try {
                 const now = new Date().toISOString();
+                const expiredThreshold = new Date(Date.now() - 60000).toISOString();
                 await supabase
                     .from('whatsapp_instances')
                     .update({
@@ -234,8 +285,7 @@ class SessionManager {
                         lease_until: null,
                         updated_at: now
                     })
-                    .lt('lease_until', now)
-                    .neq('status', 'connected')
+                    .lt('lease_until', expiredThreshold)
                     .not('assigned_node_id', 'is', null);
             } catch (errClean) {}
         }, 60000);
@@ -1099,18 +1149,18 @@ class SessionManager {
                         const nextAttempt = attempts + 1;
                         this.reconnectAttempts.set(instanceId, nextAttempt);
 
-                        if (nextAttempt > 5) {
-                            console.error(`[SessionManager] Limite de 5 tentativas de reconexão atingido para a instância ${instanceId}. Pausando sessão.`);
+                        if (nextAttempt > 10 && !isFullyAuthenticated) {
+                            console.error(`[SessionManager] Limite de 10 tentativas de reconexão atingido para a instância ${instanceId}. Pausando sessão.`);
                             this.reconnectAttempts.delete(instanceId);
                             this.pairingPendingSync.delete(instanceId);
                             
                             await this.releaseSessionLock(
                                 instanceId, 
                                 true, 
-                                'Limite de 5 tentativas de reconexão atingido. O sistema pausou a conexão para evitar o banimento do seu chip. Por favor, reconecte manualmente no painel quando o celular estiver ativo.'
+                                'Limite de tentativas de conexão atingido. Clique em Reconectar no painel quando o celular estiver ativo.'
                             );
                             
-                            await this.logConnectionEvent(tenantId, instanceId, 'max_reconnect_attempts', 'paused', '5 reconexões falhas consecutivas', null, null);
+                            await this.logConnectionEvent(tenantId, instanceId, 'max_reconnect_attempts', 'paused', '10 reconexões falhas consecutivas', null, null);
 
                             // Publica evento de status offline para o frontend
                             await eventProcessor.handleConnectionUpdate(tenantId, instanceId, { 
@@ -1119,11 +1169,11 @@ class SessionManager {
                             });
                         } else {
                             const delayMap = isFullyAuthenticated
-                                ? [30000, 60000, 300000, 900000, 1800000] // 30s, 1m, 5m, 15m, 30m para sessões ativas
+                                ? [2000, 4000, 8000, 15000, 30000] // 2s, 4s, 8s, 15s, 30s para rápida recuperação
                                 : [2000, 3000, 5000, 8000, 12000]; // 2s, 3s, 5s, 8s, 12s para geração de QR Code
-                            const delay = delayMap[nextAttempt - 1] || (isFullyAuthenticated ? 1800000 : 15000);
+                            const delay = delayMap[Math.min(nextAttempt - 1, delayMap.length - 1)] || 30000;
 
-                            console.log(`[SessionManager] Instância ${instanceId} fechou (${isFullyAuthenticated ? 'autenticada' : 'geração de QR'}). Tentativa ${nextAttempt}/5. Reconectando em ${delay / 1000}s...`);
+                            console.log(`[SessionManager] Instância ${instanceId} fechou (${isFullyAuthenticated ? 'autenticada' : 'geração de QR'}). Tentativa ${nextAttempt}. Reconectando em ${delay / 1000}s...`);
 
                             await retryWithBackoff(() =>
                                 supabase.from('whatsapp_instances')
@@ -1133,13 +1183,13 @@ class SessionManager {
                                         last_disconnected_at: new Date().toISOString(),
                                         last_disconnect_reason: reason || `status_${status}`,
                                         last_error: isFullyAuthenticated 
-                                            ? `Conexão instável. Tentando reconectar em ${delay / 1000}s (Tentativa ${nextAttempt}/5).`
+                                            ? `Conexão oscilou. Reconectando em ${delay / 1000}s (Tentativa ${nextAttempt}).`
                                             : null
                                     })
                                     .eq('id', instanceId)
                             );
 
-                            await this.logConnectionEvent(tenantId, instanceId, 'reconnecting', 'reconnecting', `Tentativa ${nextAttempt}/5 em ${delay / 1000}s`, null, null);
+                            await this.logConnectionEvent(tenantId, instanceId, 'reconnecting', 'reconnecting', `Tentativa ${nextAttempt} em ${delay / 1000}s`, null, null);
 
                             const timer = setTimeout(() => {
                                 this.reconnectingTimers.delete(instanceId);
@@ -1507,50 +1557,34 @@ class SessionManager {
     startWatchdog(tenantId, instanceId, sock) {
         this.clearWatchdog(instanceId);
         
-        let lastActivity = Date.now();
-        
-        const updateListener = () => {
-            lastActivity = Date.now();
-        };
-        
-        // Assina múltiplos eventos comuns da Baileys para registrar atividade legítima da conexão
-        sock.ev.on('connection.update', updateListener);
-        sock.ev.on('creds.update', updateListener);
-        sock.ev.on('messages.upsert', updateListener);
-        sock.ev.on('messages.update', updateListener);
-        sock.ev.on('presence.update', updateListener);
-        sock.ev.on('chats.update', updateListener);
-        
-        // Aumenta o tempo limite de inatividade para 15 minutos (900.000 ms)
-        // Isso impede de reiniciar instâncias ociosas saudáveis
+        // Verifica a saúde real do WebSocket a cada 30 segundos sem desconectar instâncias ociosas legítimas
         const interval = setInterval(() => {
-            if (Date.now() - lastActivity > 900000) {
-                console.warn(`[SessionManager/Watchdog] Instância ${instanceId} inativa/zumbi confirmada (sem atividade por 15 minutos). Forçando reinicialização do socket...`);
-                this.clearWatchdog(instanceId);
-                try {
-                    sock.end(new Error("Zombie connection detected by watchdog"));
-                } catch(e) {
-                    try { sock.ws.close(); } catch(err){}
+            if (sock && sock.ws) {
+                const wsState = sock.ws.readyState;
+                // readyState: 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED
+                if (wsState === 2 || wsState === 3 || (!sock.ws.isOpen && wsState !== 0)) {
+                    console.warn(`[SessionManager/Watchdog] Instância ${instanceId} com WebSocket em estado inválido (readyState: ${wsState}). Reciclando socket e reconectando...`);
+                    this.clearWatchdog(instanceId);
+                    this.destroyExistingSession(instanceId, 'watchdog_ws_closed').catch(() => {});
+                    setTimeout(() => {
+                        if (!this.sessions.has(instanceId)) {
+                            this.createSession(tenantId, instanceId, true).catch(err => {
+                                console.error(`[SessionManager/Watchdog] Erro ao reconectar ${instanceId}:`, err.message);
+                            });
+                        }
+                    }, 1500);
                 }
             }
-        }, 60000); // Checa a cada 1 minuto
+        }, 30000);
         
-        this.watchdogs.set(instanceId, { interval, updateListener, sock });
+        this.watchdogs.set(instanceId, { interval, sock });
     }
 
     clearWatchdog(instanceId) {
         if (this.watchdogs.has(instanceId)) {
-            const { interval, ipCheckInterval, updateListener, sock } = this.watchdogs.get(instanceId);
-            clearInterval(interval);
+            const { interval, ipCheckInterval } = this.watchdogs.get(instanceId);
+            if (interval) clearInterval(interval);
             if (ipCheckInterval) clearInterval(ipCheckInterval);
-            try {
-                sock.ev.off('connection.update', updateListener);
-                sock.ev.off('creds.update', updateListener);
-                sock.ev.off('messages.upsert', updateListener);
-                sock.ev.off('messages.update', updateListener);
-                sock.ev.off('presence.update', updateListener);
-                sock.ev.off('chats.update', updateListener);
-            } catch(e) {}
             this.watchdogs.delete(instanceId);
         }
     }

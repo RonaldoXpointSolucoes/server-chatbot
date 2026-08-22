@@ -6704,17 +6704,13 @@ export default function ChatDashboard() {
 
                             return (
                               <div 
-                                className="flex items-center gap-1.5 truncate mt-0.5 cursor-pointer hover:opacity-80 transition-opacity flex-wrap"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setCompanyDetailsOpen(primaryComp || contact);
-                                }}
+                                className="flex items-center gap-1.5 truncate mt-0.5 flex-wrap"
                                 title={primaryName ? `Empresa: ${primaryName}${hasGroup ? ` | Grupo: ${matchingGroups.map((g: any) => g.name).join(', ')}` : ''}` : `Grupo Empresarial: ${matchingGroups.map((g: any) => g.name).join(', ')}`}
                               >
                                 {primaryName && (
                                   <span className={cn("text-[11px] truncate flex items-center gap-1 font-medium", missingCnpj ? "text-rose-500 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400")}>
                                     {missingCnpj ? <AlertTriangle size={10} className="shrink-0 text-rose-500 animate-pulse" /> : <Building2 size={10} className="shrink-0" />}
-                                    <span className="truncate hover:underline">{primaryName}</span>
+                                    <span className="truncate">{primaryName}</span>
                                     {linkedCompanies.length > 1 && !isDirectCompany && ` (+${linkedCompanies.length - 1})`}
                                   </span>
                                 )}
@@ -6724,7 +6720,7 @@ export default function ChatDashboard() {
                                 {hasGroup && matchingGroups.map((g: any) => (
                                   <span 
                                     key={g.id} 
-                                    className="text-[9px] font-bold px-1.5 py-[1px] rounded-md border shrink-0 flex items-center gap-1 shadow-xs transition-transform duration-150 hover:scale-105"
+                                    className="text-[9px] font-bold px-1.5 py-[1px] rounded-md border shrink-0 flex items-center gap-1 shadow-xs"
                                     style={{
                                       backgroundColor: `${g.color}18`,
                                       borderColor: `${g.color}35`,
