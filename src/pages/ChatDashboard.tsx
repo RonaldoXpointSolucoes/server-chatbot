@@ -8902,21 +8902,44 @@ export default function ChatDashboard() {
                             </button>
 
                             {isAttachmentMenuOpen && (
-                              <div className="absolute bottom-12 left-0 z-50 w-56 p-1.5 bg-white dark:bg-[#111b21] rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 animate-in fade-in zoom-in-95 duration-150">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setIsAttachmentMenuOpen(false);
-                                    fileInputRef.current?.click();
-                                  }}
-                                  className="flex items-center gap-3 w-full p-2.5 text-sm rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/5 transition-colors group font-medium"
-                                >
-                                  <div className="w-8 h-8 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center group-hover:scale-110 transition-transform">
-                                    <ImageIcon size={16} />
+                              <>
+                                <div 
+                                  className="fixed inset-0 z-40 bg-transparent" 
+                                  onClick={() => setIsAttachmentMenuOpen(false)} 
+                                />
+                                <div className="absolute bottom-12 left-0 z-50 w-60 p-2 bg-white/95 dark:bg-[#1f2c34]/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-slate-200/80 dark:border-white/10 animate-in fade-in zoom-in-95 duration-150">
+                                  <div className="flex items-center justify-between px-2.5 py-1 mb-1 border-b border-slate-100 dark:border-white/5">
+                                    <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                                      Anexar
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => setIsAttachmentMenuOpen(false)}
+                                      className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-full hover:bg-slate-100 dark:hover:bg-white/5 transition-colors"
+                                      title="Fechar"
+                                    >
+                                      <X size={14} />
+                                    </button>
                                   </div>
-                                  Fotos & Arquivos
-                                </button>
-                              </div>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setIsAttachmentMenuOpen(false);
+                                      fileInputRef.current?.click();
+                                    }}
+                                    className="flex items-center gap-3 w-full p-2.5 text-sm rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/5 transition-all group font-medium active:scale-[0.98]"
+                                  >
+                                    <div className="w-8 h-8 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center group-hover:scale-110 transition-transform shadow-sm">
+                                      <ImageIcon size={16} />
+                                    </div>
+                                    <div className="text-left">
+                                      <p className="text-xs font-bold leading-none">Fotos & Arquivos</p>
+                                      <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">Imagens, vídeos e documentos</p>
+                                    </div>
+                                  </button>
+                                </div>
+                              </>
                             )}
                           </div>
 
@@ -9220,37 +9243,63 @@ export default function ChatDashboard() {
                           </button>
 
                           {isAttachmentMenuOpen && (
-                            <div className="absolute bottom-12 left-0 z-50 w-56 p-1.5 bg-white dark:bg-[#111b21] rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 animate-in fade-in zoom-in-95 duration-150">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setIsAttachmentMenuOpen(false);
-                                  fileInputRef.current?.click();
-                                }}
-                                className="flex items-center gap-3 w-full p-2.5 text-sm rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/5 transition-colors group font-medium"
-                              >
-                                <div className="w-8 h-8 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center group-hover:scale-110 transition-transform">
-                                  <ImageIcon size={16} />
+                            <>
+                              <div 
+                                className="fixed inset-0 z-40 bg-transparent" 
+                                onClick={() => setIsAttachmentMenuOpen(false)} 
+                              />
+                              <div className="absolute bottom-12 left-0 z-50 w-64 p-2 bg-white/95 dark:bg-[#1f2c34]/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-slate-200/80 dark:border-white/10 animate-in fade-in zoom-in-95 duration-150">
+                                <div className="flex items-center justify-between px-2.5 py-1 mb-1 border-b border-slate-100 dark:border-white/5">
+                                  <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                                    Opções de Envio
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setIsAttachmentMenuOpen(false)}
+                                    className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-full hover:bg-slate-100 dark:hover:bg-white/5 transition-colors"
+                                    title="Fechar (Esc)"
+                                  >
+                                    <X size={14} />
+                                  </button>
                                 </div>
-                                Fotos & Arquivos
-                              </button>
 
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setIsAttachmentMenuOpen(false);
-                                  setContactShareSearch('');
-                                  setSelectedContactToShare(null);
-                                  setIsShareContactModalOpen(true);
-                                }}
-                                className="flex items-center gap-3 w-full p-2.5 text-sm rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/5 transition-colors group font-medium"
-                              >
-                                <div className="w-8 h-8 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center group-hover:scale-110 transition-transform">
-                                  <UserCheck size={16} />
-                                </div>
-                                Compartilhar Contato
-                              </button>
-                            </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsAttachmentMenuOpen(false);
+                                    fileInputRef.current?.click();
+                                  }}
+                                  className="flex items-center gap-3 w-full p-2.5 text-sm rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/5 transition-all group font-medium active:scale-[0.98]"
+                                >
+                                  <div className="w-8 h-8 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center group-hover:scale-110 transition-transform shadow-sm">
+                                    <ImageIcon size={16} />
+                                  </div>
+                                  <div className="text-left">
+                                    <p className="text-xs font-bold leading-none">Fotos & Arquivos</p>
+                                    <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">Imagens, vídeos e documentos</p>
+                                  </div>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsAttachmentMenuOpen(false);
+                                    setContactShareSearch('');
+                                    setSelectedContactToShare(null);
+                                    setIsShareContactModalOpen(true);
+                                  }}
+                                  className="flex items-center gap-3 w-full p-2.5 text-sm rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/5 transition-all group font-medium active:scale-[0.98]"
+                                >
+                                  <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center group-hover:scale-110 transition-transform shadow-sm">
+                                    <UserCheck size={16} />
+                                  </div>
+                                  <div className="text-left">
+                                    <p className="text-xs font-bold leading-none">Compartilhar Contato</p>
+                                    <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">Enviar cartão vCard oficial</p>
+                                  </div>
+                                </button>
+                              </div>
+                            </>
                           )}
                         </div>
 
@@ -10639,7 +10688,17 @@ export default function ChatDashboard() {
             } else if (e.key === 'Enter' && selectedContactToShare && !isSendingContact && activeChatId) {
               const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
               setIsSendingContact(true);
-              shareContactMessage(activeChatId, selectedContactToShare, properTargetInstance as string)
+              
+              const textToSend = inputText.trim();
+              const doShare = async () => {
+                if (textToSend) {
+                  await sendHumanMessage(activeChatId, textToSend, properTargetInstance as string);
+                  setInputText('');
+                }
+                await shareContactMessage(activeChatId, selectedContactToShare, properTargetInstance as string);
+              };
+
+              doShare()
                 .then(() => {
                   setIsShareContactModalOpen(false);
                   setSelectedContactToShare(null);
@@ -10688,6 +10747,28 @@ export default function ChatDashboard() {
                 <X size={20} />
               </button>
             </div>
+
+            {/* Banner de Mensagem Anexa (se houver texto na caixa) */}
+            {inputText.trim() && (
+              <div className="mx-4 mt-3 p-3 bg-emerald-500/10 dark:bg-emerald-500/15 border border-emerald-500/20 rounded-2xl flex items-center justify-between gap-2.5 animate-in fade-in duration-200 shrink-0">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-7 h-7 rounded-xl bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                    <MessageSquare size={14} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300 uppercase tracking-wide">
+                      Mensagem anexada ao envio
+                    </p>
+                    <p className="text-xs text-slate-700 dark:text-slate-200 truncate font-medium mt-0.5">
+                      "{inputText.trim()}"
+                    </p>
+                  </div>
+                </div>
+                <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/15 px-2 py-0.5 rounded-lg shrink-0">
+                  Será enviada junto
+                </span>
+              </div>
+            )}
 
             {/* Busca de Contatos */}
             <div className="p-4 border-b border-slate-200/80 dark:border-white/5 bg-white dark:bg-[#111b21] shrink-0">
@@ -10843,6 +10924,13 @@ export default function ChatDashboard() {
                   setIsSendingContact(true);
                   try {
                     const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
+                    
+                    const textToSend = inputText.trim();
+                    if (textToSend) {
+                      await sendHumanMessage(activeChatId, textToSend, properTargetInstance as string);
+                      setInputText('');
+                    }
+
                     await shareContactMessage(activeChatId, selectedContactToShare, properTargetInstance as string);
                     setIsShareContactModalOpen(false);
                     setSelectedContactToShare(null);

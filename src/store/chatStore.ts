@@ -2011,31 +2011,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const { sendContactMessage } = await import('../services/whatsappEngine');
       await sendContactMessage(state.tenantInfo?.id || '', resolvedInstanceId, targetJid, contactName, contactPhone, apiKey);
 
-      const vcardStr = `BEGIN:VCARD\nVERSION:3.0\nN:;${contactName};;;\nFN:${contactName}\nTEL;type=CELL;type=VOICE;waid=${cleanPhone}:${cleanPhone}\nEND:VCARD`;
-
-      await supabase.from('messages').insert({
-        tenant_id: state.tenantInfo?.id,
-        instance_id: resolvedInstanceId,
-        conversation_id: contact.conv_id || contact.id,
-        direction: 'outbound',
-        message_type: 'contact',
-        status: 'sent',
-        text_content: contactName,
-        sender_type: 'human',
-        raw_payload: {
-          message: {
-            contactMessage: {
-              displayName: contactName,
-              vcard: vcardStr
-            }
-          },
-          contacts: {
-            displayName: contactName,
-            contacts: [{ vcard: vcardStr }]
-          }
-        }
-      });
-
       window.dispatchEvent(new CustomEvent('toast', { detail: { message: `Contato "${contactName}" compartilhado com sucesso!`, type: 'success' } }));
     } catch(err: any) {
       console.error('[shareContactMessage] Erro:', err);
