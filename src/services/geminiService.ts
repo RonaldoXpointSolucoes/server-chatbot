@@ -731,15 +731,18 @@ DIRETRIZES DE PROCESSAMENTO MULTIMODAL AVANÇADO:
    - Se houver vídeos anexados, mapeie a sequência exata de ações, fluxos de tela demonstrados, bugs ocorridos e transições gravadas.
 4. 📱 **DIRETRIZ MOBILE-FIRST & USABILIDADE**:
    - Todo plano deve garantir ergonomia e responsividade impecáveis para dispositivos móveis (toque mínimo 48px, zero overflow horizontal, carregamento fluido).
+5. 📝 **ESTRUTURAÇÃO EM LISTAS E BULLET POINTS (OBRIGATÓRIO)**:
+   - Organize todos os requisitos, regras e passos em listas numeradas (1., 2., 3., etc.) ou bullet points (- item).
+   - Evite parágrafos longos ou texto corrido sem divisão; cada requisito funcional deve ser um item independente e conciso.
 
 ESTRUTURA OBRIGATÓRIA DO PLANO TÉCNICO (technical_plan em Markdown):
-1. 🎯 **Objetivo & Visão Geral**: O problema resolvido e o resultado esperado.
-2. 📋 **Requisitos Funcionais & Regras de Negócio**: Lista detalhada de itens que devem funcionar.
+1. 🎯 **Objetivo & Visão Geral**: O problema resolvido e o resultado esperado em tópicos claros.
+2. 📋 **Requisitos Funcionais & Regras de Negócio**: Lista numerada (1., 2., 3...) sintetizando detalhadamente cada item extraído do áudio/texto.
 3. 🛠️ **Arquitetura & Passo a Passo de Implementação**:
-   - Componentes Frontend a criar ou editar (React / TypeScript / Tailwind)
+   - Componentes Frontend a criar ou editar (React / TypeScript / Tailwind) com caminhos de arquivo
    - Serviços, APIs e endpoints de Backend (se aplicável)
    - Estrutura de banco e storage (Supabase, policies, buckets)
-4. 🧪 **Critérios de Aceite & Validação**: Checklist prático de testes e homologação para QA.
+4. 🧪 **Critérios de Aceite & Validação**: Checklist numerado de testes e homologação para QA.
 
 Seja extremamente prático, direto, profissional e com foco em código limpo, seguro e escalável.`;
 

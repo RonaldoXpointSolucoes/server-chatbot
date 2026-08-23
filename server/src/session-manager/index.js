@@ -5,12 +5,22 @@ import { addLog } from '../system-logger.js';
 import pino from 'pino';
 import { supabase, NODE_ID, retryWithBackoff, resolveTargetJid } from '../supabase.js';
 
+export const isSocketOpen = (sock) => {
+    if (!sock || !sock.ws) return false;
+    if (sock.ws.isOpen === true) return true;
+    if (sock.ws.readyState === 1) return true; // WebSocket.OPEN
+    if (sock.ws.isClosed || sock.ws.isClosing || sock.ws.readyState === 2 || sock.ws.readyState === 3) return false;
+    // Se autenticado e sem flag de fechamento, considera ativo
+    if (sock.user?.id || sock.authState?.creds?.me?.id) return true;
+    return false;
+};
+
 const waitForSocketOpen = (sock, timeoutMs = 20000) => {
     return new Promise((resolve, reject) => {
-        if (sock.ws && sock.ws.isOpen) {
+        if (isSocketOpen(sock)) {
             return resolve(true);
         }
-        if (sock.ws && (sock.ws.isClosing || sock.ws.isClosed)) {
+        if (sock.ws && (sock.ws.isClosing || sock.ws.isClosed || sock.ws.readyState === 2 || sock.ws.readyState === 3)) {
             return reject(new Error('WebSocket is closed or closing'));
         }
 
@@ -176,7 +186,7 @@ class SessionManager {
 
                     for (const [id, sessionData] of activeEntries) {
                         const sock = sessionData?.sock;
-                        if (sock && sock.ws && sock.ws.isOpen) {
+                        if (sock && isSocketOpen(sock)) {
                             healthyIds.push(id);
                         } else {
                             zombieEntries.push({ id, tenantId: sessionData?.tenantId });
@@ -255,7 +265,7 @@ class SessionManager {
 
                     const sessionData = this.sessions.get(inst.id);
                     const sock = sessionData?.sock;
-                    const isWsOpen = Boolean(sock?.ws && sock?.ws?.isOpen);
+                    const isWsOpen = isSocketOpen(sock);
 
                     const isLeaseExpired = !inst.lease_until || (new Date(inst.lease_until).getTime() < now);
                     const isAssignedToThisNode = inst.assigned_node_id === NODE_ID;
@@ -494,7 +504,7 @@ class SessionManager {
 
         if (this.sessions.has(instanceId) && !force) {
             const existingSock = this.sessions.get(instanceId)?.sock;
-            if (existingSock && existingSock.ws && existingSock.ws.isOpen) {
+            if (existingSock && isSocketOpen(existingSock)) {
                 console.log(`[SessionManager] Sessão ${instanceId} já estava saudável em memória.`);
                 return existingSock;
             }
@@ -1276,9 +1286,9 @@ class SessionManager {
                                     let sendFn = originalSendMessage;
                                     
                                     // Se não for a primeira tentativa ou se o socket atual não estiver saudável (fechado/fechando), busca o socket mais recente
-                                    if (attempts > 0 || !activeSock.ws || !activeSock.ws.isOpen) {
+                                    if (attempts > 0 || !isSocketOpen(activeSock)) {
                                         const latestSession = this.sessions.get(instanceId);
-                                        if (latestSession && latestSession.sock && latestSession.sock.ws && latestSession.sock.ws.isOpen) {
+                                        if (latestSession && isSocketOpen(latestSession.sock)) {
                                             activeSock = latestSession.sock;
                                             sendFn = activeSock.originalSendMessage || activeSock.sendMessage;
                                         } else {
@@ -1311,14 +1321,14 @@ class SessionManager {
                                     }
                                     
                                     // Se o socket estiver inicializando/conectando, aguarda a abertura da conexão antes de prosseguir
-                                    if (activeSock && (!activeSock.ws || activeSock.ws.isConnecting || !activeSock.ws.isOpen)) {
+                                    if (activeSock && (!activeSock.ws || activeSock.ws.isConnecting || !isSocketOpen(activeSock))) {
                                         console.log(`[SessionManager - Antiban] Socket de ${instanceId} está conectando. Aguardando abertura da conexão WebSocket...`);
                                         await waitForSocketOpen(activeSock, 25000);
                                     }
 
                                     // Validação final de integridade do socket autenticado
                                     const meJid = activeSock?.user?.id || activeSock?.authState?.creds?.me?.id;
-                                    if (!activeSock || !activeSock.ws || !activeSock.ws.isOpen || !meJid) {
+                                    if (!activeSock || !isSocketOpen(activeSock) || !meJid) {
                                         throw new Error('Connection Closed (WebSocket não aberto ou autenticação pendente)');
                                     }
                                     
@@ -1430,7 +1440,7 @@ class SessionManager {
 
         if (requireAuthenticated) {
             const meId = sock?.user?.id || sock?.authState?.creds?.me?.id;
-            if (!meId || !sock.ws || !sock.ws.isOpen) {
+            if (!meId || !isSocketOpen(sock)) {
                 return null;
             }
         }
@@ -1449,7 +1459,7 @@ class SessionManager {
                 if (connectingSock) {
                     if (requireAuthenticated) {
                         const meId = connectingSock?.user?.id || connectingSock?.authState?.creds?.me?.id;
-                        if (meId && connectingSock?.ws?.isOpen) return connectingSock;
+                        if (meId && isSocketOpen(connectingSock)) return connectingSock;
                     } else {
                         return connectingSock;
                     }
@@ -1496,8 +1506,8 @@ class SessionManager {
                 const createdSock = await this.createSession(tenantId, instanceId, force);
                 if (requireAuthenticated) {
                     const meId = createdSock?.user?.id || createdSock?.authState?.creds?.me?.id;
-                    if (!meId || !createdSock?.ws || !createdSock.ws.isOpen) {
-                        if (createdSock?.ws && (createdSock.ws.isConnecting || !createdSock.ws.isOpen)) {
+                    if (!meId || !isSocketOpen(createdSock)) {
+                        if (createdSock?.ws && (createdSock.ws.isConnecting || !isSocketOpen(createdSock))) {
                             try {
                                 await waitForSocketOpen(createdSock, 20000);
                             } catch (e) {
@@ -1562,8 +1572,9 @@ class SessionManager {
             if (sock && sock.ws) {
                 const wsState = sock.ws.readyState;
                 // readyState: 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED
-                if (wsState === 2 || wsState === 3 || (!sock.ws.isOpen && wsState !== 0)) {
-                    console.warn(`[SessionManager/Watchdog] Instância ${instanceId} com WebSocket em estado inválido (readyState: ${wsState}). Reciclando socket e reconectando...`);
+                const isClosedOrClosing = wsState === 2 || wsState === 3 || sock.ws.isClosing || sock.ws.isClosed;
+                if (isClosedOrClosing && !isSocketOpen(sock)) {
+                    console.warn(`[SessionManager/Watchdog] Instância ${instanceId} com WebSocket encerrado (readyState: ${wsState}). Reciclando socket e reconectando...`);
                     this.clearWatchdog(instanceId);
                     this.destroyExistingSession(instanceId, 'watchdog_ws_closed').catch(() => {});
                     setTimeout(() => {

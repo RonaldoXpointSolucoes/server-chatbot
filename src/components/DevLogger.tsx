@@ -2278,23 +2278,23 @@ export default function DevLogger() {
 
           {/* Abas de Navegação Principal em Segmented Control Neon (CONSOLE / GASTROFOOD / ASTS) */}
           {isVisible && (
-            <div className="p-2 bg-[#0a1116] border-b border-white/10 flex gap-2 shrink-0 select-none relative z-10">
+            <div className="p-2 bg-[#091016]/95 border-b border-white/10 flex gap-2 shrink-0 select-none relative z-10 backdrop-blur-xl">
               <button 
                 onClick={(e) => { e.stopPropagation(); setActiveTab('console'); }}
                 className={`flex-1 py-2.5 font-mono text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 rounded-2xl transition-all duration-200 cursor-pointer border ${
                   activeTab === 'console' 
-                    ? 'bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-400 text-black border-emerald-300/40 shadow-lg shadow-emerald-500/25 font-black scale-[1.01]' 
+                    ? 'bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-400 text-black border-emerald-300/50 shadow-lg shadow-emerald-500/25 font-black scale-[1.01]' 
                     : 'bg-[#121c23]/60 text-[#8696a0] border-white/5 hover:text-white hover:bg-white/10'
                 }`}
               >
-                <Terminal size={14} className={activeTab === 'console' ? 'text-black' : ''} /> Console ({logs.length})
+                <Terminal size={14} className={activeTab === 'console' ? 'text-black stroke-[2.5]' : ''} /> Console ({logs.length})
               </button>
 
               <button 
                 onClick={(e) => { e.stopPropagation(); setActiveTab('gastrofood'); }}
                 className={`flex-1 py-2.5 font-mono text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 rounded-2xl transition-all duration-200 cursor-pointer border ${
                   activeTab === 'gastrofood' 
-                    ? 'bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 text-white border-blue-400/40 shadow-lg shadow-blue-500/25 font-black scale-[1.01]' 
+                    ? 'bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 text-white border-blue-400/50 shadow-lg shadow-blue-500/25 font-black scale-[1.01]' 
                     : 'bg-[#121c23]/60 text-[#8696a0] border-white/5 hover:text-white hover:bg-white/10'
                 }`}
               >
@@ -2305,11 +2305,11 @@ export default function DevLogger() {
                 onClick={(e) => { e.stopPropagation(); setActiveTab('asts'); }}
                 className={`flex-1 py-2.5 font-mono text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 rounded-2xl transition-all duration-200 cursor-pointer border ${
                   activeTab === 'asts' 
-                    ? 'bg-gradient-to-r from-amber-400 via-orange-500 to-amber-500 text-black border-amber-300/40 shadow-lg shadow-amber-500/25 font-black scale-[1.01]' 
+                    ? 'bg-gradient-to-r from-amber-400 via-orange-500 to-amber-500 text-black border-amber-300/50 shadow-lg shadow-amber-500/25 font-black scale-[1.01]' 
                     : 'bg-[#121c23]/60 text-[#8696a0] border-white/5 hover:text-white hover:bg-white/10'
                 }`}
               >
-                <Activity size={14} className={isTestingApp ? 'animate-pulse text-amber-950' : ''} /> ASTS {testSummary ? `(${testSummary.healthScore}%)` : ''}
+                <Activity size={14} className={isTestingApp ? 'animate-pulse text-amber-950 stroke-[2.5]' : ''} /> ASTS {testSummary ? `(${testSummary.healthScore}%)` : ''}
               </button>
             </div>
           )}
@@ -2537,71 +2537,82 @@ export default function DevLogger() {
               <div className="flex-1 overflow-y-auto flex flex-col font-mono text-xs custom-scrollbar min-h-[180px] bg-[#070c10] rounded-b-[28px]">
                 
                 {/* Sub-Barra de Controles: Agrupamento, Filtros de Origem e Disparo de Testes */}
-                <div className="flex items-center justify-between gap-2 p-3 px-4 bg-[#0d151b] border-b border-white/10 text-xs font-mono select-none flex-wrap sticky top-0 z-20 backdrop-blur-xl">
-                  {/* Seletor de Modo: Agrupado vs Linha do Tempo */}
-                  <div className="flex items-center gap-1 bg-[#141f27] p-1 rounded-xl border border-white/10">
-                    <button
-                      onClick={() => setViewMode('grouped')}
-                      className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer border-0 ${
-                        viewMode === 'grouped'
-                          ? 'bg-gradient-to-r from-emerald-500 to-teal-400 text-black shadow-md shadow-emerald-500/20 font-black'
-                          : 'text-[#8696a0] hover:text-white hover:bg-white/5'
-                      }`}
-                      title="Agrupar erros e logs idênticos"
-                    >
-                      📦 Agrupado ({groupedAndFilteredLogs.length})
-                    </button>
-                    <button
-                      onClick={() => setViewMode('timeline')}
-                      className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer border-0 ${
-                        viewMode === 'timeline'
-                          ? 'bg-gradient-to-r from-emerald-500 to-teal-400 text-black shadow-md shadow-emerald-500/20 font-black'
-                          : 'text-[#8696a0] hover:text-white hover:bg-white/5'
-                      }`}
-                      title="Exibir histórico individual por ordem cronológica"
-                    >
-                      🕒 Linha do Tempo
-                    </button>
-                  </div>
-
-                  {/* Chips de Filtro */}
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    {[
-                      { id: 'all', label: 'Todos', count: logs.length },
-                      { id: 'node', label: '🖥️ Servidor Node', count: nodeLogsCount },
-                      { id: 'error', label: '🔴 Erros', count: errorLogsCount },
-                      { id: 'warn', label: '🟡 Alertas', count: warnLogsCount },
-                    ].map((f) => (
+                <div className="p-3 px-4 bg-[#0a1117]/95 border-b border-white/10 text-xs font-mono select-none flex items-center justify-between gap-2.5 flex-wrap sticky top-0 z-20 backdrop-blur-xl">
+                  
+                  {/* Lado Esquerdo: Toggle de Modo & Chips de Filtro */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {/* Seletor de Modo: Agrupado vs Linha do Tempo */}
+                    <div className="flex items-center gap-1 bg-[#101920] p-1 rounded-xl border border-white/10">
                       <button
-                        key={f.id}
-                        onClick={() => setLogFilter(f.id as any)}
-                        className={`px-2.5 py-1 rounded-xl text-[10px] font-black uppercase transition-all cursor-pointer border ${
-                          logFilter === f.id
-                            ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-300 shadow-sm shadow-indigo-500/20'
-                            : 'bg-[#141f27] border-white/10 text-[#8696a0] hover:text-white hover:bg-white/5'
+                        onClick={() => setViewMode('grouped')}
+                        className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer border-0 flex items-center gap-1.5 ${
+                          viewMode === 'grouped'
+                            ? 'bg-gradient-to-r from-emerald-500 to-teal-400 text-black shadow-md shadow-emerald-500/20 font-black'
+                            : 'text-[#8696a0] hover:text-white hover:bg-white/5'
                         }`}
+                        title="Agrupar erros e logs idênticos"
                       >
-                        {f.label} ({f.count})
+                        <span>📦 Agrupado</span>
+                        <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-extrabold ${viewMode === 'grouped' ? 'bg-black/20 text-black' : 'bg-white/10 text-white/80'}`}>
+                          {groupedAndFilteredLogs.length}
+                        </span>
                       </button>
-                    ))}
+                      <button
+                        onClick={() => setViewMode('timeline')}
+                        className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer border-0 flex items-center gap-1.5 ${
+                          viewMode === 'timeline'
+                            ? 'bg-gradient-to-r from-emerald-500 to-teal-400 text-black shadow-md shadow-emerald-500/20 font-black'
+                            : 'text-[#8696a0] hover:text-white hover:bg-white/5'
+                        }`}
+                        title="Exibir histórico individual por ordem cronológica"
+                      >
+                        <span>🕒 Linha do Tempo</span>
+                      </button>
+                    </div>
+
+                    {/* Chips de Filtro */}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {[
+                        { id: 'all', label: 'Todos', count: logs.length, color: 'text-slate-300 border-slate-500/30' },
+                        { id: 'node', label: '🖥️ Servidor Node', count: nodeLogsCount, color: 'text-purple-300 border-purple-500/40' },
+                        { id: 'error', label: '🔴 Erros', count: errorLogsCount, color: 'text-rose-300 border-rose-500/40' },
+                        { id: 'warn', label: '🟡 Alertas', count: warnLogsCount, color: 'text-amber-300 border-amber-500/40' },
+                      ].map((f) => (
+                        <button
+                          key={f.id}
+                          onClick={() => setLogFilter(f.id as any)}
+                          className={`px-2.5 py-1 rounded-xl text-[10px] font-black uppercase transition-all cursor-pointer border flex items-center gap-1.5 active:scale-95 ${
+                            logFilter === f.id
+                              ? `bg-indigo-500/20 border-indigo-500/50 text-indigo-200 shadow-sm shadow-indigo-500/20 ${f.color}`
+                              : 'bg-[#101920] border-white/10 text-[#8696a0] hover:text-white hover:bg-white/5'
+                          }`}
+                        >
+                          <span>{f.label}</span>
+                          <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-bold ${logFilter === f.id ? 'bg-indigo-400/20 text-white' : 'bg-white/5 text-[#8696a0]'}`}>
+                            {f.count}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
-                  <div className="flex items-center gap-1.5">
+                  {/* Lado Direito: Ações */}
+                  <div className="flex items-center gap-2">
                     {/* Botão de Análise de Logs com IA e Criação de Card no CRM Kanban */}
                     <button
                       onClick={handleAnalyzeLogsAndCreateKanbanCard}
                       disabled={isAnalyzingAiLogs}
-                      className={`px-3 py-1 rounded-xl text-[10px] font-black transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 shadow-sm border ${
+                      className={`px-3.5 py-1.5 rounded-xl text-[10px] font-black transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 shadow-sm border ${
                         isAnalyzingAiLogs
                           ? 'bg-purple-500/20 text-purple-300 border-purple-500/50 animate-pulse'
-                          : 'bg-gradient-to-r from-purple-500/20 via-indigo-500/20 to-pink-500/20 hover:from-purple-500/30 hover:to-pink-500/30 text-purple-300 border-purple-500/40 hover:border-purple-400 shadow-purple-500/10'
+                          : 'bg-gradient-to-r from-purple-500/25 via-indigo-500/25 to-pink-500/25 hover:from-purple-500/35 hover:to-pink-500/35 text-purple-200 hover:text-white border-purple-500/40 hover:border-purple-400 shadow-lg shadow-purple-500/10'
                       }`}
                       title="Analisar logs atuais do DevLogger e Servidor Node com Gemini IA e criar card de correção no CRM Kanban"
                     >
                       {isAnalyzingAiLogs ? (
                         <Loader2 size={12} className="animate-spin text-purple-300" />
                       ) : (
-                        <Sparkles size={12} className="text-purple-400 animate-pulse" />
+                        <Sparkles size={12} className="text-purple-300 animate-pulse" />
                       )}
                       <span>{isAnalyzingAiLogs ? 'Analisando...' : '✨ Analisar c/ IA & Criar Card CRM'}</span>
                     </button>
@@ -2609,7 +2620,7 @@ export default function DevLogger() {
                     {/* Simulação de Erro do Servidor Node */}
                     <button
                       onClick={handleSimulateNodeError}
-                      className="bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 px-3 py-1 rounded-xl text-[10px] font-black transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 shadow-sm"
+                      className="bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 px-3 py-1.5 rounded-xl text-[10px] font-black transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 shadow-sm"
                       title="Simular disparo de erro no servidor Node.js para testar o agrupamento"
                     >
                       <Bug size={12} className="text-rose-400 animate-pulse" /> + Erro Node
@@ -2639,7 +2650,7 @@ export default function DevLogger() {
                 )}
 
                 {/* Lista de Cards Agrupados / Cronológicos */}
-                <div className="p-4 flex flex-col gap-3 min-h-[240px]">
+                <div className="p-4 flex flex-col gap-3.5 min-h-[240px]">
                   {groupedAndFilteredLogs.length === 0 ? (
                     <div className="m-auto py-12 px-6 flex flex-col items-center justify-center text-center space-y-4 select-none animate-in fade-in zoom-in-95 duration-300 relative">
                       <div className="relative flex items-center justify-center">
@@ -2680,76 +2691,97 @@ export default function DevLogger() {
                       const isWrn = log.type === 'warn';
                       const isSucc = log.type === 'success';
                       const isInf = log.type === 'info';
-                      const isNode = log.isServerNode;
+                      const isNode = log.isServerNode || log.source?.toLowerCase().includes('server') || log.source?.toLowerCase().includes('node');
                       const isExpanded = !!expandedLogs[log.id];
 
                       return (
                         <div 
                           key={log.id} 
-                          className={`p-4 rounded-2xl border transition-all duration-200 flex flex-col gap-2 shadow-lg backdrop-blur-md ${
+                          className={`p-4 rounded-2xl border transition-all duration-300 flex flex-col gap-2.5 shadow-xl backdrop-blur-xl ${
                             isNode && isErr
-                              ? 'bg-gradient-to-r from-rose-950/40 via-[#141d24] to-[#182229] border-l-4 border-l-rose-500 border-rose-500/40 text-rose-200 shadow-rose-500/10'
+                              ? 'bg-gradient-to-br from-rose-950/30 via-[#0e141a] to-[#121b22] border-l-4 border-l-rose-500 border-rose-500/30 text-rose-100 shadow-[0_8px_30px_rgba(244,63,94,0.12)]'
                               : isErr 
-                                ? 'bg-rose-500/10 border-l-4 border-l-rose-500 border-rose-500/30 text-rose-200 shadow-rose-500/10' 
+                                ? 'bg-gradient-to-br from-rose-950/20 via-[#0e141a] to-[#121b22] border-l-4 border-l-rose-500 border-rose-500/30 text-rose-100 shadow-[0_8px_30px_rgba(244,63,94,0.1)]' 
                                 : isWrn 
-                                  ? 'bg-amber-500/10 border-l-4 border-l-amber-500 border-amber-500/30 text-amber-200 shadow-amber-500/10' 
+                                  ? 'bg-gradient-to-br from-amber-950/20 via-[#0e141a] to-[#121b22] border-l-4 border-l-amber-400 border-amber-500/30 text-amber-100 shadow-[0_8px_30px_rgba(245,158,11,0.08)]' 
                                   : isSucc 
-                                    ? 'bg-emerald-500/10 border-l-4 border-l-emerald-500 border-emerald-500/30 text-emerald-200 shadow-emerald-500/10' 
+                                    ? 'bg-gradient-to-br from-emerald-950/20 via-[#0e141a] to-[#121b22] border-l-4 border-l-emerald-400 border-emerald-500/30 text-emerald-100 shadow-[0_8px_30px_rgba(16,185,129,0.08)]' 
                                     : isInf 
-                                      ? 'bg-blue-500/10 border-l-4 border-l-blue-500 border-blue-500/30 text-blue-200 shadow-blue-500/10' 
-                                      : 'bg-[#121b22] border-white/10 text-[#d1d7db] hover:border-white/20'
+                                      ? 'bg-gradient-to-br from-blue-950/20 via-[#0e141a] to-[#121b22] border-l-4 border-l-blue-400 border-blue-500/30 text-blue-100 shadow-[0_8px_30px_rgba(59,130,246,0.08)]' 
+                                      : 'bg-[#10171d] border-white/10 text-[#d1d7db] hover:border-white/20'
                           }`}
                         >
                           {/* Cabeçalho do Card */}
                           <div className="flex justify-between items-center select-none gap-2 flex-wrap">
                             <div className="flex items-center gap-2 font-mono text-[10px] font-black uppercase tracking-wider min-w-0">
+                              
+                              {/* Tag de Origem Unificada */}
                               {isNode ? (
-                                <span className="flex items-center gap-1 bg-purple-500/20 border border-purple-500/40 text-purple-300 px-2 py-0.5 rounded-lg text-[9px] font-mono">
+                                <span className="flex items-center gap-1 bg-purple-500/20 border border-purple-500/40 text-purple-300 px-2.5 py-0.5 rounded-lg text-[9px] font-mono font-black shadow-sm">
                                   🖥️ SERVIDOR NODE.JS
                                 </span>
-                              ) : null}
+                              ) : (
+                                <span className="flex items-center gap-1 bg-slate-500/20 border border-slate-500/30 text-slate-300 px-2 py-0.5 rounded-lg text-[9px] font-mono font-bold">
+                                  {log.source || 'APP'}
+                                </span>
+                              )}
 
-                              {isErr && <AlertTriangle size={13} className="text-rose-400 animate-pulse shrink-0" />}
-                              {isWrn && <AlertTriangle size={13} className="text-amber-400 shrink-0" />}
-                              {isSucc && <CheckCircle2 size={13} className="text-emerald-400 shrink-0" />}
-                              {isInf && <Info size={13} className="text-blue-400 shrink-0" />}
-                              {log.type === 'log' && <Terminal size={13} className="text-[#8696a0] shrink-0" />}
-
-                              <span className="truncate text-white font-bold">{log.source}</span>
+                              {/* Badge de Nível / Severidade */}
+                              {isErr && (
+                                <span className="flex items-center gap-1 bg-rose-500/20 border border-rose-500/40 text-rose-300 px-2 py-0.5 rounded-lg text-[9px] font-bold">
+                                  <AlertTriangle size={11} className="text-rose-400 animate-pulse shrink-0" /> ERRO
+                                </span>
+                              )}
+                              {isWrn && (
+                                <span className="flex items-center gap-1 bg-amber-500/20 border border-amber-500/40 text-amber-300 px-2 py-0.5 rounded-lg text-[9px] font-bold">
+                                  <AlertTriangle size={11} className="text-amber-400 shrink-0" /> ALERTA
+                                </span>
+                              )}
+                              {isSucc && (
+                                <span className="flex items-center gap-1 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 px-2 py-0.5 rounded-lg text-[9px] font-bold">
+                                  <CheckCircle2 size={11} className="text-emerald-400 shrink-0" /> SUCESSO
+                                </span>
+                              )}
+                              {isInf && (
+                                <span className="flex items-center gap-1 bg-blue-500/20 border border-blue-500/40 text-blue-300 px-2 py-0.5 rounded-lg text-[9px] font-bold">
+                                  <Info size={11} className="text-blue-400 shrink-0" /> INFO
+                                </span>
+                              )}
 
                               {/* PILULA DE CONTAGEM / AGRUPAMENTO */}
                               {log.count > 1 && (
-                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-gradient-to-r from-rose-500/30 to-amber-500/30 text-rose-200 border border-rose-400/50 shrink-0 animate-pulse shadow-md shadow-rose-500/20">
+                                <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black bg-gradient-to-r from-amber-500/25 to-orange-500/25 text-amber-200 border border-amber-400/50 shrink-0 animate-pulse shadow-sm shadow-amber-500/20 font-mono">
                                   {log.count}x Ocorrências
                                 </span>
                               )}
                             </div>
 
                             <div className="flex items-center gap-2">
-                              <span className="text-[10px] font-bold text-[#8696a0] shrink-0 font-mono">
+                              <span className="text-[10px] font-bold text-[#8696a0] shrink-0 font-mono bg-white/5 px-2 py-0.5 rounded-md border border-white/5">
                                 {new Date(log.latestTimestamp).toLocaleTimeString('pt-BR', { hour12: false })}
                               </span>
                               <button
                                 onClick={() => toggleExpandLog(log.id)}
-                                className="text-[#8696a0] hover:text-white p-1 rounded-md transition-colors cursor-pointer"
+                                className="text-[#8696a0] hover:text-white p-1 rounded-lg hover:bg-white/10 transition-colors cursor-pointer active:scale-95"
+                                title={isExpanded ? "Recolher detalhes" : "Expandir detalhes"}
                               >
                                 {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                               </button>
                             </div>
                           </div>
 
-                          {/* Mensagem do Log */}
-                          <p className="break-all whitespace-pre-wrap opacity-95 leading-relaxed font-semibold font-mono text-xs">
+                          {/* Mensagem do Log (Tipografia Nítida & Quebra de Palavras Sem Hifenização Quebrada) */}
+                          <p className="break-words whitespace-pre-wrap leading-relaxed font-semibold font-mono text-xs text-[#e6edf3]">
                             {log.message}
                           </p>
 
                           {/* Detalhes Expandidos (Histórico de ocorrências e JSON payload) */}
                           {(isExpanded || log.details) && (
-                            <div className="flex flex-col gap-2 mt-1">
+                            <div className="flex flex-col gap-2 mt-1 animate-in fade-in duration-200">
                               {log.count > 1 && (
-                                <div className="p-2.5 bg-[#0a1116] border border-white/10 rounded-xl text-[10px] text-amber-300 font-mono flex items-center justify-between flex-wrap gap-2">
+                                <div className="p-2.5 bg-[#060b0f] border border-white/10 rounded-xl text-[10px] text-amber-300 font-mono flex items-center justify-between flex-wrap gap-2">
                                   <span>
-                                    ⏱️ <strong>Primeira ocorrência:</strong> {new Date(log.firstTimestamp).toLocaleTimeString('pt-BR')} | <strong>Última:</strong> {new Date(log.latestTimestamp).toLocaleTimeString('pt-BR')}
+                                    ⏱️ <strong>Primeira ocorrência:</strong> {new Date(log.firstTimestamp).toLocaleTimeString('pt-BR')} &bull; <strong>Última:</strong> {new Date(log.latestTimestamp).toLocaleTimeString('pt-BR')}
                                   </span>
                                   <span className="text-[9px] text-[#8696a0] uppercase font-bold bg-white/5 px-2 py-0.5 rounded-md">
                                     Agrupado ({log.count} repetições)
@@ -2759,7 +2791,7 @@ export default function DevLogger() {
 
                               {log.details && (
                                 <div className="relative group/code">
-                                  <pre className="p-3.5 bg-[#050a0e] border border-white/10 rounded-xl text-[10px] text-cyan-300 overflow-x-auto max-h-[180px] custom-scrollbar font-mono leading-relaxed select-all shadow-inner pr-16">
+                                  <pre className="p-3.5 bg-[#03070b] border border-white/10 rounded-xl text-[10px] text-cyan-300 overflow-x-auto max-h-[180px] custom-scrollbar font-mono leading-relaxed select-all shadow-inner pr-16">
                                     {typeof log.details === 'object' ? JSON.stringify(log.details, null, 2) : String(log.details)}
                                   </pre>
                                   <button
@@ -2770,7 +2802,7 @@ export default function DevLogger() {
                                       setCopyFeedback('JSON Copiado!');
                                       setTimeout(() => setCopyFeedback(null), 2500);
                                     }}
-                                    className="absolute top-2 right-2 opacity-80 group-hover/code:opacity-100 bg-[#121c23] hover:bg-emerald-500 hover:text-black text-[#8696a0] border border-white/10 px-2 py-1 rounded-lg text-[9px] font-bold font-mono transition-all flex items-center gap-1 shadow-md active:scale-95 cursor-pointer"
+                                    className="absolute top-2 right-2 opacity-80 group-hover/code:opacity-100 bg-[#0f171e] hover:bg-emerald-500 hover:text-black text-[#8696a0] border border-white/10 px-2.5 py-1 rounded-lg text-[9px] font-bold font-mono transition-all flex items-center gap-1 shadow-md active:scale-95 cursor-pointer"
                                     title="Copiar JSON Payload para a área de transferência"
                                   >
                                     <Copy size={11} /> <span>Copiar</span>

@@ -386,13 +386,43 @@ async function runMigrations() {
         console.warn("[Migration] DATABASE_URL não configurada no .env. Ignorando migração.");
         return;
     }
-    const client = new pg.Client({
+
+    let client = new pg.Client({
         connectionString,
         ssl: connectionString.includes('supabase') ? { rejectUnauthorized: false } : false
     });
+
     try {
-        await client.connect();
-        console.log("[Migration] Conectado ao banco de dados via pg client.");
+        try {
+            await client.connect();
+            console.log("[Migration] Conectado ao banco de dados via pg client.");
+        } catch (connErr) {
+            if (connErr.message && (connErr.message.includes('EHOSTUNREACH') || connErr.message.includes('ENETUNREACH') || connErr.message.includes('ETIMEDOUT')) && connectionString.includes('db.')) {
+                console.log("[Migration] Tentando fallback para pooler IPv4 do Supabase...");
+                try {
+                    const match = connectionString.match(/postgres:\/\/([^:]+):([^@]+)@db\.([a-z0-9]+)\.supabase\.co:5432\/(.+)/);
+                    if (match) {
+                        const [, user, pass, projectRef, dbName] = match;
+                        const poolerUrl = `postgres://${user}.${projectRef}:${pass}@aws-0-sa-east-1.pooler.supabase.com:6543/${dbName}`;
+                        client = new pg.Client({
+                            connectionString: poolerUrl,
+                            ssl: { rejectUnauthorized: false }
+                        });
+                        await client.connect();
+                        console.log("[Migration] Conectado com sucesso via Pooler IPv4!");
+                    } else {
+                        throw connErr;
+                    }
+                } catch (poolerErr) {
+                    console.warn("[Migration] Conexão direta de migração DDL indisponível nesta rede (operações normais seguem 100% ativas via Supabase JS SDK).");
+                    return;
+                }
+            } else {
+                console.warn("[Migration] Conexão DDL de migração ignorada:", connErr.message);
+                return;
+            }
+        }
+
         const migrationSQL = `
           DROP FUNCTION IF EXISTS match_ai_reasoning_adjustments(vector, double precision, integer, uuid);
           DROP FUNCTION IF EXISTS match_ai_reasoning_adjustments(vector, float, int, uuid);
@@ -514,7 +544,7 @@ async function runMigrations() {
         await client.query(migrationSQL);
         console.log("[Migration] Migração DDL executada com sucesso!");
     } catch (err) {
-        console.warn("[Migration] Falha ao executar migração de banco local (conexão direta IPv6 indisponível nesta rede). Erro:", err.message);
+        console.warn("[Migration] Aviso durante migração DDL:", err.message);
     } finally {
         try {
             await client.end();
