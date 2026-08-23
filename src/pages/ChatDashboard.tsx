@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
 import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, Save, ShieldCheck, Smile, Briefcase, Flag, Clock, Calendar, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, CheckSquare, MessageSquare, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList, UploadCloud, FolderCheck, Globe, Lock, Zap } from 'lucide-react';
 import { getCurrentEnvironment, setEnvironment, validateServerEnvironment, ENVIRONMENTS } from '../services/environmentService';
 import { useNavigate, useOutletContext, useLocation } from 'react-router-dom';
@@ -399,6 +399,7 @@ export default function ChatDashboard() {
     appVersion,
     setActiveChat, 
     sendHumanMessage, 
+    shareContactMessage,
     sendPresenceUpdate,
     forwardMessage,
     setBotStatus,
@@ -579,6 +580,64 @@ export default function ChatDashboard() {
   const [contactShareSearch, setContactShareSearch] = useState('');
   const [selectedContactToShare, setSelectedContactToShare] = useState<any>(null);
   const [isSendingContact, setIsSendingContact] = useState(false);
+  const contactShareInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isShareContactModalOpen) {
+      const timer = setTimeout(() => {
+        contactShareInputRef.current?.focus();
+      }, 120);
+      return () => clearTimeout(timer);
+    }
+  }, [isShareContactModalOpen]);
+
+  const filteredShareContacts = useMemo(() => {
+    if (!contacts || contacts.length === 0) return [];
+    
+    // Contato da conversa atual para evitar compartilhar o contato com ele mesmo
+    const currentChat = contacts.find(c => c.id === activeChatId);
+    const currentActivePhone = (currentChat?.phone || '').replace(/\D/g, '');
+    const currentActiveId = activeChatId;
+
+    const search = contactShareSearch.toLowerCase().trim().replace(/[\s\-\(\)]/g, '');
+    const searchRaw = contactShareSearch.toLowerCase().trim();
+
+    const phoneMap = new Set<string>();
+    const result: typeof contacts = [];
+
+    for (const c of contacts) {
+      if (!c.phone) continue;
+      const cleanPhone = (c.phone || '').replace(/\D/g, '');
+      if (!cleanPhone) continue;
+
+      // Evita o próprio contato ativo da conversa
+      if (c.id === currentActiveId || (currentActivePhone && cleanPhone === currentActivePhone)) {
+        continue;
+      }
+
+      // Deduplicação por telefone para visualização limpa e ágil
+      if (phoneMap.has(cleanPhone)) continue;
+
+      if (searchRaw) {
+        const name = (c.custom_name || c.name || c.push_name || '').toLowerCase();
+        const rawPhone = (c.phone || '').toLowerCase();
+        const fantasy = (c.fantasy_name || '').toLowerCase();
+        const matchesName = name.includes(searchRaw) || fantasy.includes(searchRaw);
+        const matchesPhone = cleanPhone.includes(search) || rawPhone.includes(searchRaw);
+        if (!matchesName && !matchesPhone) continue;
+      }
+
+      phoneMap.add(cleanPhone);
+      result.push(c);
+    }
+
+    return result.sort((a, b) => {
+      const nameA = (a.custom_name || a.name || a.push_name || a.phone || '').toLowerCase();
+      const nameB = (b.custom_name || b.name || b.push_name || b.phone || '').toLowerCase();
+      return nameA.localeCompare(nameB, 'pt-BR');
+    });
+  }, [contacts, contactShareSearch, activeChatId]);
+
   const activeTicket = useChatStore(s => s.activeTicket);
 
   const calculateFinalStats = async (contactId: string, customTicket?: any) => {
@@ -10570,123 +10629,208 @@ export default function ChatDashboard() {
 
       {/* Modal de Compartilhar Contato da Lista */}
       {isShareContactModalOpen && (
-        <div className="fixed inset-0 z-[999999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="w-full max-w-lg bg-white dark:bg-[#111b21] rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-200">
+        <div 
+          className="fixed inset-0 z-[999999] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-md animate-in fade-in duration-200"
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              setIsShareContactModalOpen(false);
+              setSelectedContactToShare(null);
+              setContactShareSearch('');
+            } else if (e.key === 'Enter' && selectedContactToShare && !isSendingContact && activeChatId) {
+              const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
+              setIsSendingContact(true);
+              shareContactMessage(activeChatId, selectedContactToShare, properTargetInstance as string)
+                .then(() => {
+                  setIsShareContactModalOpen(false);
+                  setSelectedContactToShare(null);
+                  setContactShareSearch('');
+                })
+                .catch((err: any) => {
+                  console.error('Erro ao compartilhar contato:', err);
+                })
+                .finally(() => {
+                  setIsSendingContact(false);
+                });
+            }
+          }}
+        >
+          <div className="w-full max-w-lg bg-white dark:bg-[#111b21] rounded-t-[32px] sm:rounded-3xl shadow-2xl border border-slate-200/80 dark:border-white/10 overflow-hidden flex flex-col max-h-[90vh] sm:max-h-[85vh] animate-in slide-in-from-bottom-6 sm:zoom-in-95 duration-200">
             
             {/* Cabeçalho do Modal */}
-            <div className="px-6 py-4 bg-slate-50 dark:bg-[#202c33] border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
-                  <UserCheck size={20} />
+            <div className="px-6 py-4.5 bg-gradient-to-r from-slate-50 to-slate-100 dark:from-[#202c33] dark:to-[#182229] border-b border-slate-200/80 dark:border-white/10 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3.5">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center shadow-md shadow-emerald-500/20">
+                  <UserCheck size={20} className="stroke-[2.2]" />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-slate-800 dark:text-slate-100">
+                  <h3 className="text-base font-extrabold text-slate-900 dark:text-slate-100 tracking-tight flex items-center gap-2">
                     Compartilhar Contato
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 uppercase tracking-wider">
+                      vCard Oficial
+                    </span>
                   </h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Selecione um contato da empresa para enviar no WhatsApp
+                    Selecione um contato para enviar o cartão no WhatsApp
                   </p>
                 </div>
               </div>
 
               <button
+                type="button"
                 onClick={() => {
                   setIsShareContactModalOpen(false);
                   setSelectedContactToShare(null);
                   setContactShareSearch('');
                 }}
-                className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-full hover:bg-slate-200/50 dark:hover:bg-white/5 transition-colors"
+                className="p-2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-100 rounded-full hover:bg-slate-200/60 dark:hover:bg-white/10 transition-colors"
+                title="Fechar (Esc)"
               >
                 <X size={20} />
               </button>
             </div>
 
             {/* Busca de Contatos */}
-            <div className="p-4 border-b border-slate-200 dark:border-slate-800/80 bg-white dark:bg-[#111b21]">
-              <div className="relative">
-                <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <div className="p-4 border-b border-slate-200/80 dark:border-white/5 bg-white dark:bg-[#111b21] shrink-0">
+              <div className="relative flex items-center">
+                <Search size={18} className="absolute left-3.5 text-slate-400 pointer-events-none" />
                 <input
+                  ref={contactShareInputRef}
                   type="text"
-                  placeholder="Pesquisar por nome ou telefone..."
+                  placeholder="Pesquise por nome, empresa ou telefone..."
                   value={contactShareSearch}
                   onChange={(e) => setContactShareSearch(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2.5 bg-slate-100 dark:bg-[#202c33] text-sm text-slate-800 dark:text-slate-100 rounded-2xl border-none focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all placeholder:text-slate-400"
+                  className="w-full pl-10 pr-24 py-2.5 bg-slate-100/90 dark:bg-[#202c33] text-sm text-slate-800 dark:text-slate-100 rounded-2xl border border-transparent focus:border-emerald-500/40 focus:ring-4 focus:ring-emerald-500/10 focus:outline-none transition-all placeholder:text-slate-400 font-medium"
                 />
+                <div className="absolute right-3 flex items-center gap-1.5">
+                  {contactShareSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setContactShareSearch('')}
+                      className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-full hover:bg-slate-200 dark:hover:bg-white/10 transition-colors"
+                      title="Limpar busca"
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
+                  <span className="text-[11px] font-semibold text-slate-400 dark:text-slate-500 px-1.5 py-0.5 rounded-md bg-slate-200/60 dark:bg-white/5">
+                    {filteredShareContacts.length}
+                  </span>
+                </div>
               </div>
             </div>
 
             {/* Lista de Contatos Disponíveis */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-2">
-              {(() => {
-                const filtered = contacts.filter((c: any) => {
-                  if (!c.phone) return false;
-                  const search = contactShareSearch.toLowerCase().trim();
-                  if (!search) return true;
-                  const name = (c.custom_name || c.name || c.push_name || '').toLowerCase();
-                  const phone = (c.phone || '').replace(/\D/g, '');
-                  return name.includes(search) || phone.includes(search);
-                });
-
-                if (filtered.length === 0) {
-                  return (
-                    <div className="py-12 text-center text-slate-400 dark:text-slate-500">
-                      <UserCheck size={36} className="mx-auto mb-2 opacity-40" />
-                      <p className="text-sm font-medium">Nenhum contato encontrado na busca.</p>
-                    </div>
-                  );
-                }
-
-                return filtered.slice(0, 50).map((c: any) => {
+            <div className="flex-1 overflow-y-auto p-3 space-y-1.5 custom-scrollbar min-h-[220px]">
+              {filteredShareContacts.length === 0 ? (
+                <div className="py-14 text-center text-slate-400 dark:text-slate-500 flex flex-col items-center justify-center">
+                  <div className="w-14 h-14 rounded-full bg-slate-100 dark:bg-white/5 flex items-center justify-center mb-3 text-slate-400 dark:text-slate-500">
+                    <UserCheck size={28} className="opacity-60" />
+                  </div>
+                  <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">Nenhum contato encontrado</p>
+                  <p className="text-xs text-slate-400 dark:text-slate-500 mt-1 max-w-[260px]">
+                    {contactShareSearch ? `Nenhum resultado para "${contactShareSearch}". Tente outro termo.` : 'Nenhum contato disponível para compartilhamento.'}
+                  </p>
+                  {contactShareSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setContactShareSearch('')}
+                      className="mt-3 text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:underline"
+                    >
+                      Limpar filtro de busca
+                    </button>
+                  )}
+                </div>
+              ) : (
+                filteredShareContacts.slice(0, 60).map((c: any) => {
                   const isSelected = selectedContactToShare?.id === c.id;
                   const displayName = getContactDisplayName(c.custom_name || c.name, c.push_name, c.phone);
+                  const initialLetters = (displayName || 'C').slice(0, 2).toUpperCase();
                   
+                  // Gradiente harmônico para o avatar
+                  const avatarGradients = [
+                    'from-emerald-600 to-teal-500',
+                    'from-blue-600 to-indigo-500',
+                    'from-indigo-600 to-violet-500',
+                    'from-violet-600 to-purple-500',
+                    'from-amber-500 to-orange-500',
+                    'from-rose-500 to-pink-500',
+                    'from-cyan-600 to-blue-500'
+                  ];
+                  let charSum = 0;
+                  for (let i = 0; i < displayName.length; i++) charSum += displayName.charCodeAt(i);
+                  const gradientClass = avatarGradients[charSum % avatarGradients.length];
+
                   return (
                     <div
                       key={c.id}
                       onClick={() => setSelectedContactToShare(c)}
                       className={cn(
-                        "flex items-center justify-between p-3 rounded-2xl cursor-pointer transition-all duration-150 select-none",
+                        "flex items-center justify-between p-3 rounded-2xl cursor-pointer transition-all duration-150 select-none border group active:scale-[0.99]",
                         isSelected
-                          ? "bg-emerald-500/10 border border-emerald-500/30 text-emerald-950 dark:text-emerald-100"
-                          : "hover:bg-slate-50 dark:hover:bg-[#202c33]/50 text-slate-800 dark:text-slate-200"
+                          ? "bg-emerald-500/10 dark:bg-emerald-500/15 border-emerald-500/40 dark:border-emerald-500/50 shadow-sm ring-1 ring-emerald-500/20"
+                          : "bg-transparent hover:bg-slate-100/70 dark:hover:bg-white/[0.04] border-transparent text-slate-800 dark:text-slate-200"
                       )}
                     >
                       <div className="flex items-center gap-3 overflow-hidden">
-                        <div className="w-10 h-10 rounded-full bg-emerald-600 text-white font-bold flex items-center justify-center shrink-0 uppercase text-sm shadow-sm">
-                          {displayName.slice(0, 2)}
+                        <div className={cn(
+                          "w-10 h-10 rounded-2xl font-bold flex items-center justify-center shrink-0 uppercase text-xs text-white shadow-sm transition-transform duration-200 group-hover:scale-105 bg-gradient-to-tr",
+                          gradientClass
+                        )}>
+                          {initialLetters}
                         </div>
-                        <div className="overflow-hidden">
-                          <p className="text-sm font-bold truncate">{displayName}</p>
-                          <p className="text-xs text-slate-500 dark:text-slate-400 font-mono">
-                            {formatPhoneNumber(c.phone)}
-                          </p>
+                        <div className="overflow-hidden flex-1">
+                          <div className="flex items-center gap-2">
+                            <p className={cn(
+                              "text-sm font-bold truncate tracking-tight",
+                              isSelected ? "text-emerald-950 dark:text-emerald-100" : "text-slate-800 dark:text-slate-100"
+                            )}>
+                              {displayName}
+                            </p>
+                            {c.fantasy_name && (
+                              <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded bg-slate-200/70 dark:bg-white/10 text-slate-600 dark:text-slate-300 truncate max-w-[120px]">
+                                {c.fantasy_name}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <p className="text-xs text-slate-500 dark:text-slate-400 font-mono tracking-tight flex items-center gap-1">
+                              <Phone size={11} className="opacity-70" />
+                              {formatPhoneNumber(c.phone)}
+                            </p>
+                            {c.document_number && (
+                              <span className="text-[10px] text-slate-400 dark:text-slate-500 font-mono hidden sm:inline">
+                                • {formatDocumentNumber(c.document_number, c.document_type)}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
 
                       <div className="shrink-0 ml-2">
                         {isSelected ? (
-                          <div className="w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center animate-in zoom-in duration-150">
+                          <div className="w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-md shadow-emerald-500/30 animate-in zoom-in duration-150">
                             <Check size={14} strokeWidth={3} />
                           </div>
                         ) : (
-                          <div className="w-6 h-6 rounded-full border-2 border-slate-300 dark:border-slate-700" />
+                          <div className="w-6 h-6 rounded-full border-2 border-slate-300 dark:border-slate-700 group-hover:border-emerald-500/50 transition-colors" />
                         )}
                       </div>
                     </div>
                   );
-                });
-              })()}
+                })
+              )}
             </div>
 
             {/* Rodapé do Modal */}
-            <div className="p-4 bg-slate-50 dark:bg-[#202c33] border-t border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0">
+            <div className="p-4 bg-slate-50/90 dark:bg-[#182229] border-t border-slate-200/80 dark:border-white/10 flex items-center justify-between shrink-0 gap-3">
               <button
                 type="button"
                 onClick={() => {
                   setIsShareContactModalOpen(false);
                   setSelectedContactToShare(null);
+                  setContactShareSearch('');
                 }}
-                className="px-5 py-2.5 rounded-2xl text-xs font-bold text-slate-600 dark:text-slate-300 bg-slate-200/60 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 transition-colors"
+                className="px-5 py-2.5 rounded-2xl text-xs font-bold text-slate-600 dark:text-slate-300 bg-slate-200/70 dark:bg-white/5 hover:bg-slate-300/80 dark:hover:bg-white/10 transition-all active:scale-95"
               >
                 Cancelar
               </button>
@@ -10702,13 +10846,14 @@ export default function ChatDashboard() {
                     await shareContactMessage(activeChatId, selectedContactToShare, properTargetInstance as string);
                     setIsShareContactModalOpen(false);
                     setSelectedContactToShare(null);
+                    setContactShareSearch('');
                   } catch (err: any) {
                     console.error('Erro ao compartilhar contato:', err);
                   } finally {
                     setIsSendingContact(false);
                   }
                 }}
-                className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs rounded-2xl shadow-lg transition-all flex items-center gap-2"
+                className="px-6 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs rounded-2xl shadow-lg shadow-emerald-600/25 transition-all flex items-center gap-2 active:scale-95"
               >
                 {isSendingContact ? (
                   <>

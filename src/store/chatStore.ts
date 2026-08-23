@@ -760,6 +760,30 @@ function parseAdvancedMsgMetadata(m: any) {
       }
   } catch(e) {}
 
+  // Extração resiliente para mensagens de Contato / vCard
+  if (m.message_type === 'contact' || derivedType === 'contact') {
+    derivedType = 'contact';
+    const vcardCandidate = 
+      m.raw_payload?.message?.contactMessage?.vcard || 
+      m.raw_payload?.contacts?.contacts?.[0]?.vcard ||
+      m.raw_payload?.vcard ||
+      (typeof m.raw_payload === 'string' && m.raw_payload.includes('BEGIN:VCARD') ? m.raw_payload : '');
+
+    if (vcardCandidate) {
+      const waidMatch = vcardCandidate.match(/waid=(\d+)/) || vcardCandidate.match(/TEL.*?[:=]\s*([+\d\s\-()]+)/i);
+      if (waidMatch && !vcardWaid) {
+        vcardWaid = waidMatch[1].replace(/\D/g, '');
+      }
+      const fnMatch = vcardCandidate.match(/FN:(.+)/i);
+      if (fnMatch && (!derivedText || derivedText.startsWith('👤'))) {
+        derivedText = fnMatch[1].trim();
+      }
+    }
+    if (!derivedText && m.raw_payload?.contacts?.displayName) {
+      derivedText = m.raw_payload.contacts.displayName;
+    }
+  }
+
   let buttons: any[] = [];
   
   try {
@@ -1949,11 +1973,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (!contactPhone) {
       throw new Error('Telefone do contato inválido');
     }
-
-    const cardText = `👤 *Contato Compartilhado*\n*Nome:* ${contactName}\n*Telefone:* ${formatPhoneNumber(contactPhone)}`;
+    const cleanPhone = contactPhone.replace(/\D/g, '');
 
     const pseudoId = 'optimistic-' + Math.random().toString();
-    state.addMessageLocally(contactId, { id: pseudoId, text: cardText, sender: 'human', timestamp: new Date() });
+    state.addMessageLocally(contactId, { 
+      id: pseudoId, 
+      text: contactName, 
+      sender: 'human', 
+      mediaType: 'contact',
+      vcardWaid: cleanPhone,
+      status: 'sent',
+      timestamp: new Date() 
+    });
 
     try {
       const compositeInstance = contact.id && typeof contact.id === 'string' && contact.id.includes('_') ? contact.id.split('_')[1] : null;
@@ -1980,7 +2011,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const { sendContactMessage } = await import('../services/whatsappEngine');
       await sendContactMessage(state.tenantInfo?.id || '', resolvedInstanceId, targetJid, contactName, contactPhone, apiKey);
 
-      const cleanPhone = contactPhone.replace(/\D/g, '');
       const vcardStr = `BEGIN:VCARD\nVERSION:3.0\nN:;${contactName};;;\nFN:${contactName}\nTEL;type=CELL;type=VOICE;waid=${cleanPhone}:${cleanPhone}\nEND:VCARD`;
 
       await supabase.from('messages').insert({
@@ -1990,9 +2020,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
         direction: 'outbound',
         message_type: 'contact',
         status: 'sent',
-        text_content: cardText,
+        text_content: contactName,
         sender_type: 'human',
         raw_payload: {
+          message: {
+            contactMessage: {
+              displayName: contactName,
+              vcard: vcardStr
+            }
+          },
           contacts: {
             displayName: contactName,
             contacts: [{ vcard: vcardStr }]
@@ -2014,6 +2050,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (err.message !== 'whatsapp_offline') {
         window.dispatchEvent(new CustomEvent('toast', { detail: { message: `Falha ao compartilhar contato: ${err.message}`, type: 'error' } }));
       }
+      throw err;
     }
   },
 
