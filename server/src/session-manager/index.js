@@ -1,5 +1,5 @@
 import { makeWASocket, DisconnectReason, fetchLatestBaileysVersion, Browsers } from '@whiskeysockets/baileys';
-import { useSupabaseAuthState, flushPendingWrites, sessionCaches, clearInstanceMemoryCache } from './auth.js';
+import { useSupabaseAuthState, flushPendingWrites, sessionCaches, clearInstanceMemoryCache, clearRecipientSession } from './auth.js';
 import eventProcessor from '../event-processor/index.js';
 import { addLog } from '../system-logger.js';
 import pino from 'pino';
@@ -1386,6 +1386,13 @@ class SessionManager {
                                     if (isPermanentlyClosed) {
                                         console.warn(`[SessionManager - Antiban] Abortando retentativas para ${jid} via instância ${instanceId} (motivo definitivo): ${error.message}`);
                                         break;
+                                    }
+
+                                    if (error.message?.includes('No sessions') || error.message?.includes('SessionError')) {
+                                        console.warn(`[SessionManager - Antiban] SessionError (No sessions) detectado para ${jid} via instância ${instanceId}. Limpando chaves em RAM para forçar nova negociação de pre-keys...`);
+                                        try {
+                                            clearRecipientSession(instanceId, jid);
+                                        } catch (e) {}
                                     }
 
                                     console.error(`[SessionManager - Antiban] Erro na tentativa ${attempts}/${maxAttempts} para ${jid} via instância ${instanceId}:`, error.message || error);

@@ -51,6 +51,23 @@ export function clearInstanceMemoryCache(instanceId) {
     }
 }
 
+export function clearRecipientSession(instanceId, jid) {
+    if (sessionCaches.has(instanceId) && jid) {
+        const memCache = sessionCaches.get(instanceId);
+        const cleanJid = String(jid).replace('@s.whatsapp.net', '').replace('@lid', '').replace('@g.us', '');
+        let count = 0;
+        for (const key of Array.from(memCache.keys())) {
+            if (key.includes(cleanJid)) {
+                memCache.delete(key);
+                count++;
+            }
+        }
+        if (count > 0) {
+            console.log(`[SessionManager/Auth] Limpas ${count} chaves de sessão em RAM para o destinatário ${cleanJid} (instância ${instanceId}).`);
+        }
+    }
+}
+
 export async function useSupabaseAuthState(tenantId, instanceId, forceCleanState = false) {
     if (forceCleanState && sessionCaches.has(instanceId)) {
         sessionCaches.get(instanceId).clear();

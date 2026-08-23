@@ -2922,6 +2922,15 @@ export default function DevLogger() {
                 </p>
               </div>
 
+              {/* Dica de Governança da Esteira Fila Dev */}
+              <div className="bg-blue-950/30 border border-blue-500/30 rounded-2xl p-3.5 flex items-start gap-2.5">
+                <span className="text-base leading-none">💡</span>
+                <div className="text-xs text-blue-200/90 leading-relaxed">
+                  <strong className="text-blue-300 block mb-0.5">Fluxo da Esteira Fila Dev:</strong>
+                  O comando <code className="bg-blue-900/60 px-1.5 py-0.5 rounded text-blue-200 font-mono font-bold">Fila dev</code> executa autonomamente os cards que estiverem na coluna <span className="text-emerald-400 font-bold">"Em Desenvolvimento"</span>. Você pode mover este card agora mesmo pelo botão abaixo para iniciar a execução imediata.
+                </div>
+              </div>
+
               {/* Plano Técnico Estruturado em Markdown */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-[#8696a0] text-[10px] uppercase font-bold">
@@ -2936,17 +2945,31 @@ export default function DevLogger() {
 
             {/* Footer com Ações */}
             <div className="p-4 sm:p-5 border-t border-white/10 bg-[#070c10] flex items-center justify-between gap-3 relative z-10 flex-wrap">
-              <button
-                onClick={() => {
-                  const fullText = `# ${generatedAiCard.title}\n\n**Resumo:**\n${generatedAiCard.summary}\n\n${generatedAiCard.technical_plan}`;
-                  navigator.clipboard.writeText(fullText);
-                  setCopyFeedback('Plano técnico copiado!');
-                  setTimeout(() => setCopyFeedback(null), 3000);
-                }}
-                className="bg-white/5 hover:bg-white/10 border border-white/15 text-[#d1d7db] hover:text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 active:scale-95 cursor-pointer"
-              >
-                <Copy size={14} /> Copiar Plano Técnico
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    const fullText = `# ${generatedAiCard.title}\n\n**Resumo:**\n${generatedAiCard.summary}\n\n${generatedAiCard.technical_plan}`;
+                    navigator.clipboard.writeText(fullText);
+                    setCopyFeedback('Plano técnico copiado!');
+                    setTimeout(() => setCopyFeedback(null), 3000);
+                  }}
+                  className="bg-white/5 hover:bg-white/10 border border-white/15 text-[#d1d7db] hover:text-white px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 active:scale-95 cursor-pointer"
+                >
+                  <Copy size={14} /> Copiar Plano
+                </button>
+
+                <button
+                  onClick={() => {
+                    clearLogs();
+                    setCopyFeedback('🧹 Logs do DevLogger limpos!');
+                    setTimeout(() => setCopyFeedback(null), 3000);
+                  }}
+                  className="bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 text-amber-300 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 active:scale-95 cursor-pointer"
+                  title="Limpa a lista de logs do DevLogger"
+                >
+                  <Trash2 size={13} /> Limpar Logs
+                </button>
+              </div>
 
               <div className="flex items-center gap-2">
                 <button
@@ -2957,12 +2980,32 @@ export default function DevLogger() {
                 </button>
 
                 <button
+                  onClick={async () => {
+                    try {
+                      if (createdCardLead?.id) {
+                        await supabase
+                          .from('crm_leads')
+                          .update({ status: 'development', updated_at: new Date().toISOString() })
+                          .eq('id', createdCardLead.id);
+                      }
+                    } catch (e) {}
+                    setShowAiCardModal(false);
+                    useDevStore.setState({ isVisible: false });
+                    navigate(`/crm/kanban/${createdCardBoardId}`);
+                  }}
+                  className="bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 font-bold px-4 py-2.5 rounded-xl text-xs transition-all flex items-center gap-2 active:scale-95 cursor-pointer"
+                  title="Move o card diretamente para a coluna 'Em Desenvolvimento' e abre o Kanban"
+                >
+                  <Zap size={14} className="text-emerald-400" /> Mover p/ "Em Dev" & Abrir
+                </button>
+
+                <button
                   onClick={() => {
                     setShowAiCardModal(false);
                     useDevStore.setState({ isVisible: false });
                     navigate(`/crm/kanban/${createdCardBoardId}`);
                   }}
-                  className="bg-gradient-to-r from-purple-600 via-indigo-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-black px-5 py-2.5 rounded-xl text-xs transition-all flex items-center gap-2 shadow-lg shadow-purple-600/30 active:scale-95 cursor-pointer"
+                  className="bg-gradient-to-r from-purple-600 via-indigo-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-black px-4 py-2.5 rounded-xl text-xs transition-all flex items-center gap-2 shadow-lg shadow-purple-600/30 active:scale-95 cursor-pointer"
                 >
                   <ArrowUpRight size={15} /> Abrir no Kanban
                 </button>
