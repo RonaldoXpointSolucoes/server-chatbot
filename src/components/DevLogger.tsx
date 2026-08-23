@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDevStore } from '../store/devStore';
-import { Terminal, AlertTriangle, Bug, Info, CheckCircle2, ChevronDown, ChevronUp, Trash2, Copy, Activity, Layers, Calendar, Rocket, Database, Smartphone, AppWindow, ExternalLink, Network, Cpu, Play, Pause, RefreshCw, UserCheck, ShieldAlert, Sparkles, Wand2, BrainCircuit, Check, Loader2, Send, ArrowUpRight, FileCode, CheckCircle, X } from 'lucide-react';
+import { Terminal, AlertTriangle, Bug, Info, CheckCircle2, ChevronDown, ChevronUp, Trash2, Copy, Activity, Layers, Calendar, Rocket, Database, Smartphone, AppWindow, ExternalLink, Network, Cpu, Play, Pause, RefreshCw, UserCheck, ShieldAlert, Sparkles, Wand2, BrainCircuit, Check, Loader2, Send, ArrowUpRight, FileCode, CheckCircle, X, Zap } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { ServerLogsTerminal } from './ServerLogsTerminal';
 import { useChatStore } from '../store/chatStore';
