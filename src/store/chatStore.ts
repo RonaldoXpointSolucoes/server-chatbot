@@ -206,6 +206,69 @@ export const getUniquePersonKey = (c: any): string => {
   return String(c.id || '');
 };
 
+/**
+ * Determina a data precisa de resolução do ticket (closed_at):
+ * - Se houver interações (mensagens) no dia de hoje: retorna new Date().toISOString() (timestamp exato)
+ * - Se NÃO houver interações no dia de hoje: retorna a data da última mensagem trocada com hora zerada em UTC (00:00:00.000Z)
+ */
+export const getTicketResolutionDate = async (
+  supabaseClient: any,
+  conversationId: string | null | undefined,
+  fallbackLastMessageAt?: string | null
+): Promise<string> => {
+  try {
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+
+    if (conversationId) {
+      // 1. Verifica se houve alguma mensagem de interação (não-system) enviada ou recebida hoje
+      const { count: todayCount } = await supabaseClient
+        .from('messages')
+        .select('id', { count: 'exact', head: true })
+        .eq('conversation_id', conversationId)
+        .neq('sender_type', 'system')
+        .gte('timestamp', startOfDay.toISOString());
+
+      if (todayCount && todayCount > 0) {
+        return new Date().toISOString();
+      }
+
+      // 2. Se não houve mensagens hoje, busca o timestamp da última mensagem de interação (não-system)
+      const { data: lastMsgs } = await supabaseClient
+        .from('messages')
+        .select('timestamp')
+        .eq('conversation_id', conversationId)
+        .neq('sender_type', 'system')
+        .order('timestamp', { ascending: false })
+        .limit(1);
+
+      const lastMsgTs = lastMsgs?.[0]?.timestamp || fallbackLastMessageAt;
+      if (lastMsgTs) {
+        const lastMsgDate = new Date(lastMsgTs);
+        if (!isNaN(lastMsgDate.getTime())) {
+          lastMsgDate.setUTCHours(0, 0, 0, 0);
+          return lastMsgDate.toISOString();
+        }
+      }
+    } else if (fallbackLastMessageAt) {
+      const lastMsgDate = new Date(fallbackLastMessageAt);
+      if (!isNaN(lastMsgDate.getTime())) {
+        const startOfToday = new Date();
+        startOfToday.setHours(0, 0, 0, 0);
+        if (lastMsgDate.getTime() >= startOfToday.getTime()) {
+          return new Date().toISOString();
+        }
+        lastMsgDate.setUTCHours(0, 0, 0, 0);
+        return lastMsgDate.toISOString();
+      }
+    }
+  } catch (err) {
+    console.error('[getTicketResolutionDate] Erro ao calcular data de resolução:', err);
+  }
+
+  return new Date().toISOString();
+};
+
 // Cache em memória para evitar requisições redundantes de rede ao Supabase para instâncias
 export const instanceCache = {
   byName: {} as Record<string, string>,   // display_name.toLowerCase() -> id
@@ -1112,16 +1175,34 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (contactIdsForTickets.length > 0) {
         for (let i = 0; i < contactIdsForTickets.length; i += chunkSize) {
           const chunk = contactIdsForTickets.slice(i, i + chunkSize);
-          await supabase.from('chat_tickets')
-            .update({ 
-              status: 'resolved', 
-              closed_at: new Date().toISOString(),
-              resolution_summary: 'Encerrado em lote (análise I.A ignorada)',
-              metadata: { skip_ai_analysis: true, closed_in_batch: true }
-            })
+          
+          const { data: openChunkTickets } = await supabase
+            .from('chat_tickets')
+            .select('id, contact_id, opened_at')
             .eq('tenant_id', tenantInfo.id)
             .eq('status', 'open')
             .in('contact_id', chunk);
+
+          if (openChunkTickets && openChunkTickets.length > 0) {
+            for (const t of openChunkTickets) {
+              const matchedConv = convsToResolve.find(c => c.contact_id === t.contact_id);
+              const closedAt = await getTicketResolutionDate(supabase, matchedConv?.id, matchedConv?.last_message_at);
+              let effOpenedAt = t.opened_at;
+              if (effOpenedAt && new Date(effOpenedAt).getTime() > new Date(closedAt).getTime()) {
+                effOpenedAt = closedAt;
+              }
+
+              await supabase.from('chat_tickets')
+                .update({ 
+                  status: 'resolved', 
+                  opened_at: effOpenedAt,
+                  closed_at: closedAt,
+                  resolution_summary: 'Encerrado em lote (análise I.A ignorada)',
+                  metadata: { skip_ai_analysis: true, closed_in_batch: true }
+                })
+                .eq('id', t.id);
+            }
+          }
         }
       }
 
@@ -2965,27 +3046,35 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // Encerra ou registra ticket em chat_tickets
         try {
           const { data: openTickets } = await supabase.from('chat_tickets')
-            .select('id')
+            .select('id, opened_at')
             .eq('tenant_id', tenantInfo.id)
             .eq('status', 'open')
             .eq('contact_id', realContactId);
 
+          const closedAt = await getTicketResolutionDate(supabase, conv?.id, conv?.last_message_at);
+
           if (openTickets && openTickets.length > 0) {
-            const openIds = openTickets.map((t: any) => t.id);
-            await supabase.from('chat_tickets')
-              .update({ 
-                status: 'resolved', 
-                closed_at: new Date().toISOString(),
-                resolution_summary: `Resolvido por ${agentName}`
-              })
-              .in('id', openIds);
+            for (const t of openTickets) {
+              let effOpenedAt = t.opened_at;
+              if (effOpenedAt && new Date(effOpenedAt).getTime() > new Date(closedAt).getTime()) {
+                effOpenedAt = closedAt;
+              }
+              await supabase.from('chat_tickets')
+                .update({ 
+                  status: 'resolved', 
+                  opened_at: effOpenedAt,
+                  closed_at: closedAt,
+                  resolution_summary: `Resolvido por ${agentName}`
+                })
+                .eq('id', t.id);
+            }
           } else {
             await supabase.from('chat_tickets').insert({
               tenant_id: tenantInfo.id,
               contact_id: realContactId,
               status: 'resolved',
-              opened_at: conv?.last_message_at || new Date().toISOString(),
-              closed_at: new Date().toISOString(),
+              opened_at: conv?.last_message_at || closedAt,
+              closed_at: closedAt,
               problem_description: 'Atendimento finalizado pelo atendente',
               resolution_summary: `Resolvido por ${agentName}`,
               metadata: { closed_by: agentName, instance_id: conv?.instance_id || resolvedInstId }
@@ -5111,11 +5200,38 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       if (fetchErr) throw fetchErr;
 
+      // Buscar conversa associada ao contato para verificar mensagens
+      let convId = '';
+      let convLastMsgAt: string | null = null;
+      if (ticket.contact_id) {
+        const { data: convData } = await supabase
+          .from('conversations')
+          .select('id, last_message_at')
+          .eq('contact_id', ticket.contact_id)
+          .order('last_message_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (convData) {
+          convId = convData.id;
+          convLastMsgAt = convData.last_message_at;
+        }
+      }
+
+      // Calcula a data de resolução precisa (hoje ou data da última mensagem com hora zerada)
+      const closedAt = await getTicketResolutionDate(supabase, convId, convLastMsgAt);
+
+      // Ajusta opened_at se for posterior ao closed_at (ex: ticket aberto hoje para conversa antiga)
+      let effectiveOpenedAt = ticket.opened_at;
+      if (effectiveOpenedAt && new Date(effectiveOpenedAt).getTime() > new Date(closedAt).getTime()) {
+        effectiveOpenedAt = closedAt;
+      }
+
       // Sincronizar problemas resolvidos do checklist com a base unificada ticket_problems_master
       const checklist = metadata?.checklist || [];
       if (checklist.length > 0 && ticket) {
-        const openedAt = new Date(ticket.opened_at);
-        const ticketDurationMs = new Date().getTime() - openedAt.getTime();
+        const openedAt = new Date(effectiveOpenedAt);
+        const closedAtDate = new Date(closedAt);
+        const ticketDurationMs = Math.max(0, closedAtDate.getTime() - openedAt.getTime());
         const tenantId = ticket.tenant_id;
 
         // Buscar todos os problemas mestre existentes desse tenant
@@ -5217,7 +5333,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         .from('chat_tickets')
         .update({ 
           status: 'resolved',
-          closed_at: new Date().toISOString(),
+          opened_at: effectiveOpenedAt,
+          closed_at: closedAt,
           problem_description: problemDescription,
           resolution_summary: resolutionSummary,
           metadata: metadata
@@ -5231,7 +5348,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           t.id === ticketId ? { 
             ...t, 
             status: 'resolved' as const, 
-            closed_at: new Date().toISOString(),
+            opened_at: effectiveOpenedAt,
+            closed_at: closedAt,
             problem_description: problemDescription,
             resolution_summary: resolutionSummary,
             metadata: metadata
