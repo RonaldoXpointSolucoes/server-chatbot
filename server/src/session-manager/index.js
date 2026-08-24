@@ -8,8 +8,15 @@ import { supabase, NODE_ID, retryWithBackoff, resolveTargetJid } from '../supaba
 export const isSocketOpen = (sock) => {
     if (!sock || !sock.ws) return false;
     const ws = sock.ws;
-    if (ws.readyState === 1 || ws.isOpen === true) {
-        return !ws.isClosed && !ws.isClosing;
+    if (ws.isOpen === true) return true;
+    if (ws.socket && ws.socket.readyState === 1) return true; // WebSocket.OPEN
+    if (ws.isClosed === true || ws.isClosing === true) return false;
+    if (ws.socket && (ws.socket.readyState === 2 || ws.socket.readyState === 3)) return false;
+    
+    // Se possui credenciais de usuário autenticadas e ws não está fechado
+    const meId = sock.user?.id || sock.authState?.creds?.me?.id;
+    if (meId && !ws.isClosed && !ws.isClosing) {
+        return true;
     }
     return false;
 };
@@ -19,7 +26,9 @@ const waitForSocketOpen = (sock, timeoutMs = 20000) => {
         if (isSocketOpen(sock)) {
             return resolve(true);
         }
-        if (sock.ws && (sock.ws.isClosing || sock.ws.isClosed || sock.ws.readyState === 2 || sock.ws.readyState === 3)) {
+        const ws = sock?.ws;
+        const rawState = ws?.socket?.readyState;
+        if (ws && (ws.isClosing || ws.isClosed || rawState === 2 || rawState === 3)) {
             return reject(new Error('WebSocket is closed or closing'));
         }
 
@@ -186,7 +195,9 @@ class SessionManager {
 
                     for (const [id, sessionData] of activeEntries) {
                         const sock = sessionData?.sock;
-                        const isConnecting = this.connectingState.has(id) || (sock?.ws && (sock.ws.readyState === 0 || sock.ws.isConnecting));
+                        const ws = sock?.ws;
+                        const rawState = ws?.socket?.readyState;
+                        const isConnecting = this.connectingState.has(id) || (ws && (ws.isConnecting || rawState === 0));
                         if (sock && isSocketOpen(sock)) {
                             healthyIds.push(id);
                         } else if (!isConnecting) {
@@ -1644,19 +1655,25 @@ class SessionManager {
             }
             
             if (sock && sock.ws) {
-                const wsState = sock.ws.readyState;
-                // readyState: 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED, undefined
-                const isConnecting = wsState === 0 || sock.ws.isConnecting || this.connectingState.has(instanceId);
+                const ws = sock.ws;
+                const rawSocket = ws.socket;
+                const rawState = rawSocket ? rawSocket.readyState : undefined;
+                
+                // Se está conectando ou em handshake, não interrompe prematuramente
+                const isConnecting = ws.isConnecting || (rawState === 0) || this.connectingState.has(instanceId);
                 if (isConnecting) {
-                    // Está em processo de conexão/handshake, não interrompe prematuramente
                     return;
                 }
 
-                const isOpen = isSocketOpen(sock);
-                const isClosedOrClosing = wsState === 2 || wsState === 3 || wsState === undefined || sock.ws.isClosing || sock.ws.isClosed || !isOpen;
-                
+                // Se o WebSocket estiver aberto ou a sessão estiver autenticada e operacional, está saudável
+                if (ws.isOpen || isSocketOpen(sock)) {
+                    return;
+                }
+
+                // Só considera encerrado se o WebSocket estiver explicitamente fechado (isClosed: true ou rawState 2/3)
+                const isClosedOrClosing = ws.isClosed === true || ws.isClosing === true || rawState === 2 || rawState === 3;
                 if (isClosedOrClosing) {
-                    console.warn(`[SessionManager/Watchdog] Instância ${instanceId} com WebSocket encerrado (readyState: ${wsState !== undefined ? wsState : 'undefined'}). Reciclando socket e reconectando...`);
+                    console.warn(`[SessionManager/Watchdog] Instância ${instanceId} com WebSocket encerrado (isOpen: ${ws.isOpen}, isClosed: ${ws.isClosed}, rawState: ${rawState}). Reciclando socket e reconectando...`);
                     this.clearWatchdog(instanceId);
                     this.destroyExistingSession(instanceId, 'watchdog_ws_closed').catch(() => {});
                     setTimeout(() => {
