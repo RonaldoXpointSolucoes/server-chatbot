@@ -3770,6 +3770,9 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
   useEffect(() => {
     if (!isOpen) return;
 
+    const isDefinitivelyPaused = contact?.bot_status === 'paused' || (contact?.ai_paused_manually && !contact?.bot_paused_until);
+    setReactivateAi(!isDefinitivelyPaused);
+
     if (activeTicket) {
       setProblemDesc(activeTicket.problem_description || '');
       setSummary(activeTicket.metadata?.summary || '');
@@ -4161,8 +4164,10 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
                 <span className="text-[11px] font-bold text-gray-800 dark:text-white leading-none">
                   Reativar Inteligência Luna
                 </span>
-                <span className="text-[9px] text-gray-400 mt-1 leading-normal">
-                  Permite que a IA volte a responder o cliente automaticamente.
+                <span className={cn("text-[9px] mt-1 leading-normal", (contact?.bot_status === 'paused' || (contact?.ai_paused_manually && !contact?.bot_paused_until)) ? "text-amber-500 font-medium" : "text-gray-400")}>
+                  {(contact?.bot_status === 'paused' || (contact?.ai_paused_manually && !contact?.bot_paused_until))
+                    ? "Contato pausado definitivamente. Ative apenas se desejar reabilitar a IA."
+                    : "Permite que a IA volte a responder o cliente automaticamente."}
                 </span>
               </div>
             </div>

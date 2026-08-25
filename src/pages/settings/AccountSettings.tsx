@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useChatStore } from '../../store/chatStore';
-import { Settings2, Save, Link as LinkIcon, Briefcase, Store, MapPin, Clock, Plus, Trash2, Camera, Video, Utensils, Smartphone, Wifi, Battery, Signal, Home, Search, ClipboardList, User, ChevronLeft, ArrowLeft, Minus, ChevronDown, ChevronUp, Sparkles, QrCode, UserPlus, Truck, BookOpen, GripVertical, ArrowUpDown, RotateCcw, FileText, Copy, Check } from 'lucide-react';
+import { Settings2, Save, Link as LinkIcon, Briefcase, Store, MapPin, Clock, Plus, Trash2, Camera, Video, Utensils, Smartphone, Wifi, Battery, Signal, Home, Search, ClipboardList, User, ChevronLeft, ArrowLeft, Minus, ChevronDown, ChevronUp, Sparkles, QrCode, UserPlus, Truck, BookOpen, GripVertical, ArrowUpDown, RotateCcw, FileText, Copy, Check, Loader2, AlertCircle, X, ExternalLink } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { supabase } from '../../services/supabase';
 import { GastrofoodAPIDocumentationModal } from '../../components/GastrofoodAPIDocumentationModal';
@@ -156,7 +156,7 @@ const DEFAULT_CLIENTE_PAYLOAD = `{
 
 const DEFAULT_PAGAMENTO_PIX_PAYLOAD = `{
   "APaymentData": {},
-  "AIdEstab": "6D0187D9-E905-4479-AB15-B908F0222607",
+  "AIdEstab": "",
   "AIdPedido": "B7D7ADDD-AC17-4F63-994B-072BE6CE48D4"
 }`;
 
@@ -251,9 +251,15 @@ const DEFAULT_PEDIDO_PAYLOAD = `{
 }`;
 
 const extractUUID = (val: string): string => {
-  const cleanVal = val.replace(/["']/g, ''); // Remove aspas
+  if (!val) return '';
+  const cleanVal = val.replace(/["']/g, '').trim(); // Remove aspas
   const match = cleanVal.match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/);
-  return match ? match[0].toUpperCase() : val.trim();
+  return match ? match[0].toUpperCase() : cleanVal.toUpperCase();
+};
+
+const isValidUUID = (val: string): boolean => {
+  if (!val) return false;
+  return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(val.trim());
 };
 
 const injectStoreId = (payloadObj: any, storeId: string): any => {
@@ -424,7 +430,14 @@ export default function AccountSettings() {
   const [endereco, setEndereco] = useState('');
   const [diasHorarios, setDiasHorarios] = useState<DiaTrabalho[]>(DIAS_PADRAO);
   const [linkCardapio, setLinkCardapio] = useState('');
-  const [gfoodStoreId, setGfoodStoreId] = useState('6D0187D9-E905-4479-AB15-B908F0222607');
+  const [gfoodStoreId, setGfoodStoreId] = useState('');
+  const [isScanningStoreId, setIsScanningStoreId] = useState(false);
+  const [copiedStoreId, setCopiedStoreId] = useState(false);
+  const [scanStoreIdFeedback, setScanStoreIdFeedback] = useState<{
+    type: 'success' | 'error' | 'info' | null;
+    message: string;
+    candidates?: string[];
+  } | null>(null);
   const [instagram, setInstagram] = useState('');
   const [googleMaps, setGoogleMaps] = useState('');
   const [youtube, setYoutube] = useState('');
@@ -462,6 +475,7 @@ export default function AccountSettings() {
   const [isDocModalOpen, setIsDocModalOpen] = useState(false);
   const [isCepExpanded, setIsCepExpanded] = useState(false);
   const [isClienteExpanded, setIsClienteExpanded] = useState(false);
+
   // Estados para Submenus internos de Consulta/Gestão de Cliente
   const [isConsultaClienteSubExpanded, setIsConsultaClienteSubExpanded] = useState(true);
   const [isCepSubExpanded, setIsCepSubExpanded] = useState(false);
@@ -532,6 +546,7 @@ export default function AccountSettings() {
 
   const [draggedSection, setDraggedSection] = useState<SectionId | null>(null);
   const [dragOverSection, setDragOverSection] = useState<SectionId | null>(null);
+  const [dragAllowedId, setDragAllowedId] = useState<SectionId | null>(null);
 
   const saveSectionsOrder = (newOrder: SectionId[]) => {
     setSectionsOrder(newOrder);
@@ -546,14 +561,19 @@ export default function AccountSettings() {
   };
 
   const handleDragStart = (e: React.DragEvent, sectionId: SectionId) => {
+    if (dragAllowedId !== sectionId) {
+      e.preventDefault();
+      return;
+    }
     setDraggedSection(sectionId);
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', sectionId);
   };
 
   const handleDragOver = (e: React.DragEvent, sectionId: SectionId) => {
+    if (!draggedSection) return;
     e.preventDefault();
-    if (draggedSection && draggedSection !== sectionId) {
+    if (draggedSection !== sectionId) {
       setDragOverSection(sectionId);
     }
   };
@@ -565,6 +585,7 @@ export default function AccountSettings() {
   const handleDrop = (e: React.DragEvent, targetSectionId: SectionId) => {
     e.preventDefault();
     setDragOverSection(null);
+    setDragAllowedId(null);
     if (!draggedSection || draggedSection === targetSectionId) {
       setDraggedSection(null);
       return;
@@ -738,6 +759,111 @@ export default function AccountSettings() {
     } else {
       setError(`Erro na validação do JSON: ${result.error}`);
     }
+  };
+
+  const handleScanStoreIdFromLink = async (customUrl?: string) => {
+    const targetUrl = (customUrl !== undefined ? customUrl : linkCardapio).trim();
+    setScanStoreIdFeedback(null);
+
+    if (!targetUrl) {
+      setScanStoreIdFeedback({
+        type: 'error',
+        message: 'Por favor, informe primeiro o link do cardápio digital para buscar o ID da loja.'
+      });
+      return;
+    }
+
+    // 1. Verificação direta por regex no próprio link informado
+    const uuidRegex = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/g;
+    const directMatches = targetUrl.match(uuidRegex);
+    if (directMatches && directMatches.length > 0) {
+      const foundId = directMatches[0].toUpperCase();
+      setGfoodStoreId(foundId);
+      setScanStoreIdFeedback({
+        type: 'success',
+        message: `ID do estabelecimento identificado diretamente no link!`
+      });
+      return;
+    }
+
+    // 2. Varredura remota via proxy backend
+    setIsScanningStoreId(true);
+    try {
+      const apiBase = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || window.location.origin;
+      const res = await fetch(`${apiBase}/api/v1/utils/test-cardapio`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          url: targetUrl,
+          method: 'GET'
+        })
+      });
+
+      if (!res.ok) {
+        throw new Error(`Não foi possível acessar a página do cardápio (Status: ${res.status}).`);
+      }
+
+      const resData = await res.json();
+      const rawContent = typeof resData.data === 'string' 
+        ? resData.data 
+        : JSON.stringify(resData.data || resData);
+
+      // Varredura por regex de UUIDs
+      const matches = Array.from(new Set(rawContent.match(uuidRegex) || [])).map(id => (id as string).toUpperCase());
+
+      // Busca por campos conhecidos no objeto retornado
+      let bestMatch: string | null = null;
+      if (typeof resData.data === 'object' && resData.data !== null) {
+        const obj = resData.data;
+        bestMatch = obj.AGuidEstab || obj.AIdEstab || obj.guidEstab || obj.idEstab || obj.storeId || obj.fkStore || null;
+      }
+
+      if (bestMatch && uuidRegex.test(bestMatch)) {
+        const cleaned = bestMatch.toUpperCase();
+        setGfoodStoreId(cleaned);
+        setScanStoreIdFeedback({
+          type: 'success',
+          message: `ID do estabelecimento extraído com sucesso do cardápio!`
+        });
+        return;
+      }
+
+      if (matches.length === 1) {
+        setGfoodStoreId(matches[0]);
+        setScanStoreIdFeedback({
+          type: 'success',
+          message: `ID do estabelecimento capturado com sucesso!`
+        });
+      } else if (matches.length > 1) {
+        setGfoodStoreId(matches[0]);
+        setScanStoreIdFeedback({
+          type: 'info',
+          message: `Identificamos ${matches.length} IDs no link. Selecionamos o primeiro como principal:`,
+          candidates: matches
+        });
+      } else {
+        setScanStoreIdFeedback({
+          type: 'info',
+          message: 'Nenhum ID (UUID) foi localizado no conteúdo da página. Você pode preenchê-lo manualmente.'
+        });
+      }
+    } catch (err: any) {
+      setScanStoreIdFeedback({
+        type: 'error',
+        message: err.message || 'Falha ao buscar ID da loja no link do cardápio.'
+      });
+    } finally {
+      setIsScanningStoreId(false);
+    }
+  };
+
+  const handleCopyStoreId = () => {
+    if (!gfoodStoreId) return;
+    navigator.clipboard.writeText(gfoodStoreId);
+    setCopiedStoreId(true);
+    setTimeout(() => setCopiedStoreId(false), 2000);
   };
   
   const cancelMappingRef = useRef(false);
@@ -1047,10 +1173,10 @@ export default function AccountSettings() {
                   addLog(`  -> ${opcoesToUpsert.length} opções salvas no Supabase.`);
                 }
               } else {
-                addLog(`  -> Nenhum opcional cadastrado para este produto.`);
+                addLog('  -> Nenhum opcional cadastrado para este produto.');
               }
             } else {
-              addLog(`  -> Aviso: Resposta de passos inválida ou vazia.`);
+              addLog('  -> Aviso: Resposta de passos vazia.');
             }
           } else {
             addLog(`  -> Falha na API para buscar passos de "${product.name}" (Status ${resSteps.status}).`);
@@ -1086,7 +1212,7 @@ export default function AccountSettings() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ tenantId: currentTenantId })
-        }).catch(err => console.error('Erro ao invalidar cache do cardápio pós-mapeamento:', err));
+        }).catch(err => console.error('Erro ao invalidar cache do cardápio:', err));
 
         await loadCardapioFromSupabase(currentTenantId);
         setLoadSource('supabase');
@@ -1109,7 +1235,7 @@ export default function AccountSettings() {
       setNomeIa(settings.nome_ia || '');
       setEndereco(settings.endereco || '');
       setLinkCardapio(settings.link_cardapio || '');
-      setGfoodStoreId(settings.gfood_store_id || '6D0187D9-E905-4479-AB15-B908F0222607');
+      setGfoodStoreId(settings.gfood_store_id || '');
       setInstagram(settings.instagram || '');
       setGoogleMaps(settings.google_maps || '');
       setYoutube(settings.youtube || '');
@@ -1550,12 +1676,16 @@ export default function AccountSettings() {
     return (
       <div
         key={id}
-        draggable
+        draggable={dragAllowedId === id}
         onDragStart={(e) => handleDragStart(e, id)}
         onDragOver={(e) => handleDragOver(e, id)}
         onDragLeave={handleDragLeave}
         onDrop={(e) => handleDrop(e, id)}
-        onDragEnd={() => { setDraggedSection(null); setDragOverSection(null); }}
+        onDragEnd={() => { 
+          setDraggedSection(null); 
+          setDragOverSection(null); 
+          setDragAllowedId(null);
+        }}
         className={cn(
           "bg-white dark:bg-[#202c33] rounded-[24px] shadow-sm border transition-all duration-200 overflow-hidden",
           isDragging 
@@ -1570,10 +1700,16 @@ export default function AccountSettings() {
             onClick={onToggle}
             className="flex items-center gap-3 sm:gap-4 flex-1 cursor-pointer select-none"
           >
-            {/* Grip Handle para Drag and Drop */}
+            {/* Grip Handle exclusivo para Drag and Drop */}
             <div 
-              className="p-1.5 -ml-2 text-gray-400 hover:text-indigo-600 dark:text-gray-500 dark:hover:text-indigo-400 cursor-grab active:cursor-grabbing rounded-lg hover:bg-indigo-50 dark:hover:bg-white/5 transition-all"
-              title="Clique e arraste para reordenar"
+              data-drag-handle="true"
+              onMouseDown={() => setDragAllowedId(id)}
+              onMouseUp={() => setDragAllowedId(null)}
+              onMouseLeave={() => {
+                if (!draggedSection) setDragAllowedId(null);
+              }}
+              className="p-1.5 -ml-2 text-gray-400 hover:text-indigo-600 dark:text-gray-500 dark:hover:text-indigo-400 cursor-grab active:cursor-grabbing rounded-lg hover:bg-indigo-50 dark:hover:bg-white/5 transition-all select-none"
+              title="Clique e arraste para reordenar esta seção"
               onClick={(e) => e.stopPropagation()}
             >
               <GripVertical size={20} />
@@ -1762,41 +1898,191 @@ export default function AccountSettings() {
                   </p>
                 </div>
 
-                <div>
-                  <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
-                    <LinkIcon size={16} className="text-gray-400" />
-                    Link do Cardápio Digital
-                  </label>
-                  <input 
-                    type="url"
-                    value={linkCardapio}
-                    onChange={(e) => setLinkCardapio(e.target.value)}
-                    placeholder="https://seu-cardapio.com.br"
-                    className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400"
-                  />
-                  <p className="text-xs text-gray-500 dark:text-[#8696a0] mt-2">
-                    Será substituído no token <code className="bg-gray-200 dark:bg-black/30 px-1 py-0.5 rounded font-mono text-[10px] text-indigo-500 dark:text-indigo-300">[LINK_CARDAPIO]</code>.
-                  </p>
-
-                  <div className="mt-2 pl-3 border-l-2 border-indigo-500/30 dark:border-indigo-500/20">
-                    <label className="text-[10px] uppercase tracking-wider font-extrabold text-indigo-500 dark:text-indigo-400 flex items-center gap-1.5 mb-1 select-none">
-                      <Store size={12} />
-                      ID Loja gFood (UUID Estabelecimento)
+                <div className="space-y-3">
+                  {/* Link do Cardápio Digital */}
+                  <div>
+                    <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <LinkIcon size={16} className="text-gray-400" />
+                        <span>Link do Cardápio Digital</span>
+                      </div>
+                      {linkCardapio && (
+                        <a 
+                          href={linkCardapio.startsWith('http') ? linkCardapio : `https://${linkCardapio}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[11px] font-medium text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1"
+                        >
+                          <ExternalLink size={12} />
+                          Abrir cardápio
+                        </a>
+                      )}
                     </label>
-                    <input 
-                      type="text"
-                      value={gfoodStoreId}
-                      onChange={(e) => {
-                        const cleaned = extractUUID(e.target.value);
-                        setGfoodStoreId(cleaned);
-                      }}
-                      onBlur={(e) => {
-                        const cleaned = extractUUID(e.target.value);
-                        setGfoodStoreId(cleaned);
-                      }}
-                      placeholder="Ex: 6D0187D9-E905-4479-AB15-B908F0222607"
-                      className="w-full max-w-xs bg-white dark:bg-[#111b21] border border-gray-200 dark:border-[#304046] rounded-lg px-2.5 py-1 text-[11px] text-gray-700 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400/70 font-mono shadow-sm"
-                    />
+                    <div className="relative">
+                      <input 
+                        type="url"
+                        value={linkCardapio}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setLinkCardapio(val);
+                          // Se o usuário colou um link com UUID, tenta extrair opcionalmente
+                          if (val && !gfoodStoreId) {
+                            const uuidMatch = val.match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/);
+                            if (uuidMatch) {
+                              setGfoodStoreId(uuidMatch[0].toUpperCase());
+                            }
+                          }
+                        }}
+                        placeholder="https://gastrofood.com.br/cardapio/loja..."
+                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 pr-24 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400"
+                      />
+                      {linkCardapio && (
+                        <button
+                          type="button"
+                          onClick={() => handleScanStoreIdFromLink()}
+                          disabled={isScanningStoreId}
+                          title="Escanear e capturar o ID da loja automaticamente no link"
+                          className="absolute right-2 top-1/2 -translate-y-1/2 px-2.5 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/50 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 border border-indigo-200/60 dark:border-indigo-800/40 text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm disabled:opacity-50"
+                        >
+                          {isScanningStoreId ? (
+                            <>
+                              <Loader2 size={12} className="animate-spin text-indigo-500" />
+                              <span>Buscando...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles size={12} className="text-amber-500" />
+                              <span>Buscar ID</span>
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-[#8696a0] mt-1.5">
+                      Substituído no token <code className="bg-gray-200 dark:bg-black/30 px-1 py-0.5 rounded font-mono text-[10px] text-indigo-500 dark:text-indigo-300">[LINK_CARDAPIO]</code>.
+                    </p>
+                  </div>
+
+                  {/* ID Loja gFood (UUID Estabelecimento) com UI Refinada */}
+                  <div className="p-3.5 bg-gradient-to-r from-indigo-50/50 via-purple-50/30 to-blue-50/20 dark:from-indigo-950/20 dark:via-purple-950/10 dark:to-transparent border border-indigo-100 dark:border-indigo-900/30 rounded-xl space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] uppercase tracking-wider font-extrabold text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5 select-none">
+                        <Store size={13} />
+                        ID Loja gFood (UUID Estabelecimento)
+                      </label>
+                      <div className="flex items-center gap-1.5">
+                        {gfoodStoreId ? (
+                          isValidUUID(gfoodStoreId) ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300">
+                              <CheckCircle2 size={10} />
+                              UUID Válido
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300">
+                              <AlertCircle size={10} />
+                              Formato Inválido
+                            </span>
+                          )
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-gray-100 dark:bg-[#202c33] text-gray-500 dark:text-gray-400">
+                            Não configurado (Opcional)
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <div className="relative flex-1">
+                        <input 
+                          type="text"
+                          value={gfoodStoreId}
+                          onChange={(e) => {
+                            const val = e.target.value.trim();
+                            setGfoodStoreId(val ? val.toUpperCase() : '');
+                          }}
+                          placeholder="Ex: Cole o UUID da loja ou clique em Buscar"
+                          className="w-full bg-white dark:bg-[#111b21] border border-gray-200 dark:border-[#304046] rounded-lg px-3 py-2 pr-8 text-xs text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 font-mono shadow-sm transition-all placeholder:text-gray-400"
+                        />
+                        {gfoodStoreId && (
+                          <button
+                            type="button"
+                            onClick={() => setGfoodStoreId('')}
+                            title="Limpar ID da loja"
+                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
+                          >
+                            <X size={13} />
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Botão Copiar */}
+                      {gfoodStoreId && (
+                        <button
+                          type="button"
+                          onClick={handleCopyStoreId}
+                          title="Copiar ID da loja"
+                          className="p-2 rounded-lg bg-white dark:bg-[#111b21] border border-gray-200 dark:border-[#304046] text-gray-600 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-all shadow-sm"
+                        >
+                          {copiedStoreId ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
+                        </button>
+                      )}
+
+                      {/* Botão de Captura Automática */}
+                      <button
+                        type="button"
+                        onClick={() => handleScanStoreIdFromLink()}
+                        disabled={isScanningStoreId || !linkCardapio}
+                        title={linkCardapio ? "Buscar ID da loja automaticamente no link" : "Informe o link do cardápio acima para buscar"}
+                        className="px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm disabled:opacity-50 disabled:pointer-events-none"
+                      >
+                        {isScanningStoreId ? (
+                          <Loader2 size={13} className="animate-spin" />
+                        ) : (
+                          <Sparkles size={13} />
+                        )}
+                        <span className="hidden sm:inline">Buscar no Link</span>
+                      </button>
+                    </div>
+
+                    {/* Feedback e Sugestões da Busca de ID */}
+                    {scanStoreIdFeedback && (
+                      <div className={`p-2.5 rounded-lg text-xs flex items-start gap-2 animate-in fade-in duration-150 ${
+                        scanStoreIdFeedback.type === 'success'
+                          ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/40'
+                          : scanStoreIdFeedback.type === 'error'
+                          ? 'bg-red-50 dark:bg-red-950/40 text-red-800 dark:text-red-300 border border-red-200 dark:border-red-800/40'
+                          : 'bg-blue-50 dark:bg-blue-950/40 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800/40'
+                      }`}>
+                        {scanStoreIdFeedback.type === 'success' && <CheckCircle2 size={14} className="text-emerald-600 dark:text-emerald-400 mt-0.5 shrink-0" />}
+                        {scanStoreIdFeedback.type === 'error' && <AlertCircle size={14} className="text-red-600 dark:text-red-400 mt-0.5 shrink-0" />}
+                        {scanStoreIdFeedback.type === 'info' && <HelpCircle size={14} className="text-blue-600 dark:text-blue-400 mt-0.5 shrink-0" />}
+                        <div className="flex-1 space-y-1.5">
+                          <p>{scanStoreIdFeedback.message}</p>
+                          {scanStoreIdFeedback.candidates && scanStoreIdFeedback.candidates.length > 1 && (
+                            <div className="flex flex-wrap gap-1.5 pt-1">
+                              {scanStoreIdFeedback.candidates.map((cand, idx) => (
+                                <button
+                                  key={idx}
+                                  type="button"
+                                  onClick={() => setGfoodStoreId(cand)}
+                                  className={`px-2 py-0.5 text-[10px] font-mono rounded border transition-all ${
+                                    gfoodStoreId === cand
+                                      ? 'bg-indigo-600 text-white border-indigo-600 font-bold'
+                                      : 'bg-white dark:bg-[#111b21] text-gray-700 dark:text-gray-300 border-gray-300 dark:border-[#304046] hover:border-indigo-500'
+                                  }`}
+                                >
+                                  {cand}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    <p className="text-[11px] text-gray-500 dark:text-[#8696a0] leading-relaxed">
+                      Utilizado nas requisições diretas de integração com Gastrofood (<code className="font-mono text-[10px] text-indigo-500">AGuidEstab</code>). Deixe em branco se a sua unidade não utilizar UUID de loja ou preencha manualmente.
+                    </p>
                   </div>
                 </div>
               </div>

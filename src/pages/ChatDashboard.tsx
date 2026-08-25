@@ -2611,8 +2611,9 @@ export default function ChatDashboard() {
                 .limit(1)
                 .maybeSingle();
               
-              // Executa a resolução na interface imediatamente
-              await executeResolve(contactId, true);
+              // Executa a resolução na interface preservando pausa definitiva se houver
+              const isDefinitivelyPaused = contact?.bot_status === 'paused' || (contact?.ai_paused_manually && !contact?.bot_paused_until);
+              await executeResolve(contactId, !isDefinitivelyPaused);
 
               if (dbTicket) {
                 // Roda a análise de IA e gravação do ticket em background
@@ -2729,7 +2730,8 @@ export default function ChatDashboard() {
       }
     }
     
-    await executeResolve(contactId, true);
+    const isDefinitivelyPaused = contact?.bot_status === 'paused' || (contact?.ai_paused_manually && !contact?.bot_paused_until);
+    await executeResolve(contactId, !isDefinitivelyPaused);
   };
 
   const handlePrepareDraftChat = async (phoneNumber: string, targetInstance?: string | null) => {
@@ -7420,20 +7422,40 @@ export default function ChatDashboard() {
                       "flex items-center justify-center gap-1.5 h-8 w-8 xl:w-auto xl:px-3 rounded-full transition-all duration-300 text-xs font-semibold border shadow-sm hover:scale-105 active:scale-95 whitespace-nowrap",
                       !activeChat.ai_paused 
                         ? "bg-indigo-500/10 hover:bg-indigo-500/20 border-indigo-500/30 text-indigo-600 dark:text-indigo-400 shadow-[0_0_15px_rgba(99,102,241,0.15)]"
-                        : "bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/30 text-amber-600 dark:text-amber-400"
+                        : activeChat.bot_paused_until
+                        ? "bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/30 text-amber-600 dark:text-amber-400"
+                        : "bg-rose-500/10 hover:bg-rose-500/20 border-rose-500/30 text-rose-600 dark:text-rose-400"
                     )}
-                    title={!activeChat.ai_paused ? "I.A Ativa para este contato (Clique para gerenciar/pausar)" : "I.A Pausada para este contato (Clique para retomar)"}
+                    title={
+                      !activeChat.ai_paused 
+                        ? "I.A Ativa para este contato (Clique para gerenciar/pausar)" 
+                        : activeChat.bot_paused_until
+                        ? `I.A Pausada temporariamente até ${new Date(activeChat.bot_paused_until).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
+                        : "I.A Pausada Definitivamente para este contato (Clique para retomar)"
+                    }
                   >
                     <div className="relative flex items-center justify-center">
-                      <BrainCircuit size={15} className={cn(!activeChat.ai_paused && "animate-pulse")} />
-                      {!activeChat.ai_paused && (
-                        <span className="absolute -top-1 -right-1 flex h-2 w-2">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
-                        </span>
+                      {!activeChat.ai_paused ? (
+                        <>
+                          <BrainCircuit size={15} className="animate-pulse" />
+                          <span className="absolute -top-1 -right-1 flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
+                          </span>
+                        </>
+                      ) : activeChat.bot_paused_until ? (
+                        <Clock size={14} className="text-amber-500" />
+                      ) : (
+                        <StopCircle size={14} className="text-rose-500" />
                       )}
                     </div>
-                    <span className="hidden xl:inline">{!activeChat.ai_paused ? "I.A Ativa" : "I.A Pausada"}</span>
+                    <span className="hidden xl:inline">
+                      {!activeChat.ai_paused 
+                        ? "I.A Ativa" 
+                        : activeChat.bot_paused_until 
+                        ? "I.A Pausada (Temp)" 
+                        : "I.A Pausada"}
+                    </span>
                     <ChevronDown size={12} className={cn("transition-transform duration-200 hidden xl:inline", showPauseMenu && "rotate-180")} />
                   </button>
 
@@ -7444,23 +7466,68 @@ export default function ChatDashboard() {
                         animate={{ opacity: 1, y: 0, scale: 1 }}
                         exit={{ opacity: 0, y: 10, scale: 0.95 }}
                         transition={{ duration: 0.15 }}
-                        className="absolute right-0 top-full mt-2 w-56 sm:w-60 bg-white/95 dark:bg-slate-800/95 backdrop-blur-md rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700/60 py-2 z-[70] overflow-hidden"
+                        className="absolute right-0 top-full mt-2 w-64 bg-white/95 dark:bg-slate-800/95 backdrop-blur-md rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700/60 py-2 z-[70] overflow-hidden"
                       >
                         {activeChat.ai_paused ? (
-                          <button
-                            className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-emerald-600 dark:text-emerald-400 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors active:scale-98"
-                            onClick={() => {
-                               useChatStore.getState().updateConversationField(activeChat.id, { 
-                                 ai_paused: false,
-                                 ai_paused_manually: false,
-                                 ai_paused_until: null
-                               });
-                               setShowPauseMenu(false);
-                            }}
-                          >
-                            <Play size={16} className="text-emerald-500 fill-emerald-500" />
-                            <span>Retomar I.A Imediatamente</span>
-                          </button>
+                          <>
+                            {/* Card informativo de pausa */}
+                            <div className="px-4 py-2.5 bg-slate-50 dark:bg-slate-900/50 border-b border-slate-100 dark:border-slate-700/50 mb-1">
+                              <div className="flex items-center gap-1.5 font-bold text-xs">
+                                {activeChat.bot_paused_until ? (
+                                  <>
+                                    <Clock size={13} className="text-amber-500 shrink-0" />
+                                    <span className="text-amber-600 dark:text-amber-400">Pausa Temporária</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <StopCircle size={13} className="text-rose-500 shrink-0" />
+                                    <span className="text-rose-600 dark:text-rose-400">Pausa Definitiva Ativa</span>
+                                  </>
+                                )}
+                              </div>
+                              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-snug">
+                                {activeChat.bot_paused_until 
+                                  ? `Retoma automaticamente às ${new Date(activeChat.bot_paused_until).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}.`
+                                  : 'Permanecerá silenciada por tempo indeterminado até que você clique em retomar.'}
+                              </p>
+                            </div>
+
+                            <button
+                              className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 transition-colors active:scale-98"
+                              onClick={() => {
+                                 useChatStore.getState().updateConversationField(activeChat.id, { 
+                                   ai_paused: false,
+                                   ai_paused_manually: false,
+                                   ai_paused_until: null
+                                 });
+                                 setShowPauseMenu(false);
+                              }}
+                            >
+                              <Play size={16} className="text-emerald-500 fill-emerald-500" />
+                              <span>Retomar I.A Imediatamente</span>
+                            </button>
+
+                            {/* Se está em pausa temporária, opção de mudar para definitiva */}
+                            {activeChat.bot_paused_until && (
+                              <>
+                                <div className="my-1 border-t border-slate-200 dark:border-slate-700/50"></div>
+                                <button
+                                  className="w-full flex items-center gap-3 px-4 py-2 text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/20 transition-colors active:scale-98"
+                                  onClick={() => {
+                                     useChatStore.getState().updateConversationField(activeChat.id, { 
+                                       ai_paused: true,
+                                       ai_paused_manually: true,
+                                       ai_paused_until: null
+                                     });
+                                     setShowPauseMenu(false);
+                                  }}
+                                >
+                                  <StopCircle size={14} className="text-rose-500 shrink-0" />
+                                  <span>Mudar para Pausa Definitiva</span>
+                                </button>
+                              </>
+                            )}
+                          </>
                         ) : (
                           <>
                             <div className="px-4 py-2 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
@@ -7486,7 +7553,7 @@ export default function ChatDashboard() {
                             ))}
                             <div className="my-1 border-t border-slate-200 dark:border-slate-700/50"></div>
                             <button
-                                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-medium text-amber-600 dark:text-amber-400 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors active:scale-98"
+                                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/20 transition-colors active:scale-98"
                                 onClick={() => {
                                    useChatStore.getState().updateConversationField(activeChat.id, { 
                                      ai_paused: true,
@@ -7496,8 +7563,11 @@ export default function ChatDashboard() {
                                    setShowPauseMenu(false);
                                 }}
                             >
-                                <StopCircle size={16} className="text-amber-500 shrink-0" />
-                                <span>Pausar Definitivamente</span>
+                                <StopCircle size={16} className="text-rose-500 shrink-0" />
+                                <div className="text-left">
+                                  <div>Pausar Definitivamente</div>
+                                  <div className="text-[10px] text-slate-400 font-normal">Silenciar até retomada manual</div>
+                                </div>
                             </button>
                           </>
                         )}

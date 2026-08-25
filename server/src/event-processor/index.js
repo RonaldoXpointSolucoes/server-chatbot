@@ -939,12 +939,15 @@ class EventProcessor {
              
              for(const [key, data] of convMap.entries()) {
                  const exist = existingConvMap.get(key);
+                 const contactBotStatus = contactBotStatusMap.get(data.contact_id) || 'active';
+                 const isContactPaused = contactBotStatus === 'paused';
+
                  let finalStatus = 'resolved';
                  let finalAiPaused = false;
                  
                  if(exist) {
                      let nextStatus = exist.status || 'resolved';
-                     let nextAiPaused = exist.ai_paused || false;
+                     let nextAiPaused = exist.ai_paused || isContactPaused || false;
                      const isOldHistory = data.last_message_at && (Date.now() - new Date(data.last_message_at).getTime() > 24 * 60 * 60 * 1000);
                       
                      // Regra Estrita: Se o lote não possuir mensagem recebida do cliente (inbound) nem envio humano expresso,
@@ -952,16 +955,16 @@ class EventProcessor {
                      if (!data.has_inbound && !data.has_human_outbound) {
                          nextStatus = exist.status || 'resolved';
                      } else if ((exist.status === 'resolved' || exist.status === 'closed' || exist.status === 'snoozed') && !isOldHistory) {
-                          if (data.has_inbound && !exist.ai_paused) {
-                              nextStatus = 'bot';
+                          if (data.has_inbound) {
+                              nextStatus = (nextAiPaused || isContactPaused) ? 'open' : 'bot';
                           } else if (data.has_human_outbound) {
                               nextStatus = 'open';
                           }
                       }
 
                       // Transição automática de open para bot se receber inbound e a IA estiver ativa
-                      if (exist.status === 'open' && data.has_inbound && !exist.ai_paused) {
-                          nextStatus = 'bot';
+                      if (exist.status === 'open' && data.has_inbound) {
+                          nextStatus = (nextAiPaused || isContactPaused) ? 'open' : 'bot';
                       }
                       
                       if (data.has_human_outbound) {
@@ -992,11 +995,12 @@ class EventProcessor {
                       toUpdateConvs.push(updatePayload);
                  } else {
                      let initialStatus = 'resolved';
-                     let initialAiPaused = false;
+                     let initialAiPaused = isContactPaused || false;
                      const isOldHistory = data.last_message_at && (Date.now() - new Date(data.last_message_at).getTime() > 24 * 60 * 60 * 1000);
                      if (!isOldHistory) {
                          if (data.has_inbound) {
-                             initialStatus = 'bot';
+                             initialStatus = isContactPaused ? 'open' : 'bot';
+                             initialAiPaused = isContactPaused;
                          } else if (data.has_human_outbound) {
                              initialStatus = 'open';
                              initialAiPaused = true;

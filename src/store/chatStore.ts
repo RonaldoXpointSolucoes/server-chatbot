@@ -1450,14 +1450,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
       }
 
-      // 2. Atualiza no Supabase status para 'open' em TODAS as conversas do contato
+      const targetContact = get().contacts.find(c => getRealContactId(c.id) === realContactId);
+      const isDefinitivelyPaused = targetContact?.bot_status === 'paused' || (targetContact?.ai_paused_manually && !targetContact?.bot_paused_until);
+
+      // 2. Atualiza no Supabase status para 'open' em TODAS as conversas do contato, preservando ai_paused caso esteja pausado definitivamente
       if (allConvIds.length > 0) {
-        await supabase.from('conversations').update({ status: 'open' }).in('id', allConvIds);
+        const updatePayload: any = { status: 'open' };
+        if (isDefinitivelyPaused) {
+          updatePayload.ai_paused = true;
+          updatePayload.ai_paused_manually = true;
+        }
+        await supabase.from('conversations').update(updatePayload).in('id', allConvIds);
       }
 
       // 3. Atualização local de TODOS os registros de contato correspondentes ao realContactId para 'open'
       set((state) => ({
-          contacts: state.contacts.map((c) => getRealContactId(c.id) === realContactId ? { ...c, conv_status: 'open' } : c)
+          contacts: state.contacts.map((c) => getRealContactId(c.id) === realContactId ? { 
+            ...c, 
+            conv_status: 'open',
+            ai_paused: isDefinitivelyPaused ? true : c.ai_paused,
+            ai_paused_manually: isDefinitivelyPaused ? true : c.ai_paused_manually,
+            bot_status: isDefinitivelyPaused ? 'paused' : c.bot_status
+          } : c)
       }));
 
     } catch (e) {
@@ -3037,9 +3051,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
 
         const targetContact = get().contacts.find(c => getRealContactId(c.id) === realContactId);
-        let nextAiPaused = false;
         
-        if (reactivateAi !== undefined) {
+        // Verifica se o contato estava pausado definitivamente por tempo indeterminado
+        const isDefinitivelyPaused = targetContact?.bot_status === 'paused' || (targetContact?.ai_paused_manually && !targetContact?.bot_paused_until);
+
+        let nextAiPaused = false;
+        if (isDefinitivelyPaused) {
+          // Se o contato foi pausado definitivamente, NUNCA reativa a IA automaticamente ao resolver a conversa
+          nextAiPaused = true;
+        } else if (reactivateAi !== undefined) {
           nextAiPaused = !reactivateAi;
         } else {
           const isPausedManually = targetContact?.ai_paused_manually || false;
@@ -3049,7 +3069,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // 2. Sincroniza o status da IA no contato
         await supabase
           .from('contacts')
-          .update({ bot_status: nextAiPaused ? 'paused' : 'active' })
+          .update({ 
+            bot_status: nextAiPaused ? 'paused' : 'active',
+            bot_paused_until: isDefinitivelyPaused ? null : (nextAiPaused ? targetContact?.bot_paused_until || null : null)
+          })
           .eq('id', realContactId);
 
         // 3. Remove o assignment e altera status para 'resolved' em TODAS as conversas do contato
@@ -3114,6 +3137,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 conv_status: 'resolved', 
                 ai_paused: nextAiPaused, 
                 ai_paused_manually: nextAiPaused,
+                bot_status: nextAiPaused ? 'paused' : 'active',
+                bot_paused_until: isDefinitivelyPaused ? null : (nextAiPaused ? c.bot_paused_until : null),
                 snoozed_until: null,
                 snoozed_at: null,
                 snoozed_by: null
@@ -3917,8 +3942,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         conv_labels: conv.conversation_labels ? conv.conversation_labels.map((cl: any) => cl.tenant_labels).filter(Boolean) : existing.conv_labels || [],
                         instance_id: conv.instance_id || dbC.instance_id || existing.instance_id || null,
                         conv_id: isExistingNewer ? existing.conv_id : conv.id,
-                        ai_paused: isExistingNewer ? existing.ai_paused : (conv.ai_paused || false),
-                        ai_paused_manually: isExistingNewer ? existing.ai_paused_manually : (conv.ai_paused_manually || false)
+                        ai_paused: isExistingNewer ? (existing.ai_paused || dbC.bot_status === 'paused') : (dbC.bot_status === 'paused' || conv.ai_paused || false),
+                        ai_paused_manually: isExistingNewer ? (existing.ai_paused_manually || dbC.bot_status === 'paused') : (dbC.bot_status === 'paused' || conv.ai_paused_manually || false),
+                        bot_status: dbC.bot_status || (conv.ai_paused ? 'paused' : 'active'),
+                        bot_paused_until: dbC.bot_paused_until || null
                      };
                      
                      // Injeta um preview fake se messages tiver vazio e tem preview no banco 
@@ -3958,8 +3985,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         assigned_to: conv.assigned_to,
                         instance_id: conv.instance_id || dbC.instance_id || null,
                         conv_id: conv.id,
-                        ai_paused: conv.ai_paused || false,
-                        ai_paused_manually: conv.ai_paused_manually || false
+                        ai_paused: dbC.bot_status === 'paused' ? true : (conv.ai_paused || false),
+                        ai_paused_manually: dbC.bot_status === 'paused' ? true : (conv.ai_paused_manually || false),
+                        bot_status: dbC.bot_status || (conv.ai_paused ? 'paused' : 'active'),
+                        bot_paused_until: dbC.bot_paused_until || null
                       });
                    }
                 });
