@@ -1050,6 +1050,16 @@ Gere o JSON contendo exatamente as informações solicitadas no schema.`;
       if (!list || !Array.isArray(list)) return [];
       return list.slice(0, maxCount).map(item => {
         if (typeof item === 'string') return item;
+        if (item.type === 'gastrofood_api') {
+          const action = item.action || 'API Gastrofood';
+          const method = item.method || 'POST';
+          const url = item.url ? ` (${item.url})` : '';
+          const status = item.status ? ` - Status: ${item.status}` : '';
+          const dir = item.direction ? ` [${item.direction.toUpperCase()}]` : '';
+          const err = item.error ? ` | Erro: ${typeof item.error === 'object' ? JSON.stringify(item.error).substring(0, 200) : item.error}` : '';
+          const resp = item.response ? ` | Retorno: ${typeof item.response === 'object' ? JSON.stringify(item.response).substring(0, 200) : item.response}` : '';
+          return `[GASTROFOOD_API]${dir} ${action} - ${method}${url}${status}${err}${resp}`;
+        }
         const type = item.type || item.level || 'log';
         const src = item.source || item.type || 'App';
         const msg = item.message || item.error || '';

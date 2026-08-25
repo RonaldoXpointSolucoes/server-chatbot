@@ -276,7 +276,13 @@ class SessionManager {
                 for (const inst of dbInstances) {
                     const hasSessionInRam = this.sessions.has(inst.id);
                     const isConnecting = this.connectingState.has(inst.id);
-                    if (isConnecting) continue;
+                    const hasActiveTimer = this.reconnectingTimers.has(inst.id) || this.reconnectTimeouts.has(inst.id) || this.conflictTimeouts.has(inst.id);
+                    const conflictCount = this.conflictAttempts.get(inst.id) || 0;
+
+                    // Se a instância já está conectando, em período de backoff agendado ou atingiu limite de conflito, não interfere
+                    if (isConnecting || hasActiveTimer || conflictCount >= 3) {
+                        continue;
+                    }
 
                     const sessionData = this.sessions.get(inst.id);
                     const sock = sessionData?.sock;

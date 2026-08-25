@@ -1658,7 +1658,7 @@ export default function ChatDashboard() {
     if (c.is_blocked) return false;
 
     // 4) Não estar resolvido nem encerrado (Somente tickets ativos)
-    if (c.conv_status === 'resolved' || c.conv_status === 'closed' || c.status === 'resolved' || c.status === 'closed') {
+    if (c.conv_status === 'resolved' || c.conv_status === 'closed' || c.status === 'resolved' || c.status === 'closed' || c.is_resolved === true || Boolean(c.resolved_at)) {
       return false;
     }
 
@@ -1669,7 +1669,7 @@ export default function ChatDashboard() {
     }
 
     return true;
-  }, [activeChannelFilter, activeChannelName, connectedInstanceName]);
+  }, [activeChannelFilter, activeChannelName, connectedInstanceName, tenantInfo]);
 
   // Cálculo de Tickets Ativos Únicos da Caixa e Filtro Selecionados
   const activeTicketsCount = React.useMemo(() => {
@@ -1794,7 +1794,7 @@ export default function ChatDashboard() {
         const isExactActiveChat = Boolean(
           activeChatId && (c.id === activeChatId || c.conv_id === activeChatId)
         );
-        const isResolvedOrClosed = c.conv_status === 'resolved' || c.conv_status === 'closed' || c.status === 'resolved' || c.status === 'closed';
+        const isResolvedOrClosed = c.conv_status === 'resolved' || c.conv_status === 'closed' || c.status === 'resolved' || c.status === 'closed' || c.is_resolved === true || Boolean(c.resolved_at);
 
         if (isExactActiveChat && !searchTerm) {
             // No Modo Ticket (ou filtros de tickets abertos), se o chat ativo foi RESOLVIDO/ENCERRADO ou BLOQUEADO, não força visibilidade na lista de tickets abertos
