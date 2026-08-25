@@ -1,4 +1,5 @@
 import { supabase, NODE_ID, retryWithBackoff, resolveTargetJid } from '../supabase.js';
+import { buildWhatsAppMessage } from './message-builder.js';
 
 class QueueProcessor {
     constructor() {
@@ -193,110 +194,81 @@ class QueueProcessor {
                 }
 
                 let result;
+                const responseType = msg.response_type || msg.options?.responseType || 'STANDARD';
+
                 if (msg.message_type === 'text') {
                     result = await sendFn(targetJid, { text: msg.body });
                 } else if (msg.message_type === 'media' && msg.media_url) {
-                    // Envio de mídia por URL
-                    let pathname = '';
-                    try {
-                        pathname = new URL(msg.media_url).pathname;
-                    } catch (e) {
-                        pathname = msg.media_url || '';
-                    }
+                    // Se for TUTORIAL, garante validação estrita e envio com gifPlayback: true
+                    if (responseType === 'TUTORIAL') {
+                        console.log(`[QueueProcessor] Enviando resposta pronta TUTORIAL para ${targetJid} com gifPlayback: true`);
+                        const tutorialPayload = buildWhatsAppMessage({
+                            messageType: 'video',
+                            mediaUrl: msg.media_url,
+                            caption: msg.body || '',
+                            mimetype: msg.options?.mimetype || 'video/mp4',
+                            responseType: 'TUTORIAL'
+                        });
+                        result = await sendFn(targetJid, tutorialPayload);
+                    } else {
+                        // Envio de mídia por URL convencional (STANDARD)
+                        let pathname = '';
+                        try {
+                            pathname = new URL(msg.media_url).pathname;
+                        } catch (e) {
+                            pathname = msg.media_url || '';
+                        }
 
-                    const isImage = pathname.match(/\.(jpeg|jpg|gif|png|webp)$/i);
-                    const isVideo = pathname.match(/\.(mp4|3gp|mov|webm|avi|m4v)$/i);
-                    const isAudio = pathname.match(/\.(mp3|ogg|wav|m4a|aac)$/i) || msg.media_url.includes('audio');
+                        const isImage = pathname.match(/\.(jpeg|jpg|gif|png|webp)$/i);
+                        const isVideo = pathname.match(/\.(mp4|3gp|mov|webm|avi|m4v)$/i);
+                        const isAudio = pathname.match(/\.(mp3|ogg|wav|m4a|aac)$/i) || msg.media_url.includes('audio');
 
-                    let forceDocument = false;
-                    let fileSize = 0;
-                    try {
-                        const controller = new AbortController();
-                        const timeoutId = setTimeout(() => controller.abort(), 5000);
-                        const headRes = await fetch(msg.media_url, { method: 'HEAD', signal: controller.signal });
-                        clearTimeout(timeoutId);
-                        
-                        if (headRes.ok) {
-                            const len = headRes.headers.get('content-length');
-                            if (len) {
-                                fileSize = parseInt(len, 10);
-                                // Aumentado limite para permitir que vídeos grandes de demonstração (até 150MB) sejam exibidos abertos no WhatsApp
-                                const sizeLimit = isVideo ? 150 * 1024 * 1024 : 15 * 1024 * 1024;
-                                if (fileSize > sizeLimit) {
-                                    console.log(`[QueueProcessor] Arquivo de mídia é muito grande (${(fileSize / (1024 * 1024)).toFixed(2)}MB). Forçando envio como documento.`);
-                                    forceDocument = true;
+                        let forceDocument = false;
+                        let fileSize = 0;
+                        try {
+                            const controller = new AbortController();
+                            const timeoutId = setTimeout(() => controller.abort(), 5000);
+                            const headRes = await fetch(msg.media_url, { method: 'HEAD', signal: controller.signal });
+                            clearTimeout(timeoutId);
+                            
+                            if (headRes.ok) {
+                                const len = headRes.headers.get('content-length');
+                                if (len) {
+                                    fileSize = parseInt(len, 10);
+                                    // Aumentado limite para permitir que vídeos grandes de demonstração (até 150MB) sejam exibidos abertos no WhatsApp
+                                    const sizeLimit = isVideo ? 150 * 1024 * 1024 : 15 * 1024 * 1024;
+                                    if (fileSize > sizeLimit) {
+                                        console.log(`[QueueProcessor] Arquivo de mídia é muito grande (${(fileSize / (1024 * 1024)).toFixed(2)}MB). Forçando envio como documento.`);
+                                        forceDocument = true;
+                                    }
                                 }
                             }
+                        } catch (headErr) {
+                            console.warn(`[QueueProcessor] Falha ao consultar cabeçalho da mídia por URL (HEAD):`, headErr.message);
                         }
-                    } catch (headErr) {
-                        console.warn(`[QueueProcessor] Falha ao consultar cabeçalho da mídia por URL (HEAD):`, headErr.message);
-                    }
 
-                    const getMimeTypeFromFileName = (fileName) => {
-                        const ext = fileName.split('.').pop()?.toLowerCase();
-                        switch (ext) {
-                            case 'pdf': return 'application/pdf';
-                            case 'doc': return 'application/msword';
-                            case 'docx': return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-                            case 'xls': return 'application/vnd.ms-excel';
-                            case 'xlsx': return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-                            case 'ppt': return 'application/vnd.ms-powerpoint';
-                            case 'pptx': return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
-                            case 'txt': return 'text/plain';
-                            case 'csv': return 'text/csv';
-                            case 'zip': return 'application/zip';
-                            case 'rar': return 'application/x-rar-compressed';
-                            case 'png': return 'image/png';
-                            case 'jpg':
-                            case 'jpeg': return 'image/jpeg';
-                            case 'gif': return 'image/gif';
-                            case 'webp': return 'image/webp';
-                            case 'mp3': return 'audio/mpeg';
-                            case 'ogg': return 'audio/ogg';
-                            case 'wav': return 'audio/wav';
-                            case 'mp4': return 'video/mp4';
-                            default: return 'application/octet-stream';
+                        let rawFileName = msg.media_url.split('/').pop()?.split('?')[0] || '';
+                        let cleanFileName = rawFileName;
+                        if (cleanFileName.includes('_')) {
+                            const parts = cleanFileName.split('_');
+                            if (parts.length > 1 && /^\d+$/.test(parts[0])) {
+                                cleanFileName = parts.slice(1).join('_');
+                            }
                         }
-                    };
 
-                    const mediaOptions = {};
-                    let rawFileName = msg.media_url.split('/').pop()?.split('?')[0] || '';
-                    let cleanFileName = rawFileName;
-                    if (cleanFileName.includes('_')) {
-                        const parts = cleanFileName.split('_');
-                        if (parts.length > 1 && /^\d+$/.test(parts[0])) {
-                            cleanFileName = parts.slice(1).join('_');
-                        }
+                        const mediaOptions = buildWhatsAppMessage({
+                            messageType: isImage ? 'image' : isVideo ? 'video' : isAudio ? 'audio' : 'document',
+                            mediaUrl: msg.media_url,
+                            caption: msg.body,
+                            mimetype: msg.options?.mimetype,
+                            fileName: msg.options?.fileName || cleanFileName,
+                            responseType: 'STANDARD',
+                            ptt: msg.options?.ptt || msg.media_url.includes('ptt') || msg.media_url.includes('audio'),
+                            forceDocument
+                        });
+
+                        result = await sendFn(targetJid, mediaOptions);
                     }
-
-                    if (forceDocument) {
-                        mediaOptions.document = { url: msg.media_url };
-                        if (isVideo) mediaOptions.mimetype = 'video/mp4';
-                        else if (isImage) mediaOptions.mimetype = 'image/jpeg';
-                        else if (isAudio) mediaOptions.mimetype = 'audio/ogg';
-                        else mediaOptions.mimetype = getMimeTypeFromFileName(cleanFileName);
-
-                        mediaOptions.fileName = cleanFileName || (isVideo ? 'video.mp4' : isImage ? 'image.jpg' : isAudio ? 'audio.ogg' : 'arquivo');
-                    } else if (isImage) {
-                        mediaOptions.image = { url: msg.media_url };
-                        mediaOptions.mimetype = 'image/jpeg';
-                    } else if (isVideo) {
-                        mediaOptions.video = { url: msg.media_url };
-                        mediaOptions.mimetype = 'video/mp4';
-                        mediaOptions.gifPlayback = false;
-                    } else if (isAudio) {
-                        mediaOptions.audio = { url: msg.media_url };
-                        mediaOptions.mimetype = 'audio/ogg; codecs=opus';
-                        mediaOptions.ptt = msg.media_url.includes('ptt') || msg.media_url.includes('audio');
-                    } else {
-                        mediaOptions.document = { url: msg.media_url };
-                        mediaOptions.mimetype = getMimeTypeFromFileName(cleanFileName);
-                        mediaOptions.fileName = cleanFileName || 'documento';
-                    }
-
-                    if (msg.body) mediaOptions.caption = msg.body;
-
-                    result = await sendFn(targetJid, mediaOptions);
                 } else {
                     throw new Error(`Tipo de mensagem não suportado: ${msg.message_type}`);
                 }

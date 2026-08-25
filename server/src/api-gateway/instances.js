@@ -533,13 +533,14 @@ router.post('/instances/:instanceId/send-media-url', requireTenant, express.json
         const sock = await sessionManager.getSocketOrWake(req.tenantId, instanceId);
         if (!sock) return res.status(400).json({ error: 'Socket offline' });
 
-        const { mediaUrl, mimetype, fileName, jid, caption, messageType, ptt } = req.body;
+        const { mediaUrl, mimetype, fileName, jid, caption, messageType, ptt, responseType } = req.body;
 
         if (!mediaUrl || !jid || !messageType) {
             return res.status(400).json({ error: 'Missing mediaUrl, jid or messageType' });
         }
 
-        console.log(`[send-media-url] Queueing ${messageType} from URL: ${mediaUrl} to ${jid}`);
+        const finalResponseType = responseType === 'TUTORIAL' ? 'TUTORIAL' : 'STANDARD';
+        console.log(`[send-media-url] Queueing ${messageType} (${finalResponseType}) from URL: ${mediaUrl} to ${jid}`);
 
         const { data: newOutbox, error: outboxErr } = await supabase
             .from('wa_outgoing_messages')
@@ -550,6 +551,14 @@ router.post('/instances/:instanceId/send-media-url', requireTenant, express.json
                 message_type: 'media',
                 body: caption || '',
                 media_url: mediaUrl,
+                response_type: finalResponseType,
+                options: {
+                    mimetype,
+                    fileName,
+                    messageType,
+                    ptt: Boolean(ptt),
+                    responseType: finalResponseType
+                },
                 status: 'pending',
                 priority: 1
             })

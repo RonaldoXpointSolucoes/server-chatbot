@@ -1579,7 +1579,7 @@ export default function ChatDashboard() {
   const [isConfirmBatchResolveOpen, setIsConfirmBatchResolveOpen] = useState(false);
   const [isUndoToastVisible, setIsUndoToastVisible] = useState(false);
   const [quickReplyToast, setQuickReplyToast] = useState<{ shortcut: string; type: 'sent' | 'applied' } | null>(null);
-  const [pendingMediaToSend, setPendingMediaToSend] = useState<{ url: string; type: 'image' | 'video' | 'audio' | 'document'; name?: string } | null>(null);
+  const [pendingMediaToSend, setPendingMediaToSend] = useState<{ url: string; type: 'image' | 'video' | 'audio' | 'document'; name?: string; cannedResponseType?: 'STANDARD' | 'TUTORIAL' } | null>(null);
   const [batchResolvedCount, setBatchResolvedCount] = useState(0);
   const [isProcessingBatchResolve, setIsProcessingBatchResolve] = useState(false);
   const undoTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -2942,7 +2942,8 @@ export default function ChatDashboard() {
           mediaInfo.type,
           properInstance as string,
           finalMessageText,
-          mediaInfo.name
+          mediaInfo.name,
+          mediaInfo.cannedResponseType
         );
       } else {
         await sendHumanMessage(targetCompositeId, finalMessageText, properInstance as string);
@@ -3687,9 +3688,10 @@ export default function ChatDashboard() {
             mediaInfo.type, 
             properTargetInstance as string, 
             finalMessageText,
-            mediaInfo.name
+            mediaInfo.name,
+            mediaInfo.cannedResponseType
           ).then(() => {
-            setQuickReplyToast({ shortcut: 'Mídia', type: 'sent' });
+            setQuickReplyToast({ shortcut: mediaInfo.cannedResponseType === 'TUTORIAL' ? 'Tutorial' : 'Mídia', type: 'sent' });
             setTimeout(() => setQuickReplyToast(null), 3500);
           }).catch(mediaError => {
             console.error('[handleSendHuman] Erro ao enviar mídia engatilhada:', mediaError);
@@ -9332,11 +9334,25 @@ export default function ChatDashboard() {
                                     setShowQuickReplies(false);
                                     setInputText(qr.content);
                                     
-                                    if (qr.media_url) {
+                                    if (qr.type === 'TUTORIAL') {
+                                      if (!qr.media_url) {
+                                        alert('Esta resposta pronta do tipo Tutorial não possui um vídeo configurado. Por favor, adicione o vídeo na tela de Respostas Prontas antes de enviar.');
+                                        return;
+                                      }
+                                      setPendingMediaToSend({
+                                        url: qr.media_url,
+                                        type: 'video',
+                                        name: qr.shortcut,
+                                        cannedResponseType: 'TUTORIAL'
+                                      });
+                                      setQuickReplyToast({ shortcut: qr.shortcut, type: 'applied' });
+                                      setTimeout(() => setQuickReplyToast(null), 3500);
+                                    } else if (qr.media_url) {
                                       setPendingMediaToSend({
                                         url: qr.media_url,
                                         type: (qr.media_type as 'image'|'video'|'audio'|'document') || 'image',
-                                        name: qr.media_url.split('/').pop()?.split('_').slice(1).join('_') || 'Anexo da resposta rápida'
+                                        name: qr.media_url.split('/').pop()?.split('_').slice(1).join('_') || 'Anexo da resposta rápida',
+                                        cannedResponseType: 'STANDARD'
                                       });
                                       setQuickReplyToast({ shortcut: qr.shortcut, type: 'applied' });
                                       setTimeout(() => setQuickReplyToast(null), 3500);
@@ -9351,7 +9367,12 @@ export default function ChatDashboard() {
                                 >
                                   <div className="font-semibold text-blue-600 dark:text-blue-400 text-[13px] mb-1 group-hover:text-blue-700 dark:group-hover:text-blue-300 transition-colors flex items-center gap-1.5">
                                     {qr.shortcut}
-                                    {qr.media_url && (
+                                    {qr.type === 'TUTORIAL' ? (
+                                      <span className="flex items-center gap-1 text-[10px] font-bold text-purple-600 dark:text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded-md border border-purple-500/15">
+                                        <Video className="w-3 h-3 text-purple-500" />
+                                        Tutorial
+                                      </span>
+                                    ) : qr.media_url && (
                                        <span className="flex items-center gap-1 text-[10px] text-gray-500 bg-gray-100 dark:bg-white/10 px-1.5 py-0.5 rounded-md">
                                           {qr.media_type === 'video' ? <Video className="w-3 h-3" /> : qr.media_type === 'audio' ? <Mic className="w-3 h-3" /> : qr.media_type === 'document' ? <FileText className="w-3 h-3" /> : <ImageIcon className="w-3 h-3" />}
                                           Mídia
@@ -9372,12 +9393,20 @@ export default function ChatDashboard() {
                         
                         <div className="relative flex-1 min-w-0 min-h-[20px] flex flex-col gap-1.5 justify-end">
                           {pendingMediaToSend && (
-                            <div className="flex items-center gap-2.5 p-2 bg-emerald-500/5 dark:bg-emerald-500/10 border border-emerald-500/15 rounded-2xl self-start max-w-full mb-2 animate-in fade-in slide-in-from-bottom-1 duration-255 select-none shadow-sm">
+                            <div className={`flex items-center gap-2.5 p-2 rounded-2xl self-start max-w-full mb-2 animate-in fade-in slide-in-from-bottom-1 duration-255 select-none shadow-sm ${
+                              pendingMediaToSend.cannedResponseType === 'TUTORIAL'
+                                ? 'bg-purple-500/10 dark:bg-purple-500/15 border border-purple-500/25'
+                                : 'bg-emerald-500/5 dark:bg-emerald-500/10 border border-emerald-500/15'
+                            }`}>
                               {pendingMediaToSend.type === 'image' && (
                                 <img src={pendingMediaToSend.url} className="w-8 h-8 rounded-lg object-cover border border-emerald-500/10 shadow-sm shrink-0" />
                               )}
                               {pendingMediaToSend.type === 'video' && (
-                                <div className="w-8 h-8 rounded-lg bg-black/25 flex items-center justify-center border border-emerald-500/10 text-emerald-500 shrink-0">
+                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center border shrink-0 ${
+                                  pendingMediaToSend.cannedResponseType === 'TUTORIAL'
+                                    ? 'bg-purple-500/20 border-purple-500/30 text-purple-600 dark:text-purple-400'
+                                    : 'bg-black/25 border-emerald-500/10 text-emerald-500'
+                                }`}>
                                   <Video size={14} />
                                 </div>
                               )}
@@ -9393,8 +9422,12 @@ export default function ChatDashboard() {
                               )}
                               
                               <div className="min-w-0 flex flex-col pr-1">
-                                <span className="text-[9px] uppercase font-black tracking-widest text-emerald-600 dark:text-emerald-400 leading-none">
-                                  Mídia Anexada
+                                <span className={`text-[9px] uppercase font-black tracking-widest leading-none ${
+                                  pendingMediaToSend.cannedResponseType === 'TUTORIAL'
+                                    ? 'text-purple-600 dark:text-purple-400'
+                                    : 'text-emerald-600 dark:text-emerald-400'
+                                }`}>
+                                  {pendingMediaToSend.cannedResponseType === 'TUTORIAL' ? 'Vídeo Tutorial Anexado' : 'Mídia Anexada'}
                                 </span>
                                 <span className="text-[11px] font-semibold text-gray-700 dark:text-gray-200 truncate max-w-[180px] mt-0.5" title={pendingMediaToSend.name}>
                                   {pendingMediaToSend.name}

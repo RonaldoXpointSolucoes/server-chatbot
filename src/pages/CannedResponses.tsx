@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useChatStore } from '../store/chatStore';
-import { Plus, Search, Edit2, Trash2, MessageSquareText, Zap, ChevronLeft, Save, Building, Paperclip, Image as ImageIcon, Video, X, Loader2, Copy, Mic, Square, Wand2, CheckCircle2, Sparkles, FileText, ExternalLink, Globe } from 'lucide-react';
+import { useChatStore, CannedResponseType } from '../store/chatStore';
+import { Plus, Search, Edit2, Trash2, MessageSquareText, Zap, ChevronLeft, Save, Building, Paperclip, Image as ImageIcon, Video, X, Loader2, Copy, Mic, Square, Wand2, CheckCircle2, Sparkles, FileText, ExternalLink, Globe, Play, Film } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../services/supabase';
 import { uploadResumableFile } from '../services/tusUploader';
@@ -42,9 +42,11 @@ export function CannedResponses() {
   // Form State
   const [shortcut, setShortcut] = useState('');
   const [content, setContent] = useState('');
+  const [responseType, setResponseType] = useState<CannedResponseType>('STANDARD');
   const [mediaFile, setMediaFile] = useState<File | null>(null);
   const [mediaUrl, setMediaUrl] = useState<string | undefined>(undefined);
   const [mediaType, setMediaType] = useState<string | undefined>(undefined);
+  const [videoDuration, setVideoDuration] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<string>('');
   const [previewMedia, setPreviewMedia] = useState<{ url: string, type: 'video' | 'image' | 'audio' | 'document' } | null>(null);
@@ -283,6 +285,14 @@ export function CannedResponses() {
       return;
     }
 
+    if (responseType === 'TUTORIAL') {
+      const hasVideo = (mediaFile && mediaFile.type.startsWith('video/')) || (mediaUrl && (mediaType === 'video' || !mediaType));
+      if (!hasVideo) {
+        alert('Respostas do tipo Tutorial exigem um vídeo anexado (preferencialmente .mp4). Por favor, anexe um vídeo antes de salvar.');
+        return;
+      }
+    }
+
     setIsUploading(true);
     let finalMediaUrl = mediaUrl;
     let finalMediaType = mediaType;
@@ -325,9 +335,9 @@ export function CannedResponses() {
       }
 
       if (editingId) {
-        await updateQuickReply(editingId, shortcut, content, finalMediaUrl, finalMediaType);
+        await updateQuickReply(editingId, shortcut, content, finalMediaUrl, finalMediaType, responseType);
       } else {
-        await addQuickReply(shortcut, content, finalMediaUrl, finalMediaType);
+        await addQuickReply(shortcut, content, finalMediaUrl, finalMediaType, responseType);
       }
       
       setIsModalOpen(false);
@@ -347,7 +357,9 @@ export function CannedResponses() {
     setContent(reply.content);
     setMediaUrl(reply.media_url);
     setMediaType(reply.media_type);
+    setResponseType((reply.type as CannedResponseType) || 'STANDARD');
     setMediaFile(null);
+    setVideoDuration(null);
     setIsModalOpen(true);
   };
 
@@ -365,10 +377,12 @@ export function CannedResponses() {
   const resetForm = () => {
     setShortcut('/');
     setContent('');
+    setResponseType('STANDARD');
     setEditingId(null);
     setMediaFile(null);
     setMediaUrl(undefined);
     setMediaType(undefined);
+    setVideoDuration(null);
     setUploadProgress('');
     setIsAiDrawerOpen(false);
     setAiPrompt('');
@@ -452,6 +466,12 @@ export function CannedResponses() {
                         <span className="inline-flex items-center px-2.5 py-0.5 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 font-mono font-black text-xs border border-blue-500/10">
                           {reply.shortcut}
                         </span>
+                        {reply.type === 'TUTORIAL' && (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-gradient-to-r from-purple-500/15 to-indigo-500/15 text-purple-600 dark:text-purple-400 text-[10px] font-black uppercase tracking-wider border border-purple-500/20 shadow-xs">
+                            <Video className="w-3 h-3 text-purple-500" />
+                            Tutorial
+                          </span>
+                        )}
                         {tenantInfo?.name && (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-white/5 text-slate-500 dark:text-[#8696a0] text-[10px] font-bold border border-slate-200/40 dark:border-white/5" title="Empresa">
                             <Building className="w-3 h-3" />
@@ -489,16 +509,20 @@ export function CannedResponses() {
                       <div 
                         onClick={(e) => {
                           e.stopPropagation();
-                          setPreviewMedia({ url: reply.media_url, type: reply.media_type as 'video' | 'image' | 'audio' | 'document' });
+                          setPreviewMedia({ url: reply.media_url, type: (reply.media_type as any) || (reply.type === 'TUTORIAL' ? 'video' : 'image') });
                         }}
-                        className="flex-1 flex items-center gap-2.5 px-3 py-2 rounded-2xl bg-slate-50 dark:bg-black/10 border border-slate-200/30 dark:border-white/5 hover:bg-slate-100 dark:hover:bg-white/5 transition-all cursor-pointer min-w-0"
-                        title="Ver Mídia"
+                        className={`flex-1 flex items-center gap-2.5 px-3 py-2 rounded-2xl border transition-all cursor-pointer min-w-0 ${
+                          reply.type === 'TUTORIAL'
+                            ? 'bg-purple-500/5 dark:bg-purple-500/10 border-purple-500/20 hover:bg-purple-500/10'
+                            : 'bg-slate-50 dark:bg-black/10 border-slate-200/30 dark:border-white/5 hover:bg-slate-100 dark:hover:bg-white/5'
+                        }`}
+                        title={reply.type === 'TUTORIAL' ? "Assistir Vídeo Tutorial" : "Ver Mídia"}
                       >
-                        {reply.media_type === 'video' ? (
-                          <div className="relative w-10 h-10 rounded-xl overflow-hidden bg-black/10 flex items-center justify-center shrink-0">
+                        {reply.media_type === 'video' || reply.type === 'TUTORIAL' ? (
+                          <div className="relative w-10 h-10 rounded-xl overflow-hidden bg-black/20 flex items-center justify-center shrink-0 border border-purple-500/20">
                             <video src={reply.media_url} className="w-full h-full object-cover" preload="metadata" />
-                            <div className="absolute inset-0 bg-black/35 flex items-center justify-center">
-                              <Video className="w-4 h-4 text-white" />
+                            <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                              <Play className="w-4 h-4 text-white fill-white ml-0.5" />
                             </div>
                           </div>
                         ) : reply.media_type === 'audio' ? (
@@ -515,8 +539,14 @@ export function CannedResponses() {
                           </div>
                         )}
                         <div className="min-w-0 flex-1">
-                          <p className="text-[10px] font-black uppercase text-slate-400 dark:text-[#8696a0] tracking-wider leading-none">Mídia Anexa</p>
-                          <p className="text-xs font-bold text-slate-600 dark:text-[#e9edef] truncate mt-0.5">Visualizar Anexo</p>
+                          <p className={`text-[10px] font-black uppercase tracking-wider leading-none ${
+                            reply.type === 'TUTORIAL' ? 'text-purple-600 dark:text-purple-400' : 'text-slate-400 dark:text-[#8696a0]'
+                          }`}>
+                            {reply.type === 'TUTORIAL' ? 'Vídeo Tutorial' : 'Mídia Anexa'}
+                          </p>
+                          <p className="text-xs font-bold text-slate-700 dark:text-[#e9edef] truncate mt-0.5">
+                            {reply.type === 'TUTORIAL' ? 'Assistir Tutorial' : 'Visualizar Anexo'}
+                          </p>
                         </div>
                       </div>
                       <button
@@ -557,6 +587,45 @@ export function CannedResponses() {
             </div>
             
             <div className="p-6 space-y-5 overflow-y-auto flex-1">
+              <div>
+                <label className="block text-[10px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-wider mb-1.5">Tipo da Resposta</label>
+                <div className="grid grid-cols-2 gap-2 bg-slate-100 dark:bg-black/20 p-1.5 rounded-2xl border border-slate-200/50 dark:border-white/5">
+                  <button
+                    type="button"
+                    onClick={() => setResponseType('STANDARD')}
+                    className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs font-bold transition-all duration-200 cursor-pointer ${
+                      responseType === 'STANDARD'
+                        ? 'bg-white dark:bg-[#202C33] text-blue-600 dark:text-blue-400 shadow-sm border dark:border-white/5 font-black'
+                        : 'text-slate-500 dark:text-[#8696a0] hover:text-slate-700 dark:hover:text-[#d1d7db]'
+                    }`}
+                  >
+                    <MessageSquareText className="w-4 h-4" />
+                    <span>Padrão</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setResponseType('TUTORIAL');
+                      if (mediaType && mediaType !== 'video') {
+                        setMediaFile(null);
+                        setMediaUrl(undefined);
+                        setMediaType(undefined);
+                        setVideoDuration(null);
+                        if (fileInputRef.current) fileInputRef.current.value = '';
+                      }
+                    }}
+                    className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs font-bold transition-all duration-200 cursor-pointer ${
+                      responseType === 'TUTORIAL'
+                        ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-sm shadow-purple-500/20 font-black'
+                        : 'text-slate-500 dark:text-[#8696a0] hover:text-slate-700 dark:hover:text-[#d1d7db]'
+                    }`}
+                  >
+                    <Video className="w-4 h-4" />
+                    <span>Tutorial (Vídeo)</span>
+                  </button>
+                </div>
+              </div>
+
               <div>
                 <label className="block text-[10px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-wider mb-1.5">Atalho (Shortcut)</label>
                 <div className="relative">
@@ -845,7 +914,23 @@ export function CannedResponses() {
               )}
 
               <div>
-                <label className="block text-[10px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-wider mb-1.5">Mídia Anexada (Opcional)</label>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="block text-[10px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-wider">
+                    {responseType === 'TUTORIAL' ? 'Vídeo do Tutorial' : 'Mídia Anexada (Opcional)'}
+                  </label>
+                  {responseType === 'TUTORIAL' && (
+                    <span className="text-[9px] font-bold text-purple-600 dark:text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded-md border border-purple-500/15">
+                      Obrigatório
+                    </span>
+                  )}
+                </div>
+
+                {responseType === 'TUTORIAL' && (
+                  <p className="text-[11px] text-slate-500 dark:text-[#8696a0] mb-2 leading-relaxed">
+                    O vídeo será preparado automaticamente para reprodução contínua no WhatsApp com o texto acima como legenda.
+                  </p>
+                )}
+
                 <div className="flex items-center gap-4">
                   <input
                     type="file"
@@ -853,11 +938,25 @@ export function CannedResponses() {
                     onChange={(e) => {
                       if (e.target.files && e.target.files[0]) {
                         const file = e.target.files[0];
+                        if (responseType === 'TUTORIAL' && !file.type.startsWith('video/')) {
+                          alert('Para respostas do tipo Tutorial, apenas arquivos de vídeo (preferencialmente .mp4) são permitidos.');
+                          if (fileInputRef.current) fileInputRef.current.value = '';
+                          return;
+                        }
                         setMediaFile(file);
-                        setMediaUrl(URL.createObjectURL(file));
+                        const objectUrl = URL.createObjectURL(file);
+                        setMediaUrl(objectUrl);
                         const fileType = file.type;
                         if (fileType.startsWith('video/')) {
                           setMediaType('video');
+                          const tempVideo = document.createElement('video');
+                          tempVideo.preload = 'metadata';
+                          tempVideo.src = objectUrl;
+                          tempVideo.onloadedmetadata = () => {
+                            const mins = Math.floor(tempVideo.duration / 60);
+                            const secs = Math.floor(tempVideo.duration % 60);
+                            setVideoDuration(`${mins}:${secs.toString().padStart(2, '0')}`);
+                          };
                         } else if (fileType.startsWith('audio/')) {
                           setMediaType('audio');
                         } else if (fileType === 'application/pdf' || fileType.startsWith('application/') || fileType.startsWith('text/')) {
@@ -868,49 +967,62 @@ export function CannedResponses() {
                       }
                     }}
                     className="hidden"
-                    accept="image/*,video/*,audio/*,application/pdf,.doc,.docx,.xls,.xlsx,.txt"
+                    accept={responseType === 'TUTORIAL' ? "video/mp4,video/*" : "image/*,video/*,audio/*,application/pdf,.doc,.docx,.xls,.xlsx,.txt"}
                   />
                   
                   {!mediaUrl ? (
                     <div className="flex w-full gap-2">
                       <button
+                        type="button"
                         onClick={() => fileInputRef.current?.click()}
-                        className="flex-1 flex items-center justify-center gap-2 px-4 py-3 border border-dashed border-slate-350 dark:border-white/10 rounded-2xl text-slate-550 dark:text-[#8696a0] hover:bg-slate-50 dark:hover:bg-white/5 hover:border-slate-400 transition-colors cursor-pointer text-xs font-bold"
+                        className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 border border-dashed rounded-2xl transition-colors cursor-pointer text-xs font-bold ${
+                          responseType === 'TUTORIAL'
+                            ? 'border-purple-400 dark:border-purple-500/30 text-purple-600 dark:text-purple-400 bg-purple-500/5 hover:bg-purple-500/10'
+                            : 'border-slate-350 dark:border-white/10 text-slate-550 dark:text-[#8696a0] hover:bg-slate-50 dark:hover:bg-white/5 hover:border-slate-400'
+                        }`}
                       >
-                        <Paperclip className="w-4.5 h-4.5" />
-                        Anexar Arquivo
+                        {responseType === 'TUTORIAL' ? <Video className="w-4.5 h-4.5" /> : <Paperclip className="w-4.5 h-4.5" />}
+                        {responseType === 'TUTORIAL' ? 'Anexar Vídeo (.mp4)' : 'Anexar Arquivo'}
                       </button>
                       
-                      {isRecording ? (
-                        <button
-                          onClick={stopRecording}
-                          className="flex items-center gap-2 px-4 py-3 border border-rose-500 bg-rose-500/10 rounded-2xl text-rose-600 dark:text-rose-400 hover:bg-rose-500/15 transition-colors animate-pulse cursor-pointer text-xs font-bold"
-                        >
-                          <Square className="w-4.5 h-4.5 fill-current" />
-                          {formatTime(recordingTime)}
-                        </button>
-                      ) : (
-                        <button
-                          onClick={startRecording}
-                          className="flex items-center gap-2 px-4 py-3 border border-slate-300 dark:border-white/10 rounded-2xl text-slate-550 dark:text-[#8696a0] hover:bg-slate-50 dark:hover:bg-white/5 hover:border-slate-400 transition-colors cursor-pointer text-xs font-bold"
-                        >
-                          <Mic className="w-4.5 h-4.5" />
-                          Gravar
-                        </button>
+                      {responseType !== 'TUTORIAL' && (
+                        isRecording ? (
+                          <button
+                            type="button"
+                            onClick={stopRecording}
+                            className="flex items-center gap-2 px-4 py-3 border border-rose-500 bg-rose-500/10 rounded-2xl text-rose-600 dark:text-rose-400 hover:bg-rose-500/15 transition-colors animate-pulse cursor-pointer text-xs font-bold"
+                          >
+                            <Square className="w-4.5 h-4.5 fill-current" />
+                            {formatTime(recordingTime)}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={startRecording}
+                            className="flex items-center gap-2 px-4 py-3 border border-slate-300 dark:border-white/10 rounded-2xl text-slate-550 dark:text-[#8696a0] hover:bg-slate-50 dark:hover:bg-white/5 hover:border-slate-400 transition-colors cursor-pointer text-xs font-bold"
+                          >
+                            <Mic className="w-4.5 h-4.5" />
+                            Gravar
+                          </button>
+                        )
                       )}
                     </div>
                   ) : (
-                    <div className="relative w-full border border-slate-200 dark:border-white/5 rounded-2xl p-2 flex items-center gap-3 bg-slate-50 dark:bg-black/10">
+                    <div className={`relative w-full border rounded-2xl p-2.5 flex items-center gap-3 ${
+                      responseType === 'TUTORIAL'
+                        ? 'bg-purple-500/5 dark:bg-purple-500/10 border-purple-500/20'
+                        : 'bg-slate-50 dark:bg-black/10 border-slate-200 dark:border-white/5'
+                    }`}>
                       <div 
-                        onClick={() => setPreviewMedia({ url: mediaUrl, type: mediaType as 'video' | 'image' | 'audio' | 'document' })}
-                        className="w-12 h-12 bg-slate-250 dark:bg-black/20 rounded-xl flex items-center justify-center overflow-hidden shrink-0 cursor-pointer group/preview relative border dark:border-white/5"
-                        title="Ver em tela cheia"
+                        onClick={() => setPreviewMedia({ url: mediaUrl, type: (mediaType as any) || (responseType === 'TUTORIAL' ? 'video' : 'image') })}
+                        className="w-14 h-14 bg-slate-250 dark:bg-black/20 rounded-xl flex items-center justify-center overflow-hidden shrink-0 cursor-pointer group/preview relative border dark:border-white/5 shadow-xs"
+                        title="Ver em tela cheia / Reproduzir"
                       >
-                        {mediaType === 'video' ? (
+                        {mediaType === 'video' || responseType === 'TUTORIAL' ? (
                           <>
                             <video src={mediaUrl} className="w-full h-full object-cover" preload="metadata" />
-                            <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover/preview:opacity-100 transition-opacity">
-                              <Search className="w-4 h-4 text-white" />
+                            <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-70 group-hover/preview:opacity-100 transition-opacity">
+                              <Play className="w-5 h-5 text-white fill-white ml-0.5" />
                             </div>
                           </>
                         ) : mediaType === 'audio' ? (
@@ -932,23 +1044,50 @@ export function CannedResponses() {
                       </div>
                       <div className="flex-1 min-w-0 text-left">
                         <p className="text-xs font-bold text-slate-800 dark:text-[#e9edef] truncate leading-tight">
-                          {mediaFile ? mediaFile.name : 'Mídia salva'}
+                          {mediaFile ? mediaFile.name : (responseType === 'TUTORIAL' ? 'Vídeo tutorial anexado' : 'Mídia salva')}
                         </p>
-                        <p className="text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-[#8696a0] mt-0.5">
-                          {mediaType === 'video' ? 'Vídeo' : mediaType === 'audio' ? 'Áudio' : mediaType === 'document' ? 'Documento' : 'Imagem'}
-                        </p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className={`text-[10px] font-black uppercase tracking-wider ${
+                            responseType === 'TUTORIAL' ? 'text-purple-600 dark:text-purple-400' : 'text-slate-400 dark:text-[#8696a0]'
+                          }`}>
+                            {responseType === 'TUTORIAL' ? 'Vídeo Tutorial' : mediaType === 'video' ? 'Vídeo' : mediaType === 'audio' ? 'Áudio' : mediaType === 'document' ? 'Documento' : 'Imagem'}
+                          </span>
+                          {mediaFile && (
+                            <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500">
+                              • {(mediaFile.size / (1024 * 1024)).toFixed(1)} MB
+                            </span>
+                          )}
+                          {videoDuration && (
+                            <span className="text-[10px] font-mono font-bold text-purple-600 dark:text-purple-400 bg-purple-500/10 px-1.5 py-0.2 rounded">
+                              {videoDuration}
+                            </span>
+                          )}
+                        </div>
                       </div>
-                      <button
-                        onClick={() => {
-                          setMediaFile(null);
-                          setMediaUrl(undefined);
-                          setMediaType(undefined);
-                          if (fileInputRef.current) fileInputRef.current.value = '';
-                        }}
-                        className="p-2 hover:bg-rose-500/10 text-rose-500 rounded-xl transition-colors cursor-pointer"
-                      >
-                        <X className="w-4.5 h-4.5" />
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          className="px-2.5 py-1.5 text-[11px] font-bold text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-white/5 rounded-xl transition-colors cursor-pointer"
+                          title="Substituir Mídia"
+                        >
+                          Substituir
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMediaFile(null);
+                            setMediaUrl(undefined);
+                            setMediaType(undefined);
+                            setVideoDuration(null);
+                            if (fileInputRef.current) fileInputRef.current.value = '';
+                          }}
+                          className="p-1.5 hover:bg-rose-500/10 text-rose-500 rounded-xl transition-colors cursor-pointer"
+                          title="Remover"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>

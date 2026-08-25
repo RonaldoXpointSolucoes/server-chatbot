@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS wa_outgoing_messages (
   message_type text NOT NULL DEFAULT 'text',
   body text,
   media_url text,
+  response_type text DEFAULT 'STANDARD',
+  options jsonb DEFAULT '{}'::jsonb,
   status text NOT NULL DEFAULT 'pending', -- 'pending', 'processing', 'sent', 'failed', 'paused', 'cancelled'
   priority integer NOT NULL DEFAULT 5,
   scheduled_at timestamp with time zone NOT NULL DEFAULT now(),

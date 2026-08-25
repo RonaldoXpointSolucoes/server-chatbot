@@ -540,6 +540,11 @@ async function runMigrations() {
           CREATE POLICY "Permitir tudo em cardapio_opcoes" ON cardapio_opcoes FOR ALL USING (true) WITH CHECK (true);
 
           ALTER TABLE bots ADD COLUMN IF NOT EXISTS enabled_endpoints text[] DEFAULT ARRAY['cardapio', 'adicionais', 'cep', 'cliente', 'cadastro', 'pix', 'pedido', 'status'];
+
+          -- Suporte a Respostas Prontas do tipo TUTORIAL
+          ALTER TABLE quick_replies ADD COLUMN IF NOT EXISTS type text DEFAULT 'STANDARD';
+          ALTER TABLE wa_outgoing_messages ADD COLUMN IF NOT EXISTS response_type text DEFAULT 'STANDARD';
+          ALTER TABLE wa_outgoing_messages ADD COLUMN IF NOT EXISTS options jsonb DEFAULT '{}'::jsonb;
         `;
         await client.query(migrationSQL);
         console.log("[Migration] Migração DDL executada com sucesso!");

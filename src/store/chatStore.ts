@@ -577,7 +577,7 @@ interface ChatState {
   editHumanMessage: (contactId: string, messageId: string, newText: string, instanceName: string) => Promise<void>;
   deleteHumanMessage: (contactId: string, messageId: string, instanceName: string) => Promise<void>;
   forwardMessage: (contactId: string, message: MessageType, instanceName: string) => Promise<void>;
-  sendMediaFromUrl: (contactId: string, mediaUrl: string, mediaType: 'image' | 'video' | 'audio' | 'document', instanceName: string, caption?: string, fileName?: string) => Promise<void>;
+  sendMediaFromUrl: (contactId: string, mediaUrl: string, mediaType: 'image' | 'video' | 'audio' | 'document', instanceName: string, caption?: string, fileName?: string, responseType?: CannedResponseType) => Promise<void>;
   uploadAndSendMedia: (contactId: string, file: File, mediaType: 'image' | 'video' | 'audio' | 'document', instanceName: string, isPtt?: boolean, caption?: string) => Promise<void>;
   updateContactCRM: (contactId: string, payload: Partial<ContactRow>) => Promise<void>;
   deleteContact: (contactId: string) => Promise<void>;
@@ -615,8 +615,8 @@ interface ChatState {
   // Quick Replies
   quickReplies: QuickReply[];
   fetchQuickReplies: () => Promise<void>;
-  addQuickReply: (shortcut: string, content: string, mediaUrl?: string, mediaType?: string) => Promise<void>;
-  updateQuickReply: (id: string, shortcut: string, content: string, mediaUrl?: string, mediaType?: string) => Promise<void>;
+  addQuickReply: (shortcut: string, content: string, mediaUrl?: string, mediaType?: string, type?: CannedResponseType) => Promise<void>;
+  updateQuickReply: (id: string, shortcut: string, content: string, mediaUrl?: string, mediaType?: string, type?: CannedResponseType) => Promise<void>;
   deleteQuickReply: (id: string) => Promise<void>;
   
   // Contact Groups (Grupos Empresariais)
@@ -693,11 +693,16 @@ interface ChatState {
   deleteAppointment: (id: string) => Promise<void>;
 }
 
+export type CannedResponseType = 'STANDARD' | 'TUTORIAL';
+
 export interface QuickReply {
   id: string;
   tenant_id: string;
   shortcut: string;
   content: string;
+  type?: CannedResponseType;
+  media_url?: string;
+  media_type?: string;
   created_at?: string;
 }
 
@@ -1504,15 +1509,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  addQuickReply: async (shortcut: string, content: string, mediaUrl?: string, mediaType?: string) => {
+  addQuickReply: async (shortcut: string, content: string, mediaUrl?: string, mediaType?: string, type?: CannedResponseType) => {
       const state = get();
       if (!state.tenantInfo) throw new Error('Tenant não encontrado');
+      const finalType = type || 'STANDARD';
       const { data, error } = await supabase.from('quick_replies').insert({
          tenant_id: state.tenantInfo.id,
          shortcut,
          content,
          media_url: mediaUrl,
-         media_type: mediaType
+         media_type: mediaType,
+         type: finalType
       }).select().single();
       
       if (error) throw error;
@@ -1521,17 +1528,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
   },
 
-  updateQuickReply: async (id: string, shortcut: string, content: string, mediaUrl?: string, mediaType?: string) => {
+  updateQuickReply: async (id: string, shortcut: string, content: string, mediaUrl?: string, mediaType?: string, type?: CannedResponseType) => {
+      const finalType = type || 'STANDARD';
       const { error } = await supabase.from('quick_replies').update({
          shortcut,
          content,
          media_url: mediaUrl,
-         media_type: mediaType
+         media_type: mediaType,
+         type: finalType
       }).eq('id', id);
       
       if (error) throw error;
       set(s => ({
-         quickReplies: s.quickReplies.map(q => q.id === id ? { ...q, shortcut, content, media_url: mediaUrl, media_type: mediaType } : q)
+         quickReplies: s.quickReplies.map(q => q.id === id ? { ...q, shortcut, content, media_url: mediaUrl, media_type: mediaType, type: finalType } : q)
       }));
   },
 
@@ -2417,7 +2426,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  sendMediaFromUrl: async (contactId, mediaUrl, mediaType, instanceName, caption, fileName) => {
+  sendMediaFromUrl: async (contactId, mediaUrl, mediaType, instanceName, caption, fileName, responseType) => {
     const state = get();
     const contact = state.contacts.find(c => c.id === contactId);
     if (!contact || !state.tenantInfo) return;
@@ -2537,7 +2546,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         ? fileName.replace(/[^a-zA-Z0-9.\-_]/g, '_') 
         : `canned_media_${Date.now()}`;
 
-      console.log(`[sendMediaFromUrl] Disparando webhook para URL: ${mediaUrl} com nome: ${cleanFileName}`);
+      console.log(`[sendMediaFromUrl] Disparando webhook para URL: ${mediaUrl} com nome: ${cleanFileName} e responseType: ${responseType || 'STANDARD'}`);
 
       const res = await fetch(`${API_URL}/api/v1/instances/${resolvedInstanceId}/send-media-url`, {
         method: 'POST',
@@ -2553,7 +2562,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           caption: finalCaption,
           mediaUrl: mediaUrl,
           fileName: cleanFileName,
-          ptt: false
+          ptt: false,
+          responseType: responseType || 'STANDARD'
         })
       });
 
