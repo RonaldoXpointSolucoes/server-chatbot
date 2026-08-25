@@ -1880,6 +1880,7 @@ export default function AccountSettings() {
 
             {/* Informações Principais da Empresa */}
             <div className="space-y-6">
+              {/* Linha 1: Nome da Empresa e Link do Cardápio */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                   <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2 mb-2">
@@ -1898,193 +1899,186 @@ export default function AccountSettings() {
                   </p>
                 </div>
 
-                <div className="space-y-3">
-                  {/* Link do Cardápio Digital */}
-                  <div>
-                    <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <LinkIcon size={16} className="text-gray-400" />
-                        <span>Link do Cardápio Digital</span>
-                      </div>
-                      {linkCardapio && (
-                        <a 
-                          href={linkCardapio.startsWith('http') ? linkCardapio : `https://${linkCardapio}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-[11px] font-medium text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1"
-                        >
-                          <ExternalLink size={12} />
-                          Abrir cardápio
-                        </a>
-                      )}
-                    </label>
-                    <div className="relative">
-                      <input 
-                        type="url"
-                        value={linkCardapio}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setLinkCardapio(val);
-                          // Se o usuário colou um link com UUID, tenta extrair opcionalmente
-                          if (val && !gfoodStoreId) {
-                            const uuidMatch = val.match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/);
-                            if (uuidMatch) {
-                              setGfoodStoreId(uuidMatch[0].toUpperCase());
-                            }
-                          }
-                        }}
-                        placeholder="https://gastrofood.com.br/cardapio/loja..."
-                        className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 pr-24 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400"
-                      />
-                      {linkCardapio && (
-                        <button
-                          type="button"
-                          onClick={() => handleScanStoreIdFromLink()}
-                          disabled={isScanningStoreId}
-                          title="Escanear e capturar o ID da loja automaticamente no link"
-                          className="absolute right-2 top-1/2 -translate-y-1/2 px-2.5 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/50 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 border border-indigo-200/60 dark:border-indigo-800/40 text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm disabled:opacity-50"
-                        >
-                          {isScanningStoreId ? (
-                            <>
-                              <Loader2 size={12} className="animate-spin text-indigo-500" />
-                              <span>Buscando...</span>
-                            </>
-                          ) : (
-                            <>
-                              <Sparkles size={12} className="text-amber-500" />
-                              <span>Buscar ID</span>
-                            </>
-                          )}
-                        </button>
-                      )}
-                    </div>
-                    <p className="text-xs text-gray-500 dark:text-[#8696a0] mt-1.5">
-                      Substituído no token <code className="bg-gray-200 dark:bg-black/30 px-1 py-0.5 rounded font-mono text-[10px] text-indigo-500 dark:text-indigo-300">[LINK_CARDAPIO]</code>.
-                    </p>
-                  </div>
-
-                  {/* ID Loja gFood (UUID Estabelecimento) com UI Refinada */}
-                  <div className="p-3.5 bg-gradient-to-r from-indigo-50/50 via-purple-50/30 to-blue-50/20 dark:from-indigo-950/20 dark:via-purple-950/10 dark:to-transparent border border-indigo-100 dark:border-indigo-900/30 rounded-xl space-y-2">
-                    <div className="flex items-center justify-between">
-                      <label className="text-[11px] uppercase tracking-wider font-extrabold text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5 select-none">
-                        <Store size={13} />
-                        ID Loja gFood (UUID Estabelecimento)
-                      </label>
-                      <div className="flex items-center gap-1.5">
-                        {gfoodStoreId ? (
-                          isValidUUID(gfoodStoreId) ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300">
-                              <CheckCircle2 size={10} />
-                              UUID Válido
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300">
-                              <AlertCircle size={10} />
-                              Formato Inválido
-                            </span>
-                          )
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-gray-100 dark:bg-[#202c33] text-gray-500 dark:text-gray-400">
-                            Não configurado (Opcional)
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
+                <div>
+                  <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
-                      <div className="relative flex-1">
-                        <input 
-                          type="text"
-                          value={gfoodStoreId}
-                          onChange={(e) => {
-                            const val = e.target.value.trim();
-                            setGfoodStoreId(val ? val.toUpperCase() : '');
-                          }}
-                          placeholder="Ex: Cole o UUID da loja ou clique em Buscar"
-                          className="w-full bg-white dark:bg-[#111b21] border border-gray-200 dark:border-[#304046] rounded-lg px-3 py-2 pr-8 text-xs text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 font-mono shadow-sm transition-all placeholder:text-gray-400"
-                        />
-                        {gfoodStoreId && (
-                          <button
-                            type="button"
-                            onClick={() => setGfoodStoreId('')}
-                            title="Limpar ID da loja"
-                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
-                          >
-                            <X size={13} />
-                          </button>
-                        )}
-                      </div>
-
-                      {/* Botão Copiar */}
-                      {gfoodStoreId && (
-                        <button
-                          type="button"
-                          onClick={handleCopyStoreId}
-                          title="Copiar ID da loja"
-                          className="p-2 rounded-lg bg-white dark:bg-[#111b21] border border-gray-200 dark:border-[#304046] text-gray-600 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-all shadow-sm"
-                        >
-                          {copiedStoreId ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
-                        </button>
-                      )}
-
-                      {/* Botão de Captura Automática */}
-                      <button
-                        type="button"
-                        onClick={() => handleScanStoreIdFromLink()}
-                        disabled={isScanningStoreId || !linkCardapio}
-                        title={linkCardapio ? "Buscar ID da loja automaticamente no link" : "Informe o link do cardápio acima para buscar"}
-                        className="px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm disabled:opacity-50 disabled:pointer-events-none"
-                      >
-                        {isScanningStoreId ? (
-                          <Loader2 size={13} className="animate-spin" />
-                        ) : (
-                          <Sparkles size={13} />
-                        )}
-                        <span className="hidden sm:inline">Buscar no Link</span>
-                      </button>
+                      <LinkIcon size={16} className="text-gray-400" />
+                      <span>Link do Cardápio Digital</span>
                     </div>
-
-                    {/* Feedback e Sugestões da Busca de ID */}
-                    {scanStoreIdFeedback && (
-                      <div className={`p-2.5 rounded-lg text-xs flex items-start gap-2 animate-in fade-in duration-150 ${
-                        scanStoreIdFeedback.type === 'success'
-                          ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/40'
-                          : scanStoreIdFeedback.type === 'error'
-                          ? 'bg-red-50 dark:bg-red-950/40 text-red-800 dark:text-red-300 border border-red-200 dark:border-red-800/40'
-                          : 'bg-blue-50 dark:bg-blue-950/40 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800/40'
-                      }`}>
-                        {scanStoreIdFeedback.type === 'success' && <CheckCircle2 size={14} className="text-emerald-600 dark:text-emerald-400 mt-0.5 shrink-0" />}
-                        {scanStoreIdFeedback.type === 'error' && <AlertCircle size={14} className="text-red-600 dark:text-red-400 mt-0.5 shrink-0" />}
-                        {scanStoreIdFeedback.type === 'info' && <HelpCircle size={14} className="text-blue-600 dark:text-blue-400 mt-0.5 shrink-0" />}
-                        <div className="flex-1 space-y-1.5">
-                          <p>{scanStoreIdFeedback.message}</p>
-                          {scanStoreIdFeedback.candidates && scanStoreIdFeedback.candidates.length > 1 && (
-                            <div className="flex flex-wrap gap-1.5 pt-1">
-                              {scanStoreIdFeedback.candidates.map((cand, idx) => (
-                                <button
-                                  key={idx}
-                                  type="button"
-                                  onClick={() => setGfoodStoreId(cand)}
-                                  className={`px-2 py-0.5 text-[10px] font-mono rounded border transition-all ${
-                                    gfoodStoreId === cand
-                                      ? 'bg-indigo-600 text-white border-indigo-600 font-bold'
-                                      : 'bg-white dark:bg-[#111b21] text-gray-700 dark:text-gray-300 border-gray-300 dark:border-[#304046] hover:border-indigo-500'
-                                  }`}
-                                >
-                                  {cand}
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </div>
+                    {linkCardapio && (
+                      <a 
+                        href={linkCardapio.startsWith('http') ? linkCardapio : `https://${linkCardapio}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[11px] font-medium text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1"
+                      >
+                        <ExternalLink size={12} />
+                        Abrir cardápio
+                      </a>
                     )}
+                  </label>
+                  <input 
+                    type="url"
+                    value={linkCardapio}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setLinkCardapio(val);
+                      // Se o usuário colou um link com UUID, tenta extrair opcionalmente
+                      if (val && !gfoodStoreId) {
+                        const uuidMatch = val.match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/);
+                        if (uuidMatch) {
+                          setGfoodStoreId(uuidMatch[0].toUpperCase());
+                        }
+                      }
+                    }}
+                    placeholder="https://gastrofood.com.br/cardapio/loja..."
+                    className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400"
+                  />
+                  <p className="text-xs text-gray-500 dark:text-[#8696a0] mt-2">
+                    Substituído no token <code className="bg-gray-200 dark:bg-black/30 px-1 py-0.5 rounded font-mono text-[10px] text-indigo-500 dark:text-indigo-300">[LINK_CARDAPIO]</code>.
+                  </p>
+                </div>
+              </div>
 
-                    <p className="text-[11px] text-gray-500 dark:text-[#8696a0] leading-relaxed">
-                      Utilizado nas requisições diretas de integração com Gastrofood (<code className="font-mono text-[10px] text-indigo-500">AGuidEstab</code>). Deixe em branco se a sua unidade não utilizar UUID de loja ou preencha manualmente.
-                    </p>
+              {/* Linha 2: ID Loja gFood (UUID Estabelecimento) em Card Full-Width Elegante */}
+              <div className="p-4 bg-gradient-to-r from-indigo-50/60 via-purple-50/40 to-blue-50/30 dark:from-indigo-950/30 dark:via-purple-950/20 dark:to-transparent border border-indigo-100 dark:border-indigo-900/40 rounded-2xl space-y-3 shadow-sm">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <label className="text-xs uppercase tracking-wider font-extrabold text-indigo-700 dark:text-indigo-400 flex items-center gap-2 select-none">
+                    <Store size={15} />
+                    <span>ID Loja gFood (UUID do Estabelecimento)</span>
+                  </label>
+                  <div className="flex items-center gap-2">
+                    {gfoodStoreId ? (
+                      isValidUUID(gfoodStoreId) ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/40">
+                          <CheckCircle2 size={12} />
+                          UUID Válido
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/40">
+                          <AlertCircle size={12} />
+                          Formato Inválido
+                        </span>
+                      )
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 dark:bg-[#202c33] text-gray-500 dark:text-gray-400">
+                        Não configurado (Opcional)
+                      </span>
+                    )}
                   </div>
                 </div>
+
+                {/* Linha de Ação do Input e Botões */}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+                  <div className="relative flex-1">
+                    <input 
+                      type="text"
+                      value={gfoodStoreId}
+                      onChange={(e) => {
+                        const val = e.target.value.trim();
+                        setGfoodStoreId(val ? val.toUpperCase() : '');
+                      }}
+                      placeholder="Ex: 6D0187D9-4073-4CEB-986A-09083992518C"
+                      className="w-full bg-white dark:bg-[#111b21] border border-indigo-200 dark:border-indigo-900/60 rounded-xl px-4 py-2.5 pr-10 text-xs sm:text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 font-mono uppercase tracking-wide shadow-sm transition-all placeholder:text-gray-400 placeholder:normal-case placeholder:tracking-normal"
+                    />
+                    {gfoodStoreId && (
+                      <button
+                        type="button"
+                        onClick={() => setGfoodStoreId('')}
+                        title="Limpar ID da loja"
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
+                      >
+                        <X size={15} />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {/* Botão Copiar */}
+                    {gfoodStoreId && (
+                      <button
+                        type="button"
+                        onClick={handleCopyStoreId}
+                        title="Copiar ID da loja"
+                        className="px-3 py-2.5 rounded-xl bg-white dark:bg-[#111b21] border border-indigo-200 dark:border-indigo-900/60 text-gray-600 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400 hover:border-indigo-400 flex items-center gap-1.5 text-xs font-semibold transition-all shadow-sm active:scale-95"
+                      >
+                        {copiedStoreId ? (
+                          <>
+                            <Check size={14} className="text-emerald-500" />
+                            <span className="text-emerald-600 dark:text-emerald-400">Copiado</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy size={14} />
+                            <span>Copiar</span>
+                          </>
+                        )}
+                      </button>
+                    )}
+
+                    {/* Botão de Captura Automática no Link */}
+                    <button
+                      type="button"
+                      onClick={() => handleScanStoreIdFromLink()}
+                      disabled={isScanningStoreId || !linkCardapio}
+                      title={linkCardapio ? "Escanear e buscar ID da loja automaticamente no link do cardápio" : "Preencha o link do cardápio acima para buscar"}
+                      className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 active:scale-95 text-white text-xs font-semibold flex items-center justify-center gap-2 transition-all shadow-md shadow-indigo-500/20 disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap"
+                    >
+                      {isScanningStoreId ? (
+                        <>
+                          <Loader2 size={14} className="animate-spin" />
+                          <span>Escaneando...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles size={14} className="text-amber-300" />
+                          <span>Buscar no Link</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Feedback e Sugestões da Busca de ID */}
+                {scanStoreIdFeedback && (
+                  <div className={`p-3 rounded-xl text-xs flex items-start gap-2.5 animate-in fade-in duration-200 ${
+                    scanStoreIdFeedback.type === 'success'
+                      ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/40'
+                      : scanStoreIdFeedback.type === 'error'
+                      ? 'bg-red-50 dark:bg-red-950/40 text-red-800 dark:text-red-300 border border-red-200 dark:border-red-800/40'
+                      : 'bg-blue-50 dark:bg-blue-950/40 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800/40'
+                  }`}>
+                    {scanStoreIdFeedback.type === 'success' && <CheckCircle2 size={16} className="text-emerald-600 dark:text-emerald-400 mt-0.5 shrink-0" />}
+                    {scanStoreIdFeedback.type === 'error' && <AlertCircle size={16} className="text-red-600 dark:text-red-400 mt-0.5 shrink-0" />}
+                    {scanStoreIdFeedback.type === 'info' && <HelpCircle size={16} className="text-blue-600 dark:text-blue-400 mt-0.5 shrink-0" />}
+                    <div className="flex-1 space-y-2">
+                      <p className="font-medium">{scanStoreIdFeedback.message}</p>
+                      {scanStoreIdFeedback.candidates && scanStoreIdFeedback.candidates.length > 1 && (
+                        <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                          <span className="text-[11px] font-bold text-gray-500 dark:text-gray-400 mr-1">Sugestões encontradas:</span>
+                          {scanStoreIdFeedback.candidates.map((cand, idx) => (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => setGfoodStoreId(cand)}
+                              className={`px-2.5 py-1 text-xs font-mono rounded-lg border transition-all active:scale-95 ${
+                                gfoodStoreId === cand
+                                  ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-sm'
+                                  : 'bg-white dark:bg-[#111b21] text-gray-700 dark:text-gray-300 border-gray-300 dark:border-[#304046] hover:border-indigo-500 hover:text-indigo-600'
+                              }`}
+                            >
+                              {cand}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                <p className="text-xs text-gray-500 dark:text-[#8696a0] leading-relaxed">
+                  Injetado automaticamente nos payloads das requisições diretas de integração com Gastrofood (<code className="font-mono text-[10px] text-indigo-500 dark:text-indigo-300 font-bold">AGUIDEstab</code>). Deixe em branco se a sua unidade não utilizar UUID de loja ou preencha manualmente.
+                </p>
               </div>
 
               <div>
