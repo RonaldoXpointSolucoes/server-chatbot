@@ -218,7 +218,8 @@ export default function AdminDashboard() {
       });
       if (res.ok) {
         const resData = await res.json().catch(() => null);
-        if (resData && resData.id) createdCompanyId = resData.id;
+        const createdObj = Array.isArray(resData) ? resData[0] : resData;
+        if (createdObj && createdObj.id) createdCompanyId = createdObj.id;
         success = true;
       }
     } catch (err) {

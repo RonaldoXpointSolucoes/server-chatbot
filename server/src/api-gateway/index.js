@@ -232,7 +232,8 @@ router.post('/v1/admin/companies', async (req, res) => {
     try {
         const { data, error } = await supabase.from('companies').insert(req.body).select();
         if (error) throw error;
-        res.json(data);
+        const created = Array.isArray(data) ? data[0] : data;
+        res.json(created || data);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
