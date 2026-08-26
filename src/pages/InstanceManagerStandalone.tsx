@@ -39,6 +39,7 @@ import {
   ShieldAlert,
   ArrowUpRight,
   Share2,
+  Link as LinkIcon,
   Building2,
   Terminal
 } from 'lucide-react';
