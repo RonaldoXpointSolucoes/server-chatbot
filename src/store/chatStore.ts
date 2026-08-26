@@ -2798,8 +2798,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
           
           const newMessages = sortMessagesChronologically([...c.messages, msg]);
+          const isChatCurrentlyFocused = state.activeChatId === contactId && (typeof document !== 'undefined' ? document.hasFocus() : true);
           
-          return { ...c, messages: newMessages, conv_status: updatedStatus, snoozed_until: updatedSnooze };
+          let newUnread = c.unread || 0;
+          if (msg.sender === 'client' && !isChatCurrentlyFocused) {
+              newUnread = (c.unread || 0) + 1;
+          }
+
+          const msgTs = msg.timestamp ? new Date(msg.timestamp).getTime() : Date.now();
+          const previewText = msg.text || (msg.mediaType === 'image' ? '📸 Imagem' : msg.mediaType === 'video' ? '🎥 Vídeo' : msg.mediaType === 'audio' ? '🎵 Áudio' : msg.mediaType === 'document' ? '📁 Documento' : 'Mensagem');
+          
+          return { 
+            ...c, 
+            messages: newMessages, 
+            conv_status: updatedStatus, 
+            snoozed_until: updatedSnooze,
+            unread: newUnread,
+            lastMsgTimestamp: Math.max(c.lastMsgTimestamp || 0, msgTs),
+            last_message_preview: previewText
+          };
         }
         return c;
       })
@@ -2818,14 +2835,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const isGroup = contact.whatsapp_jid?.endsWith('@g.us');
     if (contact.phone && contact.phone.length > 15 && !contact.phone.includes('+') && !isGroup) return;
 
-    // BARREIRA DE INSTÂNCIA: Impede contatos vazando entre caixas via realtime
-    const currentActiveFilter = get().activeChannelFilter;
-    if (currentActiveFilter && currentActiveFilter !== 'default' && currentActiveFilter !== 'all') {
-        if (contact.instance_id && contact.instance_id !== currentActiveFilter) {
-            console.log(`[Realtime Barreira] Ignorando contato da instância ${contact.instance_id} na visualização ativa ${currentActiveFilter}`);
-            return;
-        }
-    }
 
     set((state) => {
       // 1. Resolvemos os dois principais identificadores unicos independentes (JID ou Telefone Formatado/Puro)
@@ -3948,7 +3957,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         custom_name: finalCustomName,
                         name: finalName,
                         avatar: dbC.profile_picture_url || (existing.avatar?.includes('ui-avatars') ? avatarFallback : (existing.avatar || avatarFallback)),
-                        unread: isExistingNewer ? existing.unread : unread,
+                        unread: isExistingNewer ? (existing.unread > 0 ? existing.unread : Math.max(unread, existing.unread || 0)) : Math.max(unread, existing.unread || 0),
                         is_favorite: existing.is_favorite || isFavorite,
                         is_pinned: existing.is_pinned || isPinned,
                         lastMsgTimestamp: isExistingNewer ? existing.lastMsgTimestamp : ts,
@@ -5599,24 +5608,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (!targetContactId) {
              console.warn('[Realtime] Ignorando msg INSERT por falta de contact_id mapeado:', m);
              return;
-        }
-        
-        // BARREIRA DE INSTÂNCIA: Bloqueia injeção de mensagens de outras caixas na UI atual
-        const currentActiveFilter = get().activeChannelFilter;
-        if (currentActiveFilter && currentActiveFilter !== 'default' && currentActiveFilter !== 'all') {
-            const filterInstUuid = instanceCache.getId(currentActiveFilter) || currentActiveFilter;
-            const filterInstName = instanceCache.getName(currentActiveFilter) || currentActiveFilter;
-            const msgInstUuid = convInstanceId ? (instanceCache.getId(convInstanceId) || convInstanceId) : null;
-            const msgInstName = convInstanceId ? (instanceCache.getName(convInstanceId) || convInstanceId) : null;
-
-            const isMatch = !convInstanceId || convInstanceId === currentActiveFilter ||
-                            (msgInstUuid && msgInstUuid === filterInstUuid) ||
-                            (msgInstName && msgInstName === filterInstName);
-
-            if (!isMatch) {
-                 console.log(`[Realtime Barreira] Ignorando msg INSERT da instância ${convInstanceId} na visualização ativa ${currentActiveFilter}`);
-                 return;
-            }
         }
         
         const expectedCompositeId = targetContactId + '_' + (convInstanceId || 'default');

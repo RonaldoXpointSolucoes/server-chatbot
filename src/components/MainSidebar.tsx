@@ -53,7 +53,7 @@ import {
   Building2
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { useChatStore, hasUserAccessToInstance } from '../store/chatStore';
+import { useChatStore, hasUserAccessToInstance, instanceCache } from '../store/chatStore';
 import { supabase } from '../services/supabase';
 import { createPortal } from 'react-dom';
 import { getLocalNotificationPrefs, fetchUserInboxNotificationPreferences, toggleInboxNotification } from '../services/notificationPreferences';
@@ -876,9 +876,10 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
             {instances.length > 0 && !isChannelsCollapsed && (
                <div className="pl-1 border-l-2 border-[#2a3942]/50 ml-5 my-1 py-0.5 space-y-0.5">
                  {instances.map(inst => {
+                    const instUuid = instanceCache.getId(inst.id) || inst.id;
                     const unreadCount = contacts.filter(c => {
                       const cInst = c.instance_id || (c.id.includes('_') ? c.id.split('_')[1] : null);
-                      const isMatch = cInst === inst.id || cInst === inst.display_name;
+                      const isMatch = cInst === inst.id || cInst === inst.display_name || (cInst && (instanceCache.getId(cInst) === instUuid || instanceCache.getName(cInst) === inst.display_name));
                       if (!isMatch) return false;
                       return isContactUnattended(c);
                     }).length;

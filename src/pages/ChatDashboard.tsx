@@ -728,7 +728,7 @@ export default function ChatDashboard() {
         const state = useChatStore.getState();
         if (state.activeChatId) {
           const activeContact = state.contacts.find(c => c.id === state.activeChatId);
-          if (activeContact && (Number(activeContact.unread || 0) > 0 || activeContact.isManuallyUnread)) {
+          if (activeContact && Number(activeContact.unread || 0) > 0 && !activeContact.isManuallyUnread) {
             state.markAsRead(state.activeChatId);
           }
         }
