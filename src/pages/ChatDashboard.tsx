@@ -1790,15 +1790,16 @@ export default function ChatDashboard() {
         }
 
         // 3) PROTEÇÃO RIGOROSA DE CHAT ATIVO:
-        // Se ESTE CARD ESPECÍFICO for o chat ativo aberto no painel principal, ele permanece visível na sidebar enquanto o usuário estiver interagindo com ele (EXCETO se tiver sido resolvido/encerrado no Modo Ticket)
+        // Se ESTE CARD ESPECÍFICO for o chat ativo aberto no painel principal, ele permanece visível na sidebar enquanto o usuário estiver interagindo com ele (EXCETO se tiver sido resolvido/encerrado/adiado no Modo Ticket)
         const isExactActiveChat = Boolean(
           activeChatId && (c.id === activeChatId || c.conv_id === activeChatId)
         );
         const isResolvedOrClosed = c.conv_status === 'resolved' || c.conv_status === 'closed' || c.status === 'resolved' || c.status === 'closed' || c.is_resolved === true || Boolean(c.resolved_at);
+        const isSnoozedActive = c.conv_status === 'snoozed' && c.snoozed_until && (new Date(c.snoozed_until).getTime() > Date.now());
 
         if (isExactActiveChat && !searchTerm) {
-            // No Modo Ticket (ou filtros de tickets abertos), se o chat ativo foi RESOLVIDO/ENCERRADO ou BLOQUEADO, não força visibilidade na lista de tickets abertos
-            if ((ticketMode || filterType === 'tickets' || filterType === 'open') && (isResolvedOrClosed || c.is_blocked)) {
+            // No Modo Ticket (ou filtros de tickets abertos), se o chat ativo foi RESOLVIDO/ENCERRADO, BLOQUEADO ou está ADIADO, não força visibilidade na lista de tickets abertos
+            if ((ticketMode || filterType === 'tickets' || filterType === 'open') && (isResolvedOrClosed || c.is_blocked || (isSnoozedActive && filterType !== 'snoozed' && filterType !== 'appointments'))) {
                 return false;
             }
             return true;
@@ -2990,18 +2991,21 @@ export default function ChatDashboard() {
     const raw = activeChat?.messages?.filter(m => Boolean(m.text || m.mediaUrl || m.isTask || m.sender || m.payload || m.id)) || [];
     const sorted = sortMessagesChronologically(raw);
 
-    const filtered = (ticketMode && messageFilter === 'today')
-      ? sorted.filter(m => {
-          try {
-            const msgDate = m.timestamp instanceof Date ? m.timestamp : new Date(m.timestamp);
-            if (isNaN(msgDate.getTime())) return false;
-            if (msgDate.getTime() > Date.now()) return true;
-            return isToday(msgDate);
-          } catch (e) {
-            return false;
-          }
-        })
-      : sorted;
+    let filtered = sorted;
+    if (ticketMode && messageFilter === 'today') {
+      const todayOnly = sorted.filter(m => {
+        try {
+          const msgDate = m.timestamp instanceof Date ? m.timestamp : new Date(m.timestamp);
+          if (isNaN(msgDate.getTime())) return false;
+          if (msgDate.getTime() > Date.now()) return true;
+          return isToday(msgDate);
+        } catch (e) {
+          return false;
+        }
+      });
+      // Se houver mensagens hoje, filtra por hoje; se não houver mensagens hoje mas houver mensagens anteriores, exibe o histórico imediatamente sem tela em branco!
+      filtered = todayOnly.length > 0 ? todayOnly : sorted;
+    }
 
     const deduped = filtered.filter((msg, idx) => {
       if (msg.sender !== 'system') return true;
@@ -6573,12 +6577,7 @@ export default function ChatDashboard() {
               })();
 
               return (
-                <motion.div 
-                  initial={{ opacity: 0, y: 15 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -15 }}
-                  transition={{ type: "spring", stiffness: 350, damping: 35 }}
-                  key={contact.id}
+                <div key={contact.id}
                   onClick={() => {
                     const realId = getRealContactId(contact.id);
                     let targetContactId = contact.id;
@@ -7029,7 +7028,7 @@ export default function ChatDashboard() {
                       )}
                     </div>
                   </div>
-                </motion.div>
+                </div>
               );
             });
             })()}
@@ -7867,8 +7866,7 @@ export default function ChatDashboard() {
             </div>
           ) : (
             <div 
-               key={activeChat.id}
-               className="flex-1 overflow-y-auto p-4 z-10 flex flex-col gap-2 transition-all duration-300 ease-out animate-in fade-in"
+               className="flex-1 overflow-y-auto p-4 z-10 flex flex-col gap-2"
                ref={messagesContainerRef}
              onScroll={handleScroll}
              onClick={() => {
