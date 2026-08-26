@@ -324,6 +324,13 @@ export const instanceCache = {
   }
 };
 
+// Cache em memória de mensagens históricas para carregamento instantâneo (0ms) ao trocar de chat
+export const messagesMemoryCache = new Map<string, any[]>();
+// Mapa de promessas em voo para evitar requisições concorrentes duplicadas ao Supabase
+export const inFlightMessagesLoad = new Map<string, Promise<void>>();
+// Cache de mapeamento de telefone / realId -> UUID do contato no banco
+export const contactUuidCache = new Map<string, string>();
+
 export const getOrFetchApiKey = async (instanceId: string | null | undefined): Promise<string> => {
   if (!instanceId) return '';
   const cachedKey = instanceCache.getApiKey(instanceId);
@@ -1730,6 +1737,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setActiveChat: (id) => {
     set({ activeChatId: id });
     if (id) {
+      // Hidratação instantânea da memória local (0ms) se houver cache de mensagens prévio
+      const cachedMsgs = messagesMemoryCache.get(id) || messagesMemoryCache.get(getRealContactId(id));
+      if (cachedMsgs && cachedMsgs.length > 0) {
+        set((s) => {
+          const updated = [...s.contacts];
+          const idx = updated.findIndex(c => c.id === id || c.conv_id === id || (c.id && getRealContactId(c.id) === getRealContactId(id)));
+          if (idx !== -1 && (!updated[idx].messages || updated[idx].messages.length === 0)) {
+            updated[idx] = { ...updated[idx], messages: cachedMsgs };
+            return { contacts: updated };
+          }
+          return s;
+        });
+      }
       get().loadTicketsForContact(id);
     } else {
       set({ activeTicket: null, contactTickets: [] });
@@ -4226,7 +4246,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   loadHistoricalMessages: async (contactId, instanceName, forceSync = false) => {
-    try {
+    const loadKey = `${contactId}_${instanceName}_${forceSync}`;
+    if (!forceSync && inFlightMessagesLoad.has(loadKey)) {
+      return inFlightMessagesLoad.get(loadKey);
+    }
+
+    const loadPromise = (async () => {
+      try {
         const tenant = get().tenantInfo;
         if (!tenant) return;
 
@@ -4240,7 +4266,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
         );
         const knownConvId = activeContactObj?.conv_id;
 
-        // 1. Tentar determinar o UUID do contato (contact_id) e da instância alvo
+        // Hidratação imediata da RAM (0ms) se houver mensagens em cache e o contato estiver sem mensagens
+        const memoryCached = messagesMemoryCache.get(contactId) || (realContactId ? messagesMemoryCache.get(realContactId) : null);
+        if (memoryCached && memoryCached.length > 0 && (!activeContactObj?.messages || activeContactObj.messages.length === 0)) {
+            set((s) => {
+                const updated = [...s.contacts];
+                const idx = updated.findIndex(c => c.id === contactId || (c.conv_id && c.conv_id === contactId) || (c.id && getRealContactId(c.id) === realContactId));
+                if (idx !== -1) {
+                    updated[idx] = { ...updated[idx], messages: memoryCached };
+                }
+                return { contacts: updated };
+            });
+        }
+
+        // 1. Determinar o UUID do contato (contact_id) e da instância alvo
         let targetContactUuid: string | null = null;
         if (isUuid(contactId)) {
             targetContactUuid = contactId;
@@ -4248,9 +4287,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
             targetContactUuid = realContactId;
         } else if (activeContactObj?.id && isUuid(getRealContactId(activeContactObj.id))) {
             targetContactUuid = getRealContactId(activeContactObj.id);
+        } else if (realContactId && contactUuidCache.has(realContactId)) {
+            targetContactUuid = contactUuidCache.get(realContactId) || null;
         }
 
-        // Se ainda não temos o UUID do contato em mãos, busca no banco pelo número de telefone
+        // Se ainda não temos o UUID do contato, busca no banco pelo número de telefone e salva no cache
         if (!targetContactUuid && realContactId) {
             const cleanPhone = realContactId.replace(/\D/g, '');
             if (cleanPhone) {
@@ -4264,6 +4305,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
                 if (dbContact?.id && isUuid(dbContact.id)) {
                     targetContactUuid = dbContact.id;
+                    contactUuidCache.set(realContactId, dbContact.id);
                 }
             }
         }
@@ -4279,7 +4321,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
         const hasValidInstanceId = targetInstanceId && isUuid(targetInstanceId);
 
-        // 2. Montar filtro de conversas ESTRITAMENTE com UUIDs válidos e isolado por instância
+        // 2. Montar queries paralelizadas
         let convsQuery = supabase.from('conversations')
             .select('id, status, last_message_at, updated_at, instance_id')
             .eq('tenant_id', tenant.id);
@@ -4293,7 +4335,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
             }
         }
 
-        // 3. Executar chamadas em paralelo (contact_notes, resolveInstanceUuid, conversas)
         const notesQuery = targetContactUuid
             ? supabase.from('contact_notes')
                 .select('id, content, media_url, media_type, media_metadata, is_task, assigned_to, checklist_items, task_completed, created_by_name, created_at')
@@ -4302,10 +4343,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 .order('created_at', { ascending: true })
             : Promise.resolve({ data: [] });
 
-        const [notesRes, resolvedInstanceId, allConvsRes] = await Promise.all([
+        // Query direta e antecipada de mensagens se knownConvId já for conhecido
+        const directMsgPromise = (knownConvId && isUuid(knownConvId))
+            ? supabase.from('messages')
+                .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
+                .eq('tenant_id', tenant.id)
+                .eq('conversation_id', knownConvId)
+                .order('timestamp', { ascending: false })
+                .limit(150)
+            : Promise.resolve({ data: null });
+
+        // 3. Executa TODAS as buscas simultaneamente em um único Round-Trip Time
+        const [notesRes, resolvedInstanceId, allConvsRes, directMsgRes] = await Promise.all([
              notesQuery,
              resolveInstanceUuid(tenant.id, instanceName),
-             convsQuery.order('updated_at', { ascending: false })
+             convsQuery.order('updated_at', { ascending: false }),
+             directMsgPromise
         ]);
 
         let dbNotes: any[] = notesRes.data || [];
@@ -4333,9 +4386,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }));
 
         const handleMapping = (messagesArray: any[]) => {
-            // Inclui mensagens de automação/pedidos para exibir "Segue seu pedido" e recibos
-            const filteredArray = messagesArray;
-            const mappedMsgs = filteredArray.map(m => {
+            const mappedMsgs = messagesArray.map(m => {
                 const advanced = parseAdvancedMsgMetadata(m);
                 const realTimestamp = new Date(m.timestamp);
 
@@ -4369,9 +4420,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 uniqueMsgs.push(m);
             }
 
+            // Grava no cache em memória
+            messagesMemoryCache.set(contactId, uniqueMsgs);
+            if (realContactId) messagesMemoryCache.set(realContactId, uniqueMsgs);
+
             set((s) => {
                const updated = [...s.contacts];
-               const idx = updated.findIndex(c => c.id === contactId || (c.conv_id && c.conv_id === contactId) || (c.id && getRealContactId(c.id) === getRealContactId(contactId)));
+               const idx = updated.findIndex(c => c.id === contactId || (c.conv_id && c.conv_id === contactId) || (c.id && getRealContactId(c.id) === realContactId));
                if (idx !== -1) {
                    const currentMsgs = updated[idx].messages || [];
                    const optimisticMsgs = currentMsgs.filter(m => String(m.id).startsWith('optimistic-'));
@@ -4412,15 +4467,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
             });
         };
 
-        // 4. Buscar mensagens usando .in('conversation_id', convIds) nativo ou fallback por contact_id
+        // 4. Se a query direta antecipada já trouxe mensagens, usa imediatamente
+        let rawFetchedMsgs: any[] = (directMsgRes?.data && Array.isArray(directMsgRes.data)) ? directMsgRes.data : [];
+
         if (conv?.id) {
             supabase.from('conversations').update({ unread_count: 0 }).eq('id', conv.id).then(({ error }) => {
                 if (error) console.error("[loadHistoricalMessages] Erro ao limpar unread_count:", error);
             });
         }
         
-        let rawFetchedMsgs: any[] = [];
-        if (convIds.length > 0) {
+        if (rawFetchedMsgs.length === 0 && convIds.length > 0) {
             let msgQuery = supabase.from('messages')
                    .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
                    .eq('tenant_id', tenant.id)
@@ -4432,7 +4488,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
             const { data, error: msgErr } = await msgQuery
                    .order('timestamp', { ascending: false })
-                   .limit(500);
+                   .limit(150);
 
             if (msgErr) {
                 console.error("[loadHistoricalMessages] Erro ao buscar mensagens por conversation_id:", msgErr);
@@ -4466,7 +4522,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
                 const { data, error: msgErr } = await fallbackMsgQuery
                        .order('timestamp', { ascending: false })
-                       .limit(500);
+                       .limit(150);
 
                 if (msgErr) {
                     console.error("[loadHistoricalMessages] Erro ao buscar mensagens do contato:", msgErr);
@@ -4478,9 +4534,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
         const msgs = rawFetchedMsgs ? [...rawFetchedMsgs].reverse() : [];
         handleMapping(msgs);
-               
-        
-
 
         if (forceSync) {
             // Conversa tem base, prossegue com o sync on demand
@@ -4560,7 +4613,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         // 2ª checagem final
                         let fetchNewMsgs: any[] | null = null;
                         if (validConvIds.length > 0) {
-                            const { data: finalBatch, error: fetchErr } = await supabase.from('messages')
+                            const { data: finalBatch } = await supabase.from('messages')
                                .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
                                .eq('tenant_id', tenant.id)
                                .in('conversation_id', validConvIds)
@@ -4620,9 +4673,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 }
             }
         }
-    } catch(err) {
-        console.error("Erro carregando history:", err);
-    }
+      } catch (err: any) {
+        console.error('[loadHistoricalMessages] Erro ao carregar mensagens:', err);
+      } finally {
+        inFlightMessagesLoad.delete(loadKey);
+      }
+    })();
+
+    inFlightMessagesLoad.set(loadKey, loadPromise);
+    return loadPromise;
   },
 
   syncMissedMessages: async () => {

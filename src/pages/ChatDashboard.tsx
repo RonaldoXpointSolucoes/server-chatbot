@@ -2984,6 +2984,34 @@ export default function ChatDashboard() {
   }, []);
 
   const activeChat = contacts.find(c => c.id === activeChatId || (activeChatId && c.conv_id === activeChatId)) || contacts.find(c => activeChatId && getRealContactId(c.id) === getRealContactId(activeChatId));
+
+  // Memoização de alta performance das mensagens do chat ativo (elimina lag de renderização e re-sorts desnecessários)
+  const { sortedRawMsgs, dedupedMsgs } = useMemo(() => {
+    const raw = activeChat?.messages?.filter(m => Boolean(m.text || m.mediaUrl || m.isTask || m.sender || m.payload || m.id)) || [];
+    const sorted = sortMessagesChronologically(raw);
+
+    const filtered = (ticketMode && messageFilter === 'today')
+      ? sorted.filter(m => {
+          try {
+            const msgDate = m.timestamp instanceof Date ? m.timestamp : new Date(m.timestamp);
+            if (isNaN(msgDate.getTime())) return false;
+            if (msgDate.getTime() > Date.now()) return true;
+            return isToday(msgDate);
+          } catch (e) {
+            return false;
+          }
+        })
+      : sorted;
+
+    const deduped = filtered.filter((msg, idx) => {
+      if (msg.sender !== 'system') return true;
+      const nextMsg = filtered[idx + 1];
+      return !nextMsg || nextMsg.sender !== 'system';
+    });
+
+    return { sortedRawMsgs: sorted, dedupedMsgs: deduped };
+  }, [activeChat?.id, activeChat?.messages, ticketMode, messageFilter]);
+
   const wacallSessions = useWaCallsStore((s) => s.sessions) || [];
   const chatInstanceId = activeChat ? (getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName) : null;
   const resolvedInstanceUuid = chatInstanceId ? (instanceCache.getId(chatInstanceId) || chatInstanceId) : null;
@@ -6579,17 +6607,14 @@ export default function ChatDashboard() {
                           instance_id: activeChannelFilter,
                           conv_status: 'bot',
                           unread: 0,
-                          messages: []
+                          messages: contact.messages || []
                         } as any);
                       }
                     }
 
                     setActiveChat(targetContactId);
-                    if (targetInstance) {
-                      useChatStore.getState().loadHistoricalMessages(targetContactId, targetInstance);
-                      if (contact.avatar?.includes('ui-avatars')) {
-                        useChatStore.getState().fetchContactPicture(targetContactId, contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'), targetInstance);
-                      }
+                    if (targetInstance && contact.avatar?.includes('ui-avatars')) {
+                      useChatStore.getState().fetchContactPicture(targetContactId, contact.whatsapp_jid || (contact.phone + '@s.whatsapp.net'), targetInstance);
                     }
                     if (contact.unread > 0) {
                       useChatStore.getState().markAsRead(targetContactId);
@@ -7867,29 +7892,6 @@ export default function ChatDashboard() {
 
 
             {(() => {
-              const rawMsgs = activeChat.messages?.filter(m => Boolean(m.text || m.mediaUrl || m.isTask || m.sender || m.payload || m.id)) || [];
-              const sortedRawMsgs = sortMessagesChronologically(rawMsgs);
-
-              const msgsFilteredByMode = (ticketMode && messageFilter === 'today')
-                ? sortedRawMsgs.filter(m => {
-                    try {
-                      const msgDate = m.timestamp instanceof Date ? m.timestamp : new Date(m.timestamp);
-                      if (isNaN(msgDate.getTime())) return false;
-                      // Se a mensagem for de fuso horário futuro/drift de relógio, sempre exibe
-                      if (msgDate.getTime() > Date.now()) return true;
-
-                      return isToday(msgDate);
-                    } catch (e) {
-                      return false;
-                    }
-                  })
-                : sortedRawMsgs;
-              const dedupedMsgs = msgsFilteredByMode.filter((msg, idx) => {
-                if (msg.sender !== 'system') return true;
-                const nextMsg = msgsFilteredByMode[idx + 1];
-                return !nextMsg || nextMsg.sender !== 'system';
-              });
-
               // SE NÃO HOUVER MENSAGENS NO FILTRO ATUAL (Ex: Modo Ticket filtrando hoje ou conversa vazia), EXIBE UM CARD MODERNO EM VEZ DE TELA PRETA
               if (dedupedMsgs.length === 0) {
                 if (ticketMode && messageFilter === 'today') {
