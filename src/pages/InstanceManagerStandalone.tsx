@@ -39,12 +39,13 @@ import {
   ShieldAlert,
   ArrowUpRight,
   Share2,
-  Link as LinkIcon,
-  Building2
+  Building2,
+  Terminal
 } from 'lucide-react';
 
 import { masterSupabase } from '../services/supabase';
 import { migrateInstanceHistory } from '../services/whatsappEngine';
+import { InstanceLogsModal } from '../components/InstanceLogsModal';
 
 // Configurações do Supabase & Engines com Fallback Automático
 const SUPABASE_URL = 'https://yzbxsxabzncdzuxvlppt.supabase.co';
@@ -154,6 +155,9 @@ export default function InstanceManagerStandalone() {
   // Modal de Exclusão
   const [deleteTarget, setDeleteTarget] = useState<WhatsAppInstance | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  // Modal de Logs Exclusivos do Servidor em Tempo Real
+  const [logTargetInstance, setLogTargetInstance] = useState<WhatsAppInstance | null>(null);
 
   // Suite de Diagnóstico & Testes da Instância (Tela Inteira)
   const [testTargetInstance, setTestTargetInstance] = useState<WhatsAppInstance | null>(null);
@@ -1495,6 +1499,15 @@ export default function InstanceManagerStandalone() {
                     </button>
 
                     <button
+                      onClick={() => setLogTargetInstance(inst)}
+                      className="p-3 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 font-bold rounded-xl text-xs flex items-center gap-1.5 transition active:scale-[0.98]"
+                      title="Ver Logs Exclusivos do Servidor em Tempo Real para esta Instância"
+                    >
+                      <Terminal className="w-4 h-4 text-emerald-400" />
+                      <span className="hidden sm:inline">Logs</span>
+                    </button>
+
+                    <button
                       onClick={() => setDeleteTarget(inst)}
                       className="p-3 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 rounded-xl transition"
                       title="Excluir Instância"
@@ -2136,6 +2149,13 @@ export default function InstanceManagerStandalone() {
           </div>
         </div>
       )}
+
+      {/* MODAL DE LOGS EXCLUSIVOS DO SERVIDOR EM TEMPO REAL */}
+      <InstanceLogsModal
+        instance={logTargetInstance}
+        isOpen={Boolean(logTargetInstance)}
+        onClose={() => setLogTargetInstance(null)}
+      />
     </div>
   );
 }

@@ -108,6 +108,7 @@ class SessionManager {
         this.oscillationAttempts = new Map();
         this.inProgressLocks = new Map();
         this.instanceMutexes = new Map();
+        this.autoHealingCooldowns = new Map();
 
         // Pino stream configurado para enviar logs para nosso SSE e para o stdout
         const pinoStream = {
@@ -211,13 +212,15 @@ class SessionManager {
                         const wasAuth = this.authenticatedSessions.has(z.id);
                         this.destroyExistingSession(z.id, 'zombie_heartbeat').catch(() => {});
                         if (z.tenantId && wasAuth && !isLocalDev) {
-                            setTimeout(() => {
+                            const timer = setTimeout(() => {
+                                this.reconnectingTimers.delete(z.id);
                                 if (!this.sessions.has(z.id)) {
                                     this.createSession(z.tenantId, z.id, true).catch(err => {
                                         console.error(`[SessionManager/Heartbeat] Erro na auto-reconexão pós-zumbi para ${z.id}:`, err.message);
                                     });
                                 }
                             }, 2000);
+                            this.reconnectingTimers.set(z.id, timer);
                         }
                     }
 
@@ -255,7 +258,7 @@ class SessionManager {
             }
         }, 15000);
 
-        // Supervisor de Auto-Healing Proativo (a cada 20 segundos)
+        // Supervisor de Auto-Healing Proativo (a cada 25 segundos)
         // Garante que nenhuma instância que deveria estar conectada permaneça offline/órfã
         setInterval(async () => {
             try {
@@ -274,8 +277,17 @@ class SessionManager {
                 const isProductionMaster = currentNodeId === 'production-worker' || (process.env.APP_ENV || '').toLowerCase() === 'production';
 
                 for (const inst of dbInstances) {
+                    const lastHeal = this.autoHealingCooldowns.get(inst.id) || 0;
+                    if (now - lastHeal < 45000) {
+                        continue;
+                    }
+
                     const hasSessionInRam = this.sessions.has(inst.id);
-                    const isConnecting = this.connectingState.has(inst.id);
+                    const sessionData = this.sessions.get(inst.id);
+                    const sock = sessionData?.sock;
+                    const ws = sock?.ws;
+                    const rawState = ws?.socket?.readyState;
+                    const isConnecting = this.connectingState.has(inst.id) || (ws && (ws.isConnecting || rawState === 0));
                     const hasActiveTimer = this.reconnectingTimers.has(inst.id) || this.reconnectTimeouts.has(inst.id) || this.conflictTimeouts.has(inst.id);
                     const conflictCount = this.conflictAttempts.get(inst.id) || 0;
 
@@ -284,8 +296,6 @@ class SessionManager {
                         continue;
                     }
 
-                    const sessionData = this.sessions.get(inst.id);
-                    const sock = sessionData?.sock;
                     const isWsOpen = isSocketOpen(sock);
 
                     if (hasSessionInRam && isWsOpen) {
@@ -312,6 +322,7 @@ class SessionManager {
 
                     // Se a instância não está ativa na RAM deste nó e (está atribuída a este nó OU o lease expirou OU é Master Takeover)
                     if (isAssignedToThisNode || isLeaseExpired || isMasterTakeover) {
+                        this.autoHealingCooldowns.set(inst.id, now);
                         console.warn(`[SessionManager/AutoHealing] 🩺 Detectada instância ${inst.id} desincronizada (RAM: ${hasSessionInRam ? 'Presente (WS fechado)' : 'Ausente'}, Lease Expirado: ${isLeaseExpired}). Revivendo conexão...`);
                         this.createSession(inst.tenant_id, inst.id, true).catch(err => {
                             console.error(`[SessionManager/AutoHealing] Falha ao reviver instância ${inst.id}:`, err.message);
@@ -321,7 +332,7 @@ class SessionManager {
             } catch (healErr) {
                 console.error('[SessionManager/AutoHealing] Erro no ciclo de auto-healing:', healErr.message);
             }
-        }, 20000);
+        }, 25000);
 
         // Limpeza periódica preventiva de locks órfãos/expirados no banco de dados (a cada 60s)
         setInterval(async () => {
@@ -1002,13 +1013,15 @@ class SessionManager {
                         ).catch(() => {});
 
                         const jitter = Math.floor(Math.random() * 500) + 1200;
-                        setTimeout(() => {
+                        const timer = setTimeout(() => {
+                            this.reconnectingTimers.delete(instanceId);
                             if (!this.sessions.has(instanceId)) {
                                 this.createSession(tenantId, instanceId, true).catch(err => {
                                     console.error(`[SessionManager] Erro ao reconectar pós restartRequired/428 para ${instanceId}:`, err.message);
                                 });
                             }
                         }, jitter);
+                        this.reconnectingTimers.set(instanceId, timer);
                         return;
                     }
 
@@ -1038,13 +1051,15 @@ class SessionManager {
                                 .eq('id', instanceId)
                         ).catch(() => {});
 
-                        setTimeout(() => {
+                        const timer = setTimeout(() => {
+                            this.reconnectingTimers.delete(instanceId);
                             if (!this.sessions.has(instanceId)) {
                                 this.createSession(tenantId, instanceId, true).catch(err => {
                                     console.error(`[SessionManager] Erro na reconexão automática de oscilação (${reason || status}) para ${instanceId}:`, err.message);
                                 });
                             }
                         }, delay);
+                        this.reconnectingTimers.set(instanceId, timer);
                         return;
                     }
 
@@ -1371,30 +1386,35 @@ class SessionManager {
                                             activeSock = latestSession.sock;
                                             sendFn = activeSock.originalSendMessage || activeSock.sendMessage;
                                         } else {
-                                            console.warn(`[SessionManager - Antiban] Sem sessão ativa saudável para ${instanceId}. Aguardando/acordando conexão...`);
-                                            
                                             // Se já houver reconexão em andamento, aguarda sua conclusão
                                             if (this.connectingState.has(instanceId)) {
                                                 try {
-                                                    await this.connectingState.get(instanceId);
+                                                    const connectingSock = await this.connectingState.get(instanceId);
+                                                    if (connectingSock && isSocketOpen(connectingSock)) {
+                                                        activeSock = connectingSock;
+                                                        sendFn = activeSock.originalSendMessage || activeSock.sendMessage;
+                                                    }
                                                 } catch (e) {}
                                             }
 
-                                            const wakedSock = await this.getSocketOrWake(tenantId, instanceId, false);
-                                            if (wakedSock) {
-                                                activeSock = wakedSock;
-                                                sendFn = activeSock.originalSendMessage || activeSock.sendMessage;
-                                            } else {
-                                                // Valida status no banco de dados para verificar se é desconexão definitiva ou transitória
-                                                const { data: instStatus } = await retryWithBackoff(() => 
-                                                    supabase.from('whatsapp_instances').select('status, last_error').eq('id', instanceId).maybeSingle()
-                                                ).catch(() => ({ data: null }));
+                                            if (!isSocketOpen(activeSock)) {
+                                                console.warn(`[SessionManager - Antiban] Sem sessão ativa saudável para ${instanceId}. Aguardando/acordando conexão...`);
+                                                const wakedSock = await this.getSocketOrWake(tenantId, instanceId, false);
+                                                if (wakedSock) {
+                                                    activeSock = wakedSock;
+                                                    sendFn = activeSock.originalSendMessage || activeSock.sendMessage;
+                                                } else {
+                                                    // Valida status no banco de dados para verificar se é desconexão definitiva ou transitória
+                                                    const { data: instStatus } = await retryWithBackoff(() => 
+                                                        supabase.from('whatsapp_instances').select('status, last_error').eq('id', instanceId).maybeSingle()
+                                                    ).catch(() => ({ data: null }));
 
-                                                const isDefinitiveOffline = instStatus && ['offline', 'logged_out', 'blocked_12h'].includes(instStatus.status);
-                                                if (isDefinitiveOffline) {
-                                                    throw new Error(`Instância ${instanceId} está ${instStatus.status} no banco de dados (${instStatus.last_error || 'desconectada'})`);
+                                                    const isDefinitiveOffline = instStatus && ['offline', 'logged_out', 'blocked_12h'].includes(instStatus.status);
+                                                    if (isDefinitiveOffline) {
+                                                        throw new Error(`Instância ${instanceId} está ${instStatus.status} no banco de dados (${instStatus.last_error || 'desconectada'})`);
+                                                    }
+                                                    throw new Error(`Connection Closed (Instância ${instanceId} temporariamente reconectando ou restabelecendo socket)`);
                                                 }
-                                                throw new Error(`Connection Closed (Instância ${instanceId} temporariamente reconectando ou restabelecendo socket)`);
                                             }
                                         }
                                     }
@@ -1474,11 +1494,12 @@ class SessionManager {
                                         } catch (e) {}
                                     }
 
-                                    console.error(`[SessionManager - Antiban] Erro na tentativa ${attempts}/${maxAttempts} para ${jid} via instância ${instanceId}:`, error.message || error);
-                                    
                                     if (attempts < maxAttempts) {
+                                        console.warn(`[SessionManager - Antiban] Tentativa ${attempts}/${maxAttempts} para ${jid} via instância ${instanceId}: ${error.message || error}. Aguardando restabelecimento do socket...`);
                                         const retryDelay = (2000 * attempts) + Math.floor(Math.random() * 1000);
                                         await new Promise(r => setTimeout(r, retryDelay));
+                                    } else {
+                                        console.error(`[SessionManager - Antiban] Todas as ${maxAttempts} tentativas falharam para ${jid} via instância ${instanceId}:`, error.message || error);
                                     }
                                 }
                             }
@@ -1665,8 +1686,8 @@ class SessionManager {
                 const rawSocket = ws.socket;
                 const rawState = rawSocket ? rawSocket.readyState : undefined;
                 
-                // Se está conectando ou em handshake, não interrompe prematuramente
-                const isConnecting = ws.isConnecting || (rawState === 0) || this.connectingState.has(instanceId);
+                // Se está conectando, em handshake ou com timer ativo, não interrompe prematuramente
+                const isConnecting = ws.isConnecting || (rawState === 0) || this.connectingState.has(instanceId) || this.reconnectingTimers.has(instanceId);
                 if (isConnecting) {
                     return;
                 }
@@ -1682,13 +1703,15 @@ class SessionManager {
                     console.warn(`[SessionManager/Watchdog] Instância ${instanceId} com WebSocket encerrado (isOpen: ${ws.isOpen}, isClosed: ${ws.isClosed}, rawState: ${rawState}). Reciclando socket e reconectando...`);
                     this.clearWatchdog(instanceId);
                     this.destroyExistingSession(instanceId, 'watchdog_ws_closed').catch(() => {});
-                    setTimeout(() => {
+                    const timer = setTimeout(() => {
+                        this.reconnectingTimers.delete(instanceId);
                         if (!this.sessions.has(instanceId)) {
                             this.createSession(tenantId, instanceId, true).catch(err => {
                                 console.error(`[SessionManager/Watchdog] Erro ao reconectar ${instanceId}:`, err.message);
                             });
                         }
                     }, 1500);
+                    this.reconnectingTimers.set(instanceId, timer);
                 }
             }
         }, 30000);

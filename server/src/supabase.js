@@ -37,13 +37,13 @@ if (!supabaseUrl || !supabaseKey) {
  */
 async function resilientFetch(url, options = {}, retries = 4, delay = 800) {
   try {
-    const response = await fetch(url, { ...options, keepalive: true });
+    const response = await fetch(url, options);
     
     // Tratamento de instabilidade HTTP 5xx do gateway / servidor Supabase Cloud (500, 502, 503, 504, 520-524)
     if (response.status >= 500 && retries > 0) {
       const jitter = Math.floor(Math.random() * 300);
       const waitTime = delay + jitter;
-      console.warn(`[Supabase/HTTP] Erro HTTP ${response.status} na API Supabase. Retentando em ${waitTime}ms... (${retries} retentativas restantes)`);
+      console.info(`[Supabase/HTTP] Instabilidade HTTP ${response.status} na API Supabase. Retentando em ${waitTime}ms... (${retries} retentativas restantes)`);
       await new Promise(resolve => setTimeout(resolve, waitTime));
       return resilientFetch(url, options, retries - 1, Math.min(delay * 2, 6000));
     }
@@ -52,6 +52,7 @@ async function resilientFetch(url, options = {}, retries = 4, delay = 800) {
   } catch (error) {
     const errorMsg = error?.message || String(error);
     const errorCode = error?.code || '';
+    const errorName = error?.name || '';
     
     const isTransientNetworkError = 
       errorMsg.includes('fetch failed') ||
@@ -61,15 +62,25 @@ async function resilientFetch(url, options = {}, retries = 4, delay = 800) {
       errorMsg.includes('ETIMEDOUT') ||
       errorMsg.includes('EPIPE') ||
       errorMsg.includes('ENOTFOUND') ||
+      errorMsg.includes('EAI_AGAIN') ||
+      errorMsg.includes('ECONNREFUSED') ||
       errorCode === 'UND_ERR_CONNECT_TIMEOUT' ||
       errorCode === 'UND_ERR_SOCKET' ||
+      errorCode === 'UND_ERR_BODY_TIMEOUT' ||
+      errorCode === 'UND_ERR_HEADERS_TIMEOUT' ||
       errorMsg.includes('ConnectTimeoutError') ||
-      errorMsg.includes('database connection');
+      errorMsg.includes('SocketError') ||
+      errorMsg.includes('Connection closed') ||
+      errorMsg.includes('database connection') ||
+      errorName === 'AbortError' ||
+      errorName === 'TimeoutError';
 
     if (isTransientNetworkError && retries > 0) {
       const jitter = Math.floor(Math.random() * 350);
       const waitTime = delay + jitter;
-      console.warn(`[Supabase/Network] Oscilação transitória de conexão (${errorMsg || errorCode}). Auto-recuperando em ${waitTime}ms... (${retries} retentativas restantes)`);
+      if (retries < 4) {
+        console.info(`[Supabase/Network] Auto-recuperando conexão (${errorMsg || errorCode}) em ${waitTime}ms... (${retries} retentativas restantes)`);
+      }
       await new Promise(resolve => setTimeout(resolve, waitTime));
       return resilientFetch(url, options, retries - 1, Math.min(delay * 2, 6000));
     }
@@ -103,6 +114,7 @@ export async function retryWithBackoff(fn, retries = 4, delay = 800) {
   } catch (error) {
     const errorMsg = error?.message || String(error);
     const errorCode = error?.code || '';
+    const errorName = error?.name || '';
     const status = error?.status || error?.statusCode;
 
     const isNetworkError = 
@@ -111,18 +123,28 @@ export async function retryWithBackoff(fn, retries = 4, delay = 800) {
       errorMsg.includes('timeout') ||
       errorCode === 'UND_ERR_CONNECT_TIMEOUT' ||
       errorCode === 'UND_ERR_SOCKET' ||
+      errorCode === 'UND_ERR_BODY_TIMEOUT' ||
+      errorCode === 'UND_ERR_HEADERS_TIMEOUT' ||
       errorMsg.includes('ConnectTimeoutError') ||
+      errorMsg.includes('SocketError') ||
+      errorMsg.includes('Connection closed') ||
       errorMsg.includes('database connection') ||
       errorMsg.includes('ECONNRESET') ||
       errorMsg.includes('ETIMEDOUT') ||
       errorMsg.includes('EPIPE') ||
       errorMsg.includes('ENOTFOUND') ||
+      errorMsg.includes('EAI_AGAIN') ||
+      errorMsg.includes('ECONNREFUSED') ||
+      errorName === 'AbortError' ||
+      errorName === 'TimeoutError' ||
       (typeof status === 'number' && status >= 500);
         
     if (retries > 0 && isNetworkError) {
       const jitter = Math.floor(Math.random() * 300);
       const nextDelay = delay + jitter;
-      console.info(`[Supabase/Network] Oscilação temporária de banco/rede (${errorMsg || errorCode}). Auto-recuperando em ${nextDelay}ms... (${retries} retentativas)`);
+      if (retries < 4) {
+        console.info(`[Supabase/Network] Recuperando oscilação temporária (${errorMsg || errorCode}) em ${nextDelay}ms... (${retries} retentativas restantes)`);
+      }
       await new Promise(resolve => setTimeout(resolve, nextDelay));
       return retryWithBackoff(fn, retries - 1, Math.min(delay * 2, 8000));
     }
