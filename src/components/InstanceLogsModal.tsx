@@ -22,7 +22,12 @@ import {
   SlidersHorizontal,
   ChevronRight,
   ShieldCheck,
-  ShieldAlert
+  ShieldAlert,
+  Sparkles,
+  Bot,
+  FileCode,
+  Send,
+  Zap
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
@@ -41,7 +46,7 @@ export interface LogItem {
   timestamp: string;
   level: 'error' | 'warn' | 'info' | 'log';
   message: string;
-  source?: 'server' | 'database' | 'monitoring';
+  source?: 'server' | 'database' | 'monitoring' | 'api';
   details?: any;
 }
 
@@ -70,19 +75,38 @@ interface InstanceLogsModalProps {
   onClose: () => void;
 }
 
+// Verifica se uma mensagem de log é originária da API Externa / Gateway de Automação
+const isApiLog = (log: LogItem): boolean => {
+  if (log.source === 'api') return true;
+  const msg = log.message || '';
+  return msg.includes('[API Gateway]') ||
+         msg.includes('[Evolution API]') ||
+         msg.includes('[Messages API]') ||
+         msg.includes('/message/send') ||
+         msg.includes('/messages/send') ||
+         msg.includes('Disparo Externo') ||
+         msg.includes('Disparo de Mídia') ||
+         msg.includes('Disparo de Automação') ||
+         msg.includes('[sendText]') ||
+         msg.includes('[sendMedia]') ||
+         msg.includes('[sendLocation]') ||
+         msg.includes('[sendContact]') ||
+         msg.includes('[sendReaction]');
+};
+
 export const InstanceLogsModal: React.FC<InstanceLogsModalProps> = ({
   instance,
   isOpen,
   onClose
 }) => {
   const [logs, setLogs] = useState<LogItem[]>([]);
-  const [filterLevel, setFilterLevel] = useState<'all' | 'error' | 'warn' | 'info'>('all');
+  const [filterLevel, setFilterLevel] = useState<'all' | 'api' | 'error' | 'warn' | 'info'>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [isPaused, setIsPaused] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
   const [isConnected, setIsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [copiedType, setCopiedType] = useState<'all' | 'errors' | 'id' | null>(null);
+  const [copiedType, setCopiedType] = useState<'all' | 'errors' | 'api' | 'ai' | 'id' | null>(null);
 
   const logsEndRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -103,7 +127,7 @@ export const InstanceLogsModal: React.FC<InstanceLogsModalProps> = ({
 
     if (msgLower.includes(instIdLower) || msgLower.includes(shortId)) return true;
     if (phone && phone.length >= 8 && (msgLower.includes(phone) || msgLower.includes(`55${phone}`))) return true;
-    if (nameLower && nameLower.length >= 4 && msgLower.includes(`"${nameLower}"`)) return true;
+    if (nameLower && nameLower.length >= 4 && (msgLower.includes(`"${nameLower}"`) || msgLower.includes(`(${nameLower})`) || msgLower.includes(`instância: ${nameLower}`))) return true;
 
     return false;
   };
@@ -125,12 +149,13 @@ export const InstanceLogsModal: React.FC<InstanceLogsModalProps> = ({
             if (data.success && Array.isArray(data.logs)) {
               data.logs.forEach((l: any) => {
                 if (isLogFromThisInstance(l.message, instance)) {
+                  const isApi = l.message.includes('[API Gateway]') || l.message.includes('[Evolution API]') || l.message.includes('/message/send');
                   combined.push({
                     id: l.id || `srv_${Math.random().toString(36).substring(2, 9)}`,
                     timestamp: l.timestamp || new Date().toISOString(),
                     level: l.level === 'warn' ? 'warn' : l.level === 'error' ? 'error' : l.level === 'info' ? 'info' : 'log',
                     message: l.message,
-                    source: 'server'
+                    source: isApi ? 'api' : 'server'
                   });
                 }
               });
@@ -182,7 +207,7 @@ export const InstanceLogsModal: React.FC<InstanceLogsModalProps> = ({
 
         if (monLogs && monLogs.length > 0) {
           monLogs.forEach((ml: any) => {
-            const isErr = ml.event_type?.includes('error') || ml.event_type?.includes('lost');
+            const isErr = ml.event_type?.includes('error') || ml.event_type?.includes('lost') || ml.event_type?.includes('fail');
             combined.push({
               id: `db_mon_${ml.id}`,
               timestamp: ml.created_at,
@@ -234,12 +259,13 @@ export const InstanceLogsModal: React.FC<InstanceLogsModalProps> = ({
             const parsed = JSON.parse(event.data);
             if (parsed && parsed.message) {
               if (isLogFromThisInstance(parsed.message, instance)) {
+                const isApi = parsed.message.includes('[API Gateway]') || parsed.message.includes('[Evolution API]') || parsed.message.includes('/message/send');
                 const newEntry: LogItem = {
                   id: parsed.id || `live_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
                   timestamp: parsed.timestamp || new Date().toISOString(),
                   level: parsed.level === 'warn' ? 'warn' : parsed.level === 'error' ? 'error' : parsed.level === 'info' ? 'info' : 'log',
                   message: parsed.message,
-                  source: 'server'
+                  source: isApi ? 'api' : 'server'
                 };
                 setLogs((prev) => [...prev, newEntry]);
               }
@@ -277,10 +303,11 @@ export const InstanceLogsModal: React.FC<InstanceLogsModalProps> = ({
     }
   }, [logs, autoScroll, isPaused]);
 
-  // Filtra logs por severidade e termo de busca
+  // Filtra logs por severidade/categoria e termo de busca
   const filteredLogs = useMemo(() => {
     return logs.filter((log) => {
-      // Filtro de severidade
+      // Filtro de Categoria / Severidade
+      if (filterLevel === 'api' && !isApiLog(log)) return false;
       if (filterLevel === 'error' && log.level !== 'error') return false;
       if (filterLevel === 'warn' && log.level !== 'warn' && log.level !== 'error') return false;
       if (filterLevel === 'info' && log.level !== 'info' && log.level !== 'log') return false;
@@ -303,21 +330,32 @@ export const InstanceLogsModal: React.FC<InstanceLogsModalProps> = ({
     let errorCount = 0;
     let warnCount = 0;
     let infoCount = 0;
+    let apiCount = 0;
 
     logs.forEach((l) => {
+      if (isApiLog(l)) apiCount++;
       if (l.level === 'error') errorCount++;
       else if (l.level === 'warn') warnCount++;
       else infoCount++;
     });
 
-    return { total: logs.length, error: errorCount, warn: warnCount, info: infoCount };
+    return { total: logs.length, error: errorCount, warn: warnCount, info: infoCount, api: apiCount };
   }, [logs]);
 
-  // Copiar logs para a área de transferência
-  const handleCopyLogs = (mode: 'all' | 'errors') => {
-    const listToCopy = mode === 'errors' ? logs.filter((l) => l.level === 'error' || l.level === 'warn') : filteredLogs;
+  // Copiar logs simples para a área de transferência
+  const handleCopyLogs = (mode: 'all' | 'errors' | 'api') => {
+    let listToCopy: LogItem[] = [];
+
+    if (mode === 'errors') {
+      listToCopy = logs.filter((l) => l.level === 'error' || l.level === 'warn');
+    } else if (mode === 'api') {
+      listToCopy = logs.filter(isApiLog);
+    } else {
+      listToCopy = filteredLogs;
+    }
+
     if (listToCopy.length === 0) {
-      alert(`Nenhum log ${mode === 'errors' ? 'de erro/aviso' : ''} disponível para cópia.`);
+      alert(`Nenhum log ${mode === 'errors' ? 'de erro/aviso' : mode === 'api' ? 'de API Externa' : ''} disponível para cópia.`);
       return;
     }
 
@@ -328,6 +366,53 @@ export const InstanceLogsModal: React.FC<InstanceLogsModalProps> = ({
     navigator.clipboard.writeText(formatted);
     setCopiedType(mode);
     setTimeout(() => setCopiedType(null), 2500);
+  };
+
+  // SUPERPODER: Gera e copia um Relatório Markdown Rico e Estruturado Pronto para IA (ChatGPT / Claude / Gemini)
+  const handleCopyAiReport = () => {
+    if (!instance) return;
+
+    const errors = logs.filter((l) => l.level === 'error' || l.level === 'warn');
+    const apiLogs = logs.filter(isApiLog);
+
+    const report = `# 📋 RELATÓRIO DE DIAGNÓSTICO & LOGS — INSTÂNCIA WHATSAPP (CHATBOOT ENGINE)
+**Data/Hora da Coleta**: ${new Date().toLocaleString('pt-BR')}
+
+---
+### 📱 1. Identificação da Instância
+- **Nome**: \`${instance.display_name}\`
+- **UUID da Instância**: \`${instance.id}\`
+- **Telefone Vinculado**: \`${instance.phone_number ? '+' + instance.phone_number : 'Não informado'}\`
+- **Status Atual no DB**: \`${instance.status.toUpperCase()}\`
+- **Nó Alocado (Worker)**: \`${instance.assigned_node_id || 'production-worker'}\`
+- **IP de Saída Egress**: \`${instance.egress_ip || '69.62.92.212'} (${instance.egress_city || 'São Paulo - BR'})\`
+- **Chave de API (Instância)**: \`${instance.api_key ? instance.api_key.slice(0, 8) + '...' : 'Configurada'}\`
+
+---
+### 🚨 2. Erros e Alertas Recentes Detectados (${errors.length})
+${errors.length === 0 ? '_Nenhum erro crítico registrado no buffer atual._' : errors.map((e) => `- **[${new Date(e.timestamp).toLocaleTimeString('pt-BR')}] [${e.level.toUpperCase()}]**: \`${e.message}\`${e.details ? '\n  ```json\n  ' + JSON.stringify(e.details, null, 2) + '\n  ```' : ''}`).join('\n')}
+
+---
+### 📡 3. Chamadas de API Externa / Automações (${apiLogs.length})
+${apiLogs.length === 0 ? '_Nenhuma chamada de API Externa recente registrada para esta instância._' : apiLogs.map((a) => `- **[${new Date(a.timestamp).toLocaleTimeString('pt-BR')}]**: \`${a.message}\``).join('\n')}
+
+---
+### 📜 4. Trilha Cronológica Completa de Logs (${filteredLogs.length} Eventos Selecionados)
+\`\`\`text
+${filteredLogs.map((l) => `[${new Date(l.timestamp).toLocaleTimeString('pt-BR')}] [${l.level.toUpperCase()}] ${l.message}`).join('\n')}
+\`\`\`
+
+---
+### 🎯 5. Instruções de Diagnóstico para a IA
+> **Solicitação de Análise**:
+> 1. Analise a sequência de eventos acima e identifique a causa-raiz exata de qualquer falha na automação ou no envio de mensagens desta instância.
+> 2. Verifique se houve problema de autenticação (\`ApiKey\`), parâmetros ausentes no body, número de telefone com formato inválido, socket Baileys desconectado/em conflito (\`440\`) ou erro de rede Supabase.
+> 3. Apresente um resumo objetivo do diagnóstico e as ações recomendadas para restabelecer a integração.
+`;
+
+    navigator.clipboard.writeText(report);
+    setCopiedType('ai');
+    setTimeout(() => setCopiedType(null), 3000);
   };
 
   const handleCopyId = () => {
@@ -419,8 +504,28 @@ export const InstanceLogsModal: React.FC<InstanceLogsModalProps> = ({
               </div>
             </div>
 
-            {/* Ações Rápidas & Fechar */}
+            {/* Ações Rápidas, Botão Copiar para IA & Fechar */}
             <div className="flex items-center gap-2 self-end sm:self-center">
+              
+              {/* BOTÃO PRINCIPAL: COPIAR RELATÓRIO PARA IA */}
+              <button
+                onClick={handleCopyAiReport}
+                className="py-2 px-3 bg-gradient-to-r from-emerald-500/20 via-teal-500/20 to-cyan-500/20 hover:from-emerald-500/30 hover:to-cyan-500/30 border border-emerald-500/40 text-emerald-300 font-bold rounded-xl text-xs flex items-center gap-1.5 transition shadow-lg shadow-emerald-500/10 active:scale-95"
+                title="Gera e copia um relatório completo em formato Markdown ideal para colar no ChatGPT, Claude ou Gemini"
+              >
+                {copiedType === 'ai' ? (
+                  <>
+                    <Check className="w-4 h-4 text-emerald-400" />
+                    <span>Relatório Copiado!</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4 text-emerald-400 animate-pulse" />
+                    <span>Copiar para IA</span>
+                  </>
+                )}
+              </button>
+
               <button
                 onClick={loadInitialLogs}
                 disabled={isLoading}
@@ -447,7 +552,7 @@ export const InstanceLogsModal: React.FC<InstanceLogsModalProps> = ({
             ========================================================================= */}
         <div className="p-3 sm:px-5 border-b border-slate-800 bg-slate-950/40 shrink-0 flex flex-col md:flex-row md:items-center justify-between gap-3">
           
-          {/* Abas de Severidade */}
+          {/* Abas de Categoria & Severidade */}
           <div className="flex items-center gap-1 bg-slate-950/80 p-1 rounded-xl border border-slate-800/90 overflow-x-auto shrink-0">
             <button
               onClick={() => setFilterLevel('all')}
@@ -461,6 +566,25 @@ export const InstanceLogsModal: React.FC<InstanceLogsModalProps> = ({
               <span className="text-[10px] bg-slate-700 px-1.5 py-0.2 rounded-full font-mono">
                 {counts.total}
               </span>
+            </button>
+
+            {/* ABA DEDICADA: API EXTERNA / AUTOMAÇÕES */}
+            <button
+              onClick={() => setFilterLevel('api')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 shrink-0 ${
+                filterLevel === 'api'
+                  ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 shadow-sm'
+                  : 'text-indigo-400 hover:bg-indigo-500/10'
+              }`}
+              title="Exibir exclusivamente eventos e disparos de API Externa e Automações"
+            >
+              <Radio className="w-3.5 h-3.5" />
+              <span>API Externa</span>
+              {counts.api > 0 && (
+                <span className="text-[10px] bg-indigo-500/30 text-indigo-300 px-1.5 py-0.2 rounded-full font-mono font-bold">
+                  {counts.api}
+                </span>
+              )}
             </button>
 
             <button
@@ -560,11 +684,11 @@ export const InstanceLogsModal: React.FC<InstanceLogsModalProps> = ({
               <ArrowDown className={`w-3.5 h-3.5 ${autoScroll ? 'text-emerald-400' : 'text-slate-500'}`} />
             </button>
 
-            {/* Botão Copiar Logs */}
+            {/* Botão Copiar Logs Filtrados */}
             <button
               onClick={() => handleCopyLogs('all')}
               className="p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-semibold flex items-center gap-1 transition active:scale-95 shrink-0"
-              title="Copiar todos os logs filtrados"
+              title="Copiar todos os logs filtrados na tela"
             >
               {copiedType === 'all' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
               <span className="hidden sm:inline">Copiar</span>
@@ -589,9 +713,15 @@ export const InstanceLogsModal: React.FC<InstanceLogsModalProps> = ({
             <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-3 opacity-60">
               <Terminal className="w-12 h-12 text-slate-600" />
               <div>
-                <p className="text-sm font-semibold text-slate-300">Nenhum evento registrado para esta instância ainda</p>
+                <p className="text-sm font-semibold text-slate-300">
+                  {filterLevel === 'api'
+                    ? 'Nenhum disparo de API Externa registrado nesta sessão ainda'
+                    : 'Nenhum evento registrado para esta instância ainda'}
+                </p>
                 <p className="text-xs text-slate-500 max-w-md mt-1">
-                  Os eventos, mensagens, handshakes Baileys e logs do servidor desta instância serão exibidos aqui automaticamente em tempo real.
+                  {filterLevel === 'api'
+                    ? 'As requisições externas via REST (POST /message/sendText, sendMedia, etc.) com a ApiKey desta instância serão capturadas aqui em tempo real.'
+                    : 'Os eventos, mensagens, handshakes Baileys e logs do servidor desta instância serão exibidos aqui automaticamente em tempo real.'}
                 </p>
               </div>
             </div>
@@ -607,6 +737,7 @@ export const InstanceLogsModal: React.FC<InstanceLogsModalProps> = ({
               const isError = log.level === 'error';
               const isWarn = log.level === 'warn';
               const isInfo = log.level === 'info';
+              const isApi = isApiLog(log);
 
               return (
                 <div
@@ -616,6 +747,8 @@ export const InstanceLogsModal: React.FC<InstanceLogsModalProps> = ({
                       ? 'bg-rose-950/20 border-rose-900/40 text-rose-200'
                       : isWarn
                       ? 'bg-amber-950/20 border-amber-900/40 text-amber-200'
+                      : isApi
+                      ? 'bg-indigo-950/20 border-indigo-900/40 text-indigo-200'
                       : isInfo
                       ? 'bg-cyan-950/10 border-cyan-900/30 text-cyan-200'
                       : 'bg-slate-900/40 border-slate-800/40 text-slate-300'
@@ -634,27 +767,34 @@ export const InstanceLogsModal: React.FC<InstanceLogsModalProps> = ({
                           ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
                           : isWarn
                           ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                          : isApi
+                          ? 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30'
                           : isInfo
                           ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
                           : 'bg-slate-800 text-slate-400'
                       }`}
                     >
-                      {log.level}
+                      {isApi ? 'API' : log.level}
                     </span>
 
-                    {/* Origem (Server / DB / Monitoramento) */}
-                    {log.source && log.source !== 'server' && (
+                    {/* Origem (API_GATEWAY / DB_EVENT / MONITOR) */}
+                    {isApi ? (
+                      <span className="text-[9px] font-extrabold text-indigo-300 bg-indigo-500/20 border border-indigo-500/30 px-1.5 py-0.2 rounded shrink-0 select-none flex items-center gap-1">
+                        <Send className="w-2.5 h-2.5" />
+                        GATEWAY
+                      </span>
+                    ) : log.source && log.source !== 'server' ? (
                       <span className="text-[9px] font-bold text-slate-400 bg-slate-800 px-1 py-0.2 rounded shrink-0 select-none">
                         {log.source === 'database' ? 'DB_EVENT' : 'MONITOR'}
                       </span>
-                    )}
+                    ) : null}
 
                     {/* Conteúdo da Mensagem */}
                     <div className="flex-1 min-w-0">
                       <span className="whitespace-pre-wrap">{log.message}</span>
 
-                      {/* Exibição Estruturada de Detalhes JSON */}
-                      {log.details && (
+                      {/* Exibição Estruturada de Detalhes JSON (apenas se houver propriedades) */}
+                      {log.details && typeof log.details === 'object' && Object.keys(log.details).length > 0 && (
                         <div className="mt-1.5 p-2 bg-slate-950/90 rounded border border-slate-800/80 text-[11px] text-slate-400 overflow-x-auto">
                           <pre>{JSON.stringify(log.details, null, 2)}</pre>
                         </div>
@@ -669,9 +809,9 @@ export const InstanceLogsModal: React.FC<InstanceLogsModalProps> = ({
         </div>
 
         {/* =========================================================================
-            RODAPÉ INFORMATIVO
+            RODAPÉ INFORMATIVO COM ATALHOS DE CÓPIA INTELIGENTE
             ========================================================================= */}
-        <div className="p-3 px-5 border-t border-slate-800 bg-slate-950/80 shrink-0 flex items-center justify-between text-xs text-slate-400">
+        <div className="p-3 px-5 border-t border-slate-800 bg-slate-950/80 shrink-0 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-slate-400">
           <div className="flex items-center gap-4">
             <span className="flex items-center gap-1.5">
               <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'}`} />
@@ -682,19 +822,42 @@ export const InstanceLogsModal: React.FC<InstanceLogsModalProps> = ({
 
             <span className="hidden sm:inline text-slate-500">|</span>
 
-            <span className="hidden sm:inline text-slate-400">
+            <span className="text-slate-400">
               Exibindo <strong className="text-white">{filteredLogs.length}</strong> de <strong className="text-slate-300">{logs.length}</strong> eventos
             </span>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3 flex-wrap">
+            {/* Copiar Apenas API */}
+            {counts.api > 0 && (
+              <button
+                onClick={() => handleCopyLogs('api')}
+                className="text-[11px] text-indigo-400 hover:text-indigo-300 font-semibold hover:underline flex items-center gap-1 transition"
+                title="Copiar exclusivamente logs de chamadas de API externa"
+              >
+                <Radio className="w-3 h-3" />
+                <span>{copiedType === 'api' ? 'Logs API Copiados!' : 'Copiar API'}</span>
+              </button>
+            )}
+
+            {/* Copiar Apenas Erros */}
             <button
               onClick={() => handleCopyLogs('errors')}
               className="text-[11px] text-rose-400 hover:text-rose-300 font-semibold hover:underline flex items-center gap-1 transition"
-              title="Copiar apenas os logs de erro para diagnóstico de IA"
+              title="Copiar apenas os logs de erro para diagnóstico"
             >
               <AlertCircle className="w-3 h-3" />
               <span>{copiedType === 'errors' ? 'Erros Copiados!' : 'Copiar Erros'}</span>
+            </button>
+
+            {/* Botão Copiar Relatório Completo para IA */}
+            <button
+              onClick={handleCopyAiReport}
+              className="text-[11px] text-emerald-400 hover:text-emerald-300 font-bold hover:underline flex items-center gap-1 transition bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20"
+              title="Copiar relatório completo estruturado para análise de IA"
+            >
+              <Sparkles className="w-3 h-3" />
+              <span>{copiedType === 'ai' ? 'Relatório IA Copiado!' : 'Copiar para IA'}</span>
             </button>
           </div>
         </div>

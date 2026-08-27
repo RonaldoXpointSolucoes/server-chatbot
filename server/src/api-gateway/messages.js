@@ -14,11 +14,17 @@ const requireTenant = async (req, res, next) => {
 };
 
 router.post('/messages/send', requireTenant, async (req, res) => {
-    try {
-        const { instanceId, text, contactPhone, conversationId, senderType, is_automation, sender_type } = req.body;
-        const tenantId = req.tenantId;
+    const { instanceId, text, contactPhone, conversationId, senderType, is_automation, sender_type } = req.body;
+    const tenantId = req.tenantId;
+    const isAuto = senderType === 'automation' || is_automation === true || sender_type === 'automation';
 
+    if (isAuto) {
+        console.log(`[API Gateway] [messages/send] 📨 Disparo de Automação Recebido | Instância: ${instanceId} | Destino: ${contactPhone} | Conversa: ${conversationId}`);
+    }
+
+    try {
         if (!instanceId || !text || !contactPhone || !conversationId) {
+            if (isAuto) console.warn(`[API Gateway] [messages/send] ❌ Falha 400: Parâmetros obrigatórios ausentes | Instância: ${instanceId}`);
             return res.status(400).json({ error: 'Missing required parameters' });
         }
 
@@ -26,7 +32,7 @@ router.post('/messages/send', requireTenant, async (req, res) => {
         
         // Anti-Bug: Se o socket estiver no meio do boot (deploy/restart), aguarda
         if (!sock && sessionManager.connectingState.has(instanceId)) {
-            console.log(`[Messages API] Segurando req de envio. Aguardando socket conectar: ${instanceId}`);
+            console.log(`[API Gateway] [messages/send] Segurando req de envio. Aguardando socket conectar: ${instanceId}`);
             sock = await sessionManager.connectingState.get(instanceId);
         }
         
@@ -34,6 +40,7 @@ router.post('/messages/send', requireTenant, async (req, res) => {
         if (!sock) {
             sock = await sessionManager.getSocketOrWake(tenantId, instanceId, true);
             if (!sock) {
+                if (isAuto) console.error(`[API Gateway] [messages/send] ❌ Falha 400: Socket Offline na RAM | Instância: ${instanceId} | Destino: ${contactPhone}`);
                 return res.status(400).json({ error: 'WhatsApp socket offline ou não autenticado para esta instância.' });
             }
         }
@@ -42,7 +49,10 @@ router.post('/messages/send', requireTenant, async (req, res) => {
 
         const msgResult = await sock.sendMessage(remoteJid, { text });
 
-        const isAuto = senderType === 'automation' || is_automation === true || sender_type === 'automation';
+        if (isAuto) {
+            console.log(`[API Gateway] [messages/send] ✅ Sucesso no Envio de Automação | Instância: ${instanceId} | Destino: ${remoteJid} | MsgID: ${msgResult?.key?.id}`);
+        }
+
         const dbSenderType = isAuto ? 'automation' : 'human';
 
         try {

@@ -14,12 +14,18 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 500
 // Middleware de autenticação genérica para rotas de instância já existente
 const requireApiKey = async (req, res, next) => {
     const apiKey = req.headers['apikey'] || req.headers['globalapikey'];
-    if (!apiKey) return res.status(401).json({ error: 'ApiKey header is missing.' });
+    const originIp = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || req.ip || 'N/A';
+
+    if (!apiKey) {
+        console.warn(`[API Gateway] [Auth] ❌ Falha 401: Header 'apikey' ausente | Rota: ${req.method} ${req.originalUrl} | IP: ${originIp}`);
+        return res.status(401).json({ error: 'ApiKey header is missing.' });
+    }
 
     // Se for rota de criação de instância, identificamos o inquilino por x-tenant-id
     if (req.path === '/instance/create') {
         const tenantId = req.headers['x-tenant-id'];
         if (!tenantId) {
+            console.warn(`[API Gateway] [InstanceCreate] ❌ Falha 400: x-tenant-id ausente | IP: ${originIp}`);
             return res.status(400).json({ error: 'x-tenant-id header is required for instance creation.' });
         }
 
@@ -32,6 +38,7 @@ const requireApiKey = async (req, res, next) => {
         const globalKey = comp ? comp.global_api_key : process.env.GLOBAL_API_KEY;
 
         if (globalKey && apiKey !== globalKey) {
+            console.warn(`[API Gateway] [Auth] ❌ Falha 401: Global ApiKey inválida para tenant ${tenantId} | IP: ${originIp}`);
             return res.status(401).json({ error: 'Unauthorized Global ApiKey.' });
         }
         return next();
@@ -41,17 +48,19 @@ const requireApiKey = async (req, res, next) => {
     // E no body (instance) para POST /message/sendText
     const instanceName = req.params.name || req.body.instance;
     if (!instanceName) {
+        console.warn(`[API Gateway] [Auth] ❌ Falha 400: Nome da instância ausente no path ou body ("instance") | Rota: ${req.method} ${req.originalUrl} | IP: ${originIp}`);
         return res.status(400).json({ error: 'Instance name is missing in URL path or body ("instance").' });
     }
 
     // Valida no Banco pelo Nome da Instância
     const { data, error } = await supabase
         .from('whatsapp_instances')
-        .select('id, tenant_id, status, api_key')
+        .select('id, tenant_id, display_name, phone_number, status, api_key')
         .eq('display_name', instanceName)
         .single();
 
     if (error || !data) {
+        console.warn(`[API Gateway] [Auth] ❌ Falha 404: Instância "${instanceName}" não encontrada no banco | Rota: ${req.method} ${req.originalUrl} | IP: ${originIp}`);
         return res.status(404).json({ error: 'Instance not found.' });
     }
 
@@ -66,10 +75,13 @@ const requireApiKey = async (req, res, next) => {
 
     // Autoriza se for a ApiKey da Instância OU a Global Api Key da Empresa
     if (data.api_key !== apiKey && globalKey !== apiKey) {
+        console.warn(`[API Gateway] [Auth] ❌ Falha 401: ApiKey inválida para instância ${data.id} ("${instanceName}") | IP: ${originIp}`);
         return res.status(401).json({ error: 'Unauthorized ApiKey.' });
     }
 
-    req.instanceData = data; // { id, tenant_id, status }
+    req.instanceData = data; // { id, tenant_id, display_name, phone_number, status }
+    req.apiKeyMasked = apiKey ? `${apiKey.slice(0, 6)}...${apiKey.slice(-4)}` : 'N/A';
+    req.originIp = originIp;
     next();
 };
 
@@ -314,14 +326,23 @@ router.delete('/instance/:name', requireApiKey, async (req, res) => {
  *         description: Erro interno de processamento
  */
 router.post('/message/sendText', requireApiKey, async (req, res) => {
+    const { number, text } = req.body;
+    const { id, tenant_id, display_name } = req.instanceData;
+    const originIp = req.originIp || 'N/A';
+
+    console.log(`[API Gateway] [sendText] 📨 Disparo Externo Recebido | Instância: ${id} ("${display_name}") | Destino: ${number} | Caracteres: ${text?.length || 0} | IP: ${originIp}`);
+
     try {
-        const { number, text } = req.body;
-        const { id, tenant_id } = req.instanceData;
-        
-        if (!number || !text) return res.status(400).json({ error: 'number and text are required in body' });
+        if (!number || !text) {
+            console.warn(`[API Gateway] [sendText] ❌ Falha 400: 'number' ou 'text' ausentes no body | Instância: ${id} ("${display_name}") | IP: ${originIp}`);
+            return res.status(400).json({ error: 'number and text are required in body' });
+        }
 
         const sock = await sessionManager.getSocketOrWake(tenant_id, id, true);
-        if (!sock) return res.status(400).json({ error: 'WhatsApp socket offline or not authenticated for this instance.' });
+        if (!sock) {
+            console.error(`[API Gateway] [sendText] ❌ Falha 400: Socket Offline ou não autenticado na RAM | Instância: ${id} ("${display_name}") | Destino: ${number}`);
+            return res.status(400).json({ error: 'WhatsApp socket offline or not authenticated for this instance.' });
+        }
         
         const remoteJid = await resolveTargetJid(sock, number, tenant_id);
         const msgResult = await sock.sendMessage(remoteJid, { text }, { isAutomation: true });
@@ -334,7 +355,8 @@ router.post('/message/sendText', requireApiKey, async (req, res) => {
             }
         } catch(e) {}
 
-        // A mensagem também será processada no `messages.upsert` de forma nativa e registrada no front.
+        console.log(`[API Gateway] [sendText] ✅ Sucesso no Envio | Instância: ${id} ("${display_name}") | Destino: ${remoteJid} | MsgID: ${msgResult?.key?.id}`);
+
         res.json({
             key: msgResult.key,
             message: msgResult.message,
@@ -342,6 +364,7 @@ router.post('/message/sendText', requireApiKey, async (req, res) => {
             status: "PENDING"
         });
     } catch (e) {
+        console.error(`[API Gateway] [sendText] ❌ Exceção 500 ao Enviar Mensagem: ${e.message} | Instância: ${id} ("${display_name}") | Destino: ${number} | Stack: ${e.stack?.split('\n')[1] || ''}`);
         res.status(500).json({ error: e.message });
     }
 });
@@ -391,17 +414,24 @@ router.post('/message/sendText', requireApiKey, async (req, res) => {
  *         description: Erros de armazenamento ou ffmpeg.
  */
 router.post('/message/sendMedia', requireApiKey, upload.single('file'), async (req, res) => {
-    try {
-        const { number, mediatype, instance } = req.body;
-        const { id, tenant_id } = req.instanceData;
-        const file = req.file;
+    const { number, mediatype, instance } = req.body;
+    const { id, tenant_id, display_name } = req.instanceData;
+    const file = req.file;
+    const originIp = req.originIp || 'N/A';
 
+    console.log(`[API Gateway] [sendMedia] 📨 Disparo de Mídia Recebido | Instância: ${id} ("${display_name}") | Tipo: ${mediatype} | Destino: ${number} | Arquivo: ${file?.originalname || 'N/A'} | IP: ${originIp}`);
+
+    try {
         if (!file || !number || !mediatype || !instance) {
+            console.warn(`[API Gateway] [sendMedia] ❌ Falha 400: Parâmetros obrigatórios ausentes | Instância: ${id} ("${display_name}") | IP: ${originIp}`);
             return res.status(400).json({ error: 'Missing file, number, mediatype or instance' });
         }
 
         const sock = await sessionManager.getSocketOrWake(tenant_id, id, true);
-        if (!sock) return res.status(400).json({ error: 'Socket offline or not authenticated' });
+        if (!sock) {
+            console.error(`[API Gateway] [sendMedia] ❌ Falha 400: Socket Offline na RAM | Instância: ${id} ("${display_name}") | Destino: ${number}`);
+            return res.status(400).json({ error: 'Socket offline or not authenticated' });
+        }
 
         const remoteJid = await resolveTargetJid(sock, number, tenant_id);
         const timestamp = Date.now();
@@ -437,7 +467,7 @@ router.post('/message/sendMedia', requireApiKey, upload.single('file'), async (r
                 file.originalname = file.originalname.replace('.webm', '.ogg');
                 try { fs.unlinkSync(tempInput); fs.unlinkSync(tempOutput); } catch(e){}
             } catch(err) {
-                 console.error('Falha conversao opus', err);
+                 console.error('[API Gateway] [sendMedia] ⚠️ Falha na conversão de áudio opus:', err);
             }
         }
 
@@ -527,13 +557,23 @@ router.post('/message/sendMedia', requireApiKey, upload.single('file'), async (r
  *         description: Localização enviada com sucesso
  *  */
 router.post('/message/sendLocation', requireApiKey, async (req, res) => {
+    const { number, latitude, longitude, name, address } = req.body;
+    const { id, tenant_id, display_name } = req.instanceData;
+    const originIp = req.originIp || 'N/A';
+
+    console.log(`[API Gateway] [sendLocation] 📨 Disparo de Localização Recebido | Instância: ${id} ("${display_name}") | Destino: ${number} | IP: ${originIp}`);
+
     try {
-        const { number, instance, latitude, longitude, name, address } = req.body;
-        const { id, tenant_id } = req.instanceData;
-        if (!number || !latitude || !longitude) return res.status(400).json({ error: 'number, latitude and longitude required' });
+        if (!number || !latitude || !longitude) {
+            console.warn(`[API Gateway] [sendLocation] ❌ Falha 400: Parâmetros obrigatórios ausentes | Instância: ${id}`);
+            return res.status(400).json({ error: 'number, latitude and longitude required' });
+        }
 
         const sock = await sessionManager.getSocketOrWake(tenant_id, id, true);
-        if (!sock) return res.status(400).json({ error: 'Socket offline or not authenticated' });
+        if (!sock) {
+            console.error(`[API Gateway] [sendLocation] ❌ Falha 400: Socket Offline na RAM | Instância: ${id} ("${display_name}") | Destino: ${number}`);
+            return res.status(400).json({ error: 'Socket offline or not authenticated' });
+        }
 
         const remoteJid = await resolveTargetJid(sock, number, tenant_id);
         const msgResult = await sock.sendMessage(remoteJid, {
@@ -548,8 +588,11 @@ router.post('/message/sendLocation', requireApiKey, async (req, res) => {
             }
         } catch(e) {}
 
+        console.log(`[API Gateway] [sendLocation] ✅ Sucesso no Envio | Instância: ${id} | Destino: ${remoteJid} | MsgID: ${msgResult?.key?.id}`);
+
         res.json({ key: msgResult.key, status: "PENDING" });
     } catch (e) {
+        console.error(`[API Gateway] [sendLocation] ❌ Exceção 500: ${e.message} | Instância: ${id} | Destino: ${number}`);
         res.status(500).json({ error: e.message });
     }
 });
@@ -586,13 +629,23 @@ router.post('/message/sendLocation', requireApiKey, async (req, res) => {
  *         description: Contato enviado com sucesso
  *  */
 router.post('/message/sendContact', requireApiKey, async (req, res) => {
+    const { number, contactName, contactNumber } = req.body;
+    const { id, tenant_id, display_name } = req.instanceData;
+    const originIp = req.originIp || 'N/A';
+
+    console.log(`[API Gateway] [sendContact] 📨 Disparo de Contato Recebido | Instância: ${id} ("${display_name}") | Destino: ${number} | Contato: ${contactName} (${contactNumber}) | IP: ${originIp}`);
+
     try {
-        const { number, instance, contactName, contactNumber } = req.body;
-        const { id, tenant_id } = req.instanceData;
-        if (!number || !contactName || !contactNumber) return res.status(400).json({ error: 'number, contactName and contactNumber required' });
+        if (!number || !contactName || !contactNumber) {
+            console.warn(`[API Gateway] [sendContact] ❌ Falha 400: Parâmetros ausentes | Instância: ${id}`);
+            return res.status(400).json({ error: 'number, contactName and contactNumber required' });
+        }
 
         const sock = await sessionManager.getSocketOrWake(tenant_id, id, true);
-        if (!sock) return res.status(400).json({ error: 'Socket offline or not authenticated' });
+        if (!sock) {
+            console.error(`[API Gateway] [sendContact] ❌ Falha 400: Socket Offline na RAM | Instância: ${id} ("${display_name}") | Destino: ${number}`);
+            return res.status(400).json({ error: 'Socket offline or not authenticated' });
+        }
 
         const remoteJid = await resolveTargetJid(sock, number, tenant_id);
         
@@ -615,8 +668,11 @@ router.post('/message/sendContact', requireApiKey, async (req, res) => {
             }
         } catch(e) {}
 
+        console.log(`[API Gateway] [sendContact] ✅ Sucesso no Envio | Instância: ${id} | Destino: ${remoteJid} | MsgID: ${msgResult?.key?.id}`);
+
         res.json({ key: msgResult.key, status: "PENDING" });
     } catch (e) {
+        console.error(`[API Gateway] [sendContact] ❌ Exceção 500: ${e.message} | Instância: ${id} | Destino: ${number}`);
         res.status(500).json({ error: e.message });
     }
 });
@@ -659,13 +715,23 @@ router.post('/message/sendContact', requireApiKey, async (req, res) => {
  *         description: Reação enviada com sucesso
  *  */
 router.post('/message/sendReaction', requireApiKey, async (req, res) => {
+    const { number, messageId, reaction, fromMe = false } = req.body;
+    const { id, tenant_id, display_name } = req.instanceData;
+    const originIp = req.originIp || 'N/A';
+
+    console.log(`[API Gateway] [sendReaction] 📨 Disparo de Reação Recebido | Instância: ${id} ("${display_name}") | Emoji: ${reaction} | Destino: ${number} | IP: ${originIp}`);
+
     try {
-        const { number, instance, messageId, reaction, fromMe = false } = req.body;
-        const { id, tenant_id } = req.instanceData;
-        if (!number || !messageId || !reaction) return res.status(400).json({ error: 'number, messageId and reaction required' });
+        if (!number || !messageId || !reaction) {
+            console.warn(`[API Gateway] [sendReaction] ❌ Falha 400: Parâmetros ausentes | Instância: ${id}`);
+            return res.status(400).json({ error: 'number, messageId and reaction required' });
+        }
 
         const sock = await sessionManager.getSocketOrWake(tenant_id, id, true);
-        if (!sock) return res.status(400).json({ error: 'Socket offline or not authenticated' });
+        if (!sock) {
+            console.error(`[API Gateway] [sendReaction] ❌ Falha 400: Socket Offline na RAM | Instância: ${id} ("${display_name}") | Destino: ${number}`);
+            return res.status(400).json({ error: 'Socket offline or not authenticated' });
+        }
 
         const remoteJid = await resolveTargetJid(sock, number, tenant_id);
         
@@ -684,8 +750,11 @@ router.post('/message/sendReaction', requireApiKey, async (req, res) => {
             }
         } catch(e) {}
 
+        console.log(`[API Gateway] [sendReaction] ✅ Sucesso no Envio | Instância: ${id} | Destino: ${remoteJid} | MsgID: ${msgResult?.key?.id}`);
+
         res.json({ key: msgResult.key, status: "PENDING" });
     } catch (e) {
+        console.error(`[API Gateway] [sendReaction] ❌ Exceção 500: ${e.message} | Instância: ${id} | Destino: ${number}`);
         res.status(500).json({ error: e.message });
     }
 });
