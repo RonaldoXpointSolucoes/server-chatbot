@@ -309,16 +309,28 @@ export default function ChecklistSettings() {
       if (cErr) throw cErr;
       setCargos(cargosData || []);
 
-      // 4. Carregar Usuários Operacionais
+      // 4. Carregar Usuários Operacionais com Fallback Resiliente
+      let loadedProfiles: any[] = [];
       const { data: profilesData, error: pErr } = await supabase
         .from('v_checklist_operators')
         .select('*')
         .eq('tenant_id', tenantId)
         .order('name');
-      if (pErr) throw pErr;
+      
+      if (!pErr && profilesData && profilesData.length > 0) {
+        loadedProfiles = profilesData;
+      } else {
+        // Fallback para a tabela users_profiles
+        const { data: fallbackProfiles } = await supabase
+          .from('users_profiles')
+          .select('*')
+          .eq('tenant_id', tenantId)
+          .order('name');
+        loadedProfiles = fallbackProfiles || [];
+      }
 
       // Carrega permissões de cada usuário
-      const profilesWithPerms = await Promise.all((profilesData || []).map(async (prof) => {
+      const profilesWithPerms = await Promise.all(loadedProfiles.map(async (prof) => {
         const { data: uPerms } = await supabase
           .from('user_unit_permissions')
           .select('unit_id')

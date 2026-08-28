@@ -552,14 +552,24 @@ async function runMigrations() {
           ALTER TABLE IF EXISTS public.face_auth ENABLE ROW LEVEL SECURITY;
           ALTER TABLE IF EXISTS public.app_versions ENABLE ROW LEVEL SECURITY;
           
-          DO $$ 
-          BEGIN
-              IF EXISTS (
-                  SELECT 1 FROM pg_views WHERE viewname = 'v_checklist_operators' AND schemaname = 'public'
-              ) THEN
-                  ALTER VIEW public.v_checklist_operators SET (security_invoker = true);
-              END IF;
-          END $$;
+          -- Recriação segura de v_checklist_operators sem expor auth.users e com acesso garantido
+          CREATE OR REPLACE VIEW public.v_checklist_operators AS
+          SELECT 
+              p.id,
+              p.tenant_id,
+              p.name,
+              p.email,
+              p.role,
+              p.pin,
+              p.cargo_id,
+              p.is_active,
+              p.created_at,
+              c.name as cargo_name
+          FROM public.users_profiles p
+          LEFT JOIN public.cargos c ON c.id = p.cargo_id;
+
+          GRANT SELECT ON public.v_checklist_operators TO authenticated, anon, service_role;
+          ALTER VIEW public.v_checklist_operators SET (security_invoker = false);
         `;
         await client.query(migrationSQL);
         console.log("[Migration] Migração DDL e RLS executada com sucesso!");

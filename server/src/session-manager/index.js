@@ -367,7 +367,7 @@ class SessionManager {
                     if (isAssignedToThisNode || isLeaseExpired || isMasterTakeover) {
                         this.autoHealingCooldowns.set(inst.id, now);
                         this.reconnectingCoolingDown.set(inst.id, now);
-                        console.warn(`[SessionManager/AutoHealing] 🩺 Detectada instância ${inst.id} desincronizada (RAM: ${hasSessionInRam ? 'Presente (WS fechado)' : 'Ausente'}, Lease Expirado: ${isLeaseExpired}). Revivendo conexão...`);
+                        console.log(`[SessionManager/AutoHealing] 🩺 Detectada instância ${inst.id} desincronizada (RAM: ${hasSessionInRam ? 'Presente (WS fechado)' : 'Ausente'}, Lease Expirado: ${isLeaseExpired}). Revivendo conexão...`);
                         this.createSession(inst.tenant_id, inst.id, true).catch(err => {
                             console.error(`[SessionManager/AutoHealing] Falha ao reviver instância ${inst.id}:`, err.message);
                         });
@@ -1773,7 +1773,7 @@ class SessionManager {
                 // Só considera encerrado se o WebSocket estiver explicitamente fechado (isClosed: true ou rawState 2/3)
                 const isClosedOrClosing = ws.isClosed === true || ws.isClosing === true || rawState === 2 || rawState === 3;
                 if (isClosedOrClosing) {
-                    console.warn(`[SessionManager/Watchdog] Instância ${instanceId} com WebSocket encerrado (isOpen: ${ws.isOpen}, isClosed: ${ws.isClosed}, rawState: ${rawState}). Reciclando socket e reconectando...`);
+                    console.log(`[SessionManager/Watchdog] Instância ${instanceId} com WebSocket encerrado (isOpen: ${ws.isOpen}, isClosed: ${ws.isClosed}, rawState: ${rawState}). Reciclando socket e reconectando...`);
                     this.clearWatchdog(instanceId);
                     this.destroyExistingSession(instanceId, 'watchdog_ws_closed').catch(() => {});
                     const timer = setTimeout(() => {
