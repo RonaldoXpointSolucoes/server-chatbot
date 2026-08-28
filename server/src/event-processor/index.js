@@ -66,27 +66,53 @@ class EventProcessor {
 
     async reconcileMissingMessages() {
         try {
+            if (!this.reconciliationAttempts) {
+                this.reconciliationAttempts = new Set();
+            }
+            // Limpa o set se ultrapassar 2000 entradas para evitar memory leak
+            if (this.reconciliationAttempts.size > 2000) {
+                this.reconciliationAttempts.clear();
+            }
+
             const fifteenMinutesAgo = new Date(Date.now() - 15 * 60000).toISOString();
             const { data: rawMessages, error } = await supabase
                 .from('wa_incoming_messages')
-                .select('instance_id, tenant_id, message_id, raw_payload')
+                .select('instance_id, tenant_id, message_id, raw_payload, from_me, chat_jid, message_type')
                 .gte('received_at', fifteenMinutesAgo)
+                .eq('from_me', false)
                 .order('received_at', { ascending: true })
                 .limit(100);
 
             if (error || !rawMessages || rawMessages.length === 0) return;
 
-            const messageIds = rawMessages.map(r => r.message_id).filter(Boolean);
+            // Filtra mensagens que não são de broadcast, não são protocolMessages e ainda não foram verificadas
+            const candidateMessages = rawMessages.filter(r => 
+                r.message_id && 
+                !this.reconciliationAttempts.has(r.message_id) && 
+                !this.isBroadcast(r.chat_jid) &&
+                r.message_type !== 'protocolMessage' &&
+                r.message_type !== 'senderKeyDistributionMessage' &&
+                r.raw_payload
+            );
+
+            if (candidateMessages.length === 0) return;
+
+            const messageIds = candidateMessages.map(r => r.message_id);
             const { data: existingMessages } = await supabase
                 .from('messages')
                 .select('whatsapp_message_id')
                 .in('whatsapp_message_id', messageIds);
 
             const existingSet = new Set((existingMessages || []).map(m => m.whatsapp_message_id));
-            const missingRaw = rawMessages.filter(r => r.message_id && !existingSet.has(r.message_id) && r.raw_payload);
+            const missingRaw = candidateMessages.filter(r => !existingSet.has(r.message_id));
+
+            // Marca os candidatos no cache de verificação para não gerar loops a cada 30 segundos
+            for (const r of candidateMessages) {
+                this.reconciliationAttempts.add(r.message_id);
+            }
 
             if (missingRaw.length > 0) {
-                console.warn(`[EventProcessor] Self-Healing: Encontradas ${missingRaw.length} mensagens em wa_incoming_messages ausentes na tabela messages. Re-processando para evitar perda de dados...`);
+                console.log(`[EventProcessor] Self-Healing: Re-processando ${missingRaw.length} mensagens reais pendentes...`);
                 for (const r of missingRaw) {
                     await this.handleMessageUpsert(r.tenant_id, r.instance_id, null, { messages: [r.raw_payload], type: 'reconcile' });
                 }
