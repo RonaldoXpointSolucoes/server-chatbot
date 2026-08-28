@@ -2,6 +2,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { supabase, NODE_ID } from '../supabase.js';
 import { pipeline } from '@xenova/transformers';
 import { AsyncLocalStorage } from 'async_hooks';
+import { getBrPhoneVariations, getCanonicalBrPhone } from '../event-processor/helpers.js';
 
 const tenantStorage = new AsyncLocalStorage();
 
@@ -1314,7 +1315,7 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
 
     async processMessage(params) {
         const { tenantId, instanceId, conversationId, contactId, jid, textMessage, botId, botSettings, sock, botDelay, botInstructions } = params;
-        const key = jid || conversationId;
+        const key = conversationId || jid;
 
         if (!this.pendingJobs) {
             this.pendingJobs = new Map();
@@ -1322,68 +1323,43 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
 
         let job = this.pendingJobs.get(key);
         if (job) {
-            // Cancela os cronômetros de geração pendentes
+            // Cancela os cronômetros pendentes
             if (job.generationTimeout) {
                 clearTimeout(job.generationTimeout);
                 job.generationTimeout = null;
             }
-
-            // Havia uma resposta gerada esperando para ser enviada, mas o cliente mandou nova mensagem!
             if (job.sendTimeout) {
                 clearTimeout(job.sendTimeout);
                 job.sendTimeout = null;
-
-                if (job.responseText) {
-                    if (!job.injectedHistory) job.injectedHistory = [];
-                    if (!job.accumulatedResponses) job.accumulatedResponses = [];
-
-                    // Adiciona a mensagem do usuário que gerou a resposta anterior ao histórico injetado
-                    const lastUserText = job.lastGeneratedUserText || job.textMessages.join('\n');
-                    job.injectedHistory.push({
-                        role: 'user',
-                        parts: [{ text: lastUserText }]
-                    });
-
-                    // Adiciona a resposta que ia ser enviada ao histórico injetado
-                    job.injectedHistory.push({
-                        role: 'model',
-                        parts: [{ text: job.responseText }]
-                    });
-
-                    // Guarda a resposta para ser consolidada no envio final
-                    job.accumulatedResponses.push(job.responseText);
-
-                    console.log(`[AutomationWorker] Pausada resposta anterior e anexada ao contexto para ${key}.`);
-                    
-                    // Limpa mensagens e resposta anteriores para a nova rodada
-                    job.responseText = null;
-                    job.textMessages = [];
-                }
             }
 
+            // Descarta a resposta anterior pendente para evitar duplicação ou concatenação
+            job.responseText = null;
+            job.cancelled = false;
             job.textMessages.push(textMessage);
             job.params = params; // Atualiza parâmetros para usar os mais recentes
 
             if (job.generating) {
-                // Se a IA está gerando agora, marca como obsoleta para regerar ao finalizar
+                // Se a IA está gerando agora, marca como obsoleta para regerar ao finalizar com o texto atualizado
                 job.obsolete = true;
-                console.log(`[AutomationWorker] Novas mensagens recebidas durante a geração para ${key}. Resposta atual marcada como obsoleta.`);
+                console.log(`[AutomationWorker] Novas mensagens recebidas durante a geração para ${key}. Resposta atual será regerada com o lote consolidado.`);
             } else {
                 // Re-agenda a geração após 1.5s de silêncio (debounce de entrada)
                 job.generationTimeout = setTimeout(() => this.triggerGeneration(key), 1500);
-                console.log(`[AutomationWorker] Nova mensagem adicionada ao job ativo para ${key}. Reiniciando debounce de entrada de 1.5s.`);
+                console.log(`[AutomationWorker] Nova mensagem adicionada ao job para ${key}. Reiniciando debounce de 1.5s.`);
             }
         } else {
             job = {
+                key: key,
                 textMessages: [textMessage],
                 params: params,
                 generationTimeout: null,
                 sendTimeout: null,
+                typingTimeout: null,
                 generating: false,
                 obsolete: false,
+                cancelled: false,
                 responseText: null,
-                injectedHistory: [],
-                accumulatedResponses: [],
                 lastGeneratedUserText: null
             };
             this.pendingJobs.set(key, job);
@@ -1392,37 +1368,52 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
         }
     }
 
-    cancelPendingMessage(conversationIdOrJid) {
+    cancelPendingMessage(conversationIdOrJid, reason = 'atendente_humano') {
         if (!conversationIdOrJid) return;
-        const key = conversationIdOrJid;
-        
-        // Se a chave direta do job na memória (geralmente o jid ou o conversationId) existir
-        if (this.pendingJobs && this.pendingJobs.has(key)) {
-            const job = this.pendingJobs.get(key);
-            console.log(`[AutomationWorker] Cancelando resposta automática pendente para ${key} devido a ação/mensagem do atendente humano.`);
-            if (job.generationTimeout) clearTimeout(job.generationTimeout);
-            if (job.sendTimeout) clearTimeout(job.sendTimeout);
-            this.pendingJobs.delete(key);
-            return;
+        const targetStr = String(conversationIdOrJid).trim();
+        const targetVariations = getBrPhoneVariations(targetStr);
+
+        if (!this.pendingJobs) return;
+
+        const keysToDelete = [];
+
+        for (const [k, job] of this.pendingJobs.entries()) {
+            const jobConvId = job.params?.conversationId ? String(job.params.conversationId).trim() : '';
+            const jobJid = job.params?.jid ? String(job.params.jid).trim() : '';
+            const jobContactId = job.params?.contactId ? String(job.params.contactId).trim() : '';
+            const jobPhone = job.params?.phone ? String(job.params.phone).replace(/\D/g, '') : '';
+            const jobJidPhone = jobJid ? jobJid.split('@')[0].replace(/\D/g, '') : '';
+
+            const isDirectMatch = k === targetStr || jobConvId === targetStr || jobJid === targetStr || jobContactId === targetStr;
+            const isPhoneMatch = targetVariations.some(v => v === jobPhone || v === jobJidPhone || jobJid.includes(v));
+
+            if (isDirectMatch || isPhoneMatch) {
+                console.log(`[AutomationWorker] Cancelando e abortando job de IA para ${k} (Motivo: ${reason}).`);
+                job.cancelled = true;
+                job.generating = false;
+                job.obsolete = false;
+                if (job.generationTimeout) clearTimeout(job.generationTimeout);
+                if (job.sendTimeout) clearTimeout(job.sendTimeout);
+                if (job.typingTimeout) clearTimeout(job.typingTimeout);
+
+                if (job.params?.sock && job.params?.jid) {
+                    try {
+                        job.params.sock.sendPresenceUpdate('paused', job.params.jid).catch(() => {});
+                    } catch (e) {}
+                }
+
+                keysToDelete.push(k);
+            }
         }
 
-        // Caso contrário, busca por conversationId ou jid nos parâmetros de cada job ativo
-        if (this.pendingJobs) {
-            for (const [k, job] of this.pendingJobs.entries()) {
-                if (job.params?.conversationId === key || job.params?.jid === key) {
-                    console.log(`[AutomationWorker] Cancelando resposta automática pendente para job ${k} (relacionado a ${key}) devido a ação/mensagem do atendente humano.`);
-                    if (job.generationTimeout) clearTimeout(job.generationTimeout);
-                    if (job.sendTimeout) clearTimeout(job.sendTimeout);
-                    this.pendingJobs.delete(k);
-                    break;
-                }
-            }
+        for (const k of keysToDelete) {
+            this.pendingJobs.delete(k);
         }
     }
 
     async triggerGeneration(key) {
         const job = this.pendingJobs?.get(key);
-        if (!job) return;
+        if (!job || job.cancelled) return;
 
         job.generating = true;
         job.obsolete = false;
@@ -1431,10 +1422,10 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
         const messagesCount = job.textMessages.length;
         const combinedText = job.textMessages.join('\n');
         job.lastGeneratedUserText = combinedText;
-        console.log(`[AutomationWorker] Iniciando geração da IA para ${key} com mensagens:\n"${combinedText}"`);
+        console.log(`[AutomationWorker] Iniciando geração da IA para ${key} com lote de mensagens:\n"${combinedText}"`);
 
         try {
-            // Carrega o histórico do banco de dados primeiro
+            // Carrega o histórico oficial do banco de dados
             let dbHistory = [];
             try {
                 dbHistory = await this.getConversationHistory(job.params.tenantId, job.params.conversationId, 12);
@@ -1442,17 +1433,17 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                 console.error('[AutomationWorker] Erro ao obter histórico do banco de dados no triggerGeneration:', histErr);
             }
 
-            // Mescla com o injectedHistory (respostas canceladas/acumuladas)
-            let mergedHistory = [...dbHistory];
-            if (job.injectedHistory && job.injectedHistory.length > 0) {
-                mergedHistory.push(...job.injectedHistory);
-            }
-
             const responseText = await this.generateResponse({
                 ...job.params,
                 textMessage: combinedText,
-                history: mergedHistory
+                history: dbHistory
             });
+
+            // Se o job foi cancelado durante a chamada assíncrona ao Gemini, aborta imediatamente
+            if (job.cancelled || !this.pendingJobs?.has(key)) {
+                console.log(`[AutomationWorker] Geração concluída para ${key}, mas o job foi cancelado durante o processamento. Descartando.`);
+                return;
+            }
 
             if (!responseText) {
                 console.warn(`[AutomationWorker] Resposta da IA vazia ou nula para a conversa ${key}. Silenciando bot.`);
@@ -1461,28 +1452,13 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                 return;
             }
 
-            // Se novas mensagens chegaram durante a geração, descarta e regera
+            // Se novas mensagens chegaram durante a geração, descarta e agenda nova geração com todo o texto acumulado
             if (job.obsolete) {
-                console.log(`[AutomationWorker] Geração finalizada para ${key}, mas nova mensagem chegou durante a chamada de API. Descartando resposta obsoleta.`);
-                
-                if (!job.injectedHistory) job.injectedHistory = [];
-                if (!job.accumulatedResponses) job.accumulatedResponses = [];
-
-                job.injectedHistory.push({
-                    role: 'user',
-                    parts: [{ text: combinedText }]
-                });
-                job.injectedHistory.push({
-                    role: 'model',
-                    parts: [{ text: responseText }]
-                });
-                job.accumulatedResponses.push(responseText);
-
-                // Remove as mensagens processadas nesta rodada
+                console.log(`[AutomationWorker] Novas mensagens chegaram para ${key} durante a API do Gemini. Descartando resposta parcial e regerando.`);
                 job.textMessages = job.textMessages.slice(messagesCount);
-
                 job.generating = false;
                 job.obsolete = false;
+                job.responseText = null;
                 job.generationTimeout = setTimeout(() => this.triggerGeneration(key), 1500);
                 return;
             }
@@ -1490,22 +1466,17 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
             job.generating = false;
             job.responseText = responseText;
 
-            console.log(`[AutomationWorker] Resposta gerada para ${key}. Aguardando 15s de silêncio para enviar.`);
+            console.log(`[AutomationWorker] Resposta gerada com sucesso para ${key}. Aguardando 15s de silêncio para envio.`);
 
             if (job.sendTimeout) clearTimeout(job.sendTimeout);
 
             job.sendTimeout = setTimeout(async () => {
                 try {
-                    console.log(`[AutomationWorker] Fim do cronômetro de 15s para ${key}. Enviando resposta final.`);
                     const activeJob = this.pendingJobs?.get(key);
-                    if (activeJob && activeJob.responseText === responseText) {
+                    if (activeJob && !activeJob.cancelled && activeJob.responseText === responseText) {
+                        console.log(`[AutomationWorker] Fim do cronômetro de 15s para ${key}. Disparando envio da resposta final.`);
                         this.pendingJobs.delete(key);
-                        
-                        // Coleta todas as respostas acumuladas mais a resposta final
-                        const allResponses = [...(activeJob.accumulatedResponses || []), responseText];
-                        const finalCombinedResponse = allResponses.join('\n\n');
-                        
-                        await this.sendFinalResponse(activeJob.params, finalCombinedResponse);
+                        await this.sendFinalResponse(activeJob.params, responseText);
                     }
                 } catch (sendErr) {
                     console.error('[AutomationWorker] Erro ao enviar resposta após 15s:', sendErr);
@@ -3470,10 +3441,64 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
         });
     }
 
+    async checkCanSendAiResponse(conversationId, contactId) {
+        try {
+            if (conversationId) {
+                const { data: currentConv } = await supabase
+                    .from('conversations')
+                    .select('id, status, ai_paused, snoozed_until, bot_paused_until')
+                    .eq('id', conversationId)
+                    .maybeSingle();
+
+                if (currentConv) {
+                    const nowIso = new Date().toISOString();
+                    const isPaused = currentConv.ai_paused === true;
+                    const isHumanHandled = currentConv.status === 'open';
+                    const isSnoozed = currentConv.status === 'snoozed' || (currentConv.snoozed_until && currentConv.snoozed_until > nowIso);
+                    const isTempPaused = currentConv.bot_paused_until && currentConv.bot_paused_until > nowIso;
+
+                    if (isPaused || isHumanHandled || isSnoozed || isTempPaused) {
+                        return { 
+                            allowed: false, 
+                            reason: `Conversa em estado restritivo (status: ${currentConv.status}, ai_paused: ${isPaused}, tempPaused: ${isTempPaused}, snoozed: ${isSnoozed})` 
+                        };
+                    }
+                }
+            }
+
+            if (contactId) {
+                const { data: currentContact } = await supabase
+                    .from('contacts')
+                    .select('id, bot_status')
+                    .eq('id', contactId)
+                    .maybeSingle();
+
+                if (currentContact && currentContact.bot_status === 'paused') {
+                    return { 
+                        allowed: false, 
+                        reason: `Contato ${contactId} com bot_status='paused'` 
+                    };
+                }
+            }
+
+            return { allowed: true };
+        } catch (e) {
+            console.error('[AutomationWorker] Erro ao verificar permissão de envio da IA:', e);
+            return { allowed: true };
+        }
+    }
+
     async sendFinalResponse(params, finalResponseText) {
         const { tenantId, instanceId, conversationId, contactId, jid, botSettings, sock, botDelay } = params;
         
         try {
+            // DOUBLE CHECK 1: Validação no banco de dados ANTES de simular digitação
+            const check1 = await this.checkCanSendAiResponse(conversationId, contactId);
+            if (!check1.allowed) {
+                console.log(`[AutomationWorker] Envio de IA abortado no Double-Check 1 para conversa ${conversationId}: ${check1.reason}`);
+                return;
+            }
+
             finalResponseText = formatAiMessageForWhatsApp(finalResponseText);
             if (finalResponseText && sock) {
                 // Simulação de digitação (Atraso Humano) baseada no botDelay (mínimo de 5 a 10 segundos para IA)
@@ -3492,6 +3517,16 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
                     try {
                         await sock.sendPresenceUpdate('paused', jid);
                     } catch (e) {}
+                }
+
+                // DOUBLE CHECK 2: Validação no banco de dados APÓS a digitação e IMEDIATAMENTE ANTES do envio
+                const check2 = await this.checkCanSendAiResponse(conversationId, contactId);
+                if (!check2.allowed) {
+                    console.log(`[AutomationWorker] Envio de IA abortado no Double-Check 2 (pós-digitação) para conversa ${conversationId}: ${check2.reason}`);
+                    try {
+                        await sock.sendPresenceUpdate('paused', jid);
+                    } catch (e) {}
+                    return;
                 }
 
                 const msgResult = await sock.sendMessage(jid, { text: finalResponseText });

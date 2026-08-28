@@ -1491,10 +1491,16 @@ class EventProcessor {
                           }
                       }
 
-                      // Se a conversa for 'open' (operador humano), o robô só responde se o cliente estiver explicitamente na whitelist de testes
+                      // 0. Se a IA estiver pausada (ai_paused: true), aborta imediatamente (prioridade absoluta do atendente humano)
+                      if (b.aiPaused) {
+                          console.log(`[EventProcessor] IA está pausada para a conversa ${b.conversationId} (contato: ${b.phone}). Silenciando robô.`);
+                          return;
+                      }
+
+                      // Se a conversa for 'open' (operador humano), o robô não deve atropelar o atendimento humano
                       if (b.convStatus === 'open') {
                           if (!isTestAllowed) {
-                              console.log(`[EventProcessor] Conversa está aberta (operador humano) para o contato ${b.phone}. Cliente não está na whitelist de testes da instância. Silenciando robô.`);
+                              console.log(`[EventProcessor] Conversa está aberta (operador humano) para o contato ${b.phone}. Silenciando robô.`);
                               return;
                           }
                           console.log(`[EventProcessor] Sandbox Ativo: Forçando resposta da IA em chat 'open' para o celular homologado (${b.phone}).`);

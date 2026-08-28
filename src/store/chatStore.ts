@@ -4965,6 +4965,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
         };
         await supabase.from('contacts').update(botStatusPayload).eq('id', realContactId);
 
+        // Notifica o backend imediatamente para abortar qualquer geração ou envio pendente da IA na memória
+        if (payload.ai_paused) {
+            try {
+                const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+                fetch(`${API_URL}/api/messages/cancel-ai`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-tenant-id': tenant.id
+                    },
+                    body: JSON.stringify({
+                        conversationId: conv.id,
+                        contactId: realContactId,
+                        remoteJid: contact?.phone ? `${contact.phone.replace(/\D/g, '')}@s.whatsapp.net` : undefined,
+                        reason: payload.ai_paused_until ? 'pausa_temporaria_ui' : 'pausa_definitiva_ui'
+                    })
+                }).catch(err => console.warn('[ChatStore] Falha ao notificar cancel-ai no backend:', err));
+            } catch (notifyErr) {
+                console.warn('[ChatStore] Erro ao disparar cancel-ai:', notifyErr);
+            }
+        }
+
         // Only insert system logs and messages if the pause state is actually changing
         const isStateChanging = !contact || !!contact.ai_paused !== !!payload.ai_paused;
 

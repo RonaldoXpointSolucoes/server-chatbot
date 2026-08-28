@@ -120,8 +120,8 @@ router.post('/messages/send', requireTenant, async (req, res) => {
 
         if (!isAuto) {
             try {
-                AutomationWorker.cancelPendingMessage(conversationId);
-                AutomationWorker.cancelPendingMessage(remoteJid);
+                AutomationWorker.cancelPendingMessage(conversationId, 'envio_humano_api');
+                AutomationWorker.cancelPendingMessage(remoteJid, 'envio_humano_api');
             } catch (cancelErr) {
                 console.error('[Messages API] Erro ao cancelar mensagem pendente:', cancelErr);
             }
@@ -129,7 +129,8 @@ router.post('/messages/send', requireTenant, async (req, res) => {
             await supabase.from('conversations').update({
                 updated_at: new Date().toISOString(),
                 unread_count: 0,
-                status: nextStatus
+                status: 'open',
+                ai_paused: true
             }).eq('id', conversationId);
         } else {
             // Automação: apenas atualiza timestamp sem alterar o status da conversa (NÃO reabre ticket)
@@ -369,6 +370,21 @@ router.post('/conversations/:conversationId/sync-history', requireTenant, async 
 
     } catch(e) {
         console.error("Erro no sync-history", e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+router.post('/cancel-ai', requireTenant, async (req, res) => {
+    try {
+        const { conversationId, remoteJid, contactId, reason } = req.body;
+        
+        if (conversationId) AutomationWorker.cancelPendingMessage(conversationId, reason || 'pausa_manual');
+        if (remoteJid) AutomationWorker.cancelPendingMessage(remoteJid, reason || 'pausa_manual');
+        if (contactId) AutomationWorker.cancelPendingMessage(contactId, reason || 'pausa_manual');
+        
+        res.json({ ok: true, message: 'IA abortada com sucesso' });
+    } catch (e) {
+        console.error('[Messages API] Erro ao cancelar IA:', e);
         res.status(500).json({ error: e.message });
     }
 });
