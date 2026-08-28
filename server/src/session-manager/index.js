@@ -109,6 +109,7 @@ class SessionManager {
         this.inProgressLocks = new Map();
         this.instanceMutexes = new Map();
         this.autoHealingCooldowns = new Map();
+        this.reconnectingCoolingDown = new Map();
 
         // Pino stream configurado para enviar logs para nosso SSE e para o stdout
         const pinoStream = {
@@ -199,19 +200,28 @@ class SessionManager {
                         const ws = sock?.ws;
                         const rawState = ws?.socket?.readyState;
                         const isConnecting = this.connectingState.has(id) || (ws && (ws.isConnecting || rawState === 0));
+                        const hasActiveTimer = this.reconnectingTimers.has(id) || this.reconnectTimeouts.has(id) || this.conflictTimeouts.has(id);
+                        const lastCooldown = this.reconnectingCoolingDown.get(id) || 0;
+                        const isCoolingDown = (Date.now() - lastCooldown < 35000);
+
                         if (sock && isSocketOpen(sock)) {
                             healthyIds.push(id);
-                        } else if (!isConnecting) {
-                            zombieEntries.push({ id, tenantId: sessionData?.tenantId });
+                        } else if (!isConnecting && !hasActiveTimer && !isCoolingDown) {
+                            // Só considera zumbi se estiver com WebSocket explicitamente fechado há mais de 45 segundos e sem timer ativo
+                            const isExplicitlyDead = ws && (ws.isClosed || rawState === 2 || rawState === 3);
+                            if (isExplicitlyDead) {
+                                zombieEntries.push({ id, tenantId: sessionData?.tenantId });
+                            }
                         }
                     }
 
-                    // Limpa e auto-reconecta sockets zumbis que perderam o WebSocket
+                    // Limpa e auto-reconecta sockets zumbis confirmados
                     for (const z of zombieEntries) {
                         console.warn(`[SessionManager/Heartbeat] Detectado socket zumbi sem WebSocket aberto para ${z.id}. Destruindo sessão e reconectando...`);
                         const wasAuth = this.authenticatedSessions.has(z.id);
                         this.destroyExistingSession(z.id, 'zombie_heartbeat').catch(() => {});
                         if (z.tenantId && wasAuth && !isLocalDev) {
+                            this.reconnectingCoolingDown.set(z.id, Date.now());
                             const timer = setTimeout(() => {
                                 this.reconnectingTimers.delete(z.id);
                                 if (!this.sessions.has(z.id)) {
@@ -219,7 +229,7 @@ class SessionManager {
                                         console.error(`[SessionManager/Heartbeat] Erro na auto-reconexão pós-zumbi para ${z.id}:`, err.message);
                                     });
                                 }
-                            }, 2000);
+                            }, 3000);
                             this.reconnectingTimers.set(z.id, timer);
                         }
                     }
@@ -278,7 +288,8 @@ class SessionManager {
 
                 for (const inst of dbInstances) {
                     const lastHeal = this.autoHealingCooldowns.get(inst.id) || 0;
-                    if (now - lastHeal < 45000) {
+                    const lastCooldown = this.reconnectingCoolingDown.get(inst.id) || 0;
+                    if (now - lastHeal < 45000 || now - lastCooldown < 35000) {
                         continue;
                     }
 
@@ -323,6 +334,7 @@ class SessionManager {
                     // Se a instância não está ativa na RAM deste nó e (está atribuída a este nó OU o lease expirou OU é Master Takeover)
                     if (isAssignedToThisNode || isLeaseExpired || isMasterTakeover) {
                         this.autoHealingCooldowns.set(inst.id, now);
+                        this.reconnectingCoolingDown.set(inst.id, now);
                         console.warn(`[SessionManager/AutoHealing] 🩺 Detectada instância ${inst.id} desincronizada (RAM: ${hasSessionInRam ? 'Presente (WS fechado)' : 'Ausente'}, Lease Expirado: ${isLeaseExpired}). Revivendo conexão...`);
                         this.createSession(inst.tenant_id, inst.id, true).catch(err => {
                             console.error(`[SessionManager/AutoHealing] Falha ao reviver instância ${inst.id}:`, err.message);
@@ -378,6 +390,7 @@ class SessionManager {
 
     async destroyExistingSession(instanceId, reason = 'reconnect') {
         this.clearWatchdog(instanceId);
+        this.reconnectingCoolingDown.set(instanceId, Date.now());
 
         if (this.reconnectingTimers.has(instanceId)) {
             clearTimeout(this.reconnectingTimers.get(instanceId));
@@ -1681,6 +1694,11 @@ class SessionManager {
                 return;
             }
             
+            const lastCooldown = this.reconnectingCoolingDown.get(instanceId) || 0;
+            if (Date.now() - lastCooldown < 30000) {
+                return;
+            }
+
             if (sock && sock.ws) {
                 const ws = sock.ws;
                 const rawSocket = ws.socket;
@@ -1710,7 +1728,7 @@ class SessionManager {
                                 console.error(`[SessionManager/Watchdog] Erro ao reconectar ${instanceId}:`, err.message);
                             });
                         }
-                    }, 1500);
+                    }, 2000);
                     this.reconnectingTimers.set(instanceId, timer);
                 }
             }

@@ -90,9 +90,23 @@ export default function InboxesList() {
         await fetchCompanies();
       }
 
+      const { data: instData } = await supabase
+        .from('whatsapp_instances')
+        .select('settings')
+        .eq('id', reassignTarget.id)
+        .maybeSingle();
+
+      const currentSettings = instData?.settings || {};
+      const updatedSettings = targetCompanyId !== STANDALONE_TENANT_ID
+        ? { ...currentSettings, chat_enabled: true, is_api_only: false }
+        : currentSettings;
+
       const { error } = await supabase
         .from('whatsapp_instances')
-        .update({ tenant_id: targetCompanyId })
+        .update({ 
+          tenant_id: targetCompanyId,
+          settings: updatedSettings
+        })
         .eq('id', reassignTarget.id);
 
       if (error) throw error;

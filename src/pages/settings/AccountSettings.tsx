@@ -810,38 +810,81 @@ export default function AccountSettings() {
         ? resData.data 
         : JSON.stringify(resData.data || resData);
 
-      // Varredura por regex de UUIDs
-      const matches = Array.from(new Set(rawContent.match(uuidRegex) || [])).map(id => (id as string).toUpperCase());
+      // Função de extração semântica com alta precisão para Gastrofood, Next.js e X-Data
+      const extractStoreUuid = (content: string): string | null => {
+        if (!content) return null;
 
-      // Busca por campos conhecidos no objeto retornado
-      let bestMatch: string | null = null;
-      if (typeof resData.data === 'object' && resData.data !== null) {
-        const obj = resData.data;
-        bestMatch = obj.AGuidEstab || obj.AIdEstab || obj.guidEstab || obj.idEstab || obj.storeId || obj.fkStore || null;
-      }
+        // 1. Gastrofood / Next.js Store: "store":{"$id":1,"IdUsuario":"UUID"...}
+        const storeBlockMatch = content.match(/"store"\s*:\s*\{([^}]+)\}/i);
+        if (storeBlockMatch) {
+          const idUsuarioMatch = storeBlockMatch[1].match(/"IdUsuario"\s*:\s*"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"/i);
+          if (idUsuarioMatch) return idUsuarioMatch[1].toUpperCase();
+        }
 
-      if (bestMatch && uuidRegex.test(bestMatch)) {
-        const cleaned = bestMatch.toUpperCase();
-        setGfoodStoreId(cleaned);
+        // 2. IsEstabelecimento: true com IdUsuario
+        const estabMatch = content.match(/"IdUsuario"\s*:\s*"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"[^}]*?"IsEstabelecimento"\s*:\s*true/i)
+          || content.match(/"IsEstabelecimento"\s*:\s*true[^}]*?"IdUsuario"\s*:\s*"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"/i);
+        if (estabMatch) return estabMatch[1].toUpperCase();
+
+        // 3. Referência X-Data BnuUsuario
+        const bnuMatch = content.match(/BnuUsuario\(([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\)/i);
+        if (bnuMatch) return bnuMatch[1].toUpperCase();
+
+        // 4. Campos conhecidos em objetos JSON
+        const directPatterns = [
+          /"AGUIDEstab"\s*:\s*"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"/i,
+          /"AIdEstab"\s*:\s*"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"/i,
+          /"guidEstab"\s*:\s*"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"/i,
+          /"idEstab"\s*:\s*"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"/i,
+          /"storeId"\s*:\s*"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"/i,
+          /"establishmentId"\s*:\s*"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"/i,
+          /"store_id"\s*:\s*"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"/i,
+          /"empresa_id"\s*:\s*"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"/i
+        ];
+
+        for (const pattern of directPatterns) {
+          const match = content.match(pattern);
+          if (match) return match[1].toUpperCase();
+        }
+
+        if (typeof resData.data === 'object' && resData.data !== null) {
+          const obj = resData.data;
+          const candidate = obj.AGuidEstab || obj.AIdEstab || obj.guidEstab || obj.idEstab || obj.storeId || obj.fkStore || null;
+          if (candidate && typeof candidate === 'string' && candidate.match(/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/)) {
+            return candidate.toUpperCase();
+          }
+        }
+
+        return null;
+      };
+
+      const identifiedStoreId = extractStoreUuid(rawContent);
+
+      if (identifiedStoreId) {
+        setGfoodStoreId(identifiedStoreId);
         setScanStoreIdFeedback({
           type: 'success',
-          message: `ID do estabelecimento extraído com sucesso do cardápio!`
+          message: `ID do estabelecimento identificado com precisão: ${identifiedStoreId}`
         });
         return;
       }
 
-      if (matches.length === 1) {
-        setGfoodStoreId(matches[0]);
+      // Varredura por regex geral de UUIDs (fallback caso a página não use a estrutura padrão)
+      const allMatches = Array.from(new Set(rawContent.match(uuidRegex) || [])).map(id => (id as string).toUpperCase());
+
+      if (allMatches.length === 1) {
+        setGfoodStoreId(allMatches[0]);
         setScanStoreIdFeedback({
           type: 'success',
-          message: `ID do estabelecimento capturado com sucesso!`
+          message: `ID do estabelecimento capturado com sucesso: ${allMatches[0]}`
         });
-      } else if (matches.length > 1) {
-        setGfoodStoreId(matches[0]);
+      } else if (allMatches.length > 1) {
+        // NÃO seleciona um aleatório automaticamente para evitar falso-positivo. Mostra as opções resumidas.
+        const topCandidates = allMatches.slice(0, 12);
         setScanStoreIdFeedback({
           type: 'info',
-          message: `Identificamos ${matches.length} IDs no link. Selecionamos o primeiro como principal:`,
-          candidates: matches
+          message: `Identificamos ${allMatches.length} IDs no link, mas nenhum campo explícito de loja foi confirmado. Selecione uma das opções encontradas ou preencha manualmente:`,
+          candidates: topCandidates
         });
       } else {
         setScanStoreIdFeedback({

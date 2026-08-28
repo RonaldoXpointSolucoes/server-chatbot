@@ -148,3 +148,46 @@ export function extractTypeFromMessage(msg) {
 
     return 'text';
 }
+
+export function getCanonicalBrPhone(phoneStr) {
+    if (!phoneStr) return '';
+    const clean = String(phoneStr).replace(/\D/g, '');
+    if (!clean) return '';
+    if (clean.startsWith('55')) {
+        if (clean.length === 12) {
+            const ddd = parseInt(clean.substring(2, 4), 10);
+            if (ddd >= 11 && ddd <= 99) {
+                return clean.substring(0, 4) + '9' + clean.substring(4);
+            }
+        }
+        return clean;
+    }
+    if (clean.length === 10) {
+        return '55' + clean.substring(0, 2) + '9' + clean.substring(2);
+    }
+    if (clean.length === 11) {
+        return '55' + clean;
+    }
+    return clean;
+}
+
+export function getBrPhoneVariations(phoneStr) {
+    if (!phoneStr) return [];
+    const clean = String(phoneStr).replace(/\D/g, '');
+    if (!clean) return [];
+    const res = [clean];
+    if (clean.startsWith('55') && clean.length === 13 && clean.charAt(4) === '9') {
+        res.push(clean.substring(0, 4) + clean.substring(5));
+    } else if (clean.startsWith('55') && clean.length === 12) {
+        res.push(clean.substring(0, 4) + '9' + clean.substring(4));
+    } else if (!clean.startsWith('55')) {
+        res.push('55' + clean);
+        if (clean.length === 11 && clean.charAt(2) === '9') {
+            res.push('55' + clean.substring(0, 2) + clean.substring(3));
+        } else if (clean.length === 10) {
+            res.push('55' + clean.substring(0, 2) + '9' + clean.substring(2));
+        }
+    }
+    return Array.from(new Set(res));
+}
+

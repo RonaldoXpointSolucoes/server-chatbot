@@ -198,11 +198,12 @@ export default function AdminDashboard() {
     
     let createdCompanyId: string | null = null;
     let success = false;
+    const selectedInst = newCompany.instance || null;
 
     const payload = {
       name: newCompany.name,
       plan_id: newCompany.plan_id || null,
-      evolution_api_instance: newCompany.instance || null,
+      evolution_api_instance: selectedInst,
       email: newCompany.email,
       password: newCompany.password,
       economic_group_id: newCompany.economic_group_id || null,
@@ -235,25 +236,67 @@ export default function AdminDashboard() {
 
       if (compErr) {
         alert(`Erro ao criar empresa: ${compErr.message}`);
+        setLoading(false);
+        return;
       } else if (compData) {
         createdCompanyId = compData.id;
-        if (newCompany.email) {
-          await masterSupabase.from('tenant_users').insert({
-            tenant_id: compData.id,
-            email: newCompany.email,
-            password: newCompany.password,
-            full_name: `Admin - ${newCompany.name}`,
-            role: 'admin'
-          });
-        }
       }
     }
 
-    // Se uma instância foi selecionada, vincular seu tenant_id no Supabase
-    if (createdCompanyId && newCompany.instance) {
-      await masterSupabase.from('whatsapp_instances')
-        .update({ tenant_id: createdCompanyId })
-        .or(`id.eq.${newCompany.instance},display_name.eq.${newCompany.instance}`);
+    if (createdCompanyId) {
+      // 1. Sincronizar / Criar usuário administrador em tenant_users
+      if (newCompany.email) {
+        try {
+          const userPayload = {
+            tenant_id: createdCompanyId,
+            user_id: crypto.randomUUID(),
+            email: newCompany.email.trim().toLowerCase(),
+            password: newCompany.password.trim(),
+            full_name: `Admin - ${newCompany.name}`,
+            role: 'admin',
+            allowed_instances: selectedInst ? [selectedInst] : [],
+            allowed_companies: [createdCompanyId]
+          };
+          await masterSupabase.from('tenant_users').insert(userPayload);
+        } catch (uErr) {
+          console.warn('Erro ao criar tenant_user admin:', uErr);
+        }
+      }
+
+      // 2. Se uma instância foi selecionada, vincular seu tenant_id e habilitar para o Chat
+      if (selectedInst) {
+        try {
+          const { data: instData } = await masterSupabase.from('whatsapp_instances')
+            .select('id, settings')
+            .or(`id.eq.${selectedInst},display_name.eq.${selectedInst}`)
+            .maybeSingle();
+
+          const instUuid = instData?.id || selectedInst;
+          const currentSettings = instData?.settings || {};
+          const updatedSettings = {
+            ...currentSettings,
+            chat_enabled: true,
+            is_api_only: false
+          };
+
+          await masterSupabase.from('whatsapp_instances')
+            .update({ 
+              tenant_id: createdCompanyId,
+              settings: updatedSettings
+            })
+            .eq('id', instUuid);
+
+          await masterSupabase.from('conversations')
+            .update({ tenant_id: createdCompanyId })
+            .eq('instance_id', instUuid);
+
+          await masterSupabase.from('messages')
+            .update({ tenant_id: createdCompanyId })
+            .eq('instance_id', instUuid);
+        } catch (instErr) {
+          console.error('Erro ao associar instância à empresa:', instErr);
+        }
+      }
     }
     
     setShowNewCompany(false);
@@ -304,14 +347,23 @@ export default function AdminDashboard() {
       // Sincronizar o vinculo na tabela whatsapp_instances, conversations e messages
       if (selectedInst) {
         const { data: instData } = await masterSupabase.from('whatsapp_instances')
-          .select('id')
+          .select('id, settings')
           .or(`id.eq.${selectedInst},display_name.eq.${selectedInst}`)
           .maybeSingle();
 
         const instUuid = instData?.id || selectedInst;
+        const currentSettings = instData?.settings || {};
+        const updatedSettings = {
+          ...currentSettings,
+          chat_enabled: true,
+          is_api_only: false
+        };
 
         await masterSupabase.from('whatsapp_instances')
-          .update({ tenant_id: companyId })
+          .update({ 
+            tenant_id: companyId,
+            settings: updatedSettings
+          })
           .eq('id', instUuid);
 
         await masterSupabase.from('conversations')

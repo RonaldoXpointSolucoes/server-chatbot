@@ -408,7 +408,8 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
                const settings = d.settings || {};
                const isApiOnly = settings.is_api_only === true;
                const isChatEnabled = settings.chat_enabled === true;
-               if (isApiOnly && !isChatEnabled) {
+               const isBaseInstance = d.id === connectedInstanceName || d.display_name === connectedInstanceName;
+               if (isApiOnly && !isChatEnabled && !isBaseInstance) {
                  return false;
                }
                return true;

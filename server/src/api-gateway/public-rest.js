@@ -895,4 +895,24 @@ router.get('/instance/:name/contacts', requireApiKey, async (req, res) => {
     }
 });
 
+// Rotas de compatibilidade para integradores de Bots (Typebot, EvolutionBot, Dify, Flowise, n8n, etc.)
+router.all([
+    '/typebot/changeStatus/:name?',
+    '/typebot/:action?/:name?',
+    '/evolutionBot/changeStatus/:name?',
+    '/evolutionBot/:action?/:name?',
+    '/openai/changeStatus/:name?',
+    '/openai/:action?/:name?',
+    '/dify/changeStatus/:name?',
+    '/dify/:action?/:name?',
+    '/flowise/changeStatus/:name?',
+    '/flowise/:action?/:name?',
+    '/n8n/changeStatus/:name?',
+    '/n8n/:action?/:name?',
+    '/evoai/changeStatus/:name?',
+    '/evoai/:action?/:name?'
+], (req, res) => {
+    res.status(200).json({ status: 'SUCCESS', message: 'Bot status handled successfully' });
+});
+
 export default router;
