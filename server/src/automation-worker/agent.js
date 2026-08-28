@@ -895,7 +895,12 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
                 const catProducts = produtosAtivos.filter(p => p.grupo_id === cat.id);
                 if (catProducts.length === 0) continue;
                 
-                cardapioText += `CATEGORIA: ${cat.descricao.toUpperCase()}\n`;
+                let catHeader = `CATEGORIA: ${cat.descricao.toUpperCase()}`;
+                const descLower = (cat.descricao || '').toLowerCase();
+                if (descLower.includes('refei') || descLower.includes('prato') || descLower.includes('almo')) {
+                    catHeader += ` (MARMITAS / MARMITEX / ALMOÇO / PRATOS EXECUTIVOS / PRATOS FEITOS NO DELIVERY)`;
+                }
+                cardapioText += `${catHeader}\n`;
                 cardapioText += `------------------------------------------------\n`;
                 for (const p of catProducts) {
                     cardapioText += formatProductRAG(p);
@@ -1798,6 +1803,15 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                           `   - "Perfeito, Tatiane! Pode deixar que avisaremos você por aqui em tempo real! 😉🛵" (e NUNCA "Perfeito, Tatiane Almeida!")\n` +
                           `4. Mantenha essa personalização afetuosa e natural, chamando o cliente exclusivamente pelo primeiro nome no decorrer da conversa.\n`;
 
+            // Regra Global de Perfil do Estabelecimento e Entendimento de Refeições/Marmitas no Delivery (ESTRITAS E OBRIGATÓRIAS)
+            basePrompt += `\n\n### DIRETRIZES DE PERFIL DO ESTABELECIMENTO E REFEIÇÕES/MARMITAS NO DELIVERY (ESTRITAS E OBRIGATÓRIAS) ###\n` +
+                          `1. PERFIL DO ESTABELECIMENTO: A nossa empresa é HAMBURGUERIA E RESTAURANTE! Nós servimos tanto hambúrgueres artesanais, lanches, combos, porções, sucos, sobremesas e bebidas, QUANTO refeições completas, pratos executivos, pratos feitos e MARMITAS no delivery!\n` +
+                          `2. ENTENDIMENTO DE MARMITAS E REFEIÇÕES (CRÍTICO):\n` +
+                          `   - Quando o cliente perguntar ou solicitar "marmita", "marmitas", "marmitex", "quentinha", "almoço", "comida caseira", "prato feito", "PF", "refeição" ou "refeições", compreenda IMEDIATAMENTE que se trata das opções da categoria/grupo "Refeições" do nosso cardápio no Gastrofood!\n` +
+                          `   - PROIBIÇÃO ABSOLUTA: NUNCA, sob hipótese alguma, diga que não temos marmitas ou que somos apenas hamburgueria. Nós TEMOS SIM marmitas e refeições deliciosas todos os dias no delivery!\n` +
+                          `   - AÇÃO OBRIGATÓRIA: Chame SEMPRE a ferramenta "Consultar_produtos_cardapio" com termo_busca: "marmita" ou "refeições" para obter os pratos executivos disponíveis (ex: Contra Filé à Milanesa, Feijoada, Contra Filé à Parmegiana, Frango Assado, Bife a Rolê, Virado à Paulista, Filé de Frango, Salmão Grelhado, Picadinho, Panqueca, Bisteca, etc.).\n` +
+                          `   - DETALHES DAS MARMITAS/REFEIÇÕES: Explique com simpatia e carinho que cada refeição/marmita dá direito a 3 acompanhamentos à escolha do cliente (arroz, feijão, batata frita, salada, farofa, etc.), pagando apenas o valor da proteína!\n`;
+
             // Regra Global de Entendimento de Saladas (ESTRITA)
             basePrompt += `\n\n### DIRETRIZES DE ENTENDIMENTO DE SALADAS (ESTRITAS) ###\n` +
                           `1. Se o cliente solicitar uma "salada", diferencie claramente entre "salada de verdade" (como a SALADA CAESAR ou Salada de Frutas) e "lanches/combos com salada" (como Lanche Plus Salada ou Combo Plus Salada, que são hambúrgueres).\n` +
@@ -1833,13 +1847,13 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
             basePrompt += `\n\n### DIRETRIZES DE VENDAS, CARDÁPIO E MONTAGEM DE PEDIDO (ESTRITAS) ###\n` +
                           `1. REGRA DE OURO DO CARDÁPIO (CRÍTICA E ABSOLUTA):\n` +
                           `   - Você SÓ PODE sugerir, citar, recomendar ou adicionar ao pedido produtos que estejam retornados EXPLICITAMENTE pelas ferramentas "Consultar_produtos_cardapio" ou "Consultar_adicionais_produto" nesta conversa.\n` +
-                          `   - NUNCA, sob nenhuma circunstância, alucine, invente ou sugira pratos, saladas, wraps, bebidas, sobremesas ou adicionais (ex: Salada Caesar, Wrap de Frango, Sanduíche de Peito de Peru, Strogonoff) de sua própria imaginação ou baseados em conversas/conhecimentos de RAG antigos que não constem no retorno direto das ferramentas do cardápio.\n` +
-                          `   - OBRIGATORIEDADE DE CONSULTA: Você DEVE chamar a ferramenta "Consultar_produtos_cardapio" sempre que o cliente perguntar sobre opções de comida, bebidas, sugestões de pratos, alternativas mais leves/pesadas, ou se ele citar qualquer item de alimentação. Nunca responda a perguntas sobre comida ou cardápio sem antes ter a resposta da ferramenta nesta mesma iteração de conversa.\n` +
-                          `   - ESTRATÉGIA DE BUSCA E TRUNCAMENTO: A ferramenta "Consultar_produtos_cardapio" retorna no máximo os primeiros 30 produtos por padrão se chamada sem argumentos. Se o cliente solicitar um item específico ou um tipo de item (ex: saladas, sucos, milk-shakes, doces, acompanhamentos) e este não aparecer nos primeiros 30 itens, você DEVE OBRIGATORIAMENTE realizar uma nova consulta na ferramenta passando um "termo_busca" correspondente (ex: termo_busca: "salada", termo_busca: "suco") para filtrar e validar a existência do produto antes de afirmar que o produto não existe.\n` +
-                          `   - Se o cliente solicitar pratos "leves", "saudáveis", "veganos", "doces", etc., e a busca no cardápio retornar vazia ou não tiver esses itens, informe de forma extremamente educada e simpática que a Burguer Plus é uma hamburgueria artesanal e que no momento não dispõe dessas opções específicas (ex: saladas/wraps), oferecendo e citando apenas os produtos reais que constam na resposta da ferramenta (como os hambúrgueres, batatas fritas e bebidas reais da casa) e convidando-o com carinho a escolher entre eles.\n` +
+                          `   - NUNCA, sob nenhuma circunstância, alucine, invente ou sugira pratos, bebidas, sobremesas ou adicionais de sua própria imaginação ou baseados em conversas antigas que não constem no retorno direto das ferramentas do cardápio.\n` +
+                          `   - OBRIGATORIEDADE DE CONSULTA: Você DEVE chamar a ferramenta "Consultar_produtos_cardapio" sempre que o cliente perguntar sobre opções de comida, marmitas, almoço, lanches, bebidas, sugestões de pratos, alternativas mais leves/pesadas, ou se ele citar qualquer item de alimentação. Nunca responda a perguntas sobre comida ou cardápio sem antes ter a resposta da ferramenta nesta mesma iteração de conversa.\n` +
+                          `   - ESTRATÉGIA DE BUSCA E TRUNCAMENTO: A ferramenta "Consultar_produtos_cardapio" retorna no máximo os primeiros 30 produtos por padrão se chamada sem argumentos. Se o cliente solicitar um item específico ou um tipo de item (ex: marmita, almoço, refeições, saladas, sucos, milk-shakes, doces, acompanhamentos) e este não aparecer nos primeiros 30 itens, você DEVE OBRIGATORIAMENTE realizar uma nova consulta na ferramenta passando um "termo_busca" correspondente (ex: termo_busca: "marmita", termo_busca: "refeições", termo_busca: "salada", termo_busca: "suco") para filtrar e validar a existência do produto antes de afirmar que o produto não existe.\n` +
+                          `   - Se o cliente solicitar algum item muito específico que não exista após a busca no cardápio retornar vazia, informe de forma extremamente educada e simpática que no momento não dispomos dessa opção específica, oferecendo e citando com carinho as opções reais disponíveis no nosso cardápio (hambúrgueres, refeições/marmitas, porções, bebidas e sobremesas da casa).\n` +
                           `2. FLUXO DE MONTAGEM DO PEDIDO (ESTRITO):\n` +
                           `   - Quando o cliente demonstrar interesse em um produto, você deve consultar os opcionais/adicionais desse produto usando a ferramenta "Consultar_adicionais_produto".\n` +
-                          `   - Identifique quais passos de adicionais são OBRIGATÓRIOS (onde qtd_minima > 0). Você DEVE perguntar ao cliente a preferência dele para cada passo obrigatório antes de prosseguir (ex: ponto da carne, tamanho, etc.).\n` +
+                          `   - Identifique quais passos de adicionais são OBRIGATÓRIOS (onde qtd_minima > 0). Você DEVE perguntar ao cliente a preferência dele para cada passo obrigatório antes de prosseguir (ex: ponto da carne, acompanhamentos da marmita/refeição, etc.).\n` +
                           `   - Apresente também as opções extras/adicionais opcionais (ex: bacon, queijo extra, ovo, etc.) e pergunte de forma simpática se ele deseja adicionar alguma dessas opções no item.\n` +
                           `   - Quando o cliente fechar o que deseja, faça um resumo claro de todos os itens e seus respectivos adicionais selecionados, mostrando o preço de cada um e o total acumulado do pedido.\n` +
                           `   - Coleta de Dados do Cliente: Para concluir a montagem do pedido, você DEVE verificar se o cliente possui cadastro completo:
@@ -3093,11 +3107,49 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                 let filteredProducts = productsList;
                                 const termo = call.args.termo_busca;
                                 if (termo && termo.trim() !== '') {
-                                    const searchLower = termo.toLowerCase();
-                                    filteredProducts = filteredProducts.filter(p => 
-                                        (p.name && p.name.toLowerCase().includes(searchLower)) ||
-                                        (p.description && p.description.toLowerCase().includes(searchLower))
-                                    );
+                                    const normalizeStr = (str) => (str || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+                                    const searchNormalized = normalizeStr(termo);
+
+                                    // Dicionário de Sinônimos de Gastronomia e Delivery
+                                    const isMarmitaSearch = ['marmita', 'marmitas', 'marmitex', 'quentinha', 'quentinhas', 'almoco', 'almocos', 'refeicao', 'refeicoes', 'prato feito', 'pratos feitos', 'pf', 'comida', 'comida caseira', 'executivo', 'prato executivo', 'pratos', 'almocar', 'almoco'].some(syn => searchNormalized.includes(syn) || syn.includes(searchNormalized));
+
+                                    const isBurgerSearch = ['hamburguer', 'hamburgueres', 'burger', 'burgers', 'lanche', 'lanches', 'sanduiche', 'sanduiches', 'artesanal', 'combo', 'combos'].some(syn => searchNormalized.includes(syn) || syn.includes(searchNormalized));
+
+                                    const isDrinkSearch = ['bebida', 'bebidas', 'refrigerante', 'refrigerantes', 'refri', 'suco', 'sucos', 'cerveja', 'cervejas', 'agua', 'aguas', 'drink', 'drinks', 'chopp'].some(syn => searchNormalized.includes(syn) || syn.includes(searchNormalized));
+
+                                    const isDessertSearch = ['sobremesa', 'sobremesas', 'doce', 'doces', 'acai', 'acais', 'sorvete', 'sorvetes', 'milk-shake', 'milkshake', 'milkshakes'].some(syn => searchNormalized.includes(syn) || syn.includes(searchNormalized));
+
+                                    const isPortionSearch = ['porcao', 'porcoes', 'petisco', 'petiscos', 'batata', 'fritas', 'mandioca', 'salame', 'frango a passarinho'].some(syn => searchNormalized.includes(syn) || syn.includes(searchNormalized));
+
+                                    filteredProducts = filteredProducts.filter(p => {
+                                        const pName = normalizeStr(p.name);
+                                        const pDesc = normalizeStr(p.description);
+                                        const pGrupo = normalizeStr(gruposMap[p.grupo_id]);
+
+                                        // 1. Match direto por nome, descrição ou grupo
+                                        if (pName.includes(searchNormalized) || pDesc.includes(searchNormalized) || pGrupo.includes(searchNormalized)) {
+                                            return true;
+                                        }
+
+                                        // 2. Match Semântico de Sinônimos
+                                        if (isMarmitaSearch && (pGrupo.includes('refeic') || pGrupo.includes('almoc') || pGrupo.includes('prato') || pDesc.includes('refeicao') || pDesc.includes('refeicoes') || pName.includes('feijoada') || pName.includes('marmit'))) {
+                                            return true;
+                                        }
+                                        if (isBurgerSearch && (pGrupo.includes('lanch') || pGrupo.includes('burg') || pGrupo.includes('combo'))) {
+                                            return true;
+                                        }
+                                        if (isDrinkSearch && (pGrupo.includes('bebid') || pGrupo.includes('suc') || pGrupo.includes('drink'))) {
+                                            return true;
+                                        }
+                                        if (isDessertSearch && (pGrupo.includes('sobremes') || pGrupo.includes('acai') || pGrupo.includes('milk'))) {
+                                            return true;
+                                        }
+                                        if (isPortionSearch && (pGrupo.includes('porc') || pGrupo.includes('petisc'))) {
+                                            return true;
+                                        }
+
+                                        return false;
+                                    });
                                 }
 
                                 let baseCardapioUrl = companySettings.link_cardapio || '';
