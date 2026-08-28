@@ -9,16 +9,14 @@ export const HOMOLOG_ALLOWED_INSTANCES = [
     'cc4efe36-f391-4b3d-a24c-ddcd8a293cf6', // FoodNext (11 94775-8860)
     '5c78d358-d449-41c4-b396-a04ab20a39e4'  // Ronaldo-Web (11 97596-0999)
 ];
-export const HOMOLOG_TEST_TENANT_ID = '8b1e427b-2321-4ea7-9d7e-90f7d5cbad21';
 
 export const isInstanceAllowedForNode = (instanceId, tenantId = null) => {
     const currentNodeId = String(NODE_ID).trim();
     const isAlphaWorker = currentNodeId.includes('alpha') || (process.env.APP_ENV || '').toLowerCase() === 'alpha';
     if (!isAlphaWorker) return true;
     if (process.env.AUTO_START_ALPHA_ALL === 'true') return true;
-    if (HOMOLOG_ALLOWED_INSTANCES.includes(instanceId)) return true;
-    if (tenantId && tenantId === HOMOLOG_TEST_TENANT_ID) return true;
-    return false;
+    // O nó Alpha de Homologação é restrito EXCLUSIVAMENTE às instâncias oficiais de teste homologadas
+    return HOMOLOG_ALLOWED_INSTANCES.includes(instanceId);
 };
 
 export const isSocketOpen = (sock) => {
@@ -371,7 +369,7 @@ class SessionManager {
                         assignedNodeId.includes('local') ||
                         assignedNodeId.startsWith('worker-local')
                     );
-                    const isMasterTakeover = isProductionMaster && isNonProductionRemote;
+                    const isMasterTakeover = isProductionMaster && isNonProductionRemote && !HOMOLOG_ALLOWED_INSTANCES.includes(inst.id);
 
                     // Se a instância pertence ativamente a outro nó com lease válido (e não é Master Takeover), não concorre
                     if (assignedNodeId && !isAssignedToThisNode && !isLeaseExpired && !isMasterTakeover) {
@@ -553,7 +551,7 @@ class SessionManager {
                 assignedNodeId.startsWith('worker-local')
             );
             const isProductionMaster = currentNodeId === 'production-worker' || (process.env.APP_ENV || '').toLowerCase() === 'production';
-            const isMasterTakeover = isProductionMaster && isNonProductionOwner;
+            const isMasterTakeover = isProductionMaster && isNonProductionOwner && !HOMOLOG_ALLOWED_INSTANCES.includes(instanceId);
 
             const isAlphaWorker = currentNodeId.includes('alpha') || (process.env.APP_ENV || '').toLowerCase() === 'alpha';
             const isProductionOwner = assignedNodeId && (assignedNodeId === 'production-worker' || assignedNodeId.includes('prod'));
@@ -1204,16 +1202,33 @@ class SessionManager {
                             lastDisconnect: { error: { output: { statusCode: status } } } 
                         });
                     } else if (isConflict) {
-                        const isLocal = process.env.DISABLE_AUTO_START_SESSIONS === 'true';
+                        const isLocal = process.env.DISABLE_AUTO_START_SESSIONS === 'true' || process.env.IS_LOCAL_DEV === 'true';
                         const currentNodeId = String(NODE_ID).trim();
                         const isAlphaWorker = currentNodeId.includes('alpha') || (process.env.APP_ENV || '').toLowerCase() === 'alpha';
 
                         // Se o nó atual for Alpha e a instância não for homologação permitida, cede o controle pacificamente
-                        if (isAlphaWorker && !isInstanceAllowedForNode(instanceId, tenantId)) {
-                            console.warn(`[SessionManager] Conflito de sessão na instância ${instanceId}: Nó Alpha cedendo controle local para o nó de produção.`);
+                        if (isAlphaWorker && !HOMOLOG_ALLOWED_INSTANCES.includes(instanceId)) {
+                            console.warn(`[SessionManager] Conflito de sessão na instância ${instanceId}: Nó Alpha cedendo controle local para o nó de produção imediatamente.`);
                             await this.destroyExistingSession(instanceId, 'conflict_alpha_yield');
                             this.conflictAttempts.delete(instanceId);
                             return;
+                        }
+
+                        // Se o nó atual for Produção e a instância for de homologação onde o nó Alpha está ativo, cede o controle
+                        if (!isAlphaWorker && HOMOLOG_ALLOWED_INSTANCES.includes(instanceId)) {
+                            const { data: dbInst } = await retryWithBackoff(() =>
+                                supabase.from('whatsapp_instances')
+                                    .select('assigned_node_id, lease_until, updated_at')
+                                    .eq('id', instanceId)
+                                    .maybeSingle()
+                            );
+                            const remoteNode = dbInst?.assigned_node_id ? String(dbInst.assigned_node_id).trim() : '';
+                            if (remoteNode.includes('alpha')) {
+                                console.warn(`[SessionManager] Conflito na instância de homologação ${instanceId}: Nó de Produção cedendo para o Nó Alpha ativo.`);
+                                await this.destroyExistingSession(instanceId, 'conflict_prod_yield_to_alpha');
+                                this.conflictAttempts.delete(instanceId);
+                                return;
+                            }
                         }
 
                         const cAttempts = (this.conflictAttempts.get(instanceId) || 0) + 1;
@@ -1238,8 +1253,9 @@ class SessionManager {
 
                         const isProductionMaster = currentNodeId === 'production-worker' || (process.env.APP_ENV || '').toLowerCase() === 'production';
                         const isNonProductionRemote = remoteNodeId && (remoteNodeId.includes('alpha') || remoteNodeId.includes('staging') || remoteNodeId.includes('local') || remoteNodeId.startsWith('worker-local'));
+                        const isMasterTakeoverRemote = isProductionMaster && isNonProductionRemote && !HOMOLOG_ALLOWED_INSTANCES.includes(instanceId);
 
-                        if (isOtherActive && !(isProductionMaster && isNonProductionRemote)) {
+                        if (isOtherActive && !isMasterTakeoverRemote) {
                             console.warn(`[SessionManager] ⚠️ Conflito de sessão na instância ${instanceId}: O nó remoto '${remoteNodeId}' assumiu a posse ativa. Cedendo controle local para evitar colisões.`);
                             this.conflictAttempts.delete(instanceId);
                             return;
@@ -1738,9 +1754,10 @@ class SessionManager {
                 if (assignedNodeId && assignedNodeId !== currentNodeId && data.lease_until && new Date(data.lease_until) > now && !force) {
                     const isProductionMaster = currentNodeId === 'production-worker' || (process.env.APP_ENV || '').toLowerCase() === 'production';
                     const isNonProductionOwner = assignedNodeId.includes('alpha') || assignedNodeId.includes('staging') || assignedNodeId.includes('local') || assignedNodeId.startsWith('worker-local');
+                    const isMasterTakeover = isProductionMaster && isNonProductionOwner && !HOMOLOG_ALLOWED_INSTANCES.includes(instanceId);
 
                     // Se não for o Production Master reassumindo controle de um worker não-produção:
-                    if (!(isProductionMaster && isNonProductionOwner)) {
+                    if (!isMasterTakeover) {
                         const lastUpdated = data.updated_at ? new Date(data.updated_at) : null;
                         const isStale = !lastUpdated || (now.getTime() - lastUpdated.getTime() > 35000);
                         if (!isStale && (data.status === 'connected' || data.status === 'connected_local')) {

@@ -343,7 +343,7 @@ router.post('/message/sendText', requireApiKey, async (req, res) => {
 
         const sock = await getSocketWithRetry(tenant_id, id, 3);
         if (!sock) {
-            console.error(`[API Gateway] [sendText] ❌ Falha 400: Socket Offline ou não autenticado na RAM | Instância: ${id} ("${display_name}") | Destino: ${number}`);
+            console.warn(`[API Gateway] [sendText] ⚠️ Falha 400: Socket Offline ou não autenticado na RAM | Instância: ${id} ("${display_name}") | Destino: ${number}`);
             return res.status(400).json({ error: 'WhatsApp socket offline or not authenticated for this instance.' });
         }
         
