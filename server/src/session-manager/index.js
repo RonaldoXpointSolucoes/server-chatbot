@@ -1070,18 +1070,30 @@ class SessionManager {
                         return;
                     }
 
-                    const isStreamOscillation = !isConflict && (status === 503 || status === 502 || status === 504 || status === 408 || status === 405 || reason.toLowerCase().includes('connection terminated') || reason.toLowerCase().includes('connection lost'));
+                    const isStreamOscillation = !isConflict && (
+                        status === 503 || 
+                        status === 502 || 
+                        status === 504 || 
+                        status === 408 || 
+                        status === 405 || 
+                        reason.toLowerCase().includes('timed out') ||
+                        reason.toLowerCase().includes('timeout') ||
+                        reason.toLowerCase().includes('connection terminated') || 
+                        reason.toLowerCase().includes('connection lost') ||
+                        reason.toLowerCase().includes('econnreset') ||
+                        reason.toLowerCase().includes('socket offline')
+                    );
 
                     if (isStreamOscillation && isFullyAuthenticated) {
                         const attempts = (this.oscillationAttempts.get(instanceId) || 0) + 1;
                         this.oscillationAttempts.set(instanceId, attempts);
 
-                        const baseDelays = [4000, 8000, 12000, 20000];
+                        const baseDelays = [3000, 6000, 10000, 18000];
                         const baseDelay = baseDelays[Math.min(attempts - 1, baseDelays.length - 1)];
                         const jitter = Math.floor(Math.random() * 1500);
                         const delay = baseDelay + jitter;
 
-                        console.log(`[SessionManager] Oscilação temporária de conexão com servidores WhatsApp (${reason || status}) na instância ${instanceId} (tentativa ${attempts}). Reciclando RAM e aguardando ${Math.round(delay / 1000)}s para estabilizar chaves...`);
+                        console.log(`[SessionManager] Oscilação temporária / timeout de conexão com servidores WhatsApp (${reason || status}) na instância ${instanceId} (tentativa ${attempts}). Reciclando RAM e aguardando ${Math.round(delay / 1000)}s para estabilizar chaves...`);
                         await this.destroyExistingSession(instanceId, 'stream_oscillation');
 
                         await retryWithBackoff(() =>
@@ -1123,18 +1135,17 @@ class SessionManager {
 
                     await this.logConnectionEvent(tenantId, instanceId, 'disconnected', 'close', reason || `status_${status}`, null, null);
 
-                    if (loggedOut || status === 401 || status === 403 || status === 400 || status === 500 || isBadSession) {
-                        console.log(`[SessionManager] Desconexão/Sessão inválida detectada na instância ${instanceId} (status: ${status}, reason: ${reason}). Limpando credenciais desatualizadas em RAM e Supabase.`);
-                        await this.destroyExistingSession(instanceId, 'invalid_session');
+                    const isExplicitLogout = loggedOut || (status === 401 && reason.toLowerCase().includes('logged out'));
+                    if (isExplicitLogout) {
+                        console.log(`[SessionManager] Desconexão/Logout explícito pelo celular detectado na instância ${instanceId} (status: ${status}, reason: ${reason}). Limpando credenciais em RAM e Supabase.`);
+                        await this.destroyExistingSession(instanceId, 'explicit_logout');
 
                         await retryWithBackoff(() => supabase.from('wa_auth_credentials').delete().eq('instance_id', instanceId));
                         await retryWithBackoff(() => supabase.from('wa_auth_keys').delete().eq('instance_id', instanceId));
                         await retryWithBackoff(() => supabase.from('whatsapp_instance_runtime').delete().eq('instance_id', instanceId));
                         
-                        const nextStatus = loggedOut ? 'logged_out' : 'disconnected';
-                        const errMsg = loggedOut 
-                            ? 'Desconectado pelo celular. A sessão do WhatsApp foi encerrada no dispositivo móvel. Clique em Reconectar para vincular novamente.' 
-                            : 'A sessão de conexão expirou ou falhou. Clique em Reconectar para vincular novamente via QR Code ou Código de Pareamento.';
+                        const nextStatus = 'logged_out';
+                        const errMsg = 'Desconectado pelo celular. A sessão do WhatsApp foi encerrada no dispositivo móvel. Clique em Reconectar para vincular novamente.';
 
                         await this.releaseSessionLock(instanceId, true, errMsg);
                         
@@ -1145,6 +1156,38 @@ class SessionManager {
                             connection: 'close', 
                             lastDisconnect: { error: { output: { statusCode: status || 401 } } } 
                         });
+                    } else if (isFullyAuthenticated) {
+                        // Desconexão transitória com credenciais salvas: auto-reconexão com backoff exponencial + jitter
+                        const attempts = (this.reconnectAttempts.get(instanceId) || 0) + 1;
+                        this.reconnectAttempts.set(instanceId, attempts);
+                        
+                        const baseDelay = Math.min(1500 * Math.pow(1.4, attempts), 25000);
+                        const jitter = Math.floor(Math.random() * 1500);
+                        const delay = Math.round(baseDelay + jitter);
+                        
+                        console.log(`[SessionManager] Desconexão não-fatal (${reason || status}) na instância ${instanceId}. Tentativa ${attempts} de reconexão em ${Math.round(delay / 1000)}s com backoff...`);
+                        
+                        await retryWithBackoff(() =>
+                            supabase.from('whatsapp_instances')
+                                .update({
+                                    status: 'reconnecting',
+                                    lease_until: new Date(Date.now() + 60000).toISOString(),
+                                    last_disconnected_at: new Date().toISOString(),
+                                    last_disconnect_reason: reason || `status_${status}`,
+                                    updated_at: new Date().toISOString()
+                                })
+                                .eq('id', instanceId)
+                        ).catch(() => {});
+
+                        const timer = setTimeout(() => {
+                            this.reconnectingTimers.delete(instanceId);
+                            if (!this.sessions.has(instanceId)) {
+                                this.createSession(tenantId, instanceId, true).catch(err => {
+                                    console.error(`[SessionManager] Erro na auto-reconexão com backoff para ${instanceId}:`, err.message);
+                                });
+                            }
+                        }, delay);
+                        this.reconnectingTimers.set(instanceId, timer);
                     } else if (isBlocked12h && isFullyAuthenticated) {
                         console.error(`[SessionManager] Instância ${instanceId} está BLOQUEADA por 12h no WhatsApp.`);
                         this.authenticatedSessions.delete(instanceId);
