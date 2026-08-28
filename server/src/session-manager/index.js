@@ -13,9 +13,14 @@ export const isSocketOpen = (sock) => {
     if (ws.isClosed === true || ws.isClosing === true) return false;
     if (ws.socket && (ws.socket.readyState === 2 || ws.socket.readyState === 3)) return false;
     
-    // Se possui credenciais de usuário autenticadas e ws não está fechado
+    // Se está em processo ativo de conexão/handshake, não considerar aberto ainda para envio imediato sem wait
+    if (ws.isConnecting === true || (ws.socket && ws.socket.readyState === 0)) {
+        return false;
+    }
+
+    // Se possui credenciais de usuário autenticadas e ws não está explicitamente fechado nem fechando
     const meId = sock.user?.id || sock.authState?.creds?.me?.id;
-    if (meId && !ws.isClosed && !ws.isClosing) {
+    if (meId && !ws.isClosed && !ws.isClosing && (!ws.socket || ws.socket.readyState === 1)) {
         return true;
     }
     return false;
@@ -33,23 +38,32 @@ const waitForSocketOpen = (sock, timeoutMs = 20000) => {
         }
 
         let isClean = false;
+        let pollTimer = null;
         const cleanUp = () => {
             if (isClean) return;
             isClean = true;
             clearTimeout(timer);
+            if (pollTimer) clearInterval(pollTimer);
             try {
-                sock.ev.off('connection.update', connectionListener);
+                if (sock.ev && typeof sock.ev.off === 'function') {
+                    sock.ev.off('connection.update', connectionListener);
+                }
             } catch (e) {}
         };
 
         const timer = setTimeout(() => {
             cleanUp();
-            reject(new Error('Timeout waiting for connection to open'));
+            // Verificação final antes de rejeitar
+            if (isSocketOpen(sock)) {
+                resolve(true);
+            } else {
+                reject(new Error('Timeout waiting for connection to open'));
+            }
         }, timeoutMs);
 
         const connectionListener = (update) => {
             const { connection } = update;
-            if (connection === 'open') {
+            if (connection === 'open' || isSocketOpen(sock)) {
                 cleanUp();
                 resolve(true);
             } else if (connection === 'close') {
@@ -58,7 +72,17 @@ const waitForSocketOpen = (sock, timeoutMs = 20000) => {
             }
         };
 
-        sock.ev.on('connection.update', connectionListener);
+        if (sock.ev && typeof sock.ev.on === 'function') {
+            sock.ev.on('connection.update', connectionListener);
+        }
+
+        // Polling de fallback rápido (a cada 200ms) para detectar abertura imediata do socket
+        pollTimer = setInterval(() => {
+            if (isSocketOpen(sock)) {
+                cleanUp();
+                resolve(true);
+            }
+        }, 200);
     });
 };
 
@@ -329,6 +353,14 @@ class SessionManager {
                     // Se a instância pertence ativamente a outro nó com lease válido (e não é Master Takeover), não concorre
                     if (assignedNodeId && !isAssignedToThisNode && !isLeaseExpired && !isMasterTakeover) {
                         continue;
+                    }
+
+                    // Se a instância está na RAM deste nó mas WS está fechado, valida se não é apenas uma oscilação recente
+                    if (hasSessionInRam && !isWsOpen) {
+                        const lastDisconn = sessionData?.lastDisconnectedAt ? new Date(sessionData.lastDisconnectedAt).getTime() : 0;
+                        if (now - lastDisconn < 30000 && (hasActiveTimer || isConnecting)) {
+                            continue;
+                        }
                     }
 
                     // Se a instância não está ativa na RAM deste nó e (está atribuída a este nó OU o lease expirou OU é Master Takeover)
@@ -1553,8 +1585,11 @@ class SessionManager {
         const sock = data.sock;
         // Valida se o WebSocket está saudável (não está CLOSING nem CLOSED)
         if (sock.ws && (sock.ws.isClosing || sock.ws.isClosed)) {
-            console.log(`[SessionManager] Limpeza de socket zumbi para ${instanceId} (WebSocket fechado/fechando).`);
-            this.sessions.delete(instanceId);
+            const isReconnectingActive = this.connectingState.has(instanceId) || this.reconnectingTimers.has(instanceId);
+            if (!isReconnectingActive) {
+                console.log(`[SessionManager] Limpeza de socket inativo para ${instanceId} (WebSocket fechado).`);
+                this.sessions.delete(instanceId);
+            }
             return null;
         }
 
@@ -1572,6 +1607,19 @@ class SessionManager {
         let sock = this.getSocket(instanceId, requireAuthenticated);
         if (sock && !force) return sock;
 
+        // Se a sessão já existe na memória autenticada mas está em fase de conexão/handshake, aguarda abertura suave
+        const rawSession = this.sessions.get(instanceId);
+        if (rawSession && rawSession.sock) {
+            const rawSock = rawSession.sock;
+            const meId = rawSock.user?.id || rawSock.authState?.creds?.me?.id;
+            if (meId && (!isSocketOpen(rawSock) || rawSock.ws?.isConnecting || rawSock.ws?.socket?.readyState === 0)) {
+                try {
+                    await waitForSocketOpen(rawSock, 3500);
+                    if (isSocketOpen(rawSock)) return rawSock;
+                } catch (e) {}
+            }
+        }
+
         // Se já houver promessa de inicialização em andamento, aguarda seu retorno
         if (this.connectingState.has(instanceId)) {
             try {
@@ -1579,7 +1627,13 @@ class SessionManager {
                 if (connectingSock) {
                     if (requireAuthenticated) {
                         const meId = connectingSock?.user?.id || connectingSock?.authState?.creds?.me?.id;
-                        if (meId && isSocketOpen(connectingSock)) return connectingSock;
+                        if (meId) {
+                            if (isSocketOpen(connectingSock)) return connectingSock;
+                            try {
+                                await waitForSocketOpen(connectingSock, 3500);
+                                if (isSocketOpen(connectingSock)) return connectingSock;
+                            } catch (e) {}
+                        }
                     } else {
                         return connectingSock;
                     }
@@ -1668,10 +1722,8 @@ class SessionManager {
         console.log(`[SessionManager] Encerrando todas as ${this.sessions.size} sessões no nó ${NODE_ID}...`);
         const activeIds = Array.from(this.sessions.keys());
         for (const id of activeIds) {
-            try {
-                this.closingSessions.add(id);
-                await this.destroyExistingSession(id, 'shutdown');
-            } catch (e) {}
+            this.clearWatchdog(id);
+            await this.destroyExistingSession(id, 'closeAllSessions').catch(() => {});
         }
         try {
             await supabase.from('whatsapp_instances')
@@ -1695,12 +1747,15 @@ class SessionManager {
             }
             
             const lastCooldown = this.reconnectingCoolingDown.get(instanceId) || 0;
-            if (Date.now() - lastCooldown < 30000) {
+            if (Date.now() - lastCooldown < 45000) {
                 return;
             }
 
-            if (sock && sock.ws) {
-                const ws = sock.ws;
+            const currentSession = this.sessions.get(instanceId);
+            const activeSock = currentSession?.sock || sock;
+
+            if (activeSock && activeSock.ws) {
+                const ws = activeSock.ws;
                 const rawSocket = ws.socket;
                 const rawState = rawSocket ? rawSocket.readyState : undefined;
                 
@@ -1711,7 +1766,7 @@ class SessionManager {
                 }
 
                 // Se o WebSocket estiver aberto ou a sessão estiver autenticada e operacional, está saudável
-                if (ws.isOpen || isSocketOpen(sock)) {
+                if (ws.isOpen || isSocketOpen(activeSock)) {
                     return;
                 }
 

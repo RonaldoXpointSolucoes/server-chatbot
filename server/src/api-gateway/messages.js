@@ -33,12 +33,22 @@ router.post('/messages/send', requireTenant, async (req, res) => {
         // Anti-Bug: Se o socket estiver no meio do boot (deploy/restart), aguarda
         if (!sock && sessionManager.connectingState.has(instanceId)) {
             console.log(`[API Gateway] [messages/send] Segurando req de envio. Aguardando socket conectar: ${instanceId}`);
-            sock = await sessionManager.connectingState.get(instanceId);
+            try {
+                sock = await sessionManager.connectingState.get(instanceId);
+            } catch (e) {}
         }
         
-        // Se o socket não existe na memória, tenta acordar apenas se a instância estiver conectada no banco
+        // Se o socket não existe na memória, tenta acordar com até 3 tentativas
         if (!sock) {
-            sock = await sessionManager.getSocketOrWake(tenantId, instanceId, true);
+            const delays = [0, 1000, 2000];
+            for (let attempt = 0; attempt < 3; attempt++) {
+                if (delays[attempt] > 0) {
+                    await new Promise(r => setTimeout(r, delays[attempt]));
+                }
+                sock = await sessionManager.getSocketOrWake(tenantId, instanceId, true);
+                if (sock) break;
+            }
+
             if (!sock) {
                 if (isAuto) console.error(`[API Gateway] [messages/send] ❌ Falha 400: Socket Offline na RAM | Instância: ${instanceId} | Destino: ${contactPhone}`);
                 return res.status(400).json({ error: 'WhatsApp socket offline ou não autenticado para esta instância.' });
@@ -47,7 +57,18 @@ router.post('/messages/send', requireTenant, async (req, res) => {
         
         const remoteJid = await resolveTargetJid(sock, contactPhone, tenantId);
 
-        const msgResult = await sock.sendMessage(remoteJid, { text });
+        let msgResult;
+        try {
+            msgResult = await sock.sendMessage(remoteJid, { text });
+        } catch (sendErr) {
+            console.warn(`[API Gateway] [messages/send] Falha na 1ª tentativa (${sendErr.message}). Tentando obter socket renovado...`);
+            const retrySock = await sessionManager.getSocketOrWake(tenantId, instanceId, true);
+            if (retrySock) {
+                msgResult = await retrySock.sendMessage(remoteJid, { text });
+            } else {
+                throw sendErr;
+            }
+        }
 
         if (isAuto) {
             console.log(`[API Gateway] [messages/send] ✅ Sucesso no Envio de Automação | Instância: ${instanceId} | Destino: ${remoteJid} | MsgID: ${msgResult?.key?.id}`);

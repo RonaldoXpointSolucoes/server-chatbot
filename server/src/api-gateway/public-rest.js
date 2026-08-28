@@ -11,6 +11,19 @@ import ffmpeg from 'fluent-ffmpeg';
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 500 * 1024 * 1024 } }); // 500MB
 
+// Helper de obtenção de socket com retry e backoff suave
+async function getSocketWithRetry(tenantId, instanceId, maxRetries = 3) {
+    const delays = [0, 1000, 2000];
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+        if (delays[attempt] > 0) {
+            await new Promise(r => setTimeout(r, delays[attempt]));
+        }
+        const sock = await sessionManager.getSocketOrWake(tenantId, instanceId, true);
+        if (sock) return sock;
+    }
+    return null;
+}
+
 // Middleware de autenticação genérica para rotas de instância já existente
 const requireApiKey = async (req, res, next) => {
     const apiKey = req.headers['apikey'] || req.headers['globalapikey'];
@@ -274,21 +287,13 @@ router.delete('/instance/:name', requireApiKey, async (req, res) => {
         if (sock) {
             try { await sock.logout(); } catch(e){}
         }
-        await sessionManager.closeSession(id);
-        await supabase.from('whatsapp_instances').delete().eq('id', id);
-        
-        res.json({ status: 'SUCCESS', error: false, message: 'Instance deleted' });
-    } catch(e) {
-        res.status(500).json({ error: e.message });
-    }
-});
-
 /**
  * @swagger
  * /message/sendText:
  *   post:
  *     tags: [Message]
- *     summary: Enviar texto
+ *     summary: Enviar mensagem de texto simples
+ *     description: Envia uma mensagem de texto via WhatsApp através da instância autenticada. Compatível com o ecossistema Evolution API.
  *     parameters:
  *       - in: header
  *         name: apikey
@@ -296,34 +301,25 @@ router.delete('/instance/:name', requireApiKey, async (req, res) => {
  *         schema:
  *           type: string
  *           example: "sk_cd31511433a155678ade719569eaa0ff"
+ *         description: A ApiKey da instância ou a Global ApiKey da Empresa
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
+ *             required:
+ *               - number
+ *               - text
  *             properties:
  *               number:
  *                 type: string
- *                 description: O número de telefone com DDI e DDD
+ *                 description: O número de destino com DDD e DDI (ex 5511975960999 ou 11975960999)
  *                 example: "5511975960999"
  *               text:
  *                 type: string
  *                 description: A mensagem de texto a ser enviada
  *                 example: "Olá! Esta é uma mensagem de teste enviada diretamente pelo Swagger UI da Antigravity 🚀"
- *               instance:
- *                 type: string
- *                 description: O nome exato da instância de envio
- *                 example: "Teste"
- *     responses:
- *       200:
- *         description: Mensagem postada na fila do Socket
- *       400:
- *         description: Socket Offline ou Parâmetros Ausentes
- *       401:
- *         description: ApiKey Inválida ou Nome da Instância não encontrado
- *       500:
- *         description: Erro interno de processamento
  */
 router.post('/message/sendText', requireApiKey, async (req, res) => {
     const { number, text } = req.body;
@@ -338,14 +334,25 @@ router.post('/message/sendText', requireApiKey, async (req, res) => {
             return res.status(400).json({ error: 'number and text are required in body' });
         }
 
-        const sock = await sessionManager.getSocketOrWake(tenant_id, id, true);
+        const sock = await getSocketWithRetry(tenant_id, id, 3);
         if (!sock) {
             console.error(`[API Gateway] [sendText] ❌ Falha 400: Socket Offline ou não autenticado na RAM | Instância: ${id} ("${display_name}") | Destino: ${number}`);
             return res.status(400).json({ error: 'WhatsApp socket offline or not authenticated for this instance.' });
         }
         
         const remoteJid = await resolveTargetJid(sock, number, tenant_id);
-        const msgResult = await sock.sendMessage(remoteJid, { text }, { isAutomation: true });
+        let msgResult;
+        try {
+            msgResult = await sock.sendMessage(remoteJid, { text }, { isAutomation: true });
+        } catch (sendErr) {
+            console.warn(`[API Gateway] [sendText] Aviso na 1ª tentativa de envio (${sendErr.message}). Tentando obter socket atualizado e retentar...`);
+            const retrySock = await getSocketWithRetry(tenant_id, id, 2);
+            if (retrySock) {
+                msgResult = await retrySock.sendMessage(remoteJid, { text }, { isAutomation: true });
+            } else {
+                throw sendErr;
+            }
+        }
 
         try {
             const { EventProcessor } = await import('../event-processor/index.js');
@@ -427,7 +434,7 @@ router.post('/message/sendMedia', requireApiKey, upload.single('file'), async (r
             return res.status(400).json({ error: 'Missing file, number, mediatype or instance' });
         }
 
-        const sock = await sessionManager.getSocketOrWake(tenant_id, id, true);
+        const sock = await getSocketWithRetry(tenant_id, id, 3);
         if (!sock) {
             console.error(`[API Gateway] [sendMedia] ❌ Falha 400: Socket Offline na RAM | Instância: ${id} ("${display_name}") | Destino: ${number}`);
             return res.status(400).json({ error: 'Socket offline or not authenticated' });
@@ -464,59 +471,86 @@ router.post('/message/sendMedia', requireApiKey, upload.single('file'), async (r
                 
                 file.buffer = fs.readFileSync(tempOutput);
                 file.mimetype = 'audio/ogg; codecs=opus';
-                file.originalname = file.originalname.replace('.webm', '.ogg');
-                try { fs.unlinkSync(tempInput); fs.unlinkSync(tempOutput); } catch(e){}
-            } catch(err) {
-                 console.error('[API Gateway] [sendMedia] ⚠️ Falha na conversão de áudio opus:', err);
+                
+                fs.unlinkSync(tempInput);
+                fs.unlinkSync(tempOutput);
+            } catch (e) {
+                console.error("[API Gateway] Erro na conversão de audio ffmpeg:", e);
             }
         }
 
-        // Upload to Supabase Storage First
-        const safeName = file.originalname.replace(/[^a-zA-Z0-9.\-]/g, '_');
-        const storagePath = `tenant_${tenant_id}/instance_${id}/${remoteJid}/${timestamp}_${safeName}`;
+        // Upload do arquivo para o bucket do Supabase Storage
+        const fileExt = file.originalname ? file.originalname.split('.').pop() : (mediatype === 'audio' ? 'ogg' : 'bin');
+        const fileName = `${tenant_id}/${id}/${timestamp}_${crypto.randomBytes(4).toString('hex')}.${fileExt}`;
+        
+        const { error: uploadError } = await supabase.storage
+            .from('media')
+            .upload(fileName, file.buffer, {
+                contentType: file.mimetype,
+                upsert: true
+            });
 
-        const { data: uploadData, error: uploadErr } = await supabase.storage
-            .from('chat_media')
-            .upload(storagePath, file.buffer, { contentType: file.mimetype, upsert: false });
-
-        let mediaUrl = '';
-        if (!uploadErr) {
-            const { data: publicUrlData } = supabase.storage.from('chat_media').getPublicUrl(storagePath);
-            mediaUrl = publicUrlData.publicUrl;
+        if (uploadError) {
+            console.error("[API Gateway] Erro no upload Supabase Storage:", uploadError);
+            return res.status(500).json({ error: 'Failed to upload media to storage', details: uploadError.message });
         }
 
-        // Prepare message payload
-        const sendPayload = {};
-        if (mediatype === 'image') sendPayload.image = file.buffer;
-        else if (mediatype === 'video') sendPayload.video = file.buffer;
-        else if (mediatype === 'audio') { sendPayload.audio = file.buffer; sendPayload.mimetype = file.mimetype; sendPayload.ptt = true; } // ptt=true force audio note
-        else if (mediatype === 'document') { sendPayload.document = file.buffer; sendPayload.mimetype = file.mimetype; sendPayload.fileName = file.originalname; }
-        else return res.status(400).json({ error: 'Unsupported mediatype' });
+        const { data: publicUrlData } = supabase.storage.from('media').getPublicUrl(fileName);
+        const mediaUrl = publicUrlData.publicUrl;
 
-        const msgResult = await sock.sendMessage(remoteJid, sendPayload, { isAutomation: true });
+        // Disparo Baileys de acordo com o mediatype
+        let messagePayload = {};
+        const isPtt = req.body.ptt === true || req.body.ptt === 'true' || mediatype === 'audio';
 
-        // Armazena URL no eventProcessor (opcional, só p renderizar imagem no UI frontend se ele assinar o socket interno)
+        if (mediatype === 'image') {
+            messagePayload = { image: file.buffer, caption: req.body.caption || '' };
+        } else if (mediatype === 'video') {
+            messagePayload = { video: file.buffer, caption: req.body.caption || '' };
+        } else if (mediatype === 'audio') {
+            messagePayload = { audio: file.buffer, mimetype: 'audio/ogg; codecs=opus', ptt: isPtt };
+        } else if (mediatype === 'document') {
+            messagePayload = { 
+                document: file.buffer, 
+                mimetype: file.mimetype || 'application/octet-stream', 
+                fileName: file.originalname || 'document',
+                caption: req.body.caption || '' 
+            };
+        } else {
+            return res.status(400).json({ error: `Unsupported mediatype: ${mediatype}` });
+        }
+
+        let msgResult;
+        try {
+            msgResult = await sock.sendMessage(remoteJid, messagePayload, { isAutomation: true });
+        } catch (sendErr) {
+            console.warn(`[API Gateway] [sendMedia] Aviso na 1ª tentativa (${sendErr.message}). Retentando com socket renovado...`);
+            const retrySock = await getSocketWithRetry(tenant_id, id, 2);
+            if (retrySock) {
+                msgResult = await retrySock.sendMessage(remoteJid, messagePayload, { isAutomation: true });
+            } else {
+                throw sendErr;
+            }
+        }
+
         try {
             const { EventProcessor } = await import('../event-processor/index.js');
-            if (EventProcessor?.pendingMediaCache && msgResult?.key?.id) {
-                EventProcessor.pendingMediaCache.set(msgResult.key.id, mediaUrl);
-                setTimeout(() => EventProcessor.pendingMediaCache.delete(msgResult.key.id), 60000);
-            }
             if (EventProcessor?.automationMessagesCache && msgResult?.key?.id) {
                 EventProcessor.automationMessagesCache.set(`${id}_${msgResult.key.id}`, true);
                 setTimeout(() => EventProcessor.automationMessagesCache.delete(`${id}_${msgResult.key.id}`), 60000);
             }
         } catch(e) {}
 
+        console.log(`[API Gateway] [sendMedia] ✅ Sucesso no Envio | Instância: ${id} ("${display_name}") | Destino: ${remoteJid} | MsgID: ${msgResult?.key?.id} | URL: ${mediaUrl}`);
+
         res.json({
             key: msgResult.key,
             message: msgResult.message,
             messageTimestamp: msgResult.messageTimestamp,
-            status: "PENDING",
-            media_url: mediaUrl
+            mediaUrl: mediaUrl,
+            status: "PENDING"
         });
-
     } catch (e) {
+        console.error(`[API Gateway] [sendMedia] ❌ Exceção 500: ${e.message} | Instância: ${id} ("${display_name}") | Destino: ${number}`);
         res.status(500).json({ error: e.message });
     }
 });
@@ -569,7 +603,7 @@ router.post('/message/sendLocation', requireApiKey, async (req, res) => {
             return res.status(400).json({ error: 'number, latitude and longitude required' });
         }
 
-        const sock = await sessionManager.getSocketOrWake(tenant_id, id, true);
+        const sock = await getSocketWithRetry(tenant_id, id, 3);
         if (!sock) {
             console.error(`[API Gateway] [sendLocation] ❌ Falha 400: Socket Offline na RAM | Instância: ${id} ("${display_name}") | Destino: ${number}`);
             return res.status(400).json({ error: 'Socket offline or not authenticated' });
@@ -641,7 +675,7 @@ router.post('/message/sendContact', requireApiKey, async (req, res) => {
             return res.status(400).json({ error: 'number, contactName and contactNumber required' });
         }
 
-        const sock = await sessionManager.getSocketOrWake(tenant_id, id, true);
+        const sock = await getSocketWithRetry(tenant_id, id, 3);
         if (!sock) {
             console.error(`[API Gateway] [sendContact] ❌ Falha 400: Socket Offline na RAM | Instância: ${id} ("${display_name}") | Destino: ${number}`);
             return res.status(400).json({ error: 'Socket offline or not authenticated' });
@@ -727,7 +761,7 @@ router.post('/message/sendReaction', requireApiKey, async (req, res) => {
             return res.status(400).json({ error: 'number, messageId and reaction required' });
         }
 
-        const sock = await sessionManager.getSocketOrWake(tenant_id, id, true);
+        const sock = await getSocketWithRetry(tenant_id, id, 3);
         if (!sock) {
             console.error(`[API Gateway] [sendReaction] ❌ Falha 400: Socket Offline na RAM | Instância: ${id} ("${display_name}") | Destino: ${number}`);
             return res.status(400).json({ error: 'Socket offline or not authenticated' });
