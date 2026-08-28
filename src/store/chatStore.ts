@@ -922,14 +922,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: status } }));
     } else {
       const currentState = get().instancesStatus[id];
+      // Se a instância já estava conectada, não rebaixa visualmente de imediato (tolerância de 35s contra falsos positivos de oscilação transitória)
       if (currentState === 'connected' || currentState === 'connected_local') {
          if ((window as any)[`_offline_checks_${id}`] || instanceStatusTimeouts[id]) {
             return;
          }
 
          let checkCount = 0;
-         const maxChecks = 3;
-         const checkIntervalMs = 30000; // 30s
+         const maxChecks = 2;
+         const checkIntervalMs = 18000; // 18s por verificação (total ~36s de carência)
          
          const intervalId = setInterval(async () => {
             checkCount++;
@@ -945,7 +946,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                }
                
                if (checkCount >= maxChecks) {
-                  set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: status } }));
+                  set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: dbStatus } }));
                   clearInterval(intervalId);
                   delete (window as any)[`_offline_checks_${id}`];
                }
@@ -957,6 +958,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
          (window as any)[`_offline_checks_${id}`] = intervalId;
       } else {
          set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: status } }));
+         // Se o status for transitório (connecting/reconnecting) no boot inicial, agenda revalidação rápida
+         if (status === 'connecting' || status === 'reconnecting' || status === 'reconnecting_local') {
+            if (!instanceStatusTimeouts[id]) {
+               instanceStatusTimeouts[id] = setTimeout(async () => {
+                  delete instanceStatusTimeouts[id];
+                  try {
+                     const { data } = await supabase.from('whatsapp_instances').select('status').eq('id', id).maybeSingle();
+                     if (data?.status && data.status !== status) {
+                        set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: data.status } }));
+                     }
+                  } catch (e) {}
+               }, 5000);
+            }
+         }
       }
     }
   },

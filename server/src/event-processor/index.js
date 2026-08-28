@@ -1965,9 +1965,9 @@ class EventProcessor {
                 .maybeSingle();
 
             const hasAuthCredsInDb = Boolean(authCreds && authCreds.instance_id);
-            const isConnStatus = currentInst && ['connected', 'connected_local'].includes(currentInst.status);
-            // Só considera ativamente conectada se tiver o status conectado E possuir as chaves auth salvas no banco
-            const isAlreadyConnected = isConnStatus && hasAuthCredsInDb;
+            const isConnStatus = currentInst && ['connected', 'connected_local', 'reconnecting'].includes(currentInst.status);
+            // Considera conectada/autenticada se possuir as credenciais auth salvas no banco ou status ativo
+            const isAlreadyConnected = hasAuthCredsInDb || isConnStatus;
 
             if (qr) {
                 // Se a instância já possui autenticação válida, ignora a emissão de QR code para não poluir o frontend

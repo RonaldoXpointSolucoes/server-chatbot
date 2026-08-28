@@ -20,7 +20,7 @@ import publicRestRoutes from './api-gateway/public-rest.js';
 import { setupSwagger } from './api-gateway/swagger.js';
 import systemLogger, { errorBuffer, persistSystemLog } from './system-logger.js';
 import { supabase, NODE_ID } from './supabase.js';
-import sessionManager from './session-manager/index.js';
+import sessionManager, { HOMOLOG_ALLOWED_INSTANCES, isInstanceAllowedForNode } from './session-manager/index.js';
 import snoozeManager from './snooze-manager.js';
 import queueProcessor from './session-manager/queue-processor.js';
 import autoRagTrainer from './automation-worker/auto-rag-trainer.js';
@@ -629,10 +629,7 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
             
             if (isAlphaWorker && process.env.AUTO_START_ALPHA_ALL !== 'true') {
                 console.log("[Worker Boot/Alpha] Nó de Homologação/Alpha detectado. Auto-start restrito exclusivamente a instâncias de teste homologadas (FoodNext / Ronaldo-Web)...");
-                const testInstanceIds = [
-                    'cc4efe36-f391-4b3d-a24c-ddcd8a293cf6', // FoodNext (11 94775-8860)
-                    '5c78d358-d449-41c4-b396-a04ab20a39e4'  // Ronaldo-Web (11 97596-0999)
-                ];
+                const testInstanceIds = HOMOLOG_ALLOWED_INSTANCES;
                 const { data: testLeases } = await supabase
                     .from('whatsapp_instances')
                     .select('id, tenant_id')

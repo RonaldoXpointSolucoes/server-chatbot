@@ -5,6 +5,22 @@ import { addLog } from '../system-logger.js';
 import pino from 'pino';
 import { supabase, NODE_ID, retryWithBackoff, resolveTargetJid } from '../supabase.js';
 
+export const HOMOLOG_ALLOWED_INSTANCES = [
+    'cc4efe36-f391-4b3d-a24c-ddcd8a293cf6', // FoodNext (11 94775-8860)
+    '5c78d358-d449-41c4-b396-a04ab20a39e4'  // Ronaldo-Web (11 97596-0999)
+];
+export const HOMOLOG_TEST_TENANT_ID = '8b1e427b-2321-4ea7-9d7e-90f7d5cbad21';
+
+export const isInstanceAllowedForNode = (instanceId, tenantId = null) => {
+    const currentNodeId = String(NODE_ID).trim();
+    const isAlphaWorker = currentNodeId.includes('alpha') || (process.env.APP_ENV || '').toLowerCase() === 'alpha';
+    if (!isAlphaWorker) return true;
+    if (process.env.AUTO_START_ALPHA_ALL === 'true') return true;
+    if (HOMOLOG_ALLOWED_INSTANCES.includes(instanceId)) return true;
+    if (tenantId && tenantId === HOMOLOG_TEST_TENANT_ID) return true;
+    return false;
+};
+
 export const isSocketOpen = (sock) => {
     if (!sock || !sock.ws) return false;
     const ws = sock.ws;
@@ -311,6 +327,11 @@ class SessionManager {
                 const isProductionMaster = currentNodeId === 'production-worker' || (process.env.APP_ENV || '').toLowerCase() === 'production';
 
                 for (const inst of dbInstances) {
+                    // Isolamento de nó: Se este worker for Alpha, só pode auto-curar instâncias de homologação autorizadas
+                    if (!isInstanceAllowedForNode(inst.id, inst.tenant_id)) {
+                        continue;
+                    }
+
                     const lastHeal = this.autoHealingCooldowns.get(inst.id) || 0;
                     const lastCooldown = this.reconnectingCoolingDown.get(inst.id) || 0;
                     if (now - lastHeal < 45000 || now - lastCooldown < 35000) {
@@ -319,6 +340,8 @@ class SessionManager {
 
                     const hasSessionInRam = this.sessions.has(inst.id);
                     const sessionData = this.sessions.get(inst.id);
+                    const sessionCreatedAt = sessionData?.createdAt || 0;
+                    const isYoungSession = (now - sessionCreatedAt < 45000); // Não interfere em sockets em processo inicial de handshake/pre-keys
                     const sock = sessionData?.sock;
                     const ws = sock?.ws;
                     const rawState = ws?.socket?.readyState;
@@ -326,8 +349,8 @@ class SessionManager {
                     const hasActiveTimer = this.reconnectingTimers.has(inst.id) || this.reconnectTimeouts.has(inst.id) || this.conflictTimeouts.has(inst.id);
                     const conflictCount = this.conflictAttempts.get(inst.id) || 0;
 
-                    // Se a instância já está conectando, em período de backoff agendado ou atingiu limite de conflito, não interfere
-                    if (isConnecting || hasActiveTimer || conflictCount >= 3) {
+                    // Se a instância já está conectando, em handshake inicial (< 45s), em período de backoff agendado ou atingiu limite de conflito, não interfere
+                    if (isYoungSession || isConnecting || hasActiveTimer || conflictCount >= 3) {
                         continue;
                     }
 
@@ -367,7 +390,7 @@ class SessionManager {
                     if (isAssignedToThisNode || isLeaseExpired || isMasterTakeover) {
                         this.autoHealingCooldowns.set(inst.id, now);
                         this.reconnectingCoolingDown.set(inst.id, now);
-                        console.log(`[SessionManager/AutoHealing] 🩺 Detectada instância ${inst.id} desincronizada (RAM: ${hasSessionInRam ? 'Presente (WS fechado)' : 'Ausente'}, Lease Expirado: ${isLeaseExpired}). Revivendo conexão...`);
+                        console.log(`[SessionManager/AutoHealing] 🩺 Detectada instância ${inst.id} desincronizada no nó ${currentNodeId} (RAM: ${hasSessionInRam ? 'Presente (WS fechado)' : 'Ausente'}, Lease Expirado: ${isLeaseExpired}). Revivendo conexão...`);
                         this.createSession(inst.tenant_id, inst.id, true).catch(err => {
                             console.error(`[SessionManager/AutoHealing] Falha ao reviver instância ${inst.id}:`, err.message);
                         });
@@ -489,6 +512,11 @@ class SessionManager {
     }
 
     async acquireSessionLock(instanceId, force = false) {
+        if (!isInstanceAllowedForNode(instanceId)) {
+            console.log(`[SessionManager/Lock/Alpha] Nó Alpha recusou adquirir lock da instância de produção ${instanceId}.`);
+            throw new Error(`Instância ${instanceId} pertence à produção e não é permitida no nó Alpha.`);
+        }
+
         const maxLockAttempts = 4;
         const currentNodeId = String(NODE_ID).trim();
 
@@ -615,6 +643,11 @@ class SessionManager {
     }
 
     async createSession(tenantId, instanceId, force = false) {
+        if (!isInstanceAllowedForNode(instanceId, tenantId)) {
+            console.log(`[SessionManager/Create/Alpha] Nó Alpha recusou criar sessão da instância de produção ${instanceId}.`);
+            throw new Error(`Instância ${instanceId} pertence à produção e não é permitida no nó Alpha.`);
+        }
+
         return this.runWithInstanceMutex(instanceId, async () => {
             if (this.reconnectingTimers.has(instanceId)) {
                 const timer = this.reconnectingTimers.get(instanceId);
@@ -1038,38 +1071,7 @@ class SessionManager {
                     const isBlocked12h = reason.toLowerCase().includes('blocked') || reason.toLowerCase().includes('12h') || status === 410 || status === 429;
                     const isForbidden = (status === 403 || reason.toLowerCase().includes('forbidden')) && status !== 503 && status !== 502 && status !== 504;
                     const isBadSession = (status === 500 || reason.toLowerCase().includes('bad session')) && status !== 503 && status !== 502 && status !== 504 && !isConflict;
-
                     const isRestartRequired = !isConflict && (status === 515 || status === 428 || status === 1006 || status === DisconnectReason.restartRequired || reason.toLowerCase().includes('restart required') || reason.toLowerCase().includes('precondition required') || reason.toLowerCase().includes('connection closed') || (reason.toLowerCase().includes('stream errored') && !reason.toLowerCase().includes('conflict'))) && isFullyAuthenticated;
-                    if (isRestartRequired) {
-                        console.log(`[SessionManager] WhatsApp solicitou reinicialização/estabilização de socket (status ${status} / ${reason}) para a instância ${instanceId}. Reciclando chaves em RAM e reconectando em 1.5s com jitter...`);
-                        await this.destroyExistingSession(instanceId, 'restart_required');
-                        
-                        // Atualiza status transitório para 'reconnecting' no banco para manter lock ativo
-                        await retryWithBackoff(() =>
-                            supabase.from('whatsapp_instances')
-                                .update({
-                                    status: 'reconnecting',
-                                    lease_until: new Date(Date.now() + 60000).toISOString(),
-                                    last_disconnected_at: new Date().toISOString(),
-                                    last_disconnect_reason: reason || `restart_required_${status}`,
-                                    updated_at: new Date().toISOString()
-                                })
-                                .eq('id', instanceId)
-                        ).catch(() => {});
-
-                        const jitter = Math.floor(Math.random() * 500) + 1200;
-                        const timer = setTimeout(() => {
-                            this.reconnectingTimers.delete(instanceId);
-                            if (!this.sessions.has(instanceId)) {
-                                this.createSession(tenantId, instanceId, true).catch(err => {
-                                    console.error(`[SessionManager] Erro ao reconectar pós restartRequired/428 para ${instanceId}:`, err.message);
-                                });
-                            }
-                        }, jitter);
-                        this.reconnectingTimers.set(instanceId, timer);
-                        return;
-                    }
-
                     const isStreamOscillation = !isConflict && (
                         status === 503 || 
                         status === 502 || 
@@ -1083,42 +1085,6 @@ class SessionManager {
                         reason.toLowerCase().includes('econnreset') ||
                         reason.toLowerCase().includes('socket offline')
                     );
-
-                    if (isStreamOscillation && isFullyAuthenticated) {
-                        const attempts = (this.oscillationAttempts.get(instanceId) || 0) + 1;
-                        this.oscillationAttempts.set(instanceId, attempts);
-
-                        const baseDelays = [3000, 6000, 10000, 18000];
-                        const baseDelay = baseDelays[Math.min(attempts - 1, baseDelays.length - 1)];
-                        const jitter = Math.floor(Math.random() * 1500);
-                        const delay = baseDelay + jitter;
-
-                        console.log(`[SessionManager] Oscilação temporária / timeout de conexão com servidores WhatsApp (${reason || status}) na instância ${instanceId} (tentativa ${attempts}). Reciclando RAM e aguardando ${Math.round(delay / 1000)}s para estabilizar chaves...`);
-                        await this.destroyExistingSession(instanceId, 'stream_oscillation');
-
-                        await retryWithBackoff(() =>
-                            supabase.from('whatsapp_instances')
-                                .update({
-                                    status: 'reconnecting',
-                                    lease_until: new Date(Date.now() + 60000).toISOString(),
-                                    last_disconnected_at: new Date().toISOString(),
-                                    last_disconnect_reason: reason || `stream_oscillation_${status}`,
-                                    updated_at: new Date().toISOString()
-                                })
-                                .eq('id', instanceId)
-                        ).catch(() => {});
-
-                        const timer = setTimeout(() => {
-                            this.reconnectingTimers.delete(instanceId);
-                            if (!this.sessions.has(instanceId)) {
-                                this.createSession(tenantId, instanceId, true).catch(err => {
-                                    console.error(`[SessionManager] Erro na reconexão automática de oscilação (${reason || status}) para ${instanceId}:`, err.message);
-                                });
-                            }
-                        }, delay);
-                        this.reconnectingTimers.set(instanceId, timer);
-                        return;
-                    }
 
                     // Clear stable connection timeouts if it disconnected early
                     if (this.conflictTimeouts.has(instanceId)) {
@@ -1136,6 +1102,7 @@ class SessionManager {
                     await this.logConnectionEvent(tenantId, instanceId, 'disconnected', 'close', reason || `status_${status}`, null, null);
 
                     const isExplicitLogout = loggedOut || (status === 401 && reason.toLowerCase().includes('logged out'));
+
                     if (isExplicitLogout) {
                         console.log(`[SessionManager] Desconexão/Logout explícito pelo celular detectado na instância ${instanceId} (status: ${status}, reason: ${reason}). Limpando credenciais em RAM e Supabase.`);
                         await this.destroyExistingSession(instanceId, 'explicit_logout');
@@ -1156,38 +1123,6 @@ class SessionManager {
                             connection: 'close', 
                             lastDisconnect: { error: { output: { statusCode: status || 401 } } } 
                         });
-                    } else if (isFullyAuthenticated) {
-                        // Desconexão transitória com credenciais salvas: auto-reconexão com backoff exponencial + jitter
-                        const attempts = (this.reconnectAttempts.get(instanceId) || 0) + 1;
-                        this.reconnectAttempts.set(instanceId, attempts);
-                        
-                        const baseDelay = Math.min(1500 * Math.pow(1.4, attempts), 25000);
-                        const jitter = Math.floor(Math.random() * 1500);
-                        const delay = Math.round(baseDelay + jitter);
-                        
-                        console.log(`[SessionManager] Desconexão não-fatal (${reason || status}) na instância ${instanceId}. Tentativa ${attempts} de reconexão em ${Math.round(delay / 1000)}s com backoff...`);
-                        
-                        await retryWithBackoff(() =>
-                            supabase.from('whatsapp_instances')
-                                .update({
-                                    status: 'reconnecting',
-                                    lease_until: new Date(Date.now() + 60000).toISOString(),
-                                    last_disconnected_at: new Date().toISOString(),
-                                    last_disconnect_reason: reason || `status_${status}`,
-                                    updated_at: new Date().toISOString()
-                                })
-                                .eq('id', instanceId)
-                        ).catch(() => {});
-
-                        const timer = setTimeout(() => {
-                            this.reconnectingTimers.delete(instanceId);
-                            if (!this.sessions.has(instanceId)) {
-                                this.createSession(tenantId, instanceId, true).catch(err => {
-                                    console.error(`[SessionManager] Erro na auto-reconexão com backoff para ${instanceId}:`, err.message);
-                                });
-                            }
-                        }, delay);
-                        this.reconnectingTimers.set(instanceId, timer);
                     } else if (isBlocked12h && isFullyAuthenticated) {
                         console.error(`[SessionManager] Instância ${instanceId} está BLOQUEADA por 12h no WhatsApp.`);
                         this.authenticatedSessions.delete(instanceId);
@@ -1270,6 +1205,17 @@ class SessionManager {
                         });
                     } else if (isConflict) {
                         const isLocal = process.env.DISABLE_AUTO_START_SESSIONS === 'true';
+                        const currentNodeId = String(NODE_ID).trim();
+                        const isAlphaWorker = currentNodeId.includes('alpha') || (process.env.APP_ENV || '').toLowerCase() === 'alpha';
+
+                        // Se o nó atual for Alpha e a instância não for homologação permitida, cede o controle pacificamente
+                        if (isAlphaWorker && !isInstanceAllowedForNode(instanceId, tenantId)) {
+                            console.warn(`[SessionManager] Conflito de sessão na instância ${instanceId}: Nó Alpha cedendo controle local para o nó de produção.`);
+                            await this.destroyExistingSession(instanceId, 'conflict_alpha_yield');
+                            this.conflictAttempts.delete(instanceId);
+                            return;
+                        }
+
                         const cAttempts = (this.conflictAttempts.get(instanceId) || 0) + 1;
                         this.conflictAttempts.set(instanceId, cAttempts);
                         this.reconnectAttempts.delete(instanceId);
@@ -1286,7 +1232,6 @@ class SessionManager {
                         );
 
                         const remoteNodeId = dbInst?.assigned_node_id ? String(dbInst.assigned_node_id).trim() : null;
-                        const currentNodeId = String(NODE_ID).trim();
                         const isOwnedByOther = remoteNodeId && remoteNodeId !== currentNodeId;
                         const lastUp = dbInst?.updated_at ? new Date(dbInst.updated_at).getTime() : 0;
                         const isOtherActive = isOwnedByOther && (Date.now() - lastUp < 35000);
@@ -1336,12 +1281,103 @@ class SessionManager {
                             }, delay);
                             this.reconnectingTimers.set(instanceId, timer);
                         }
+                    } else if (isRestartRequired) {
+                        console.log(`[SessionManager] WhatsApp solicitou reinicialização/estabilização de socket (status ${status} / ${reason}) para a instância ${instanceId}. Reciclando chaves em RAM e reconectando em 1.5s com jitter...`);
+                        await this.destroyExistingSession(instanceId, 'restart_required');
+                        
+                        // Atualiza lease_until e last_disconnect_reason no banco preservando o status connected para não causar flickering
+                        await retryWithBackoff(() =>
+                            supabase.from('whatsapp_instances')
+                                .update({
+                                    lease_until: new Date(Date.now() + 60000).toISOString(),
+                                    last_disconnected_at: new Date().toISOString(),
+                                    last_disconnect_reason: reason || `restart_required_${status}`,
+                                    updated_at: new Date().toISOString()
+                                })
+                                .eq('id', instanceId)
+                        ).catch(() => {});
+
+                        const jitter = Math.floor(Math.random() * 500) + 1200;
+                        const timer = setTimeout(() => {
+                            this.reconnectingTimers.delete(instanceId);
+                            if (!this.sessions.has(instanceId)) {
+                                this.createSession(tenantId, instanceId, true).catch(err => {
+                                    console.error(`[SessionManager] Erro ao reconectar pós restartRequired/428 para ${instanceId}:`, err.message);
+                                });
+                            }
+                        }, jitter);
+                        this.reconnectingTimers.set(instanceId, timer);
+                        return;
+                    } else if (isStreamOscillation && isFullyAuthenticated) {
+                        const attempts = (this.oscillationAttempts.get(instanceId) || 0) + 1;
+                        this.oscillationAttempts.set(instanceId, attempts);
+
+                        const baseDelays = [3000, 6000, 10000, 18000];
+                        const baseDelay = baseDelays[Math.min(attempts - 1, baseDelays.length - 1)];
+                        const jitter = Math.floor(Math.random() * 1500);
+                        const delay = baseDelay + jitter;
+
+                        console.log(`[SessionManager] Oscilação temporária / timeout de conexão com servidores WhatsApp (${reason || status}) na instância ${instanceId} (tentativa ${attempts}). Reciclando RAM e aguardando ${Math.round(delay / 1000)}s para estabilizar chaves...`);
+                        await this.destroyExistingSession(instanceId, 'stream_oscillation');
+
+                        await retryWithBackoff(() =>
+                            supabase.from('whatsapp_instances')
+                                .update({
+                                    lease_until: new Date(Date.now() + 60000).toISOString(),
+                                    last_disconnected_at: new Date().toISOString(),
+                                    last_disconnect_reason: reason || `stream_oscillation_${status}`,
+                                    updated_at: new Date().toISOString()
+                                })
+                                .eq('id', instanceId)
+                        ).catch(() => {});
+
+                        const timer = setTimeout(() => {
+                            this.reconnectingTimers.delete(instanceId);
+                            if (!this.sessions.has(instanceId)) {
+                                this.createSession(tenantId, instanceId, true).catch(err => {
+                                    console.error(`[SessionManager] Erro na reconexão automática de oscilação (${reason || status}) para ${instanceId}:`, err.message);
+                                });
+                            }
+                        }, delay);
+                        this.reconnectingTimers.set(instanceId, timer);
+                        return;
+                    } else if (isFullyAuthenticated) {
+                        // Desconexão transitória de rede com credenciais salvas: auto-reconexão com backoff exponencial + jitter
+                        const attempts = (this.reconnectAttempts.get(instanceId) || 0) + 1;
+                        this.reconnectAttempts.set(instanceId, attempts);
+                        
+                        const baseDelay = Math.min(1500 * Math.pow(1.4, attempts), 25000);
+                        const jitter = Math.floor(Math.random() * 1500);
+                        const delay = Math.round(baseDelay + jitter);
+                        
+                        console.log(`[SessionManager] Desconexão transitória (${reason || status}) na instância ${instanceId}. Tentativa ${attempts} de reconexão em ${Math.round(delay / 1000)}s com backoff...`);
+                        
+                        await retryWithBackoff(() =>
+                            supabase.from('whatsapp_instances')
+                                .update({
+                                    lease_until: new Date(Date.now() + 60000).toISOString(),
+                                    last_disconnected_at: new Date().toISOString(),
+                                    last_disconnect_reason: reason || `status_${status}`,
+                                    updated_at: new Date().toISOString()
+                                })
+                                .eq('id', instanceId)
+                        ).catch(() => {});
+
+                        const timer = setTimeout(() => {
+                            this.reconnectingTimers.delete(instanceId);
+                            if (!this.sessions.has(instanceId)) {
+                                this.createSession(tenantId, instanceId, true).catch(err => {
+                                    console.error(`[SessionManager] Erro na auto-reconexão com backoff para ${instanceId}:`, err.message);
+                                });
+                            }
+                        }, delay);
+                        this.reconnectingTimers.set(instanceId, timer);
                     } else {
                         const attempts = this.reconnectAttempts.get(instanceId) || 0;
                         const nextAttempt = attempts + 1;
                         this.reconnectAttempts.set(instanceId, nextAttempt);
 
-                        if (nextAttempt > 10 && !isFullyAuthenticated) {
+                        if (nextAttempt > 10) {
                             console.error(`[SessionManager] Limite de 10 tentativas de reconexão atingido para a instância ${instanceId}. Pausando sessão.`);
                             this.reconnectAttempts.delete(instanceId);
                             this.pairingPendingSync.delete(instanceId);
@@ -1360,23 +1396,18 @@ class SessionManager {
                                 lastDisconnect: { error: { output: { statusCode: 503 } } } 
                             });
                         } else {
-                            const delayMap = isFullyAuthenticated
-                                ? [2000, 4000, 8000, 15000, 30000] // 2s, 4s, 8s, 15s, 30s para rápida recuperação
-                                : [2000, 3000, 5000, 8000, 12000]; // 2s, 3s, 5s, 8s, 12s para geração de QR Code
+                            const delayMap = [2000, 3000, 5000, 8000, 12000]; // 2s, 3s, 5s, 8s, 12s para geração de QR Code
                             const delay = delayMap[Math.min(nextAttempt - 1, delayMap.length - 1)] || 30000;
 
-                            console.log(`[SessionManager] Instância ${instanceId} fechou (${isFullyAuthenticated ? 'autenticada' : 'geração de QR'}). Tentativa ${nextAttempt}. Reconectando em ${delay / 1000}s...`);
+                            console.log(`[SessionManager] Instância ${instanceId} fechou (geração de QR). Tentativa ${nextAttempt}. Reconectando em ${delay / 1000}s...`);
 
                             await retryWithBackoff(() =>
                                 supabase.from('whatsapp_instances')
                                     .update({ 
                                         reconnect_attempts: nextAttempt,
-                                        status: isFullyAuthenticated ? 'reconnecting' : 'connecting',
+                                        status: 'connecting',
                                         last_disconnected_at: new Date().toISOString(),
-                                        last_disconnect_reason: reason || `status_${status}`,
-                                        last_error: isFullyAuthenticated 
-                                            ? `Conexão oscilou. Reconectando em ${delay / 1000}s (Tentativa ${nextAttempt}).`
-                                            : null
+                                        last_disconnect_reason: reason || `status_${status}`
                                     })
                                     .eq('id', instanceId)
                             );
@@ -1604,7 +1635,7 @@ class SessionManager {
                 });
             };
             
-            this.sessions.set(instanceId, { sock, tenantId, monitoringUntil: currentInstance?.monitoring_until });
+            this.sessions.set(instanceId, { sock, tenantId, createdAt: Date.now(), monitoringUntil: currentInstance?.monitoring_until });
 
             await retryWithBackoff(() =>
                 supabase.from('whatsapp_instances').update({
