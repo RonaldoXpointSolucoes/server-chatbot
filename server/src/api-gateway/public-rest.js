@@ -287,6 +287,13 @@ router.delete('/instance/:name', requireApiKey, async (req, res) => {
         if (sock) {
             try { await sock.logout(); } catch(e){}
         }
+        await supabase.from('whatsapp_instances').delete().eq('id', id);
+        sessionManager.sessions.delete(id);
+        res.json({ status: 'SUCCESS', message: 'Instance deleted' });
+    } catch(e) {
+        res.status(500).json({ error: e.message });
+    }
+});
 /**
  * @swagger
  * /message/sendText:
