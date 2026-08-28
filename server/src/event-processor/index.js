@@ -70,8 +70,8 @@ class EventProcessor {
             const { data: rawMessages, error } = await supabase
                 .from('wa_incoming_messages')
                 .select('instance_id, tenant_id, message_id, raw_payload')
-                .gte('created_at', fifteenMinutesAgo)
-                .order('created_at', { ascending: true })
+                .gte('received_at', fifteenMinutesAgo)
+                .order('received_at', { ascending: true })
                 .limit(100);
 
             if (error || !rawMessages || rawMessages.length === 0) return;
@@ -1928,11 +1928,11 @@ class EventProcessor {
                 .maybeSingle();
 
             const { data: authCreds } = await supabase.from('wa_auth_credentials')
-                .select('session_id')
-                .eq('session_id', instanceId)
+                .select('instance_id')
+                .eq('instance_id', instanceId)
                 .maybeSingle();
 
-            const hasAuthCredsInDb = Boolean(authCreds && authCreds.session_id);
+            const hasAuthCredsInDb = Boolean(authCreds && authCreds.instance_id);
             const isConnStatus = currentInst && ['connected', 'connected_local'].includes(currentInst.status);
             // Só considera ativamente conectada se tiver o status conectado E possuir as chaves auth salvas no banco
             const isAlreadyConnected = isConnStatus && hasAuthCredsInDb;

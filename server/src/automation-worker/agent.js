@@ -731,7 +731,11 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
                             };
                         });
                         
-                        await supabase.from('cardapio_passos').upsert(passosToUpsert, { onConflict: 'tenant_id,id' });
+                        try {
+                            await supabase.from('cardapio_passos').upsert(passosToUpsert, { onConflict: 'tenant_id,id' });
+                        } catch(stepErr) {
+                            console.warn(`[Gastrofood/Sync] Aviso ao gravar passos do produto ${product.id}:`, stepErr.message);
+                        }
                         
                         const opcoesToUpsert = [];
                         passos.forEach(p => {
@@ -769,7 +773,11 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
                         });
                         
                         if (opcoesToUpsert.length > 0) {
-                            await supabase.from('cardapio_opcoes').upsert(opcoesToUpsert, { onConflict: 'tenant_id,id' });
+                            try {
+                                await supabase.from('cardapio_opcoes').upsert(opcoesToUpsert, { onConflict: 'tenant_id,id' });
+                            } catch(optErr) {
+                                console.warn(`[Gastrofood/Sync] Aviso ao gravar opções do produto ${product.id}:`, optErr.message);
+                            }
                         }
                     } else {
                         // Se o produto NÃO possui passos (passos.length === 0), gravamos um registro "dummy" de controle
@@ -782,7 +790,11 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
                             pergunta: 'Nenhum Adicional',
                             ativo: false
                         };
-                        await supabase.from('cardapio_passos').upsert(dummyPasso, { onConflict: 'tenant_id,id' });
+                        try {
+                            await supabase.from('cardapio_passos').upsert(dummyPasso, { onConflict: 'tenant_id,id' });
+                        } catch(dummyErr) {
+                            console.warn(`[Gastrofood/Sync] Aviso ao gravar dummyPasso do produto ${product.id}:`, dummyErr.message);
+                        }
                     }
                 } else {
                     const errText = await resSteps.text();

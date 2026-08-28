@@ -545,9 +545,24 @@ async function runMigrations() {
           ALTER TABLE quick_replies ADD COLUMN IF NOT EXISTS type text DEFAULT 'STANDARD';
           ALTER TABLE wa_outgoing_messages ADD COLUMN IF NOT EXISTS response_type text DEFAULT 'STANDARD';
           ALTER TABLE wa_outgoing_messages ADD COLUMN IF NOT EXISTS options jsonb DEFAULT '{}'::jsonb;
+
+          -- Retrocompatibilidade e Segurança Supabase Advisor
+          ALTER TABLE IF EXISTS wa_incoming_messages ADD COLUMN IF NOT EXISTS created_at timestamp with time zone DEFAULT now();
+          ALTER TABLE IF EXISTS public.webhook_triggers ENABLE ROW LEVEL SECURITY;
+          ALTER TABLE IF EXISTS public.face_auth ENABLE ROW LEVEL SECURITY;
+          ALTER TABLE IF EXISTS public.app_versions ENABLE ROW LEVEL SECURITY;
+          
+          DO $$ 
+          BEGIN
+              IF EXISTS (
+                  SELECT 1 FROM pg_views WHERE viewname = 'v_checklist_operators' AND schemaname = 'public'
+              ) THEN
+                  ALTER VIEW public.v_checklist_operators SET (security_invoker = true);
+              END IF;
+          END $$;
         `;
         await client.query(migrationSQL);
-        console.log("[Migration] Migração DDL executada com sucesso!");
+        console.log("[Migration] Migração DDL e RLS executada com sucesso!");
     } catch (err) {
         console.warn("[Migration] Aviso durante migração DDL:", err.message);
     } finally {
