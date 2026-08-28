@@ -1844,7 +1844,7 @@ export default function DevLogger() {
       )}
 
       <div className={`fixed z-[9999] right-2 sm:right-6 transition-all duration-300 ease-out ${isVisible ? 'top-2 sm:top-3 bottom-2 sm:bottom-3 flex flex-col pointer-events-auto' : '-top-[1000px] pointer-events-none'}`}>
-        <div className="bg-[#070c10]/95 backdrop-blur-3xl border border-white/10 rounded-[28px] shadow-[0_25px_70px_rgba(0,0,0,0.95)] w-[94vw] sm:w-[660px] flex flex-col max-h-full overflow-hidden text-[#d1d7db] transition-all duration-300 relative group/card border-t border-white/20 my-auto">
+        <div className="bg-[#070c10]/95 backdrop-blur-3xl border border-white/10 rounded-[28px] shadow-[0_25px_70px_rgba(0,0,0,0.95)] w-[96vw] sm:w-[740px] md:w-[820px] max-w-[96vw] flex flex-col max-h-full overflow-hidden text-[#d1d7db] transition-all duration-300 relative group/card border-t border-white/20 my-auto">
           
           {/* Brilho Radial de Fundo Neon */}
           <div className="absolute -top-24 -left-24 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
@@ -1852,14 +1852,14 @@ export default function DevLogger() {
 
           {/* Header Superior Neon Glassmorphism (Fixo & Sticky) */}
           <div 
-            className="flex items-center justify-between px-3 sm:px-5 py-3 border-b border-white/10 cursor-pointer bg-[#070c10] bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-indigo-500/10 hover:from-emerald-500/15 hover:to-indigo-500/15 transition-all select-none relative z-30 shrink-0 sticky top-0 gap-2 overflow-hidden"
+            className="flex items-center justify-between px-3 sm:px-5 py-2.5 sm:py-3 border-b border-white/10 cursor-pointer bg-[#070c10] bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-indigo-500/10 hover:from-emerald-500/15 hover:to-indigo-500/15 transition-all select-none relative z-30 shrink-0 sticky top-0 gap-2 overflow-x-auto custom-scrollbar"
             onClick={toggleVisibility}
           >
             {/* Lado Esquerdo: Logo, Título e Chip ONLINE */}
             <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
               <div className="relative flex items-center justify-center shrink-0">
                 <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-2xl bg-gradient-to-tr from-emerald-500 via-teal-400 to-emerald-300 flex items-center justify-center shadow-lg shadow-emerald-500/30">
-                  <Terminal size={18} className="text-black stroke-[2.5]" />
+                  <Terminal size={17} className="text-black stroke-[2.5]" />
                 </div>
                 <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-400 border-2 border-[#070c10] animate-pulse" />
               </div>
@@ -1871,7 +1871,7 @@ export default function DevLogger() {
                     COCKPIT
                   </span>
                 </div>
-                <span className="text-[9px] text-emerald-400/80 font-bold tracking-widest block uppercase font-mono leading-none mt-1">DEV LOGGER SYSTEM</span>
+                <span className="text-[8px] sm:text-[9px] text-emerald-400/80 font-bold tracking-widest block uppercase font-mono leading-none mt-1">DEV LOGGER SYSTEM</span>
               </div>
               
               {/* Chip de Status do Motor */}
@@ -1897,105 +1897,111 @@ export default function DevLogger() {
             </div>
 
             {/* Barra de Ferramentas Dev no Header */}
-            <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 overflow-x-auto custom-scrollbar py-0.5">
-              <button 
-                onClick={(e) => { 
-                  e.stopPropagation(); 
-                  setShowServerLogs(true); 
-                  useDevStore.setState({ isVisible: false }); 
-                }} 
-                className="text-[#8696a0] hover:text-emerald-300 bg-white/5 hover:bg-emerald-500/15 border border-white/10 hover:border-emerald-500/30 p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer active:scale-95 shadow-sm shrink-0" 
-                title="Abrir Terminal Server Node.js (SSE Stream)"
-              >
-                <Terminal size={15} />
-              </button>
-
-              <button 
-                onClick={(e) => { e.stopPropagation(); handleTestSupabase(); }} 
-                className="text-[#8696a0] hover:text-purple-300 bg-white/5 hover:bg-purple-500/15 border border-white/10 hover:border-purple-500/30 p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer active:scale-95 shadow-sm shrink-0" 
-                title="Testar Conexão Supabase DB"
-              >
-                <Database size={15} />
-              </button>
-
-              <button 
-                onClick={(e) => { e.stopPropagation(); handleTestApp(); }} 
-                className="text-[#8696a0] hover:text-cyan-300 bg-white/5 hover:bg-cyan-500/15 border border-white/10 hover:border-cyan-500/30 p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer active:scale-95 shadow-sm shrink-0" 
-                title="Testar Aplicação React (State & Hooks)"
-              >
-                <AppWindow size={15} />
-              </button>
-
-              <button 
-                onClick={(e) => { e.stopPropagation(); handleTestEngine(); }} 
-                className="text-[#8696a0] hover:text-blue-300 bg-white/5 hover:bg-blue-500/15 border border-white/10 hover:border-blue-500/30 p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer active:scale-95 shadow-sm shrink-0" 
-                title="Testar Status do Baileys WhatsApp Engine"
-              >
-                <Smartphone size={15} />
-              </button>
-
-              <button 
-                onClick={(e) => { e.stopPropagation(); setShowTestPanel(!showTestPanel); }} 
-                className={`p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer relative active:scale-95 border shrink-0 ${
-                  showTestPanel 
-                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-lg shadow-amber-500/20' 
-                    : 'text-[#8696a0] hover:text-amber-300 bg-white/5 hover:bg-amber-500/15 border-white/10 hover:border-amber-500/30'
-                }`}
-                title="Antigravity Test Suite (ASTS Cockpit)"
-              >
-                <Activity size={15} className={isTestingApp ? 'animate-pulse text-amber-400' : ''} />
-                {isTestingApp && (
-                  <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
-                  </span>
-                )}
-              </button>
-
-              <div className="w-px h-4 bg-white/15 mx-0.5 shrink-0" />
-
-              <div className="relative flex items-center shrink-0">
+            <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 py-0.5 ml-auto">
+              {/* Grupo de Testes e Diagnóstico */}
+              <div className="flex items-center gap-1 bg-black/30 p-1 rounded-2xl border border-white/5">
                 <button 
-                  onClick={(e) => { e.stopPropagation(); copyLogs(); }} 
-                  className="text-[#8696a0] hover:text-emerald-300 bg-white/5 hover:bg-emerald-500/15 border border-white/10 hover:border-emerald-500/30 p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer active:scale-95 shadow-sm" 
-                  title="Copiar Logs Estruturados"
+                  onClick={(e) => { 
+                    e.stopPropagation(); 
+                    setShowServerLogs(true); 
+                    useDevStore.setState({ isVisible: false }); 
+                  }} 
+                  className="text-[#8696a0] hover:text-emerald-300 bg-white/5 hover:bg-emerald-500/15 border border-white/5 hover:border-emerald-500/30 p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer active:scale-95 shadow-sm shrink-0" 
+                  title="Abrir Terminal Server Node.js (SSE Stream)"
                 >
-                  <Copy size={15} />
+                  <Terminal size={14} />
                 </button>
-                {copyFeedback && (
-                  <div className="absolute right-full mr-2 whitespace-nowrap bg-gradient-to-r from-emerald-500 to-teal-400 text-black font-black text-[10px] px-2.5 py-1 rounded-lg shadow-xl animate-in fade-in slide-in-from-right-2 z-30 font-mono">
-                    {copyFeedback}
-                  </div>
-                )}
+
+                <button 
+                  onClick={(e) => { e.stopPropagation(); handleTestSupabase(); }} 
+                  className="text-[#8696a0] hover:text-purple-300 bg-white/5 hover:bg-purple-500/15 border border-white/5 hover:border-purple-500/30 p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer active:scale-95 shadow-sm shrink-0" 
+                  title="Testar Conexão Supabase DB"
+                >
+                  <Database size={14} />
+                </button>
+
+                <button 
+                  onClick={(e) => { e.stopPropagation(); handleTestApp(); }} 
+                  className="text-[#8696a0] hover:text-cyan-300 bg-white/5 hover:bg-cyan-500/15 border border-white/5 hover:border-cyan-500/30 p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer active:scale-95 shadow-sm shrink-0" 
+                  title="Testar Aplicação React (State & Hooks)"
+                >
+                  <AppWindow size={14} />
+                </button>
+
+                <button 
+                  onClick={(e) => { e.stopPropagation(); handleTestEngine(); }} 
+                  className="text-[#8696a0] hover:text-blue-300 bg-white/5 hover:bg-blue-500/15 border border-white/5 hover:border-blue-500/30 p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer active:scale-95 shadow-sm shrink-0" 
+                  title="Testar Status do Baileys WhatsApp Engine"
+                >
+                  <Smartphone size={14} />
+                </button>
+
+                <button 
+                  onClick={(e) => { e.stopPropagation(); setShowTestPanel(!showTestPanel); }} 
+                  className={`p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer relative active:scale-95 border shrink-0 ${
+                    showTestPanel 
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-lg shadow-amber-500/20' 
+                      : 'text-[#8696a0] hover:text-amber-300 bg-white/5 hover:bg-amber-500/15 border-white/5 hover:border-amber-500/30'
+                  }`}
+                  title="Antigravity Test Suite (ASTS Cockpit)"
+                >
+                  <Activity size={14} className={isTestingApp ? 'animate-pulse text-amber-400' : ''} />
+                  {isTestingApp && (
+                    <span className="absolute -top-1 -right-1 flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                    </span>
+                  )}
+                </button>
               </div>
 
-              <button 
-                onClick={(e) => { e.stopPropagation(); clearLogs(); }} 
-                className="text-[#8696a0] hover:text-rose-300 bg-white/5 hover:bg-rose-500/15 border border-white/10 hover:border-rose-500/30 p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer active:scale-95 shadow-sm shrink-0" 
-                title="Limpar Histórico de Logs"
-              >
-                <Trash2 size={15} />
-              </button>
+              <div className="w-px h-4 bg-white/10 mx-0.5 shrink-0" />
 
-              <div className="w-px h-4 bg-white/15 mx-0.5 shrink-0" />
+              {/* Grupo de Ações de Logs */}
+              <div className="flex items-center gap-1">
+                <div className="relative flex items-center shrink-0">
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); copyLogs(); }} 
+                    className="text-[#8696a0] hover:text-emerald-300 bg-white/5 hover:bg-emerald-500/15 border border-white/10 hover:border-emerald-500/30 p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer active:scale-95 shadow-sm" 
+                    title="Copiar Logs Estruturados"
+                  >
+                    <Copy size={14} />
+                  </button>
+                  {copyFeedback && (
+                    <div className="absolute right-full mr-2 whitespace-nowrap bg-gradient-to-r from-emerald-500 to-teal-400 text-black font-black text-[10px] px-2.5 py-1 rounded-lg shadow-xl animate-in fade-in slide-in-from-right-2 z-30 font-mono">
+                      {copyFeedback}
+                    </div>
+                  )}
+                </div>
+
+                <button 
+                  onClick={(e) => { e.stopPropagation(); clearLogs(); }} 
+                  className="text-[#8696a0] hover:text-rose-300 bg-white/5 hover:bg-rose-500/15 border border-white/10 hover:border-rose-500/30 p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer active:scale-95 shadow-sm shrink-0" 
+                  title="Limpar Histórico de Logs"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+
+              <div className="w-px h-4 bg-white/10 mx-0.5 shrink-0" />
 
               {/* Botão de Análise de Logs com IA e Criação de Card no CRM Kanban */}
               <button 
                 onClick={(e) => { e.stopPropagation(); handleAnalyzeLogsAndCreateKanbanCard(); }} 
                 disabled={isAnalyzingAiLogs}
-                className={`p-1.5 sm:p-2 px-2.5 rounded-xl transition-all cursor-pointer relative active:scale-95 border shrink-0 flex items-center gap-1.5 font-mono text-[10px] font-black ${
+                className={`p-1.5 sm:py-1.5 sm:px-2.5 rounded-xl transition-all cursor-pointer relative active:scale-95 border shrink-0 flex items-center gap-1.5 font-mono text-[10px] font-black ${
                   isAnalyzingAiLogs 
                     ? 'bg-purple-500/20 text-purple-300 border-purple-500/50 animate-pulse' 
-                    : 'bg-gradient-to-r from-purple-500/25 via-indigo-500/25 to-pink-500/25 text-purple-200 hover:text-white border-purple-500/40 hover:border-purple-400 hover:shadow-lg hover:shadow-purple-500/20'
+                    : 'bg-gradient-to-r from-purple-500/25 via-indigo-500/25 to-pink-500/25 hover:from-purple-500/40 hover:to-pink-500/40 text-purple-200 hover:text-white border-purple-500/40 hover:border-purple-400 hover:shadow-lg hover:shadow-purple-500/20'
                 }`}
                 title="Analisar todos os logs com IA (Gemini 2.5 Flash) e criar Card de Correção no CRM Kanban (Quadro Desenvolvimento & Roadmap)"
               >
                 {isAnalyzingAiLogs ? (
-                  <Loader2 size={14} className="animate-spin text-purple-300" />
+                  <Loader2 size={13} className="animate-spin text-purple-300" />
                 ) : (
-                  <Sparkles size={14} className="text-purple-300 animate-pulse" />
+                  <Sparkles size={13} className="text-purple-300 animate-pulse" />
                 )}
-                <span className="hidden sm:inline">I.A Card CRM</span>
+                <span className="inline whitespace-nowrap">I.A CRM</span>
               </button>
 
               <a 
@@ -2003,14 +2009,14 @@ export default function DevLogger() {
                 target="_blank" 
                 rel="noopener noreferrer" 
                 onClick={(e) => e.stopPropagation()} 
-                className="bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/40 px-2.5 py-1 rounded-xl text-[10px] font-black transition-all flex items-center gap-1 shadow-sm active:scale-95 shrink-0 font-mono" 
+                className="bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/40 px-2 sm:px-2.5 py-1.5 rounded-xl text-[10px] font-black transition-all flex items-center gap-1 shadow-sm active:scale-95 shrink-0 font-mono whitespace-nowrap" 
                 title="Abrir Documentação Interativa da API (Swagger)"
               >
-                API Docs
+                <span className="hidden sm:inline">API</span> Docs
               </a>
 
-              <button className="text-[#8696a0] hover:text-white transition-colors p-1 shrink-0">
-                {isVisible ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+              <button className="text-[#8696a0] hover:text-white transition-colors p-1 shrink-0 ml-0.5">
+                {isVisible ? <ChevronUp size={17} /> : <ChevronDown size={17} />}
               </button>
             </div>
           </div>
@@ -2278,38 +2284,58 @@ export default function DevLogger() {
 
           {/* Abas de Navegação Principal em Segmented Control Neon (CONSOLE / GASTROFOOD / ASTS) */}
           {isVisible && (
-            <div className="p-2 bg-[#091016]/95 border-b border-white/10 flex gap-2 shrink-0 select-none relative z-10 backdrop-blur-xl">
+            <div className="p-2 sm:p-2.5 bg-[#080e13]/95 border-b border-white/10 flex gap-1.5 sm:gap-2 shrink-0 select-none relative z-10 backdrop-blur-2xl">
               <button 
                 onClick={(e) => { e.stopPropagation(); setActiveTab('console'); }}
-                className={`flex-1 py-2.5 font-mono text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 rounded-2xl transition-all duration-200 cursor-pointer border ${
+                className={`flex-1 py-2 sm:py-2.5 font-mono text-[11px] sm:text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 sm:gap-2 rounded-2xl transition-all duration-200 cursor-pointer border ${
                   activeTab === 'console' 
-                    ? 'bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-400 text-black border-emerald-300/50 shadow-lg shadow-emerald-500/25 font-black scale-[1.01]' 
-                    : 'bg-[#121c23]/60 text-[#8696a0] border-white/5 hover:text-white hover:bg-white/10'
+                    ? 'bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-400 text-black border-emerald-300/60 shadow-lg shadow-emerald-500/25 font-black scale-[1.01]' 
+                    : 'bg-[#101920]/70 text-[#8696a0] border-white/5 hover:text-white hover:bg-white/10'
                 }`}
               >
-                <Terminal size={14} className={activeTab === 'console' ? 'text-black stroke-[2.5]' : ''} /> Console ({logs.length})
+                <Terminal size={14} className={activeTab === 'console' ? 'text-black stroke-[2.5]' : ''} /> 
+                <span>Console</span>
+                <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-black ${
+                  activeTab === 'console' ? 'bg-black/25 text-black' : 'bg-white/10 text-white/80'
+                }`}>
+                  {logs.length}
+                </span>
               </button>
 
               <button 
                 onClick={(e) => { e.stopPropagation(); setActiveTab('gastrofood'); }}
-                className={`flex-1 py-2.5 font-mono text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 rounded-2xl transition-all duration-200 cursor-pointer border ${
+                className={`flex-1 py-2 sm:py-2.5 font-mono text-[11px] sm:text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 sm:gap-2 rounded-2xl transition-all duration-200 cursor-pointer border ${
                   activeTab === 'gastrofood' 
-                    ? 'bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 text-white border-blue-400/50 shadow-lg shadow-blue-500/25 font-black scale-[1.01]' 
-                    : 'bg-[#121c23]/60 text-[#8696a0] border-white/5 hover:text-white hover:bg-white/10'
+                    ? 'bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 text-white border-blue-400/60 shadow-lg shadow-blue-500/25 font-black scale-[1.01]' 
+                    : 'bg-[#101920]/70 text-[#8696a0] border-white/5 hover:text-white hover:bg-white/10'
                 }`}
               >
-                <Network size={14} /> Gastrofood ({groupedGastrofoodLogs.length})
+                <Network size={14} /> 
+                <span>Gastrofood</span>
+                <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-black ${
+                  activeTab === 'gastrofood' ? 'bg-white/20 text-white' : 'bg-white/10 text-white/80'
+                }`}>
+                  {groupedGastrofoodLogs.length}
+                </span>
               </button>
 
               <button 
                 onClick={(e) => { e.stopPropagation(); setActiveTab('asts'); }}
-                className={`flex-1 py-2.5 font-mono text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 rounded-2xl transition-all duration-200 cursor-pointer border ${
+                className={`flex-1 py-2 sm:py-2.5 font-mono text-[11px] sm:text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 sm:gap-2 rounded-2xl transition-all duration-200 cursor-pointer border ${
                   activeTab === 'asts' 
-                    ? 'bg-gradient-to-r from-amber-400 via-orange-500 to-amber-500 text-black border-amber-300/50 shadow-lg shadow-amber-500/25 font-black scale-[1.01]' 
-                    : 'bg-[#121c23]/60 text-[#8696a0] border-white/5 hover:text-white hover:bg-white/10'
+                    ? 'bg-gradient-to-r from-amber-400 via-orange-500 to-amber-500 text-black border-amber-300/60 shadow-lg shadow-amber-500/25 font-black scale-[1.01]' 
+                    : 'bg-[#101920]/70 text-[#8696a0] border-white/5 hover:text-white hover:bg-white/10'
                 }`}
               >
-                <Activity size={14} className={isTestingApp ? 'animate-pulse text-amber-950 stroke-[2.5]' : ''} /> ASTS {testSummary ? `(${testSummary.healthScore}%)` : ''}
+                <Activity size={14} className={isTestingApp ? 'animate-pulse text-amber-950 stroke-[2.5]' : ''} /> 
+                <span>ASTS</span>
+                {testSummary && (
+                  <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-black ${
+                    activeTab === 'asts' ? 'bg-black/25 text-black' : 'bg-amber-500/20 text-amber-300'
+                  }`}>
+                    {testSummary.healthScore}%
+                  </span>
+                )}
               </button>
             </div>
           )}
@@ -2537,15 +2563,15 @@ export default function DevLogger() {
               <div className="flex-1 overflow-y-auto flex flex-col font-mono text-xs custom-scrollbar min-h-[180px] bg-[#070c10] rounded-b-[28px]">
                 
                 {/* Sub-Barra de Controles: Agrupamento, Filtros de Origem e Disparo de Testes */}
-                <div className="p-3 px-4 bg-[#0a1117]/95 border-b border-white/10 text-xs font-mono select-none flex items-center justify-between gap-2.5 flex-wrap sticky top-0 z-20 backdrop-blur-xl">
+                <div className="p-2.5 sm:p-3 px-3 sm:px-4 bg-[#080e13]/95 border-b border-white/10 text-xs font-mono select-none flex items-center justify-between gap-2 flex-wrap sticky top-0 z-20 backdrop-blur-2xl">
                   
                   {/* Lado Esquerdo: Toggle de Modo & Chips de Filtro */}
-                  <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
                     {/* Seletor de Modo: Agrupado vs Linha do Tempo */}
-                    <div className="flex items-center gap-1 bg-[#101920] p-1 rounded-xl border border-white/10">
+                    <div className="flex items-center gap-0.5 bg-[#0e161c] p-0.5 rounded-xl border border-white/10">
                       <button
                         onClick={() => setViewMode('grouped')}
-                        className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer border-0 flex items-center gap-1.5 ${
+                        className={`px-2.5 sm:px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer border-0 flex items-center gap-1.5 ${
                           viewMode === 'grouped'
                             ? 'bg-gradient-to-r from-emerald-500 to-teal-400 text-black shadow-md shadow-emerald-500/20 font-black'
                             : 'text-[#8696a0] hover:text-white hover:bg-white/5'
@@ -2559,7 +2585,7 @@ export default function DevLogger() {
                       </button>
                       <button
                         onClick={() => setViewMode('timeline')}
-                        className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer border-0 flex items-center gap-1.5 ${
+                        className={`px-2.5 sm:px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer border-0 flex items-center gap-1.5 ${
                           viewMode === 'timeline'
                             ? 'bg-gradient-to-r from-emerald-500 to-teal-400 text-black shadow-md shadow-emerald-500/20 font-black'
                             : 'text-[#8696a0] hover:text-white hover:bg-white/5'
@@ -2571,7 +2597,7 @@ export default function DevLogger() {
                     </div>
 
                     {/* Chips de Filtro */}
-                    <div className="flex items-center gap-1.5 flex-wrap">
+                    <div className="flex items-center gap-1 flex-wrap">
                       {[
                         { id: 'all', label: 'Todos', count: logs.length, color: 'text-slate-300 border-slate-500/30' },
                         { id: 'node', label: '🖥️ Servidor Node', count: nodeLogsCount, color: 'text-purple-300 border-purple-500/40' },
@@ -2581,10 +2607,10 @@ export default function DevLogger() {
                         <button
                           key={f.id}
                           onClick={() => setLogFilter(f.id as any)}
-                          className={`px-2.5 py-1 rounded-xl text-[10px] font-black uppercase transition-all cursor-pointer border flex items-center gap-1.5 active:scale-95 ${
+                          className={`px-2 sm:px-2.5 py-1 rounded-xl text-[10px] font-black uppercase transition-all cursor-pointer border flex items-center gap-1 active:scale-95 ${
                             logFilter === f.id
                               ? `bg-indigo-500/20 border-indigo-500/50 text-indigo-200 shadow-sm shadow-indigo-500/20 ${f.color}`
-                              : 'bg-[#101920] border-white/10 text-[#8696a0] hover:text-white hover:bg-white/5'
+                              : 'bg-[#0e161c] border-white/10 text-[#8696a0] hover:text-white hover:bg-white/5'
                           }`}
                         >
                           <span>{f.label}</span>
@@ -2597,12 +2623,12 @@ export default function DevLogger() {
                   </div>
 
                   {/* Lado Direito: Ações */}
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5">
                     {/* Botão de Análise de Logs com IA e Criação de Card no CRM Kanban */}
                     <button
                       onClick={handleAnalyzeLogsAndCreateKanbanCard}
                       disabled={isAnalyzingAiLogs}
-                      className={`px-3.5 py-1.5 rounded-xl text-[10px] font-black transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 shadow-sm border ${
+                      className={`px-3 py-1.5 rounded-xl text-[10px] font-black transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 shadow-sm border ${
                         isAnalyzingAiLogs
                           ? 'bg-purple-500/20 text-purple-300 border-purple-500/50 animate-pulse'
                           : 'bg-gradient-to-r from-purple-500/25 via-indigo-500/25 to-pink-500/25 hover:from-purple-500/35 hover:to-pink-500/35 text-purple-200 hover:text-white border-purple-500/40 hover:border-purple-400 shadow-lg shadow-purple-500/10'
@@ -2620,7 +2646,7 @@ export default function DevLogger() {
                     {/* Simulação de Erro do Servidor Node */}
                     <button
                       onClick={handleSimulateNodeError}
-                      className="bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 px-3 py-1.5 rounded-xl text-[10px] font-black transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 shadow-sm"
+                      className="bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 px-2.5 sm:px-3 py-1.5 rounded-xl text-[10px] font-black transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 shadow-sm"
                       title="Simular disparo de erro no servidor Node.js para testar o agrupamento"
                     >
                       <Bug size={12} className="text-rose-400 animate-pulse" /> + Erro Node
@@ -2652,16 +2678,26 @@ export default function DevLogger() {
                 {/* Lista de Cards Agrupados / Cronológicos */}
                 <div className="p-4 flex flex-col gap-3.5 min-h-[240px]">
                   {groupedAndFilteredLogs.length === 0 ? (
-                    <div className="m-auto py-12 px-6 flex flex-col items-center justify-center text-center space-y-4 select-none animate-in fade-in zoom-in-95 duration-300 relative">
-                      <div className="relative flex items-center justify-center">
-                        <div className="absolute -inset-4 rounded-full bg-gradient-to-tr from-emerald-500/20 via-teal-500/15 to-indigo-500/20 blur-2xl animate-pulse" />
-                        <div className="w-20 h-20 rounded-3xl bg-[#0c141a]/90 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shadow-2xl shadow-emerald-500/20 relative z-10 backdrop-blur-xl">
-                          <Terminal size={36} className="animate-pulse text-emerald-400" />
+                    <div className="m-auto py-10 px-6 flex flex-col items-center justify-center text-center space-y-4 select-none animate-in fade-in zoom-in-95 duration-300 relative">
+                      
+                      {/* Badge Superior de Status Operacional */}
+                      <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-[10px] font-bold text-emerald-300 font-mono shadow-sm">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                        <span>SISTEMA OPERACIONAL ESTÁVEL • 0 ANOMALIAS</span>
+                      </div>
+
+                      {/* Radar Cibernético Neon */}
+                      <div className="relative flex items-center justify-center my-2">
+                        <div className="absolute -inset-6 rounded-full bg-gradient-to-tr from-emerald-500/20 via-teal-500/15 to-indigo-500/20 blur-2xl animate-pulse" />
+                        <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-3xl bg-[#0c141a]/90 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shadow-2xl shadow-emerald-500/25 relative z-10 backdrop-blur-2xl">
+                          <Terminal size={36} className="animate-pulse text-emerald-400 stroke-[2]" />
                         </div>
                         <div className="absolute inset-0 rounded-3xl border border-emerald-400/30 animate-ping pointer-events-none" />
+                        <div className="absolute -inset-3 rounded-full border border-teal-500/20 animate-pulse pointer-events-none" />
                       </div>
+
                       <div className="space-y-1.5 z-10 max-w-md">
-                        <h4 className="text-base font-black text-white tracking-tight font-mono bg-gradient-to-r from-white via-emerald-100 to-teal-200 bg-clip-text text-transparent">
+                        <h4 className="text-base sm:text-lg font-black text-white tracking-tight font-mono bg-gradient-to-r from-white via-emerald-100 to-teal-200 bg-clip-text text-transparent">
                           {logFilter === 'node' ? 'Nenhum erro do Servidor Node capturado' : 'Nenhum log detectado'}
                         </h4>
                         <p className="text-xs text-[#8696a0] max-w-sm leading-relaxed font-mono">
@@ -2670,6 +2706,7 @@ export default function DevLogger() {
                             : 'Erros do Servidor Node, requisições HTTP e exceções de lógica serão capturados e agrupados aqui.'}
                         </p>
                       </div>
+
                       <div className="flex items-center gap-3 pt-2 z-10 flex-wrap justify-center">
                         <button
                           onClick={() => handleTestApp()}

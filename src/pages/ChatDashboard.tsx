@@ -6550,7 +6550,7 @@ export default function ChatDashboard() {
                   }
                 }
               }
-              return !isChannelLoading && (filteredContacts.length > 0 || !searchTerm) && sliced.map((contact) => {
+              return (filteredContacts.length > 0 || !searchTerm) && sliced.map((contact) => {
               const lastMsg = Array.isArray(contact.messages) && contact.messages.length > 0 ? contact.messages[contact.messages.length - 1] : null;
               const effTime = getEffectiveContactTime(contact);
               const timeDisplay = effTime > 0
@@ -7033,7 +7033,7 @@ export default function ChatDashboard() {
             });
             })()}
 
-            {isChannelLoading && (
+            {isChannelLoading && filteredContacts.length === 0 && (
               <motion.div 
                 key="channel-loading-skeletons"
                 initial={{ opacity: 0 }}

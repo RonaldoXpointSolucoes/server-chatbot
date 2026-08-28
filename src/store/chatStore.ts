@@ -3771,11 +3771,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
            }
         }
 
-        // Puxa até 2000 conversas para garantir o carregamento do histórico completo de todas as caixas
+        // Puxa até 300 conversas mais recentes para carregamento instantâneo da sidebar
         const { data: dbConvs } = await convQuery
            .order('is_pinned', { ascending: false })
            .order('last_message_at', { ascending: false })
-           .limit(2000);
+           .limit(300);
            
         if (!dbConvs || dbConvs.length === 0) {
            await supportPromises;
@@ -4359,7 +4359,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 .eq('tenant_id', tenant.id)
                 .eq('conversation_id', knownConvId)
                 .order('timestamp', { ascending: false })
-                .limit(150)
+                .limit(80)
             : Promise.resolve({ data: null });
 
         // 3. Executa TODAS as buscas simultaneamente em um único Round-Trip Time
@@ -4497,7 +4497,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
             const { data, error: msgErr } = await msgQuery
                    .order('timestamp', { ascending: false })
-                   .limit(150);
+                   .limit(80);
 
             if (msgErr) {
                 console.error("[loadHistoricalMessages] Erro ao buscar mensagens por conversation_id:", msgErr);
