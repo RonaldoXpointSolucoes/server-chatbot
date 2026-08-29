@@ -50,7 +50,8 @@ import {
   Target,
   Bell,
   BellOff,
-  Building2
+  Building2,
+  Ticket
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useChatStore, hasUserAccessToInstance, instanceCache } from '../store/chatStore';
@@ -1096,6 +1097,28 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
               isSub
               onClick={() => navigate('/checklist/settings')}
               isActive={window.location.pathname === '/checklist/settings'}
+            />
+          </CollapsibleSection>
+
+          <CollapsibleSection 
+            title="Vouchers Corporativos" 
+            icon={<Ticket size={16} className="text-emerald-400" />} 
+            isOpen={expandedSections.vouchers ?? true} 
+            onToggle={() => toggleSection('vouchers')}
+          >
+            <NavItem 
+              icon={<LayoutDashboard size={16} className="text-emerald-400" />} 
+              title="Painel de Vouchers" 
+              isSub
+              onClick={() => navigate('/vouchers')}
+              isActive={window.location.pathname === '/vouchers' || window.location.pathname === '/voucher-gestao'}
+            />
+            <NavItem 
+              icon={<QrCode size={16} className="text-emerald-400" />} 
+              title="Terminal Scanner / Caixa" 
+              isSub
+              onClick={() => window.open('/voucher-scanner', '_blank')}
+              isActive={false}
             />
           </CollapsibleSection>
 

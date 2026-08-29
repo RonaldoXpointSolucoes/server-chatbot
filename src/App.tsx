@@ -43,6 +43,9 @@ import { NetworkStatusToast } from './components/NetworkStatusToast';
 import { GlobalToast } from './components/GlobalToast';
 import InstanceManagerStandalone from './pages/InstanceManagerStandalone';
 import ConnectInstanceStandalone from './pages/ConnectInstanceStandalone';
+import VoucherDashboard from './pages/voucher/VoucherDashboard';
+import VoucherViewer from './pages/voucher/VoucherViewer';
+import VoucherScanner from './pages/voucher/VoucherScanner';
 
 // Inicializa o tema globalmente no boot
 const savedTheme = localStorage.getItem('theme') || 'light';
@@ -107,6 +110,10 @@ export default function App() {
             <Route path="/checklist/builder" element={<ErrorBoundary><ChecklistBuilder /></ErrorBoundary>} />
             <Route path="/checklist/settings" element={<ErrorBoundary><ChecklistSettings /></ErrorBoundary>} />
 
+            {/* Módulo de Vouchers Digitais Corporativos */}
+            <Route path="/vouchers" element={<ErrorBoundary><VoucherDashboard /></ErrorBoundary>} />
+            <Route path="/voucher-gestao" element={<ErrorBoundary><VoucherDashboard /></ErrorBoundary>} />
+
             {/* Apps Embedados */}
             <Route path="/apps/portal" element={<PortalApp />} />
             <Route path="/apps/delivery" element={<DeliveryApp />} />
@@ -120,6 +127,11 @@ export default function App() {
           <Route path="/checklist/tablet" element={<ErrorBoundary><ChecklistTablet /></ErrorBoundary>} />
 
         </Route>
+
+        {/* Rotas Públicas do Módulo Voucher (Colaborador e Caixa) */}
+        <Route path="/voucher/:token" element={<VoucherViewer />} />
+        <Route path="/voucher-scanner" element={<VoucherScanner />} />
+        <Route path="/voucher-validar" element={<VoucherScanner />} />
 
         {/* Gerenciamento Master SaaS */}
         <Route path="/admin/login" element={<AdminLogin />} />
