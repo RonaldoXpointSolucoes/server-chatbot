@@ -18,7 +18,19 @@ import {
   Shield,
   Zap,
   PhoneCall,
-  RotateCw
+  RotateCw,
+  Download,
+  Share2,
+  PlusCircle,
+  Monitor,
+  Info,
+  X,
+  ExternalLink,
+  ArrowRight,
+  FileText,
+  Activity,
+  Terminal,
+  Clock
 } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { getActiveEngineUrl } from '../services/environmentService';
@@ -34,6 +46,21 @@ interface InstanceData {
   tenant_name?: string;
 }
 
+interface ConnectionLogItem {
+  id: string;
+  type: string;
+  message: string;
+  level: string;
+  created_at: string;
+  payload?: {
+    event_type?: string;
+    error?: string;
+    phone?: string;
+    status?: string;
+    instance_name?: string;
+  };
+}
+
 const QR_RENEWAL_INTERVAL = 25; // Segundos para auto-renovação do QR Code Baileys
 
 export default function ConnectInstanceStandalone() {
@@ -44,7 +71,6 @@ export default function ConnectInstanceStandalone() {
   const [instance, setInstance] = useState<InstanceData | null>(null);
   const instanceRef = useRef<InstanceData | null>(null);
 
-  // Atualiza o ref sempre que instance mudar
   useEffect(() => {
     instanceRef.current = instance;
   }, [instance]);
@@ -65,6 +91,17 @@ export default function ConnectInstanceStandalone() {
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
   const [copiedPairing, setCopiedPairing] = useState<boolean>(false);
 
+  // Estados de PWA / Instalação
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [isStandalone, setIsStandalone] = useState<boolean>(false);
+  const [showInstallModal, setShowInstallModal] = useState<boolean>(false);
+  const [installPlatform, setInstallPlatform] = useState<'ios' | 'android' | 'desktop'>('android');
+
+  // Estados de Logs de Conexão
+  const [showLogsModal, setShowLogsModal] = useState<boolean>(false);
+  const [connectionLogs, setConnectionLogs] = useState<ConnectionLogItem[]>([]);
+  const [loadingLogs, setLoadingLogs] = useState<boolean>(false);
+
   // Contador de Auto-Renovação do QR Code
   const [qrCountdown, setQrCountdown] = useState<number>(QR_RENEWAL_INTERVAL);
   const [isRenewingAuto, setIsRenewingAuto] = useState<boolean>(false);
@@ -79,7 +116,118 @@ export default function ConnectInstanceStandalone() {
 
   const isConnected = connectionStatus === 'connected' || connectionStatus === 'connected_local' || connectionStatus === 'open';
 
-  // 2. Consulta o status em tempo real no motor Node/Baileys com fallback no Supabase
+  // 1. Detecta plataforma do usuário e inicializa escuta de eventos PWA
+  useEffect(() => {
+    const checkStandalone = () => {
+      const isStandaloneMode = 
+        window.matchMedia('(display-mode: standalone)').matches || 
+        (window.navigator as any).standalone ||
+        document.referrer.includes('android-app://') ||
+        searchParams.get('standalone') === 'true';
+      setIsStandalone(Boolean(isStandaloneMode));
+    };
+
+    checkStandalone();
+
+    const userAgent = window.navigator.userAgent.toLowerCase();
+    const isIos = /iphone|ipad|ipod/.test(userAgent);
+    const isAndroid = /android/.test(userAgent);
+    
+    if (isIos) {
+      setInstallPlatform('ios');
+    } else if (isAndroid) {
+      setInstallPlatform('android');
+    } else {
+      setInstallPlatform('desktop');
+    }
+
+    const handleBeforeInstall = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+
+    const handleAppInstalled = () => {
+      setIsStandalone(true);
+      setDeferredPrompt(null);
+      setShowInstallModal(false);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+    window.addEventListener('appinstalled', handleAppInstalled);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, [searchParams]);
+
+  // 2. Injeta dinamicamente o Web App Manifest exclusivo para esta instância
+  useEffect(() => {
+    if (!instance || !instanceId) return;
+
+    const instanceTitle = `Reconectar ${instance.display_name}`;
+    document.title = `${instanceTitle} | WhatsApp Direct`;
+
+    let metaAppleTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+    if (!metaAppleTitle) {
+      metaAppleTitle = document.createElement('meta');
+      metaAppleTitle.setAttribute('name', 'apple-mobile-web-app-title');
+      document.head.appendChild(metaAppleTitle);
+    }
+    metaAppleTitle.setAttribute('content', instanceTitle);
+
+    const customManifest = {
+      name: `Reconectar WhatsApp - ${instance.display_name}`,
+      short_name: `${instance.display_name.slice(0, 16)}`,
+      description: `Painel de Reconexão e Status do WhatsApp para a instância ${instance.display_name}`,
+      start_url: `/connect-instance/${instanceId}?standalone=true`,
+      scope: `/connect-instance/`,
+      id: `/connect-instance/${instanceId}`,
+      display: 'standalone',
+      display_override: ['standalone', 'fullscreen', 'minimal-ui'],
+      background_color: '#090e11',
+      theme_color: '#090e11',
+      orientation: 'portrait',
+      categories: ['business', 'utilities'],
+      icons: [
+        {
+          src: '/pwa-192x192.png',
+          sizes: '192x192',
+          type: 'image/png',
+          purpose: 'any'
+        },
+        {
+          src: '/pwa-512x512.png',
+          sizes: '512x512',
+          type: 'image/png',
+          purpose: 'any'
+        },
+        {
+          src: '/maskable-icon-512x512.png',
+          sizes: '512x512',
+          type: 'image/png',
+          purpose: 'maskable'
+        }
+      ]
+    };
+
+    const manifestBlob = new Blob([JSON.stringify(customManifest)], { type: 'application/json' });
+    const manifestBlobUrl = URL.createObjectURL(manifestBlob);
+
+    let manifestLink = document.querySelector('link[rel="manifest"]') as HTMLLinkElement;
+    if (!manifestLink) {
+      manifestLink = document.createElement('link');
+      manifestLink.rel = 'manifest';
+      document.head.appendChild(manifestLink);
+    }
+    manifestLink.href = manifestBlobUrl;
+
+    return () => {
+      URL.revokeObjectURL(manifestBlobUrl);
+    };
+  }, [instance, instanceId]);
+
+  // 3. Consulta o status em tempo real no motor Node/Baileys com fallback no Supabase
   const checkEngineStatus = useCallback(async (targetInst?: InstanceData | null) => {
     const inst = targetInst || instanceRef.current;
     const currentInstanceId = instanceId;
@@ -106,7 +254,6 @@ export default function ConnectInstanceStandalone() {
         data = rawJson.data || rawJson;
       }
 
-      // Fallback direto no Supabase se API HTTP não responder ou não tiver QR
       let qrFromRt: string | null = null;
       if (!data?.qr_code && !data?.qrBase64 && !data?.qr_base64) {
         const { data: rt } = await supabase
@@ -165,7 +312,7 @@ export default function ConnectInstanceStandalone() {
     }
   }, [instanceId, actionLoading]);
 
-  // 3. Dispara a geração ou auto-renovação de QR Code com polling ativo
+  // 4. Dispara a geração ou auto-renovação de QR Code com polling ativo
   const handleGenerateQr = useCallback(async (forceNew = false, isAuto = false) => {
     const inst = instanceRef.current;
     if (!instanceId || isConnected) return;
@@ -207,7 +354,6 @@ export default function ConnectInstanceStandalone() {
         throw new Error(data.error || data.message || 'Falha ao acionar servidor.');
       }
 
-      // Resetar o contador de auto-renovação
       setQrCountdown(QR_RENEWAL_INTERVAL);
 
       if (data.qrBase64 || data.qr_base64 || data.base64) {
@@ -224,7 +370,6 @@ export default function ConnectInstanceStandalone() {
         setStatusMessage('QR Code gerado e ativo! Aponte a câmera do WhatsApp.');
         setActionLoading(false);
       } else {
-        // Polling ativo no Supabase aguardando a persistência do QR Code pelo Baileys
         let found = false;
         for (let attempt = 0; attempt < 8; attempt++) {
           await new Promise((resolve) => setTimeout(resolve, 800));
@@ -268,7 +413,7 @@ export default function ConnectInstanceStandalone() {
     }
   }, [instanceId, isConnected, checkEngineStatus]);
 
-  // 1. Carrega dados básicos da instância no Supabase
+  // 5. Carrega dados básicos da instância no Supabase
   const loadInstanceMetadata = useCallback(async () => {
     if (!instanceId) {
       setError('ID da instância não informado na URL.');
@@ -289,7 +434,6 @@ export default function ConnectInstanceStandalone() {
         .maybeSingle();
 
       if (dbErr || !data) {
-        // Se não achou pelo UUID estrito, busca por display_name
         const { data: dataByName } = await supabase
           .from('whatsapp_instances')
           .select('*, whatsapp_instance_runtime(qr_code, pairing_code)')
@@ -334,7 +478,6 @@ export default function ConnectInstanceStandalone() {
         handleGenerateQr(false, false);
       }
 
-      // Consulta imediatamente o status na engine enviando o tenant_id recém obtido
       checkEngineStatus(instData);
     } catch (e: any) {
       setError(`Erro ao carregar instância: ${e.message}`);
@@ -343,7 +486,42 @@ export default function ConnectInstanceStandalone() {
     }
   }, [instanceId, handleGenerateQr, checkEngineStatus]);
 
-  // 4. Dispara a geração de Código de Pareamento (8 Dígitos)
+  // 6. Carrega os logs de conexão da instância
+  const fetchConnectionLogs = useCallback(async () => {
+    if (!instanceId) return;
+    setLoadingLogs(true);
+    try {
+      const baseUrl = getActiveEngineUrl();
+      const res = await fetch(`${baseUrl}/api/v1/instances/${instanceId}/connection-logs?limit=40&_t=${Date.now()}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.logs && Array.isArray(data.logs)) {
+          setConnectionLogs(data.logs);
+          setLoadingLogs(false);
+          return;
+        }
+      }
+
+      // Fallback direto no Supabase
+      const { data: dbLogs } = await supabase
+        .from('system_logs')
+        .select('*')
+        .eq('type', 'WhatsApp Connection')
+        .filter('payload->>instance_id', 'eq', instanceId)
+        .order('created_at', { ascending: false })
+        .limit(30);
+
+      if (dbLogs) {
+        setConnectionLogs(dbLogs as ConnectionLogItem[]);
+      }
+    } catch (err) {
+      console.warn('[ConnectStandalone] Erro ao carregar logs de conexão:', err);
+    } finally {
+      setLoadingLogs(false);
+    }
+  }, [instanceId]);
+
+  // 7. Dispara a geração de Código de Pareamento (8 Dígitos)
   const handleGeneratePairingCode = async () => {
     const inst = instanceRef.current;
     if (!instanceId) return;
@@ -399,7 +577,7 @@ export default function ConnectInstanceStandalone() {
     }
   };
 
-  // 5. Desconectar instância
+  // 8. Desconectar instância
   const handleDisconnect = async () => {
     const inst = instanceRef.current;
     if (!instanceId) return;
@@ -433,16 +611,32 @@ export default function ConnectInstanceStandalone() {
     }
   };
 
+  // 9. Dispara o fluxo de instalação PWA
+  const handleInstallClick = async () => {
+    if (deferredPrompt) {
+      try {
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        if (outcome === 'accepted') {
+          setIsStandalone(true);
+          setDeferredPrompt(null);
+        }
+      } catch (err) {
+        setShowInstallModal(true);
+      }
+    } else {
+      setShowInstallModal(true);
+    }
+  };
+
   // Efeito Inicial: Carrega metadados, polling e Realtime duplo
   useEffect(() => {
     loadInstanceMetadata();
 
-    // Polling contínuo de status a cada 2.5s
     pollTimerRef.current = setInterval(() => {
       checkEngineStatus();
     }, 2500);
 
-    // Inscrição Realtime no Supabase para whatsapp_instances (status de conexão)
     if (instanceId) {
       const instChannel = supabase
         .channel(`public:whatsapp_instances:${instanceId}`)
@@ -466,7 +660,6 @@ export default function ConnectInstanceStandalone() {
         )
         .subscribe();
 
-      // Inscrição Realtime no Supabase para whatsapp_instance_runtime (novos QR Codes gerados pelo Baileys)
       const runtimeChannel = supabase
         .channel(`public:whatsapp_instance_runtime:${instanceId}`)
         .on(
@@ -498,7 +691,7 @@ export default function ConnectInstanceStandalone() {
     };
   }, [instanceId, loadInstanceMetadata, checkEngineStatus]);
 
-  // Loop de Auto-Renovação Contínua do QR Code (A cada 1 segundo, apenas se houver QR Code ativo)
+  // Loop de Auto-Renovação Contínua do QR Code
   useEffect(() => {
     if (isConnected || connectMode !== 'qr' || (!qrCodeData && !qrBase64)) {
       return;
@@ -507,7 +700,6 @@ export default function ConnectInstanceStandalone() {
     renewTimerRef.current = setInterval(() => {
       setQrCountdown((prev) => {
         if (prev <= 1) {
-          // Quando chega a zero, aciona a auto-renovação silenciosa
           handleGenerateQr(true, true);
           return QR_RENEWAL_INTERVAL;
         }
@@ -535,7 +727,7 @@ export default function ConnectInstanceStandalone() {
 
   if (loading) {
     return (
-      <div className="fixed inset-0 w-full h-full bg-[#090e11] text-slate-100 flex flex-col items-center justify-center p-4 select-none overflow-y-auto custom-scrollbar font-sans z-50">
+      <div className="fixed inset-0 w-full h-full bg-[#090e11] text-slate-100 flex flex-col items-center justify-center p-4 select-none font-sans z-50">
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
         <div className="flex flex-col items-center gap-4 bg-[#111b21]/90 border border-white/10 p-8 rounded-[32px] backdrop-blur-2xl shadow-2xl relative z-10">
           <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center shadow-lg shadow-emerald-500/30">
@@ -549,7 +741,7 @@ export default function ConnectInstanceStandalone() {
 
   if (error && !instance) {
     return (
-      <div className="fixed inset-0 w-full h-full bg-[#090e11] text-slate-100 flex flex-col items-center justify-center p-4 select-none overflow-y-auto custom-scrollbar font-sans z-50">
+      <div className="fixed inset-0 w-full h-full bg-[#090e11] text-slate-100 flex flex-col items-center justify-center p-4 select-none font-sans z-50">
         <div className="w-full max-w-md bg-[#111b21]/95 border border-rose-500/30 p-8 rounded-[32px] backdrop-blur-2xl text-center space-y-5 shadow-2xl relative z-10">
           <div className="w-16 h-16 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center mx-auto text-rose-400">
             <AlertTriangle className="w-8 h-8" />
@@ -570,86 +762,99 @@ export default function ConnectInstanceStandalone() {
   }
 
   return (
-    <div className="fixed inset-0 w-full h-full bg-[#090e11] text-slate-100 flex flex-col items-center justify-start overflow-y-auto custom-scrollbar p-4 sm:p-6 md:p-8 select-none font-sans z-30">
+    <div className="min-h-screen w-full bg-[#090e11] text-slate-100 flex flex-col items-center justify-center p-3 sm:p-5 md:p-6 lg:p-8 select-none font-sans relative overflow-x-hidden">
       
       {/* Luzes de Fundo Ambientais (Cyber Backlights) */}
       <div className="fixed -top-32 -left-32 w-96 h-96 bg-emerald-500/15 rounded-full blur-[100px] pointer-events-none" />
       <div className="fixed -bottom-32 -right-32 w-96 h-96 bg-teal-500/15 rounded-full blur-[100px] pointer-events-none" />
-      <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-indigo-500/5 rounded-full blur-[120px] pointer-events-none" />
+      <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-indigo-500/5 rounded-full blur-[140px] pointer-events-none" />
 
-      {/* Card Principal Glassmorphism com Rolagem Livre */}
-      <div className="w-full max-w-md md:max-w-lg bg-[#111b21]/95 border border-white/10 rounded-[32px] p-5 sm:p-7 md:p-8 shadow-[0_25px_70px_rgba(0,0,0,0.65)] backdrop-blur-2xl relative z-10 space-y-5 my-auto shrink-0">
+      {/* Card Principal Widescreen (2 Colunas no Desktop para visibilidade total sem rolagem) */}
+      <div className="w-full max-w-4xl lg:max-w-5xl bg-[#111b21]/95 border border-white/10 rounded-[32px] p-5 sm:p-7 md:p-8 shadow-[0_25px_80px_rgba(0,0,0,0.7)] backdrop-blur-2xl relative z-10 space-y-5 my-auto shrink-0">
         
-        {/* Header com Nome da Instância e Botão Copiar Link */}
-        <div className="flex items-center justify-between border-b border-white/[0.08] pb-4">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 bg-gradient-to-tr from-emerald-600 via-emerald-500 to-teal-500 rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-500/25 border border-white/20 shrink-0">
-              <QrCode className="w-5 h-5 text-white" />
+        {/* ========================================================= */}
+        {/* HEADER SUPERIOR COM NOME, STATUS E AÇÕES RÁPIDAS */}
+        {/* ========================================================= */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-white/[0.08] pb-4 gap-3.5">
+          
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-12 h-12 bg-gradient-to-tr from-emerald-600 via-emerald-500 to-teal-500 rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-500/25 border border-white/20 shrink-0">
+              <QrCode className="w-6 h-6 text-white" />
             </div>
-            <div>
-              <h1 className="text-base sm:text-lg font-black text-white tracking-wide truncate max-w-[180px] sm:max-w-[240px]">
-                {instance?.display_name || 'Conectar WhatsApp'}
-              </h1>
+            <div className="min-w-0 text-left">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-base sm:text-xl font-black text-white tracking-wide truncate max-w-[200px] sm:max-w-[280px]">
+                  {instance?.display_name || 'Conectar WhatsApp'}
+                </h1>
+                {/* Badge de Status de Conexão */}
+                <span className={`px-2.5 py-0.5 rounded-full text-[9.5px] font-black uppercase tracking-wider flex items-center gap-1.5 border ${
+                  isConnected
+                    ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 shadow-[0_0_12px_rgba(16,185,129,0.3)]'
+                    : statusStep > 1
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-[0_0_12px_rgba(245,158,11,0.2)]'
+                    : 'bg-rose-500/20 text-rose-400 border-rose-500/40'
+                }`}>
+                  <span className={`w-2 h-2 rounded-full ${
+                    isConnected ? 'bg-emerald-400 animate-pulse' : statusStep > 1 ? 'bg-amber-400 animate-pulse' : 'bg-rose-400'
+                  }`} />
+                  {isConnected ? 'Conectado' : statusStep > 1 ? 'Aguardando Leitura' : 'Desconectado'}
+                </span>
+              </div>
               <p className="text-[10.5px] text-slate-400 font-bold flex items-center gap-1.5 mt-0.5">
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                 <span>Link Autônomo de Conexão Direct</span>
               </p>
             </div>
           </div>
 
-          <button
-            onClick={copyDirectLink}
-            className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-2xl border text-[11px] font-black uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 shrink-0 ${
-              copiedLink
-                ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300 shadow-md shadow-emerald-500/20'
-                : 'bg-white/5 hover:bg-white/10 border-white/10 text-slate-300 hover:text-white'
-            }`}
-            title="Copiar Link de Conexão Direct"
-          >
-            {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
-            <span className="hidden xs:inline sm:inline">{copiedLink ? 'Copiado!' : 'Copiar Link'}</span>
-          </button>
-        </div>
+          {/* Botões de Ação do Header */}
+          <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+            {/* Botão de Histórico de Logs */}
+            <button
+              onClick={() => {
+                fetchConnectionLogs();
+                setShowLogsModal(true);
+              }}
+              className="px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 hover:text-white rounded-2xl text-[11px] font-black uppercase tracking-wider transition-all flex items-center gap-1.5 active:scale-95 cursor-pointer shadow-sm"
+              title="Visualizar logs e histórico de tentativas de conexão desta instância"
+            >
+              <Activity className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Logs</span>
+            </button>
 
-        {/* Rastreador de Status Dinâmico (4 Passos) */}
-        <div className="bg-[#0c1317] p-3.5 sm:p-4 rounded-2xl border border-white/[0.08] space-y-2.5 shadow-inner">
-          <div className="flex items-center justify-between text-xs font-black">
-            <span className="text-slate-400 text-[10px] sm:text-[10.5px] uppercase tracking-wider">Status da Conexão:</span>
-            <span className={`px-2.5 py-0.5 sm:px-3 sm:py-1 rounded-full text-[9.5px] sm:text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 border ${
-              isConnected
-                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 shadow-[0_0_12px_rgba(16,185,129,0.3)]'
-                : statusStep > 1
-                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-[0_0_12px_rgba(245,158,11,0.2)]'
-                : 'bg-rose-500/20 text-rose-400 border-rose-500/40'
-            }`}>
-              <span className={`w-2 h-2 rounded-full ${
-                isConnected ? 'bg-emerald-400 animate-pulse' : statusStep > 1 ? 'bg-amber-400 animate-pulse' : 'bg-rose-400'
-              }`} />
-              {isConnected ? 'Conectado' : statusStep > 1 ? 'Aguardando Leitura' : 'Desconectado'}
-            </span>
-          </div>
-
-          {/* Barra de Progresso Visual de 4 Segmentos */}
-          <div className="grid grid-cols-4 gap-1.5 pt-0.5">
-            <div className={`h-1.5 rounded-full transition-all duration-300 ${statusStep >= 1 ? 'bg-gradient-to-r from-emerald-500 to-teal-400 shadow-[0_0_8px_rgba(16,185,129,0.6)]' : 'bg-white/10'}`} title="Passo 1: Inicializando" />
-            <div className={`h-1.5 rounded-full transition-all duration-300 ${statusStep >= 2 ? 'bg-gradient-to-r from-emerald-500 to-teal-400 shadow-[0_0_8px_rgba(16,185,129,0.6)]' : 'bg-white/10'}`} title="Passo 2: QR Code Pronto" />
-            <div className={`h-1.5 rounded-full transition-all duration-300 ${statusStep >= 3 ? 'bg-gradient-to-r from-emerald-500 to-teal-400 shadow-[0_0_8px_rgba(16,185,129,0.6)]' : 'bg-white/10'}`} title="Passo 3: Autenticando Celular" />
-            <div className={`h-1.5 rounded-full transition-all duration-300 ${statusStep >= 4 ? 'bg-gradient-to-r from-emerald-500 to-teal-400 shadow-[0_0_8px_rgba(16,185,129,0.6)]' : 'bg-white/10'}`} title="Passo 4: Conectado com Sucesso" />
-          </div>
-
-          <p className="text-[10.5px] sm:text-[11px] text-slate-300 font-bold pt-0.5 text-center flex items-center justify-center gap-2">
-            {actionLoading || isRenewingAuto ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400 shrink-0" />
-            ) : isConnected ? (
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            {!isStandalone ? (
+              <button
+                onClick={handleInstallClick}
+                className="px-3 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl text-[11px] font-black uppercase tracking-wider transition-all flex items-center gap-1.5 shadow-md shadow-emerald-600/30 hover:shadow-emerald-500/40 active:scale-95 cursor-pointer border border-emerald-400/30 animate-pulse"
+                title="Instalar este Reconector na Área de Trabalho ou Celular"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Instalar App</span>
+              </button>
             ) : (
-              <Wifi className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span className="px-3 py-1.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded-2xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 shadow-sm">
+                <Zap className="w-3 h-3 text-emerald-400" />
+                <span>App Standalone Ativo</span>
+              </span>
             )}
-            <span className="truncate">{statusMessage}</span>
-          </p>
+
+            <button
+              onClick={copyDirectLink}
+              className={`px-3 py-2 rounded-2xl border text-[11px] font-black uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 ${
+                copiedLink
+                  ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300 shadow-md shadow-emerald-500/20'
+                  : 'bg-white/5 hover:bg-white/10 border-white/10 text-slate-300 hover:text-white'
+              }`}
+              title="Copiar Link de Conexão Direct"
+            >
+              {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
+              <span>{copiedLink ? 'Copiado!' : 'Copiar Link'}</span>
+            </button>
+          </div>
+
         </div>
 
-        {/* Banner de Erro */}
+        {/* Banner de Erro se houver */}
         {error && (
           <div className="p-3.5 bg-rose-500/15 border border-rose-500/30 rounded-2xl text-rose-300 text-xs font-bold flex items-center gap-2.5 shadow-md">
             <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
@@ -658,102 +863,212 @@ export default function ConnectInstanceStandalone() {
         )}
 
         {/* ========================================================= */}
-        {/* TELA DE SUCESSO (DISPOSITIVO CONECTADO) */}
+        {/* CORPO PRINCIPAL EM GRID DE 2 COLUNAS (SPLIT LAYOUT) */}
         {/* ========================================================= */}
-        {isConnected ? (
-          <div className="py-7 px-5 bg-gradient-to-b from-emerald-500/15 via-teal-500/10 to-transparent border border-emerald-500/30 rounded-[28px] text-center space-y-5 animate-in fade-in zoom-in-95 duration-300 shadow-xl">
-            <div className="w-16 h-16 sm:w-18 sm:h-18 bg-gradient-to-tr from-emerald-500 to-teal-400 rounded-full flex items-center justify-center mx-auto shadow-[0_0_35px_rgba(16,185,129,0.45)] ring-4 ring-emerald-500/20">
-              <CheckCircle2 className="w-9 h-9 text-slate-950 stroke-[2.5]" />
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-7 items-stretch">
+          
+          {/* ========================================================= */}
+          {/* COLUNA DA ESQUERDA: INFORMAÇÕES, STATUS E INSTRUÇÕES */}
+          {/* ========================================================= */}
+          <div className="lg:col-span-6 flex flex-col justify-between space-y-4 text-left">
+            
+            <div className="space-y-4">
+              {/* Tracker de Status Dinâmico */}
+              <div className="bg-[#0c1317] p-3.5 rounded-2xl border border-white/[0.08] space-y-2.5 shadow-inner">
+                <div className="flex items-center justify-between text-[11px] font-black">
+                  <span className="text-slate-400 uppercase tracking-wider">Etapa do Processo:</span>
+                  <span className="text-emerald-400 font-mono font-bold">Passo {statusStep} de 4</span>
+                </div>
+
+                {/* Barra de Progresso Visual de 4 Segmentos */}
+                <div className="grid grid-cols-4 gap-1.5">
+                  <div className={`h-1.5 rounded-full transition-all duration-300 ${statusStep >= 1 ? 'bg-gradient-to-r from-emerald-500 to-teal-400 shadow-[0_0_8px_rgba(16,185,129,0.6)]' : 'bg-white/10'}`} title="Passo 1: Inicializando" />
+                  <div className={`h-1.5 rounded-full transition-all duration-300 ${statusStep >= 2 ? 'bg-gradient-to-r from-emerald-500 to-teal-400 shadow-[0_0_8px_rgba(16,185,129,0.6)]' : 'bg-white/10'}`} title="Passo 2: QR Code Pronto" />
+                  <div className={`h-1.5 rounded-full transition-all duration-300 ${statusStep >= 3 ? 'bg-gradient-to-r from-emerald-500 to-teal-400 shadow-[0_0_8px_rgba(16,185,129,0.6)]' : 'bg-white/10'}`} title="Passo 3: Autenticando Celular" />
+                  <div className={`h-1.5 rounded-full transition-all duration-300 ${statusStep >= 4 ? 'bg-gradient-to-r from-emerald-500 to-teal-400 shadow-[0_0_8px_rgba(16,185,129,0.6)]' : 'bg-white/10'}`} title="Passo 4: Conectado com Sucesso" />
+                </div>
+
+                <p className="text-[11px] text-slate-300 font-bold flex items-center gap-2 pt-0.5">
+                  {actionLoading || isRenewingAuto ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400 shrink-0" />
+                  ) : isConnected ? (
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  ) : (
+                    <Wifi className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  )}
+                  <span className="truncate">{statusMessage}</span>
+                </p>
+              </div>
+
+              {/* Passo a Passo Ilustrado "Como conectar no WhatsApp" */}
+              <div className="bg-[#0c1317] p-3.5 rounded-2xl border border-white/[0.08] space-y-2.5 shadow-inner">
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-1.5">
+                  <Zap size={13} className="text-emerald-400" />
+                  <span>Instruções para Conectar no Celular:</span>
+                </span>
+                
+                <div className="space-y-2 text-[11px]">
+                  <div className="flex items-center gap-3 bg-white/[0.02] p-2.5 rounded-xl border border-white/5 hover:border-emerald-500/30 transition-all">
+                    <span className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 font-black text-xs flex items-center justify-center shrink-0">1</span>
+                    <div className="min-w-0">
+                      <strong className="text-white block leading-tight">Abra o aplicativo WhatsApp</strong>
+                      <span className="text-[10px] text-slate-400 leading-tight">No celular principal onde está o chip.</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 bg-white/[0.02] p-2.5 rounded-xl border border-white/5 hover:border-emerald-500/30 transition-all">
+                    <span className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 font-black text-xs flex items-center justify-center shrink-0">2</span>
+                    <div className="min-w-0">
+                      <strong className="text-white block leading-tight">Acesse "Aparelhos Conectados"</strong>
+                      <span className="text-[10px] text-slate-400 leading-tight">Toque em Configurações (ou ⋮) ➔ Conectar um aparelho.</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 bg-white/[0.02] p-2.5 rounded-xl border border-white/5 hover:border-emerald-500/30 transition-all">
+                    <span className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 font-black text-xs flex items-center justify-center shrink-0">3</span>
+                    <div className="min-w-0">
+                      <strong className="text-white block leading-tight">Aponte a Câmera para o QR Code</strong>
+                      <span className="text-[10px] text-slate-400 leading-tight">Enquadre o código ao lado na tela do seu aparelho.</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Alternador de Abas (QR Code vs Código de 8 Dígitos) */}
+              <div className="flex bg-[#0c1317] p-1 rounded-2xl border border-white/[0.08] shadow-inner">
+                <button
+                  onClick={() => setConnectMode('qr')}
+                  className={`flex-1 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                    connectMode === 'qr'
+                      ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-lg shadow-emerald-600/30'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
+                  }`}
+                >
+                  <QrCode className="w-3.5 h-3.5" />
+                  <span>Usar QR Code</span>
+                </button>
+
+                <button
+                  onClick={() => setConnectMode('pairing')}
+                  className={`flex-1 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                    connectMode === 'pairing'
+                      ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-lg shadow-emerald-600/30'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
+                  }`}
+                >
+                  <Key className="w-3.5 h-3.5" />
+                  <span>Código de 8 Dígitos</span>
+                </button>
+              </div>
             </div>
 
-            <div className="space-y-1">
-              <h2 className="text-base sm:text-lg font-black text-white tracking-wide">
-                Dispositivo Conectado com Sucesso!
-              </h2>
-              <p className="text-xs text-slate-400 font-medium">
-                A instância <strong className="text-emerald-300">{instance?.display_name}</strong> está sincronizada e pronta.
-              </p>
-            </div>
-
-            {connectedNumber && (
-              <div className="inline-flex items-center gap-2 px-4 py-2 bg-[#0c1317] border border-emerald-500/40 rounded-2xl text-emerald-300 font-black text-xs sm:text-sm shadow-inner font-mono tracking-wider">
-                <Smartphone className="w-4 h-4 text-emerald-400" />
-                <span>+{connectedNumber}</span>
+            {/* Banner de Instalação PWA Inteligente na Esquerda */}
+            {!isStandalone && (
+              <div className="p-3 bg-gradient-to-r from-emerald-950/40 via-[#0c1317] to-teal-950/30 border border-emerald-500/25 rounded-2xl flex items-center justify-between gap-3 shadow-inner">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center shrink-0 text-emerald-400">
+                    <Smartphone className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0 text-left">
+                    <h3 className="text-[11px] font-black text-emerald-300 leading-tight">Instalar Atalho Exclusivo</h3>
+                    <p className="text-[9.5px] text-slate-400 leading-tight truncate">Abra em 1 clique sem precisar fazer login.</p>
+                  </div>
+                </div>
+                <button
+                  onClick={handleInstallClick}
+                  className="px-2.5 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-200 text-[10px] font-black uppercase tracking-wider rounded-xl shrink-0 transition-all active:scale-95 cursor-pointer flex items-center gap-1"
+                >
+                  <Download className="w-3 h-3 text-emerald-400" />
+                  <span>Instalar</span>
+                </button>
               </div>
             )}
 
-            <div className="pt-2 flex flex-col sm:flex-row gap-2.5">
-              <button
-                onClick={() => handleGenerateQr(true, false)}
-                disabled={actionLoading}
-                className="flex-1 py-3 px-4 bg-white/10 hover:bg-white/15 text-slate-200 font-black rounded-2xl text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer border border-white/10"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${actionLoading ? 'animate-spin' : ''}`} />
-                <span>Reconectar / Novo QR</span>
-              </button>
-
-              <button
-                onClick={handleDisconnect}
-                disabled={actionLoading}
-                className="py-3 px-4 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 font-black rounded-2xl text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer"
-              >
-                <LogOut className="w-3.5 h-3.5 text-rose-400" />
-                <span>Desconectar Chip</span>
-              </button>
+            {/* Rodapé / Footer Corporativo */}
+            <div className="pt-2 border-t border-white/[0.08] flex items-center justify-between text-[10.5px] text-slate-500 font-bold">
+              <span className="flex items-center gap-1.5">
+                <Shield size={12} className="text-emerald-400/70" />
+                <span>Powered by Baileys V6 Engine</span>
+              </span>
+              <span className="flex items-center gap-1 text-slate-400">
+                <Sparkles className="w-3 h-3 text-emerald-400" />
+                <span>X-Point Soluções</span>
+              </span>
             </div>
+
           </div>
-        ) : (
-          /* ========================================================= */
-          /* TELA DE PAREAMENTO (QR CODE OU CÓDIGO DE 8 DÍGITOS) */
-          /* ========================================================= */
-          <div className="space-y-4">
-            {/* Alternador de Abas */}
-            <div className="flex bg-[#0c1317] p-1 rounded-2xl border border-white/[0.08] shadow-inner">
-              <button
-                onClick={() => setConnectMode('qr')}
-                className={`flex-1 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer ${
-                  connectMode === 'qr'
-                    ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-lg shadow-emerald-600/30'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
-                }`}
-              >
-                <QrCode className="w-3.5 h-3.5" />
-                <span>QR Code</span>
-              </button>
 
-              <button
-                onClick={() => setConnectMode('pairing')}
-                className={`flex-1 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer ${
-                  connectMode === 'pairing'
-                    ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-lg shadow-emerald-600/30'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
-                }`}
-              >
-                <Key className="w-3.5 h-3.5" />
-                <span>Código de 8 Dígitos</span>
-              </button>
-            </div>
+          {/* ========================================================= */}
+          {/* COLUNA DA DIREITA: QR CODE HERO / CÓDIGO / SUCESSO */}
+          {/* ========================================================= */}
+          <div className="lg:col-span-6 bg-[#0c1317]/90 rounded-[28px] border border-white/[0.08] p-5 sm:p-6 flex flex-col items-center justify-center text-center shadow-inner relative min-h-[380px]">
+            
+            {/* ESTADO 1: DISPOSITIVO CONECTADO */}
+            {isConnected ? (
+              <div className="w-full space-y-5 animate-in fade-in zoom-in-95 duration-300">
+                <div className="w-20 h-20 bg-gradient-to-tr from-emerald-500 to-teal-400 rounded-full flex items-center justify-center mx-auto shadow-[0_0_40px_rgba(16,185,129,0.45)] ring-4 ring-emerald-500/20">
+                  <CheckCircle2 className="w-10 h-10 text-slate-950 stroke-[2.5]" />
+                </div>
 
-            {/* ABA 1: QR CODE */}
-            {connectMode === 'qr' ? (
-              <div className="space-y-4 flex flex-col items-center text-center">
+                <div className="space-y-1">
+                  <h2 className="text-lg font-black text-white tracking-wide">
+                    Dispositivo Conectado com Sucesso!
+                  </h2>
+                  <p className="text-xs text-slate-400 font-medium">
+                    A instância <strong className="text-emerald-300">{instance?.display_name}</strong> está sincronizada e ativa.
+                  </p>
+                </div>
+
+                {connectedNumber && (
+                  <div className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#111b21] border border-emerald-500/40 rounded-2xl text-emerald-300 font-black text-sm shadow-inner font-mono tracking-wider">
+                    <Smartphone className="w-4 h-4 text-emerald-400" />
+                    <span>+{connectedNumber}</span>
+                  </div>
+                )}
+
+                <div className="pt-2 flex flex-col sm:flex-row gap-2.5 w-full">
+                  <button
+                    onClick={() => handleGenerateQr(true, false)}
+                    disabled={actionLoading}
+                    className="flex-1 py-3 px-4 bg-white/10 hover:bg-white/15 text-slate-200 font-black rounded-2xl text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer border border-white/10"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${actionLoading ? 'animate-spin' : ''}`} />
+                    <span>Reconectar / Novo QR</span>
+                  </button>
+
+                  <button
+                    onClick={handleDisconnect}
+                    disabled={actionLoading}
+                    className="py-3 px-4 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 font-black rounded-2xl text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer"
+                  >
+                    <LogOut className="w-3.5 h-3.5 text-rose-400" />
+                    <span>Desconectar Chip</span>
+                  </button>
+                </div>
+              </div>
+            ) : connectMode === 'qr' ? (
+              /* ESTADO 2: ABA QR CODE */
+              <div className="w-full flex flex-col items-center justify-center space-y-4">
                 
                 {/* Moldura Cibernética do QR Code */}
                 {actionLoading && !qrBase64 && !qrCodeData ? (
-                  <div className="w-[220px] h-[220px] bg-[#0c1317] rounded-[28px] border border-emerald-500/30 flex flex-col items-center justify-center gap-3 text-xs text-slate-300 shadow-inner p-4 animate-pulse">
-                    <Loader2 className="w-9 h-9 animate-spin text-emerald-400" />
-                    <span className="font-bold text-center leading-tight">Gerando QR Code oficial...<br/><span className="text-[10px] text-slate-400 font-normal">Conectando aos servidores do WhatsApp</span></span>
+                  <div className="w-[220px] h-[220px] sm:w-[240px] sm:h-[240px] bg-[#111b21] rounded-[28px] border border-emerald-500/30 flex flex-col items-center justify-center gap-3 text-xs text-slate-300 shadow-inner p-4 animate-pulse">
+                    <Loader2 className="w-10 h-10 animate-spin text-emerald-400" />
+                    <span className="font-bold text-center leading-tight">
+                      Gerando QR Code oficial...<br/>
+                      <span className="text-[10px] text-slate-400 font-normal">Conectando aos servidores do WhatsApp</span>
+                    </span>
                   </div>
                 ) : qrBase64 ? (
-                  <div className="p-3.5 bg-white rounded-[24px] shadow-[0_12px_40px_rgba(0,0,0,0.6)] inline-block ring-6 ring-emerald-500/20 transition-all hover:scale-[1.01] relative group">
-                    <img src={qrBase64} alt="QR Code WhatsApp" className="w-[190px] h-[190px] sm:w-[210px] sm:h-[210px] rounded-xl object-contain" />
+                  <div className="p-3.5 bg-white rounded-[26px] shadow-[0_15px_50px_rgba(0,0,0,0.7)] inline-block ring-6 ring-emerald-500/25 transition-all hover:scale-[1.01] relative group">
+                    <img src={qrBase64} alt="QR Code WhatsApp" className="w-[200px] h-[200px] sm:w-[220px] sm:h-[220px] rounded-xl object-contain" />
                   </div>
                 ) : qrCodeData ? (
-                  <div className="p-3.5 bg-white rounded-[24px] shadow-[0_12px_40px_rgba(0,0,0,0.6)] inline-block ring-6 ring-emerald-500/20 transition-all hover:scale-[1.01] relative group">
-                    <QRCode value={qrCodeData} size={200} />
+                  <div className="p-3.5 bg-white rounded-[26px] shadow-[0_15px_50px_rgba(0,0,0,0.7)] inline-block ring-6 ring-emerald-500/25 transition-all hover:scale-[1.01] relative group">
+                    <QRCode value={qrCodeData} size={220} />
                   </div>
                 ) : (
-                  <div className="py-8 px-5 bg-[#0c1317] rounded-[24px] border border-white/10 w-full space-y-3 shadow-inner">
+                  <div className="py-10 px-5 bg-[#111b21] rounded-[26px] border border-white/10 w-full space-y-3 shadow-inner">
                     <div className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mx-auto text-slate-400">
                       <Smartphone className="w-6 h-6" />
                     </div>
@@ -765,41 +1080,18 @@ export default function ConnectInstanceStandalone() {
 
                 {/* Badge de Auto-Renovação Contínua */}
                 {(qrBase64 || qrCodeData) && (
-                  <div className="inline-flex items-center gap-2 px-3 py-1 bg-[#0c1317] border border-emerald-500/30 rounded-full text-[10px] font-black text-emerald-300 shadow-sm">
+                  <div className="inline-flex items-center gap-2 px-3.5 py-1 bg-[#111b21] border border-emerald-500/30 rounded-full text-[10px] font-black text-emerald-300 shadow-sm">
                     <RotateCw className={`w-3 h-3 text-emerald-400 ${isRenewingAuto ? 'animate-spin' : ''}`} />
                     <span>Auto-renovação em {qrCountdown}s</span>
                     <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-ping" />
                   </div>
                 )}
 
-                {/* Passo a Passo Ilustrado em 3 Etapas */}
-                <div className="w-full bg-[#0c1317] p-3 rounded-2xl border border-white/[0.08] text-left space-y-2 shadow-inner">
-                  <span className="text-[9.5px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-1.5">
-                    <Zap size={12} className="text-emerald-400" />
-                    <span>Como conectar no WhatsApp:</span>
-                  </span>
-                  
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 text-[10px]">
-                    <div className="flex items-center gap-2 bg-white/[0.02] p-2 rounded-xl border border-white/5">
-                      <span className="w-4 h-4 rounded-lg bg-emerald-500/20 text-emerald-400 font-black text-[9px] flex items-center justify-center shrink-0">1</span>
-                      <span className="text-slate-300 font-semibold leading-tight">Abra o WhatsApp</span>
-                    </div>
-                    <div className="flex items-center gap-2 bg-white/[0.02] p-2 rounded-xl border border-white/5">
-                      <span className="w-4 h-4 rounded-lg bg-emerald-500/20 text-emerald-400 font-black text-[9px] flex items-center justify-center shrink-0">2</span>
-                      <span className="text-slate-300 font-semibold leading-tight">Aparelhos Conectados</span>
-                    </div>
-                    <div className="flex items-center gap-2 bg-white/[0.02] p-2 rounded-xl border border-white/5">
-                      <span className="w-4 h-4 rounded-lg bg-emerald-500/20 text-emerald-400 font-black text-[9px] flex items-center justify-center shrink-0">3</span>
-                      <span className="text-slate-300 font-semibold leading-tight">Aponte para o QR Code</span>
-                    </div>
-                  </div>
-                </div>
-
                 {/* Botão Gerar / Renovar QR Code Manualmente */}
                 <button
                   onClick={() => handleGenerateQr(true, false)}
                   disabled={actionLoading}
-                  className="w-full py-3.5 bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black rounded-2xl text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-[0_8px_25px_rgba(16,185,129,0.35)] hover:shadow-[0_12px_30px_rgba(16,185,129,0.45)] active:scale-95 cursor-pointer disabled:opacity-50"
+                  className="w-full max-w-xs py-3.5 bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black rounded-2xl text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-[0_8px_25px_rgba(16,185,129,0.35)] hover:shadow-[0_12px_30px_rgba(16,185,129,0.45)] active:scale-95 cursor-pointer disabled:opacity-50"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${actionLoading ? 'animate-spin' : ''}`} />
                   <span>{qrCodeData || qrBase64 ? 'Renovar QR Code Agora' : 'Gerar QR Code de Conexão'}</span>
@@ -807,19 +1099,19 @@ export default function ConnectInstanceStandalone() {
 
               </div>
             ) : (
-              /* ABA 2: CÓDIGO DE PAREAMENTO (8 DÍGITOS) */
-              <div className="space-y-4">
+              /* ESTADO 3: ABA CÓDIGO DE PAREAMENTO (8 DÍGITOS) */
+              <div className="w-full max-w-xs space-y-4 animate-in fade-in zoom-in-95 duration-200">
                 <div className="text-left space-y-1.5">
                   <label className="block text-[10px] font-black text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
                     <PhoneCall size={12} className="text-emerald-400" />
-                    <span>Número do Celular com DDD (Ex: 5511999999999)</span>
+                    <span>Número do Celular com DDD</span>
                   </label>
                   <input
                     type="text"
                     value={pairingPhone}
                     onChange={(e) => setPairingPhone(e.target.value)}
                     placeholder="5511999999999"
-                    className="w-full bg-[#0c1317] border border-white/10 rounded-2xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all font-mono shadow-inner font-bold"
+                    className="w-full bg-[#111b21] border border-white/10 rounded-2xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all font-mono shadow-inner font-bold"
                   />
                 </div>
 
@@ -833,19 +1125,19 @@ export default function ConnectInstanceStandalone() {
                 </button>
 
                 {pairingCode && (
-                  <div className="p-5 bg-emerald-500/10 border border-emerald-500/30 rounded-[24px] space-y-3 text-center animate-in fade-in zoom-in-95 duration-200 shadow-lg">
-                    <p className="text-[10.5px] text-emerald-300 font-black uppercase tracking-wider">
-                      Digite este código na notificação do celular:
+                  <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-[24px] space-y-2.5 text-center animate-in fade-in zoom-in-95 duration-200 shadow-lg">
+                    <p className="text-[10px] text-emerald-300 font-black uppercase tracking-wider">
+                      Digite este código no seu celular:
                     </p>
-                    <div className="text-3xl sm:text-4xl font-black text-white tracking-[0.35em] font-mono bg-[#0c1317] py-3.5 rounded-2xl border border-emerald-500/40 shadow-inner">
+                    <div className="text-2xl sm:text-3xl font-black text-white tracking-[0.3em] font-mono bg-[#111b21] py-3 rounded-2xl border border-emerald-500/40 shadow-inner">
                       {pairingCode}
                     </div>
                     <button
                       onClick={copyPairingCode}
-                      className="w-full py-2.5 bg-white/5 hover:bg-white/10 text-emerald-300 border border-emerald-500/30 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-95"
+                      className="w-full py-2 bg-white/5 hover:bg-white/10 text-emerald-300 border border-emerald-500/30 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95"
                     >
-                      {copiedPairing ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                      <span>{copiedPairing ? 'Código Copiado com Sucesso!' : 'Copiar Código de Pareamento'}</span>
+                      {copiedPairing ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
+                      <span>{copiedPairing ? 'Copiado!' : 'Copiar Código'}</span>
                     </button>
                   </div>
                 )}
@@ -853,21 +1145,296 @@ export default function ConnectInstanceStandalone() {
             )}
 
           </div>
-        )}
 
-        {/* Rodapé / Footer Corporativo */}
-        <div className="pt-3 border-t border-white/[0.08] text-center flex items-center justify-between text-[10.5px] text-slate-500 font-bold">
-          <span className="flex items-center gap-1.5">
-            <Shield size={12} className="text-emerald-400/70" />
-            <span>Powered by Baileys V6 Engine</span>
-          </span>
-          <span className="flex items-center gap-1 text-slate-400">
-            <Sparkles className="w-3 h-3 text-emerald-400" />
-            <span>X-Point Soluções</span>
-          </span>
         </div>
 
       </div>
+
+      {/* ========================================================= */}
+      {/* MODAL DE HISTÓRICO E LOGS DE CONEXÃO */}
+      {/* ========================================================= */}
+      {showLogsModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 select-none animate-in fade-in duration-200">
+          <div className="w-full max-w-xl bg-[#111b21] border border-white/15 rounded-[32px] p-5 sm:p-6 shadow-2xl space-y-4 text-left relative overflow-hidden flex flex-col max-h-[85vh]">
+            
+            {/* Fechar */}
+            <button
+              onClick={() => setShowLogsModal(false)}
+              className="absolute top-5 right-5 w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-slate-400 hover:text-white transition-all cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            {/* Cabeçalho */}
+            <div className="flex items-center gap-3 pr-8">
+              <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center text-white shadow-lg shadow-emerald-500/25 border border-white/20 shrink-0">
+                <Activity className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-base font-black text-white leading-tight">
+                  Logs de Tentativas de Conexão
+                </h3>
+                <p className="text-xs text-emerald-400 font-bold truncate">
+                  Instância: {instance?.display_name || instanceId}
+                </p>
+              </div>
+            </div>
+
+            {/* Botão de Atualização Manual */}
+            <div className="flex items-center justify-between bg-[#0c1317] px-3.5 py-2 rounded-xl border border-white/10 text-xs">
+              <span className="text-slate-400 font-medium">Eventos registrados no servidor:</span>
+              <button
+                onClick={fetchConnectionLogs}
+                disabled={loadingLogs}
+                className="px-2.5 py-1 bg-white/5 hover:bg-white/10 text-emerald-400 font-bold rounded-lg border border-white/10 flex items-center gap-1.5 cursor-pointer active:scale-95 transition-all"
+              >
+                <RefreshCw className={`w-3 h-3 ${loadingLogs ? 'animate-spin' : ''}`} />
+                <span>Atualizar</span>
+              </button>
+            </div>
+
+            {/* Lista de Logs */}
+            <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2.5 pr-1 min-h-[220px]">
+              {loadingLogs && connectionLogs.length === 0 ? (
+                <div className="py-12 flex flex-col items-center justify-center gap-2 text-slate-400 text-xs font-bold">
+                  <Loader2 className="w-6 h-6 animate-spin text-emerald-400" />
+                  <span>Carregando logs do servidor...</span>
+                </div>
+              ) : connectionLogs.length === 0 ? (
+                <div className="py-12 text-center text-slate-500 text-xs font-medium space-y-2">
+                  <Terminal className="w-8 h-8 mx-auto text-slate-600" />
+                  <p>Nenhuma tentativa de conexão registrada ainda para esta instância.</p>
+                </div>
+              ) : (
+                connectionLogs.map((log) => {
+                  const isErr = log.level === 'error' || log.payload?.event_type === 'connection_error';
+                  const isSucc = log.payload?.event_type === 'connection_success' || log.message.includes('sucesso');
+                  const logDate = new Date(log.created_at).toLocaleTimeString('pt-BR', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    day: '2-digit',
+                    month: '2-digit'
+                  });
+
+                  return (
+                    <div
+                      key={log.id}
+                      className={`p-3 rounded-2xl border text-xs space-y-1 transition-all ${
+                        isSucc
+                          ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
+                          : isErr
+                          ? 'bg-rose-500/10 border-rose-500/30 text-rose-200'
+                          : 'bg-[#0c1317] border-white/10 text-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider flex items-center gap-1 ${
+                          isSucc
+                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                            : isErr
+                            ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                            : 'bg-white/10 text-slate-300'
+                        }`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${isSucc ? 'bg-emerald-400' : isErr ? 'bg-rose-400' : 'bg-slate-400'}`} />
+                          {isSucc ? 'Conectado' : isErr ? 'Falha / Erro' : 'Tentativa'}
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-mono flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          <span>{logDate}</span>
+                        </span>
+                      </div>
+                      <p className="text-[11px] font-medium leading-relaxed pt-0.5">
+                        {log.message}
+                      </p>
+                      {log.payload?.error && (
+                        <p className="text-[10px] text-rose-400 font-mono bg-black/30 p-1.5 rounded-lg">
+                          Detalhes: {log.payload.error}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <button
+              onClick={() => setShowLogsModal(false)}
+              className="w-full py-3 bg-white/10 hover:bg-white/15 text-slate-200 font-black rounded-2xl text-xs uppercase tracking-wider transition-all cursor-pointer border border-white/10"
+            >
+              Fechar Painel de Logs
+            </button>
+
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* MODAL DE GUIA DE INSTALAÇÃO PWA (iOS / Android / Desktop) */}
+      {/* ========================================================= */}
+      {showInstallModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 select-none animate-in fade-in duration-200">
+          <div className="w-full max-w-md bg-[#111b21] border border-white/15 rounded-[32px] p-6 shadow-2xl space-y-5 text-left relative overflow-hidden">
+            
+            <button
+              onClick={() => setShowInstallModal(false)}
+              className="absolute top-5 right-5 w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-slate-400 hover:text-white transition-all cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center text-white shadow-lg shadow-emerald-500/25 border border-white/20">
+                <Download className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-white leading-tight">
+                  Instalar Reconector WhatsApp
+                </h3>
+                <p className="text-xs text-emerald-400 font-bold">
+                  {instance?.display_name}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex bg-[#0c1317] p-1 rounded-xl border border-white/10 text-[11px] font-black">
+              <button
+                onClick={() => setInstallPlatform('ios')}
+                className={`flex-1 py-2 rounded-lg transition-all flex items-center justify-center gap-1.5 ${
+                  installPlatform === 'ios'
+                    ? 'bg-white/15 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Smartphone className="w-3.5 h-3.5" />
+                <span>iPhone / iOS</span>
+              </button>
+              <button
+                onClick={() => setInstallPlatform('android')}
+                className={`flex-1 py-2 rounded-lg transition-all flex items-center justify-center gap-1.5 ${
+                  installPlatform === 'android'
+                    ? 'bg-white/15 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Smartphone className="w-3.5 h-3.5" />
+                <span>Android</span>
+              </button>
+              <button
+                onClick={() => setInstallPlatform('desktop')}
+                className={`flex-1 py-2 rounded-lg transition-all flex items-center justify-center gap-1.5 ${
+                  installPlatform === 'desktop'
+                    ? 'bg-white/15 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Monitor className="w-3.5 h-3.5" />
+                <span>Computador</span>
+              </button>
+            </div>
+
+            {installPlatform === 'ios' && (
+              <div className="space-y-3 bg-[#0c1317] p-4 rounded-2xl border border-white/5 text-xs">
+                <div className="flex items-start gap-3">
+                  <div className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 font-black flex items-center justify-center shrink-0 text-xs">1</div>
+                  <p className="text-slate-300">
+                    No Safari do iPhone/iPad, toque no ícone <strong className="text-white inline-flex items-center gap-1"><Share2 className="w-3.5 h-3.5 text-emerald-400 inline" /> Compartilhar</strong> na barra inferior.
+                  </p>
+                </div>
+                <div className="flex items-start gap-3">
+                  <div className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 font-black flex items-center justify-center shrink-0 text-xs">2</div>
+                  <p className="text-slate-300">
+                    Role as opções para cima e toque em <strong className="text-white inline-flex items-center gap-1"><PlusCircle className="w-3.5 h-3.5 text-emerald-400 inline" /> Adicionar à Tela de Início</strong>.
+                  </p>
+                </div>
+                <div className="flex items-start gap-3">
+                  <div className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 font-black flex items-center justify-center shrink-0 text-xs">3</div>
+                  <p className="text-slate-300">
+                    Toque em <strong className="text-emerald-400">Adicionar</strong> no canto superior direito. O ícone de reconexão estará na sua tela inicial!
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {installPlatform === 'android' && (
+              <div className="space-y-3 bg-[#0c1317] p-4 rounded-2xl border border-white/5 text-xs">
+                {deferredPrompt ? (
+                  <div className="text-center space-y-3">
+                    <p className="text-slate-300">
+                      Seu navegador suporta a instalação direta em 1 toque.
+                    </p>
+                    <button
+                      onClick={handleInstallClick}
+                      className="w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black rounded-xl text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span>Instalar Aplicativo Agora</span>
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-start gap-3">
+                      <div className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 font-black flex items-center justify-center shrink-0 text-xs">1</div>
+                      <p className="text-slate-300">
+                        Toque no menu de <strong className="text-white">três pontinhos (⋮)</strong> no canto superior direito do Chrome.
+                      </p>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <div className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 font-black flex items-center justify-center shrink-0 text-xs">2</div>
+                      <p className="text-slate-300">
+                        Selecione a opção <strong className="text-white">"Instalar aplicativo"</strong> ou <strong className="text-white">"Adicionar à tela inicial"</strong>.
+                      </p>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {installPlatform === 'desktop' && (
+              <div className="space-y-3 bg-[#0c1317] p-4 rounded-2xl border border-white/5 text-xs">
+                {deferredPrompt ? (
+                  <div className="text-center space-y-3">
+                    <p className="text-slate-300">
+                      Instale o aplicativo na sua Área de Trabalho para acesso rápido.
+                    </p>
+                    <button
+                      onClick={handleInstallClick}
+                      className="w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black rounded-xl text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span>Instalar na Área de Trabalho</span>
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-start gap-3">
+                      <div className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 font-black flex items-center justify-center shrink-0 text-xs">1</div>
+                      <p className="text-slate-300">
+                        Clique no ícone de <strong className="text-white">Instalar App</strong> no lado direito da barra de endereço do Chrome ou Edge.
+                      </p>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <div className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 font-black flex items-center justify-center shrink-0 text-xs">2</div>
+                      <p className="text-slate-300">
+                        Ou clique nos <strong className="text-white">três pontinhos (⋮)</strong> ➔ <strong className="text-white">"Salvar e compartilhar"</strong> ➔ <strong className="text-white">"Instalar este site como app"</strong>.
+                      </p>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            <button
+              onClick={() => setShowInstallModal(false)}
+              className="w-full py-3 bg-white/10 hover:bg-white/15 text-slate-200 font-black rounded-2xl text-xs uppercase tracking-wider transition-all cursor-pointer border border-white/10"
+            >
+              Entendi, Fechar
+            </button>
+
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

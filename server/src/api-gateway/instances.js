@@ -243,6 +243,30 @@ router.post('/instances/:instanceId/disconnect', requireTenant, async (req, res)
     }
 });
 
+// Endpoint para consulta de histórico e logs de conexão da instância
+router.get('/instances/:instanceId/connection-logs', async (req, res) => {
+    try {
+        const { instanceId } = req.params;
+        const limit = parseInt(req.query.limit || '30', 10);
+
+        const { data: logs, error } = await supabase
+            .from('system_logs')
+            .select('*')
+            .eq('type', 'WhatsApp Connection')
+            .filter('payload->>instance_id', 'eq', instanceId)
+            .order('created_at', { ascending: false })
+            .limit(limit);
+
+        if (error) {
+            throw error;
+        }
+
+        res.json({ ok: true, logs: logs || [] });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // Endpoint de Diagnóstico e Ping nos Servidores do WhatsApp (Meta WebSocket Ping)
 router.get('/instances/:instanceId/ping-whatsapp', requireTenant, async (req, res) => {
     try {

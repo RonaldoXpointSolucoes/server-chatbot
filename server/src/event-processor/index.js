@@ -10,6 +10,7 @@ import FlowEngine from '../flow-runtime/index.js';
 import AutomationWorker from '../automation-worker/agent.js';
 import PushService from '../push-service/index.js';
 import crypto from 'crypto';
+import { logAndNotifyConnectionEvent } from './connection-notifier.js';
 import {
     isBroadcast,
     isGroup,
@@ -1949,13 +1950,23 @@ class EventProcessor {
                 payload.last_error = errMsg;
                 payload.passkeyBlocked = true;
 
+                // Log e notificação de falha de conexão
+                logAndNotifyConnectionEvent({
+                    tenantId,
+                    instanceId,
+                    eventType: 'connection_error',
+                    status: 'offline',
+                    error: errMsg,
+                    details: { passkeyBlocked: true }
+                });
+
                 await realtime.publishInstanceEvent(tenantId, instanceId, 'instance.status', payload);
                 return;
             }
 
             // Verifica se a instância já possui credenciais AUTENTICADAS salvas em wa_auth_credentials E status conectado
             const { data: currentInst } = await supabase.from('whatsapp_instances')
-                .select('status, phone_number')
+                .select('status, phone_number, display_name')
                 .eq('id', instanceId)
                 .maybeSingle();
 
@@ -1998,6 +2009,15 @@ class EventProcessor {
                                 updated_at: new Date().toISOString()
                             }, { onConflict: 'instance_id' })
                     );
+
+                    // Registra log da emissão do QR Code
+                    logAndNotifyConnectionEvent({
+                        tenantId,
+                        instanceId,
+                        eventType: 'qr_ready',
+                        status: 'connecting',
+                        details: { instanceName: currentInst?.display_name }
+                    });
 
                     await realtime.publishInstanceEvent(tenantId, instanceId, 'instance.qr_updated', payload);
                 } catch(e) {
@@ -2043,13 +2063,26 @@ class EventProcessor {
                 } else {
                     const errMsg = reason === 409
                         ? 'Desconectado por conflito: Outro dispositivo se conectou a esta conta de WhatsApp. O sistema suspendeu reconexões automáticas.'
-                        : `Code: ${reason}`;
+                        : reason === 401
+                        ? 'Sessão encerrada (Logout realizado pelo WhatsApp no celular).'
+                        : `Falha de conexão com o WhatsApp (Código: ${reason || 'N/A'})`;
+
                     await supabase.from('whatsapp_instances')
                         .update({ status: 'offline', last_error: errMsg })
                         .eq('id', instanceId);
                     payload.status = 'offline';
                     payload.reason = reason;
                     if(loggedOut) payload.loggedOut = true;
+
+                    // Log e disparo de alerta via FoodNext para erros definitivos
+                    logAndNotifyConnectionEvent({
+                        tenantId,
+                        instanceId,
+                        eventType: 'connection_error',
+                        status: 'offline',
+                        error: errMsg,
+                        details: { reason, loggedOut, instanceName: currentInst?.display_name }
+                    });
                 }
             }
             if (connection === 'connecting') {
@@ -2065,6 +2098,15 @@ class EventProcessor {
                 if (update.pairingSuccess) {
                     payload.pairingSuccess = true;
                     payload.phone = update.phone;
+
+                    logAndNotifyConnectionEvent({
+                        tenantId,
+                        instanceId,
+                        eventType: 'handshake_start',
+                        status: 'connecting',
+                        phone: update.phone,
+                        details: { instanceName: currentInst?.display_name }
+                    });
                 }
             }
 
@@ -2088,6 +2130,17 @@ class EventProcessor {
                         .insert({ instance_id: instanceId, tenant_id: tenantId, qr_code: null, pairing_code: null });
                 }
                 payload.status = statusVal;
+
+                // Log e disparo de notificação de SUCESSO via própria caixa conectada
+                const connectedPhone = currentInst?.phone_number || update?.phone || (authCreds?.creds_data?.me?.id ? authCreds.creds_data.me.id.split(':')[0].split('@')[0] : null);
+                logAndNotifyConnectionEvent({
+                    tenantId,
+                    instanceId,
+                    eventType: 'connection_success',
+                    status: statusVal,
+                    phone: connectedPhone,
+                    details: { instanceName: currentInst?.display_name, nodeId: NODE_ID }
+                });
             }
 
             if (Object.keys(payload).length > 0) {
