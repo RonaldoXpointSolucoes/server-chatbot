@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { useWaCallsStore } from '../store/useWaCallsStore';
 import QRCode from 'react-qr-code';
 import { useDevStore } from '../store/devStore';
-import { Smartphone, CheckCircle, Loader2, AlertCircle, RefreshCw, Key, Shield, MessageSquare, Terminal, Eye, Link, Unlink, Activity, ShieldAlert, Cpu, Network, FileDown, Lock, Server, Users, StopCircle, QrCode, RefreshCcw, LogOut, Download, Clock, Zap, Building2, HelpCircle, Archive, Trash2, Edit3, Save, X, PlusCircle, Maximize2, MoreVertical, Copy, ArrowRight, Settings, CheckCircle2, ChevronRight, Phone, UserCircle2, Signal, Plus, EyeOff, EyeIcon, User } from 'lucide-react';
+import { Smartphone, CheckCircle, Loader2, AlertCircle, RefreshCw, Key, Shield, MessageSquare, Terminal, Eye, Link, Unlink, Activity, ShieldAlert, Cpu, Network, FileDown, Lock, Server, Users, StopCircle, QrCode, RefreshCcw, LogOut, Download, Clock, Zap, Building2, HelpCircle, Archive, Trash2, Edit3, Save, X, PlusCircle, Maximize2, MoreVertical, Copy, ArrowRight, Settings, CheckCircle2, ChevronRight, Phone, UserCircle2, Signal, Plus, EyeOff, EyeIcon, User, ExternalLink } from 'lucide-react';
 
 interface WhatsAppInstance {
   id: string;
@@ -1597,14 +1597,16 @@ export default function InstancesDashboard() {
                     {/* Botão Link de Conexão Direta ConectaZap (Sem Login) */}
                     <button
                       onClick={() => {
-                        const directUrl = `https://conecta-zap.vercel.app/${inst.id}`;
-                        navigator.clipboard.writeText(directUrl);
-                        alert(`🔗 Link ConectaZap (Conexão Direta Exclusiva) copiado!\n\n${directUrl}\n\nEnvie este link para qualquer pessoa abrir ou instalar no celular para conectar o WhatsApp.`);
+                        const directUrl = `https://reconecta-zap.vercel.app/${inst.id}`;
+                        try {
+                          navigator.clipboard.writeText(directUrl);
+                        } catch {}
+                        window.open(directUrl, '_blank');
                       }}
                       className="px-3.5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2 shadow-md shadow-emerald-500/20 active:scale-95 cursor-pointer"
-                      title="Copiar Link ConectaZap Exclusivo (Sem Login)"
+                      title="Abrir Painel ConectaZap desta Instância (Nova Aba)"
                     >
-                      <Link size={18} /> ConectaZap
+                      <ExternalLink size={16} /> ConectaZap
                     </button>
 
                     {/* Botão Associar a Empresa */}
