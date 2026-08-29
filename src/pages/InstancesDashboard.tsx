@@ -1594,17 +1594,17 @@ export default function InstancesDashboard() {
                        </>
                     )}
 
-                    {/* Botão Link de Conexão Direta ReconectaZap (Sem Login) */}
-                    <button 
+                    {/* Botão Link de Conexão Direta ConectaZap (Sem Login) */}
+                    <button
                       onClick={() => {
-                        const directUrl = `https://reconecta-zap.vercel.app/${inst.id}`;
+                        const directUrl = `https://conecta-zap.vercel.app/${inst.id}`;
                         navigator.clipboard.writeText(directUrl);
-                        alert(`🔗 Link ReconectaZap (Conexão Direta Exclusiva) copiado!\n\n${directUrl}\n\nEnvie este link para qualquer pessoa abrir ou instalar no celular para conectar o WhatsApp.`);
+                        alert(`🔗 Link ConectaZap (Conexão Direta Exclusiva) copiado!\n\n${directUrl}\n\nEnvie este link para qualquer pessoa abrir ou instalar no celular para conectar o WhatsApp.`);
                       }}
-                      className="px-4 py-3.5 bg-emerald-500/10 hover:bg-emerald-500 hover:text-white text-emerald-400 font-bold rounded-[14px] transition-all flex justify-center items-center gap-2 border border-emerald-500/20 hover:border-emerald-500 cursor-pointer"
-                      title="Copiar Link ReconectaZap Exclusivo (Sem Login)"
+                      className="px-3.5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2 shadow-md shadow-emerald-500/20 active:scale-95 cursor-pointer"
+                      title="Copiar Link ConectaZap Exclusivo (Sem Login)"
                     >
-                      <Link size={18} /> ReconectaZap
+                      <Link size={18} /> ConectaZap
                     </button>
 
                     {/* Botão Associar a Empresa */}

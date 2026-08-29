@@ -76,7 +76,7 @@ export default function App() {
   const [activeInstanceId, setActiveInstanceId] = useState<string>(() => {
     if (urlParamId) return urlParamId;
     try {
-      return localStorage.getItem('reconectazap_last_instance_id') || '';
+      return localStorage.getItem('conectazap_last_instance_id') || localStorage.getItem('reconectazap_last_instance_id') || '';
     } catch {
       return '';
     }
@@ -187,13 +187,13 @@ export default function App() {
   useEffect(() => {
     if (!instance) return;
 
-    const instanceTitle = `Reconectar ${instance.display_name} | ReconectaZap`;
+    const instanceTitle = `${instance.display_name} | ConectaZap`;
     document.title = instanceTitle;
 
     // Salva no localStorage para reaberturas diretas do PWA
     try {
-      localStorage.setItem('reconectazap_last_instance_id', instance.id);
-      localStorage.setItem('reconectazap_last_instance_name', instance.display_name);
+      localStorage.setItem('conectazap_last_instance_id', instance.id);
+      localStorage.setItem('conectazap_last_instance_name', instance.display_name);
     } catch {}
 
     // Se estiver em rota genérica ou raiz, atualiza a barra do navegador para a URL da instância
@@ -208,17 +208,17 @@ export default function App() {
       metaAppleTitle.setAttribute('name', 'apple-mobile-web-app-title');
       document.head.appendChild(metaAppleTitle);
     }
-    metaAppleTitle.setAttribute('content', `Zap - ${instance.display_name}`);
+    metaAppleTitle.setAttribute('content', `ConectaZap`);
 
-    // INJEÇÃO DINÂMICA DO MANIFEST COM START_URL EXATO DA INSTÂNCIA
+    // INJEÇÃO DINÂMICA DO MANIFEST COM NOME LIMPO "ConectaZap"
     try {
       const dynamicManifest = {
-        name: `Reconectar ${instance.display_name} - ReconectaZap`,
-        short_name: instance.display_name.substring(0, 12),
+        name: `ConectaZap`,
+        short_name: `ConectaZap`,
         description: `Painel Exclusivo de Conexão WhatsApp para ${instance.display_name}`,
         start_url: `/${instance.id}?standalone=true`,
         scope: `/`,
-        id: `reconectazap-${instance.id}`,
+        id: `conectazap-${instance.id}`,
         display: 'standalone',
         display_override: ['standalone', 'fullscreen', 'minimal-ui'],
         background_color: '#090e11',
@@ -260,7 +260,7 @@ export default function App() {
         document.head.appendChild(linkManifest);
       }
     } catch (e) {
-      console.warn('[ReconectaZap] Erro ao injetar manifest dinâmico:', e);
+      console.warn('[ConectaZap] Erro ao injetar manifest dinâmico:', e);
     }
   }, [instance, urlParamId]);
 
@@ -341,7 +341,7 @@ export default function App() {
         }
       }
     } catch (e) {
-      console.warn('[ReconectaZap] Erro ao consultar engine:', e);
+      console.warn('[ConectaZap] Erro ao consultar engine:', e);
     }
   }, [actionLoading]);
 
@@ -548,7 +548,7 @@ export default function App() {
         setConnectionLogs(dbLogs as ConnectionLogItem[]);
       }
     } catch (err) {
-      console.warn('[ReconectaZap] Erro ao carregar logs:', err);
+      console.warn('[ConectaZap] Erro ao carregar logs:', err);
     } finally {
       setLoadingLogs(false);
     }
@@ -770,13 +770,13 @@ export default function App() {
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />
         <div className="flex flex-col items-center gap-4 bg-[#111b21]/90 border border-white/10 p-8 rounded-[32px] backdrop-blur-2xl shadow-2xl relative z-10">
           <div className="w-14 h-14 rounded-2xl overflow-hidden shadow-lg shadow-emerald-500/30 border border-emerald-400/40 relative">
-            <img src="/icon.png" alt="ReconectaZap" className="w-full h-full object-cover" />
+            <img src="/icon.png" alt="ConectaZap" className="w-full h-full object-cover" />
             <div className="absolute inset-0 bg-emerald-950/40 flex items-center justify-center">
               <Loader2 className="w-6 h-6 animate-spin text-emerald-400" />
             </div>
           </div>
           <div className="text-center space-y-1">
-            <h2 className="text-sm font-black uppercase tracking-wider text-white">ReconectaZap</h2>
+            <h2 className="text-sm font-black uppercase tracking-wider text-white">ConectaZap</h2>
             <span className="text-[11px] font-bold text-slate-400">Carregando painel de conexão...</span>
           </div>
         </div>
@@ -786,8 +786,8 @@ export default function App() {
 
   // TELA DE BUSCA / INFORMAR INSTÂNCIA (Caso acesse / na raiz sem nada salvo)
   if (!activeInstanceId || (error && !instance)) {
-    const lastSavedId = localStorage.getItem('reconectazap_last_instance_id');
-    const lastSavedName = localStorage.getItem('reconectazap_last_instance_name');
+    const lastSavedId = localStorage.getItem('conectazap_last_instance_id') || localStorage.getItem('reconectazap_last_instance_id');
+    const lastSavedName = localStorage.getItem('conectazap_last_instance_name') || localStorage.getItem('reconectazap_last_instance_name');
 
     return (
       <div className="min-h-screen w-full bg-[#090e11] text-slate-100 flex flex-col items-center justify-center p-4 select-none font-sans relative">
@@ -797,12 +797,12 @@ export default function App() {
         <div className="w-full max-w-md bg-[#111b21]/95 border border-white/10 p-7 sm:p-8 rounded-[32px] backdrop-blur-2xl text-center space-y-6 shadow-2xl relative z-10">
           
           <div className="w-16 h-16 rounded-2xl overflow-hidden shadow-lg shadow-emerald-500/30 border border-emerald-400/40 mx-auto bg-black ring-4 ring-emerald-500/20">
-            <img src="/icon.png" alt="ReconectaZap" className="w-full h-full object-cover" />
+            <img src="/icon.png" alt="ConectaZap" className="w-full h-full object-cover" />
           </div>
 
           <div className="space-y-1">
             <h2 className="text-lg font-black text-white uppercase tracking-wider">
-              ReconectaZap
+              ConectaZap
             </h2>
             <p className="text-xs text-emerald-400 font-bold">
               Painel de Conexão Direta WhatsApp
@@ -879,15 +879,15 @@ export default function App() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-white/[0.08] pb-4 gap-3.5">
           
           <div className="flex items-center gap-3.5 min-w-0">
-            {/* Logo do ReconectaZap com tamanho travado e anel luminoso */}
+            {/* Logo do ConectaZap com tamanho travado e anel luminoso */}
             <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl overflow-hidden shadow-lg shadow-emerald-500/25 border border-emerald-400/30 ring-2 ring-emerald-500/20 shrink-0 bg-black flex items-center justify-center">
-              <img src="/icon.png" alt="ReconectaZap Logo" className="w-full h-full object-cover" />
+              <img src="/icon.png" alt="ConectaZap Logo" className="w-full h-full object-cover" />
             </div>
 
             <div className="min-w-0 text-left">
               <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="text-base sm:text-xl font-black text-white tracking-wide truncate max-w-[200px] sm:max-w-[280px]">
-                  {instance?.display_name || 'ReconectaZap'}
+                  {instance?.display_name || 'ConectaZap'}
                 </h1>
                 {/* Badge de Status */}
                 <span className={`px-2.5 py-0.5 rounded-full text-[9.5px] font-black uppercase tracking-wider flex items-center gap-1.5 border ${
@@ -905,7 +905,7 @@ export default function App() {
               </div>
               <p className="text-[10.5px] text-emerald-400 font-bold flex items-center gap-1.5 mt-0.5">
                 <Zap className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                <span>ReconectaZap • Conexão Direta WhatsApp</span>
+                <span>ConectaZap • Conexão Direta WhatsApp</span>
               </p>
             </div>
           </div>
@@ -928,7 +928,7 @@ export default function App() {
               <button
                 onClick={handleInstallClick}
                 className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl text-[11px] font-black uppercase tracking-wider transition-all flex items-center gap-1.5 shadow-md shadow-emerald-600/30 hover:shadow-emerald-500/40 active:scale-95 cursor-pointer border border-emerald-400/30"
-                title="Instalar este Reconector no Celular ou Computador"
+                title="Instalar este Conector no Celular ou Computador"
               >
                 <Download className="w-3.5 h-3.5" />
                 <span>Instalar App</span>
@@ -1069,7 +1069,7 @@ export default function App() {
                     <Smartphone className="w-4 h-4" />
                   </div>
                   <div className="min-w-0 text-left">
-                    <h3 className="text-[11px] font-black text-emerald-300 leading-tight">Instalar Atalho ReconectaZap</h3>
+                    <h3 className="text-[11px] font-black text-emerald-300 leading-tight">Instalar Atalho ConectaZap</h3>
                     <p className="text-[9.5px] text-slate-400 leading-tight truncate">Abra em 1 clique sem precisar fazer login.</p>
                   </div>
                 </div>
@@ -1091,7 +1091,7 @@ export default function App() {
               </span>
               <span className="flex items-center gap-1 text-slate-400">
                 <Sparkles className="w-3 h-3 text-emerald-400" />
-                <span>ReconectaZap • X-Point</span>
+                <span>ConectaZap • X-Point</span>
               </span>
             </div>
 
@@ -1368,11 +1368,11 @@ export default function App() {
 
             <div className="flex items-center gap-3">
               <div className="w-12 h-12 rounded-2xl overflow-hidden shadow-lg shadow-emerald-500/25 border border-white/20 shrink-0 bg-black">
-                <img src="/icon.png" alt="ReconectaZap" className="w-full h-full object-cover" />
+                <img src="/icon.png" alt="ConectaZap" className="w-full h-full object-cover" />
               </div>
               <div>
                 <h3 className="text-base font-black text-white leading-tight">
-                  Instalar ReconectaZap
+                  Instalar ConectaZap
                 </h3>
                 <p className="text-xs text-emerald-400 font-bold">
                   {instance?.display_name}
@@ -1433,7 +1433,7 @@ export default function App() {
                 <div className="flex items-start gap-3">
                   <div className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 font-black flex items-center justify-center shrink-0 text-xs">3</div>
                   <p className="text-slate-300">
-                    Toque em <strong className="text-emerald-400">Adicionar</strong> no canto superior direito. O ícone do ReconectaZap estará na sua tela inicial!
+                    Toque em <strong className="text-emerald-400">Adicionar</strong> no canto superior direito. O ícone do ConectaZap estará na sua tela inicial!
                   </p>
                 </div>
               </div>
@@ -1478,7 +1478,7 @@ export default function App() {
                 {deferredPrompt ? (
                   <div className="text-center space-y-3 pt-1">
                     <p className="text-slate-300">
-                      Instale o ReconectaZap na sua Área de Trabalho para acesso rápido.
+                      Instale o ConectaZap na sua Área de Trabalho para acesso rápido.
                     </p>
                     <button
                       onClick={handleInstallClick}
@@ -1499,7 +1499,7 @@ export default function App() {
                     <div className="flex items-start gap-3">
                       <div className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 font-black flex items-center justify-center shrink-0 text-xs">2</div>
                       <p className="text-slate-300">
-                        Ou clique nos <strong className="text-white">três pontinhos (⋮)</strong> ➔ <strong className="text-white">"Salvar e compartilhar"</strong> ➔ <strong className="text-white">"Instalar ReconectaZap como app"</strong>.
+                        Ou clique nos <strong className="text-white">três pontinhos (⋮)</strong> ➔ <strong className="text-white">"Salvar e compartilhar"</strong> ➔ <strong className="text-white">"Instalar ConectaZap como app"</strong>.
                       </p>
                     </div>
                   </>

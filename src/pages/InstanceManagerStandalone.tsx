@@ -1476,15 +1476,15 @@ export default function InstanceManagerStandalone() {
 
                     <button
                       onClick={() => {
-                        const directUrl = `https://reconecta-zap.vercel.app/${inst.id}`;
+                        const directUrl = `https://conecta-zap.vercel.app/${inst.id}`;
                         navigator.clipboard.writeText(directUrl);
-                        alert(`🔗 Link ReconectaZap (Conexão Direta Exclusiva) copiado!\n\n${directUrl}\n\nQualquer pessoa pode abrir este link no celular para conectar o WhatsApp.`);
+                        alert(`🔗 Link ConectaZap (Conexão Direta Exclusiva) copiado!\n\n${directUrl}\n\nQualquer pessoa pode abrir este link no celular para conectar o WhatsApp.`);
                       }}
                       className="p-3 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 font-bold rounded-xl text-xs flex items-center gap-1.5 transition active:scale-[0.98]"
-                      title="Copiar Link ReconectaZap Exclusivo (Sem Necessidade de Login)"
+                      title="Copiar Link ConectaZap Exclusivo (Sem Necessidade de Login)"
                     >
                       <LinkIcon className="w-4 h-4 text-emerald-400" />
-                      <span className="hidden sm:inline">ReconectaZap</span>
+                      <span className="hidden sm:inline">ConectaZap</span>
                     </button>
 
                     <button
@@ -1710,15 +1710,15 @@ export default function InstanceManagerStandalone() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => {
-                    const directUrl = `https://reconecta-zap.vercel.app/${connectInstance.id}`;
+                    const directUrl = `https://conectazap.vercel.app/${connectInstance.id}`;
                     navigator.clipboard.writeText(directUrl);
-                    alert(`🔗 Link ReconectaZap (Conexão Direta Exclusiva) copiado!\n\n${directUrl}\n\nEnvie este link para qualquer pessoa conectar o WhatsApp.`);
+                    alert(`🔗 Link ConectaZap (Conexão Direta Exclusiva) copiado!\n\n${directUrl}\n\nEnvie este link para qualquer pessoa conectar o WhatsApp.`);
                   }}
                   className="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 font-bold rounded-xl text-xs flex items-center gap-1.5 transition"
-                  title="Copiar Link ReconectaZap Exclusivo (Sem Login)"
+                  title="Copiar Link ConectaZap Exclusivo (Sem Login)"
                 >
                   <LinkIcon className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Copiar ReconectaZap</span>
+                  <span>Copiar ConectaZap</span>
                 </button>
 
                 <button

@@ -9,9 +9,9 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.png', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png'],
       manifest: {
-        name: 'ReconectaZap - Conexão WhatsApp Direct',
-        short_name: 'ReconectaZap',
-        description: 'Painel Autônomo e Exclusivo de Reconexão e Status do WhatsApp',
+        name: 'ConectaZap',
+        short_name: 'ConectaZap',
+        description: 'Painel Autônomo e Exclusivo de Conexão WhatsApp Direct',
         theme_color: '#090e11',
         background_color: '#090e11',
         display: 'standalone',
