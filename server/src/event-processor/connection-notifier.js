@@ -5,7 +5,13 @@ import sessionManager, { isSocketOpen } from '../session-manager/index.js';
 const notificationCooldownMap = new Map();
 const COOLDOWN_MS = 120000; // 2 minutos
 
-const SUPPORT_NUMBER = process.env.SUPPORT_WHATSAPP_NUMBER || '5511975960999';
+// Rastreamento estrito de tentativas de pareamento ativas (QR Code ou Pairing Code gerados nos últimos 5 minutos)
+// Garante que mensagens no WhatsApp NUNCA sejam disparadas por reboots de servidor, leases ou reconexões automáticas.
+export const activePairingAttempts = new Map();
+const PAIRING_EXPIRY_MS = 300000; // 5 minutos
+
+// Número oficial da caixa Suporte X-Point (11 4135-1987)
+const SUPPORT_NUMBER = process.env.SUPPORT_WHATSAPP_NUMBER || '551141351987';
 const FOODNEXT_INSTANCE_ID = 'cc4efe36-f391-4b3d-a24c-ddcd8a293cf6';
 
 /**
@@ -19,6 +25,7 @@ function formatToJid(numberStr) {
 
 /**
  * Registra o log no Supabase (system_logs) e dispara automação de WhatsApp
+ * SOMENTE se o cliente realmente tiver gerado e escaneado o QR code / código recentemente.
  */
 export async function logAndNotifyConnectionEvent({
     tenantId,
@@ -32,7 +39,16 @@ export async function logAndNotifyConnectionEvent({
     if (!instanceId) return;
 
     try {
-        // 1. Busca metadados da instância (nome de exibição)
+        // 1. Gerenciamento do ciclo de pareamento ativo
+        if (eventType === 'qr_ready' || eventType === 'handshake_start') {
+            activePairingAttempts.set(instanceId, {
+                timestamp: Date.now(),
+                eventType,
+                details
+            });
+        }
+
+        // 2. Busca metadados da instância (nome de exibição)
         let displayName = details?.instanceName || null;
         let finalPhone = phone;
 
@@ -57,7 +73,6 @@ export async function logAndNotifyConnectionEvent({
 
         let logMessage = '';
         let logLevel = 'info';
-        let isCriticalEvent = false;
 
         switch (eventType) {
             case 'qr_ready':
@@ -73,13 +88,11 @@ export async function logAndNotifyConnectionEvent({
             case 'connection_success':
                 logMessage = `[${instName}] Conexão WhatsApp estabelecida com sucesso! Aparelho sincronizado: +${finalPhone || 'identificado'}.`;
                 logLevel = 'info';
-                isCriticalEvent = true;
                 break;
 
             case 'connection_error':
                 logMessage = `[${instName}] Falha na tentativa de conexão: ${error || 'Tempo limite excedido ou conexão rejeitada pelo WhatsApp'}.`;
                 logLevel = 'error';
-                isCriticalEvent = true;
                 break;
 
             default:
@@ -87,7 +100,7 @@ export async function logAndNotifyConnectionEvent({
                 logLevel = 'info';
         }
 
-        // 2. Gravação de log detalhado no Supabase (system_logs)
+        // 3. Gravação de log detalhado no Supabase (system_logs)
         const logPayload = {
             instance_id: instanceId,
             instance_name: instName,
@@ -115,12 +128,26 @@ export async function logAndNotifyConnectionEvent({
             }
         }).catch(() => {});
 
-        // 3. Automação de Alerta WhatsApp para o Suporte X-Point (Apenas em Sucesso ou Erro Crítico)
-        if (!isCriticalEvent) {
+        // 4. CRITÉRIO RIGOROSO PARA ENVIO DE MENSAGEM NO WHATSAPP:
+        // A mensagem de WhatsApp SÓ DEVE SER ENVIADA se houver uma tentativa de pareamento ativa recente (nos últimos 5 minutos).
+        // Se a conexão for fruto de boot do servidor, renovação de lease ou reconexão interna, NENHUMA MENSAGEM É ENVIADA.
+        const pairingAttempt = activePairingAttempts.get(instanceId);
+        const isClientInitiatedScan = pairingAttempt && (Date.now() - pairingAttempt.timestamp < PAIRING_EXPIRY_MS);
+
+        if (!isClientInitiatedScan) {
+            // Conexão rotineira / reboot / heartbeat ➔ Log registrado, mas NENHUMA mensagem no WhatsApp
             return;
         }
 
-        // Verificação Anti-Loop / Cooldown
+        // Se for sucesso ou erro em um pareamento iniciado pelo cliente, limpa o registro de pareamento
+        if (eventType === 'connection_success' || eventType === 'connection_error') {
+            activePairingAttempts.delete(instanceId);
+        } else {
+            // qr_ready ou handshake_start não enviam WhatsApp, apenas logs
+            return;
+        }
+
+        // 5. Verificação Anti-Loop / Cooldown de 2 minutos
         const cooldownKey = `${instanceId}_${eventType}`;
         const lastSentTime = notificationCooldownMap.get(cooldownKey) || 0;
         const timeSinceLast = Date.now() - lastSentTime;
@@ -133,7 +160,7 @@ export async function logAndNotifyConnectionEvent({
         const supportJid = formatToJid(SUPPORT_NUMBER);
 
         // =========================================================================
-        // CASO A: CONEXÃO COM SUCESSO ➔ A própria caixa que se conectou envia
+        // CASO A: CONEXÃO COM SUCESSO ➔ A própria caixa que se conectou envia para o Suporte
         // =========================================================================
         if (eventType === 'connection_success') {
             const successMsg = `🟢 *[X-Point Notificações]*\n*WhatsApp Conectado com Sucesso!*\n\n📱 *Instância:* ${instName}\n🆔 *ID:* \`${instanceId}\`\n📞 *Número Conectado:* +${finalPhone || 'Identificado'}\n⏰ *Data/Hora:* ${formattedDate}\n🚀 *Status:* Online & Sincronizado no Servidor`;
@@ -160,7 +187,7 @@ export async function logAndNotifyConnectionEvent({
         }
 
         // =========================================================================
-        // CASO B: FALHA OU ERRO NA CONEXÃO ➔ Enviado pela caixa FoodNext
+        // CASO B: FALHA OU ERRO NA CONEXÃO ➔ Enviado pela caixa FoodNext para o Suporte
         // =========================================================================
         if (eventType === 'connection_error') {
             const errorMsg = `🔴 *[X-Point Alerta de Falha]*\n*Falha na Conexão de WhatsApp*\n\n📱 *Instância:* ${instName}\n🆔 *ID:* \`${instanceId}\`\n⏰ *Data/Hora:* ${formattedDate}\n⚠️ *Motivo do Erro:* ${error || 'Tempo limite excedido ou desconexão prematura'}\n📋 *Status:* Desconectado`;
@@ -208,5 +235,6 @@ async function sendViaFoodNext(targetJid, textMessage, cooldownKey) {
 }
 
 export default {
-    logAndNotifyConnectionEvent
+    logAndNotifyConnectionEvent,
+    activePairingAttempts
 };

@@ -2,6 +2,7 @@ import express from 'express';
 import sessionManager from '../session-manager/index.js';
 import queueProcessor from '../session-manager/queue-processor.js';
 import { supabase, NODE_ID, resolveTargetJid } from '../supabase.js';
+import { activePairingAttempts } from '../event-processor/connection-notifier.js';
 import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
@@ -119,6 +120,13 @@ router.post('/instances/:instanceId/connect', requireTenant, async (req, res) =>
             .eq('id', instanceId)
             .eq('tenant_id', tenantId);
 
+        // Marca que esta instância está em processo ATIVO de conexão pelo usuário
+        activePairingAttempts.set(instanceId, {
+            timestamp: Date.now(),
+            source: 'api_connect_request',
+            tenantId
+        });
+
         sessionManager.createSession(tenantId, instanceId, true).catch(console.error);
 
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
@@ -216,6 +224,12 @@ router.post('/instances/:instanceId/pairing-code', requireTenant, async (req, re
         // Salva pairing_code no runtime do Supabase para escuta via Realtime
         await supabase.from('whatsapp_instance_runtime')
             .upsert({ instance_id: instanceId, tenant_id: tenantId, pairing_code: code }, { onConflict: 'instance_id' });
+
+        activePairingAttempts.set(instanceId, {
+            timestamp: Date.now(),
+            source: 'api_pairing_code_request',
+            tenantId
+        });
 
         res.json({ ok: true, code, instanceId });
     } catch (e) {

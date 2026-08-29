@@ -1392,8 +1392,21 @@ export default function ConnectInstanceStandalone() {
 
             {installPlatform === 'desktop' && (
               <div className="space-y-3 bg-[#0c1317] p-4 rounded-2xl border border-white/5 text-xs">
+                <div className="p-3 bg-amber-500/10 border border-amber-500/25 rounded-xl text-[11px] text-amber-200/90 leading-relaxed space-y-1">
+                  <div className="flex items-center gap-1.5 font-black text-amber-300">
+                    <Info className="w-3.5 h-3.5" />
+                    <span>Dica sobre o botão "Abrir no app"</span>
+                  </div>
+                  <p>
+                    Se o seu navegador exibir <strong>"Abrir no app"</strong> na barra de endereços, é porque você já possui o painel principal do SaaS instalado neste computador.
+                  </p>
+                  <p className="text-slate-400">
+                    O <strong>cliente final</strong> (que não possui o SaaS instalado) verá diretamente a opção de <strong>Instalar o Aplicativo</strong>. Para testar no seu PC, abra em uma <strong>Janela Anônima</strong>.
+                  </p>
+                </div>
+
                 {deferredPrompt ? (
-                  <div className="text-center space-y-3">
+                  <div className="text-center space-y-3 pt-1">
                     <p className="text-slate-300">
                       Instale o aplicativo na sua Área de Trabalho para acesso rápido.
                     </p>
