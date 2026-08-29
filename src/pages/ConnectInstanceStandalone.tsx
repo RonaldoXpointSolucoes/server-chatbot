@@ -83,16 +83,18 @@ export default function ConnectInstanceStandalone() {
   const checkEngineStatus = useCallback(async (targetInst?: InstanceData | null) => {
     const inst = targetInst || instanceRef.current;
     const currentInstanceId = instanceId;
-    if (!currentInstanceId || !inst?.tenant_id) return;
+    if (!currentInstanceId) return;
+
+    const tenantId = inst?.tenant_id || '00000000-0000-0000-0000-000000000000';
+    const apiKey = inst?.api_key || 'chatboot-secret-key';
 
     try {
       const baseUrl = getActiveEngineUrl();
-      const apiKey = inst.api_key || 'chatboot-secret-key';
       const res = await fetch(`${baseUrl}/api/v1/instances/${currentInstanceId}/status?_t=${Date.now()}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
-          'x-tenant-id': inst.tenant_id,
+          'x-tenant-id': tenantId,
           'apikey': apiKey
         },
         cache: 'no-store'
@@ -117,7 +119,7 @@ export default function ConnectInstanceStandalone() {
         }
       }
 
-      const st = data?.status || data?.sessionStatus || inst.status || 'disconnected';
+      const st = data?.status || data?.sessionStatus || inst?.status || 'disconnected';
       const phone = data?.phoneNumber || data?.phone || data?.user_jid?.split('@')[0];
 
       setConnectionStatus(st);
@@ -166,10 +168,13 @@ export default function ConnectInstanceStandalone() {
   // 3. Dispara a geração ou auto-renovação de QR Code com polling ativo
   const handleGenerateQr = useCallback(async (forceNew = false, isAuto = false) => {
     const inst = instanceRef.current;
-    if (!instanceId || !inst?.tenant_id || isConnected) return;
+    if (!instanceId || isConnected) return;
 
     if (isAutoGeneratingRef.current && isAuto) return;
     isAutoGeneratingRef.current = true;
+
+    const tenantId = inst?.tenant_id || '00000000-0000-0000-0000-000000000000';
+    const apiKey = inst?.api_key || 'chatboot-secret-key';
 
     try {
       if (isAuto) {
@@ -182,16 +187,16 @@ export default function ConnectInstanceStandalone() {
       setError(null);
 
       const baseUrl = getActiveEngineUrl();
-      const apiKey = inst.api_key || 'chatboot-secret-key';
       const endpoint = `${baseUrl}/api/v1/instances/${instanceId}/connect${forceNew ? '?force_new=true' : ''}`;
 
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-tenant-id': inst.tenant_id,
+          'x-tenant-id': tenantId,
           'apikey': apiKey
         },
+        body: JSON.stringify({ forceNew }),
         cache: 'no-store'
       });
 
@@ -341,11 +346,14 @@ export default function ConnectInstanceStandalone() {
   // 4. Dispara a geração de Código de Pareamento (8 Dígitos)
   const handleGeneratePairingCode = async () => {
     const inst = instanceRef.current;
-    if (!instanceId || !inst?.tenant_id) return;
+    if (!instanceId) return;
     if (!pairingPhone || pairingPhone.length < 10) {
       setError('Por favor, informe o número completo com DDD (Ex: 5511999999999)');
       return;
     }
+
+    const tenantId = inst?.tenant_id || '00000000-0000-0000-0000-000000000000';
+    const apiKey = inst?.api_key || 'chatboot-secret-key';
 
     try {
       setActionLoading(true);
@@ -356,14 +364,13 @@ export default function ConnectInstanceStandalone() {
 
       const cleanPhone = pairingPhone.replace(/\D/g, '');
       const baseUrl = getActiveEngineUrl();
-      const apiKey = inst.api_key || 'chatboot-secret-key';
       const endpoint = `${baseUrl}/api/v1/instances/${instanceId}/pairing-code?force_new=true`;
 
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-tenant-id': inst.tenant_id,
+          'x-tenant-id': tenantId,
           'apikey': apiKey
         },
         body: JSON.stringify({ phone_number: cleanPhone, phoneNumber: cleanPhone })
@@ -395,18 +402,20 @@ export default function ConnectInstanceStandalone() {
   // 5. Desconectar instância
   const handleDisconnect = async () => {
     const inst = instanceRef.current;
-    if (!instanceId || !inst?.tenant_id) return;
+    if (!instanceId) return;
     if (!window.confirm('Tem certeza que deseja desconectar este WhatsApp? A conexão atual será encerrada.')) return;
+
+    const tenantId = inst?.tenant_id || '00000000-0000-0000-0000-000000000000';
+    const apiKey = inst?.api_key || 'chatboot-secret-key';
 
     try {
       setActionLoading(true);
       const baseUrl = getActiveEngineUrl();
-      const apiKey = inst.api_key || 'chatboot-secret-key';
       await fetch(`${baseUrl}/api/v1/instances/${instanceId}/disconnect`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-tenant-id': inst.tenant_id,
+          'x-tenant-id': tenantId,
           'apikey': apiKey
         }
       });
@@ -489,9 +498,9 @@ export default function ConnectInstanceStandalone() {
     };
   }, [instanceId, loadInstanceMetadata, checkEngineStatus]);
 
-  // Loop de Auto-Renovação Contínua do QR Code (A cada 1 segundo)
+  // Loop de Auto-Renovação Contínua do QR Code (A cada 1 segundo, apenas se houver QR Code ativo)
   useEffect(() => {
-    if (isConnected || connectMode !== 'qr') {
+    if (isConnected || connectMode !== 'qr' || (!qrCodeData && !qrBase64)) {
       return;
     }
 
@@ -509,7 +518,7 @@ export default function ConnectInstanceStandalone() {
     return () => {
       if (renewTimerRef.current) clearInterval(renewTimerRef.current);
     };
-  }, [isConnected, connectMode, handleGenerateQr]);
+  }, [isConnected, connectMode, qrCodeData, qrBase64, handleGenerateQr]);
 
   const copyDirectLink = () => {
     navigator.clipboard.writeText(window.location.href);

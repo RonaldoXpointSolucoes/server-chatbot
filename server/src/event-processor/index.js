@@ -1953,26 +1953,26 @@ class EventProcessor {
                 return;
             }
 
-            // Verifica se a instância já possui credenciais salvas em wa_auth_credentials E status conectado
+            // Verifica se a instância já possui credenciais AUTENTICADAS salvas em wa_auth_credentials E status conectado
             const { data: currentInst } = await supabase.from('whatsapp_instances')
                 .select('status, phone_number')
                 .eq('id', instanceId)
                 .maybeSingle();
 
             const { data: authCreds } = await supabase.from('wa_auth_credentials')
-                .select('instance_id')
+                .select('instance_id, creds_data')
                 .eq('instance_id', instanceId)
                 .maybeSingle();
 
-            const hasAuthCredsInDb = Boolean(authCreds && authCreds.instance_id);
-            const isConnStatus = currentInst && ['connected', 'connected_local', 'reconnecting'].includes(currentInst.status);
-            // Considera conectada/autenticada se possuir as credenciais auth salvas no banco ou status ativo
-            const isAlreadyConnected = hasAuthCredsInDb || isConnStatus;
+            const hasValidMe = Boolean(authCreds?.creds_data?.me?.id || authCreds?.creds_data?.me?.jid);
+            const isConnStatus = currentInst && ['connected', 'connected_local'].includes(currentInst.status);
+            // Considera conectada/autenticada APENAS se possuir usuário autenticado nos creds e status conectado
+            const isAlreadyConnected = hasValidMe && isConnStatus;
 
             if (qr) {
-                // Se a instância já possui autenticação válida, ignora a emissão de QR code para não poluir o frontend
+                // Se a instância já possui autenticação válida com o WhatsApp, ignora a emissão de QR code para não poluir o frontend
                 if (isAlreadyConnected) {
-                    console.log(`[EventProcessor] Ignorando evento de QR Code parasita para instância ${instanceId} que já possui credenciais de autenticação salvas.`);
+                    console.log(`[EventProcessor] Ignorando evento de QR Code parasita para instância ${instanceId} que já possui credenciais autenticadas salvas.`);
                     return;
                 }
 

@@ -83,19 +83,27 @@ router.post('/instances/:instanceId/connect', requireTenant, async (req, res) =>
             }
         }
         
-        // Verifica status atual no banco para determinar se é uma reconexão de instância desconectada/offline
+        // Verifica status atual e credenciais no banco para determinar se deve reiniciar o estado
         const { data: dbInst } = await supabase
             .from('whatsapp_instances')
             .select('status')
             .eq('id', instanceId)
             .single();
 
+        const { data: authCreds } = await supabase
+            .from('wa_auth_credentials')
+            .select('creds_data')
+            .eq('instance_id', instanceId)
+            .maybeSingle();
+
+        const hasValidCredsInDb = Boolean(authCreds?.creds_data?.me?.id || authCreds?.creds_data?.me?.jid);
         const currentStatus = dbInst?.status;
         const isStaleDisconnect = ['disconnected', 'offline', 'paused', 'logged_out', 'bad_session'].includes(currentStatus);
+        const shouldResetCreds = forceNewQR || isStaleDisconnect || !hasValidCredsInDb;
 
-        // Limpa credenciais desatualizadas se for solicitado force_new=true ou se a instância já estava desconectada/offline
-        if (forceNewQR || isStaleDisconnect) {
-            console.log(`[API] Limpeza de credenciais desatualizadas executada para a instância ${instanceId} (status anterior: ${currentStatus}, forceNew: ${forceNewQR})...`);
+        // Limpa credenciais desatualizadas se for solicitado force_new=true, se a instância estava offline ou se ainda não possuía pareamento autenticado
+        if (shouldResetCreds) {
+            console.log(`[API] Limpeza de credenciais executada para a instância ${instanceId} (status: ${currentStatus}, forceNew: ${forceNewQR}, hasValidCreds: ${hasValidCredsInDb})...`);
             const { sessionCaches } = await import('../session-manager/auth.js');
             if (sessionCaches && sessionCaches.has(instanceId)) {
                 sessionCaches.get(instanceId).clear();
