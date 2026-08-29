@@ -161,7 +161,7 @@ export default function App() {
     };
   }, [searchParams]);
 
-  // 2. Injeta dinamicamente o Web App Manifest exclusivo para esta instância
+  // 2. Injeta dinamicamente o título e meta tags para esta instância
   useEffect(() => {
     if (!instance) return;
 
@@ -361,7 +361,7 @@ export default function App() {
   // 5. Carrega dados básicos da instância no Supabase
   const loadInstanceMetadata = useCallback(async () => {
     if (!rawId) {
-      setError('Por favor, acerte o link de reconexão informando o ID da instância (Ex: /seu-id-da-instancia).');
+      setError('Por favor, informe o ID ou nome da instância na URL (Ex: /seu-id-da-instancia).');
       setLoading(false);
       return;
     }
@@ -393,7 +393,7 @@ export default function App() {
       }
 
       if (!instData) {
-        setError(`Instância '${rawId}' não foi encontrada.`);
+        setError(`Instância '${rawId}' não foi encontrada no banco de dados.`);
         setLoading(false);
         return;
       }
@@ -671,12 +671,12 @@ export default function App() {
   if (loading) {
     return (
       <div className="fixed inset-0 w-full h-full bg-[#090e11] text-slate-100 flex flex-col items-center justify-center p-4 select-none font-sans z-50">
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />
         <div className="flex flex-col items-center gap-4 bg-[#111b21]/90 border border-white/10 p-8 rounded-[32px] backdrop-blur-2xl shadow-2xl relative z-10">
-          <div className="w-16 h-16 rounded-2xl overflow-hidden shadow-lg shadow-emerald-500/30 border border-emerald-400/30 relative">
+          <div className="w-14 h-14 rounded-2xl overflow-hidden shadow-lg shadow-emerald-500/30 border border-emerald-400/40 relative">
             <img src="/icon.png" alt="ReconectaZap" className="w-full h-full object-cover" />
             <div className="absolute inset-0 bg-emerald-950/40 flex items-center justify-center">
-              <Loader2 className="w-8 h-8 animate-spin text-emerald-400" />
+              <Loader2 className="w-6 h-6 animate-spin text-emerald-400" />
             </div>
           </div>
           <div className="text-center space-y-1">
@@ -722,14 +722,16 @@ export default function App() {
       <div className="w-full max-w-4xl lg:max-w-5xl bg-[#111b21]/95 border border-white/10 rounded-[32px] p-5 sm:p-7 md:p-8 shadow-[0_25px_80px_rgba(0,0,0,0.7)] backdrop-blur-2xl relative z-10 space-y-5 my-auto shrink-0">
         
         {/* ========================================================= */}
-        {/* HEADER SUPERIOR */}
+        {/* HEADER SUPERIOR COM LOGO EMBUTIDO HARMONIOSO */}
         {/* ========================================================= */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-white/[0.08] pb-4 gap-3.5">
           
           <div className="flex items-center gap-3.5 min-w-0">
-            <div className="w-13 h-13 rounded-2xl overflow-hidden shadow-lg shadow-emerald-500/30 border border-emerald-400/40 shrink-0 bg-black">
+            {/* Logo do ReconectaZap com tamanho travado e anel luminoso */}
+            <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl overflow-hidden shadow-lg shadow-emerald-500/25 border border-emerald-400/30 ring-2 ring-emerald-500/20 shrink-0 bg-black flex items-center justify-center">
               <img src="/icon.png" alt="ReconectaZap Logo" className="w-full h-full object-cover" />
             </div>
+
             <div className="min-w-0 text-left">
               <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="text-base sm:text-xl font-black text-white tracking-wide truncate max-w-[200px] sm:max-w-[280px]">
@@ -751,7 +753,7 @@ export default function App() {
               </div>
               <p className="text-[10.5px] text-emerald-400 font-bold flex items-center gap-1.5 mt-0.5">
                 <Zap className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                <span>ReconectaZap • Painel Autônomo WhatsApp Direct</span>
+                <span>ReconectaZap • Conexão Direta WhatsApp</span>
               </p>
             </div>
           </div>
@@ -773,7 +775,7 @@ export default function App() {
             {!isStandalone ? (
               <button
                 onClick={handleInstallClick}
-                className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl text-[11px] font-black uppercase tracking-wider transition-all flex items-center gap-1.5 shadow-md shadow-emerald-600/30 hover:shadow-emerald-500/40 active:scale-95 cursor-pointer border border-emerald-400/30 animate-pulse"
+                className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl text-[11px] font-black uppercase tracking-wider transition-all flex items-center gap-1.5 shadow-md shadow-emerald-600/30 hover:shadow-emerald-500/40 active:scale-95 cursor-pointer border border-emerald-400/30"
                 title="Instalar este Reconector no Celular ou Computador"
               >
                 <Download className="w-3.5 h-3.5" />
@@ -811,7 +813,7 @@ export default function App() {
         )}
 
         {/* ========================================================= */}
-        {/* GRID DE 2 COLUNAS */}
+        {/* GRID DE 2 COLUNAS (SPLIT WIDESCREEN) */}
         {/* ========================================================= */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-7 items-stretch">
           
@@ -1213,7 +1215,7 @@ export default function App() {
             </button>
 
             <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-2xl overflow-hidden shadow-lg shadow-emerald-500/25 border border-white/20">
+              <div className="w-12 h-12 rounded-2xl overflow-hidden shadow-lg shadow-emerald-500/25 border border-white/20 shrink-0 bg-black">
                 <img src="/icon.png" alt="ReconectaZap" className="w-full h-full object-cover" />
               </div>
               <div>
@@ -1322,9 +1324,9 @@ export default function App() {
             {installPlatform === 'desktop' && (
               <div className="space-y-3 bg-[#0c1317] p-4 rounded-2xl border border-white/5 text-xs">
                 {deferredPrompt ? (
-                  <div className="text-center space-y-3">
+                  <div className="text-center space-y-3 pt-1">
                     <p className="text-slate-300">
-                      Instale o ReconectaZap na sua Área de Trabalho para acesso rápido em 1 clique.
+                      Instale o ReconectaZap na sua Área de Trabalho para acesso rápido.
                     </p>
                     <button
                       onClick={handleInstallClick}
