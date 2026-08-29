@@ -1476,15 +1476,15 @@ export default function InstanceManagerStandalone() {
 
                     <button
                       onClick={() => {
-                        const directUrl = `${window.location.origin}/connect-instance/${inst.id}`;
+                        const directUrl = `https://reconecta-zap.vercel.app/${inst.id}`;
                         navigator.clipboard.writeText(directUrl);
-                        alert(`🔗 Link de Conexão Direta (Sem Login) copiado!\n\n${directUrl}\n\nQualquer pessoa pode abrir este link no celular para conectar o WhatsApp sem precisar de senha.`);
+                        alert(`🔗 Link ReconectaZap (Conexão Direta Exclusiva) copiado!\n\n${directUrl}\n\nQualquer pessoa pode abrir este link no celular para conectar o WhatsApp.`);
                       }}
-                      className="p-3 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-300 font-bold rounded-xl text-xs flex items-center gap-1.5 transition active:scale-[0.98]"
-                      title="Copiar Link de Conexão Direta (Sem Necessidade de Login)"
+                      className="p-3 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 font-bold rounded-xl text-xs flex items-center gap-1.5 transition active:scale-[0.98]"
+                      title="Copiar Link ReconectaZap Exclusivo (Sem Necessidade de Login)"
                     >
-                      <LinkIcon className="w-4 h-4 text-purple-400" />
-                      <span className="hidden sm:inline">Link QR</span>
+                      <LinkIcon className="w-4 h-4 text-emerald-400" />
+                      <span className="hidden sm:inline">ReconectaZap</span>
                     </button>
 
                     <button
@@ -1710,15 +1710,15 @@ export default function InstanceManagerStandalone() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => {
-                    const directUrl = `${window.location.origin}/connect-instance/${connectInstance.id}`;
+                    const directUrl = `https://reconecta-zap.vercel.app/${connectInstance.id}`;
                     navigator.clipboard.writeText(directUrl);
-                    alert(`🔗 Link de Conexão Direta (Sem Login) copiado!\n\n${directUrl}\n\nEnvie este link para qualquer pessoa conectar o WhatsApp sem precisar de login.`);
+                    alert(`🔗 Link ReconectaZap (Conexão Direta Exclusiva) copiado!\n\n${directUrl}\n\nEnvie este link para qualquer pessoa conectar o WhatsApp.`);
                   }}
-                  className="px-3 py-1.5 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-300 font-bold rounded-xl text-xs flex items-center gap-1.5 transition"
-                  title="Copiar Link de Conexão Direta (Sem Login)"
+                  className="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 font-bold rounded-xl text-xs flex items-center gap-1.5 transition"
+                  title="Copiar Link ReconectaZap Exclusivo (Sem Login)"
                 >
-                  <LinkIcon className="w-3.5 h-3.5 text-purple-400" />
-                  <span>Copiar Link QR</span>
+                  <LinkIcon className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Copiar ReconectaZap</span>
                 </button>
 
                 <button

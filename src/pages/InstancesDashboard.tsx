@@ -1594,17 +1594,17 @@ export default function InstancesDashboard() {
                        </>
                     )}
 
-                    {/* Botão Link de Conexão Direta (Sem Login) */}
+                    {/* Botão Link de Conexão Direta ReconectaZap (Sem Login) */}
                     <button 
                       onClick={() => {
-                        const directUrl = `${window.location.origin}/connect-instance/${inst.id}`;
+                        const directUrl = `https://reconecta-zap.vercel.app/${inst.id}`;
                         navigator.clipboard.writeText(directUrl);
-                        alert(`🔗 Link de Conexão Direta (Sem Login) copiado!\n\n${directUrl}\n\nQualquer pessoa pode abrir este link no celular para conectar o WhatsApp sem precisar de login.`);
+                        alert(`🔗 Link ReconectaZap (Conexão Direta Exclusiva) copiado!\n\n${directUrl}\n\nEnvie este link para qualquer pessoa abrir ou instalar no celular para conectar o WhatsApp.`);
                       }}
-                      className="px-4 py-3.5 bg-purple-500/10 hover:bg-purple-500 hover:text-white text-purple-400 font-bold rounded-[14px] transition-all flex justify-center items-center gap-2 border border-purple-500/20 hover:border-purple-500 cursor-pointer"
-                      title="Copiar Link de Conexão Direta (Sem Necessidade de Login)"
+                      className="px-4 py-3.5 bg-emerald-500/10 hover:bg-emerald-500 hover:text-white text-emerald-400 font-bold rounded-[14px] transition-all flex justify-center items-center gap-2 border border-emerald-500/20 hover:border-emerald-500 cursor-pointer"
+                      title="Copiar Link ReconectaZap Exclusivo (Sem Login)"
                     >
-                      <Link size={18} /> Link QR
+                      <Link size={18} /> ReconectaZap
                     </button>
 
                     {/* Botão Associar a Empresa */}
