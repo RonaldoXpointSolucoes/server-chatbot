@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import QRCode from 'react-qr-code';
 import { createClient } from '@supabase/supabase-js';
 import {
@@ -28,7 +28,10 @@ import {
   X,
   Activity,
   Terminal,
-  Clock
+  Clock,
+  Search,
+  ArrowRight,
+  History
 } from 'lucide-react';
 
 const SUPABASE_URL = 'https://yzbxsxabzncdzuxvlppt.supabase.co';
@@ -66,8 +69,20 @@ interface ConnectionLogItem {
 export default function App() {
   const { id: paramId } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
-  const rawId = paramId || searchParams.get('id') || '';
+  const navigate = useNavigate();
 
+  // 1. Resolve o ID com suporte a parâmetros de URL ou cache do último PWA instalado
+  const urlParamId = paramId || searchParams.get('id') || '';
+  const [activeInstanceId, setActiveInstanceId] = useState<string>(() => {
+    if (urlParamId) return urlParamId;
+    try {
+      return localStorage.getItem('reconectazap_last_instance_id') || '';
+    } catch {
+      return '';
+    }
+  });
+
+  const [inputManualId, setInputManualId] = useState<string>('');
   const [instance, setInstance] = useState<InstanceData | null>(null);
   const instanceRef = useRef<InstanceData | null>(null);
 
@@ -116,6 +131,13 @@ export default function App() {
 
   const isConnected = connectionStatus === 'connected' || connectionStatus === 'connected_local' || connectionStatus === 'open';
 
+  // Sincroniza activeInstanceId se a rota mudar
+  useEffect(() => {
+    if (urlParamId && urlParamId !== activeInstanceId) {
+      setActiveInstanceId(urlParamId);
+    }
+  }, [urlParamId]);
+
   // 1. Detecta plataforma do usuário e inicializa escuta de eventos PWA
   useEffect(() => {
     const checkStandalone = () => {
@@ -161,13 +183,25 @@ export default function App() {
     };
   }, [searchParams]);
 
-  // 2. Injeta dinamicamente o título e meta tags para esta instância
+  // 2. Injeta dinamicamente o Web App Manifest e Título para a URL e Instância Exata
   useEffect(() => {
     if (!instance) return;
 
     const instanceTitle = `Reconectar ${instance.display_name} | ReconectaZap`;
     document.title = instanceTitle;
 
+    // Salva no localStorage para reaberturas diretas do PWA
+    try {
+      localStorage.setItem('reconectazap_last_instance_id', instance.id);
+      localStorage.setItem('reconectazap_last_instance_name', instance.display_name);
+    } catch {}
+
+    // Se estiver em rota genérica ou raiz, atualiza a barra do navegador para a URL da instância
+    if (!urlParamId || urlParamId !== instance.id) {
+      window.history.replaceState(null, '', `/${instance.id}?standalone=true`);
+    }
+
+    // Configura Apple Web App Title
     let metaAppleTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]');
     if (!metaAppleTitle) {
       metaAppleTitle = document.createElement('meta');
@@ -175,7 +209,60 @@ export default function App() {
       document.head.appendChild(metaAppleTitle);
     }
     metaAppleTitle.setAttribute('content', `Zap - ${instance.display_name}`);
-  }, [instance]);
+
+    // INJEÇÃO DINÂMICA DO MANIFEST COM START_URL EXATO DA INSTÂNCIA
+    try {
+      const dynamicManifest = {
+        name: `Reconectar ${instance.display_name} - ReconectaZap`,
+        short_name: instance.display_name.substring(0, 12),
+        description: `Painel Exclusivo de Conexão WhatsApp para ${instance.display_name}`,
+        start_url: `/${instance.id}?standalone=true`,
+        scope: `/`,
+        id: `reconectazap-${instance.id}`,
+        display: 'standalone',
+        display_override: ['standalone', 'fullscreen', 'minimal-ui'],
+        background_color: '#090e11',
+        theme_color: '#090e11',
+        orientation: 'portrait',
+        categories: ['business', 'utilities'],
+        icons: [
+          {
+            src: '/pwa-192x192.png',
+            sizes: '192x192',
+            type: 'image/png',
+            purpose: 'any'
+          },
+          {
+            src: '/pwa-512x512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'any'
+          },
+          {
+            src: '/icon.png',
+            sizes: '1024x1024',
+            type: 'image/png',
+            purpose: 'maskable'
+          }
+        ]
+      };
+
+      const manifestBlob = new Blob([JSON.stringify(dynamicManifest)], { type: 'application/manifest+json' });
+      const manifestUrl = URL.createObjectURL(manifestBlob);
+
+      let linkManifest = document.querySelector('link[rel="manifest"]');
+      if (linkManifest) {
+        linkManifest.setAttribute('href', manifestUrl);
+      } else {
+        linkManifest = document.createElement('link');
+        linkManifest.setAttribute('rel', 'manifest');
+        linkManifest.setAttribute('href', manifestUrl);
+        document.head.appendChild(linkManifest);
+      }
+    } catch (e) {
+      console.warn('[ReconectaZap] Erro ao injetar manifest dinâmico:', e);
+    }
+  }, [instance, urlParamId]);
 
   // 3. Consulta status no motor Baileys / Supabase
   const checkEngineStatus = useCallback(async (targetInst?: InstanceData | null) => {
@@ -359,9 +446,10 @@ export default function App() {
   }, [isConnected, checkEngineStatus]);
 
   // 5. Carrega dados básicos da instância no Supabase
-  const loadInstanceMetadata = useCallback(async () => {
-    if (!rawId) {
-      setError('Por favor, informe o ID ou nome da instância na URL (Ex: /seu-id-da-instancia).');
+  const loadInstanceMetadata = useCallback(async (targetIdToLoad?: string) => {
+    const effectiveId = targetIdToLoad || activeInstanceId;
+
+    if (!effectiveId) {
       setLoading(false);
       return;
     }
@@ -375,14 +463,14 @@ export default function App() {
       const { data, error: dbErr } = await supabase
         .from('whatsapp_instances')
         .select('*, whatsapp_instance_runtime(qr_code, pairing_code)')
-        .eq('id', rawId)
+        .eq('id', effectiveId)
         .maybeSingle();
 
       if (dbErr || !data) {
         const { data: dataByName } = await supabase
           .from('whatsapp_instances')
           .select('*, whatsapp_instance_runtime(qr_code, pairing_code)')
-          .ilike('display_name', rawId)
+          .ilike('display_name', effectiveId)
           .maybeSingle();
 
         if (dataByName) {
@@ -393,7 +481,7 @@ export default function App() {
       }
 
       if (!instData) {
-        setError(`Instância '${rawId}' não foi encontrada no banco de dados.`);
+        setError(`Instância '${effectiveId}' não foi encontrada no banco de dados.`);
         setLoading(false);
         return;
       }
@@ -429,7 +517,7 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, [rawId, handleGenerateQr, checkEngineStatus]);
+  }, [activeInstanceId, handleGenerateQr, checkEngineStatus]);
 
   // 6. Carrega os logs de conexão da instância
   const fetchConnectionLogs = useCallback(async () => {
@@ -572,20 +660,29 @@ export default function App() {
     }
   };
 
+  // 10. Handler para busca manual de instância
+  const handleManualSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inputManualId.trim()) return;
+    const clean = inputManualId.trim();
+    setActiveInstanceId(clean);
+    navigate(`/${clean}?standalone=true`);
+  };
+
   // Efeito Inicial
   useEffect(() => {
-    loadInstanceMetadata();
+    if (activeInstanceId) {
+      loadInstanceMetadata(activeInstanceId);
 
-    pollTimerRef.current = setInterval(() => {
-      checkEngineStatus();
-    }, 2500);
+      pollTimerRef.current = setInterval(() => {
+        checkEngineStatus();
+      }, 2500);
 
-    if (rawId) {
       const instChannel = supabase
-        .channel(`public:whatsapp_instances:${rawId}`)
+        .channel(`public:whatsapp_instances:${activeInstanceId}`)
         .on(
           'postgres_changes',
-          { event: 'UPDATE', schema: 'public', table: 'whatsapp_instances', filter: `id=eq.${rawId}` },
+          { event: 'UPDATE', schema: 'public', table: 'whatsapp_instances', filter: `id=eq.${activeInstanceId}` },
           (payload) => {
             const updated = payload.new as InstanceData;
             setInstance((prev) => {
@@ -604,10 +701,10 @@ export default function App() {
         .subscribe();
 
       const runtimeChannel = supabase
-        .channel(`public:whatsapp_instance_runtime:${rawId}`)
+        .channel(`public:whatsapp_instance_runtime:${activeInstanceId}`)
         .on(
           'postgres_changes',
-          { event: '*', schema: 'public', table: 'whatsapp_instance_runtime', filter: `instance_id=eq.${rawId}` },
+          { event: '*', schema: 'public', table: 'whatsapp_instance_runtime', filter: `instance_id=eq.${activeInstanceId}` },
           (payload: any) => {
             const newRuntime = payload.new;
             if (newRuntime && newRuntime.qr_code) {
@@ -627,12 +724,10 @@ export default function App() {
         supabase.removeChannel(instChannel);
         supabase.removeChannel(runtimeChannel);
       };
+    } else {
+      setLoading(false);
     }
-
-    return () => {
-      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
-    };
-  }, [rawId, loadInstanceMetadata, checkEngineStatus]);
+  }, [activeInstanceId, loadInstanceMetadata, checkEngineStatus]);
 
   // Loop de Auto-Renovação Contínua
   useEffect(() => {
@@ -656,7 +751,8 @@ export default function App() {
   }, [isConnected, connectMode, qrCodeData, qrBase64, handleGenerateQr]);
 
   const copyDirectLink = () => {
-    navigator.clipboard.writeText(window.location.href);
+    const url = window.location.origin + (instance ? `/${instance.id}` : window.location.pathname);
+    navigator.clipboard.writeText(url);
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2500);
   };
@@ -688,23 +784,79 @@ export default function App() {
     );
   }
 
-  if (error && !instance) {
+  // TELA DE BUSCA / INFORMAR INSTÂNCIA (Caso acesse / na raiz sem nada salvo)
+  if (!activeInstanceId || (error && !instance)) {
+    const lastSavedId = localStorage.getItem('reconectazap_last_instance_id');
+    const lastSavedName = localStorage.getItem('reconectazap_last_instance_name');
+
     return (
-      <div className="fixed inset-0 w-full h-full bg-[#090e11] text-slate-100 flex flex-col items-center justify-center p-4 select-none font-sans z-50">
-        <div className="w-full max-w-md bg-[#111b21]/95 border border-rose-500/30 p-8 rounded-[32px] backdrop-blur-2xl text-center space-y-5 shadow-2xl relative z-10">
-          <div className="w-16 h-16 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center mx-auto text-rose-400">
-            <AlertTriangle className="w-8 h-8" />
+      <div className="min-h-screen w-full bg-[#090e11] text-slate-100 flex flex-col items-center justify-center p-4 select-none font-sans relative">
+        <div className="fixed -top-32 -left-32 w-96 h-96 bg-emerald-500/15 rounded-full blur-[100px] pointer-events-none" />
+        <div className="fixed -bottom-32 -right-32 w-96 h-96 bg-teal-500/15 rounded-full blur-[100px] pointer-events-none" />
+
+        <div className="w-full max-w-md bg-[#111b21]/95 border border-white/10 p-7 sm:p-8 rounded-[32px] backdrop-blur-2xl text-center space-y-6 shadow-2xl relative z-10">
+          
+          <div className="w-16 h-16 rounded-2xl overflow-hidden shadow-lg shadow-emerald-500/30 border border-emerald-400/40 mx-auto bg-black ring-4 ring-emerald-500/20">
+            <img src="/icon.png" alt="ReconectaZap" className="w-full h-full object-cover" />
           </div>
+
           <div className="space-y-1">
-            <h2 className="text-base font-black text-white uppercase tracking-wider">Instância Não Encontrada</h2>
-            <p className="text-xs text-slate-400 font-medium">{error}</p>
+            <h2 className="text-lg font-black text-white uppercase tracking-wider">
+              ReconectaZap
+            </h2>
+            <p className="text-xs text-emerald-400 font-bold">
+              Painel de Conexão Direta WhatsApp
+            </p>
           </div>
-          <button
-            onClick={() => window.location.reload()}
-            className="w-full py-3.5 bg-white/10 hover:bg-white/15 text-white font-black rounded-2xl text-xs uppercase tracking-wider transition-all active:scale-95 cursor-pointer border border-white/10"
-          >
-            Tentar Novamente
-          </button>
+
+          {error && (
+            <div className="p-3 bg-rose-500/15 border border-rose-500/30 rounded-2xl text-rose-300 text-xs font-bold text-left flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
+              <span>{error}</span>
+            </div>
+          )}
+
+          {lastSavedId && (
+            <div className="bg-[#0c1317] p-3.5 rounded-2xl border border-emerald-500/30 text-left space-y-2">
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                <History className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Última Instância Conectada:</span>
+              </span>
+              <button
+                onClick={() => {
+                  setActiveInstanceId(lastSavedId);
+                  navigate(`/${lastSavedId}?standalone=true`);
+                }}
+                className="w-full py-2.5 px-3 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 rounded-xl text-xs font-black text-emerald-300 flex items-center justify-between transition-all cursor-pointer group active:scale-95"
+              >
+                <span>{lastSavedName || lastSavedId}</span>
+                <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+              </button>
+            </div>
+          )}
+
+          <form onSubmit={handleManualSearch} className="space-y-3 text-left">
+            <label className="block text-[11px] font-black text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+              <Search className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Nome ou ID da sua Instância:</span>
+            </label>
+            <input
+              type="text"
+              value={inputManualId}
+              onChange={(e) => setInputManualId(e.target.value)}
+              placeholder="Ex: AllForno ou ce214c5b-..."
+              className="w-full bg-[#0c1317] border border-white/15 rounded-2xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 font-mono shadow-inner font-bold"
+            />
+            <button
+              type="submit"
+              disabled={!inputManualId.trim()}
+              className="w-full py-3.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black rounded-2xl text-xs uppercase tracking-wider transition-all active:scale-95 cursor-pointer shadow-lg shadow-emerald-600/30 disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              <span>Acessar Conexão</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </form>
+
         </div>
       </div>
     );
@@ -1110,7 +1262,7 @@ export default function App() {
                   Logs de Tentativas de Conexão
                 </h3>
                 <p className="text-xs text-emerald-400 font-bold truncate">
-                  Instância: {instance?.display_name || rawId}
+                  Instância: {instance?.display_name || activeInstanceId}
                 </p>
               </div>
             </div>
