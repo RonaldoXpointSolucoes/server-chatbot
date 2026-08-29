@@ -13,7 +13,6 @@ import {
   ShieldCheck,
   Wifi,
   AlertTriangle,
-  LogOut,
   Key,
   Sparkles,
   Shield,
@@ -31,7 +30,9 @@ import {
   Clock,
   Search,
   ArrowRight,
-  History
+  History,
+  Send,
+  CheckCircle
 } from 'lucide-react';
 
 const SUPABASE_URL = 'https://yzbxsxabzncdzuxvlppt.supabase.co';
@@ -105,6 +106,11 @@ export default function App() {
   const [connectedNumber, setConnectedNumber] = useState<string | null>(null);
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
   const [copiedPairing, setCopiedPairing] = useState<boolean>(false);
+
+  // Estados de Teste de Mensagem
+  const [testLoading, setTestLoading] = useState<boolean>(false);
+  const [testSuccess, setTestSuccess] = useState<boolean>(false);
+  const [testError, setTestError] = useState<string | null>(null);
 
   // Estados de PWA / Instalação
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
@@ -554,7 +560,71 @@ export default function App() {
     }
   }, []);
 
-  // 7. Código de pareamento
+  // 7. Dispara Mensagem de Teste para a caixa Suporte X-Point (11 4135-1987)
+  const handleSendTestMessage = async () => {
+    const inst = instanceRef.current;
+    if (!inst?.id) return;
+
+    setTestLoading(true);
+    setTestError(null);
+    setTestSuccess(false);
+
+    try {
+      const tenantId = inst?.tenant_id || '00000000-0000-0000-0000-000000000000';
+      const apiKey = inst?.api_key || 'chatboot-secret-key';
+      const nowFormatted = new Date().toLocaleString('pt-BR');
+      
+      const testText = `🧪 *Teste de Conexão ConectaZap*\n\n✅ *Status:* Conectado e Operacional\n📱 *Instância:* ${inst.display_name}\n📞 *Número:* +${connectedNumber || inst.phone_number || ''}\n⏰ *Data/Hora:* ${nowFormatted}\n\n_Mensagem de teste enviada com sucesso para o Suporte X-Point._`;
+
+      // 1ª Tentativa: Envio via rota REST pública /message/sendText
+      let res = await fetch(`${ENGINE_URL}/api/v1/message/sendText`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': apiKey,
+          'x-tenant-id': tenantId
+        },
+        body: JSON.stringify({
+          number: '551141351987',
+          text: testText
+        })
+      });
+
+      // 2ª Tentativa (Fallback): Envio via rota /instances/:id/invoke
+      if (!res.ok) {
+        res = await fetch(`${ENGINE_URL}/api/v1/instances/${inst.id}/invoke`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': apiKey,
+            'x-tenant-id': tenantId
+          },
+          body: JSON.stringify({
+            method: 'sendMessage',
+            args: [
+              '551141351987@s.whatsapp.net',
+              { text: testText }
+            ]
+          })
+        });
+      }
+
+      const rawJson = await res.json();
+      if (!res.ok) {
+        throw new Error(rawJson.error || rawJson.message || 'Falha ao enviar mensagem de teste.');
+      }
+
+      setTestSuccess(true);
+      setTimeout(() => setTestSuccess(false), 6000);
+    } catch (err: any) {
+      setTestError(err.message || 'Erro ao enviar mensagem de teste');
+      setTimeout(() => setTestError(null), 6000);
+    } finally {
+      setTestLoading(false);
+    }
+  };
+
+  // 8. Código de pareamento
   const handleGeneratePairingCode = async () => {
     const inst = instanceRef.current;
     if (!inst?.id) return;
@@ -604,39 +674,6 @@ export default function App() {
     } catch (e: any) {
       setError(e.message || 'Erro ao gerar código de pareamento.');
       setStatusStep(1);
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  // 8. Desconectar
-  const handleDisconnect = async () => {
-    const inst = instanceRef.current;
-    if (!inst?.id) return;
-    if (!window.confirm('Tem certeza que deseja desconectar este WhatsApp? A conexão atual será encerrada.')) return;
-
-    const tenantId = inst?.tenant_id || '00000000-0000-0000-0000-000000000000';
-    const apiKey = inst?.api_key || 'chatboot-secret-key';
-
-    try {
-      setActionLoading(true);
-      await fetch(`${ENGINE_URL}/api/v1/instances/${inst.id}/disconnect`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-tenant-id': tenantId,
-          'apikey': apiKey
-        }
-      });
-      setConnectionStatus('disconnected');
-      setConnectedNumber(null);
-      setQrCodeData(null);
-      setQrBase64(null);
-      setPairingCode(null);
-      setStatusStep(1);
-      setStatusMessage('Sessão encerrada com sucesso.');
-    } catch (e: any) {
-      setError(`Erro ao desconectar: ${e.message}`);
     } finally {
       setActionLoading(false);
     }
@@ -1101,13 +1138,13 @@ export default function App() {
           <div className="lg:col-span-6 bg-[#0c1317]/90 rounded-[28px] border border-white/[0.08] p-5 sm:p-6 flex flex-col items-center justify-center text-center shadow-inner relative min-h-[380px]">
             
             {isConnected ? (
-              <div className="w-full space-y-5 animate-in fade-in zoom-in-95 duration-300">
-                <div className="w-20 h-20 bg-gradient-to-tr from-emerald-500 to-teal-400 rounded-full flex items-center justify-center mx-auto shadow-[0_0_40px_rgba(16,185,129,0.45)] ring-4 ring-emerald-500/20">
-                  <CheckCircle2 className="w-10 h-10 text-slate-950 stroke-[2.5]" />
+              <div className="w-full space-y-4 animate-in fade-in zoom-in-95 duration-300">
+                <div className="w-16 h-16 bg-gradient-to-tr from-emerald-500 to-teal-400 rounded-full flex items-center justify-center mx-auto shadow-[0_0_35px_rgba(16,185,129,0.45)] ring-4 ring-emerald-500/20">
+                  <CheckCircle2 className="w-8 h-8 text-slate-950 stroke-[2.5]" />
                 </div>
 
                 <div className="space-y-1">
-                  <h2 className="text-lg font-black text-white tracking-wide">
+                  <h2 className="text-base sm:text-lg font-black text-white tracking-wide">
                     Dispositivo Conectado com Sucesso!
                   </h2>
                   <p className="text-xs text-slate-400 font-medium">
@@ -1116,31 +1153,64 @@ export default function App() {
                 </div>
 
                 {connectedNumber && (
-                  <div className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#111b21] border border-emerald-500/40 rounded-2xl text-emerald-300 font-black text-sm shadow-inner font-mono tracking-wider">
+                  <div className="inline-flex items-center gap-2 px-4 py-2 bg-[#111b21] border border-emerald-500/40 rounded-2xl text-emerald-300 font-black text-sm shadow-inner font-mono tracking-wider">
                     <Smartphone className="w-4 h-4 text-emerald-400" />
                     <span>+{connectedNumber}</span>
                   </div>
                 )}
 
-                <div className="pt-2 flex flex-col sm:flex-row gap-2.5 w-full">
-                  <button
-                    onClick={() => handleGenerateQr(true, false)}
-                    disabled={actionLoading}
-                    className="flex-1 py-3 px-4 bg-white/10 hover:bg-white/15 text-slate-200 font-black rounded-2xl text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer border border-white/10"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${actionLoading ? 'animate-spin' : ''}`} />
-                    <span>Reconectar / Novo QR</span>
-                  </button>
+                {/* PAINEL DE TESTE DE ENVIO PARA SUPORTE X-POINT (11 4135-1987) */}
+                <div className="bg-[#111b21] p-4 rounded-2xl border border-emerald-500/30 text-left space-y-2.5 shadow-inner">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Teste de Envio em Tempo Real</span>
+                    </span>
+                    <span className="text-[10px] font-bold text-emerald-400 font-mono">
+                      Destino: 11 4135-1987
+                    </span>
+                  </div>
+
+                  <p className="text-[11px] text-slate-300 leading-tight">
+                    Clique no botão abaixo para disparar uma mensagem de teste para a caixa <strong>Suporte X-Point (11 4135-1987)</strong> e comprovar o funcionamento do WhatsApp.
+                  </p>
 
                   <button
-                    onClick={handleDisconnect}
-                    disabled={actionLoading}
-                    className="py-3 px-4 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 font-black rounded-2xl text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer"
+                    onClick={handleSendTestMessage}
+                    disabled={testLoading}
+                    className="w-full py-3 bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black rounded-xl text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-[0_6px_20px_rgba(16,185,129,0.35)] active:scale-95 cursor-pointer disabled:opacity-50"
                   >
-                    <LogOut className="w-3.5 h-3.5 text-rose-400" />
-                    <span>Desconectar Chip</span>
+                    {testLoading ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    ) : testSuccess ? (
+                      <CheckCircle className="w-4 h-4 text-white" />
+                    ) : (
+                      <Send className="w-4 h-4" />
+                    )}
+                    <span>
+                      {testLoading
+                        ? 'Enviando Mensagem de Teste...'
+                        : testSuccess
+                        ? 'Mensagem Entregue com Sucesso!'
+                        : 'Enviar Mensagem de Teste'}
+                    </span>
                   </button>
+
+                  {testSuccess && (
+                    <div className="p-2.5 bg-emerald-500/20 border border-emerald-500/40 rounded-xl text-emerald-300 text-xs font-bold flex items-center gap-2 animate-in fade-in">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>Mensagem enviada com sucesso para a caixa Suporte X-Point!</span>
+                    </div>
+                  )}
+
+                  {testError && (
+                    <div className="p-2.5 bg-rose-500/20 border border-rose-500/40 rounded-xl text-rose-300 text-xs font-bold flex items-center gap-2 animate-in fade-in">
+                      <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                      <span>{testError}</span>
+                    </div>
+                  )}
                 </div>
+
               </div>
             ) : connectMode === 'qr' ? (
               <div className="w-full flex flex-col items-center justify-center space-y-4">
