@@ -101,9 +101,11 @@ Sempre que o usuário digitar `Fila dev` (ou variações como `fila dev`, `Fila 
 2. **Governança da Coluna "Em Análise" (`analysis`)**:
    - **PROIBIDO INICIAR DESENVOLVIMENTO**: A IA **NÃO PODE** alterar código nem iniciar tarefas que estejam nesta coluna.
    - **VISUALIZAÇÃO COMPLETA**: Exibir a listagem clara dos cards em análise, informando ao usuário que aguardam autorização prévia.
-3. **Autonomia da Coluna "Em Desenvolvimento" (`development`)**:
-   - **EXECUÇÃO AUTÔNOMA TOTAL**: Se houver itens nesta coluna, a IA deve ler os requisitos técnicos do card (`notes`), codificar as soluções no projeto, validar compilação/testes e migrar o card no banco para a coluna **"Em Testes & QA"** (`node .agents/skills/fila-dev/scripts/get_dev_queue.cjs move <CARD_ID> testing`).
-   - Apresentar o relatório da entrega e confirmação da migração do card.
+3. **Autonomia Sênior e Tratamento Sequencial da Coluna "Em Desenvolvimento" (`development`)**:
+   - **POSTURA TÉCNICA SÊNIOR / STAFF ENGINEER**: A IA atua com profundo conhecimento de arquitetura, Clean Code, concorrência, banco de dados e UI/UX.
+   - **INSPEÇÃO VISUAL OBRIGATÓRIA DE IMAGENS E EVIDÊNCIAS**: A IA deve inspecionar e abrir cada imagem/print anexado ao card antes de codificar, correlacionando os elementos visuais com o código.
+   - **PROCESSAMENTO CONTÍNUO DE TODA A FILA (LOOP SEQUENCIAL)**: A IA não deve parar no primeiro card. Ela processa o Card 1 ➔ Codifica ➔ Valida ➔ Move para "Em Testes & QA" (`node .agents/skills/fila-dev/scripts/get_dev_queue.cjs move <CARD_ID> testing <REPORT>`) e **imediatamente pega o Card 2 e repete até zerar toda a coluna "Em Desenvolvimento"**.
+   - Apresentar o relatório consolidado de todas as entregas e a esteira atualizada.
 
 
 

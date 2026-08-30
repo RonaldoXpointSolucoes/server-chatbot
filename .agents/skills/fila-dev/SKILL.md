@@ -1,67 +1,103 @@
 ---
 name: fila-dev
-description: Protocolo de governança e execução autônoma do quadro "Desenvolvimento & Roadmap" no CRM Kanban. Gerencia as esteiras "Em Análise" (somente visualização/bloqueado para dev) e "Em Desenvolvimento" (execução autônoma com migração para "Em Testes & QA"). Ativado automaticamente pelo comando "Fila dev".
+description: Protocolo de governança, engenharia de software sênior e execução autônoma do quadro "Desenvolvimento & Roadmap" no CRM Kanban. Trata a fila sequencialmente, inspeciona imagens/evidências anexadas, desenvolve com excelência técnica e migra os cards para "Em Testes & QA". Ativado automaticamente pelo comando "Fila dev".
 ---
 
-# Skill: Esteira de Governança e Execução Autônoma "Fila Dev"
+# Skill: Esteira de Governança, Engenharia Sênior e Execução Autônoma "Fila Dev"
 
 > ⚡ **GATILHO DE ATIVAÇÃO**: Digite `Fila dev` (ou variações como `fila dev`, `Fila Dev`, `/fila-dev` ou `fila dev.`) no chat para executar este protocolo automaticamente.
 
-Esta skill estabelece a governança e o pipeline de execução autônoma do quadro **Desenvolvimento & Roadmap** (`ID: 95be1dee-9d28-47d9-8ccf-d51a337f1572`) no CRM Kanban.
+Esta skill rege a governança e o pipeline de execução autônoma do quadro **Desenvolvimento & Roadmap** (`ID: 95be1dee-9d28-47d9-8ccf-d51a337f1572`) no CRM Kanban.
 
 ---
 
-## 🏛️ 1. Filosofia de Governança por Colunas
+## 🏛️ 1. Filosofia de Governança e Papel Sênior
 
 ```mermaid
 graph LR
     subgraph CRM_KANBAN["Quadro: Desenvolvimento & Roadmap"]
         A["1. Backlog / Ideias"] --> B["2. Em Análise<br/><b>(🔒 Somente Leitura)</b>"]
-        B -.->|"Aprovação do Usuário (Arrastar)"| C["3. Em Desenvolvimento<br/><b>(⚡ Execução Autônoma IA)</b>"]
+        B -.->|"Aprovação do Usuário (Arrastar)"| C["3. Em Desenvolvimento<br/><b>(⚡ Execução Sequencial Sênior IA)</b>"]
         C -->|"IA Conclui e Move Card"| D["4. Em Testes & QA<br/><b>(🧪 Homologação)</b>"]
         D --> E["5. Concluído / Produção"]
     end
 ```
 
-### 🔒 Regra da Coluna "Em Análise" (`status: 'analysis'`):
-- **PROIBIDO DESENVOLVER OU MODIFICAR CÓDIGO**: A IA **NÃO** deve iniciar implementação, refatoração ou criação de código para tarefas que estejam nesta coluna.
-- **VISUALIZAÇÃO COMPLETA**: A IA deve ler todos os cards desta coluna e apresentar uma visão clara (título, prioridade, resumo e tags) ao usuário, informando que os itens aguardam aprovação manual (arrastar para "Em Desenvolvimento").
-
-### ⚡ Regra da Coluna "Em Desenvolvimento" (`status: 'development'`):
-- **AUTONOMIA TOTAL DE CODIFICAÇÃO**: Quando um card estiver nesta coluna, o Antigravity tem autorização explícita para:
-  1. Ler o objetivo, diagnóstico e plano técnico contidos no card (`notes` / `summary`).
-  2. Implementar as alterações de código necessárias nos arquivos indicados.
-  3. Validar a compilação (`npx tsc --noEmit` ou testes pertinentes).
-  4. **Mover o card no banco de dados para "Em Testes & QA"** (`status: 'testing'`) através do comando:
-     `node .agents/skills/fila-dev/scripts/get_dev_queue.cjs move <CARD_ID> testing`
-  5. Apresentar o relatório da entrega e a confirmação de que o card foi migrado para testes.
+### 🧠 Postura e Conhecimento Técnico Exigido (Staff / Principal Engineer)
+Ao assumir um card para desenvolvimento, a IA **NÃO** deve fazer correções superficiais ou parciais. Ela atua com **altíssimo nível técnico**, incorporando:
+- **Arquitetura & Clean Code**: SOLID, DRY, modularidade, separação de responsabilidades e tratamento preventivo de exceções.
+- **Resiliência de Backend & Concorrência**: Prevenção de deadlocks, leases distribuídos, tratamento de sockets Baileys e integridade transacional.
+- **Banco de Dados & Supabase**: Políticas RLS, índices, triggers, schema cache do PostgREST e consistência multitenant.
+- **Design System & UI/UX**: Mobile First, glassmorphism, tipografia moderna, acessibilidade e micro-animações.
 
 ---
 
-## 🛠️ 2. Protocolo de Execução do Comando "Fila dev"
+## 🔍 2. Inspeção Obrigatória de Imagens, Capturas e Evidências Visuais
 
-Sempre que o usuário digitar `Fila dev`:
+Cada card pode conter capturas de tela, fotos de terminais, fluxogramas ou prints de erros anexados no markdown (`notes`) ou no Supabase Storage (`chat_media/crm_cards`).
 
-### Passo 1: Consulta da Fila em Tempo Real
-Executar o script oficial:
+### Protocolo de Análise Visual:
+1. **Identificar Anexos**: Ler os campos `attached_media` e `media_count` retornados pelo script `get_dev_queue.cjs`.
+2. **Abrir e Inspecionar Visualmente Cada Imagem**:
+   - Usar as ferramentas de visualização (`view_file` ou download temporário) para analisar os prints de erro, layouts de tela ou telas de teste.
+   - Compreender exatamente o que o usuário/sistema destacou no print (ex: botões sobrepostos, erros de console, estados de botões, valores incorretos).
+3. **Correlacionar com o Código-Fonte**: Cruzar os elementos visuais vistos na imagem com os componentes React, rotas Express ou registros do Supabase antes de realizar qualquer alteração.
+
+---
+
+## 🔄 3. Processamento Contínuo e Sequencial da Fila ("Tratar a Fila")
+
+O comando **`Fila dev`** trata a fila de forma **contínua e exaustiva** até zerar todos os itens da coluna **"Em Desenvolvimento"** (`development`).
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as Usuário
+    participant Script as get_dev_queue.cjs
+    participant AI as Antigravity AI (Sênior)
+    participant Code as Base de Código
+    participant QA as Coluna Em Testes & QA
+
+    User->>AI: "Fila dev"
+    AI->>Script: get_dev_queue.cjs list
+    Script-->>AI: Retorna fila com cards e mídias
+    loop Para cada Card em "Em Desenvolvimento" (por ordem de posição/prioridade)
+        AI->>AI: Analisa notas técnicas e inspeciona TODAS as imagens anexadas
+        AI->>Code: Codifica a solução de alto nível no backend/frontend
+        AI->>Code: Valida compilação (tsc / node -c)
+        AI->>Script: get_dev_queue.cjs move <CARD_ID> testing <REPORT>
+        Script-->>QA: Card migrado para "Em Testes & QA"
+    end
+    AI->>User: Relatório consolidado de todas as entregas realizadas
+```
+
+---
+
+## 🔒 4. Regras Estritas de Governança por Coluna
+
+### 🔒 Coluna "Em Análise" (`status: 'analysis'`):
+- **PROIBIDO INICIAR CODIFICAÇÃO**: A IA **NÃO PODE** alterar código nem iniciar tarefas que estejam nesta coluna.
+- **VISUALIZAÇÃO TRANSPARENTE**: Exibir a listagem clara dos cards em análise, informando ao usuário que aguardam autorização prévia (arrastar para "Em Desenvolvimento").
+
+### ⚡ Coluna "Em Desenvolvimento" (`status: 'development'`):
+- **EXECUÇÃO AUTÔNOMA TOTAL & SEQUENCIAL**:
+  1. A IA extrai o primeiro card prioritário da fila.
+  2. Inspeciona todas as imagens e notas técnicas.
+  3. Realiza o desenvolvimento completo e refatoração necessária com qualidade sênior.
+  4. Valida a compilação (`npm run build` ou `node -c`).
+  5. Migra o card para **"Em Testes & QA"** (`testing`).
+  6. **Avança imediatamente para o próximo card da fila e repete o processo até que a coluna esteja vazia (0 cards).**
+
+---
+
+## 🛠️ 5. Comandos e Scripts de Apoio
+
+### 1. Consultar a Fila em Tempo Real:
 ```bash
 node .agents/skills/fila-dev/scripts/get_dev_queue.cjs list
 ```
 
-### Passo 2: Decisão de Fluxo
-
-#### Cenário A: Existem Cards na Fila "Em Desenvolvimento"
-1. Listar os cards em desenvolvimento e selecionar o item prioritário.
-2. Analisar o conteúdo técnico do card (`notes`, arquivos e objetivo).
-3. Executar o desenvolvimento completo (edição de código, criação de funções, correções).
-4. Validar que não há erros de compilação TypeScript (`npx tsc --noEmit`).
-5. Migrar o card para a coluna **"Em Testes & QA"** com o relatório técnico de entrega documentado:
-   ```bash
-   node .agents/skills/fila-dev/scripts/get_dev_queue.cjs move <ID_DO_CARD> testing '{"summary":"Descrição completa das funções e arquivos modificados","files":["server/src/session-manager/index.js"]}'
-   ```
-6. Apresentar o relatório da entrega e a tabela atualizada da esteira.
-
-#### Cenário B: Não Existem Cards "Em Desenvolvimento" (Apenas "Em Análise" e/ou "Backlog")
-1. Apresentar a tabela consolidada de todos os cards da fila.
-2. Listar em destaque os cards que estão **"Em Análise"**, reforçando que nenhum código foi alterado pois aguardam autorização (arrastar para "Em Desenvolvimento").
-3. Orientar o usuário a mover o card desejado para a coluna "Em Desenvolvimento" no Kanban (`/crm/kanban/95be1dee-9d28-47d9-8ccf-d51a337f1572`) e digitar `Fila dev` novamente para disparar a codificação.
+### 2. Migrar Card com Relatório Técnico de Entrega:
+```bash
+node .agents/skills/fila-dev/scripts/get_dev_queue.cjs move <ID_DO_CARD> testing '{"summary":"Descrição detalhada das funções criadas/refatoradas e correções aplicadas","files":["src/...","server/..."]}'
+```

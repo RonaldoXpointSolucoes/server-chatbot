@@ -1,7 +1,7 @@
 {
   "name": "chatboot",
   "private": true,
-  "version": "7.0.1",
+  "version": "7.0.2",
   "type": "module",
   "scripts": {
     "dev": "vite --host",
@@ -20,6 +20,7 @@
     "date-fns": "^4.1.0",
     "dotenv": "^17.4.0",
     "framer-motion": "^12.38.0",
+    "html2canvas": "^1.4.1",
     "lucide-react": "^1.7.0",
     "nspell": "^2.1.5",
     "pg": "^8.20.0",

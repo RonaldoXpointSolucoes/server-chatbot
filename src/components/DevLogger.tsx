@@ -6,11 +6,13 @@ import { supabase } from '../services/supabase';
 import { ServerLogsTerminal } from './ServerLogsTerminal';
 import { useChatStore } from '../store/chatStore';
 import { geminiService } from '../services/geminiService';
+import html2canvas from 'html2canvas';
 
 export default function DevLogger() {
   const navigate = useNavigate();
   const { logs, isVisible, isEnabled, toggleVisibility, addLog, clearLogs, showServerLogs, setShowServerLogs } = useDevStore();
   const bottomRef = useRef<HTMLDivElement>(null);
+  const devLoggerModalRef = useRef<HTMLDivElement>(null);
   
   const [engineStatus, setEngineStatus] = useState<'online' | 'offline' | 'checking'>('checking');
   const [lastPing, setLastPing] = useState<Date | null>(null);
@@ -1146,18 +1148,55 @@ export default function DevLogger() {
 
     try {
       setIsAnalyzingAiLogs(true);
-      setAiAnalysisStep('1/4 📥 Coletando logs do DevLogger e Servidor Node.js...');
+      setAiAnalysisStep('1/5 📸 Capturando print do DevLogger & evidências visuais...');
 
-      // 1. Logs locais do DevLogger
+      // 1. Captura de tela do DevLogger com html2canvas
+      let uploadedScreenshotUrl: string | null = null;
+      let screenshotBase64: string | undefined = undefined;
+
+      if (devLoggerModalRef.current) {
+        try {
+          const canvas = await html2canvas(devLoggerModalRef.current, {
+            backgroundColor: '#070c10',
+            scale: 1.5,
+            logging: false,
+            useCORS: true,
+            allowTaint: true
+          });
+          const base64Full = canvas.toDataURL('image/jpeg', 0.85);
+          screenshotBase64 = base64Full.replace(/^data:image\/jpeg;base64,/, '');
+
+          // Converter para Blob para upload no Supabase Storage
+          const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/jpeg', 0.85));
+          if (blob) {
+            const fileName = `devlogger_capture_${Date.now()}.jpg`;
+            const filePath = `crm_cards/${fileName}`;
+            const { error: upErr } = await supabase.storage
+              .from('chat_media')
+              .upload(filePath, blob, { contentType: 'image/jpeg', upsert: true });
+
+            if (!upErr) {
+              const { data: { publicUrl } } = supabase.storage.from('chat_media').getPublicUrl(filePath);
+              uploadedScreenshotUrl = publicUrl;
+            }
+          }
+        } catch (captureErr) {
+          console.warn('[DevLogger] Falha ao capturar screenshot visual do DevLogger:', captureErr);
+        }
+      }
+
+      setAiAnalysisStep('2/5 📥 Coletando logs de todas as abas (Console, Servidor, Gastrofood, ASTS)...');
+
+      // 2. Logs locais do DevLogger
       const currentLogs = useDevStore.getState().logs || [];
       const errorAndWarnLogs = currentLogs.filter(l => l.type === 'error' || l.type === 'warn' || l.source?.toLowerCase().includes('server') || l.source?.toLowerCase().includes('node'));
       const activeLogsToAnalyze = errorAndWarnLogs.length > 0 ? errorAndWarnLogs : currentLogs;
 
-      // 2. Coleta de erros recentes do Servidor Node.js
+      // 3. Coleta de erros recentes do Servidor Node.js
       let fetchedServerErrors: any[] = [];
       try {
         const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000));
-        const fetchPromise = fetch(`${engineUrl}/api/v1/system/logs/recent-errors?limit=30`).then(r => r.ok ? r.json() : null);
+        const fetchPromise = fetch(`${engineUrl}/api/v1/system/logs/recent-errors?limit=35`).then(r => r.ok ? r.json() : null);
         const serverData: any = await Promise.race([fetchPromise, timeoutPromise]);
         if (serverData?.success && Array.isArray(serverData.errors)) {
           fetchedServerErrors = serverData.errors;
@@ -1166,7 +1205,7 @@ export default function DevLogger() {
         // Fallback silencioso
       }
 
-      // 3. Coleta de logs de erro do Supabase system_logs
+      // 4. Coleta de logs de erro do Supabase system_logs
       let supabaseSystemLogs: any[] = [];
       try {
         const { data: dbLogs } = await supabase
@@ -1174,7 +1213,7 @@ export default function DevLogger() {
           .select('*')
           .or('level.eq.error,level.eq.warn')
           .order('created_at', { ascending: false })
-          .limit(20);
+          .limit(25);
         if (dbLogs && Array.isArray(dbLogs)) {
           supabaseSystemLogs = dbLogs;
         }
@@ -1195,22 +1234,23 @@ export default function DevLogger() {
         ...currentLogs.filter(l => l.source?.toLowerCase().includes('server') || l.source?.toLowerCase().includes('node'))
       ];
 
-      setAiAnalysisStep('2/4 🧠 Processando diagnóstico e causa raiz com Gemini 2.5 Flash...');
+      setAiAnalysisStep('3/5 🧠 Processando diagnóstico profundo e causa raiz com Gemini 2.5 Flash...');
 
-      // 4. Invocar a IA para diagnosticar e criar o plano
+      // 5. Invocar a IA para diagnosticar e criar o plano com análise multimodal (texto + print)
       const aiPlan = await geminiService.analyzeLogsAndGenerateFixPlan({
         consoleLogs: activeLogsToAnalyze,
         serverErrors: combinedServerErrors,
         gastrofoodLogs: gastrofoodLogs,
         astsErrors: testErrors,
+        screenshotBase64: screenshotBase64,
         boardName: 'Desenvolvimento & Roadmap'
       });
 
-      setAiAnalysisStep('3/4 🔍 Localizando quadro Desenvolvimento & Roadmap no CRM...');
+      setAiAnalysisStep('4/5 🔍 Localizando quadro Desenvolvimento & Roadmap no CRM...');
 
       const currentTenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id') || useChatStore.getState().tenantInfo?.id || '8b1e427b-2321-4ea7-9d7e-90f7d5cbad21';
 
-      // 5. Buscar o quadro do CRM
+      // 6. Buscar o quadro do CRM
       let targetBoard: any = null;
       const targetBoardIdDefault = '95be1dee-9d28-47d9-8ccf-d51a337f1572';
 
@@ -1251,7 +1291,7 @@ export default function DevLogger() {
         throw new Error('Nenhum quadro de CRM encontrado para vincular o card de correção.');
       }
 
-      // 6. Localizar o ID do estágio correspondente à coluna "Em Análise"
+      // 7. Localizar o ID do estágio correspondente à coluna "Em Análise"
       let targetStageId = 'analysis';
       if (targetBoard.config?.stages && Array.isArray(targetBoard.config.stages)) {
         const foundStage = targetBoard.config.stages.find((s: any) => 
@@ -1268,9 +1308,13 @@ export default function DevLogger() {
         }
       }
 
-      setAiAnalysisStep('4/4 🚀 Publicando card na coluna Em Análise...');
+      setAiAnalysisStep('5/5 🚀 Publicando card com imagem na coluna Em Análise...');
 
-      // 7. Inserir o Card na tabela crm_leads
+      // 8. Inserir o Card na tabela crm_leads com a imagem anexada no topo
+      const mediaHeader = uploadedScreenshotUrl 
+        ? `![📸 Evidência Visual DevLogger](${uploadedScreenshotUrl})\n\n` 
+        : '';
+
       const leadPayload = {
         tenant_id: targetBoard.tenant_id || currentTenantId,
         board_id: targetBoard.id,
@@ -1284,7 +1328,7 @@ export default function DevLogger() {
         agent_id: null,
         due_date: null,
         tags: Array.from(new Set([...(aiPlan.tags || []), aiPlan.category || 'Correção', 'IA-PLANO', 'DEVLOGGER'])),
-        notes: `${aiPlan.summary}\n\n${aiPlan.technical_plan}`
+        notes: `${mediaHeader}${aiPlan.summary}\n\n${aiPlan.technical_plan}`
       };
 
       const { data: insertedLead, error: insertError } = await supabase
@@ -1295,7 +1339,7 @@ export default function DevLogger() {
 
       if (insertError) throw insertError;
 
-      // 8. Sucesso e Notificação
+      // 9. Sucesso e Notificação
       setCreatedCardLead(insertedLead);
       setCreatedCardBoardId(targetBoard.id);
       setCreatedCardBoardName(targetBoard.name || 'Desenvolvimento & Roadmap');
@@ -1304,9 +1348,9 @@ export default function DevLogger() {
 
       addLog({
         type: 'success',
-        message: `✨ Card de Correção Criado com Sucesso com I.A!\nQuadro: "${targetBoard.name}" | Coluna: "Em Análise"\nTítulo: ${aiPlan.title}`,
+        message: `✨ Card de Correção Criado com Sucesso com I.A!\nQuadro: "${targetBoard.name}" | Coluna: "Em Análise"\nTítulo: ${aiPlan.title}${uploadedScreenshotUrl ? '\n📸 Print do DevLogger anexado à galeria do Card.' : ''}`,
         source: 'Gemini AI (SRE)',
-        details: { leadId: insertedLead.id, boardId: targetBoard.id, title: aiPlan.title, priority: aiPlan.priority, tags: aiPlan.tags }
+        details: { leadId: insertedLead.id, boardId: targetBoard.id, title: aiPlan.title, priority: aiPlan.priority, tags: aiPlan.tags, mediaUrl: uploadedScreenshotUrl }
       });
 
     } catch (err: any) {
@@ -1844,7 +1888,7 @@ export default function DevLogger() {
       )}
 
       <div className={`fixed z-[9999] right-2 sm:right-6 transition-all duration-300 ease-out ${isVisible ? 'top-2 sm:top-3 bottom-2 sm:bottom-3 flex flex-col pointer-events-auto' : '-top-[1000px] pointer-events-none'}`}>
-        <div className="bg-[#070c10]/95 backdrop-blur-3xl border border-white/10 rounded-[28px] shadow-[0_25px_70px_rgba(0,0,0,0.95)] w-[96vw] sm:w-[740px] md:w-[820px] max-w-[96vw] flex flex-col max-h-full overflow-hidden text-[#d1d7db] transition-all duration-300 relative group/card border-t border-white/20 my-auto">
+        <div ref={devLoggerModalRef} className="bg-[#070c10]/95 backdrop-blur-3xl border border-white/10 rounded-[28px] shadow-[0_25px_70px_rgba(0,0,0,0.95)] w-[96vw] sm:w-[740px] md:w-[820px] max-w-[96vw] flex flex-col max-h-full overflow-hidden text-[#d1d7db] transition-all duration-300 relative group/card border-t border-white/20 my-auto">
           
           {/* Brilho Radial de Fundo Neon */}
           <div className="absolute -top-24 -left-24 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />

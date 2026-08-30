@@ -120,6 +120,7 @@ async function getDevQueue(action = 'list', cardIdToMove = null, targetStatus = 
       .from('crm_leads')
       .select('*')
       .eq('board_id', board.id)
+      .order('position', { ascending: true })
       .order('created_at', { ascending: true });
 
     if (leadsErr) {
@@ -135,6 +136,48 @@ async function getDevQueue(action = 'list', cardIdToMove = null, targetStatus = 
       { id: 'done', label: 'Concluído / Produção' }
     ];
 
+    // Helper para extrair mídias/imagens anexadas nas notas do card
+    const extractCardMedia = (notes) => {
+      if (!notes || typeof notes !== 'string') return [];
+      const items = [];
+      const seenUrls = new Set();
+
+      // 1. Imagens markdown: ![alt](url)
+      const imgRegex = /!\[(.*?)\]\((https?:\/\/[^\s\)]+)\)/g;
+      let m;
+      while ((m = imgRegex.exec(notes)) !== null) {
+        const url = m[2]?.trim();
+        if (url && !seenUrls.has(url)) {
+          seenUrls.add(url);
+          items.push({ name: m[1]?.trim() || 'Captura Anexada', url, type: 'image' });
+        }
+      }
+
+      // 2. URLs diretas de storage chat_media
+      const storageRegex = /(https?:\/\/[^\s"'<>]+\/chat_media\/crm_cards\/[^\s"'<>]+)/gi;
+      while ((m = storageRegex.exec(notes)) !== null) {
+        const url = m[1]?.trim();
+        if (url && !seenUrls.has(url)) {
+          seenUrls.add(url);
+          const fileName = url.split('/').pop()?.split('?')[0] || 'Evidência Anexada';
+          const isVideo = /\.(mp4|webm|mov)$/i.test(fileName);
+          const isAudio = /\.(mp3|wav|ogg|m4a|opus)$/i.test(fileName);
+          items.push({ name: fileName, url, type: isVideo ? 'video' : isAudio ? 'audio' : 'image' });
+        }
+      }
+
+      return items;
+    };
+
+    const enrichLead = (lead) => {
+      const media = extractCardMedia(lead.notes);
+      return {
+        ...lead,
+        media_count: media.length,
+        attached_media: media
+      };
+    };
+
     const grouped = {
       backlog: [],
       analysis: [],
@@ -145,19 +188,20 @@ async function getDevQueue(action = 'list', cardIdToMove = null, targetStatus = 
     };
 
     (leads || []).forEach(lead => {
+      const enriched = enrichLead(lead);
       const st = (lead.status || '').toLowerCase();
       if (st === 'backlog' || st.includes('backlog') || st.includes('ideia')) {
-        grouped.backlog.push(lead);
+        grouped.backlog.push(enriched);
       } else if (st === 'analysis' || st.includes('análise') || st.includes('analise')) {
-        grouped.analysis.push(lead);
+        grouped.analysis.push(enriched);
       } else if (st === 'development' || st.includes('desenvolvimento') || st.includes('progresso') || st.includes('andamento')) {
-        grouped.development.push(lead);
+        grouped.development.push(enriched);
       } else if (st === 'testing' || st.includes('teste') || st.includes('qa') || st.includes('validação')) {
-        grouped.testing.push(lead);
+        grouped.testing.push(enriched);
       } else if (st === 'done' || st.includes('conclu') || st.includes('produção') || st.includes('producao')) {
-        grouped.done.push(lead);
+        grouped.done.push(enriched);
       } else {
-        grouped.others.push(lead);
+        grouped.others.push(enriched);
       }
     });
 
@@ -195,3 +239,4 @@ const cardId = args[1] || null;
 const targetStatus = args[2] || 'testing';
 
 getDevQueue(action, cardId, targetStatus);
+

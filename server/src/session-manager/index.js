@@ -556,17 +556,26 @@ class SessionManager {
             const isAlphaWorker = currentNodeId.includes('alpha') || (process.env.APP_ENV || '').toLowerCase() === 'alpha';
             const isProductionOwner = assignedNodeId && (assignedNodeId === 'production-worker' || assignedNodeId.includes('prod'));
 
+            // Reconhecer se o lock já pertence ao nó atual ou ao mesmo cluster
+            const isSameNodeOwner = Boolean(
+                assignedNodeId && (
+                    assignedNodeId === currentNodeId ||
+                    (isAlphaWorker && (assignedNodeId === 'alpha-worker' || assignedNodeId.includes('alpha'))) ||
+                    (isProductionMaster && (assignedNodeId === 'production-worker' || assignedNodeId.includes('prod')))
+                )
+            );
+
             // Permite assumir o lock se:
             // 1. Forçado explicitamente (force)
             // 2. Precedência de Produção (isMasterTakeover)
             // 3. Não possui nó atribuído
-            // 4. Já pertence ao nó atual
+            // 4. Já pertence ao nó atual ou mesmo cluster (isSameNodeOwner)
             // 5. O lease expirou
             // 6. O status é explicitamente inativo
             // 7. O worker proprietário está sem heartbeat há mais de 30s
             // 8. Última tentativa de backoff atingida e o nó não está com heartbeat recente (< 20s) E não é Alpha tentando roubar Produção
-            const isOtherHeartbeatFresh = assignedNodeId && assignedNodeId !== currentNodeId && isLeaseActive && timeSinceLastUpdate <= 20000;
-            const canTakeover = force || isMasterTakeover || !assignedNodeId || assignedNodeId === currentNodeId || !isLeaseActive || isExplicitlyDeadStatus || isStaleWorker || isDeadInterim || (attempt === maxLockAttempts && !isOtherHeartbeatFresh && (!isAlphaWorker || !isProductionOwner));
+            const isOtherHeartbeatFresh = assignedNodeId && !isSameNodeOwner && isLeaseActive && timeSinceLastUpdate <= 20000;
+            const canTakeover = force || isMasterTakeover || !assignedNodeId || isSameNodeOwner || !isLeaseActive || isExplicitlyDeadStatus || isStaleWorker || isDeadInterim || (attempt === maxLockAttempts && !isOtherHeartbeatFresh && (!isAlphaWorker || !isProductionOwner));
 
             if (canTakeover) {
                 const leaseUntil = new Date(Date.now() + 45000).toISOString();
@@ -599,7 +608,7 @@ class SessionManager {
 
             // Se for a última tentativa e o outro nó for Produção legítima com heartbeat super ativo (< 20s), informa e preserva
             if (attempt === maxLockAttempts) {
-                if (inst.status === 'connected' && assignedNodeId && assignedNodeId !== currentNodeId && timeSinceLastUpdate <= 20000 && !force) {
+                if (inst.status === 'connected' && assignedNodeId && !isSameNodeOwner && timeSinceLastUpdate <= 20000 && !force) {
                     if (isAlphaWorker && isProductionOwner) {
                         console.log(`[SessionManager/Lock/Alpha] Instância ${instanceId} pertence ao nó de produção ${assignedNodeId}. O nó Alpha não interferirá.`);
                         throw new Error(`Instância ${instanceId} pertence ao nó de produção ${assignedNodeId}`);
@@ -612,7 +621,7 @@ class SessionManager {
 
             const backoffMs = attempt * 2000;
             const remainingLease = leaseExpiry ? Math.max(0, Math.round((leaseExpiry.getTime() - Date.now()) / 1000)) : 0;
-            console.warn(`[SessionManager/Lock] Aguardando liberação do lock da instância ${instanceId} (nó atual: ${assignedNodeId || 'nenhum'}, heartbeat há ${Math.round(timeSinceLastUpdate / 1000)}s, lease restante: ${remainingLease}s, tentativa ${attempt}/${maxLockAttempts}) em ${backoffMs / 1000}s...`);
+            console.log(`[SessionManager/Lock] Aguardando liberação do lock da instância ${instanceId} (nó atual: ${assignedNodeId || 'nenhum'}, heartbeat há ${Math.round(timeSinceLastUpdate / 1000)}s, lease restante: ${remainingLease}s, tentativa ${attempt}/${maxLockAttempts}) em ${backoffMs / 1000}s...`);
             await new Promise(r => setTimeout(r, backoffMs));
         }
 
