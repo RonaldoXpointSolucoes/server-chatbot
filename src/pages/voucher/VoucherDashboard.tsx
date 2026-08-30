@@ -202,6 +202,13 @@ export default function VoucherDashboard() {
       if (vRes.status === 'fulfilled' && vRes.value.data && vRes.value.data.length > 0) {
         setVouchers(vRes.value.data);
         localStorage.setItem(`voucher_items_${tenantId}`, JSON.stringify(vRes.value.data));
+        vRes.value.data.forEach((vItem: any) => {
+          if (vItem.public_token) {
+            try {
+              localStorage.setItem(`voucher_token_${vItem.public_token}`, JSON.stringify(vItem));
+            } catch (_) {}
+          }
+        });
       }
       if (cRes.status === 'fulfilled' && cRes.value.data && cRes.value.data.length > 0) {
         setCampanhas(cRes.value.data);
@@ -225,6 +232,29 @@ export default function VoucherDashboard() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Sincroniza vouchers do estado local para a chave direta de cada token
+  useEffect(() => {
+    if (vouchers && vouchers.length > 0) {
+      vouchers.forEach((vItem: any) => {
+        if (vItem.public_token) {
+          try {
+            localStorage.setItem(`voucher_token_${vItem.public_token}`, JSON.stringify(vItem));
+          } catch (_) {}
+        }
+      });
+    }
+  }, [vouchers]);
+
+  // Abertura com garantia de persistência instantânea
+  const handleOpenVoucherDigital = (voucher: any) => {
+    try {
+      if (voucher && voucher.public_token) {
+        localStorage.setItem(`voucher_token_${voucher.public_token}`, JSON.stringify(voucher));
+      }
+    } catch (_) {}
+    window.open(`/voucher/${voucher.public_token}`, '_blank');
+  };
 
   // Consulta e auto-preenchimento de CNPJ
   const handleCnpjLookup = async (overrideCnpj?: string) => {
@@ -806,65 +836,80 @@ export default function VoucherDashboard() {
         </div>
       </div>
 
-      {/* Navegação de Abas Fluida */}
-      <div className="flex items-center justify-between gap-3 border-b border-black/10 dark:border-white/10 pb-2 overflow-x-auto">
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setActiveTab('vouchers')}
-            className={`px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center gap-2 min-h-[44px] shrink-0 ${
-              activeTab === 'vouchers'
-                ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
-                : 'text-slate-500 dark:text-slate-400 hover:bg-black/5 dark:hover:bg-white/5'
-            }`}
-          >
-            <Ticket className="w-3.5 h-3.5" />
-            <span>Vouchers ({vouchers.length})</span>
-          </button>
+      {/* Navegação de Abas Fluida (Estilo Pílula - Zero Cortes) */}
+      <div className="border-b border-black/10 dark:border-white/10 pb-3 pt-1">
+        <div className="flex items-center justify-between gap-3 overflow-x-auto scrollbar-none py-1.5 px-0.5">
+          <div className="flex items-center gap-2.5 sm:gap-3 shrink-0">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'vouchers'}
+              onClick={() => setActiveTab('vouchers')}
+              className={`px-5 sm:px-6 py-3 rounded-2xl text-xs font-black uppercase tracking-wider transition-all duration-200 cursor-pointer flex items-center justify-center gap-2.5 min-h-[48px] shrink-0 select-none ${
+                activeTab === 'vouchers'
+                  ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/25 scale-[1.02] border border-emerald-400/30'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5'
+              }`}
+            >
+              <Ticket className="w-4 h-4 shrink-0" />
+              <span>VOUCHERS ({vouchers.length})</span>
+            </button>
+
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'campanhas'}
+              onClick={() => setActiveTab('campanhas')}
+              className={`px-5 sm:px-6 py-3 rounded-2xl text-xs font-black uppercase tracking-wider transition-all duration-200 cursor-pointer flex items-center justify-center gap-2.5 min-h-[48px] shrink-0 select-none ${
+                activeTab === 'campanhas'
+                  ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/25 scale-[1.02] border border-emerald-400/30'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5'
+              }`}
+            >
+              <Calendar className="w-4 h-4 shrink-0" />
+              <span>CAMPANHAS ({campanhas.length})</span>
+            </button>
+
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'empresas'}
+              onClick={() => setActiveTab('empresas')}
+              className={`px-5 sm:px-6 py-3 rounded-2xl text-xs font-black uppercase tracking-wider transition-all duration-200 cursor-pointer flex items-center justify-center gap-2.5 min-h-[48px] shrink-0 select-none ${
+                activeTab === 'empresas'
+                  ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/25 scale-[1.02] border border-emerald-400/30'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5'
+              }`}
+            >
+              <Building2 className="w-4 h-4 shrink-0" />
+              <span>EMPRESAS ({empresas.length})</span>
+            </button>
+
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'auditoria'}
+              onClick={() => setActiveTab('auditoria')}
+              className={`px-5 sm:px-6 py-3 rounded-2xl text-xs font-black uppercase tracking-wider transition-all duration-200 cursor-pointer flex items-center justify-center gap-2.5 min-h-[48px] shrink-0 select-none ${
+                activeTab === 'auditoria'
+                  ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/25 scale-[1.02] border border-emerald-400/30'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5'
+              }`}
+            >
+              <History className="w-4 h-4 shrink-0" />
+              <span>AUDITORIA ({events.length})</span>
+            </button>
+          </div>
 
           <button
-            onClick={() => setActiveTab('campanhas')}
-            className={`px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center gap-2 min-h-[44px] shrink-0 ${
-              activeTab === 'campanhas'
-                ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
-                : 'text-slate-500 dark:text-slate-400 hover:bg-black/5 dark:hover:bg-white/5'
-            }`}
+            type="button"
+            onClick={fetchData}
+            className="p-3 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-2xl cursor-pointer shrink-0 min-h-[48px] min-w-[48px] flex items-center justify-center transition-colors"
+            title="Atualizar dados"
           >
-            <Calendar className="w-3.5 h-3.5" />
-            <span>Campanhas ({campanhas.length})</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('empresas')}
-            className={`px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center gap-2 min-h-[44px] shrink-0 ${
-              activeTab === 'empresas'
-                ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
-                : 'text-slate-500 dark:text-slate-400 hover:bg-black/5 dark:hover:bg-white/5'
-            }`}
-          >
-            <Building2 className="w-3.5 h-3.5" />
-            <span>Empresas ({empresas.length})</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('auditoria')}
-            className={`px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center gap-2 min-h-[44px] shrink-0 ${
-              activeTab === 'auditoria'
-                ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
-                : 'text-slate-500 dark:text-slate-400 hover:bg-black/5 dark:hover:bg-white/5'
-            }`}
-          >
-            <History className="w-3.5 h-3.5" />
-            <span>Auditoria ({events.length})</span>
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
         </div>
-
-        <button
-          onClick={fetchData}
-          className="p-2.5 text-slate-500 dark:text-slate-400 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl cursor-pointer shrink-0"
-          title="Atualizar dados"
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-        </button>
       </div>
 
       {/* ========================================================= */}
@@ -966,7 +1011,7 @@ export default function VoucherDashboard() {
                           </button>
 
                           <button
-                            onClick={() => window.open(`/voucher/${v.public_token}`, '_blank')}
+                            onClick={() => handleOpenVoucherDigital(v)}
                             className="p-2.5 bg-black/5 dark:bg-white/10 hover:bg-black/10 rounded-xl text-slate-400 hover:text-white cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center"
                             title="Abrir Voucher Digital"
                           >
@@ -1048,7 +1093,7 @@ export default function VoucherDashboard() {
                             </button>
 
                             <button
-                              onClick={() => window.open(`/voucher/${v.public_token}`, '_blank')}
+                              onClick={() => handleOpenVoucherDigital(v)}
                               className="p-2 bg-black/5 dark:bg-white/10 hover:bg-black/10 rounded-xl text-slate-400 hover:text-white cursor-pointer transition-all active:scale-95 min-h-[40px] min-w-[40px] inline-flex items-center justify-center"
                               title="Abrir Voucher Digital"
                             >

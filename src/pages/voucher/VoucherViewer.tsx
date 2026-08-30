@@ -36,16 +36,95 @@ export default function VoucherViewer() {
 
   const countdownTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // 1. Carrega dados do voucher da API ou Supabase
+  // 1. Carrega dados do voucher de múltiplas fontes (LocalStorage, Backend API, Supabase)
   const loadVoucher = useCallback(async () => {
     if (!token) return;
     try {
       setLoading(true);
       setError(null);
 
-      // Tenta via backend engine
+      const cleanToken = token.trim();
+
+      // --- CAMADA 1: Busca no LocalStorage (Cache Instantâneo e Testes Locais) ---
       try {
-        const res = await fetch(`${ENGINE_URL}/api/v1/vouchers/public/${token}?_t=${Date.now()}`);
+        // Busca direta pela chave do token
+        const directCached = localStorage.getItem(`voucher_token_${cleanToken}`);
+        if (directCached) {
+          const v = JSON.parse(directCached);
+          if (v && (v.public_token === cleanToken || v.id === cleanToken)) {
+            setVoucherData({
+              id: v.id,
+              public_token: v.public_token || cleanToken,
+              status: v.status || 'CRIADO',
+              valor: Number(v.valor) || 40.0,
+              beneficiario_nome: v.beneficiario_nome || 'Colaborador',
+              beneficiario_whatsapp: v.beneficiario_whatsapp || '',
+              validade_fim: v.validade_fim || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+              campanha_nome: v.voucher_campanhas?.nome || v.campanha_nome || 'Benefício Corporativo',
+              campanha_descricao: v.voucher_campanhas?.descricao || v.campanha_descricao || 'Apresente este voucher no caixa para obter seu desconto.',
+              empresa_razao_social: v.voucher_empresas_parceiras?.razao_social || v.empresa_razao_social || 'Empresa Parceira',
+              empresa_nome_fantasia: v.voucher_empresas_parceiras?.nome_fantasia || v.empresa_nome_fantasia,
+              horarios_permitidos: v.voucher_campanhas?.horarios_permitidos || v.horarios_permitidos,
+              data_resgate: v.data_resgate
+            });
+            setQrJwt(v.public_token || cleanToken);
+            setCountdown(QR_INTERVAL);
+            setLoading(false);
+            return;
+          }
+        }
+
+        // Varredura em todas as listas de vouchers salvas no localStorage
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && (key.startsWith('voucher_items_') || key.startsWith('vouchers_'))) {
+            const raw = localStorage.getItem(key);
+            if (raw) {
+              const list = JSON.parse(raw);
+              if (Array.isArray(list)) {
+                const found = list.find((item: any) => item.public_token === cleanToken || item.id === cleanToken);
+                if (found) {
+                  setVoucherData({
+                    id: found.id,
+                    public_token: found.public_token || cleanToken,
+                    status: found.status || 'CRIADO',
+                    valor: Number(found.valor) || 40.0,
+                    beneficiario_nome: found.beneficiario_nome || 'Colaborador',
+                    beneficiario_whatsapp: found.beneficiario_whatsapp || '',
+                    validade_fim: found.validade_fim || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+                    campanha_nome: found.voucher_campanhas?.nome || found.campanha_nome || 'Benefício Corporativo',
+                    campanha_descricao: found.voucher_campanhas?.descricao || found.campanha_descricao || 'Apresente este voucher no caixa para obter seu desconto.',
+                    empresa_razao_social: found.voucher_empresas_parceiras?.razao_social || found.empresa_razao_social || 'Empresa Parceira',
+                    empresa_nome_fantasia: found.voucher_empresas_parceiras?.nome_fantasia || found.empresa_nome_fantasia,
+                    horarios_permitidos: found.voucher_campanhas?.horarios_permitidos || found.horarios_permitidos,
+                    data_resgate: found.data_resgate
+                  });
+                  setQrJwt(found.public_token || cleanToken);
+                  setCountdown(QR_INTERVAL);
+                  setLoading(false);
+
+                  // Grava na chave direta para próximos acessos
+                  localStorage.setItem(`voucher_token_${cleanToken}`, JSON.stringify(found));
+                  return;
+                }
+              }
+            }
+          }
+        }
+      } catch (localErr) {
+        console.warn('[VoucherViewer] Erro ao ler do localStorage:', localErr);
+      }
+
+      // --- CAMADA 2: Busca via Backend REST Engine ---
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 4000);
+
+        const res = await fetch(`${ENGINE_URL}/api/v1/vouchers/public/${cleanToken}?_t=${Date.now()}`, {
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+
         if (res.ok) {
           const json = await res.json();
           if (json.success && json.voucher) {
@@ -53,40 +132,50 @@ export default function VoucherViewer() {
             setQrJwt(json.qrJwt || json.voucher.public_token);
             setCountdown(json.expiresInSeconds || QR_INTERVAL);
             setLoading(false);
+            localStorage.setItem(`voucher_token_${cleanToken}`, JSON.stringify(json.voucher));
             return;
           }
         }
       } catch (apiErr) {
-        console.warn('Fallback para Supabase direto:', apiErr);
+        console.warn('[VoucherViewer] Backend não respondeu, tentando Supabase direto:', apiErr);
       }
 
-      // Fallback direto no Supabase
-      const { data, error: dbErr } = await supabase
-        .from('vouchers')
-        .select('*, voucher_campanhas(*), voucher_empresas_parceiras(*), voucher_colaboradores(*)')
-        .eq('public_token', token)
-        .maybeSingle();
+      // --- CAMADA 3: Busca no Banco Supabase ---
+      try {
+        const { data, error: dbErr } = await supabase
+          .from('vouchers')
+          .select('*, voucher_campanhas(*), voucher_empresas_parceiras(*), voucher_colaboradores(*)')
+          .eq('public_token', cleanToken)
+          .maybeSingle();
 
-      if (dbErr || !data) {
-        throw new Error('Voucher não localizado ou inválido.');
+        if (!dbErr && data) {
+          const formatted = {
+            id: data.id,
+            public_token: data.public_token,
+            status: data.status,
+            valor: data.valor,
+            beneficiario_nome: data.beneficiario_nome || data.voucher_colaboradores?.nome || 'Colaborador',
+            beneficiario_whatsapp: data.beneficiario_whatsapp || '',
+            validade_fim: data.validade_fim,
+            campanha_nome: data.voucher_campanhas?.nome || 'Campanha Corporativa',
+            campanha_descricao: data.voucher_campanhas?.descricao,
+            empresa_razao_social: data.voucher_empresas_parceiras?.razao_social || 'Empresa Parceira',
+            empresa_nome_fantasia: data.voucher_empresas_parceiras?.nome_fantasia,
+            horarios_permitidos: data.voucher_campanhas?.horarios_permitidos,
+            data_resgate: data.data_resgate
+          };
+          setVoucherData(formatted);
+          setQrJwt(data.public_token);
+          setCountdown(QR_INTERVAL);
+          setLoading(false);
+          localStorage.setItem(`voucher_token_${cleanToken}`, JSON.stringify(formatted));
+          return;
+        }
+      } catch (supabaseErr) {
+        console.warn('[VoucherViewer] Erro na consulta do Supabase:', supabaseErr);
       }
 
-      setVoucherData({
-        id: data.id,
-        public_token: data.public_token,
-        status: data.status,
-        valor: data.valor,
-        beneficiario_nome: data.beneficiario_nome || data.voucher_colaboradores?.nome || 'Colaborador',
-        validade_fim: data.validade_fim,
-        campanha_nome: data.voucher_campanhas?.nome || 'Campanha Corporativa',
-        campanha_descricao: data.voucher_campanhas?.descricao,
-        empresa_razao_social: data.voucher_empresas_parceiras?.razao_social || 'Empresa Parceira',
-        empresa_nome_fantasia: data.voucher_empresas_parceiras?.nome_fantasia,
-        horarios_permitidos: data.voucher_campanhas?.horarios_permitidos,
-        data_resgate: data.data_resgate
-      });
-      setQrJwt(data.public_token);
-      setCountdown(QR_INTERVAL);
+      throw new Error('Voucher não localizado ou inválido.');
     } catch (err: any) {
       setError(err.message || 'Erro ao carregar voucher.');
     } finally {

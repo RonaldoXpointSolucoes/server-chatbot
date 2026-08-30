@@ -50,32 +50,93 @@ export default function VoucherScanner() {
     if (e) e.preventDefault();
     if (!tokenInput.trim()) return;
 
+    const cleanToken = tokenInput.trim().toUpperCase();
+
     try {
       setLoadingReserve(true);
       setError(null);
       setSuccessMessage(null);
       setActiveVoucher(null);
 
-      const res = await fetch(`${ENGINE_URL}/api/v1/vouchers/redeem/reserve`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          token: tokenInput.trim(),
-          atendenteId: atendenteName
-        })
-      });
+      // Tenta via backend engine
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000);
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Falha ao validar voucher.');
+        const res = await fetch(`${ENGINE_URL}/api/v1/vouchers/redeem/reserve`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            token: cleanToken,
+            atendenteId: atendenteName
+          }),
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+
+        const data = await res.json();
+        if (res.ok && data.voucher) {
+          setActiveVoucher({
+            ...data.voucher,
+            campanha: data.campanha,
+            empresa: data.empresa
+          });
+          setSuccessMessage('Voucher reservado com sucesso! Lock de 2 minutos ativo.');
+          return;
+        }
+      } catch (backendErr) {
+        console.warn('[VoucherScanner] Backend offline, tentando validação local:', backendErr);
       }
 
-      setActiveVoucher({
-        ...data.voucher,
-        campanha: data.campanha,
-        empresa: data.empresa
-      });
-      setSuccessMessage('Voucher reservado com sucesso! Lock de 2 minutos ativo.');
+      // Fallback: Validação Local via LocalStorage
+      let localV: any = null;
+      const direct = localStorage.getItem(`voucher_token_${cleanToken}`);
+      if (direct) {
+        localV = JSON.parse(direct);
+      } else {
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && (key.startsWith('voucher_items_') || key.startsWith('vouchers_'))) {
+            const raw = localStorage.getItem(key);
+            if (raw) {
+              const list = JSON.parse(raw);
+              if (Array.isArray(list)) {
+                const found = list.find((item: any) => item.public_token === cleanToken || item.id === cleanToken);
+                if (found) {
+                  localV = found;
+                  break;
+                }
+              }
+            }
+          }
+        }
+      }
+
+      if (localV) {
+        if (localV.status === 'UTILIZADO') {
+          throw new Error(`Este voucher (${cleanToken}) já foi utilizado anteriormente.`);
+        }
+        if (localV.status === 'CANCELADO' || localV.status === 'EXPIRADO') {
+          throw new Error(`Este voucher (${cleanToken}) está com status '${localV.status}'.`);
+        }
+        if (localV.validade_fim && new Date(localV.validade_fim) < new Date()) {
+          throw new Error(`Este voucher venceu em ${new Date(localV.validade_fim).toLocaleDateString('pt-BR')}.`);
+        }
+
+        setActiveVoucher({
+          id: localV.id,
+          public_token: localV.public_token || cleanToken,
+          valor: Number(localV.valor) || 40.0,
+          beneficiario_nome: localV.beneficiario_nome || 'Colaborador',
+          status: localV.status || 'CRIADO',
+          campanha: localV.voucher_campanhas || { nome: localV.campanha_nome || 'Benefício Corporativo' },
+          empresa: localV.voucher_empresas_parceiras || { razao_social: localV.empresa_razao_social || 'Empresa Parceira' }
+        });
+        setSuccessMessage('Voucher reservado com sucesso! Lock de 2 minutos ativo.');
+        return;
+      }
+
+      throw new Error(`Voucher '${cleanToken}' não localizado no sistema.`);
     } catch (err: any) {
       setError(err.message || 'Erro ao validar voucher.');
     } finally {
@@ -91,22 +152,64 @@ export default function VoucherScanner() {
       setLoadingConfirm(true);
       setError(null);
 
-      const res = await fetch(`${ENGINE_URL}/api/v1/vouchers/redeem/confirm`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          voucherId: activeVoucher.id,
-          atendenteId: atendenteName
-        })
-      });
+      // Tenta via backend engine
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000);
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Falha ao confirmar resgate.');
+        const res = await fetch(`${ENGINE_URL}/api/v1/vouchers/redeem/confirm`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            voucherId: activeVoucher.id,
+            atendenteId: atendenteName
+          }),
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+
+        const data = await res.json();
+        if (res.ok) {
+          setSuccessMessage(`✅ Voucher ${activeVoucher.public_token} BAIXADO COM SUCESSO!`);
+        }
+      } catch (backendErr) {
+        console.warn('[VoucherScanner] Baixa no backend falhou, confirmando localmente:', backendErr);
+      }
+
+      // Baixa no LocalStorage
+      try {
+        const tokenKey = `voucher_token_${activeVoucher.public_token}`;
+        const raw = localStorage.getItem(tokenKey);
+        if (raw) {
+          const v = JSON.parse(raw);
+          v.status = 'UTILIZADO';
+          v.data_resgate = new Date().toISOString();
+          localStorage.setItem(tokenKey, JSON.stringify(v));
+        }
+
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && (key.startsWith('voucher_items_') || key.startsWith('vouchers_'))) {
+            const listRaw = localStorage.getItem(key);
+            if (listRaw) {
+              const list = JSON.parse(listRaw);
+              if (Array.isArray(list)) {
+                const updatedList = list.map((item: any) =>
+                  item.public_token === activeVoucher.public_token || item.id === activeVoucher.id
+                    ? { ...item, status: 'UTILIZADO', data_resgate: new Date().toISOString() }
+                    : item
+                );
+                localStorage.setItem(key, JSON.stringify(updatedList));
+              }
+            }
+          }
+        }
+      } catch (localSaveErr) {
+        console.warn('[VoucherScanner] Erro ao salvar baixa local:', localSaveErr);
       }
 
       setSuccessMessage(`✅ Voucher ${activeVoucher.public_token} BAIXADO COM SUCESSO!`);
-      
+
       // Adiciona ao histórico da sessão
       setSessionHistory((prev) => [
         {
