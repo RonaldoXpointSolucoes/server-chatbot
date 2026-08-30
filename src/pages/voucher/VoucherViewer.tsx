@@ -17,7 +17,10 @@ import {
   Calendar,
   Sparkles,
   Loader2,
-  Info
+  Info,
+  Ban,
+  XCircle,
+  AlertOctagon
 } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 
@@ -360,28 +363,51 @@ export default function VoucherViewer() {
 
         </div>
 
-        {/* QR Code Dinâmico ou Mensagem de Utilizado */}
+        {/* QR Code Dinâmico ou Card de Bloqueio/Utilizado */}
         {isUtilizado ? (
-          <div className="p-6 bg-purple-500/10 border border-purple-500/30 rounded-[28px] text-center space-y-3 animate-in fade-in">
-            <div className="w-14 h-14 rounded-full bg-purple-500/20 border border-purple-500/40 text-purple-300 flex items-center justify-center mx-auto shadow-lg shadow-purple-500/20">
-              <CheckCircle2 className="w-8 h-8 text-purple-400" />
+          <div className="p-6 bg-gradient-to-b from-rose-950/60 via-[#111b21] to-[#0c1317] border-2 border-rose-500/60 rounded-[28px] text-center space-y-4 shadow-[0_0_35px_rgba(244,63,94,0.25)] animate-in zoom-in-95 duration-200 relative overflow-hidden">
+            
+            {/* Marca d'água / Carimbo Diagonal */}
+            <div className="absolute -right-8 -top-8 bg-rose-600/20 border border-rose-500/40 text-rose-300 text-[10px] font-black uppercase px-10 py-1.5 rotate-45 pointer-events-none tracking-widest shadow-lg">
+              UTILIZADO
             </div>
-            <h3 className="text-base font-black text-white">Voucher Resgatado com Sucesso!</h3>
-            <p className="text-xs text-slate-300">
-              Este benefício já foi validado e baixado no caixa em{' '}
-              <strong className="text-purple-300">{new Date(voucherData.data_resgate || Date.now()).toLocaleString('pt-BR')}</strong>.
-            </p>
+
+            <div className="w-16 h-16 rounded-2xl bg-rose-600/25 border-2 border-rose-500/70 text-rose-400 flex items-center justify-center mx-auto shadow-lg shadow-rose-600/30">
+              <CheckCircle2 className="w-9 h-9 text-rose-400 animate-pulse" />
+            </div>
+
+            <div>
+              <span className="px-3 py-0.5 bg-rose-600/30 text-rose-300 border border-rose-500/50 rounded-full text-[10px] font-black uppercase tracking-wider inline-flex items-center gap-1">
+                <Ban className="w-3 h-3 text-rose-400" />
+                BAIXA CONCLUÍDA • USO BLOQUEADO
+              </span>
+              <h3 className="text-base sm:text-lg font-black text-white mt-2">
+                Voucher Já Foi Resgatado!
+              </h3>
+            </div>
+
+            <div className="p-3 bg-[#0c1317] rounded-xl border border-rose-500/20 text-xs text-rose-200 space-y-1 text-left">
+              <p className="font-semibold">
+                Este benefício foi validado e baixado no caixa em:
+              </p>
+              <p className="font-mono font-black text-rose-300 text-sm">
+                {new Date(voucherData.data_resgate || Date.now()).toLocaleString('pt-BR')}
+              </p>
+              <p className="text-[11px] text-slate-400 pt-1 border-t border-white/5">
+                Não é permitido reutilizar o voucher para novos pedidos.
+              </p>
+            </div>
           </div>
         ) : (
-          <div className="bg-[#0c1317] p-5 rounded-[28px] border border-white/10 flex flex-col items-center justify-center space-y-3 text-center shadow-inner">
+          <div className="bg-gradient-to-b from-[#0e211b] to-[#0c1317] p-5 rounded-[28px] border-2 border-emerald-500/50 flex flex-col items-center justify-center space-y-3.5 text-center shadow-[0_0_35px_rgba(16,185,129,0.2)]">
             
-            <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-1.5">
-              <Zap className="w-3 h-3 text-emerald-400" />
-              <span>Apresente este QR Code no Balcão</span>
+            <span className="px-3 py-1 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded-full text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 animate-pulse">
+              <Zap className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Voucher Válido • Apresente no Balcão</span>
             </span>
 
             {/* QR Code com borda neon */}
-            <div className="p-3.5 bg-white rounded-2xl shadow-[0_10px_35px_rgba(0,0,0,0.5)] ring-4 ring-emerald-500/30 transition-all hover:scale-105">
+            <div className="p-3.5 bg-white rounded-2xl shadow-[0_10px_35px_rgba(0,0,0,0.6)] ring-4 ring-emerald-500/40 transition-all hover:scale-105">
               <QRCode value={qrJwt || voucherData.public_token} size={180} />
             </div>
 
@@ -392,11 +418,11 @@ export default function VoucherViewer() {
                   <RotateCw className={`w-3 h-3 text-emerald-400 ${isRenewing ? 'animate-spin' : ''}`} />
                   <span>QR Code Dinâmico Antifraude</span>
                 </span>
-                <span className="font-mono text-emerald-300">{countdown}s</span>
+                <span className="font-mono text-emerald-300 font-bold">{countdown}s</span>
               </div>
               <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-1000 ease-linear rounded-full"
+                  className="h-full bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-400 transition-all duration-1000 ease-linear rounded-full shadow-[0_0_10px_rgba(16,185,129,0.8)]"
                   style={{ width: `${(countdown / QR_INTERVAL) * 100}%` }}
                 />
               </div>
@@ -414,6 +440,15 @@ export default function VoucherViewer() {
           <div className="flex items-center gap-2">
             <Clock className="w-3.5 h-3.5 text-teal-400 shrink-0" />
             <span>Campanha: <strong className="text-slate-200">{voucherData.campanha_nome}</strong></span>
+          </div>
+          <div className="flex items-center justify-between pt-1.5 border-t border-white/5 text-[10px]">
+            <span className="flex items-center gap-1 text-slate-400">
+              <ShieldCheck className="w-3 h-3 text-emerald-400" />
+              <span>Ativo Digital Rastreável</span>
+            </span>
+            <span className="font-mono text-emerald-400/80 font-bold">
+              {voucherData.public_token}
+            </span>
           </div>
         </div>
 

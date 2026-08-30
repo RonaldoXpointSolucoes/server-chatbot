@@ -640,6 +640,10 @@ class SessionManager {
         );
     }
 
+    async startSession(tenantId, instanceId, force = false) {
+        return this.createSession(tenantId, instanceId, force);
+    }
+
     async createSession(tenantId, instanceId, force = false) {
         if (!isInstanceAllowedForNode(instanceId, tenantId)) {
             console.log(`[SessionManager/Create/Alpha] Nó Alpha recusou criar sessão da instância de produção ${instanceId}.`);
