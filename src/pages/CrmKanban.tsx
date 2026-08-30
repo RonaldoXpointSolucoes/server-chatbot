@@ -1674,6 +1674,14 @@ export default function CrmKanban() {
         {/* Linha 1: Identidade do Quadro & Botões Principais de Criação */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="flex items-center gap-3.5 min-w-0">
+            <button
+              onClick={() => navigate('/chat')}
+              aria-label="Voltar para o Chat"
+              title="Voltar para o Chat"
+              className="w-11 h-11 rounded-2xl bg-white dark:bg-[#182229] hover:bg-slate-100 dark:hover:bg-white/10 text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 border border-slate-200/80 dark:border-white/[0.08] flex items-center justify-center transition-all duration-200 active:scale-95 shadow-sm shrink-0 cursor-pointer min-h-[48px] min-w-[48px]"
+            >
+              <ChevronLeft size={22} strokeWidth={2.5} />
+            </button>
             <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-violet-600 via-indigo-600 to-cyan-400 text-white flex items-center justify-center shadow-lg shadow-indigo-500/25 shrink-0 ring-4 ring-indigo-500/10">
               <Sparkles size={20} className="animate-pulse text-amber-300" />
             </div>

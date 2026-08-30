@@ -32,10 +32,15 @@ import {
   PlusCircle,
   Layers,
   ChevronRight,
-  User
+  User,
+  MapPin,
+  Mail,
+  Briefcase,
+  Info
 } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 import { useChatStore } from '../../store/chatStore';
+import { lookupCnpj, formatCnpj, formatCep, CnpjData } from '../../services/cnpjService';
 
 const ENGINE_URL = 'https://owckk0k8w8soo40w40owc4ss.69.62.92.212.sslip.io';
 
@@ -140,15 +145,32 @@ export default function VoucherDashboard() {
     dataFim: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
   });
 
-  // Form Empresa
+  // Form Empresa com Campos Detalhados de CNPJ
   const [companyForm, setCompanyForm] = useState({
     razaoSocial: '',
     nomeFantasia: '',
     cnpj: '',
+    cep: '',
+    logradouro: '',
+    numero: '',
+    complemento: '',
+    bairro: '',
+    municipio: '',
+    uf: '',
     contatoNome: '',
     contatoWhatsapp: '',
+    telefoneEmpresa: '',
+    emailEmpresa: '',
+    atividadePrincipal: '',
+    naturezaJuridica: '',
+    dataAbertura: '',
+    statusCnpj: '',
     limiteVouchers: 100
   });
+
+  const [isLoadingCnpj, setIsLoadingCnpj] = useState<boolean>(false);
+  const [cnpjError, setCnpjError] = useState<string | null>(null);
+  const [cnpjSuccessMessage, setCnpjSuccessMessage] = useState<string | null>(null);
 
   const [actionLoading, setActionLoading] = useState<boolean>(false);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
@@ -204,17 +226,80 @@ export default function VoucherDashboard() {
     fetchData();
   }, [fetchData]);
 
+  // Consulta e auto-preenchimento de CNPJ
+  const handleCnpjLookup = async (overrideCnpj?: string) => {
+    const raw = overrideCnpj || companyForm.cnpj;
+    const clean = (raw || '').replace(/\D/g, '');
+    if (clean.length !== 14) {
+      if (clean.length > 0) {
+        setCnpjError('CNPJ deve conter exatamente 14 dígitos numéricos.');
+      }
+      return;
+    }
+
+    try {
+      setIsLoadingCnpj(true);
+      setCnpjError(null);
+      setCnpjSuccessMessage(null);
+
+      const data = await lookupCnpj(clean);
+      setCompanyForm(prev => ({
+        ...prev,
+        cnpj: data.cnpj,
+        razaoSocial: data.razaoSocial || prev.razaoSocial,
+        nomeFantasia: data.nomeFantasia || prev.nomeFantasia,
+        cep: data.cep || prev.cep,
+        logradouro: data.logradouro || prev.logradouro,
+        numero: data.numero || prev.numero,
+        complemento: data.complemento || prev.complemento,
+        bairro: data.bairro || prev.bairro,
+        municipio: data.municipio || prev.municipio,
+        uf: data.uf || prev.uf,
+        telefoneEmpresa: data.telefone || prev.telefoneEmpresa,
+        contatoWhatsapp: prev.contatoWhatsapp || (data.telefone ? data.telefone.replace(/\D/g, '') : ''),
+        emailEmpresa: data.email || prev.emailEmpresa,
+        atividadePrincipal: data.atividadePrincipal || prev.atividadePrincipal,
+        naturezaJuridica: data.naturezaJuridica || prev.naturezaJuridica,
+        dataAbertura: data.dataAbertura || prev.dataAbertura,
+        statusCnpj: data.statusCnpj || prev.statusCnpj
+      }));
+
+      setCnpjSuccessMessage(`CNPJ ${data.cnpj} (${data.statusCnpj || 'Ativa'}) preenchido automaticamente!`);
+      setTimeout(() => setCnpjSuccessMessage(null), 4000);
+    } catch (err: any) {
+      console.warn('Erro ao consultar CNPJ:', err);
+      setCnpjError(err.message || 'Não foi possível consultar o CNPJ. Verifique o número digitado.');
+    } finally {
+      setIsLoadingCnpj(false);
+    }
+  };
+
   // ==============================================================================
   // GESTÃO INLINE DE EMPRESA PARCEIRA (Criação e Edição)
   // ==============================================================================
   const openNewCompanyModal = () => {
     setEditingCompany(null);
+    setCnpjError(null);
+    setCnpjSuccessMessage(null);
     setCompanyForm({
       razaoSocial: '',
       nomeFantasia: '',
       cnpj: '',
+      cep: '',
+      logradouro: '',
+      numero: '',
+      complemento: '',
+      bairro: '',
+      municipio: '',
+      uf: '',
       contatoNome: '',
       contatoWhatsapp: '',
+      telefoneEmpresa: '',
+      emailEmpresa: '',
+      atividadePrincipal: '',
+      naturezaJuridica: '',
+      dataAbertura: '',
+      statusCnpj: '',
       limiteVouchers: 100
     });
     setShowCompanyModal(true);
@@ -222,12 +307,27 @@ export default function VoucherDashboard() {
 
   const openEditCompanyModal = (comp: any) => {
     setEditingCompany(comp);
+    setCnpjError(null);
+    setCnpjSuccessMessage(null);
     setCompanyForm({
       razaoSocial: comp.razao_social || '',
       nomeFantasia: comp.nome_fantasia || '',
       cnpj: comp.cnpj || '',
+      cep: comp.cep || '',
+      logradouro: comp.logradouro || '',
+      numero: comp.numero || '',
+      complemento: comp.complemento || '',
+      bairro: comp.bairro || '',
+      municipio: comp.municipio || '',
+      uf: comp.uf || '',
       contatoNome: comp.contato_nome || '',
       contatoWhatsapp: comp.contato_whatsapp || '',
+      telefoneEmpresa: comp.telefone_empresa || comp.telefone || '',
+      emailEmpresa: comp.email_empresa || comp.email || '',
+      atividadePrincipal: comp.atividade_principal || '',
+      naturezaJuridica: comp.natureza_juridica || '',
+      dataAbertura: comp.data_abertura_cnpj || comp.data_abertura || '',
+      statusCnpj: comp.status_cnpj || '',
       limiteVouchers: comp.limite_vouchers || 100
     });
     setShowCompanyModal(true);
@@ -251,6 +351,19 @@ export default function VoucherDashboard() {
           razao_social: companyForm.razaoSocial.trim(),
           nome_fantasia: companyForm.nomeFantasia.trim() || companyForm.razaoSocial.trim(),
           cnpj: companyForm.cnpj.trim(),
+          cep: companyForm.cep.trim(),
+          logradouro: companyForm.logradouro.trim(),
+          numero: companyForm.numero.trim(),
+          complemento: companyForm.complemento.trim(),
+          bairro: companyForm.bairro.trim(),
+          municipio: companyForm.municipio.trim(),
+          uf: companyForm.uf.trim().toUpperCase(),
+          telefone_empresa: companyForm.telefoneEmpresa.trim(),
+          email_empresa: companyForm.emailEmpresa.trim(),
+          atividade_principal: companyForm.atividadePrincipal.trim(),
+          natureza_juridica: companyForm.naturezaJuridica.trim(),
+          data_abertura_cnpj: companyForm.dataAbertura || null,
+          status_cnpj: companyForm.statusCnpj || 'ATIVA',
           contato_nome: companyForm.contatoNome.trim(),
           contato_whatsapp: companyForm.contatoWhatsapp.replace(/\D/g, ''),
           limite_vouchers: Number(companyForm.limiteVouchers) || 100,
@@ -275,6 +388,19 @@ export default function VoucherDashboard() {
           razao_social: companyForm.razaoSocial.trim(),
           nome_fantasia: companyForm.nomeFantasia.trim() || companyForm.razaoSocial.trim(),
           cnpj: companyForm.cnpj.trim(),
+          cep: companyForm.cep.trim(),
+          logradouro: companyForm.logradouro.trim(),
+          numero: companyForm.numero.trim(),
+          complemento: companyForm.complemento.trim(),
+          bairro: companyForm.bairro.trim(),
+          municipio: companyForm.municipio.trim(),
+          uf: companyForm.uf.trim().toUpperCase(),
+          telefone_empresa: companyForm.telefoneEmpresa.trim(),
+          email_empresa: companyForm.emailEmpresa.trim(),
+          atividade_principal: companyForm.atividadePrincipal.trim(),
+          natureza_juridica: companyForm.naturezaJuridica.trim(),
+          data_abertura_cnpj: companyForm.dataAbertura || null,
+          status_cnpj: companyForm.statusCnpj || 'ATIVA',
           contato_nome: companyForm.contatoNome.trim(),
           contato_whatsapp: companyForm.contatoWhatsapp.replace(/\D/g, ''),
           limite_vouchers: Number(companyForm.limiteVouchers) || 100,
@@ -1312,108 +1438,322 @@ export default function VoucherDashboard() {
       {/* ========================================================= */}
       {showCompanyModal && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-          <div className="w-full max-w-md bg-[#1f2c34] border border-white/10 rounded-[32px] p-5 sm:p-6 shadow-2xl space-y-4 text-left my-auto">
+          <div className="w-full max-w-2xl bg-[#1f2c34] border border-white/10 rounded-[32px] p-5 sm:p-7 shadow-2xl space-y-4 text-left my-auto max-h-[92vh] flex flex-col">
             
-            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+            {/* Header Modal */}
+            <div className="flex items-center justify-between border-b border-white/10 pb-3 shrink-0">
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-500/20 to-teal-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30 shadow-md">
                   <Building2 className="w-5 h-5" />
                 </div>
-                <h3 className="text-base font-black text-white">
-                  {editingCompany ? 'Editar Empresa Parceira' : 'Cadastrar Empresa Parceira'}
-                </h3>
+                <div>
+                  <h3 className="text-base font-black text-white">
+                    {editingCompany ? 'Editar Empresa Parceira' : 'Cadastrar Empresa Parceira'}
+                  </h3>
+                  <p className="text-[11px] text-slate-400 font-medium">
+                    Preencha o CNPJ para auto-completar todos os dados cadastrais da empresa
+                  </p>
+                </div>
               </div>
               <button
                 onClick={() => setShowCompanyModal(false)}
-                className="p-2 text-slate-400 hover:text-white rounded-lg cursor-pointer"
+                className="p-2 text-slate-400 hover:text-white rounded-xl cursor-pointer hover:bg-white/5 transition-colors"
               >
-                <X className="w-4 h-4" />
+                <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveCompany} className="space-y-3 text-xs">
-              <div>
-                <label className="block text-slate-300 font-bold mb-1">Razão Social</label>
-                <input
-                  type="text"
-                  value={companyForm.razaoSocial}
-                  onChange={(e) => setCompanyForm({ ...companyForm, razaoSocial: e.target.value })}
-                  placeholder="Ex: Tech Solutions Brasil LTDA"
-                  className="w-full bg-[#111b21] border border-white/10 rounded-xl px-3.5 py-3 text-white font-bold min-h-[48px]"
-                  required
-                />
+            <form onSubmit={handleSaveCompany} className="space-y-4 text-xs overflow-y-auto pr-1 scrollbar-thin flex-1">
+              
+              {/* SEÇÃO 1: CNPJ & CONSULTA AUTOMÁTICA */}
+              <div className="bg-[#111b21] p-4 rounded-2xl border border-white/5 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="block text-emerald-400 font-black tracking-wide text-xs uppercase flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5" /> CNPJ & Busca Automática na Receita
+                  </label>
+                  {companyForm.statusCnpj && (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                      {companyForm.statusCnpj}
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      type="text"
+                      value={companyForm.cnpj}
+                      onChange={(e) => {
+                        const formatted = formatCnpj(e.target.value);
+                        setCompanyForm({ ...companyForm, cnpj: formatted });
+                        if (formatted.replace(/\D/g, '').length === 14) {
+                          handleCnpjLookup(formatted);
+                        }
+                      }}
+                      onBlur={() => {
+                        if (companyForm.cnpj.replace(/\D/g, '').length === 14 && !companyForm.razaoSocial) {
+                          handleCnpjLookup();
+                        }
+                      }}
+                      placeholder="00.000.000/0001-00"
+                      className="w-full bg-[#182229] border border-white/10 focus:border-emerald-500 rounded-xl px-3.5 py-3 text-white font-mono font-bold min-h-[48px] text-sm focus:outline-none transition-all"
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={isLoadingCnpj || companyForm.cnpj.replace(/\D/g, '').length !== 14}
+                    onClick={() => handleCnpjLookup()}
+                    className="px-4 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all disabled:opacity-50 min-h-[48px] shrink-0"
+                  >
+                    {isLoadingCnpj ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Consultando...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Search className="w-4 h-4" />
+                        <span>Buscar Dados</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {cnpjError && (
+                  <p className="text-[11px] text-rose-400 font-bold flex items-center gap-1.5 mt-1 bg-rose-500/10 p-2 rounded-lg border border-rose-500/20">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" /> {cnpjError}
+                  </p>
+                )}
+
+                {cnpjSuccessMessage && (
+                  <p className="text-[11px] text-emerald-300 font-bold flex items-center gap-1.5 mt-1 bg-emerald-500/10 p-2 rounded-lg border border-emerald-500/20">
+                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> {cnpjSuccessMessage}
+                  </p>
+                )}
               </div>
 
-              <div>
-                <label className="block text-slate-300 font-bold mb-1">Nome Fantasia (Opcional)</label>
-                <input
-                  type="text"
-                  value={companyForm.nomeFantasia}
-                  onChange={(e) => setCompanyForm({ ...companyForm, nomeFantasia: e.target.value })}
-                  placeholder="Ex: TechCorp"
-                  className="w-full bg-[#111b21] border border-white/10 rounded-xl px-3.5 py-3 text-white font-bold min-h-[48px]"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {/* SEÇÃO 2: DADOS DA EMPRESA */}
+              <div className="space-y-3">
                 <div>
-                  <label className="block text-slate-300 font-bold mb-1">CNPJ</label>
+                  <label className="block text-slate-300 font-bold mb-1">Razão Social *</label>
                   <input
                     type="text"
-                    value={companyForm.cnpj}
-                    onChange={(e) => setCompanyForm({ ...companyForm, cnpj: e.target.value })}
-                    placeholder="00.000.000/0001-00"
-                    className="w-full bg-[#111b21] border border-white/10 rounded-xl px-3.5 py-3 text-white font-bold min-h-[48px]"
+                    value={companyForm.razaoSocial}
+                    onChange={(e) => setCompanyForm({ ...companyForm, razaoSocial: e.target.value })}
+                    placeholder="Ex: Tech Solutions Brasil LTDA"
+                    className="w-full bg-[#111b21] border border-white/10 focus:border-emerald-500 rounded-xl px-3.5 py-3 text-white font-bold min-h-[48px] focus:outline-none"
+                    required
                   />
                 </div>
-                <div>
-                  <label className="block text-slate-300 font-bold mb-1">Limite Mensal</label>
-                  <input
-                    type="number"
-                    value={companyForm.limiteVouchers}
-                    onChange={(e) => setCompanyForm({ ...companyForm, limiteVouchers: Number(e.target.value) })}
-                    className="w-full bg-[#111b21] border border-white/10 rounded-xl px-3.5 py-3 text-white font-bold min-h-[48px]"
-                  />
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block text-slate-300 font-bold mb-1">Nome Fantasia</label>
+                    <input
+                      type="text"
+                      value={companyForm.nomeFantasia}
+                      onChange={(e) => setCompanyForm({ ...companyForm, nomeFantasia: e.target.value })}
+                      placeholder="Ex: TechCorp"
+                      className="w-full bg-[#111b21] border border-white/10 rounded-xl px-3.5 py-3 text-white font-bold min-h-[48px] focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 font-bold mb-1">Limite Mensal de Vouchers</label>
+                    <input
+                      type="number"
+                      value={companyForm.limiteVouchers}
+                      onChange={(e) => setCompanyForm({ ...companyForm, limiteVouchers: Number(e.target.value) })}
+                      className="w-full bg-[#111b21] border border-white/10 rounded-xl px-3.5 py-3 text-white font-bold min-h-[48px] focus:outline-none"
+                      min={1}
+                    />
+                  </div>
+                </div>
+
+                {/* Atividade & Natureza */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block text-slate-300 font-bold mb-1">Atividade Principal (CNAE)</label>
+                    <input
+                      type="text"
+                      value={companyForm.atividadePrincipal}
+                      onChange={(e) => setCompanyForm({ ...companyForm, atividadePrincipal: e.target.value })}
+                      placeholder="Ex: Desenvolvimento de software"
+                      className="w-full bg-[#111b21] border border-white/10 rounded-xl px-3.5 py-2.5 text-slate-200 text-xs min-h-[44px] focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 font-bold mb-1">Natureza Jurídica</label>
+                    <input
+                      type="text"
+                      value={companyForm.naturezaJuridica}
+                      onChange={(e) => setCompanyForm({ ...companyForm, naturezaJuridica: e.target.value })}
+                      placeholder="Ex: Sociedade Empresária Limitada"
+                      className="w-full bg-[#111b21] border border-white/10 rounded-xl px-3.5 py-2.5 text-slate-200 text-xs min-h-[44px] focus:outline-none"
+                    />
+                  </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <div>
-                  <label className="block text-slate-300 font-bold mb-1">Nome do Contato</label>
-                  <input
-                    type="text"
-                    value={companyForm.contatoNome}
-                    onChange={(e) => setCompanyForm({ ...companyForm, contatoNome: e.target.value })}
-                    placeholder="Ex: Carlos Silva"
-                    className="w-full bg-[#111b21] border border-white/10 rounded-xl px-3.5 py-3 text-white font-bold min-h-[48px]"
-                  />
+              {/* SEÇÃO 3: ENDEREÇO COMPLETO */}
+              <div className="bg-[#111b21]/60 p-3.5 rounded-2xl border border-white/5 space-y-2.5">
+                <label className="block text-slate-300 font-black uppercase text-[11px] flex items-center gap-1.5">
+                  <MapPin className="w-3.5 h-3.5 text-emerald-400" /> Endereço da Empresa
+                </label>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div>
+                    <label className="block text-slate-400 font-semibold mb-1 text-[11px]">CEP</label>
+                    <input
+                      type="text"
+                      value={companyForm.cep}
+                      onChange={(e) => setCompanyForm({ ...companyForm, cep: formatCep(e.target.value) })}
+                      placeholder="00000-000"
+                      className="w-full bg-[#182229] border border-white/10 rounded-xl px-3 py-2.5 text-white font-mono text-xs min-h-[44px]"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block text-slate-400 font-semibold mb-1 text-[11px]">Logradouro</label>
+                    <input
+                      type="text"
+                      value={companyForm.logradouro}
+                      onChange={(e) => setCompanyForm({ ...companyForm, logradouro: e.target.value })}
+                      placeholder="Av. Paulista"
+                      className="w-full bg-[#182229] border border-white/10 rounded-xl px-3 py-2.5 text-white text-xs min-h-[44px]"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-slate-300 font-bold mb-1">WhatsApp de Contato</label>
-                  <input
-                    type="text"
-                    value={companyForm.contatoWhatsapp}
-                    onChange={(e) => setCompanyForm({ ...companyForm, contatoWhatsapp: e.target.value })}
-                    placeholder="11988887777"
-                    className="w-full bg-[#111b21] border border-white/10 rounded-xl px-3.5 py-3 text-white font-bold min-h-[48px]"
-                  />
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div>
+                    <label className="block text-slate-400 font-semibold mb-1 text-[11px]">Número</label>
+                    <input
+                      type="text"
+                      value={companyForm.numero}
+                      onChange={(e) => setCompanyForm({ ...companyForm, numero: e.target.value })}
+                      placeholder="1000"
+                      className="w-full bg-[#182229] border border-white/10 rounded-xl px-3 py-2.5 text-white text-xs min-h-[44px]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-400 font-semibold mb-1 text-[11px]">Complemento</label>
+                    <input
+                      type="text"
+                      value={companyForm.complemento}
+                      onChange={(e) => setCompanyForm({ ...companyForm, complemento: e.target.value })}
+                      placeholder="Sala 402"
+                      className="w-full bg-[#182229] border border-white/10 rounded-xl px-3 py-2.5 text-white text-xs min-h-[44px]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-400 font-semibold mb-1 text-[11px]">Bairro</label>
+                    <input
+                      type="text"
+                      value={companyForm.bairro}
+                      onChange={(e) => setCompanyForm({ ...companyForm, bairro: e.target.value })}
+                      placeholder="Bela Vista"
+                      className="w-full bg-[#182229] border border-white/10 rounded-xl px-3 py-2.5 text-white text-xs min-h-[44px]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-400 font-semibold mb-1 text-[11px]">Cidade / UF</label>
+                    <div className="flex gap-1">
+                      <input
+                        type="text"
+                        value={companyForm.municipio}
+                        onChange={(e) => setCompanyForm({ ...companyForm, municipio: e.target.value })}
+                        placeholder="São Paulo"
+                        className="w-full bg-[#182229] border border-white/10 rounded-xl px-2.5 py-2.5 text-white text-xs min-h-[44px]"
+                      />
+                      <input
+                        type="text"
+                        value={companyForm.uf}
+                        onChange={(e) => setCompanyForm({ ...companyForm, uf: e.target.value.toUpperCase().slice(0, 2) })}
+                        placeholder="SP"
+                        className="w-12 bg-[#182229] border border-white/10 rounded-xl px-1.5 py-2.5 text-white text-center font-bold text-xs min-h-[44px]"
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              <div className="flex gap-2.5 pt-3">
+              {/* SEÇÃO 4: CONTATOS & RESPONSÁVEL */}
+              <div className="bg-[#111b21]/60 p-3.5 rounded-2xl border border-white/5 space-y-2.5">
+                <label className="block text-slate-300 font-black uppercase text-[11px] flex items-center gap-1.5">
+                  <User className="w-3.5 h-3.5 text-emerald-400" /> Contatos & Responsável
+                </label>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block text-slate-400 font-semibold mb-1 text-[11px]">Nome do Responsável</label>
+                    <input
+                      type="text"
+                      value={companyForm.contatoNome}
+                      onChange={(e) => setCompanyForm({ ...companyForm, contatoNome: e.target.value })}
+                      placeholder="Ex: Carlos Silva"
+                      className="w-full bg-[#182229] border border-white/10 rounded-xl px-3.5 py-2.5 text-white text-xs min-h-[44px]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-400 font-semibold mb-1 text-[11px]">WhatsApp de Envio / Notificações</label>
+                    <input
+                      type="text"
+                      value={companyForm.contatoWhatsapp}
+                      onChange={(e) => setCompanyForm({ ...companyForm, contatoWhatsapp: e.target.value })}
+                      placeholder="11988887777"
+                      className="w-full bg-[#182229] border border-white/10 rounded-xl px-3.5 py-2.5 text-white font-mono text-xs min-h-[44px]"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block text-slate-400 font-semibold mb-1 text-[11px]">E-mail Corporativo</label>
+                    <input
+                      type="email"
+                      value={companyForm.emailEmpresa}
+                      onChange={(e) => setCompanyForm({ ...companyForm, emailEmpresa: e.target.value })}
+                      placeholder="contato@empresa.com.br"
+                      className="w-full bg-[#182229] border border-white/10 rounded-xl px-3.5 py-2.5 text-white text-xs min-h-[44px]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-400 font-semibold mb-1 text-[11px]">Telefone Fixo / Central</label>
+                    <input
+                      type="text"
+                      value={companyForm.telefoneEmpresa}
+                      onChange={(e) => setCompanyForm({ ...companyForm, telefoneEmpresa: e.target.value })}
+                      placeholder="1133334444"
+                      className="w-full bg-[#182229] border border-white/10 rounded-xl px-3.5 py-2.5 text-white font-mono text-xs min-h-[44px]"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Botões de Ação */}
+              <div className="flex gap-2.5 pt-2 shrink-0">
                 <button
                   type="button"
                   onClick={() => setShowCompanyModal(false)}
-                  className="flex-1 py-3.5 bg-white/10 hover:bg-white/15 rounded-xl text-slate-300 font-black uppercase cursor-pointer min-h-[48px]"
+                  className="flex-1 py-3.5 bg-white/10 hover:bg-white/15 rounded-xl text-slate-300 font-black uppercase cursor-pointer min-h-[48px] transition-colors"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  disabled={actionLoading}
-                  className="flex-1 py-3.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl font-black uppercase cursor-pointer shadow-lg shadow-emerald-600/30 min-h-[48px]"
+                  disabled={actionLoading || isLoadingCnpj}
+                  className="flex-1 py-3.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl font-black uppercase cursor-pointer shadow-lg shadow-emerald-600/30 min-h-[48px] transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                 >
-                  {actionLoading ? 'Salvando...' : editingCompany ? 'Salvar Alterações' : 'Cadastrar Empresa'}
+                  {actionLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Salvando...</span>
+                    </>
+                  ) : editingCompany ? (
+                    'Salvar Alterações'
+                  ) : (
+                    'Cadastrar Empresa'
+                  )}
                 </button>
               </div>
             </form>

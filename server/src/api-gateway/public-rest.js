@@ -11,9 +11,9 @@ import ffmpeg from 'fluent-ffmpeg';
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 500 * 1024 * 1024 } }); // 500MB
 
-// Helper de obtenção de socket com retry e backoff suave
+// Helper de obtenção de socket com retry, auto-reconnect e backoff inteligente
 async function getSocketWithRetry(tenantId, instanceId, maxRetries = 3) {
-    const delays = [0, 1000, 2000];
+    const delays = [0, 1000, 2000, 3000];
     for (let attempt = 0; attempt < maxRetries; attempt++) {
         if (delays[attempt] > 0) {
             await new Promise(r => setTimeout(r, delays[attempt]));
@@ -21,6 +21,18 @@ async function getSocketWithRetry(tenantId, instanceId, maxRetries = 3) {
         const sock = await sessionManager.getSocketOrWake(tenantId, instanceId, true);
         if (sock) return sock;
     }
+
+    // Se ainda assim o socket estiver offline na RAM, dispara tentativa de start ativa da sessão
+    try {
+        console.warn(`[API Gateway] Socket da instância ${instanceId} offline na RAM. Tentando start ativo da sessão...`);
+        await sessionManager.startSession(tenantId, instanceId, false, true);
+        await new Promise(r => setTimeout(r, 1500));
+        const sock = sessionManager.getSocket(instanceId);
+        if (sock) return sock;
+    } catch (startErr) {
+        console.warn(`[API Gateway] Aviso ao tentar start ativo de ${instanceId}:`, startErr.message);
+    }
+
     return null;
 }
 

@@ -5755,7 +5755,15 @@ export default function ChatDashboard() {
           activeDropdown === 'sidebar-menu' ? "z-30" : "z-10"
         )}>
           <div className="flex items-center justify-between w-full mt-1 gap-1.5">
-            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+              <button 
+                onClick={() => navigate(-1)}
+                aria-label="Voltar"
+                title="Voltar para a página anterior"
+                className="flex items-center justify-center p-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#aebac1] transition-all min-w-[36px] min-h-[36px]"
+              >
+                <ChevronLeft size={20} strokeWidth={2.5} />
+              </button>
               <button 
                 onClick={(e) => {
                   e.stopPropagation();
