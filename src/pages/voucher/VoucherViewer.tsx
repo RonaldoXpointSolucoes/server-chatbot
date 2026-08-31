@@ -790,42 +790,42 @@ export default function VoucherViewer() {
   const empresaExibicao = voucherData.empresa_razao_social || 'TERRAS GONÇALVES SOCIEDADE DE ADVOGADOS';
 
   return (
-    <div className="min-h-screen w-full bg-[#070c0e] text-slate-100 flex flex-col items-center justify-center p-3 sm:p-6 select-none font-sans relative overflow-x-hidden">
+    <div className="min-h-screen w-full bg-[#060a0d] text-slate-100 flex flex-col items-center justify-start sm:justify-center p-3 sm:p-6 font-sans relative overflow-x-hidden overflow-y-auto overscroll-y-contain">
       
       {/* Luzes de Fundo & Glow Neon */}
-      <div className="fixed -top-32 -left-32 w-96 h-96 bg-emerald-500/15 rounded-full blur-[120px] pointer-events-none" />
-      <div className="fixed -bottom-32 -right-32 w-96 h-96 bg-teal-500/15 rounded-full blur-[120px] pointer-events-none" />
-      <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-amber-500/5 rounded-full blur-[140px] pointer-events-none" />
+      <div className="fixed -top-32 -left-32 w-96 h-96 bg-emerald-500/10 rounded-full blur-[140px] pointer-events-none" />
+      <div className="fixed -bottom-32 -right-32 w-96 h-96 bg-teal-500/10 rounded-full blur-[140px] pointer-events-none" />
+      <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-amber-500/5 rounded-full blur-[160px] pointer-events-none" />
 
       {/* ========================================================= */}
       {/* BARRA SUPERIOR DE AÇÕES & STATUS */}
       {/* ========================================================= */}
-      <div className="w-full max-w-4xl flex items-center justify-between gap-3 mb-4 z-20 px-2">
+      <div className="w-full max-w-4xl flex items-center justify-between gap-2 mb-3 sm:mb-4 z-20 px-1 pt-1 sm:pt-0">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center shadow-lg shadow-emerald-500/10">
+          <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center shadow-lg shadow-emerald-500/10 shrink-0">
             <Ticket className="w-4 h-4" />
           </div>
-          <div>
-            <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block">Ingresso Digital VIP</span>
-            <span className="text-xs font-mono font-black text-emerald-400">{voucherData.public_token}</span>
+          <div className="min-w-0">
+            <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-widest text-slate-400 block truncate">Ingresso Digital VIP</span>
+            <span className="text-[11px] sm:text-xs font-mono font-black text-emerald-400 truncate block">{voucherData.public_token}</span>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           <button
             type="button"
             onClick={copyVoucherLink}
-            className="px-3.5 py-2 bg-[#111b21]/90 hover:bg-[#16222a] border border-white/10 text-slate-200 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-sm active:scale-95"
+            className="px-3 py-1.5 sm:px-3.5 sm:py-2 bg-[#111b21]/90 hover:bg-[#16222a] border border-white/10 text-slate-200 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-sm active:scale-95"
             title="Copiar Link Oficial"
           >
             {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Share2 className="w-3.5 h-3.5 text-emerald-400" />}
-            <span className="hidden sm:inline">{copied ? 'Copiado!' : 'Compartilhar'}</span>
+            <span className="text-[11px] sm:text-xs">{copied ? 'Copiado!' : 'Compartilhar'}</span>
           </button>
 
           <button
             type="button"
             onClick={handlePrintVipTicket}
-            className="px-3.5 py-2 bg-gradient-to-r from-emerald-500 to-teal-400 text-[#0b141a] text-xs font-black uppercase tracking-wider rounded-xl hover:opacity-95 transition-all flex items-center gap-1.5 cursor-pointer shadow-md shadow-emerald-500/20 active:scale-95"
+            className="px-3 py-1.5 sm:px-3.5 sm:py-2 bg-gradient-to-r from-emerald-500 to-teal-400 text-[#0b141a] text-[11px] sm:text-xs font-black uppercase tracking-wider rounded-xl hover:opacity-95 transition-all flex items-center gap-1.5 cursor-pointer shadow-md shadow-emerald-500/20 active:scale-95"
             title="Imprimir Modelo Oficial"
           >
             <Printer className="w-3.5 h-3.5" />
@@ -837,84 +837,84 @@ export default function VoucherViewer() {
       {/* ========================================================= */}
       {/* ESTRUTURA DO TICKET VIP (HORIZONTAL NO PC / VERTICAL NO CELULAR) */}
       {/* ========================================================= */}
-      <div className="w-full max-w-4xl relative z-10 my-auto transition-all duration-300">
+      <div className="w-full max-w-4xl relative z-10 transition-all duration-300 mb-6">
         
         <div className="flex flex-col md:flex-row items-stretch justify-center relative">
           
           {/* ========================================================= */}
           {/* 1. CORPO PRINCIPAL DO INGRESSO (LADO ESQUERDO / PARTE SUPERIOR) */}
           {/* ========================================================= */}
-          <div className={`flex-1 bg-gradient-to-br from-[#0c1418] via-[#101b22] to-[#0c1317] border-2 border-emerald-500/40 rounded-t-[28px] md:rounded-t-none md:rounded-l-[28px] p-6 sm:p-8 relative overflow-hidden shadow-2xl transition-all duration-500 ${
+          <div className={`flex-1 bg-gradient-to-br from-[#0c1418] via-[#101b22] to-[#0c1317] border-2 border-emerald-500/40 rounded-t-[28px] md:rounded-t-none md:rounded-l-[28px] p-4 sm:p-7 md:p-8 relative overflow-hidden shadow-2xl transition-all duration-500 ${
             isDetached ? 'md:-translate-x-2 shadow-emerald-900/30' : ''
           }`}>
             
             {/* Marca d'água decorativa de fundo "VIP PASS" */}
-            <div className="absolute -bottom-4 right-4 text-7xl sm:text-8xl font-black text-white/[0.03] tracking-widest pointer-events-none select-none">
+            <div className="absolute -bottom-4 right-4 text-6xl sm:text-8xl font-black text-white/[0.02] tracking-widest pointer-events-none select-none">
               VIP PASS
             </div>
 
             {/* Badge Dourado Oficial */}
-            <div className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-gradient-to-r from-amber-500/20 via-amber-500/10 to-amber-500/20 border border-amber-500/40 text-amber-300 text-[10.5px] font-black uppercase tracking-widest mb-3 shadow-sm">
-              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+            <div className="inline-flex items-center gap-1.5 px-3 py-0.5 sm:px-3.5 sm:py-1 rounded-full bg-gradient-to-r from-amber-500/20 via-amber-500/10 to-amber-500/20 border border-amber-500/40 text-amber-300 text-[10px] sm:text-[10.5px] font-black uppercase tracking-widest mb-2.5 shadow-sm">
+              <Sparkles className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-400" />
               <span>★ VIP COMPLIMENTARY PASS ★</span>
             </div>
 
             {/* Nome e Subtítulo da Empresa Concedente (Patrocinadora B2B) */}
-            <div className="space-y-0.5 mb-4 text-left">
-              <span className="text-[10px] uppercase font-black tracking-wider text-slate-400 flex items-center gap-1">
-                <Building2 className="w-3.5 h-3.5 text-emerald-400" /> Oferecido com Carinho por:
+            <div className="space-y-0.5 mb-3.5 text-left">
+              <span className="text-[9.5px] uppercase font-black tracking-wider text-slate-400 flex items-center gap-1">
+                <Building2 className="w-3 h-3 text-emerald-400" /> Oferecido com Carinho por:
               </span>
-              <h1 className="text-lg sm:text-xl font-black text-emerald-400 uppercase tracking-tight leading-tight">
+              <h1 className="text-base sm:text-xl font-black text-emerald-400 uppercase tracking-tight leading-tight">
                 {empresaExibicao}
               </h1>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+              <p className="text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                 PROGRAMA DE BENEFÍCIO & CORTESIA CORPORATIVA
               </p>
             </div>
 
             {/* ========================================================= */}
-            {/* NOVO BLOCO: ESTABELECIMENTO DE CONSUMO (RESTAURANTE ONDE USAR) */}
+            {/* BLOCO: ESTABELECIMENTO DE CONSUMO (RESTAURANTE ONDE USAR) */}
             {/* ========================================================= */}
-            <div className="bg-gradient-to-r from-emerald-950/40 via-[#0a181e] to-teal-950/40 border border-emerald-500/35 rounded-2xl p-3.5 sm:p-4 mb-4 text-left space-y-2.5 shadow-sm">
+            <div className="bg-gradient-to-r from-emerald-950/40 via-[#0a181e] to-teal-950/40 border border-emerald-500/35 rounded-2xl p-3 sm:p-4 mb-3.5 text-left space-y-2 shadow-sm">
               
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 border-b border-white/5 pb-2">
                 <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-black">
+                  <div className="w-7 h-7 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-black shrink-0">
                     <Store className="w-4 h-4" />
                   </div>
                   <div>
-                    <span className="text-[9.5px] font-black uppercase tracking-wider text-emerald-400 block">
+                    <span className="text-[9px] font-black uppercase tracking-wider text-emerald-400 block">
                       Válido para consumo exclusivamente em:
                     </span>
-                    <strong className="text-base sm:text-lg font-black text-white uppercase tracking-tight">
+                    <strong className="text-sm sm:text-lg font-black text-white uppercase tracking-tight">
                       {restaurantInfo.nome}
                     </strong>
                   </div>
                 </div>
 
-                <span className="text-[9px] font-black text-emerald-300 bg-emerald-500/20 px-2 py-0.5 rounded-full border border-emerald-500/30 self-start sm:self-auto">
+                <span className="text-[8.5px] sm:text-[9px] font-black text-emerald-300 bg-emerald-500/20 px-2 py-0.5 rounded-full border border-emerald-500/30 self-start sm:self-auto">
                   RESTAURANTE CONVENIADO
                 </span>
               </div>
 
               {/* Endereço */}
               <div className="flex items-start gap-1.5 text-xs text-slate-300">
-                <MapPin className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                <span className="leading-snug">{restaurantInfo.endereco}</span>
+                <MapPin className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                <span className="leading-snug text-[11px] sm:text-xs">{restaurantInfo.endereco}</span>
               </div>
 
               {/* Botões de Ação do Restaurante (Cardápio, GPS, Instagram) */}
-              <div className="flex flex-wrap items-center gap-2 pt-1">
+              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 pt-0.5">
                 {restaurantInfo.cardapioUrl && (
                   <a
                     href={restaurantInfo.cardapioUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="px-3 py-1.5 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-sm"
+                    className="px-2.5 py-1.5 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 text-[10.5px] sm:text-[11px] font-bold rounded-xl transition-all flex items-center gap-1 cursor-pointer active:scale-95 shadow-sm"
                   >
-                    <Utensils className="w-3.5 h-3.5 text-emerald-400" />
+                    <Utensils className="w-3 h-3 text-emerald-400" />
                     <span>Ver Cardápio Online</span>
-                    <ExternalLink className="w-3 h-3 opacity-70" />
+                    <ExternalLink className="w-2.5 h-2.5 opacity-70" />
                   </a>
                 )}
 
@@ -923,9 +923,9 @@ export default function VoucherViewer() {
                     href={restaurantInfo.googleMapsUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 text-slate-200 text-[11px] font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-sm"
+                    className="px-2.5 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 text-slate-200 text-[10.5px] sm:text-[11px] font-bold rounded-xl transition-all flex items-center gap-1 cursor-pointer active:scale-95 shadow-sm"
                   >
-                    <Compass className="w-3.5 h-3.5 text-teal-400" />
+                    <Compass className="w-3 h-3 text-teal-400" />
                     <span>Como Chegar (GPS)</span>
                   </a>
                 )}
@@ -935,15 +935,15 @@ export default function VoucherViewer() {
                     href={restaurantInfo.instagram.startsWith('http') ? restaurantInfo.instagram : `https://instagram.com/${restaurantInfo.instagram.replace('@', '')}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="px-2.5 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 text-[11px] font-bold rounded-xl transition-all flex items-center gap-1 cursor-pointer active:scale-95"
+                    className="px-2.5 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 text-[10.5px] sm:text-[11px] font-bold rounded-xl transition-all flex items-center gap-1 cursor-pointer active:scale-95"
                     title="Instagram do Restaurante"
                   >
-                    <svg className="w-3.5 h-3.5 text-rose-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <svg className="w-3 h-3 text-rose-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <rect width="20" height="20" x="2" y="2" rx="5" ry="5" />
                       <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" />
                       <line x1="17.5" x2="17.51" y1="6.5" y2="6.5" />
                     </svg>
-                    <span className="hidden sm:inline">Instagram</span>
+                    <span>Instagram</span>
                   </a>
                 )}
               </div>
@@ -951,25 +951,25 @@ export default function VoucherViewer() {
             </div>
 
             {/* Card Escuro: Valor Liberado & Beneficiário */}
-            <div className="bg-[#070c0f]/90 border border-white/10 rounded-2xl p-3.5 sm:p-4 mb-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-inner">
+            <div className="bg-[#070c0f]/90 border border-white/10 rounded-2xl p-3 sm:p-4 mb-3.5 flex flex-row items-center justify-between gap-2 shadow-inner">
               
               <div>
-                <span className="text-[9.5px] font-black uppercase tracking-wider text-slate-400 block mb-0.5">
+                <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block mb-0.5">
                   VALOR LIBERADO
                 </span>
-                <span className="text-2xl sm:text-3xl font-black text-emerald-400 tracking-tight">
+                <span className="text-xl sm:text-3xl font-black text-emerald-400 tracking-tight">
                   {valorFormatado}
                 </span>
               </div>
 
-              <div className="text-left sm:text-right">
-                <span className="text-[9.5px] font-black uppercase tracking-wider text-slate-400 block mb-0.5">
+              <div className="text-right">
+                <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block mb-0.5">
                   Beneficiário
                 </span>
-                <span className="text-sm sm:text-base font-black text-white block">
+                <span className="text-xs sm:text-base font-black text-white block truncate max-w-[150px] sm:max-w-[200px]">
                   {voucherData.beneficiario_nome}
                 </span>
-                <span className="inline-block font-mono font-black text-[11px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-lg mt-0.5">
+                <span className="inline-block font-mono font-black text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-1.5 py-0.5 rounded-lg mt-0.5">
                   {voucherData.public_token}
                 </span>
               </div>
@@ -977,8 +977,8 @@ export default function VoucherViewer() {
             </div>
 
             {/* Informações de Rodapé do Ticket */}
-            <div className="flex flex-col sm:flex-row items-start sm:items-end justify-between gap-2 text-left text-xs text-slate-400 pt-2 border-t border-white/5">
-              <div className="space-y-0.5">
+            <div className="flex flex-col sm:flex-row items-start sm:items-end justify-between gap-1.5 text-left text-xs text-slate-400 pt-2 border-t border-white/5">
+              <div className="space-y-0.5 text-[11px] sm:text-xs">
                 <div>
                   <strong>Validade:</strong> <span className="text-slate-200">{new Date(voucherData.validade_fim).toLocaleDateString('pt-BR')}</span>
                 </div>
@@ -987,7 +987,7 @@ export default function VoucherViewer() {
                 </div>
               </div>
 
-              <div className="text-left sm:text-right text-[10.5px] text-slate-500 font-semibold max-w-[240px]">
+              <div className="text-left sm:text-right text-[10px] sm:text-[10.5px] text-slate-500 font-semibold max-w-[240px]">
                 Apresente este voucher no balcão da {restaurantInfo.nome} para resgate.
               </div>
             </div>
@@ -1015,11 +1015,11 @@ export default function VoucherViewer() {
           <div className="relative flex md:flex-col items-center justify-center bg-transparent z-20">
             
             {/* Entalhes Circulares nos Cantos (Desktop: Top/Bottom | Mobile: Left/Right) */}
-            <div className="hidden md:block absolute -top-3 left-1/2 -translate-x-1/2 w-6 h-6 bg-[#070c0e] rounded-full border-b-2 border-emerald-500/40 z-30" />
-            <div className="md:hidden absolute -left-3 top-1/2 -translate-y-1/2 w-6 h-6 bg-[#070c0e] rounded-full border-r-2 border-emerald-500/40 z-30" />
+            <div className="hidden md:block absolute -top-3 left-1/2 -translate-x-1/2 w-6 h-6 bg-[#060a0d] rounded-full border-b-2 border-emerald-500/40 z-30" />
+            <div className="md:hidden absolute -left-3 top-1/2 -translate-y-1/2 w-6 h-6 bg-[#060a0d] rounded-full border-r-2 border-emerald-500/40 z-30" />
 
-            <div className="hidden md:block absolute -bottom-3 left-1/2 -translate-x-1/2 w-6 h-6 bg-[#070c0e] rounded-full border-t-2 border-emerald-500/40 z-30" />
-            <div className="md:hidden absolute -right-3 top-1/2 -translate-y-1/2 w-6 h-6 bg-[#070c0e] rounded-full border-l-2 border-emerald-500/40 z-30" />
+            <div className="hidden md:block absolute -bottom-3 left-1/2 -translate-x-1/2 w-6 h-6 bg-[#060a0d] rounded-full border-t-2 border-emerald-500/40 z-30" />
+            <div className="md:hidden absolute -right-3 top-1/2 -translate-y-1/2 w-6 h-6 bg-[#060a0d] rounded-full border-l-2 border-emerald-500/40 z-30" />
 
             {/* Linha Picotada Tracejada */}
             <div className="w-full md:w-0 md:h-full border-t-2 md:border-t-0 md:border-l-2 border-dashed border-emerald-500/50 py-3 md:py-0 md:px-3 flex items-center justify-center">
@@ -1028,7 +1028,7 @@ export default function VoucherViewer() {
               <button
                 type="button"
                 onClick={() => setIsDetached(!isDetached)}
-                className="group px-3 py-1.5 md:py-3 bg-[#0c1418] hover:bg-[#14232b] text-emerald-400 border border-emerald-500/40 rounded-full md:rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg flex items-center gap-1.5 transition-all cursor-pointer active:scale-95 select-none"
+                className="group px-3.5 py-1.5 md:py-3 bg-[#0c1418] hover:bg-[#14232b] text-emerald-400 border border-emerald-500/40 rounded-full md:rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg flex items-center gap-1.5 transition-all cursor-pointer active:scale-95 select-none"
                 title={isDetached ? 'Juntar Canhoto' : 'Destacar Canhoto no Caixa'}
               >
                 <Scissors className={`w-3.5 h-3.5 transition-transform ${isDetached ? 'rotate-90 text-amber-400' : 'group-hover:rotate-45'}`} />
@@ -1044,15 +1044,15 @@ export default function VoucherViewer() {
           {/* ========================================================= */}
           {/* 3. CANHOTO DO CAIXA COM QR CODE (LADO DIREITO / PARTE INFERIOR) */}
           {/* ========================================================= */}
-          <div className={`w-full md:w-72 bg-gradient-to-b from-[#0c171d] via-[#101b22] to-[#081014] border-2 border-emerald-500/40 rounded-b-[28px] md:rounded-b-none md:rounded-r-[28px] p-5 sm:p-6 flex flex-col items-center justify-between text-center relative shadow-2xl transition-all duration-500 ${
+          <div className={`w-full md:w-72 bg-gradient-to-b from-[#0c171d] via-[#101b22] to-[#081014] border-2 border-emerald-500/40 rounded-b-[28px] md:rounded-b-none md:rounded-r-[28px] p-4 sm:p-6 flex flex-col items-center justify-between text-center relative shadow-2xl transition-all duration-500 ${
             isDetached
-              ? 'md:translate-x-4 md:rotate-1 translate-y-4 shadow-[0_20px_50px_rgba(0,168,132,0.25)] border-emerald-400'
+              ? 'md:translate-x-4 md:rotate-1 translate-y-3 shadow-[0_20px_50px_rgba(0,168,132,0.25)] border-emerald-400'
               : ''
           }`}>
             
             {/* Header do Canhoto com Nome da Loja */}
             <div className="w-full text-center space-y-0.5 mb-1.5">
-              <span className="text-[9.5px] font-black uppercase tracking-widest text-slate-400 block">
+              <span className="text-[9px] sm:text-[9.5px] font-black uppercase tracking-widest text-slate-400 block">
                 CANHOTO DO CAIXA
               </span>
               <span className="text-[10.5px] font-black text-emerald-400 uppercase tracking-tight block">
@@ -1061,8 +1061,8 @@ export default function VoucherViewer() {
             </div>
 
             {/* QR Code de Alta Resolução com Borda Neon */}
-            <div className="p-3 bg-white rounded-2xl shadow-2xl ring-4 ring-emerald-500/30 my-1.5 transition-transform hover:scale-105">
-              <QRCode value={qrJwt || voucherData.public_token} size={140} />
+            <div className="p-3 bg-white rounded-2xl shadow-2xl ring-4 ring-emerald-500/30 my-2 transition-transform hover:scale-105">
+              <QRCode value={qrJwt || voucherData.public_token} size={150} />
             </div>
 
             {/* Barra e Contador de Auto-Renovação Antifraude de 30s */}
@@ -1074,7 +1074,7 @@ export default function VoucherViewer() {
                 </span>
                 <span className="font-mono text-emerald-300">{countdown}s</span>
               </div>
-              <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
+              <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-1000 ease-linear rounded-full"
                   style={{ width: `${(countdown / QR_INTERVAL) * 100}%` }}
@@ -1105,11 +1105,11 @@ export default function VoucherViewer() {
       </div>
 
       {/* ========================================================= */}
-      {/* RODAPÉ INFORMATIVO */}
+      {/* RODAPÉ INFORMATIVO COM PADDING EXTRA PARA MOBILE */}
       {/* ========================================================= */}
-      <div className="w-full max-w-4xl flex items-center justify-between text-[11px] text-slate-500 font-bold mt-4 z-20 px-2">
+      <div className="w-full max-w-4xl flex flex-col sm:flex-row items-center justify-between gap-1 text-[10px] sm:text-[11px] text-slate-500 font-bold z-20 px-2 pb-16 sm:pb-8 text-center sm:text-left">
         <span className="flex items-center gap-1.5">
-          <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+          <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
           <span>Autenticação Criptográfica JWT Antifraude</span>
         </span>
         <span>X-Point Voucher Digital • {restaurantInfo.nome}</span>
