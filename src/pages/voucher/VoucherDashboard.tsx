@@ -47,7 +47,11 @@ import {
   Coins,
   Eye,
   CheckCircle,
-  Printer
+  Printer,
+  Trash2,
+  CheckSquare,
+  Square,
+  AlertTriangle
 } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 import { useChatStore } from '../../store/chatStore';
@@ -157,6 +161,13 @@ export default function VoucherDashboard() {
   const [selectedVoucherForPrint, setSelectedVoucherForPrint] = useState<any | null>(null);
   const [showPrintModal, setShowPrintModal] = useState<boolean>(false);
   const [printLayout, setPrintLayout] = useState<'thermal' | 'pdf'>('thermal');
+
+  // Estados de Exclusão Individual e em Massa
+  const [selectedVoucherIds, setSelectedVoucherIds] = useState<string[]>([]);
+  const [voucherToDelete, setVoucherToDelete] = useState<any | null>(null);
+  const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState<boolean>(false);
+  const [isBulkDelete, setIsBulkDelete] = useState<boolean>(false);
+  const [isDeletingVouchers, setIsDeletingVouchers] = useState<boolean>(false);
 
   // Form Voucher (Lote ou Individual com Modo Simplificado)
   const [voucherEmissionMode, setVoucherEmissionMode] = useState<'individual' | 'lote'>('individual');
@@ -1244,6 +1255,89 @@ export default function VoucherDashboard() {
   };
 
   // ==============================================================================
+  // GESTÃO DE EXCLUSÃO INDIVIDUAL E EM MASSA DE VOUCHERS
+  // ==============================================================================
+  const handleToggleSelectAll = () => {
+    if (selectedVoucherIds.length === filteredVouchers.length && filteredVouchers.length > 0) {
+      setSelectedVoucherIds([]);
+    } else {
+      setSelectedVoucherIds(filteredVouchers.map((v) => v.id));
+    }
+  };
+
+  const handleToggleSelectVoucher = (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setSelectedVoucherIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  const openDeleteSingleModal = (voucher: any, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setVoucherToDelete(voucher);
+    setIsBulkDelete(false);
+    setShowDeleteConfirmModal(true);
+  };
+
+  const openDeleteBulkModal = () => {
+    if (selectedVoucherIds.length === 0) return;
+    setIsBulkDelete(true);
+    setShowDeleteConfirmModal(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    const idsToDelete = isBulkDelete
+      ? selectedVoucherIds
+      : (voucherToDelete ? [voucherToDelete.id] : []);
+
+    if (idsToDelete.length === 0) return;
+
+    try {
+      setIsDeletingVouchers(true);
+      setActionError(null);
+
+      // 1. Deleta do Supabase
+      try {
+        await supabase.from('vouchers').delete().in('id', idsToDelete);
+      } catch (sbErr) {
+        console.warn('[Vouchers] Erro ao deletar do Supabase:', sbErr);
+      }
+
+      // 2. Atualiza estado local e Tenant Storage
+      const updatedList = vouchers.filter((v) => !idsToDelete.includes(v.id));
+      setVouchers(updatedList);
+      setTenantStorage('voucher_items', tenantId, updatedList);
+
+      // 3. Limpa tokens de localStorage
+      idsToDelete.forEach((id) => {
+        const v = vouchers.find((item) => item.id === id);
+        if (v?.public_token) {
+          try {
+            localStorage.removeItem(`voucher_token_${v.public_token}`);
+          } catch (_) {}
+        }
+      });
+
+      // 4. Limpa seleções
+      setSelectedVoucherIds((prev) => prev.filter((id) => !idsToDelete.includes(id)));
+      setVoucherToDelete(null);
+      setShowDeleteConfirmModal(false);
+
+      setActionSuccess(
+        idsToDelete.length === 1
+          ? 'Voucher excluído com sucesso!'
+          : `${idsToDelete.length} vouchers excluídos com sucesso!`
+      );
+      setTimeout(() => setActionSuccess(null), 4000);
+    } catch (err: any) {
+      console.error('Erro ao excluir vouchers:', err);
+      setActionError('Falha ao excluir voucher(s): ' + (err.message || 'Erro inesperado'));
+    } finally {
+      setIsDeletingVouchers(false);
+    }
+  };
+
+  // ==============================================================================
   // MÉTRICAS E TOTALIZADORES FINANCEIROS
   // ==============================================================================
   const totalEmitidos = vouchers.length;
@@ -1467,16 +1561,48 @@ export default function VoucherDashboard() {
       {activeTab === 'vouchers' && (
         <div className="space-y-4">
           
-          {/* Barra de Pesquisa Única e Fluida */}
-          <div className="w-full relative">
-            <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Buscar por código, beneficiário ou empresa parceira..."
-              className="w-full bg-white dark:bg-[#1f2c34] border border-black/10 dark:border-white/10 rounded-2xl pl-10 pr-4 py-3 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500 font-bold shadow-sm"
-            />
+          {/* Barra de Pesquisa & Ações em Massa */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+            <div className="flex-1 relative">
+              <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Buscar por código, beneficiário ou empresa parceira..."
+                className="w-full bg-white dark:bg-[#1f2c34] border border-black/10 dark:border-white/10 rounded-2xl pl-10 pr-4 py-3 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500 font-bold shadow-sm"
+              />
+            </div>
+
+            {/* Barra de Ações em Massa (Ativa quando houver vouchers selecionados) */}
+            {selectedVoucherIds.length > 0 && (
+              <div className="flex items-center justify-between sm:justify-start gap-2 bg-red-500/10 dark:bg-red-500/15 border border-red-500/30 px-3.5 py-2 rounded-2xl animate-in fade-in slide-in-from-top-2 duration-200">
+                <span className="text-xs font-bold text-red-600 dark:text-red-400 flex items-center gap-1.5">
+                  <CheckSquare className="w-4 h-4 shrink-0" />
+                  <span><strong>{selectedVoucherIds.length}</strong> selecionado(s)</span>
+                </span>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedVoucherIds([])}
+                    className="px-2.5 py-1.5 text-[11px] font-bold text-slate-600 dark:text-slate-300 hover:bg-black/5 dark:hover:bg-white/10 rounded-lg transition-all cursor-pointer"
+                  >
+                    Desmarcar
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={openDeleteBulkModal}
+                    disabled={isDeletingVouchers}
+                    className="px-3.5 py-2 bg-red-600 hover:bg-red-700 active:scale-95 text-white text-xs font-black uppercase tracking-wider rounded-xl transition-all shadow-md shadow-red-500/20 flex items-center gap-1.5 cursor-pointer disabled:opacity-50 min-h-[40px]"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                    <span>Excluir Selecionados</span>
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {filteredVouchers.length === 0 ? (
@@ -1502,16 +1628,30 @@ export default function VoucherDashboard() {
                   const isUtil = v.status === 'UTILIZADO';
                   const isVal = v.status === 'VALIDADO';
                   const isEnv = v.status === 'ENVIADO';
+                  const isSelected = selectedVoucherIds.includes(v.id);
 
                   return (
                     <div
                       key={v.id}
-                      className="bg-white dark:bg-[#1f2c34] p-4 rounded-2xl border border-black/10 dark:border-white/10 space-y-3 shadow-sm text-left"
+                      className={`bg-white dark:bg-[#1f2c34] p-4 rounded-2xl border transition-all space-y-3 shadow-sm text-left ${
+                        isSelected 
+                          ? 'border-emerald-500/60 ring-2 ring-emerald-500/20 bg-emerald-500/[0.02]' 
+                          : 'border-black/10 dark:border-white/10'
+                      }`}
                     >
                       <div className="flex items-center justify-between">
-                        <span className="font-mono font-black text-emerald-600 dark:text-emerald-400 text-sm">
-                          {v.public_token}
-                        </span>
+                        <div className="flex items-center gap-2.5">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={(e) => handleToggleSelectVoucher(v.id, e as any)}
+                            className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer accent-emerald-600"
+                          />
+                          <span className="font-mono font-black text-emerald-600 dark:text-emerald-400 text-sm">
+                            {v.public_token}
+                          </span>
+                        </div>
+
                         <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${
                           isUtil
                             ? 'bg-purple-500/20 text-purple-600 dark:text-purple-300 border border-purple-500/30'
@@ -1562,13 +1702,13 @@ export default function VoucherDashboard() {
                           </strong>
                         </div>
 
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5">
                           <button
                             onClick={() => {
                               setSelectedVoucherForPrint(v);
                               setShowPrintModal(true);
                             }}
-                            className="p-2.5 bg-black/5 dark:bg-white/10 hover:bg-black/10 rounded-xl text-slate-400 hover:text-white cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center"
+                            className="p-2 bg-black/5 dark:bg-white/10 hover:bg-black/10 rounded-xl text-slate-400 hover:text-white cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center transition-all active:scale-95"
                             title="Imprimir Voucher (Térmica / PDF)"
                           >
                             <Printer className="w-4 h-4" />
@@ -1577,7 +1717,7 @@ export default function VoucherDashboard() {
                           <button
                             onClick={() => handleSendWhatsApp(v)}
                             disabled={actionLoading}
-                            className="p-2.5 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-600 dark:text-emerald-400 rounded-xl cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center"
+                            className="p-2 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-600 dark:text-emerald-400 rounded-xl cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center transition-all active:scale-95"
                             title="Disparar via WhatsApp"
                           >
                             <Send className="w-4 h-4" />
@@ -1585,10 +1725,18 @@ export default function VoucherDashboard() {
 
                           <button
                             onClick={() => handleOpenVoucherDigital(v)}
-                            className="p-2.5 bg-black/5 dark:bg-white/10 hover:bg-black/10 rounded-xl text-slate-400 hover:text-white cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center"
+                            className="p-2 bg-black/5 dark:bg-white/10 hover:bg-black/10 rounded-xl text-slate-400 hover:text-white cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center transition-all active:scale-95"
                             title="Abrir Voucher Digital"
                           >
                             <ExternalLink className="w-4 h-4" />
+                          </button>
+
+                          <button
+                            onClick={(e) => openDeleteSingleModal(v, e)}
+                            className="p-2 bg-red-500/10 hover:bg-red-500/25 text-red-500 hover:text-red-600 dark:text-red-400 rounded-xl cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center transition-all active:scale-95"
+                            title="Excluir Voucher"
+                          >
+                            <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
                       </div>
@@ -1602,6 +1750,15 @@ export default function VoucherDashboard() {
                 <table className="w-full text-left text-xs">
                   <thead className="bg-slate-50 dark:bg-[#0c1317] text-slate-400 font-black uppercase text-[10px] tracking-wider border-b border-black/5 dark:border-white/5">
                     <tr>
+                      <th className="py-3.5 px-3 text-center w-10">
+                        <input
+                          type="checkbox"
+                          checked={filteredVouchers.length > 0 && selectedVoucherIds.length === filteredVouchers.length}
+                          onChange={handleToggleSelectAll}
+                          className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer accent-emerald-600"
+                          title="Selecionar Todos"
+                        />
+                      </th>
                       <th className="py-3.5 px-4">Código</th>
                       <th className="py-3.5 px-4">Beneficiário</th>
                       <th className="py-3.5 px-4">Empresa / Campanha</th>
@@ -1616,9 +1773,25 @@ export default function VoucherDashboard() {
                       const isUtil = v.status === 'UTILIZADO';
                       const isVal = v.status === 'VALIDADO';
                       const isEnv = v.status === 'ENVIADO';
+                      const isSelected = selectedVoucherIds.includes(v.id);
 
                       return (
-                        <tr key={v.id} className="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors">
+                        <tr 
+                          key={v.id} 
+                          className={`transition-colors ${
+                            isSelected 
+                              ? 'bg-emerald-500/[0.06] dark:bg-emerald-500/[0.08]' 
+                              : 'hover:bg-slate-50 dark:hover:bg-white/[0.02]'
+                          }`}
+                        >
+                          <td className="py-3.5 px-3 text-center w-10">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={(e) => handleToggleSelectVoucher(v.id, e as any)}
+                              className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer accent-emerald-600"
+                            />
+                          </td>
                           <td className="py-3.5 px-4 font-mono font-black text-emerald-600 dark:text-emerald-400 text-sm">
                             {v.public_token}
                           </td>
@@ -1698,6 +1871,14 @@ export default function VoucherDashboard() {
                               title="Abrir Voucher Digital"
                             >
                               <ExternalLink className="w-4 h-4" />
+                            </button>
+
+                            <button
+                              onClick={(e) => openDeleteSingleModal(v, e)}
+                              className="p-2 bg-red-500/10 hover:bg-red-500/25 text-red-500 hover:text-red-600 dark:text-red-400 rounded-xl cursor-pointer transition-all active:scale-95 min-h-[40px] min-w-[40px] inline-flex items-center justify-center"
+                              title="Excluir Voucher"
+                            >
+                              <Trash2 className="w-4 h-4" />
                             </button>
                           </td>
                         </tr>
@@ -3467,6 +3648,103 @@ export default function VoucherDashboard() {
               </button>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* MODAL DE CONFIRMAÇÃO DE EXCLUSÃO (INDIVIDUAL OU EM MASSA) */}
+      {/* ========================================================= */}
+      {showDeleteConfirmModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="bg-[#182229] border border-red-500/30 rounded-3xl p-6 sm:p-7 max-w-md w-full shadow-2xl space-y-5 text-left relative overflow-hidden animate-in zoom-in-95 duration-200">
+            {/* Efeito Glow Vermelho */}
+            <div className="absolute top-0 right-0 w-48 h-48 bg-red-500/10 rounded-full blur-3xl pointer-events-none -mr-16 -mt-16" />
+
+            <div className="flex items-center gap-3.5 border-b border-white/10 pb-4">
+              <div className="w-12 h-12 rounded-2xl bg-red-500/20 text-red-400 flex items-center justify-center shrink-0 border border-red-500/30 shadow-inner">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-base font-black text-white leading-tight">
+                  {isBulkDelete ? 'Excluir Vouchers Selecionados' : 'Excluir Voucher'}
+                </h3>
+                <p className="text-xs text-red-400/80 font-bold mt-0.5">
+                  Ação Permanente e Irreversível
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3 text-xs text-slate-300 leading-relaxed">
+              {isBulkDelete ? (
+                <div className="p-4 bg-black/30 border border-red-500/20 rounded-2xl space-y-2">
+                  <p className="font-medium text-slate-200">
+                    Você está prestes a excluir <strong className="text-red-400 font-black text-sm">{selectedVoucherIds.length} vouchers</strong> selecionados.
+                  </p>
+                  <p className="text-[11px] text-slate-400">
+                    Os vouchers serão desativados e removidos do banco de dados e dos terminais de caixa imediatamente.
+                  </p>
+                </div>
+              ) : (
+                <div className="p-4 bg-black/30 border border-red-500/20 rounded-2xl space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400 font-bold">Código do Voucher:</span>
+                    <strong className="font-mono text-emerald-400 font-black text-sm">{voucherToDelete?.public_token}</strong>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400 font-bold">Beneficiário:</span>
+                    <span className="text-white font-medium">{voucherToDelete?.beneficiario_nome || 'Colaborador'}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400 font-bold">Valor:</span>
+                    <strong className="text-emerald-400 font-black">
+                      {Number(voucherToDelete?.valor || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                    </strong>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-start gap-2 p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-300 text-[11px]">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-400" />
+                <span>
+                  Após a exclusão, os vouchers não poderão mais ser resgatados ou consultados pelos clientes.
+                </span>
+              </div>
+            </div>
+
+            {/* Ações do Modal */}
+            <div className="pt-2 border-t border-white/10 flex gap-2.5">
+              <button
+                type="button"
+                disabled={isDeletingVouchers}
+                onClick={() => {
+                  setShowDeleteConfirmModal(false);
+                  setVoucherToDelete(null);
+                }}
+                className="flex-1 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-slate-300 font-black uppercase text-xs cursor-pointer transition-all disabled:opacity-50 min-h-[48px]"
+              >
+                Cancelar
+              </button>
+
+              <button
+                type="button"
+                disabled={isDeletingVouchers}
+                onClick={handleConfirmDelete}
+                className="flex-1 py-3 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 active:scale-95 text-white rounded-xl font-black uppercase text-xs cursor-pointer shadow-lg shadow-red-500/25 flex items-center justify-center gap-2 transition-all disabled:opacity-50 min-h-[48px]"
+              >
+                {isDeletingVouchers ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Excluindo...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    <span>Confirmar Exclusão</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}
