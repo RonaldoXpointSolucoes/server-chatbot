@@ -142,21 +142,30 @@ async function getDevQueue(action = 'list', cardIdToMove = null, targetStatus = 
       const items = [];
       const seenUrls = new Set();
 
+      const cleanUrl = (rawUrl) => {
+        return (rawUrl || '').trim().replace(/[\)\]"'\.,;]+$/, '').trim();
+      };
+
+      const cleanName = (rawName) => {
+        const trimmed = (rawName || '').trim().replace(/^📸\s*|!\[|\]$/g, '').trim();
+        return trimmed || 'Evidência Anexada';
+      };
+
       // 1. Imagens markdown: ![alt](url)
       const imgRegex = /!\[(.*?)\]\((https?:\/\/[^\s\)]+)\)/g;
       let m;
       while ((m = imgRegex.exec(notes)) !== null) {
-        const url = m[2]?.trim();
+        const url = cleanUrl(m[2]);
         if (url && !seenUrls.has(url)) {
           seenUrls.add(url);
-          items.push({ name: m[1]?.trim() || 'Captura Anexada', url, type: 'image' });
+          items.push({ name: cleanName(m[1]), url, type: 'image' });
         }
       }
 
       // 2. URLs diretas de storage chat_media
       const storageRegex = /(https?:\/\/[^\s"'<>]+\/chat_media\/crm_cards\/[^\s"'<>]+)/gi;
       while ((m = storageRegex.exec(notes)) !== null) {
-        const url = m[1]?.trim();
+        const url = cleanUrl(m[1]);
         if (url && !seenUrls.has(url)) {
           seenUrls.add(url);
           const fileName = url.split('/').pop()?.split('?')[0] || 'Evidência Anexada';

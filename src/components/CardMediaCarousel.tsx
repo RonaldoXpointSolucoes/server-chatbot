@@ -45,12 +45,21 @@ export function extractCardMedia(notes?: string | null): CardMediaItem[] {
   const items: CardMediaItem[] = [];
   const seenUrls = new Set<string>();
 
+  const cleanUrl = (rawUrl: string): string => {
+    return rawUrl.trim().replace(/[\)\]"'\.,;]+$/, '').trim();
+  };
+
+  const cleanName = (rawName: string): string => {
+    const trimmed = rawName.trim().replace(/^📸\s*|!\[|\]$/g, '').trim();
+    return trimmed || 'Evidência Anexada';
+  };
+
   // 1. Regex para imagens markdown: ![nome](url)
   const imageRegex = /!\[(.*?)\]\((https?:\/\/[^\s\)]+)\)/g;
   let match: RegExpExecArray | null;
   while ((match = imageRegex.exec(notes)) !== null) {
-    const rawName = match[1]?.trim() || 'Imagem Anexada';
-    const url = match[2]?.trim();
+    const rawName = cleanName(match[1] || 'Imagem Anexada');
+    const url = cleanUrl(match[2] || '');
     if (url && !seenUrls.has(url)) {
       seenUrls.add(url);
       items.push({
@@ -65,8 +74,8 @@ export function extractCardMedia(notes?: string | null): CardMediaItem[] {
   // 2. Regex para vídeos markdown: 🎥 [nome](url) ou links diretos com extensão de vídeo
   const videoRegex = /(?:🎥\s*)?\[(.*?)\]\((https?:\/\/[^\s\)]+\.(?:mp4|webm|mov|ogg)(?:\?[^\s\)]*)?)\)/gi;
   while ((match = videoRegex.exec(notes)) !== null) {
-    const rawName = match[1]?.trim() || 'Vídeo Anexado';
-    const url = match[2]?.trim();
+    const rawName = cleanName(match[1] || 'Vídeo Anexado');
+    const url = cleanUrl(match[2] || '');
     if (url && !seenUrls.has(url)) {
       seenUrls.add(url);
       items.push({
@@ -81,8 +90,8 @@ export function extractCardMedia(notes?: string | null): CardMediaItem[] {
   // 3. Regex para áudios markdown: 🎙️ [nome](url) ou links diretos com extensão de áudio
   const audioRegex = /(?:🎙️\s*)?\[(.*?)\]\((https?:\/\/[^\s\)]+\.(?:mp3|wav|ogg|m4a|aac|opus)(?:\?[^\s\)]*)?)\)/gi;
   while ((match = audioRegex.exec(notes)) !== null) {
-    const rawName = match[1]?.trim() || 'Áudio Anexado';
-    const url = match[2]?.trim();
+    const rawName = cleanName(match[1] || 'Áudio Anexado');
+    const url = cleanUrl(match[2] || '');
     if (url && !seenUrls.has(url)) {
       seenUrls.add(url);
       items.push({
@@ -94,10 +103,10 @@ export function extractCardMedia(notes?: string | null): CardMediaItem[] {
     }
   }
 
-  // 4. Regex para URLs de storage chat_media que podem não estar formatadas com ![ ]
+  // 4. Regex para URLs soltas de storage chat_media que não estejam dentro de markdown
   const storageRegex = /(https?:\/\/[^\s"'<>]+\/chat_media\/crm_cards\/[^\s"'<>]+)/gi;
   while ((match = storageRegex.exec(notes)) !== null) {
-    const url = match[1]?.trim();
+    const url = cleanUrl(match[1] || '');
     if (url && !seenUrls.has(url)) {
       seenUrls.add(url);
       const fileName = url.split('/').pop()?.split('?')[0] || 'Evidência Anexada';
