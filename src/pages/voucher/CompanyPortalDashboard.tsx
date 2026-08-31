@@ -171,6 +171,33 @@ export default function CompanyPortalDashboard() {
             }
           });
 
+          // Sincroniza vouchers locais para a nuvem caso ainda não existam no Supabase
+          const unpersisted = allVouchers.filter(
+            (v: any) => !dbVouchers.some((dbV: any) => (dbV.public_token || '').toLowerCase() === (v.public_token || '').toLowerCase() || dbV.id === v.id)
+          );
+          if (unpersisted.length > 0) {
+            const payloadsToSync = unpersisted.map((v: any) => ({
+              id: v.id,
+              tenant_id: v.tenant_id || tenantId,
+              empresa_id: v.empresa_id || companyId,
+              empresa_nome: v.empresa_nome || currentComp.razao_social,
+              empresa_razao_social: v.empresa_razao_social || currentComp.razao_social,
+              campanha_id: v.campanha_id || null,
+              public_token: v.public_token,
+              valor: Number(v.valor || 0),
+              status: v.status || 'CRIADO',
+              beneficiario_nome: v.beneficiario_nome || 'Colaborador',
+              beneficiario_whatsapp: v.beneficiario_whatsapp || '',
+              observacoes: v.observacoes || `Emitido via Portal B2B por ${currentComp.razao_social}`,
+              validade_fim: v.validade_fim || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+              created_at: v.created_at || new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            }));
+            try {
+              await supabase.from('vouchers').upsert(payloadsToSync);
+            } catch (_) {}
+          }
+
           allVouchers = merged;
           localStorage.setItem(`voucher_items_${tenantId}`, JSON.stringify(allVouchers));
         }

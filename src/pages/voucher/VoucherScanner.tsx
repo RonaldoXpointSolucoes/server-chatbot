@@ -481,33 +481,37 @@ export default function VoucherScanner() {
         console.warn('[VoucherScanner] Backend offline, confirmando localmente:', backendErr);
       }
 
-      // 2. Baixa no Supabase
+      // 2. Baixa no Supabase em Tempo Real
       try {
+        const updateFilter = `id.eq.${activeVoucher.id},public_token.eq.${activeVoucher.public_token},public_token.ilike.${activeVoucher.public_token}`;
         await supabase
           .from('vouchers')
           .update({
             status: 'UTILIZADO',
             data_resgate: resgateHora,
-            atendente_id: atendenteName
+            atendente_id: atendenteName,
+            updated_at: resgateHora
           })
-          .eq('id', activeVoucher.id);
+          .or(updateFilter);
 
         // Registro de Auditoria no Ledger
-        await supabase.from('voucher_events').insert({
-          id: 'ev-' + Math.random().toString(36).substring(2, 9),
-          tenant_id: tenantId,
-          voucher_id: activeVoucher.id,
-          voucher_token: activeVoucher.public_token,
-          tipo_operacao: 'DEBITO_RESGATE',
-          valor: redemptionValue,
-          beneficiario_nome: activeVoucher.beneficiario_nome || 'Colaborador',
-          status_anterior: activeVoucher.status || 'CRIADO',
-          status_novo: 'UTILIZADO',
-          data_hora: resgateHora,
-          usuario_responsavel: `Atendente / PDV: ${atendenteName}`,
-          hash_transacao: txnHash,
-          motivo: `Resgate e desconto concedido no caixa da Burguer Plus por ${atendenteName}`
-        });
+        try {
+          await supabase.from('voucher_events').insert({
+            id: 'ev-' + Math.random().toString(36).substring(2, 9),
+            tenant_id: tenantId,
+            voucher_id: activeVoucher.id,
+            voucher_token: activeVoucher.public_token,
+            tipo_operacao: 'DEBITO_RESGATE',
+            valor: redemptionValue,
+            beneficiario_nome: activeVoucher.beneficiario_nome || 'Colaborador',
+            status_anterior: activeVoucher.status || 'CRIADO',
+            status_novo: 'UTILIZADO',
+            data_hora: resgateHora,
+            usuario_responsavel: `Atendente / PDV: ${atendenteName}`,
+            hash_transacao: txnHash,
+            motivo: `Resgate e desconto concedido no caixa da Burguer Plus por ${atendenteName}`
+          });
+        } catch (_) {}
       } catch (dbErr) {
         console.warn('[VoucherScanner] Erro Supabase ao gravar baixa:', dbErr);
       }
