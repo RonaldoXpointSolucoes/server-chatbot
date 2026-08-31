@@ -347,11 +347,35 @@ export default function CompanyPortalDashboard() {
       };
       localStorage.setItem(`voucher_events_${tenantId}`, JSON.stringify([novoEvento, ...allEvents]));
 
-      // Tenta persistir no Supabase em segundo plano
+      // Persiste no Supabase em tempo real
       try {
-        await supabase.from('voucher_empresas_parceiras').update({ saldo_global: novoSaldo }).eq('id', companyId);
-        await supabase.from('vouchers').insert(novoVoucher);
-      } catch (_) {}
+        const voucherDbPayload = {
+          id: novoVoucher.id,
+          tenant_id: tenantId,
+          empresa_id: companyId,
+          empresa_nome: companyData.razao_social || companyData.nome_fantasia,
+          empresa_razao_social: companyData.razao_social || companyData.nome_fantasia,
+          campanha_id: null,
+          public_token: novoVoucher.public_token,
+          valor: valorNum,
+          status: 'CRIADO',
+          beneficiario_nome: beneficiarioNome.trim(),
+          beneficiario_whatsapp: cleanWhats,
+          observacoes: voucherObs.trim() || `Emitido via Portal B2B por ${companyData.razao_social}`,
+          validade_fim: novoVoucher.validade_fim,
+          atendente_id: `PORTAL_B2B (${companyData.login_usuario || companyData.razao_social})`,
+          created_at: novoVoucher.created_at,
+          updated_at: new Date().toISOString()
+        };
+
+        await supabase.from('vouchers').upsert([voucherDbPayload]);
+        await supabase
+          .from('voucher_empresas_parceiras')
+          .update({ saldo_global: novoSaldo, saldo_credito: novoSaldo, updated_at: new Date().toISOString() })
+          .eq('id', companyId);
+      } catch (errDb) {
+        console.warn('[CompanyPortal] Erro ao salvar no Supabase:', errDb);
+      }
 
       // Limpa formulário e abre modal de sucesso
       setIssuedVoucher(novoVoucher);
@@ -370,11 +394,7 @@ export default function CompanyPortalDashboard() {
 
   // Helpers de Compartilhamento
   const getProductionBaseUrl = () => {
-    const origin = window.location.origin;
-    if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
-      return 'https://chat-boot-theta.vercel.app';
-    }
-    return origin;
+    return 'https://voucher-xpointsolucoes.vercel.app';
   };
 
   const getVoucherUrl = (token: string) => `${getProductionBaseUrl()}/voucher/${token}`;

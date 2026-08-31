@@ -263,7 +263,7 @@ export default function VoucherViewer() {
       try {
         const { data, error: dbErr } = await supabase
           .from('vouchers')
-          .select('*, voucher_campanhas(*), voucher_empresas_parceiras(*), voucher_colaboradores(*)')
+          .select('*')
           .eq('public_token', cleanToken)
           .maybeSingle();
 
@@ -273,17 +273,18 @@ export default function VoucherViewer() {
             id: data.id,
             tenant_id: data.tenant_id,
             public_token: data.public_token,
-            status: data.status,
+            status: data.status || 'CRIADO',
             valor: Number(data.valor) || 50.0,
-            beneficiario_nome: data.beneficiario_nome || data.voucher_colaboradores?.nome || 'Colaborador / Convidado',
+            beneficiario_nome: data.beneficiario_nome || 'Colaborador / Convidado',
             beneficiario_whatsapp: data.beneficiario_whatsapp || '',
             validade_fim: data.validade_fim,
-            campanha_nome: data.voucher_campanhas?.nome || 'Crédito Corporativo Especial',
-            campanha_descricao: data.voucher_campanhas?.descricao,
-            empresa_razao_social: comp.razaoSocial,
+            campanha_nome: data.campanha_nome || 'Presente Corporativo Especial',
+            campanha_descricao: data.observacoes || 'Benefício exclusivo BURGUER PLUS',
+            empresa_razao_social: data.empresa_razao_social || data.empresa_nome || comp.razaoSocial,
             empresa_nome_fantasia: comp.nomeFantasia,
             observacoes: data.observacoes,
-            data_resgate: data.data_resgate
+            data_resgate: data.data_resgate,
+            created_at: data.created_at
           };
           setVoucherData(formatted);
           setQrJwt(data.public_token);
