@@ -64,10 +64,10 @@ function PushNotificationManager() {
   return null;
 }
 
-// Roteador Raiz Inteligente (Detecta se o acesso é via domínio de voucher dedicado ex: voucher-xpoint.vercel.app)
+// Roteador Raiz Inteligente (Detecta se o acesso é via domínio de voucher dedicado ex: voucher-xpointsolucoes.vercel.app)
 function RootRouter() {
   const hostname = window.location.hostname.toLowerCase();
-  const isVoucherDomain = hostname.includes('voucher') || hostname.startsWith('vch.') || hostname.startsWith('vouchers.');
+  const isVoucherDomain = hostname.includes('voucher') || hostname.includes('xpointsolucoes') && hostname.includes('voucher') || hostname.startsWith('vch.') || hostname.startsWith('vouchers.');
 
   if (isVoucherDomain) {
     try {
@@ -159,6 +159,9 @@ export default function App() {
         <Route path="/voucher-empresa/login" element={<CompanyPortalLogin />} />
         <Route path="/voucher-empresa" element={<CompanyPortalDashboard />} />
         <Route path="/portal-empresa" element={<CompanyPortalDashboard />} />
+        <Route path="/voucher-b2b" element={<CompanyPortalLogin />} />
+        <Route path="/empresa/login" element={<CompanyPortalLogin />} />
+        <Route path="/empresa" element={<CompanyPortalLogin />} />
 
         {/* Gerenciamento Master SaaS */}
         <Route path="/admin/login" element={<AdminLogin />} />

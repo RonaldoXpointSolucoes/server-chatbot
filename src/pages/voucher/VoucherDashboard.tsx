@@ -221,6 +221,19 @@ export default function VoucherDashboard() {
     }));
   };
 
+  // Helper de URL Base Oficial (Garante domínio de produção da Vercel mesmo em testes locais)
+  const getVoucherBaseUrl = () => {
+    const origin = window.location.origin;
+    if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
+      return 'https://voucher-xpointsolucoes.vercel.app';
+    }
+    return origin;
+  };
+
+  const getB2BPortalBaseUrl = () => {
+    return 'https://voucher-xpointsolucoes.vercel.app';
+  };
+
   // Motor de Impressão (Cupom Térmico 40 Colunas ESC/POS e Ingresso VIP Pass com Canhoto Destacável)
   const handleExecutePrint = (voucher: any, layout: 'thermal' | 'pdf') => {
     if (!voucher) return;
@@ -235,7 +248,7 @@ export default function VoucherDashboard() {
     const emissionDate = new Date(voucher.created_at || Date.now()).toLocaleString('pt-BR');
     const empresaNome = voucher.voucher_empresas_parceiras?.razao_social || voucher.empresa_razao_social || voucher.empresa_nome || 'Empresa Parceira Conveniada';
     const campanhaNome = voucher.voucher_campanhas?.nome || voucher.campanha_nome || 'Crédito Corporativo Especial';
-    const qrUrl = `${window.location.origin}/voucher/${voucher.public_token}`;
+    const qrUrl = `${getVoucherBaseUrl()}/voucher/${voucher.public_token}`;
     const qrImageSrc = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(qrUrl)}`;
 
     if (layout === 'thermal') {
@@ -1110,7 +1123,7 @@ export default function VoucherDashboard() {
   };
 
   const handleCopyCompanyAccessInfo = (comp: any) => {
-    const portalUrl = `${window.location.origin}/voucher-empresa/login?user=${encodeURIComponent(comp.login_usuario || comp.cnpj || '')}`;
+    const portalUrl = `${getB2BPortalBaseUrl()}/voucher-empresa/login?user=${encodeURIComponent(comp.login_usuario || comp.cnpj || '')}`;
     const user = comp.login_usuario || comp.cnpj || comp.email_empresa || 'Usuário cadastrado';
     const pass = comp.login_senha || '123456';
     const creditStr = Number(comp.saldo_credito ?? comp.saldo_global ?? 500).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -1126,7 +1139,7 @@ export default function VoucherDashboard() {
   const FOODNEXT_INSTANCE_ID = 'cc4efe36-f391-4b3d-a24c-ddcd8a293cf6';
 
   const handleShareCompanyAccessViaWhatsapp = async (comp: any) => {
-    const portalUrl = `${window.location.origin}/voucher-empresa/login?user=${encodeURIComponent(comp.login_usuario || comp.cnpj || '')}`;
+    const portalUrl = `${getB2BPortalBaseUrl()}/voucher-empresa/login?user=${encodeURIComponent(comp.login_usuario || comp.cnpj || '')}`;
     const user = comp.login_usuario || comp.cnpj || comp.email_empresa || 'Usuário cadastrado';
     const pass = comp.login_senha || '123456';
     const creditStr = Number(comp.saldo_credito ?? comp.saldo_global ?? 500).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -1572,7 +1585,7 @@ export default function VoucherDashboard() {
         return;
       }
 
-      const voucherUrl = `${window.location.origin}/voucher/${selectedVoucherForSend.public_token}`;
+      const voucherUrl = `${getVoucherBaseUrl()}/voucher/${selectedVoucherForSend.public_token}`;
       const valorFormatado = Number(selectedVoucherForSend.valor || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
       const empresaNome = selectedVoucherForSend.voucher_empresas_parceiras?.razao_social || selectedVoucherForSend.empresa_razao_social || selectedVoucherForSend.empresa_nome || 'Empresa Parceira Conveniada';
       const dataValidade = new Date(selectedVoucherForSend.validade_fim).toLocaleDateString('pt-BR');
@@ -3557,6 +3570,65 @@ export default function VoucherDashboard() {
                   ))}
                 </div>
 
+                {/* Link Exclusivo de Acesso ao Portal da Empresa */}
+                <div className="pt-2 border-t border-emerald-500/20 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase text-emerald-400">
+                      Link Exclusivo do Portal B2B
+                    </span>
+                    <span className="text-[10px] text-slate-400">
+                      Login por E-mail, Usuário ou CNPJ
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={`${getB2BPortalBaseUrl()}`}
+                      className="w-full bg-black/40 border border-emerald-500/30 rounded-xl px-3 py-2 text-[11px] text-emerald-300 font-mono select-all focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(`${getB2BPortalBaseUrl()}`);
+                        setActionSuccess('Link exclusivo do portal copiado com sucesso!');
+                        setTimeout(() => setActionSuccess(null), 3000);
+                      }}
+                      className="px-3 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 font-bold text-xs rounded-xl border border-emerald-500/30 transition-all cursor-pointer flex items-center gap-1.5 shrink-0"
+                      title="Copiar Link"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>Copiar</span>
+                    </button>
+                  </div>
+
+                  {companyForm.contatoWhatsapp && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const rawPhone = companyForm.contatoWhatsapp.replace(/\D/g, '');
+                        const cleanPhone = rawPhone.startsWith('55') ? rawPhone : `55${rawPhone}`;
+                        const portalUrl = `${getB2BPortalBaseUrl()}`;
+                        const msg = `✨ *ACESSO AO PORTAL DE VOUCHERS CORPORATIVOS* ✨\n\n` +
+                          `Olá, *${companyForm.contatoNome || 'Responsável'}* da empresa *${companyForm.razaoSocial || companyForm.nomeFantasia}*! 👋\n\n` +
+                          `Seu acesso exclusivo ao portal de emissão de vouchers da *BURGUER PLUS* está liberado!\n\n` +
+                          `🌐 *Link Exclusivo de Acesso:*\n${portalUrl}\n\n` +
+                          `🔑 *Credenciais de Acesso:*\n` +
+                          `👤 *E-mail / Usuário:* ${companyForm.emailEmpresa || companyForm.loginUsuario}\n` +
+                          `🔒 *Senha Inicial:* ${companyForm.loginSenha || '123456'}\n` +
+                          `💳 *Saldo Disponível:* R$ ${Number(companyForm.saldoCredito || 0).toFixed(2)}\n\n` +
+                          `_Você já pode acessar e emitir vouchers para seus colaboradores e convidados._`;
+                        window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`, '_blank', 'noopener,noreferrer');
+                      }}
+                      className="w-full py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      <span>Enviar Link e Credenciais via WhatsApp para a Empresa</span>
+                    </button>
+                  )}
+                </div>
+
               </div>
 
               {/* Botões de Ação */}
@@ -3844,7 +3916,7 @@ export default function VoucherDashboard() {
                 <div className="p-3 bg-[#0c1317] rounded-xl border border-white/5 font-mono text-[11px] text-slate-300 leading-relaxed max-h-32 overflow-y-auto select-all">
                   🎟️ *Seu Voucher Digital Corporativo Chegou!*<br />
                   Olá *{selectedVoucherForSend.beneficiario_nome || 'Colaborador'}*, você recebeu um benefício de {Number(selectedVoucherForSend.valor || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}.<br />
-                  👉 *Acesse seu Voucher e QR Code:* {window.location.origin}/voucher/{selectedVoucherForSend.public_token}
+                  👉 *Acesse seu Voucher e QR Code:* {getVoucherBaseUrl()}/voucher/{selectedVoucherForSend.public_token}
                 </div>
               </div>
 
@@ -4156,7 +4228,7 @@ export default function VoucherDashboard() {
                   </div>
                   <div className="flex flex-col items-center justify-center pt-1">
                     <QRCode
-                      value={`${window.location.origin}/voucher/${selectedVoucherForPrint.public_token}`}
+                      value={`${getVoucherBaseUrl()}/voucher/${selectedVoucherForPrint.public_token}`}
                       size={100}
                     />
                     <span className="font-bold text-[10px] mt-1">{selectedVoucherForPrint.public_token}</span>
@@ -4202,7 +4274,7 @@ export default function VoucherDashboard() {
                   </div>
                   <div className="flex flex-col items-center justify-center pt-1">
                     <QRCode
-                      value={`${window.location.origin}/voucher/${selectedVoucherForPrint.public_token}`}
+                      value={`${getVoucherBaseUrl()}/voucher/${selectedVoucherForPrint.public_token}`}
                       size={110}
                     />
                     <span className="text-[9px] text-slate-500 mt-1">Leitura Oficial no Caixa</span>
@@ -4380,9 +4452,9 @@ export default function VoucherDashboard() {
             {/* Cartão de Credenciais */}
             <div className="bg-black/40 border border-white/10 rounded-2xl p-4 space-y-2.5 text-xs">
               <div>
-                <span className="text-[10px] uppercase font-black text-slate-400 block">Link de Acesso ao Portal</span>
+                <span className="text-[10px] uppercase font-black text-slate-400 block">Link Exclusivo do Portal</span>
                 <div className="font-mono text-emerald-400 text-[11px] truncate bg-black/50 p-2 rounded-xl border border-white/5 mt-1">
-                  {`${window.location.origin}/voucher-empresa/login?user=${encodeURIComponent(selectedCompanyForAccess.login_usuario || selectedCompanyForAccess.cnpj || '')}`}
+                  {`${getB2BPortalBaseUrl()}`}
                 </div>
               </div>
 

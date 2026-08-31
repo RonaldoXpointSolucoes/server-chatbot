@@ -553,6 +553,7 @@ async function runMigrations() {
           ALTER TABLE IF EXISTS public.app_versions ENABLE ROW LEVEL SECURITY;
           
           -- Recriação segura de v_checklist_operators sem expor auth.users e com acesso garantido
+          DROP VIEW IF EXISTS public.v_checklist_operators CASCADE;
           CREATE OR REPLACE VIEW public.v_checklist_operators AS
           SELECT 
               p.id,
@@ -570,6 +571,91 @@ async function runMigrations() {
 
           GRANT SELECT ON public.v_checklist_operators TO authenticated, anon, service_role;
           ALTER VIEW public.v_checklist_operators SET (security_invoker = false);
+
+          -- =========================================================================
+          -- TABELAS DO MÓDULO DE VOUCHERS CORPORATIVOS
+          -- =========================================================================
+          CREATE TABLE IF NOT EXISTS public.voucher_empresas_parceiras (
+            id text PRIMARY KEY,
+            tenant_id uuid NOT NULL,
+            razao_social text NOT NULL,
+            nome_fantasia text,
+            cnpj text,
+            contato_nome text,
+            contato_whatsapp text,
+            email_empresa text,
+            login_usuario text,
+            login_senha text,
+            saldo_global numeric(10,2) DEFAULT 0.00,
+            saldo_credito numeric(10,2) DEFAULT 0.00,
+            credito_total_concedido numeric(10,2) DEFAULT 0.00,
+            credito_fim timestamp with time zone,
+            ativo boolean DEFAULT true,
+            created_at timestamp with time zone DEFAULT now(),
+            updated_at timestamp with time zone DEFAULT now()
+          );
+          ALTER TABLE public.voucher_empresas_parceiras ENABLE ROW LEVEL SECURITY;
+          DROP POLICY IF EXISTS "Permitir tudo em voucher_empresas_parceiras" ON public.voucher_empresas_parceiras;
+          CREATE POLICY "Permitir tudo em voucher_empresas_parceiras" ON public.voucher_empresas_parceiras FOR ALL USING (true) WITH CHECK (true);
+          GRANT ALL ON public.voucher_empresas_parceiras TO authenticated, anon, service_role;
+
+          CREATE TABLE IF NOT EXISTS public.voucher_campanhas (
+            id text PRIMARY KEY,
+            tenant_id uuid NOT NULL,
+            empresa_id text,
+            nome text NOT NULL,
+            descricao text,
+            valor_voucher numeric(10,2) DEFAULT 0.00,
+            quantidade_total integer DEFAULT 0,
+            ativo boolean DEFAULT true,
+            validade_fim timestamp with time zone,
+            created_at timestamp with time zone DEFAULT now()
+          );
+          ALTER TABLE public.voucher_campanhas ENABLE ROW LEVEL SECURITY;
+          DROP POLICY IF EXISTS "Permitir tudo em voucher_campanhas" ON public.voucher_campanhas;
+          CREATE POLICY "Permitir tudo em voucher_campanhas" ON public.voucher_campanhas FOR ALL USING (true) WITH CHECK (true);
+          GRANT ALL ON public.voucher_campanhas TO authenticated, anon, service_role;
+
+          CREATE TABLE IF NOT EXISTS public.voucher_colaboradores (
+            id text PRIMARY KEY,
+            tenant_id uuid NOT NULL,
+            empresa_id text,
+            nome text NOT NULL,
+            cpf text,
+            whatsapp text,
+            email text,
+            ativo boolean DEFAULT true,
+            created_at timestamp with time zone DEFAULT now()
+          );
+          ALTER TABLE public.voucher_colaboradores ENABLE ROW LEVEL SECURITY;
+          DROP POLICY IF EXISTS "Permitir tudo em voucher_colaboradores" ON public.voucher_colaboradores;
+          CREATE POLICY "Permitir tudo em voucher_colaboradores" ON public.voucher_colaboradores FOR ALL USING (true) WITH CHECK (true);
+          GRANT ALL ON public.voucher_colaboradores TO authenticated, anon, service_role;
+
+          CREATE TABLE IF NOT EXISTS public.vouchers (
+            id text PRIMARY KEY,
+            tenant_id uuid NOT NULL,
+            empresa_id text,
+            campanha_id text,
+            colaborador_id text,
+            public_token text UNIQUE NOT NULL,
+            valor numeric(10,2) NOT NULL DEFAULT 0.00,
+            status text NOT NULL DEFAULT 'CRIADO',
+            beneficiario_nome text,
+            beneficiario_whatsapp text,
+            empresa_nome text,
+            empresa_razao_social text,
+            observacoes text,
+            validade_fim timestamp with time zone NOT NULL,
+            data_resgate timestamp with time zone,
+            atendente_id text,
+            created_at timestamp with time zone DEFAULT now(),
+            updated_at timestamp with time zone DEFAULT now()
+          );
+          ALTER TABLE public.vouchers ENABLE ROW LEVEL SECURITY;
+          DROP POLICY IF EXISTS "Permitir tudo em vouchers" ON public.vouchers;
+          CREATE POLICY "Permitir tudo em vouchers" ON public.vouchers FOR ALL USING (true) WITH CHECK (true);
+          GRANT ALL ON public.vouchers TO authenticated, anon, service_role;
         `;
         await client.query(migrationSQL);
         console.log("[Migration] Migração DDL e RLS executada com sucesso!");

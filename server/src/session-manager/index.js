@@ -1547,7 +1547,8 @@ class SessionManager {
 
                                             if (!isSocketOpen(activeSock)) {
                                                 console.warn(`[SessionManager - Antiban] Sem sessão ativa saudável para ${instanceId}. Aguardando/acordando conexão...`);
-                                                const wakedSock = await this.getSocketOrWake(tenantId, instanceId, false);
+                                                const forceRestart = attempts >= 2;
+                                                const wakedSock = await this.getSocketOrWake(tenantId, instanceId, true, forceRestart);
                                                 if (wakedSock) {
                                                     activeSock = wakedSock;
                                                     sendFn = activeSock.originalSendMessage || activeSock.sendMessage;
@@ -1570,7 +1571,18 @@ class SessionManager {
                                     // Se o socket estiver inicializando/conectando, aguarda a abertura da conexão antes de prosseguir
                                     if (activeSock && (!activeSock.ws || activeSock.ws.isConnecting || !isSocketOpen(activeSock))) {
                                         console.log(`[SessionManager - Antiban] Socket de ${instanceId} está conectando. Aguardando abertura da conexão WebSocket...`);
-                                        await waitForSocketOpen(activeSock, 25000);
+                                        try {
+                                            await waitForSocketOpen(activeSock, 25000);
+                                        } catch (waitErr) {
+                                            console.warn(`[SessionManager - Antiban] Aviso ao aguardar abertura do socket: ${waitErr.message}`);
+                                        }
+                                    }
+
+                                    // Atualiza a referência caso a sessão tenha sido recarregada em memória durante o wait
+                                    const latestSock = this.sessions.get(instanceId)?.sock;
+                                    if (latestSock && isSocketOpen(latestSock)) {
+                                        activeSock = latestSock;
+                                        sendFn = activeSock.originalSendMessage || activeSock.sendMessage;
                                     }
 
                                     // Validação final de integridade do socket autenticado
