@@ -2792,10 +2792,15 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                         }
                                     }
 
-                                    const headers = {};
+                                    const headers = {
+                                        'Content-Type': 'application/json',
+                                        'Accept': 'application/json'
+                                    };
                                     if (statusToken) {
                                         headers['Authorization'] = statusToken.startsWith('Bearer ') ? statusToken : `Bearer ${statusToken}`;
                                     }
+
+                                    const postPayload = JSON.stringify({ id: idPedido, idPedido: idPedido });
 
                                     console.log(`[AutomationWorker - Status Pedido] Buscando status do pedido ${idPedido} via Gastrofood API... URL: ${requestUrl}`);
                                     logGastrofoodCall({
@@ -2803,12 +2808,13 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                         action: 'Consultar Status',
                                         method: 'POST',
                                         url: requestUrl,
-                                        payload: null
+                                        payload: postPayload
                                     });
 
                                     const response = await fetch(requestUrl, {
                                         method: 'POST',
-                                        headers
+                                        headers,
+                                        body: postPayload
                                     });
 
                                     if (response.ok) {

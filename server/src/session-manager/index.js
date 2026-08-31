@@ -40,14 +40,14 @@ export const isSocketOpen = (sock) => {
     return false;
 };
 
-const waitForSocketOpen = (sock, timeoutMs = 20000) => {
+const waitForSocketOpen = (sock, timeoutMs = 8000) => {
     return new Promise((resolve, reject) => {
         if (isSocketOpen(sock)) {
             return resolve(true);
         }
         const ws = sock?.ws;
         const rawState = ws?.socket?.readyState;
-        if (ws && (ws.isClosing || ws.isClosed || rawState === 2 || rawState === 3)) {
+        if (!sock || (ws && (ws.isClosing || ws.isClosed || rawState === 2 || rawState === 3))) {
             return reject(new Error('WebSocket is closed or closing'));
         }
 
@@ -71,7 +71,7 @@ const waitForSocketOpen = (sock, timeoutMs = 20000) => {
             if (isSocketOpen(sock)) {
                 resolve(true);
             } else {
-                reject(new Error('Timeout waiting for connection to open'));
+                reject(new Error('Timeout waiting for connection to open (WebSocket não respondeu a tempo)'));
             }
         }, timeoutMs);
 
@@ -90,13 +90,13 @@ const waitForSocketOpen = (sock, timeoutMs = 20000) => {
             sock.ev.on('connection.update', connectionListener);
         }
 
-        // Polling de fallback rápido (a cada 200ms) para detectar abertura imediata do socket
+        // Polling de fallback rápido (a cada 150ms) para detectar abertura imediata do socket
         pollTimer = setInterval(() => {
             if (isSocketOpen(sock)) {
                 cleanUp();
                 resolve(true);
             }
-        }, 200);
+        }, 150);
     });
 };
 
@@ -1572,7 +1572,7 @@ class SessionManager {
                                     if (activeSock && (!activeSock.ws || activeSock.ws.isConnecting || !isSocketOpen(activeSock))) {
                                         console.log(`[SessionManager - Antiban] Socket de ${instanceId} está conectando. Aguardando abertura da conexão WebSocket...`);
                                         try {
-                                            await waitForSocketOpen(activeSock, 25000);
+                                            await waitForSocketOpen(activeSock, 8000);
                                         } catch (waitErr) {
                                             console.warn(`[SessionManager - Antiban] Aviso ao aguardar abertura do socket: ${waitErr.message}`);
                                         }

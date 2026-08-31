@@ -390,8 +390,15 @@ router.post('/message/sendText', requireApiKey, async (req, res) => {
             status: "PENDING"
         });
     } catch (e) {
-        console.error(`[API Gateway] [sendText] ❌ Exceção 500 ao Enviar Mensagem: ${e.message} | Instância: ${id} ("${display_name}") | Destino: ${number} | Stack: ${e.stack?.split('\n')[1] || ''}`);
-        res.status(500).json({ error: e.message });
+        const isConnClosed = e.message?.includes('Connection Closed') || e.message?.includes('WebSocket não aberto') || e.message?.includes('desconectada') || e.message?.includes('offline');
+        const statusCode = isConnClosed ? 503 : 500;
+        console.error(`[API Gateway] [sendText] ❌ Falha ${statusCode} ao Enviar Mensagem: ${e.message} | Instância: ${id} ("${display_name}") | Destino: ${number}`);
+        res.status(statusCode).json({
+            error: e.message,
+            code: isConnClosed ? 'WHATSAPP_SOCKET_UNAVAILABLE' : 'INTERNAL_SERVER_ERROR',
+            instance_id: id,
+            status: isConnClosed ? 'offline_or_reconnecting' : 'error'
+        });
     }
 });
 

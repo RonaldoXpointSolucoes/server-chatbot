@@ -836,14 +836,22 @@ export default function VoucherDashboard() {
         }
       } catch (_) {}
 
-      // 2. Consulta em nuvem no Supabase
-      const [vRes, cRes, eRes, evRes, instRes] = await Promise.allSettled([
+      // 2. Consulta em nuvem no Supabase (com tratamento resiliente)
+      const [vRes, cRes, eRes, instRes] = await Promise.allSettled([
         supabase.from('vouchers').select('*').order('created_at', { ascending: false }).limit(500),
         supabase.from('voucher_campanhas').select('*').order('created_at', { ascending: false }),
         supabase.from('voucher_empresas_parceiras').select('*').order('created_at', { ascending: false }),
-        supabase.from('voucher_events').select('*').order('created_at', { ascending: false }).limit(200),
         supabase.from('whatsapp_instances').select('id, name, display_name, phone_number, status, is_active, session_name, api_key').eq('tenant_id', tenantId)
       ]);
+
+      // Eventos de auditoria carregados com fallback seguro
+      let dbEventsList: any[] = [];
+      try {
+        const evRes = await supabase.from('voucher_events').select('*').order('created_at', { ascending: false }).limit(100);
+        if (!evRes.error && evRes.data) {
+          dbEventsList = evRes.data;
+        }
+      } catch (_) {}
 
       // 3. Merge de Empresas
       let mergedEmpresas = [...localCompanies];
@@ -936,8 +944,8 @@ export default function VoucherDashboard() {
 
       // 6. Merge de Eventos
       let mergedEvents = [...localEvents];
-      if (evRes.status === 'fulfilled' && evRes.value.data && evRes.value.data.length > 0) {
-        evRes.value.data.forEach((dbEv: any) => {
+      if (dbEventsList && dbEventsList.length > 0) {
+        dbEventsList.forEach((dbEv: any) => {
           const idx = mergedEvents.findIndex((m) => m.id === dbEv.id);
           if (idx >= 0) mergedEvents[idx] = { ...mergedEvents[idx], ...dbEv };
           else mergedEvents.push(dbEv);
