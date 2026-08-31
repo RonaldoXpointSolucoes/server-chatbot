@@ -622,9 +622,14 @@ interface ChatState {
   // Quick Replies
   quickReplies: QuickReply[];
   fetchQuickReplies: () => Promise<void>;
-  addQuickReply: (shortcut: string, content: string, mediaUrl?: string, mediaType?: string, type?: CannedResponseType) => Promise<void>;
-  updateQuickReply: (id: string, shortcut: string, content: string, mediaUrl?: string, mediaType?: string, type?: CannedResponseType) => Promise<void>;
+  addQuickReply: (shortcut: string, content: string, mediaUrl?: string, mediaType?: string, type?: CannedResponseType, categoryId?: string | null) => Promise<void>;
+  updateQuickReply: (id: string, shortcut: string, content: string, mediaUrl?: string, mediaType?: string, type?: CannedResponseType, categoryId?: string | null) => Promise<void>;
   deleteQuickReply: (id: string) => Promise<void>;
+  
+  // Quick Reply Categories (Pastas e Subcategorias)
+  addQuickReplyCategory: (category: Omit<QuickReplyCategory, 'id' | 'created_at'>) => Promise<void>;
+  updateQuickReplyCategory: (id: string, updates: Partial<QuickReplyCategory>) => Promise<void>;
+  deleteQuickReplyCategory: (id: string) => Promise<void>;
   
   // Contact Groups (Grupos Empresariais)
   addContactGroup: (group: Omit<ContactGroup, 'id'>) => Promise<void>;
@@ -702,6 +707,18 @@ interface ChatState {
 
 export type CannedResponseType = 'STANDARD' | 'TUTORIAL';
 
+export interface QuickReplyCategory {
+  id: string;
+  name: string;
+  shortcut?: string;
+  parent_id?: string | null;
+  color?: string;
+  icon?: string;
+  description?: string;
+  order?: number;
+  created_at?: string;
+}
+
 export interface QuickReply {
   id: string;
   tenant_id: string;
@@ -710,6 +727,7 @@ export interface QuickReply {
   type?: CannedResponseType;
   media_url?: string;
   media_type?: string;
+  category_id?: string | null;
   created_at?: string;
 }
 
@@ -1545,38 +1563,79 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  addQuickReply: async (shortcut: string, content: string, mediaUrl?: string, mediaType?: string, type?: CannedResponseType) => {
+  addQuickReply: async (shortcut: string, content: string, mediaUrl?: string, mediaType?: string, type?: CannedResponseType, categoryId?: string | null) => {
       const state = get();
       if (!state.tenantInfo) throw new Error('Tenant não encontrado');
       const finalType = type || 'STANDARD';
-      const { data, error } = await supabase.from('quick_replies').insert({
+      const payload: any = {
          tenant_id: state.tenantInfo.id,
          shortcut,
          content,
          media_url: mediaUrl,
          media_type: mediaType,
          type: finalType
-      }).select().single();
+      };
+      if (categoryId !== undefined && categoryId !== null) {
+         payload.category_id = categoryId;
+      }
+
+      let data: any = null;
+      try {
+        const res = await supabase.from('quick_replies').insert(payload).select().single();
+        if (res.error) throw res.error;
+        data = res.data;
+      } catch (err: any) {
+        if (err?.message?.includes('category_id') || err?.code === 'PGRST204') {
+          delete payload.category_id;
+          const res = await supabase.from('quick_replies').insert(payload).select().single();
+          if (res.error) throw res.error;
+          data = res.data ? { ...res.data, category_id: categoryId || null } : null;
+        } else {
+          throw err;
+        }
+      }
       
-      if (error) throw error;
       if (data) {
-         set({ quickReplies: [data, ...state.quickReplies] });
+         set({ quickReplies: [{ ...data, category_id: categoryId || data.category_id || null }, ...state.quickReplies] });
       }
   },
 
-  updateQuickReply: async (id: string, shortcut: string, content: string, mediaUrl?: string, mediaType?: string, type?: CannedResponseType) => {
+  updateQuickReply: async (id: string, shortcut: string, content: string, mediaUrl?: string, mediaType?: string, type?: CannedResponseType, categoryId?: string | null) => {
       const finalType = type || 'STANDARD';
-      const { error } = await supabase.from('quick_replies').update({
+      const payload: any = {
          shortcut,
          content,
          media_url: mediaUrl,
          media_type: mediaType,
          type: finalType
-      }).eq('id', id);
+      };
+      if (categoryId !== undefined) {
+         payload.category_id = categoryId;
+      }
+
+      try {
+        const { error } = await supabase.from('quick_replies').update(payload).eq('id', id);
+        if (error) throw error;
+      } catch (err: any) {
+        if (err?.message?.includes('category_id') || err?.code === 'PGRST204') {
+          delete payload.category_id;
+          const { error } = await supabase.from('quick_replies').update(payload).eq('id', id);
+          if (error) throw error;
+        } else {
+          throw err;
+        }
+      }
       
-      if (error) throw error;
       set(s => ({
-         quickReplies: s.quickReplies.map(q => q.id === id ? { ...q, shortcut, content, media_url: mediaUrl, media_type: mediaType, type: finalType } : q)
+         quickReplies: s.quickReplies.map(q => q.id === id ? { 
+           ...q, 
+           shortcut, 
+           content, 
+           media_url: mediaUrl, 
+           media_type: mediaType, 
+           type: finalType, 
+           category_id: categoryId !== undefined ? categoryId : q.category_id 
+         } : q)
       }));
   },
 
@@ -1587,6 +1646,53 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set(s => ({
          quickReplies: s.quickReplies.filter(q => q.id !== id)
       }));
+  },
+
+  addQuickReplyCategory: async (category: Omit<QuickReplyCategory, 'id' | 'created_at'>) => {
+    const state = get();
+    if (!state.tenantInfo) return;
+    const currentCategories: QuickReplyCategory[] = state.tenantInfo.settings?.quickReplyCategories || [];
+    const newCategory: QuickReplyCategory = {
+      ...category,
+      id: crypto.randomUUID(),
+      created_at: new Date().toISOString()
+    };
+    const updated = [...currentCategories, newCategory];
+    await state.updateTenantSettings({ quickReplyCategories: updated });
+  },
+
+  updateQuickReplyCategory: async (id: string, updates: Partial<QuickReplyCategory>) => {
+    const state = get();
+    if (!state.tenantInfo) return;
+    const currentCategories: QuickReplyCategory[] = state.tenantInfo.settings?.quickReplyCategories || [];
+    const updated = currentCategories.map(cat => cat.id === id ? { ...cat, ...updates } : cat);
+    await state.updateTenantSettings({ quickReplyCategories: updated });
+  },
+
+  deleteQuickReplyCategory: async (id: string) => {
+    const state = get();
+    if (!state.tenantInfo) return;
+    const currentCategories: QuickReplyCategory[] = state.tenantInfo.settings?.quickReplyCategories || [];
+    
+    // Identificar recursivamente todos os IDs de subcategorias a deletar
+    const idsToDelete = new Set<string>([id]);
+    let added = true;
+    while (added) {
+      added = false;
+      for (const cat of currentCategories) {
+        if (cat.parent_id && idsToDelete.has(cat.parent_id) && !idsToDelete.has(cat.id)) {
+          idsToDelete.add(cat.id);
+          added = true;
+        }
+      }
+    }
+    const updated = currentCategories.filter(cat => !idsToDelete.has(cat.id));
+    await state.updateTenantSettings({ quickReplyCategories: updated });
+
+    // Atualizar localmente as respostas prontas que estavam vinculadas a essas categorias
+    set(s => ({
+      quickReplies: s.quickReplies.map(q => q.category_id && idsToDelete.has(q.category_id) ? { ...q, category_id: null } : q)
+    }));
   },
 
   addContactGroup: async (group) => {

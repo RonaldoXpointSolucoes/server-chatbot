@@ -148,6 +148,15 @@ export default function VoucherDashboard() {
   const [showCompanyModal, setShowCompanyModal] = useState<boolean>(false);
   const [editingCompany, setEditingCompany] = useState<any | null>(null);
 
+  // Estados de Acesso Corporativo & Gestão de Créditos de Empresas Parceiras
+  const [selectedCompanyForAccess, setSelectedCompanyForAccess] = useState<any | null>(null);
+  const [showCompanyAccessModal, setShowCompanyAccessModal] = useState<boolean>(false);
+  const [selectedCompanyForCredit, setSelectedCompanyForCredit] = useState<any | null>(null);
+  const [showCompanyCreditModal, setShowCompanyCreditModal] = useState<boolean>(false);
+  const [creditAdjustmentAmount, setCreditAdjustmentAmount] = useState<string>('500');
+  const [creditAdjustmentValidity, setCreditAdjustmentValidity] = useState<string>('');
+  const [copiedAccessInfo, setCopiedAccessInfo] = useState<boolean>(false);
+
   const [showCampaignModal, setShowCampaignModal] = useState<boolean>(false);
   const [editingCampaign, setEditingCampaign] = useState<any | null>(null);
 
@@ -212,10 +221,10 @@ export default function VoucherDashboard() {
     }));
   };
 
-  // Motor de Impressão (Cupom Térmico 40 Colunas ESC/POS e Documento PDF A4)
+  // Motor de Impressão (Cupom Térmico 40 Colunas ESC/POS e Ingresso VIP Pass com Canhoto Destacável)
   const handleExecutePrint = (voucher: any, layout: 'thermal' | 'pdf') => {
     if (!voucher) return;
-    const printWindow = window.open('', '_blank', 'width=460,height=680');
+    const printWindow = window.open('', '_blank', 'width=860,height=680');
     if (!printWindow) {
       alert('Por favor, permita popups neste site para abrir a impressão.');
       return;
@@ -224,8 +233,8 @@ export default function VoucherDashboard() {
     const formattedValue = Number(voucher.valor || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
     const formattedDate = new Date(voucher.validade_fim).toLocaleDateString('pt-BR');
     const emissionDate = new Date(voucher.created_at || Date.now()).toLocaleString('pt-BR');
-    const empresaNome = voucher.voucher_empresas_parceiras?.razao_social || 'Cliente Avulso (Venda Direta)';
-    const campanhaNome = voucher.voucher_campanhas?.nome || 'Benefício Especial';
+    const empresaNome = voucher.voucher_empresas_parceiras?.razao_social || voucher.empresa_razao_social || voucher.empresa_nome || 'Empresa Parceira Conveniada';
+    const campanhaNome = voucher.voucher_campanhas?.nome || voucher.campanha_nome || 'Crédito Corporativo Especial';
     const qrUrl = `${window.location.origin}/voucher/${voucher.public_token}`;
     const qrImageSrc = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(qrUrl)}`;
 
@@ -277,7 +286,7 @@ export default function VoucherDashboard() {
           
           <div><strong>TITULAR:</strong> ${voucher.beneficiario_nome || 'Cliente / Colaborador'}</div>
           ${voucher.beneficiario_whatsapp ? `<div><strong>WHATS:</strong> ${voucher.beneficiario_whatsapp}</div>` : ''}
-          <div><strong>ORIGEM:</strong> ${empresaNome}</div>
+          <div><strong>PATROCINADOR:</strong> ${empresaNome}</div>
           <div><strong>CAMPANHA:</strong> ${campanhaNome}</div>
           
           <div class="divider"></div>
@@ -322,175 +331,352 @@ export default function VoucherDashboard() {
         </html>
       `);
     } else {
-      // DOCUMENTO / VALE PRESENTE PDF A4
+      // INGRESSO VIP PASS SHOW COM CANHOTO DESTACÁVEL (PDF A4)
       printWindow.document.write(`
         <!DOCTYPE html>
         <html>
         <head>
           <meta charset="utf-8" />
-          <title>Vale Presente PDF - ${voucher.public_token}</title>
+          <title>VIP Pass Ticket - ${voucher.public_token}</title>
           <style>
-            @page {
-              size: A4 portrait;
-              margin: 15mm;
-            }
+            @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;900&family=JetBrains+Mono:wght@700;900&display=swap');
+            
+            * { box-sizing: border-box; margin: 0; padding: 0; }
             body {
-              font-family: 'Helvetica Neue', Arial, sans-serif;
-              margin: 0;
-              padding: 24px;
-              color: #1e293b;
-              background: #f8fafc;
+              font-family: 'Montserrat', sans-serif;
+              background: #f4f6f8;
+              padding: 40px 20px;
               display: flex;
               justify-content: center;
-            }
-            .card {
-              width: 100%;
-              max-width: 580px;
-              background: #ffffff;
-              border: 2px solid #10b981;
-              border-radius: 24px;
-              padding: 32px;
-              box-shadow: 0 10px 25px rgba(0,0,0,0.05);
-            }
-            .header {
-              display: flex;
-              justify-content: space-between;
               align-items: center;
-              border-bottom: 2px solid #f1f5f9;
-              padding-bottom: 16px;
+              color: #111;
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
             }
-            .brand {
-              font-size: 20px;
-              font-weight: 900;
-              color: #0f172a;
+
+            .ticket-container {
+              width: 820px;
+              background: #ffffff;
+              border-radius: 24px;
+              box-shadow: 0 20px 50px rgba(0,0,0,0.15);
+              display: flex;
+              position: relative;
+              overflow: hidden;
+              border: 2px solid #00a884;
             }
-            .badge {
-              background: #ecfdf5;
-              color: #059669;
-              border: 1px solid #10b981;
-              font-weight: 800;
-              font-size: 11px;
-              padding: 4px 12px;
-              border-radius: 999px;
-              text-transform: uppercase;
+
+            .ticket-container::before {
+              content: '';
+              position: absolute;
+              top: -14px;
+              right: 234px;
+              width: 28px;
+              height: 28px;
+              background: #f4f6f8;
+              border-radius: 50%;
+              border-bottom: 2px solid #00a884;
+              z-index: 10;
             }
-            .token-box {
-              text-align: center;
-              margin: 20px 0;
-              background: #0f172a;
+
+            .ticket-container::after {
+              content: '';
+              position: absolute;
+              bottom: -14px;
+              right: 234px;
+              width: 28px;
+              height: 28px;
+              background: #f4f6f8;
+              border-radius: 50%;
+              border-top: 2px solid #00a884;
+              z-index: 10;
+            }
+
+            .ticket-main {
+              flex: 1;
+              padding: 32px 36px;
+              background: linear-gradient(135deg, #0b141a 0%, #111b21 100%);
               color: #ffffff;
-              padding: 16px;
-              border-radius: 16px;
+              position: relative;
             }
-            .token {
-              font-family: monospace;
-              font-size: 26px;
+
+            .ticket-main::before {
+              content: 'VIP PASS';
+              position: absolute;
+              bottom: 10px;
+              right: 20px;
+              font-size: 80px;
               font-weight: 900;
-              letter-spacing: 3px;
-              color: #34d399;
+              color: rgba(255,255,255,0.03);
+              letter-spacing: 6px;
+              pointer-events: none;
             }
-            .value-label {
+
+            .badge-gold {
+              display: inline-flex;
+              align-items: center;
+              gap: 6px;
+              background: linear-gradient(90deg, #d97706, #f59e0b);
+              color: #0b141a;
               font-size: 11px;
+              font-weight: 900;
               text-transform: uppercase;
-              color: #64748b;
-              font-weight: bold;
+              letter-spacing: 1.5px;
+              padding: 5px 14px;
+              border-radius: 20px;
+              margin-bottom: 12px;
             }
-            .value {
+
+            .company-name {
+              font-size: 18px;
+              font-weight: 900;
+              color: #00a884;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+              margin-bottom: 4px;
+            }
+
+            .company-subtitle {
+              font-size: 11px;
+              color: #94a3b8;
+              text-transform: uppercase;
+              letter-spacing: 1px;
+              font-weight: 600;
+              margin-bottom: 20px;
+            }
+
+            .middle-row {
+              display: flex;
+              align-items: center;
+              justify-content: space-between;
+              background: rgba(255,255,255,0.04);
+              border: 1px solid rgba(255,255,255,0.1);
+              padding: 16px 20px;
+              border-radius: 16px;
+              margin-bottom: 20px;
+            }
+
+            .value-block .label {
+              font-size: 10px;
+              color: #94a3b8;
+              text-transform: uppercase;
+              font-weight: 700;
+              letter-spacing: 1px;
+            }
+
+            .value-block .amount {
               font-size: 32px;
               font-weight: 900;
-              color: #059669;
-              margin: 6px 0;
+              color: #00a884;
+              line-height: 1.1;
+              margin-top: 2px;
             }
-            .details {
-              background: #f8fafc;
-              border: 1px solid #e2e8f0;
-              border-radius: 14px;
-              padding: 16px;
-              margin: 20px 0;
-              font-size: 13px;
+
+            .beneficiary-block {
+              text-align: right;
             }
-            .details-row {
+
+            .beneficiary-block .name {
+              font-size: 16px;
+              font-weight: 800;
+              color: #ffffff;
+            }
+
+            .token-pill {
+              display: inline-block;
+              font-family: 'JetBrains Mono', monospace;
+              font-size: 12px;
+              background: rgba(0,168,132,0.15);
+              color: #00a884;
+              border: 1px solid rgba(0,168,132,0.3);
+              padding: 4px 10px;
+              border-radius: 8px;
+              margin-top: 4px;
+              font-weight: 700;
+            }
+
+            .footer-info {
               display: flex;
               justify-content: space-between;
-              margin-bottom: 8px;
-            }
-            .details-row:last-child {
-              margin-bottom: 0;
-            }
-            .qr-center {
-              text-align: center;
-              margin: 20px 0;
-            }
-            .footer {
-              text-align: center;
+              align-items: flex-end;
               font-size: 11px;
-              color: #64748b;
-              border-top: 1px solid #f1f5f9;
-              padding-top: 16px;
+              color: #94a3b8;
             }
-            @media print {
-              body { background: #fff; padding: 0; }
-              .card { border: 2px solid #059669; box-shadow: none; max-width: 100%; }
+
+            .perforation-line {
+              width: 0px;
+              border-left: 2px dashed #00a884;
+              position: relative;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+            }
+
+            .cut-label {
+              position: absolute;
+              background: #0b141a;
+              color: #00a884;
+              font-size: 9px;
+              font-weight: 900;
+              text-transform: uppercase;
+              letter-spacing: 1px;
+              padding: 6px 4px;
+              writing-mode: vertical-rl;
+              text-orientation: mixed;
+              border: 1px dashed #00a884;
+              border-radius: 6px;
+              white-space: nowrap;
+            }
+
+            .ticket-stub {
+              width: 248px;
+              padding: 28px 22px;
+              background: #0d171d;
+              color: #ffffff;
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              justify-content: space-between;
+              text-align: center;
+              border-left: 1px solid rgba(255,255,255,0.05);
+            }
+
+            .stub-header {
+              font-size: 10px;
+              font-weight: 900;
+              text-transform: uppercase;
+              letter-spacing: 1px;
+              color: #94a3b8;
+            }
+
+            .qr-box {
+              background: #ffffff;
+              padding: 10px;
+              border-radius: 14px;
+              box-shadow: 0 6px 16px rgba(0,0,0,0.3);
+              margin: 12px 0;
+            }
+
+            .stub-amount {
+              font-size: 18px;
+              font-weight: 900;
+              color: #00a884;
+              margin-bottom: 4px;
+            }
+
+            .stub-beneficiary {
+              font-size: 11px;
+              color: #ffffff;
+              font-weight: 700;
+              margin-bottom: 8px;
+              max-width: 180px;
+              white-space: nowrap;
+              overflow: hidden;
+              text-overflow: ellipsis;
+            }
+
+            .signature-box {
+              width: 100%;
+              border-top: 1px solid rgba(255,255,255,0.2);
+              padding-top: 6px;
+              font-size: 9px;
+              color: #64748b;
+              text-transform: uppercase;
+            }
+
+            .restaurant-box {
+              background: rgba(0, 168, 132, 0.08);
+              border: 1px solid rgba(0, 168, 132, 0.3);
+              border-radius: 14px;
+              padding: 12px 16px;
+              margin-bottom: 16px;
+            }
+
+            .restaurant-tag {
+              font-size: 9.5px;
+              font-weight: 900;
+              text-transform: uppercase;
+              letter-spacing: 1px;
+              color: #34d399;
+              display: flex;
+              align-items: center;
+              gap: 4px;
+              margin-bottom: 3px;
+            }
+
+            .restaurant-name {
+              font-size: 15px;
+              font-weight: 900;
+              color: #ffffff;
+              text-transform: uppercase;
+            }
+
+            .restaurant-address {
+              font-size: 10.5px;
+              color: #94a3b8;
+              margin-top: 2px;
             }
           </style>
         </head>
         <body>
-          <div class="card">
-            <div class="header">
+          <div class="ticket-container">
+            <div class="ticket-main">
+              <div class="badge-gold">★ VIP COMPLIMENTARY PASS ★</div>
+              <div class="company-name">${empresaNome}</div>
+              <div class="company-subtitle">Programa de Benefício & Cortesia Corporativa</div>
+
+              <!-- Estabelecimento de Consumo -->
+              <div class="restaurant-box">
+                <div class="restaurant-tag">🍔 LOCAL DE CONSUMO EXCLUSIVO:</div>
+                <div class="restaurant-name">BURGUER PLUS</div>
+                <div class="restaurant-address">📍 Praça Miguel Ortega, 340 - Parque Assunção - Taboão da Serra/SP</div>
+              </div>
+
+              <div class="middle-row">
+                <div class="value-block">
+                  <div class="label">Valor Liberado</div>
+                  <div class="amount">${formattedValue}</div>
+                </div>
+                <div class="beneficiary-block">
+                  <div class="label">Beneficiário</div>
+                  <div class="name">${voucher.beneficiario_nome || 'Cliente / Colaborador'}</div>
+                  <div class="token-pill">${voucher.public_token}</div>
+                </div>
+              </div>
+
+              <div class="footer-info">
+                <div>
+                  <strong>Validade:</strong> ${formattedDate}<br/>
+                  <strong>Site / Cardápio:</strong> www.burguerplus.com.br
+                </div>
+                <div style="text-align: right;">
+                  Apresente este voucher no balcão da BURGUER PLUS para resgate.
+                </div>
+              </div>
+            </div>
+
+            <div class="perforation-line">
+              <span class="cut-label">✂ DESTACAR NO CAIXA</span>
+            </div>
+
+            <div class="ticket-stub">
               <div>
-                <div class="brand">X-POINT VOUCHER</div>
-                <div style="font-size: 12px; color: #64748b;">Cupom de Benefício & Vale Presente</div>
+                <div class="stub-header">CANHOTO DO CAIXA</div>
+                <div style="font-size: 10px; font-weight: 800; color: #00a884; text-transform: uppercase; margin-top: 2px;">BURGUER PLUS</div>
               </div>
-              <div class="badge">Voucher Digital Válido</div>
-            </div>
-            
-            <div class="token-box">
-              <div class="value-label" style="color: #94a3b8;">Código de Validação</div>
-              <div class="token">${voucher.public_token}</div>
-            </div>
-            
-            <div style="text-align: center;">
-              <div class="value-label">Valor do Crédito</div>
-              <div class="value">${formattedValue}</div>
-            </div>
-            
-            <div class="details">
-              <div class="details-row">
-                <span style="color: #64748b;">Beneficiário:</span>
-                <strong style="color: #0f172a;">${voucher.beneficiario_nome || 'Cliente / Colaborador'}</strong>
+              
+              <div class="qr-box">
+                <img src="${qrImageSrc}" width="110" height="110" alt="QR Code" />
               </div>
-              ${voucher.beneficiario_whatsapp ? `
-              <div class="details-row">
-                <span style="color: #64748b;">WhatsApp:</span>
-                <strong style="font-family: monospace;">${voucher.beneficiario_whatsapp}</strong>
-              </div>` : ''}
-              <div class="details-row">
-                <span style="color: #64748b;">Origem / Convênio:</span>
-                <strong>${empresaNome}</strong>
+
+              <div class="stub-amount">${formattedValue}</div>
+              <div class="stub-beneficiary">${voucher.beneficiario_nome || 'Colaborador'}</div>
+              
+              <div class="signature-box">
+                Visto do Caixa / Data:<br/>____/____/________
               </div>
-              <div class="details-row">
-                <span style="color: #64748b;">Campanha:</span>
-                <strong style="color: #059669;">${campanhaNome}</strong>
-              </div>
-              <div class="details-row" style="border-top: 1px dashed #cbd5e1; padding-top: 8px; margin-top: 8px;">
-                <span style="color: #64748b;">Válido até:</span>
-                <strong style="color: #dc2626;">${formattedDate}</strong>
-              </div>
-            </div>
-            
-            <div class="qr-center">
-              <div style="font-size: 11px; font-weight: bold; color: #475569; margin-bottom: 6px;">
-                QR CODE PARA LEITURA NO CAIXA:
-              </div>
-              <img src="${qrImageSrc}" style="width: 140px; height: 140px; margin: 0 auto; display: block; border-radius: 8px; border: 1px solid #cbd5e1;" />
-            </div>
-            
-            <div class="footer">
-              Apresente este voucher impresso ou digital no balcão de atendimento.<br/>
-              Autenticação Criptográfica JWT • X-Point Gestão de Ativos
             </div>
           </div>
-          
+
           <script>
             window.onload = function() {
               setTimeout(function() {
@@ -516,7 +702,7 @@ export default function VoucherDashboard() {
     dataFim: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
   });
 
-  // Form Empresa com Campos Detalhados de CNPJ
+  // Form Empresa com Campos Detalhados de CNPJ, Acesso B2B e Créditos Corporativos
   const [companyForm, setCompanyForm] = useState({
     razaoSocial: '',
     nomeFantasia: '',
@@ -536,7 +722,12 @@ export default function VoucherDashboard() {
     naturezaJuridica: '',
     dataAbertura: '',
     statusCnpj: '',
-    limiteVouchers: 100
+    limiteVouchers: 100,
+    loginUsuario: '',
+    loginSenha: '',
+    saldoCredito: 500,
+    creditoInicio: new Date().toISOString().split('T')[0],
+    creditoFim: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
   });
 
   const [isLoadingCnpj, setIsLoadingCnpj] = useState<boolean>(false);
@@ -719,12 +910,14 @@ export default function VoucherDashboard() {
   };
 
   // ==============================================================================
-  // GESTÃO INLINE DE EMPRESA PARCEIRA (Criação e Edição)
+  // GESTÃO INLINE DE EMPRESA PARCEIRA (Criação, Edição, Acesso B2B e Créditos)
   // ==============================================================================
   const openNewCompanyModal = () => {
     setEditingCompany(null);
     setCnpjError(null);
     setCnpjSuccessMessage(null);
+    const today = new Date().toISOString().split('T')[0];
+    const defaultEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
     setCompanyForm({
       razaoSocial: '',
       nomeFantasia: '',
@@ -744,7 +937,12 @@ export default function VoucherDashboard() {
       naturezaJuridica: '',
       dataAbertura: '',
       statusCnpj: '',
-      limiteVouchers: 100
+      limiteVouchers: 100,
+      loginUsuario: '',
+      loginSenha: '123' + Math.random().toString(36).substring(2, 6),
+      saldoCredito: 500,
+      creditoInicio: today,
+      creditoFim: defaultEnd
     });
     setShowCompanyModal(true);
   };
@@ -753,6 +951,8 @@ export default function VoucherDashboard() {
     setEditingCompany(comp);
     setCnpjError(null);
     setCnpjSuccessMessage(null);
+    const today = new Date().toISOString().split('T')[0];
+    const defaultEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
     setCompanyForm({
       razaoSocial: comp.razao_social || '',
       nomeFantasia: comp.nome_fantasia || '',
@@ -772,7 +972,12 @@ export default function VoucherDashboard() {
       naturezaJuridica: comp.natureza_juridica || '',
       dataAbertura: comp.data_abertura_cnpj || comp.data_abertura || '',
       statusCnpj: comp.status_cnpj || '',
-      limiteVouchers: comp.limite_vouchers || 100
+      limiteVouchers: comp.limite_vouchers || 100,
+      loginUsuario: comp.login_usuario || (comp.razao_social ? comp.razao_social.toLowerCase().replace(/[^a-z0-9]/g, '') : ''),
+      loginSenha: comp.login_senha || '123456',
+      saldoCredito: Number(comp.saldo_credito ?? comp.saldo_global ?? 500),
+      creditoInicio: comp.credito_inicio ? comp.credito_inicio.split('T')[0] : today,
+      creditoFim: comp.credito_fim ? comp.credito_fim.split('T')[0] : defaultEnd
     });
     setShowCompanyModal(true);
   };
@@ -787,6 +992,10 @@ export default function VoucherDashboard() {
     try {
       setActionLoading(true);
       setActionError(null);
+
+      const generatedLogin = companyForm.loginUsuario.trim() || companyForm.razaoSocial.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const generatedPass = companyForm.loginSenha.trim() || '123456';
+      const parsedCredit = Number(companyForm.saldoCredito) || 0;
 
       if (editingCompany) {
         // EDIÇÃO
@@ -811,6 +1020,13 @@ export default function VoucherDashboard() {
           contato_nome: companyForm.contatoNome.trim(),
           contato_whatsapp: companyForm.contatoWhatsapp.replace(/\D/g, ''),
           limite_vouchers: Number(companyForm.limiteVouchers) || 100,
+          login_usuario: generatedLogin,
+          login_senha: generatedPass,
+          saldo_credito: parsedCredit,
+          saldo_global: parsedCredit,
+          credito_total_concedido: Math.max(parsedCredit, Number(editingCompany.credito_total_concedido || parsedCredit)),
+          credito_inicio: companyForm.creditoInicio ? new Date(companyForm.creditoInicio + 'T00:00:00').toISOString() : new Date().toISOString(),
+          credito_fim: companyForm.creditoFim ? new Date(companyForm.creditoFim + 'T23:59:59').toISOString() : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
           updated_at: new Date().toISOString()
         };
 
@@ -848,6 +1064,13 @@ export default function VoucherDashboard() {
           contato_nome: companyForm.contatoNome.trim(),
           contato_whatsapp: companyForm.contatoWhatsapp.replace(/\D/g, ''),
           limite_vouchers: Number(companyForm.limiteVouchers) || 100,
+          login_usuario: generatedLogin,
+          login_senha: generatedPass,
+          saldo_credito: parsedCredit,
+          saldo_global: parsedCredit,
+          credito_total_concedido: parsedCredit,
+          credito_inicio: companyForm.creditoInicio ? new Date(companyForm.creditoInicio + 'T00:00:00').toISOString() : new Date().toISOString(),
+          credito_fim: companyForm.creditoFim ? new Date(companyForm.creditoFim + 'T23:59:59').toISOString() : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
           ativo: true,
           created_at: new Date().toISOString()
         };
@@ -866,13 +1089,165 @@ export default function VoucherDashboard() {
         setVoucherForm((prev) => ({ ...prev, empresaId: newCompany.id }));
         setCampaignForm((prev) => ({ ...prev, empresaId: newCompany.id }));
 
-        setActionSuccess(`Empresa '${newCompany.razao_social}' criada e selecionada com sucesso!`);
+        setActionSuccess(`Empresa '${newCompany.razao_social}' criada com R$ ${parsedCredit.toFixed(2)} em créditos!`);
       }
 
       setShowCompanyModal(false);
       setTimeout(() => setActionSuccess(null), 4000);
     } catch (err: any) {
       setActionError(err.message || 'Erro ao salvar empresa.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // ==============================================================================
+  // AÇÕES RÁPIDAS B2B: CONVITE DE ACESSO VIA WHATSAPP E RECARGA DE CRÉDITO
+  // ==============================================================================
+  const handleOpenAccessModal = (comp: any) => {
+    setSelectedCompanyForAccess(comp);
+    setShowCompanyAccessModal(true);
+  };
+
+  const handleCopyCompanyAccessInfo = (comp: any) => {
+    const portalUrl = `${window.location.origin}/voucher-empresa/login?user=${encodeURIComponent(comp.login_usuario || comp.cnpj || '')}`;
+    const user = comp.login_usuario || comp.cnpj || comp.email_empresa || 'Usuário cadastrado';
+    const pass = comp.login_senha || '123456';
+    const creditStr = Number(comp.saldo_credito ?? comp.saldo_global ?? 500).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    const valStr = comp.credito_fim ? new Date(comp.credito_fim).toLocaleDateString('pt-BR') : '30 dias';
+
+    const textToCopy = `*PORTAL B2B DE VOUCHERS CORPORATIVOS*\n\n🏢 *Empresa:* ${comp.razao_social}\n💳 *Saldo de Crédito:* ${creditStr}\n⏳ *Validade do Crédito:* até ${valStr}\n\n🔗 *Link de Acesso:*\n${portalUrl}\n\n👤 *Usuário:* ${user}\n🔑 *Senha:* ${pass}\n\n_Acesse o portal para auto-emitir seus vouchers e presentear colaboradores e clientes._`;
+
+    navigator.clipboard.writeText(textToCopy);
+    setCopiedAccessInfo(true);
+    setTimeout(() => setCopiedAccessInfo(false), 3000);
+  };
+
+  const FOODNEXT_INSTANCE_ID = 'cc4efe36-f391-4b3d-a24c-ddcd8a293cf6';
+
+  const handleShareCompanyAccessViaWhatsapp = async (comp: any) => {
+    const portalUrl = `${window.location.origin}/voucher-empresa/login?user=${encodeURIComponent(comp.login_usuario || comp.cnpj || '')}`;
+    const user = comp.login_usuario || comp.cnpj || comp.email_empresa || 'Usuário cadastrado';
+    const pass = comp.login_senha || '123456';
+    const creditStr = Number(comp.saldo_credito ?? comp.saldo_global ?? 500).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    const valStr = comp.credito_fim ? new Date(comp.credito_fim).toLocaleDateString('pt-BR') : '30 dias';
+
+    const msg = `🏢✨ *ACESSO AO PORTAL B2B DE VOUCHERS CORPORATIVOS*\n\n` +
+      `Olá *${comp.contato_nome || comp.razao_social}*!\n\n` +
+      `Seu acesso exclusivo ao *Portal B2B de Vouchers Corporativos* foi liberado com sucesso!\n\n` +
+      `💳 *Saldo de Crédito Liberado:* ${creditStr}\n` +
+      `⏳ *Validade do Crédito:* até ${valStr}\n\n` +
+      `🔗 *Link Direto de Acesso:*\n${portalUrl}\n\n` +
+      `👤 *Usuário:* \`${user}\`\n` +
+      `🔑 *Senha de Acesso:* \`${pass}\`\n\n` +
+      `_No portal você pode auto-emitir vouchers digitais personalizados com QR Code e enviar direto para seus colaboradores ou clientes._`;
+
+    const rawPhone = (comp.contato_whatsapp || comp.telefone_empresa || '').replace(/\D/g, '');
+    if (!rawPhone || rawPhone.length < 10) {
+      setActionError(`A empresa ${comp.razao_social} não possui telefone/WhatsApp válido com DDD.`);
+      return;
+    }
+
+    const cleanPhone = rawPhone.startsWith('55') ? rawPhone : `55${rawPhone}`;
+    const targetJid = `${cleanPhone}@s.whatsapp.net`;
+
+    try {
+      setActionLoading(true);
+      setActionError(null);
+      setActionSuccess(null);
+
+      const res = await fetch(`${ENGINE_URL}/api/v1/instances/${FOODNEXT_INSTANCE_ID}/invoke`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-id': tenantId
+        },
+        body: JSON.stringify({
+          method: 'sendMessage',
+          args: [targetJid, { text: msg }]
+        })
+      });
+
+      const resJson = await res.json().catch(() => ({}));
+      if (res.ok && resJson.ok !== false) {
+        setActionSuccess(`✅ Acesso ao portal enviado com sucesso para ${comp.razao_social} (${rawPhone}) via FoodNext!`);
+      } else {
+        throw new Error(resJson.error || resJson.message || 'Falha ao enviar mensagem pela FoodNext');
+      }
+    } catch (err: any) {
+      console.error('[FoodNext Error]', err);
+      setActionError(`❌ Falha no envio via FoodNext: ${err.message}`);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleOpenCreditModal = (comp: any) => {
+    setSelectedCompanyForCredit(comp);
+    setCreditAdjustmentAmount('500');
+    const defaultEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    setCreditAdjustmentValidity(comp.credito_fim ? comp.credito_fim.split('T')[0] : defaultEnd);
+    setShowCompanyCreditModal(true);
+  };
+
+  const handleSaveCreditAdjustment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedCompanyForCredit) return;
+
+    const addVal = parseFloat(creditAdjustmentAmount.replace(',', '.'));
+    if (isNaN(addVal) || addVal <= 0) {
+      alert('Informe um valor de recarga válido.');
+      return;
+    }
+
+    try {
+      setActionLoading(true);
+      const currentCredit = Number(selectedCompanyForCredit.saldo_credito ?? selectedCompanyForCredit.saldo_global ?? 0);
+      const newCredit = currentCredit + addVal;
+      const newTotal = Number(selectedCompanyForCredit.credito_total_concedido || currentCredit) + addVal;
+
+      const updatedObj = {
+        ...selectedCompanyForCredit,
+        saldo_credito: newCredit,
+        saldo_global: newCredit,
+        credito_total_concedido: newTotal,
+        credito_fim: creditAdjustmentValidity ? new Date(creditAdjustmentValidity + 'T23:59:59').toISOString() : selectedCompanyForCredit.credito_fim,
+        updated_at: new Date().toISOString()
+      };
+
+      const newList = empresas.map((emp) => (emp.id === selectedCompanyForCredit.id ? updatedObj : emp));
+      setEmpresas(newList);
+      setTenantStorage('voucher_companies', tenantId, newList);
+
+      // Registra evento de recarga no Ledger
+      const novoEvento = {
+        id: 'ev-' + Math.random().toString(36).substring(2, 9),
+        tenant_id: tenantId,
+        voucher_id: null,
+        voucher_token: 'RECARGA_CREDITO_B2B',
+        tipo_operacao: 'CREDITO_RECARGA_B2B',
+        valor: addVal,
+        status_anterior: 'RECARGA',
+        status_novo: 'DISPONIVEL',
+        data_hora: new Date().toISOString(),
+        usuario_responsavel: 'Restaurante (Gestor de Vouchers)',
+        beneficiario_nome: selectedCompanyForCredit.razao_social,
+        motivo: `Recarga de crédito corporativo de R$ ${addVal.toFixed(2)} para ${selectedCompanyForCredit.razao_social}`,
+        created_at: new Date().toISOString()
+      };
+      const evList = [novoEvento, ...events];
+      setEvents(evList);
+      setTenantStorage('voucher_events', tenantId, evList);
+
+      try {
+        await supabase.from('voucher_empresas_parceiras').update({ saldo_global: newCredit }).eq('id', selectedCompanyForCredit.id);
+      } catch (_) {}
+
+      setActionSuccess(`Crédito de R$ ${addVal.toFixed(2)} adicionado com sucesso para ${selectedCompanyForCredit.razao_social}!`);
+      setShowCompanyCreditModal(false);
+      setTimeout(() => setActionSuccess(null), 4000);
+    } catch (err: any) {
+      alert(err.message || 'Erro ao ajustar crédito.');
     } finally {
       setActionLoading(false);
     }
@@ -1095,6 +1470,29 @@ export default function VoucherDashboard() {
         });
       }
 
+      // Se emitido vinculado a uma empresa parceira, abate do saldo de crédito da empresa
+      if (selectedEmpresa && (selectedEmpresa.saldo_credito !== undefined || selectedEmpresa.saldo_global !== undefined)) {
+        const totalDebito = emissionValue * countToEmit;
+        const currentBal = Number(selectedEmpresa.saldo_credito ?? selectedEmpresa.saldo_global ?? 0);
+        if (currentBal > 0) {
+          const novoSaldoEmp = Math.max(0, currentBal - totalDebito);
+          const updatedEmpresa = {
+            ...selectedEmpresa,
+            saldo_credito: novoSaldoEmp,
+            saldo_global: novoSaldoEmp,
+            updated_at: new Date().toISOString()
+          };
+
+          const updatedEmpresasList = empresas.map((emp) => (emp.id === selectedEmpresa.id ? updatedEmpresa : emp));
+          setEmpresas(updatedEmpresasList);
+          setTenantStorage('voucher_companies', tenantId, updatedEmpresasList);
+
+          try {
+            await supabase.from('voucher_empresas_parceiras').update({ saldo_global: novoSaldoEmp }).eq('id', selectedEmpresa.id);
+          } catch (_) {}
+        }
+      }
+
       // Persistência no Supabase
       try {
         await supabase.from('vouchers').insert(newVouchers);
@@ -1176,15 +1574,27 @@ export default function VoucherDashboard() {
 
       const voucherUrl = `${window.location.origin}/voucher/${selectedVoucherForSend.public_token}`;
       const valorFormatado = Number(selectedVoucherForSend.valor || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+      const empresaNome = selectedVoucherForSend.voucher_empresas_parceiras?.razao_social || selectedVoucherForSend.empresa_razao_social || selectedVoucherForSend.empresa_nome || 'Empresa Parceira Conveniada';
+      const dataValidade = new Date(selectedVoucherForSend.validade_fim).toLocaleDateString('pt-BR');
+      const finalidade = selectedVoucherForSend.voucher_campanhas?.nome || selectedVoucherForSend.observacoes || 'Benefício Corporativo Especial';
 
-      const messageText = `🎟️ *Seu Voucher Digital Corporativo Chegou!*\n\n` +
-        `Olá *${selectedVoucherForSend.beneficiario_nome || 'Colaborador'}*,\n` +
-        `Você recebeu um voucher corporativo especial de *${selectedVoucherForSend.voucher_empresas_parceiras?.razao_social || 'Empresa Parceira'}*.\n\n` +
-        `💰 *Valor:* ${valorFormatado}\n` +
-        `🏷️ *Campanha:* ${selectedVoucherForSend.voucher_campanhas?.nome || 'Benefício Corporativo'}\n` +
-        `⏳ *Validade:* ${new Date(selectedVoucherForSend.validade_fim).toLocaleDateString('pt-BR')}\n\n` +
-        `👉 *Acesse seu Voucher e QR Code:*\n${voucherUrl}\n\n` +
-        `_Apresente o QR Code no balcão para resgatar seu benefício._`;
+      const restauranteNome = 'BURGUER PLUS';
+      const restauranteEndereco = 'Praça Miguel Ortega, 340 - Parque Assunção - Taboão da Serra/SP';
+      const cardapioUrl = 'https://www.burguerplus.com.br';
+
+      const messageText = `✨ *PRESENTE CORPORATIVO EXCLUSIVO* ✨\n` +
+        `🏢 *Oferecido por:* ${empresaNome}\n\n` +
+        `Olá, *${selectedVoucherForSend.beneficiario_nome || 'Colaborador'}*! 🎉\n\n` +
+        `Você acaba de ser presenteado com um *Voucher Digital VIP* no valor de:\n` +
+        `💳 *${valorFormatado}*\n\n` +
+        `🍔 *Local de Resgate Exclusivo:* ${restauranteNome}\n` +
+        `📍 *Endereço:* ${restauranteEndereco}\n` +
+        `🍽️ *Cardápio Online:* ${cardapioUrl}\n\n` +
+        `🎟️ *Código do Voucher:* \`${selectedVoucherForSend.public_token}\`\n` +
+        `⏳ *Válido até:* ${dataValidade}\n` +
+        `🏷️ *Finalidade:* ${finalidade}\n\n` +
+        `📲 *Acesse seu Voucher com QR Code Oficial:*\n${voucherUrl}\n\n` +
+        `_Basta apresentar o QR Code acima no caixa da ${restauranteNome} para validar seu benefício._`;
 
       // Seleção da Instância: Própria da Loja vs Contingência FoodNext
       const targetInstance = tenantInstances.find((i) => i.id === selectedSendInstanceId) || tenantInstances[0];
@@ -1633,10 +2043,12 @@ export default function VoucherDashboard() {
                   return (
                     <div
                       key={v.id}
-                      className={`bg-white dark:bg-[#1f2c34] p-4 rounded-2xl border transition-all space-y-3 shadow-sm text-left ${
-                        isSelected 
+                      className={`p-4 rounded-2xl border transition-all space-y-3 shadow-sm text-left ${
+                        isUtil
+                          ? 'bg-purple-500/[0.04] dark:bg-purple-950/25 border-l-4 border-l-purple-500 border-t-purple-500/20 border-r-purple-500/20 border-b-purple-500/20'
+                          : isSelected 
                           ? 'border-emerald-500/60 ring-2 ring-emerald-500/20 bg-emerald-500/[0.02]' 
-                          : 'border-black/10 dark:border-white/10'
+                          : 'bg-white dark:bg-[#1f2c34] border-black/10 dark:border-white/10'
                       }`}
                     >
                       <div className="flex items-center justify-between">
@@ -1647,21 +2059,21 @@ export default function VoucherDashboard() {
                             onChange={(e) => handleToggleSelectVoucher(v.id, e as any)}
                             className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer accent-emerald-600"
                           />
-                          <span className="font-mono font-black text-emerald-600 dark:text-emerald-400 text-sm">
+                          <span className={`font-mono font-black text-sm ${isUtil ? 'text-purple-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
                             {v.public_token}
                           </span>
                         </div>
 
-                        <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${
+                        <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider inline-flex items-center gap-1 ${
                           isUtil
-                            ? 'bg-purple-500/20 text-purple-600 dark:text-purple-300 border border-purple-500/30'
+                            ? 'bg-purple-500/20 text-purple-600 dark:text-purple-300 border border-purple-500/40 shadow-sm'
                             : isVal
                             ? 'bg-amber-500/20 text-amber-600 dark:text-amber-300 border border-amber-500/30 animate-pulse'
                             : isEnv
                             ? 'bg-blue-500/20 text-blue-600 dark:text-blue-300 border border-blue-500/30'
                             : 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 border border-emerald-500/30'
                         }`}>
-                          {v.status}
+                          {isUtil ? '✓ UTILIZADO' : v.status}
                         </span>
                       </div>
 
@@ -1778,8 +2190,10 @@ export default function VoucherDashboard() {
                       return (
                         <tr 
                           key={v.id} 
-                          className={`transition-colors ${
-                            isSelected 
+                          className={`transition-all ${
+                            isUtil
+                              ? 'bg-purple-500/[0.05] dark:bg-purple-950/25 border-l-4 border-l-purple-500 shadow-sm'
+                              : isSelected 
                               ? 'bg-emerald-500/[0.06] dark:bg-emerald-500/[0.08]' 
                               : 'hover:bg-slate-50 dark:hover:bg-white/[0.02]'
                           }`}
@@ -1792,7 +2206,7 @@ export default function VoucherDashboard() {
                               className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer accent-emerald-600"
                             />
                           </td>
-                          <td className="py-3.5 px-4 font-mono font-black text-emerald-600 dark:text-emerald-400 text-sm">
+                          <td className={`py-3.5 px-4 font-mono font-black text-sm ${isUtil ? 'text-purple-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
                             {v.public_token}
                           </td>
                           <td className="py-3.5 px-4">
@@ -1829,16 +2243,16 @@ export default function VoucherDashboard() {
                             {Number(v.valor || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                           </td>
                           <td className="py-3.5 px-4">
-                            <span className={`px-2.5 py-1 rounded-full text-[9.5px] font-black uppercase tracking-wider ${
+                            <span className={`px-2.5 py-1 rounded-full text-[9.5px] font-black uppercase tracking-wider inline-flex items-center gap-1 ${
                               isUtil
-                                ? 'bg-purple-500/20 text-purple-600 dark:text-purple-300 border border-purple-500/30'
+                                ? 'bg-purple-500/20 text-purple-600 dark:text-purple-300 border border-purple-500/40 shadow-sm'
                                 : isVal
                                 ? 'bg-amber-500/20 text-amber-600 dark:text-amber-300 border border-amber-500/30 animate-pulse'
                                 : isEnv
                                 ? 'bg-blue-500/20 text-blue-600 dark:text-blue-300 border border-blue-500/30'
                                 : 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 border border-emerald-500/30'
                             }`}>
-                              {v.status}
+                              {isUtil ? '✓ UTILIZADO' : v.status}
                             </span>
                           </td>
                           <td className="py-3.5 px-4 text-slate-400 font-medium">
@@ -1858,9 +2272,13 @@ export default function VoucherDashboard() {
 
                             <button
                               onClick={() => handleSendWhatsApp(v)}
-                              disabled={actionLoading}
-                              className="p-2 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-600 dark:text-emerald-400 rounded-xl cursor-pointer transition-all active:scale-95 min-h-[40px] min-w-[40px] inline-flex items-center justify-center"
-                              title="Disparar via WhatsApp"
+                              disabled={actionLoading || isUtil}
+                              className={`p-2 rounded-xl transition-all min-h-[40px] min-w-[40px] inline-flex items-center justify-center ${
+                                isUtil
+                                  ? 'bg-black/5 dark:bg-white/5 text-slate-600 cursor-not-allowed opacity-40'
+                                  : 'bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-600 dark:text-emerald-400 cursor-pointer active:scale-95'
+                              }`}
+                              title={isUtil ? 'Voucher já utilizado no caixa. Reenvio bloqueado.' : 'Disparar via WhatsApp'}
                             >
                               <Send className="w-4 h-4" />
                             </button>
@@ -2004,30 +2422,103 @@ export default function VoucherDashboard() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {empresas.map((e) => (
-                <div key={e.id} className="bg-white dark:bg-[#1f2c34] p-5 rounded-2xl border border-black/10 dark:border-white/10 space-y-3 shadow-sm text-left">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
-                        <Building2 className="w-4 h-4" />
+              {empresas.map((e) => {
+                const saldo = Number(e.saldo_credito ?? e.saldo_global ?? 500);
+                const diasRest = e.credito_fim 
+                  ? Math.max(0, Math.ceil((new Date(e.credito_fim).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
+                  : 30;
+
+                return (
+                  <div key={e.id} className="bg-white dark:bg-[#1f2c34] p-5 rounded-2xl border border-black/10 dark:border-white/10 space-y-3.5 shadow-sm text-left hover:border-emerald-500/30 transition-all flex flex-col justify-between">
+                    <div className="space-y-3">
+                      {/* Topo do Card */}
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 shadow-sm">
+                            <Building2 className="w-4.5 h-4.5" />
+                          </div>
+                          <div className="min-w-0">
+                            <h3 className="font-black text-sm text-slate-900 dark:text-white leading-tight truncate" title={e.razao_social}>
+                              {e.razao_social}
+                            </h3>
+                            {e.nome_fantasia && e.nome_fantasia !== e.razao_social && (
+                              <p className="text-[11px] text-slate-400 truncate">{e.nome_fantasia}</p>
+                            )}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => openEditCompanyModal(e)}
+                          className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg cursor-pointer shrink-0 transition-colors"
+                          title="Editar Empresa"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
                       </div>
-                      <h3 className="font-black text-sm text-slate-900 dark:text-white leading-tight truncate">{e.razao_social}</h3>
+
+                      {/* Bloco de Créditos & Validade B2B */}
+                      <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] uppercase font-black tracking-wider text-emerald-400 flex items-center gap-1">
+                            <Wallet className="w-3 h-3" /> Saldo de Crédito
+                          </span>
+                          <span className="text-sm font-black text-emerald-400">
+                            {saldo.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-[10px] text-slate-300 font-medium pt-0.5 border-t border-emerald-500/10">
+                          <span>Validade:</span>
+                          <span className="font-bold text-white flex items-center gap-1">
+                            <Clock className="w-3 h-3 text-amber-400" />
+                            {diasRest > 0 ? `${diasRest} dias restantes` : 'Expirado'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Informações de CNPJ & Contato */}
+                      <div className="text-xs text-slate-400 space-y-1 pt-0.5">
+                        <div className="flex items-center justify-between">
+                          <span>CNPJ:</span>
+                          <span className="font-mono text-slate-200 font-bold">{e.cnpj || 'Não informado'}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span>Contato:</span>
+                          <span className="text-slate-200 font-medium">{e.contato_nome || 'Não informado'}</span>
+                        </div>
+                        {e.contato_whatsapp && (
+                          <div className="flex items-center justify-between">
+                            <span>WhatsApp:</span>
+                            <span className="font-mono text-slate-200 font-medium">{e.contato_whatsapp}</span>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    <button
-                      onClick={() => openEditCompanyModal(e)}
-                      className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg cursor-pointer shrink-0"
-                      title="Editar Empresa"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </button>
+
+                    {/* Botões de Ação B2B */}
+                    <div className="pt-2 border-t border-black/5 dark:border-white/5 grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenAccessModal(e)}
+                        className="py-2 px-2.5 bg-white/5 hover:bg-emerald-500/15 border border-white/10 hover:border-emerald-500/30 text-white hover:text-emerald-400 text-[11px] font-black uppercase rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                        title="Ver credenciais de login e enviar link de acesso para o parceiro"
+                      >
+                        <Lock className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Acesso Portal</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleOpenCreditModal(e)}
+                        className="py-2 px-2.5 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-400 text-[11px] font-black uppercase rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                        title="Adicionar ou recarregar créditos desta empresa"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Recarregar</span>
+                      </button>
+                    </div>
+
                   </div>
-                  <div className="text-xs text-slate-400 space-y-1.5 pt-1">
-                    <div>CNPJ: <span className="font-mono text-slate-300 font-bold">{e.cnpj || 'Não informado'}</span></div>
-                    <div>Contato: <span className="text-slate-300">{e.contato_nome} ({e.contato_whatsapp || 'Sem Whats'})</span></div>
-                    <div>Limite: <span className="font-black text-emerald-400">{e.limite_vouchers} vouchers/mês</span></div>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -2977,6 +3468,97 @@ export default function VoucherDashboard() {
                 </div>
               </div>
 
+              {/* SEÇÃO 5: ACESSO AO PORTAL B2B & GESTÃO DE CRÉDITOS */}
+              <div className="bg-gradient-to-br from-emerald-500/10 via-emerald-500/5 to-transparent p-4 rounded-2xl border border-emerald-500/30 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="block text-emerald-400 font-black uppercase text-[11px] flex items-center gap-1.5">
+                    <Lock className="w-3.5 h-3.5" /> Acesso ao Portal B2B & Créditos Corporativos
+                  </label>
+                  <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full font-black">
+                    Auto-Emissão B2B
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1 text-[11px]">Usuário de Acesso ao Portal</label>
+                    <input
+                      type="text"
+                      value={companyForm.loginUsuario}
+                      onChange={(e) => setCompanyForm({ ...companyForm, loginUsuario: e.target.value })}
+                      placeholder="Ex: terrasgoncalves"
+                      className="w-full bg-[#111b21] border border-white/10 rounded-xl px-3.5 py-2.5 text-white text-xs min-h-[44px] focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1 text-[11px]">Senha de Acesso</label>
+                    <input
+                      type="text"
+                      value={companyForm.loginSenha}
+                      onChange={(e) => setCompanyForm({ ...companyForm, loginSenha: e.target.value })}
+                      placeholder="Senha do parceiro"
+                      className="w-full bg-[#111b21] border border-white/10 rounded-xl px-3.5 py-2.5 text-white font-mono text-xs min-h-[44px] focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1 text-[11px]">Saldo de Crédito (R$)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={companyForm.saldoCredito}
+                      onChange={(e) => setCompanyForm({ ...companyForm, saldoCredito: Number(e.target.value) })}
+                      placeholder="500.00"
+                      className="w-full bg-[#111b21] border border-white/10 rounded-xl px-3.5 py-2.5 text-emerald-400 font-black text-xs min-h-[44px] focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1 text-[11px]">Data de Início</label>
+                    <input
+                      type="date"
+                      value={companyForm.creditoInicio}
+                      onChange={(e) => setCompanyForm({ ...companyForm, creditoInicio: e.target.value })}
+                      className="w-full bg-[#111b21] border border-white/10 rounded-xl px-3.5 py-2.5 text-white text-xs min-h-[44px] focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1 text-[11px]">Validade do Crédito (Fim)</label>
+                    <input
+                      type="date"
+                      value={companyForm.creditoFim}
+                      onChange={(e) => setCompanyForm({ ...companyForm, creditoFim: e.target.value })}
+                      className="w-full bg-[#111b21] border border-white/10 rounded-xl px-3.5 py-2.5 text-white text-xs min-h-[44px] focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Atalhos Rápidos de Validade */}
+                <div className="flex items-center gap-1.5 pt-1">
+                  <span className="text-[10px] text-slate-400 font-semibold">Atalhos de Vigência:</span>
+                  {[
+                    { label: '+30 dias', days: 30 },
+                    { label: '+60 dias', days: 60 },
+                    { label: '+90 dias', days: 90 }
+                  ].map((p) => (
+                    <button
+                      key={p.label}
+                      type="button"
+                      onClick={() => {
+                        const newEnd = new Date(Date.now() + p.days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+                        setCompanyForm({ ...companyForm, creditoFim: newEnd });
+                      }}
+                      className="px-2.5 py-1 bg-white/5 hover:bg-white/10 text-slate-300 text-[10px] font-bold rounded-lg transition-colors cursor-pointer"
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+
+              </div>
+
               {/* Botões de Ação */}
               <div className="flex gap-2.5 pt-2 shrink-0">
                 <button
@@ -3745,6 +4327,245 @@ export default function VoucherDashboard() {
                 )}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* MODAL: CREDENCIAIS & ACESSO AO PORTAL B2B DA EMPRESA */}
+      {/* ========================================================= */}
+      {showCompanyAccessModal && selectedCompanyForAccess && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-[#111b21] border border-white/10 rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl animate-in zoom-in-95 text-left relative overflow-hidden">
+            
+            {/* Glow de Fundo */}
+            <div className="absolute top-0 right-0 w-40 h-40 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none" />
+
+            {/* Header Modal */}
+            <div className="flex items-center justify-between border-b border-white/5 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                  <Building2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-sm text-white">{selectedCompanyForAccess.razao_social}</h3>
+                  <p className="text-[11px] text-emerald-400 font-bold">Acesso ao Portal B2B de Vouchers</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCompanyAccessModal(false)}
+                className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Resumo de Créditos e Validade */}
+            <div className="p-3.5 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex items-center justify-between">
+              <div>
+                <span className="text-[10px] uppercase font-black text-emerald-400 block">Crédito Liberado</span>
+                <span className="text-base font-black text-emerald-400">
+                  {Number(selectedCompanyForAccess.saldo_credito ?? selectedCompanyForAccess.saldo_global ?? 500).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                </span>
+              </div>
+              <div className="text-right">
+                <span className="text-[10px] uppercase font-black text-slate-400 block">Validade</span>
+                <span className="text-xs font-bold text-white">
+                  {selectedCompanyForAccess.credito_fim ? new Date(selectedCompanyForAccess.credito_fim).toLocaleDateString('pt-BR') : '30 dias'}
+                </span>
+              </div>
+            </div>
+
+            {/* Cartão de Credenciais */}
+            <div className="bg-black/40 border border-white/10 rounded-2xl p-4 space-y-2.5 text-xs">
+              <div>
+                <span className="text-[10px] uppercase font-black text-slate-400 block">Link de Acesso ao Portal</span>
+                <div className="font-mono text-emerald-400 text-[11px] truncate bg-black/50 p-2 rounded-xl border border-white/5 mt-1">
+                  {`${window.location.origin}/voucher-empresa/login?user=${encodeURIComponent(selectedCompanyForAccess.login_usuario || selectedCompanyForAccess.cnpj || '')}`}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
+                  <span className="text-[10px] uppercase font-black text-slate-400 block">Usuário</span>
+                  <strong className="font-mono text-white text-xs">
+                    {selectedCompanyForAccess.login_usuario || selectedCompanyForAccess.cnpj || 'Usuário'}
+                  </strong>
+                </div>
+
+                <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
+                  <span className="text-[10px] uppercase font-black text-slate-400 block">Senha</span>
+                  <strong className="font-mono text-emerald-400 text-xs">
+                    {selectedCompanyForAccess.login_senha || '123456'}
+                  </strong>
+                </div>
+              </div>
+            </div>
+
+            {/* Ações de Envio e Compartilhamento */}
+            <div className="space-y-2 pt-1">
+              <button
+                type="button"
+                onClick={() => handleShareCompanyAccessViaWhatsapp(selectedCompanyForAccess)}
+                className="w-full py-3 bg-emerald-500 text-[#0b141a] font-black text-xs uppercase tracking-wider rounded-xl hover:opacity-95 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-emerald-500/20"
+              >
+                <Send className="w-4 h-4" />
+                <span>Enviar Acesso no WhatsApp do Responsável</span>
+              </button>
+
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleCopyCompanyAccessInfo(selectedCompanyForAccess)}
+                  className="py-2.5 bg-white/5 hover:bg-white/10 text-white font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  {copiedAccessInfo ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                  <span>{copiedAccessInfo ? 'Copiado!' : 'Copiar Acesso'}</span>
+                </button>
+
+                <a
+                  href={`/voucher-empresa/login?user=${encodeURIComponent(selectedCompanyForAccess.login_usuario || selectedCompanyForAccess.cnpj || '')}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="py-2.5 bg-white/5 hover:bg-white/10 text-slate-300 font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-1.5 text-center"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  <span>Abrir Portal</span>
+                </a>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* MODAL: RECARGA DE CRÉDITOS & VALIDADE CORPORATIVA */}
+      {/* ========================================================= */}
+      {showCompanyCreditModal && selectedCompanyForCredit && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-[#111b21] border border-white/10 rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl animate-in zoom-in-95 text-left">
+            
+            {/* Header Modal */}
+            <div className="flex items-center justify-between border-b border-white/5 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                  <Wallet className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-sm text-white">Recarregar Crédito Corporativo</h3>
+                  <p className="text-[11px] text-slate-400">{selectedCompanyForCredit.razao_social}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCompanyCreditModal(false)}
+                className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Saldo Atual */}
+            <div className="p-3.5 bg-black/40 border border-white/10 rounded-2xl flex items-center justify-between">
+              <div>
+                <span className="text-[10px] uppercase font-black text-slate-400 block">Saldo Atual Disponível</span>
+                <span className="text-lg font-black text-white">
+                  {Number(selectedCompanyForCredit.saldo_credito ?? selectedCompanyForCredit.saldo_global ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                </span>
+              </div>
+              <div className="text-right">
+                <span className="text-[10px] uppercase font-black text-slate-400 block">Vigência Atual</span>
+                <span className="text-xs font-bold text-slate-300">
+                  {selectedCompanyForCredit.credito_fim ? new Date(selectedCompanyForCredit.credito_fim).toLocaleDateString('pt-BR') : '30 dias'}
+                </span>
+              </div>
+            </div>
+
+            {/* Formulário de Recarga */}
+            <form onSubmit={handleSaveCreditAdjustment} className="space-y-4">
+              
+              <div className="space-y-1">
+                <label className="text-[11px] font-black uppercase text-slate-400 pl-1 block">
+                  Valor a Adicionar ao Saldo (R$) *
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="1"
+                  value={creditAdjustmentAmount}
+                  onChange={(e) => setCreditAdjustmentAmount(e.target.value)}
+                  placeholder="500.00"
+                  required
+                  className="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-3 text-sm text-emerald-400 font-black focus:outline-none focus:border-emerald-500"
+                />
+                {/* Atalhos de Valor */}
+                <div className="flex items-center gap-1.5 pt-1">
+                  {['200', '500', '1000', '2000'].map((val) => (
+                    <button
+                      key={val}
+                      type="button"
+                      onClick={() => setCreditAdjustmentAmount(val)}
+                      className="px-2.5 py-1 bg-white/5 hover:bg-emerald-500/20 text-slate-300 hover:text-emerald-300 text-[10px] font-bold rounded-lg transition-colors cursor-pointer"
+                    >
+                      + R$ {val}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[11px] font-black uppercase text-slate-400 pl-1 block">
+                  Nova Data de Validade do Crédito
+                </label>
+                <input
+                  type="date"
+                  value={creditAdjustmentValidity}
+                  onChange={(e) => setCreditAdjustmentValidity(e.target.value)}
+                  className="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500"
+                />
+                {/* Atalhos de Validade */}
+                <div className="flex items-center gap-1.5 pt-1">
+                  {[
+                    { label: '+30 dias', days: 30 },
+                    { label: '+60 dias', days: 60 },
+                    { label: '+90 dias', days: 90 }
+                  ].map((p) => (
+                    <button
+                      key={p.label}
+                      type="button"
+                      onClick={() => {
+                        const newEnd = new Date(Date.now() + p.days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+                        setCreditAdjustmentValidity(newEnd);
+                      }}
+                      className="px-2.5 py-1 bg-white/5 hover:bg-white/10 text-slate-300 text-[10px] font-bold rounded-lg transition-colors cursor-pointer"
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="pt-2">
+                <button
+                  type="submit"
+                  disabled={actionLoading}
+                  className="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-400 text-[#0b141a] font-black text-xs uppercase tracking-wider rounded-2xl hover:opacity-95 active:scale-[0.99] transition-all shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  {actionLoading ? (
+                    <span>Processando Recarga...</span>
+                  ) : (
+                    <>
+                      <Sparkles className="w-4 h-4" />
+                      <span>Confirmar e Adicionar Crédito</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+            </form>
+
           </div>
         </div>
       )}

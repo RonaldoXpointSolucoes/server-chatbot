@@ -46,6 +46,8 @@ import ConnectInstanceStandalone from './pages/ConnectInstanceStandalone';
 import VoucherDashboard from './pages/voucher/VoucherDashboard';
 import VoucherViewer from './pages/voucher/VoucherViewer';
 import VoucherScanner from './pages/voucher/VoucherScanner';
+import CompanyPortalLogin from './pages/voucher/CompanyPortalLogin';
+import CompanyPortalDashboard from './pages/voucher/CompanyPortalDashboard';
 
 // Inicializa o tema globalmente no boot
 const savedTheme = localStorage.getItem('theme') || 'light';
@@ -62,7 +64,26 @@ function PushNotificationManager() {
   return null;
 }
 
+// Roteador Raiz Inteligente (Detecta se o acesso é via domínio de voucher dedicado ex: voucher-xpoint.vercel.app)
+function RootRouter() {
+  const hostname = window.location.hostname.toLowerCase();
+  const isVoucherDomain = hostname.includes('voucher') || hostname.startsWith('vch.') || hostname.startsWith('vouchers.');
 
+  if (isVoucherDomain) {
+    try {
+      const activeSession = sessionStorage.getItem('active_company_session') || localStorage.getItem('active_company_session');
+      if (activeSession) {
+        const parsed = JSON.parse(activeSession);
+        if (parsed?.id) {
+          return <CompanyPortalDashboard />;
+        }
+      }
+    } catch (_) {}
+    return <CompanyPortalLogin />;
+  }
+
+  return <ClientLogin />;
+}
 
 // Provedor Global de Rotas
 export default function App() {
@@ -75,8 +96,9 @@ export default function App() {
       <NetworkStatusToast />
       <GlobalToast />
       <Routes>
-        {/* Rota do Cliente Comum */}
-        <Route path="/" element={<ClientLogin />} />
+        {/* Rota Raiz Inteligente (ChatBoot vs Portal Voucher Corporativo) */}
+        <Route path="/" element={<RootRouter />} />
+        <Route path="/login" element={<RootRouter />} />
 
         {/* Rotas Privadas (Client SaaS) */}
         <Route element={<ProtectedRoute role="client" />}>
@@ -132,6 +154,11 @@ export default function App() {
         <Route path="/voucher/:token" element={<VoucherViewer />} />
         <Route path="/voucher-scanner" element={<VoucherScanner />} />
         <Route path="/voucher-validar" element={<VoucherScanner />} />
+
+        {/* Portal B2B Exclusivo de Empresas Parceiras (Gestão de Crédito e Auto-Emissão) */}
+        <Route path="/voucher-empresa/login" element={<CompanyPortalLogin />} />
+        <Route path="/voucher-empresa" element={<CompanyPortalDashboard />} />
+        <Route path="/portal-empresa" element={<CompanyPortalDashboard />} />
 
         {/* Gerenciamento Master SaaS */}
         <Route path="/admin/login" element={<AdminLogin />} />

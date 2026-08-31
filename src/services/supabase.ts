@@ -106,26 +106,35 @@ const customAuthStorage = {
   }
 };
 
+// Mutex assíncrono in-memory para serializar operações de Auth com 100% de integridade transacional sem conflitos de Web Locks API
+const authLocks = new Map<string, Promise<any>>();
+
+const customAuthLock = async (name: string, _acquireTimeout: number, fn: () => Promise<any>) => {
+  const currentLock = authLocks.get(name) || Promise.resolve();
+  let release: () => void;
+  const nextLock = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  authLocks.set(name, nextLock);
+
+  try {
+    await currentLock;
+    return await fn();
+  } finally {
+    release!();
+    if (authLocks.get(name) === nextLock) {
+      authLocks.delete(name);
+    }
+  }
+};
+
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     storage: customAuthStorage,
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
-    lock: async (name: string, acquireTimeout: number, fn: () => Promise<any>) => {
-      // Lock resiliente: previne o erro "Lock was released because another request stole it"
-      if (typeof navigator !== 'undefined' && (navigator as any).locks) {
-        try {
-          return await (navigator as any).locks.request(name, { mode: 'exclusive' }, async () => {
-            return await fn();
-          });
-        } catch (err: any) {
-          // Se o lock expirou ou foi cancelado por concorrência entre abas, executa a função pacificamente
-          return await fn();
-        }
-      }
-      return await fn();
-    }
+    lock: customAuthLock
   },
   global: {
     fetch: customFetch

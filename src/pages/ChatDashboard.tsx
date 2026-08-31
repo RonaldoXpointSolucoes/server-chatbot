@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
-import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, Save, ShieldCheck, Smile, Briefcase, Flag, Clock, Calendar, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, CheckSquare, MessageSquare, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList, UploadCloud, FolderCheck, Globe, Lock, Zap } from 'lucide-react';
+import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, ChevronRight, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, Save, ShieldCheck, Smile, Briefcase, Flag, Clock, Calendar, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, CheckSquare, MessageSquare, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList, UploadCloud, FolderCheck, Globe, Lock, Zap, Folder, FolderOpen, FolderTree, CornerDownRight } from 'lucide-react';
 import { getCurrentEnvironment, setEnvironment, validateServerEnvironment, ENVIRONMENTS } from '../services/environmentService';
 import { useNavigate, useOutletContext, useLocation } from 'react-router-dom';
-import { useChatStore, instanceCache, resolveInstanceUuid, sortMessagesChronologically, getEffectiveContactTime, getRealContactId, getUniquePersonKey } from '../store/chatStore';
+import { useChatStore, QuickReplyCategory, instanceCache, resolveInstanceUuid, sortMessagesChronologically, getEffectiveContactTime, getRealContactId, getUniquePersonKey } from '../store/chatStore';
 import { useWaCallsStore } from '../store/useWaCallsStore';
 import { Phone } from 'lucide-react';
 import { playNotificationSound } from '../utils/AudioEngine';
@@ -1369,6 +1369,7 @@ export default function ChatDashboard() {
   const [isSendingMessage, setIsSendingMessage] = useState(false);
   const [showQuickReplies, setShowQuickReplies] = useState(false);
   const [quickReplyFilter, setQuickReplyFilter] = useState('');
+  const [activeQuickReplyFolderId, setActiveQuickReplyFolderId] = useState<string | null>(null);
   const quickReplies = useChatStore(state => state.quickReplies);
   const [replyMessage, setReplyMessage] = useState<{ id: string, text: string, sender: string } | null>(null);
   const [pastedImage, setPastedImage] = useState<File | null>(null);
@@ -9396,78 +9397,310 @@ export default function ChatDashboard() {
                       {/* Campo de Texto WhatsApp */}
                       <div className="flex flex-1 flex-row items-end px-4 py-2 bg-white dark:bg-[#2a3942] border border-transparent focus-within:border-[#00a884]/50 gap-3 rounded-[24px] shadow-sm relative">
                         
-                        {/* Quick Replies Popover */}
-                        {showQuickReplies && quickReplies.length > 0 && (
-                          <div className="absolute bottom-full left-0 mb-2 w-[350px] max-w-[90vw] bg-white dark:bg-[#202c33] rounded-2xl shadow-xl border border-gray-100 dark:border-white/10 overflow-hidden z-[100] animate-in fade-in zoom-in-95 slide-in-from-bottom-4">
-                            <div className="p-3 bg-gray-50/50 dark:bg-[#111b21]/50 border-b border-gray-100 dark:border-white/5 text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider flex items-center gap-2">
-                              ⚡ Respostas Prontas
-                            </div>
-                            <div className="max-h-64 overflow-y-auto custom-scrollbar">
-                              {quickReplies.filter(qr => qr.shortcut.toLowerCase().includes(quickReplyFilter) || qr.content.toLowerCase().includes(quickReplyFilter)).map(qr => (
+                        {/* Quick Replies & Folders Popover */}
+                        {showQuickReplies && (quickReplies.length > 0 || (tenantInfo?.settings?.quickReplyCategories && tenantInfo.settings.quickReplyCategories.length > 0)) && (() => {
+                          const categories: QuickReplyCategory[] = tenantInfo?.settings?.quickReplyCategories || [];
+                          
+                          const getCategory = (catId?: string | null): QuickReplyCategory | undefined => {
+                            if (!catId) return undefined;
+                            return categories.find(c => c.id === catId);
+                          };
+
+                          const getCategoryPath = (catId?: string | null): string => {
+                            if (!catId) return '';
+                            const cat = categories.find(c => c.id === catId);
+                            if (!cat) return '';
+                            if (cat.parent_id) {
+                              const parent = categories.find(c => c.id === cat.parent_id);
+                              if (parent) {
+                                return `${getCategoryPath(parent.id)} › ${cat.name}`;
+                              }
+                            }
+                            return cat.name;
+                          };
+
+                          const getAllDescendantCategoryIds = (catId: string): string[] => {
+                            const result: string[] = [catId];
+                            const directChildren = categories.filter(c => c.parent_id === catId);
+                            for (const child of directChildren) {
+                              result.push(...getAllDescendantCategoryIds(child.id));
+                            }
+                            return result;
+                          };
+
+                          const getCategoryItemCount = (catId: string): number => {
+                            const descendantIds = new Set(getAllDescendantCategoryIds(catId));
+                            return quickReplies.filter(q => q.category_id && descendantIds.has(q.category_id)).length;
+                          };
+
+                          const activeFolder = activeQuickReplyFolderId ? getCategory(activeQuickReplyFolderId) : null;
+                          const hasFilter = !!quickReplyFilter.trim();
+
+                          // 1. Pastas a Exibir
+                          let displayFolders: QuickReplyCategory[] = [];
+                          // 2. Respostas a Exibir
+                          let displayReplies: typeof quickReplies = [];
+
+                          if (hasFilter) {
+                            // Modo de Busca Global
+                            displayFolders = categories.filter(c => 
+                              c.name.toLowerCase().includes(quickReplyFilter) ||
+                              (c.shortcut && c.shortcut.toLowerCase().includes(quickReplyFilter))
+                            );
+                            displayReplies = quickReplies.filter(qr => 
+                              qr.shortcut.toLowerCase().includes(quickReplyFilter) ||
+                              qr.content.toLowerCase().includes(quickReplyFilter) ||
+                              (qr.category_id && getCategoryPath(qr.category_id).toLowerCase().includes(quickReplyFilter))
+                            );
+                          } else if (activeQuickReplyFolderId) {
+                            // Modo Navegação Dentro de uma Pasta
+                            displayFolders = categories.filter(c => c.parent_id === activeQuickReplyFolderId);
+                            displayReplies = quickReplies.filter(qr => qr.category_id === activeQuickReplyFolderId);
+                          } else {
+                            // Modo Raiz
+                            displayFolders = categories.filter(c => !c.parent_id);
+                            displayReplies = quickReplies.filter(qr => !qr.category_id);
+                          }
+
+                          const handleSelectReply = (qr: typeof quickReplies[0]) => {
+                            setShowQuickReplies(false);
+                            setActiveQuickReplyFolderId(null);
+                            setInputText(qr.content);
+                            
+                            if (qr.type === 'TUTORIAL') {
+                              if (!qr.media_url) {
+                                alert('Esta resposta pronta do tipo Tutorial não possui um vídeo configurado. Por favor, adicione o vídeo na tela de Respostas Prontas antes de enviar.');
+                                return;
+                              }
+                              setPendingMediaToSend({
+                                url: qr.media_url,
+                                type: 'video',
+                                name: qr.shortcut,
+                                cannedResponseType: 'TUTORIAL'
+                              });
+                              setQuickReplyToast({ shortcut: qr.shortcut, type: 'applied' });
+                              setTimeout(() => setQuickReplyToast(null), 3500);
+                            } else if (qr.media_url) {
+                              setPendingMediaToSend({
+                                url: qr.media_url,
+                                type: (qr.media_type as 'image'|'video'|'audio'|'document') || 'image',
+                                name: qr.media_url.split('/').pop()?.split('_').slice(1).join('_') || 'Anexo da resposta rápida',
+                                cannedResponseType: 'STANDARD'
+                              });
+                              setQuickReplyToast({ shortcut: qr.shortcut, type: 'applied' });
+                              setTimeout(() => setQuickReplyToast(null), 3500);
+                            } else {
+                              setPendingMediaToSend(null);
+                              setQuickReplyToast({ shortcut: qr.shortcut, type: 'applied' });
+                              setTimeout(() => setQuickReplyToast(null), 3500);
+                            }
+                            
+                            setTimeout(() => textareaRef.current?.focus(), 10);
+                          };
+
+                          const handleOpenFolder = (folder: QuickReplyCategory) => {
+                            setActiveQuickReplyFolderId(folder.id);
+                            setQuickReplyFilter('');
+                            setInputText('/');
+                            setTimeout(() => textareaRef.current?.focus(), 10);
+                          };
+
+                          const handleGoBack = () => {
+                            if (activeFolder?.parent_id) {
+                              setActiveQuickReplyFolderId(activeFolder.parent_id);
+                            } else {
+                              setActiveQuickReplyFolderId(null);
+                            }
+                            setQuickReplyFilter('');
+                            setInputText('/');
+                            setTimeout(() => textareaRef.current?.focus(), 10);
+                          };
+
+                          return (
+                            <div className="absolute bottom-full left-0 mb-2 w-[380px] max-w-[92vw] bg-white dark:bg-[#202c33] rounded-3xl shadow-2xl border border-gray-100 dark:border-white/10 overflow-hidden z-[100] animate-in fade-in zoom-in-95 slide-in-from-bottom-4 backdrop-blur-md">
+                              
+                              {/* Header com Navegação e Breadcrumb */}
+                              <div className="p-3 bg-gray-50/90 dark:bg-[#111b21]/90 border-b border-gray-100 dark:border-white/5 flex items-center justify-between text-xs font-bold text-gray-700 dark:text-gray-200">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  {activeQuickReplyFolderId ? (
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={handleGoBack}
+                                        className="p-1 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 text-blue-600 dark:text-blue-400 transition-colors flex items-center gap-1 cursor-pointer font-black text-[11px] uppercase tracking-wider"
+                                        title="Voltar ao nível anterior"
+                                      >
+                                        <ChevronLeft size={14} />
+                                        <span>Voltar</span>
+                                      </button>
+                                      <span className="text-gray-300 dark:text-white/20">•</span>
+                                      <div className="flex items-center gap-1.5 min-w-0">
+                                        <Folder className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                                        <span className="truncate max-w-[170px] text-[11px] font-black text-slate-800 dark:text-slate-100">
+                                          {getCategoryPath(activeQuickReplyFolderId)}
+                                        </span>
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-amber-500">⚡</span>
+                                      <span className="text-[11px] font-black uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                                        Respostas Prontas & Pastas
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+
                                 <button
-                                  key={qr.id}
                                   type="button"
-                                  className="w-full text-left px-4 py-3 hover:bg-blue-50 dark:hover:bg-[#2a3942] transition-colors border-b border-gray-50 dark:border-white/5 last:border-0 group"
                                   onClick={() => {
                                     setShowQuickReplies(false);
-                                    setInputText(qr.content);
-                                    
-                                    if (qr.type === 'TUTORIAL') {
-                                      if (!qr.media_url) {
-                                        alert('Esta resposta pronta do tipo Tutorial não possui um vídeo configurado. Por favor, adicione o vídeo na tela de Respostas Prontas antes de enviar.');
-                                        return;
-                                      }
-                                      setPendingMediaToSend({
-                                        url: qr.media_url,
-                                        type: 'video',
-                                        name: qr.shortcut,
-                                        cannedResponseType: 'TUTORIAL'
-                                      });
-                                      setQuickReplyToast({ shortcut: qr.shortcut, type: 'applied' });
-                                      setTimeout(() => setQuickReplyToast(null), 3500);
-                                    } else if (qr.media_url) {
-                                      setPendingMediaToSend({
-                                        url: qr.media_url,
-                                        type: (qr.media_type as 'image'|'video'|'audio'|'document') || 'image',
-                                        name: qr.media_url.split('/').pop()?.split('_').slice(1).join('_') || 'Anexo da resposta rápida',
-                                        cannedResponseType: 'STANDARD'
-                                      });
-                                      setQuickReplyToast({ shortcut: qr.shortcut, type: 'applied' });
-                                      setTimeout(() => setQuickReplyToast(null), 3500);
-                                    } else {
-                                      setPendingMediaToSend(null);
-                                      setQuickReplyToast({ shortcut: qr.shortcut, type: 'applied' });
-                                      setTimeout(() => setQuickReplyToast(null), 3500);
-                                    }
-                                    
-                                    setTimeout(() => textareaRef.current?.focus(), 10);
+                                    setActiveQuickReplyFolderId(null);
                                   }}
+                                  className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-white rounded-lg transition-colors cursor-pointer"
+                                  title="Fechar"
                                 >
-                                  <div className="font-semibold text-blue-600 dark:text-blue-400 text-[13px] mb-1 group-hover:text-blue-700 dark:group-hover:text-blue-300 transition-colors flex items-center gap-1.5">
-                                    {qr.shortcut}
-                                    {qr.type === 'TUTORIAL' ? (
-                                      <span className="flex items-center gap-1 text-[10px] font-bold text-purple-600 dark:text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded-md border border-purple-500/15">
-                                        <Video className="w-3 h-3 text-purple-500" />
-                                        Tutorial
-                                      </span>
-                                    ) : qr.media_url && (
-                                       <span className="flex items-center gap-1 text-[10px] text-gray-500 bg-gray-100 dark:bg-white/10 px-1.5 py-0.5 rounded-md">
-                                          {qr.media_type === 'video' ? <Video className="w-3 h-3" /> : qr.media_type === 'audio' ? <Mic className="w-3 h-3" /> : qr.media_type === 'document' ? <FileText className="w-3 h-3" /> : <ImageIcon className="w-3 h-3" />}
-                                          Mídia
-                                       </span>
-                                    )}
-                                  </div>
-                                  <div className="text-gray-600 dark:text-gray-300 text-[13px] line-clamp-2 leading-relaxed">{qr.content}</div>
+                                  <X size={14} />
                                 </button>
-                              ))}
-                              {quickReplies.filter(qr => qr.shortcut.toLowerCase().includes(quickReplyFilter) || qr.content.toLowerCase().includes(quickReplyFilter)).length === 0 && (
-                                <div className="p-6 text-center text-gray-500 dark:text-gray-400 text-[13px]">
-                                  Nenhuma resposta encontrada para "{quickReplyFilter}"
-                                </div>
-                              )}
+                              </div>
+
+                              {/* Lista com Pastas e Respostas */}
+                              <div className="max-h-72 overflow-y-auto custom-scrollbar divide-y divide-gray-50 dark:divide-white/5">
+                                
+                                {/* 1. Seção de Pastas/Categorias */}
+                                {displayFolders.length > 0 && (
+                                  <div className="p-2 space-y-1">
+                                    <div className="px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 flex items-center gap-1">
+                                      <FolderTree size={11} className="text-blue-500" />
+                                      <span>Pastas / Projetos</span>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 gap-1">
+                                      {displayFolders.map(folder => {
+                                        const count = getCategoryItemCount(folder.id);
+                                        const folderColor = folder.color || '#3b82f6';
+
+                                        return (
+                                          <button
+                                            key={folder.id}
+                                            type="button"
+                                            onClick={() => handleOpenFolder(folder)}
+                                            className="w-full text-left px-3 py-2.5 hover:bg-blue-50/80 dark:hover:bg-[#2a3942] rounded-2xl transition-all flex items-center justify-between group cursor-pointer border border-transparent hover:border-blue-500/20 active:scale-[0.99]"
+                                          >
+                                            <div className="flex items-center gap-2.5 min-w-0">
+                                              <div 
+                                                className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0 shadow-2xs"
+                                                style={{ backgroundColor: `${folderColor}20`, color: folderColor }}
+                                              >
+                                                <Folder size={14} />
+                                              </div>
+                                              <div className="min-w-0">
+                                                <div className="flex items-center gap-1.5">
+                                                  <span className="font-black text-xs text-slate-800 dark:text-[#e9edef] truncate">
+                                                    {folder.name}
+                                                  </span>
+                                                  {folder.shortcut && (
+                                                    <span className="px-1.5 py-0.2 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 font-mono text-[10px] font-bold">
+                                                      {folder.shortcut}
+                                                    </span>
+                                                  )}
+                                                </div>
+                                                <p className="text-[10px] text-slate-400 dark:text-[#8696a0]">
+                                                  {count} resposta(s) • Clique para abrir
+                                                </p>
+                                              </div>
+                                            </div>
+
+                                            <div className="flex items-center gap-1 text-slate-400 group-hover:text-blue-500 group-hover:translate-x-0.5 transition-all">
+                                              <span className="text-[10px] font-bold">Abrir</span>
+                                              <ChevronRight size={14} />
+                                            </div>
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* 2. Seção de Respostas Prontas */}
+                                {displayReplies.length > 0 && (
+                                  <div className="p-2 space-y-1">
+                                    {displayFolders.length > 0 && (
+                                      <div className="px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 flex items-center gap-1">
+                                        <MessageSquareText size={11} className="text-amber-500" />
+                                        <span>Respostas Prontas</span>
+                                      </div>
+                                    )}
+
+                                    {displayReplies.map(qr => {
+                                      const qrCategoryPath = getCategoryPath(qr.category_id);
+                                      return (
+                                        <button
+                                          key={qr.id}
+                                          type="button"
+                                          className="w-full text-left p-3 hover:bg-blue-50 dark:hover:bg-[#2a3942] rounded-2xl transition-all border border-transparent hover:border-blue-500/20 group cursor-pointer active:scale-[0.99]"
+                                          onClick={() => handleSelectReply(qr)}
+                                        >
+                                          <div className="flex items-center justify-between gap-1 mb-1">
+                                            <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                                              <span className="font-mono font-black text-blue-600 dark:text-blue-400 text-xs group-hover:text-blue-700 dark:group-hover:text-blue-300 transition-colors">
+                                                {qr.shortcut}
+                                              </span>
+
+                                              {hasFilter && qrCategoryPath && (
+                                                <span className="px-1.5 py-0.2 rounded bg-slate-100 dark:bg-white/10 text-[9px] font-bold text-slate-500 dark:text-slate-400 truncate max-w-[120px]">
+                                                  📁 {qrCategoryPath}
+                                                </span>
+                                              )}
+
+                                              {qr.type === 'TUTORIAL' ? (
+                                                <span className="flex items-center gap-1 text-[9px] font-black uppercase tracking-wider text-purple-600 dark:text-purple-400 bg-purple-500/10 px-1.5 py-0.2 rounded-md border border-purple-500/15">
+                                                  <Video className="w-2.5 h-2.5 text-purple-500" />
+                                                  Tutorial
+                                                </span>
+                                              ) : qr.media_url && (
+                                                <span className="flex items-center gap-1 text-[9px] text-gray-500 bg-gray-100 dark:bg-white/10 px-1.5 py-0.2 rounded-md">
+                                                  {qr.media_type === 'video' ? <Video className="w-2.5 h-2.5" /> : qr.media_type === 'audio' ? <Mic className="w-2.5 h-2.5" /> : qr.media_type === 'document' ? <FileText className="w-2.5 h-2.5" /> : <ImageIcon className="w-2.5 h-2.5" />}
+                                                  Mídia
+                                                </span>
+                                              )}
+                                            </div>
+
+                                            <span className="text-[10px] text-slate-400 group-hover:text-blue-500 font-bold opacity-0 group-hover:opacity-100 transition-opacity">
+                                              Inserir ↵
+                                            </span>
+                                          </div>
+                                          <div className="text-gray-600 dark:text-gray-300 text-xs line-clamp-2 leading-relaxed">
+                                            {qr.content}
+                                          </div>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+
+                                {/* 3. Nenhum resultado */}
+                                {displayFolders.length === 0 && displayReplies.length === 0 && (
+                                  <div className="p-8 text-center text-gray-500 dark:text-gray-400 text-xs">
+                                    <p className="font-semibold mb-2">
+                                      Nenhum resultado encontrado para "{quickReplyFilter}"
+                                    </p>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setQuickReplyFilter('');
+                                        setActiveQuickReplyFolderId(null);
+                                      }}
+                                      className="text-blue-500 hover:underline text-[11px] font-bold cursor-pointer"
+                                    >
+                                      Ver todas as pastas raiz
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
                             </div>
-                          </div>
-                        )}
+                          );
+                        })()}
                         
                         <div className="relative flex-1 min-w-0 min-h-[20px] flex flex-col gap-1.5 justify-end">
                           {pendingMediaToSend && (
