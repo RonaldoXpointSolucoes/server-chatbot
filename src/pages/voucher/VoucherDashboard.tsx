@@ -111,6 +111,31 @@ const setTenantStorage = (prefix: string, currentTenantId: string, list: any[]) 
   }
 };
 
+// Helpers Universais para Resolução do Nome da Empresa e Campanha
+export const getVoucherEmpresaNome = (v: any, empresasList: any[] = []): string | null => {
+  if (!v) return null;
+  const name = v.empresa_razao_social || v.empresa_nome || v.voucher_empresas_parceiras?.razao_social || v.empresa_origem;
+  if (name && name !== 'Cliente Avulso (Sem Vínculo B2B)' && name !== 'Cliente Avulso (Sem Empresa)' && name !== 'Empresa Parceira') {
+    return name;
+  }
+  if (v.empresa_id) {
+    const emp = empresasList.find((e) => e.id === v.empresa_id);
+    if (emp) return emp.razao_social || emp.nome_fantasia;
+  }
+  return null;
+};
+
+export const getVoucherCampanhaNome = (v: any, campanhasList: any[] = []): string | null => {
+  if (!v) return null;
+  const name = v.campanha_nome || v.voucher_campanhas?.nome;
+  if (name) return name;
+  if (v.campanha_id) {
+    const cmp = campanhasList.find((c) => c.id === v.campanha_id);
+    if (cmp) return cmp.nome;
+  }
+  return v.observacoes || null;
+};
+
 export default function VoucherDashboard() {
   const tenantInfo = useChatStore((state) => state.tenantInfo);
   const currentAccount = useChatStore((state) => state.currentAccount);
@@ -769,58 +794,156 @@ export default function VoucherDashboard() {
     }
   }, [empresas, campanhas]);
 
-  // Carrega dados do Supabase estritamente filtrados pelo inquilino ativo
+  // Carrega e sincroniza dados do Supabase e LocalStorage unificando todas as fontes
   const fetchData = useCallback(async () => {
     if (!tenantId) return;
     try {
       setLoading(true);
 
+      // 1. Carrega o estado local atual de todas as possíveis chaves do navegador
+      const localVouchers = getTenantStorage('voucher_items', tenantId, []);
+      const localCompanies = getTenantStorage('voucher_companies', tenantId, []);
+      const localCampaigns = getTenantStorage('voucher_campaigns', tenantId, []);
+      const localEvents = getTenantStorage('voucher_events', tenantId, []);
+
+      // Varredura de vouchers órfãos ou legados no localStorage
+      const extraLocalVouchers: any[] = [];
+      try {
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && (k.startsWith('voucher_items_') || k.startsWith('vouchers_'))) {
+            const raw = localStorage.getItem(k);
+            if (raw) {
+              const list = JSON.parse(raw);
+              if (Array.isArray(list)) {
+                list.forEach((it) => {
+                  if (it && (it.public_token || it.id)) {
+                    extraLocalVouchers.push(it);
+                  }
+                });
+              }
+            }
+          } else if (k && k.startsWith('voucher_token_')) {
+            const raw = localStorage.getItem(k);
+            if (raw) {
+              const single = JSON.parse(raw);
+              if (single && (single.public_token || single.id)) {
+                extraLocalVouchers.push(single);
+              }
+            }
+          }
+        }
+      } catch (_) {}
+
+      // 2. Consulta em nuvem no Supabase
       const [vRes, cRes, eRes, evRes, instRes] = await Promise.allSettled([
-        supabase.from('vouchers').select('*').order('created_at', { ascending: false }).limit(300),
+        supabase.from('vouchers').select('*').order('created_at', { ascending: false }).limit(500),
         supabase.from('voucher_campanhas').select('*').order('created_at', { ascending: false }),
         supabase.from('voucher_empresas_parceiras').select('*').order('created_at', { ascending: false }),
-        supabase.from('voucher_events').select('*').order('created_at', { ascending: false }).limit(100),
+        supabase.from('voucher_events').select('*').order('created_at', { ascending: false }).limit(200),
         supabase.from('whatsapp_instances').select('id, name, display_name, phone_number, status, is_active, session_name, api_key').eq('tenant_id', tenantId)
       ]);
 
+      // 3. Merge de Empresas
+      let mergedEmpresas = [...localCompanies];
       if (eRes.status === 'fulfilled' && eRes.value.data && eRes.value.data.length > 0) {
-        setEmpresas(eRes.value.data);
-        setTenantStorage('voucher_companies', tenantId, eRes.value.data);
-      } else {
-        const stored = getTenantStorage('voucher_companies', tenantId, []);
-        setEmpresas(stored);
-      }
-
-      if (cRes.status === 'fulfilled' && cRes.value.data && cRes.value.data.length > 0) {
-        setCampanhas(cRes.value.data);
-        setTenantStorage('voucher_campaigns', tenantId, cRes.value.data);
-      } else {
-        const stored = getTenantStorage('voucher_campaigns', tenantId, []);
-        setCampanhas(stored);
-      }
-
-      if (vRes.status === 'fulfilled' && vRes.value.data && vRes.value.data.length > 0) {
-        setVouchers(vRes.value.data);
-        setTenantStorage('voucher_items', tenantId, vRes.value.data);
-        vRes.value.data.forEach((vItem: any) => {
-          if (vItem.public_token) {
-            try {
-              localStorage.setItem(`voucher_token_${vItem.public_token}`, JSON.stringify(vItem));
-            } catch (_) {}
-          }
+        eRes.value.data.forEach((dbEmp: any) => {
+          const idx = mergedEmpresas.findIndex((m) => m.id === dbEmp.id);
+          if (idx >= 0) mergedEmpresas[idx] = { ...mergedEmpresas[idx], ...dbEmp };
+          else mergedEmpresas.push(dbEmp);
         });
-      } else {
-        const stored = getTenantStorage('voucher_items', tenantId, []);
-        setVouchers(stored);
+      }
+      setEmpresas(mergedEmpresas);
+      setTenantStorage('voucher_companies', tenantId, mergedEmpresas);
+
+      // 4. Merge de Campanhas
+      let mergedCampanhas = [...localCampaigns];
+      if (cRes.status === 'fulfilled' && cRes.value.data && cRes.value.data.length > 0) {
+        cRes.value.data.forEach((dbCmp: any) => {
+          const idx = mergedCampanhas.findIndex((m) => m.id === dbCmp.id);
+          if (idx >= 0) mergedCampanhas[idx] = { ...mergedCampanhas[idx], ...dbCmp };
+          else mergedCampanhas.push(dbCmp);
+        });
+      }
+      setCampanhas(mergedCampanhas);
+      setTenantStorage('voucher_campaigns', tenantId, mergedCampanhas);
+
+      // 5. Merge Unificado de Vouchers (Supabase + LocalStorage de todas as fontes)
+      const dbVouchersList = (vRes.status === 'fulfilled' && vRes.value.data) ? vRes.value.data : [];
+      const combinedPool = [...dbVouchersList, ...localVouchers, ...extraLocalVouchers];
+      const mergedVouchersMap = new Map<string, any>();
+
+      combinedPool.forEach((vItem) => {
+        if (!vItem) return;
+        const key = (vItem.public_token || vItem.id || '').toLowerCase().trim();
+        if (!key) return;
+
+        const existing = mergedVouchersMap.get(key);
+        if (!existing) {
+          mergedVouchersMap.set(key, vItem);
+        } else {
+          // Se um item tiver status UTILIZADO ou data mais recente, prevalece
+          mergedVouchersMap.set(key, {
+            ...existing,
+            ...vItem,
+            status: vItem.status === 'UTILIZADO' ? 'UTILIZADO' : (existing.status === 'UTILIZADO' ? 'UTILIZADO' : (vItem.status || existing.status))
+          });
+        }
+      });
+
+      const finalVouchersList = Array.from(mergedVouchersMap.values());
+      // Ordena por data de criação decrescente
+      finalVouchersList.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+
+      setVouchers(finalVouchersList);
+      setTenantStorage('voucher_items', tenantId, finalVouchersList);
+
+      // Salva cada token em chave direta para acesso instantâneo
+      finalVouchersList.forEach((vItem: any) => {
+        if (vItem.public_token) {
+          try {
+            localStorage.setItem(`voucher_token_${vItem.public_token}`, JSON.stringify(vItem));
+          } catch (_) {}
+        }
+      });
+
+      // Sincroniza silenciosamente no Supabase vouchers que estavam apenas locais
+      const unpersisted = finalVouchersList.filter(
+        (v) => !dbVouchersList.some((dbV: any) => (dbV.public_token || '').toLowerCase() === (v.public_token || '').toLowerCase() || dbV.id === v.id)
+      );
+      if (unpersisted.length > 0) {
+        const payloadsToSync = unpersisted.map((v) => ({
+          id: v.id,
+          tenant_id: v.tenant_id || tenantId,
+          empresa_id: v.empresa_id || null,
+          campanha_id: v.campanha_id || null,
+          public_token: v.public_token,
+          valor: Number(v.valor || 0),
+          status: v.status || 'CRIADO',
+          beneficiario_nome: v.beneficiario_nome || 'Colaborador',
+          beneficiario_whatsapp: v.beneficiario_whatsapp || '',
+          empresa_nome: v.empresa_nome || v.empresa_razao_social || 'Burguer Plus (Venda Direta)',
+          empresa_razao_social: v.empresa_razao_social || v.empresa_nome || 'Burguer Plus (Venda Direta)',
+          campanha_nome: v.campanha_nome || 'Crédito Corporativo',
+          validade_fim: v.validade_fim || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+          created_at: v.created_at || new Date().toISOString()
+        }));
+        try {
+          await supabase.from('vouchers').upsert(payloadsToSync);
+        } catch (_) {}
       }
 
+      // 6. Merge de Eventos
+      let mergedEvents = [...localEvents];
       if (evRes.status === 'fulfilled' && evRes.value.data && evRes.value.data.length > 0) {
-        setEvents(evRes.value.data);
-        setTenantStorage('voucher_events', tenantId, evRes.value.data);
-      } else {
-        const stored = getTenantStorage('voucher_events', tenantId, []);
-        setEvents(stored);
+        evRes.value.data.forEach((dbEv: any) => {
+          const idx = mergedEvents.findIndex((m) => m.id === dbEv.id);
+          if (idx >= 0) mergedEvents[idx] = { ...mergedEvents[idx], ...dbEv };
+          else mergedEvents.push(dbEv);
+        });
       }
+      setEvents(mergedEvents);
+      setTenantStorage('voucher_events', tenantId, mergedEvents);
 
       if (instRes.status === 'fulfilled' && instRes.value.data && instRes.value.data.length > 0) {
         setTenantInstances(instRes.value.data);
@@ -830,11 +953,7 @@ export default function VoucherDashboard() {
         setTenantInstances([]);
       }
     } catch (err: any) {
-      console.warn('[Voucher] Carregamento local por inquilino ativo:', err);
-      setEmpresas(getTenantStorage('voucher_companies', tenantId, []));
-      setCampanhas(getTenantStorage('voucher_campaigns', tenantId, []));
-      setVouchers(getTenantStorage('voucher_items', tenantId, []));
-      setEvents(getTenantStorage('voucher_events', tenantId, []));
+      console.warn('[Voucher] Carregamento unificado:', err);
     } finally {
       setLoading(false);
     }
@@ -1454,10 +1573,12 @@ export default function VoucherDashboard() {
           valor: emissionValue,
           beneficiario_nome: benefNome,
           beneficiario_whatsapp: benefWhats,
+          empresa_nome: selectedEmpresa ? selectedEmpresa.razao_social : 'Burguer Plus (Venda Direta)',
+          empresa_razao_social: selectedEmpresa ? selectedEmpresa.razao_social : 'Burguer Plus (Venda Direta)',
+          campanha_nome: selectedCampanha ? selectedCampanha.nome : 'Crédito Corporativo Especial',
+          observacoes: selectedCampanha ? selectedCampanha.descricao : 'Crédito Balcão Burguer Plus',
           validade_fim: new Date(voucherForm.validadeFim).toISOString(),
-          created_at: new Date().toISOString(),
-          voucher_campanhas: selectedCampanha ? { nome: selectedCampanha.nome } : null,
-          voucher_empresas_parceiras: selectedEmpresa ? { razao_social: selectedEmpresa.razao_social } : null
+          created_at: new Date().toISOString()
         };
 
         newVouchers.push(voucherItem);
@@ -2100,22 +2221,33 @@ export default function VoucherDashboard() {
                         </div>
 
                         <div className="text-slate-500 dark:text-slate-400">
-                          {v.empresa_id && v.voucher_empresas_parceiras?.razao_social ? (
-                            <div>
-                              <span className="font-semibold text-slate-900 dark:text-white">{v.voucher_empresas_parceiras.razao_social}</span>
-                              {v.voucher_campanhas?.nome && (
-                                <>
-                                  <span className="mx-1">•</span>
-                                  <span className="text-emerald-500 font-semibold">{v.voucher_campanhas.nome}</span>
-                                </>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 text-[10px] font-bold text-slate-500 dark:text-slate-400">
-                              <User className="w-3 h-3 text-slate-400" />
-                              <span>Cliente Avulso (Sem Empresa)</span>
-                            </span>
-                          )}
+                          {(() => {
+                            const empNome = getVoucherEmpresaNome(v, empresas);
+                            const cmpNome = getVoucherCampanhaNome(v, campanhas);
+
+                            if (empNome) {
+                              return (
+                                <div>
+                                  <div className="font-semibold text-slate-900 dark:text-white flex items-center gap-1">
+                                    <Building2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                                    <span>{empNome}</span>
+                                  </div>
+                                  {cmpNome && (
+                                    <span className="text-[10px] text-emerald-500 font-bold block mt-0.5">
+                                      {cmpNome}
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            }
+
+                            return (
+                              <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 text-[10px] font-bold text-slate-500 dark:text-slate-400">
+                                <Store className="w-3 h-3 text-emerald-500" />
+                                <span>Burguer Plus • Cliente Avulso</span>
+                              </div>
+                            );
+                          })()}
                         </div>
                       </div>
 
@@ -2233,24 +2365,33 @@ export default function VoucherDashboard() {
                             )}
                           </td>
                           <td className="py-3.5 px-4 text-slate-500 dark:text-slate-300">
-                            {v.empresa_id && v.voucher_empresas_parceiras?.razao_social ? (
-                              <div>
-                                <div className="font-semibold text-slate-900 dark:text-white flex items-center gap-1.5">
-                                  <Building2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                                  <span>{v.voucher_empresas_parceiras.razao_social}</span>
+                            {(() => {
+                              const empNome = getVoucherEmpresaNome(v, empresas);
+                              const cmpNome = getVoucherCampanhaNome(v, campanhas);
+
+                              if (empNome) {
+                                return (
+                                  <div>
+                                    <div className="font-semibold text-slate-900 dark:text-white flex items-center gap-1.5">
+                                      <Building2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                                      <span>{empNome}</span>
+                                    </div>
+                                    {cmpNome && (
+                                      <span className="text-[10px] text-emerald-500 font-bold block mt-0.5">
+                                        {cmpNome}
+                                      </span>
+                                    )}
+                                  </div>
+                                );
+                              }
+
+                              return (
+                                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 text-[10.5px] font-bold text-slate-600 dark:text-slate-400">
+                                  <Store className="w-3.5 h-3.5 text-emerald-500" />
+                                  <span>Burguer Plus • Cliente Avulso (Balcão)</span>
                                 </div>
-                                {v.voucher_campanhas?.nome && (
-                                  <span className="text-[10px] text-emerald-500 font-bold block mt-0.5">
-                                    {v.voucher_campanhas.nome}
-                                  </span>
-                                )}
-                              </div>
-                            ) : (
-                              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 text-[10.5px] font-bold text-slate-600 dark:text-slate-400">
-                                <User className="w-3 h-3 text-slate-400" />
-                                <span>Cliente Avulso (Sem Empresa)</span>
-                              </div>
-                            )}
+                              );
+                            })()}
                           </td>
                           <td className="py-3.5 px-4 font-black text-slate-900 dark:text-white text-sm">
                             {Number(v.valor || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
@@ -4013,7 +4154,7 @@ export default function VoucherDashboard() {
                 <div>
                   <span className="text-slate-400 block">Origem / Convênio:</span>
                   <span className="text-slate-200 font-bold truncate block">
-                    {selectedVoucherForLedger.voucher_empresas_parceiras?.razao_social || 'Cliente Avulso (Venda Direta)'}
+                    {getVoucherEmpresaNome(selectedVoucherForLedger, empresas) || 'Burguer Plus (Venda Direta / Balcão)'}
                   </span>
                 </div>
                 <div>
@@ -4216,8 +4357,8 @@ export default function VoucherDashboard() {
                     {selectedVoucherForPrint.beneficiario_whatsapp && (
                       <div><strong>WHATS:</strong> {selectedVoucherForPrint.beneficiario_whatsapp}</div>
                     )}
-                    <div><strong>ORIGEM:</strong> {selectedVoucherForPrint.voucher_empresas_parceiras?.razao_social || 'Cliente Avulso (Venda Direta)'}</div>
-                    <div><strong>CAMPANHA:</strong> {selectedVoucherForPrint.voucher_campanhas?.nome || 'Benefício Especial'}</div>
+                    <div><strong>ORIGEM:</strong> {getVoucherEmpresaNome(selectedVoucherForPrint, empresas) || 'Burguer Plus (Venda Direta / Balcão)'}</div>
+                    <div><strong>CAMPANHA:</strong> {getVoucherCampanhaNome(selectedVoucherForPrint, campanhas) || 'Crédito Corporativo / Benefício Especial'}</div>
                   </div>
                   <div className="border-t border-b border-dashed border-black py-1 text-center">
                     <span className="text-[9px] block">VALOR DO BENEFÍCIO:</span>
@@ -4269,7 +4410,7 @@ export default function VoucherDashboard() {
                   </div>
                   <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 text-[10px] space-y-1">
                     <div><span className="text-slate-500">Titular:</span> <strong>{selectedVoucherForPrint.beneficiario_nome || 'Cliente / Colaborador'}</strong></div>
-                    <div><span className="text-slate-500">Convênio:</span> <strong>{selectedVoucherForPrint.voucher_empresas_parceiras?.razao_social || 'Cliente Avulso (Venda Direta)'}</strong></div>
+                    <div><span className="text-slate-500">Convênio:</span> <strong>{getVoucherEmpresaNome(selectedVoucherForPrint, empresas) || 'Burguer Plus (Venda Direta / Balcão)'}</strong></div>
                     <div><span className="text-slate-500">Validade:</span> <strong className="text-red-600">{new Date(selectedVoucherForPrint.validade_fim).toLocaleDateString('pt-BR')}</strong></div>
                   </div>
                   <div className="flex flex-col items-center justify-center pt-1">
