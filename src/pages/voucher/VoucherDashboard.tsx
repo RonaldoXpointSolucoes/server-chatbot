@@ -51,7 +51,8 @@ import {
   Trash2,
   CheckSquare,
   Square,
-  AlertTriangle
+  AlertTriangle,
+  Store
 } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 import { useChatStore } from '../../store/chatStore';
