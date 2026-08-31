@@ -776,10 +776,10 @@ export default function VoucherDashboard() {
       setLoading(true);
 
       const [vRes, cRes, eRes, evRes, instRes] = await Promise.allSettled([
-        supabase.from('vouchers').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(100),
-        supabase.from('voucher_campanhas').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }),
-        supabase.from('voucher_empresas_parceiras').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }),
-        supabase.from('voucher_events').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(50),
+        supabase.from('vouchers').select('*').order('created_at', { ascending: false }).limit(300),
+        supabase.from('voucher_campanhas').select('*').order('created_at', { ascending: false }),
+        supabase.from('voucher_empresas_parceiras').select('*').order('created_at', { ascending: false }),
+        supabase.from('voucher_events').select('*').order('created_at', { ascending: false }).limit(100),
         supabase.from('whatsapp_instances').select('id, name, display_name, phone_number, status, is_active, session_name, api_key').eq('tenant_id', tenantId)
       ]);
 

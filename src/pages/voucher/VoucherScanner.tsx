@@ -129,7 +129,7 @@ const playTerminalBeep = (type: 'success' | 'error' | 'confirm') => {
   }
 };
 
-// Extrator universal de Token (Suporta URLs completas, JWT e códigos digitados com ou sem hífen)
+// Extrator universal de Token (Suporta URLs completas, prefixos VIP/VOUCHER, JWT e códigos digitados)
 const extractVoucherToken = (raw: string): string => {
   if (!raw) return '';
   let str = raw.trim();
@@ -147,9 +147,18 @@ const extractVoucherToken = (raw: string): string => {
       const decodedJson = atob(payloadBase64.replace(/-/g, '+').replace(/_/g, '/'));
       const parsed = JSON.parse(decodedJson);
       if (parsed?.token || parsed?.voucher_token || parsed?.id || parsed?.public_token) {
-        return (parsed.token || parsed.voucher_token || parsed.id || parsed.public_token).trim();
+        str = (parsed.token || parsed.voucher_token || parsed.id || parsed.public_token).trim();
       }
     } catch (_) {}
+  }
+
+  // 3. Remove prefixos decorativos como VIP, VIP-, VIP:, VOUCHER:, TOKEN:, #
+  str = str.replace(/^(vip[:\-_ ]*|voucher[:\-_ ]*|token[:\-_ ]*|#+)/i, '').trim();
+
+  // 4. Se tiver formato vch-... em qualquer parte da string, extrai o token oficial
+  const vchMatch = str.match(/vch-[a-z0-9]+/i);
+  if (vchMatch) {
+    return vchMatch[0].trim();
   }
 
   return str.trim();
@@ -308,13 +317,14 @@ export default function VoucherScanner() {
       }
 
       // =========================================================================
-      // CAMADA 3: Supabase (Consulta Direta Case-Insensitive)
+      // CAMADA 3: Supabase (Consulta Direta Case-Insensitive sem joins quebrados)
       // =========================================================================
       if (!foundVoucher) {
         try {
+          // Busca por public_token
           const { data: dbData, error: dbErr } = await supabase
             .from('vouchers')
-            .select('*, voucher_campanhas(*), voucher_empresas_parceiras(*), voucher_colaboradores(*)')
+            .select('*')
             .ilike('public_token', searchToken)
             .maybeSingle();
 
@@ -324,13 +334,28 @@ export default function VoucherScanner() {
             // Tenta busca por ID
             const { data: dbDataById } = await supabase
               .from('vouchers')
-              .select('*, voucher_campanhas(*), voucher_empresas_parceiras(*), voucher_colaboradores(*)')
+              .select('*')
               .eq('id', searchToken)
               .maybeSingle();
 
             if (dbDataById) {
               foundVoucher = dbDataById;
             }
+          }
+
+          // Se encontrou, complementa empresa se necessário
+          if (foundVoucher && foundVoucher.empresa_id && (!foundVoucher.empresa_nome || !foundVoucher.empresa_razao_social)) {
+            try {
+              const { data: empData } = await supabase
+                .from('voucher_empresas_parceiras')
+                .select('razao_social, nome_fantasia')
+                .eq('id', foundVoucher.empresa_id)
+                .maybeSingle();
+              if (empData) {
+                foundVoucher.empresa_razao_social = empData.razao_social || empData.nome_fantasia;
+                foundVoucher.empresa_nome = empData.nome_fantasia || empData.razao_social;
+              }
+            } catch (_) {}
           }
         } catch (supabaseErr) {
           console.warn('[VoucherScanner] Erro Supabase:', supabaseErr);
