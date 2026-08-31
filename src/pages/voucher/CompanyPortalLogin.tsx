@@ -281,7 +281,7 @@ export default function CompanyPortalLogin() {
   };
 
   return (
-    <div className="min-h-screen w-full bg-[#0b141a] flex items-center justify-center p-4 relative overflow-hidden text-slate-100 font-sans select-none">
+    <div className="h-full h-[100dvh] w-full bg-[#0b141a] flex items-center justify-center p-4 relative overflow-y-auto overscroll-y-contain text-slate-100 font-sans">
       {/* Luzes de Fundo & Glassmorphism Glow */}
       <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none animate-pulse" />
       <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />

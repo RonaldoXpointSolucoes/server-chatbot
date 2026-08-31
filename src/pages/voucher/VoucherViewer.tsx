@@ -760,7 +760,7 @@ export default function VoucherViewer() {
 
   if (loading) {
     return (
-      <div className="min-h-screen w-full bg-[#070c0e] text-slate-100 flex flex-col items-center justify-center p-4">
+      <div className="h-full h-[100dvh] w-full bg-[#070c0e] text-slate-100 flex flex-col items-center justify-center p-4 overflow-y-auto">
         <div className="flex flex-col items-center gap-3 bg-[#0d171d] p-8 rounded-[32px] border border-white/10 shadow-2xl">
           <Loader2 className="w-8 h-8 animate-spin text-emerald-400" />
           <span className="text-xs font-bold text-slate-400">Carregando Ingresso VIP Digital...</span>
@@ -771,7 +771,7 @@ export default function VoucherViewer() {
 
   if (error || !voucherData) {
     return (
-      <div className="min-h-screen w-full bg-[#070c0e] text-slate-100 flex flex-col items-center justify-center p-4">
+      <div className="h-full h-[100dvh] w-full bg-[#070c0e] text-slate-100 flex flex-col items-center justify-center p-4 overflow-y-auto">
         <div className="w-full max-w-sm bg-[#0d171d] border border-rose-500/30 p-7 rounded-[32px] text-center space-y-4 shadow-2xl">
           <div className="w-12 h-12 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto">
             <AlertTriangle className="w-6 h-6" />
@@ -790,7 +790,7 @@ export default function VoucherViewer() {
   const empresaExibicao = voucherData.empresa_razao_social || 'TERRAS GONÇALVES SOCIEDADE DE ADVOGADOS';
 
   return (
-    <div className="min-h-screen w-full bg-[#060a0d] text-slate-100 flex flex-col items-center justify-start sm:justify-center p-3 sm:p-6 font-sans relative overflow-x-hidden overflow-y-auto overscroll-y-contain">
+    <div className="h-full h-[100dvh] w-full bg-[#060a0d] text-slate-100 flex flex-col items-center justify-start p-3 sm:p-6 font-sans relative overflow-x-hidden overflow-y-auto overscroll-y-contain">
       
       {/* Luzes de Fundo & Glow Neon */}
       <div className="fixed -top-32 -left-32 w-96 h-96 bg-emerald-500/10 rounded-full blur-[140px] pointer-events-none" />
