@@ -1339,7 +1339,13 @@ export default function DevLogger() {
 
       if (insertError) throw insertError;
 
-      // 9. Sucesso e Notificação
+      // 9. Limpeza Automática do Histórico de Erros, Avisos e Alertas
+      clearLogs();
+      setTestErrors([]);
+      setTestLogs([]);
+      setTestSummary(null);
+
+      // 10. Sucesso, Notificação e Exibição do Modal
       setCreatedCardLead(insertedLead);
       setCreatedCardBoardId(targetBoard.id);
       setCreatedCardBoardName(targetBoard.name || 'Desenvolvimento & Roadmap');
@@ -1348,7 +1354,7 @@ export default function DevLogger() {
 
       addLog({
         type: 'success',
-        message: `✨ Card de Correção Criado com Sucesso com I.A!\nQuadro: "${targetBoard.name}" | Coluna: "Em Análise"\nTítulo: ${aiPlan.title}${uploadedScreenshotUrl ? '\n📸 Print do DevLogger anexado à galeria do Card.' : ''}`,
+        message: `✨ Card de Correção Criado com Sucesso com I.A!\nQuadro: "${targetBoard.name}" | Coluna: "Em Análise"\nTítulo: ${aiPlan.title}${uploadedScreenshotUrl ? '\n📸 Print do DevLogger anexado à galeria do Card.' : ''}\n🧹 Histórico de erros e alertas arquivado com sucesso no CRM e limpo no DevLogger.`,
         source: 'Gemini AI (SRE)',
         details: { leadId: insertedLead.id, boardId: targetBoard.id, title: aiPlan.title, priority: aiPlan.priority, tags: aiPlan.tags, mediaUrl: uploadedScreenshotUrl }
       });
