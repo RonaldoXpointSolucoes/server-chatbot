@@ -790,7 +790,7 @@ export default function VoucherViewer() {
   const empresaExibicao = voucherData.empresa_razao_social || 'TERRAS GONÇALVES SOCIEDADE DE ADVOGADOS';
 
   return (
-    <div className="h-full h-[100dvh] w-full bg-[#060a0d] text-slate-100 flex flex-col items-center justify-start p-3 sm:p-6 font-sans relative overflow-x-hidden overflow-y-auto overscroll-y-contain">
+    <div className="h-full h-[100dvh] w-full bg-[#060a0d] text-slate-100 flex flex-col items-center justify-start pt-3 pb-24 px-3 sm:pt-6 sm:pb-12 sm:px-6 font-sans relative overflow-x-hidden overflow-y-auto overscroll-y-contain">
       
       {/* Luzes de Fundo & Glow Neon */}
       <div className="fixed -top-32 -left-32 w-96 h-96 bg-emerald-500/10 rounded-full blur-[140px] pointer-events-none" />
