@@ -1676,7 +1676,17 @@ class SessionManager {
 
             return sock;
         } catch (error) {
-            console.error(`[SessionManager] Falha ao inciar sessão ${instanceId}`, error);
+            const isLockProtection = error?.message && (
+                error.message.includes('lock ativo') || 
+                error.message.includes('pertence ao nó de produção') ||
+                error.message.includes('possui lock') ||
+                error.message.includes('Lock negado')
+            );
+            if (isLockProtection) {
+                console.log(`[SessionManager/Lock] Instância ${instanceId} preservada sob lock exclusivo de outro nó: ${error.message}`);
+            } else {
+                console.error(`[SessionManager] Falha ao inciar sessão ${instanceId}`, error);
+            }
             throw error;
         }
     }
