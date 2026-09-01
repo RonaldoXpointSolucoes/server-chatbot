@@ -203,6 +203,47 @@ const getLeadSummarySnippet = (notes?: string | null) => {
   return firstParagraph.length > 130 ? firstParagraph.slice(0, 130) + '...' : firstParagraph;
 };
 
+// Extração Inteligente de URL de Teste e Dica de Homologação
+const extractValidationInfo = (lead: any) => {
+  if (!lead) return { url: null, tip: '' };
+  const notes = lead.notes || '';
+  
+  // 1. Busca URL explícita no texto ou nos relatórios de entrega
+  let url: string | null = null;
+  const urlMatch = notes.match(/https?:\/\/[^\s\)\"\'\<\>]+/i);
+  if (urlMatch) {
+    url = urlMatch[0];
+  } else if (notes.toLowerCase().includes('voucher') || notes.toLowerCase().includes('empresa') || notes.toLowerCase().includes('cupom')) {
+    url = '/voucher-empresa';
+  } else if (notes.toLowerCase().includes('conversa') || notes.toLowerCase().includes('chat') || notes.toLowerCase().includes('voltar')) {
+    url = '/chat';
+  } else if (notes.toLowerCase().includes('kanban') || notes.toLowerCase().includes('crm')) {
+    url = window.location.pathname;
+  }
+
+  // 2. Busca Dica de Teste / Critérios de Aceite
+  let tip: string | null = null;
+  const deliveryReport = lead.history?.slice().reverse().find((h: any) => h.delivery_report?.summary)?.delivery_report?.summary;
+  if (deliveryReport) {
+    tip = deliveryReport;
+  } else {
+    const criteriaMatch = notes.match(/🧪\s*\*\*?Critérios de Aceite[\s\S]*?(?=(?:---|\n\n###|$))/i);
+    if (criteriaMatch) {
+      tip = criteriaMatch[0].replace(/🧪\s*\*\*?Critérios de Aceite.*?\*\*?/i, '').trim();
+    } else {
+      const objMatch = notes.match(/🎯\s*\*\*?Objetivo[\s\S]*?(?=(?:---|\n\n###|📋|$))/i);
+      if (objMatch) {
+        tip = objMatch[0].trim();
+      }
+    }
+  }
+
+  return { 
+    url, 
+    tip: tip || 'Verifique as alterações realizadas na tela correspondente e valide se os critérios de aceitação foram totalmente atendidos.' 
+  };
+};
+
 // Interfaces do Kanban CRM
 interface CRMBoard {
   id: string;
@@ -367,6 +408,18 @@ export default function CrmKanban() {
   // Estados para o Modal Detalhes do Lead Modernizado
   const [leadDetailTab, setLeadDetailTab] = useState<'overview' | 'technical' | 'notes' | 'history'>('overview');
   const [copiedDelivery, setCopiedDelivery] = useState(false);
+
+  // Estados para Modal de Dica de Teste & Validação (Card 4)
+  const [validatingLead, setValidatingLead] = useState<CRMLead | null>(null);
+  const [validationData, setValidationData] = useState<{ url: string | null; tip: string } | null>(null);
+  const [copiedTip, setCopiedTip] = useState(false);
+
+  const handleOpenValidationModal = (lead: CRMLead) => {
+    const info = extractValidationInfo(lead);
+    setValidatingLead(lead);
+    setValidationData(info);
+    setCopiedTip(false);
+  };
   const [isEditingNotes, setIsEditingNotes] = useState(false);
   const [isEditingTechnical, setIsEditingTechnical] = useState(false);
   const [techSummaryInput, setTechSummaryInput] = useState('');
@@ -669,7 +722,8 @@ export default function CrmKanban() {
     if (!generatedPlan || !boardId || !tenantId) return;
     try {
       setLoading(true);
-      const targetStatus = selectedTargetStage || pipelineStages[0]?.id || 'backlog';
+      const defaultAnalysisStage = pipelineStages.find(s => s.id === 'analysis' || s.label?.toLowerCase().includes('análise') || s.label?.toLowerCase().includes('analise'))?.id || pipelineStages[0]?.id || 'analysis';
+      const targetStatus = selectedTargetStage || defaultAnalysisStage;
       const colLeads = leads.filter(l => l.status === targetStatus);
       let newPosition = 0;
       if (colLeads.length > 0) {
@@ -1724,7 +1778,8 @@ export default function CrmKanban() {
               onClick={() => {
                 setGeneratedPlan(null);
                 setAiCardPrompt('');
-                setSelectedTargetStage(pipelineStages[0]?.id || '');
+                const defaultAnalysisStage = pipelineStages.find(s => s.id === 'analysis' || s.label?.toLowerCase().includes('análise') || s.label?.toLowerCase().includes('analise'))?.id || pipelineStages[0]?.id || '';
+                setSelectedTargetStage(defaultAnalysisStage);
                 setIsAiCardModalOpen(true);
               }}
               className="flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-violet-600 via-indigo-600 to-cyan-500 hover:from-violet-500 hover:to-cyan-400 text-white rounded-xl text-xs font-black shadow-lg shadow-indigo-500/25 hover:shadow-indigo-500/40 transition-all duration-200 hover:scale-[1.02] active:scale-95 cursor-pointer ring-2 ring-white/20 min-h-[48px] sm:min-h-0 flex-1 sm:flex-initial"
@@ -2186,16 +2241,36 @@ export default function CrmKanban() {
                                 </span>
                               )}
 
-                              {pipelineStages.findIndex(s => s.id === lead.status) < pipelineStages.length - 1 && (
+                              {/* Botão Validar (Exclusivo da etapa Em Testes & QA / Homologação) */}
+                              {(lead.status === 'testing' || stage.id === 'testing' || stage.label?.toLowerCase().includes('teste') || stage.label?.toLowerCase().includes('qa')) && (
                                 <button 
+                                  type="button"
                                   onClick={(e) => {
                                     e.stopPropagation();
+                                    e.preventDefault();
+                                    handleOpenValidationModal(lead);
+                                  }}
+                                  className="group/valid text-[10px] font-black uppercase text-amber-600 dark:text-amber-300 hover:text-amber-700 dark:hover:text-amber-200 flex items-center justify-center gap-1.5 hover:scale-[1.03] active:scale-95 transition-all cursor-pointer bg-amber-500/15 dark:bg-amber-500/20 hover:bg-amber-500/30 px-3 py-1.5 rounded-xl border border-amber-500/30 shadow-xs min-h-[32px] select-none z-10"
+                                  title="Abrir Roteiro de Teste & Validação"
+                                >
+                                  <Sparkles size={11} className="text-amber-400 animate-pulse" />
+                                  <span>Validar</span>
+                                </button>
+                              )}
+
+                              {pipelineStages.findIndex(s => s.id === lead.status) < pipelineStages.length - 1 && (
+                                <button 
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    e.preventDefault();
                                     handleAdvanceLead(lead);
                                   }}
-                                  className="group/btn text-[9.5px] font-black uppercase text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 flex items-center gap-1 hover:scale-105 active:scale-95 transition-all cursor-pointer bg-indigo-500/10 dark:bg-indigo-500/15 hover:bg-indigo-500/20 px-2 py-1 rounded-lg border border-indigo-500/20"
+                                  className="group/btn text-[10px] font-black uppercase text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 flex items-center justify-center gap-1.5 hover:scale-[1.03] active:scale-95 transition-all cursor-pointer bg-indigo-500/10 dark:bg-indigo-500/15 hover:bg-indigo-500/25 px-3 py-1.5 rounded-xl border border-indigo-500/25 shadow-xs min-h-[32px] select-none z-10"
+                                  title="Avançar para a próxima etapa"
                                 >
                                   <span>Avançar</span>
-                                  <ChevronRight size={10} strokeWidth={3} className="transition-transform group-hover/btn:translate-x-0.5" />
+                                  <ChevronRight size={11} strokeWidth={3} className="transition-transform group-hover/btn:translate-x-0.5" />
                                 </button>
                               )}
                             </div>
@@ -4295,6 +4370,130 @@ export default function CrmKanban() {
           useChatStore.getState().fetchCrmBoards(); // recarregar sidebar
         }}
       />
+
+      {/* MODAL: Roteiro de Homologação & Dica de Teste (Card 4) */}
+      {validatingLead && validationData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="w-full max-w-xl bg-white dark:bg-[#111b21] rounded-[28px] border border-slate-200 dark:border-white/10 shadow-2xl overflow-hidden flex flex-col max-h-[90vh] text-left animate-in zoom-in-95 duration-200">
+            
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-slate-200/40 dark:border-white/10 bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-transparent flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-500 flex items-center justify-center border border-amber-500/30 shadow-sm shrink-0">
+                  <Sparkles size={20} className="animate-pulse" />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-600 dark:text-amber-300 border border-amber-500/25">
+                    Homologação & QA
+                  </span>
+                  <h3 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white mt-1 truncate">
+                    {validatingLead.title}
+                  </h3>
+                </div>
+              </div>
+              <button 
+                type="button"
+                onClick={() => {
+                  setValidatingLead(null);
+                  setValidationData(null);
+                }} 
+                className="p-2 text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl transition-all cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Corpo */}
+            <div className="p-6 space-y-4 overflow-y-auto custom-scrollbar flex-1 text-xs">
+              
+              {/* Box de Dica de Teste */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="font-black text-slate-600 dark:text-slate-400 uppercase tracking-wider text-[10px] flex items-center gap-1.5">
+                    <CheckCircle2 size={13} className="text-amber-500" />
+                    O que testar & Critérios de Homologação:
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(validationData.tip);
+                      setCopiedTip(true);
+                      setTimeout(() => setCopiedTip(false), 2000);
+                    }}
+                    className="text-[10px] font-bold text-slate-400 hover:text-amber-500 flex items-center gap-1 cursor-pointer"
+                  >
+                    <Copy size={11} />
+                    <span>{copiedTip ? 'Copiado!' : 'Copiar Dica'}</span>
+                  </button>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-amber-500/[0.06] border border-amber-500/20 text-slate-800 dark:text-slate-200 leading-relaxed font-sans text-xs select-text whitespace-pre-wrap">
+                  {validationData.tip}
+                </div>
+              </div>
+
+              {/* Botão de Acesso Direto à Tela (se houver URL) */}
+              {validationData.url && (
+                <div className="p-4 rounded-2xl bg-slate-100 dark:bg-white/[0.03] border border-slate-200 dark:border-white/10 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-0.5">
+                      URL de Teste no Sistema
+                    </span>
+                    <span className="font-mono text-xs text-indigo-600 dark:text-indigo-400 font-bold truncate block">
+                      {validationData.url}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (validationData.url?.startsWith('http')) {
+                        window.open(validationData.url, '_blank');
+                      } else if (validationData.url) {
+                        navigate(validationData.url);
+                      }
+                    }}
+                    className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-md hover:shadow-lg transition-all active:scale-95 cursor-pointer shrink-0"
+                  >
+                    <span>Abrir Tela</span>
+                    <ExternalLink size={13} />
+                  </button>
+                </div>
+              )}
+
+            </div>
+
+            {/* Footer com Ações */}
+            <div className="px-6 py-4 border-t border-slate-200/40 dark:border-white/10 bg-slate-50/50 dark:bg-black/10 shrink-0 flex flex-col-reverse sm:flex-row gap-2.5 justify-end items-center">
+              <button 
+                type="button"
+                onClick={() => {
+                  setValidatingLead(null);
+                  setValidationData(null);
+                }}
+                className="w-full sm:w-auto px-5 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 text-slate-600 dark:text-slate-300 font-bold rounded-xl text-xs active:scale-95 cursor-pointer"
+              >
+                Fechar
+              </button>
+              
+              <button 
+                type="button"
+                onClick={() => {
+                  if (validatingLead) {
+                    handleAdvanceLead(validatingLead);
+                  }
+                  setValidatingLead(null);
+                  setValidationData(null);
+                }}
+                className="w-full sm:w-auto px-6 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black rounded-xl text-xs shadow-md shadow-emerald-500/25 active:scale-95 cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <CheckCircle2 size={14} />
+                <span>Aprovar e Avançar para Concluído</span>
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
 
     </div>
   );

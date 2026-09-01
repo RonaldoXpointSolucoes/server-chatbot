@@ -1222,23 +1222,23 @@ export default function VoucherViewer() {
               </span>
             </div>
 
-            {/* QR Code com Overlay de Bloqueio se Utilizado */}
+            {/* QR Code com Overlay de Bloqueio se Utilizado ou Expirado */}
             <div className="relative p-3 bg-white rounded-2xl shadow-2xl ring-4 my-2 transition-transform hover:scale-105 overflow-hidden">
-              <div className={isUtilizado ? 'opacity-20 blur-[2px]' : ''}>
+              <div className={(isUtilizado || isExpirado) ? 'opacity-20 blur-[2px]' : ''}>
                 <QRCode value={qrJwt || voucherData.public_token} size={150} />
               </div>
 
               {/* Overlay de Bloqueio do QR Code */}
-              {isUtilizado && (
+              {(isUtilizado || isExpirado) && (
                 <div className="absolute inset-0 bg-black/85 backdrop-blur-[2px] flex flex-col items-center justify-center p-3 text-center z-20">
                   <div className="w-10 h-10 rounded-xl bg-rose-600 text-white flex items-center justify-center mb-1.5 shadow-lg shadow-rose-600/40">
                     <Ban className="w-5 h-5" />
                   </div>
                   <strong className="text-[10px] font-black text-rose-400 uppercase tracking-wide leading-tight">
-                    QR CODE INATIVO
+                    {isUtilizado ? 'QR CODE INATIVO' : 'QR CODE EXPIRADO'}
                   </strong>
                   <span className="text-[8px] text-slate-300 mt-0.5 font-bold uppercase">
-                    CUPOM RESGATADO
+                    {isUtilizado ? 'CUPOM RESGATADO' : 'PRAZO ENCERRADO'}
                   </span>
                 </div>
               )}
