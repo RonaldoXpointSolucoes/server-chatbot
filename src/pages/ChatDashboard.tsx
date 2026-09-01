@@ -5756,6 +5756,7 @@ export default function ChatDashboard() {
           activeDropdown === 'sidebar-menu' ? "z-30" : "z-10"
         )}>
           <div className="flex items-center justify-between w-full mt-1 gap-1.5">
+            <div className="flex items-center gap-1.5">
               {/* Botão de Voltar (Oculto na tela principal de conversas no mobile) */}
               <button 
                 onClick={() => navigate(-1)}
