@@ -404,20 +404,26 @@ export default function VoucherViewer() {
     };
   }, [renewQrToken, voucherData?.status]);
 
-  // 4. Realtime no Supabase para escutar resgate no caixa
+  // 4. Realtime no Supabase para escutar resgate no caixa (por id e public_token)
   useEffect(() => {
-    if (!voucherData?.id) return;
+    if (!token && !voucherData?.id) return;
+    const cleanToken = (token || voucherData?.public_token || voucherData?.id || '').trim();
 
     const channel = supabase
-      .channel(`public:vouchers:viewer:${voucherData.id}`)
+      .channel(`public:vouchers:viewer:${cleanToken}`)
       .on(
         'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'vouchers', filter: `id=eq.${voucherData.id}` },
+        { event: '*', schema: 'public', table: 'vouchers' },
         (payload: any) => {
           const updated = payload.new;
-          if (updated) {
+          if (updated && (
+            updated.id === voucherData?.id || 
+            updated.public_token === cleanToken || 
+            (updated.public_token && updated.public_token.toLowerCase() === cleanToken.toLowerCase())
+          )) {
             setVoucherData((prev: any) => ({
               ...prev,
+              ...updated,
               status: updated.status,
               data_resgate: updated.data_resgate,
               atendente_id: updated.atendente_id
@@ -427,10 +433,33 @@ export default function VoucherViewer() {
       )
       .subscribe();
 
+    // Polling de alta frequência como garantia contra perda de websocket
+    const interval = setInterval(async () => {
+      if (voucherData?.status === 'UTILIZADO' || voucherData?.data_resgate) return;
+      try {
+        const { data } = await supabase
+          .from('vouchers')
+          .select('*')
+          .or(`public_token.ilike.${cleanToken},id.eq.${cleanToken}`)
+          .maybeSingle();
+
+        if (data && (data.status === 'UTILIZADO' || data.status === 'used' || data.status === 'RESGATADO' || data.data_resgate)) {
+          setVoucherData((prev: any) => ({
+            ...prev,
+            ...data,
+            status: 'UTILIZADO',
+            data_resgate: data.data_resgate || new Date().toISOString(),
+            atendente_id: data.atendente_id || 'Balcão / Caixa Principal'
+          }));
+        }
+      } catch (_) {}
+    }, 3000);
+
     return () => {
       supabase.removeChannel(channel);
+      clearInterval(interval);
     };
-  }, [voucherData?.id]);
+  }, [token, voucherData?.id, voucherData?.public_token, voucherData?.status, voucherData?.data_resgate]);
 
   const copyVoucherLink = () => {
     navigator.clipboard.writeText(window.location.href);
@@ -847,9 +876,9 @@ export default function VoucherViewer() {
     );
   }
 
-  const isUtilizado = voucherData.status === 'UTILIZADO';
+  const isUtilizado = voucherData.status === 'UTILIZADO' || voucherData.status === 'used' || voucherData.status === 'RESGATADO' || Boolean(voucherData.data_resgate);
   const isValidado = voucherData.status === 'VALIDADO';
-  const isExpirado = voucherData.status === 'EXPIRADO' || new Date(voucherData.validade_fim) < new Date();
+  const isExpirado = voucherData.status === 'EXPIRADO' || (voucherData.validade_fim && new Date(voucherData.validade_fim) < new Date());
   const valorFormatado = Number(voucherData.valor || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   const empresaExibicao = voucherData.empresa_razao_social || 'TERRAS GONÇALVES SOCIEDADE DE ADVOGADOS';
 

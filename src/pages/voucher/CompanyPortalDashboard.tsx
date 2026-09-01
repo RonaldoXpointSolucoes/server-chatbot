@@ -130,11 +130,11 @@ export default function CompanyPortalDashboard() {
 
       // 3. Sincroniza em tempo real com o Supabase para capturar baixas efetuadas no Caixa
       try {
-        const { data: dbVouchers } = await supabase
+        const { data: dbVouchers, error: dbErr } = await supabase
           .from('vouchers')
-          .select('*, voucher_campanhas(*), voucher_colaboradores(*)');
+          .select('*');
 
-        if (dbVouchers && dbVouchers.length > 0) {
+        if (!dbErr && dbVouchers && dbVouchers.length > 0) {
           const merged = allVouchers.map((v: any) => {
             const match = dbVouchers.find((dbV: any) =>
               (dbV.public_token && (dbV.public_token || '').toLowerCase() === (v.public_token || '').toLowerCase()) ||
@@ -240,8 +240,13 @@ export default function CompanyPortalDashboard() {
       )
       .subscribe();
 
+    const interval = setInterval(() => {
+      loadCompanyAndVouchers();
+    }, 4000);
+
     return () => {
       supabase.removeChannel(channel);
+      clearInterval(interval);
     };
   }, [companySession]);
 
@@ -267,7 +272,7 @@ export default function CompanyPortalDashboard() {
 
   const totalVouchersEmitidos = vouchers.length;
   const totalValorEmitido = vouchers.reduce((acc, v) => acc + Number(v.valor || 0), 0);
-  const vouchersUtilizados = vouchers.filter((v) => v.status === 'UTILIZADO');
+  const vouchersUtilizados = vouchers.filter((v) => v.status === 'UTILIZADO' || v.status === 'used' || v.status === 'RESGATADO');
   const totalValorUtilizado = vouchersUtilizados.reduce((acc, v) => acc + Number(v.valor || 0), 0);
 
   // ==============================================================================
