@@ -473,7 +473,8 @@ const getResponseTypeGuideline = (type: string) => {
 export default function ChecklistBuilder() {
   const { showMainSidebar, setShowMainSidebar } = (useOutletContext() as { showMainSidebar: boolean, setShowMainSidebar: (v: boolean) => void }) || { showMainSidebar: true, setShowMainSidebar: () => {} };
   const geminiApiKey = geminiService.getApiKey();
-  const tenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+  const storeTenantId = useChatStore((state) => state.tenantInfo?.id);
+  const tenantId = storeTenantId || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
 
   // Listas de Carregamento
   const [checklists, setChecklists] = useState<Checklist[]>([]);
@@ -570,7 +571,7 @@ export default function ChecklistBuilder() {
     if (tenantId) {
       loadInitialData();
     }
-  }, [tenantId]);
+  }, [tenantId, storeTenantId]);
 
   // Função para converter horários da Janela Operacional para minutos de tolerância
   const updateMinutesFromWindow = (prevTime: string, endTime: string, alarmMin: number) => {

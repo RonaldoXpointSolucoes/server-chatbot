@@ -110,9 +110,10 @@ router.post('/redeem/reserve', async (req, res) => {
 // 4. Passo 2 do Resgate: Baixa Definitiva do Voucher
 router.post('/redeem/confirm', async (req, res) => {
   try {
-    const { voucherId, atendenteId = 'CAIXA_PRINCIPAL' } = req.body;
-    if (!voucherId) {
-      return res.status(400).json({ error: 'voucherId é obrigatório para confirmação da baixa.' });
+    const { voucherId, token, publicToken, id, atendenteId = 'CAIXA_PRINCIPAL' } = req.body;
+    const effectiveVoucherId = voucherId || token || publicToken || id;
+    if (!effectiveVoucherId) {
+      return res.status(400).json({ error: 'voucherId, token ou id é obrigatório para confirmação da baixa.' });
     }
 
     const reqInfo = {
@@ -120,7 +121,7 @@ router.post('/redeem/confirm', async (req, res) => {
       userAgent: req.headers['user-agent'] || null
     };
 
-    const result = await voucherEngine.confirmRedeem(voucherId, atendenteId, reqInfo);
+    const result = await voucherEngine.confirmRedeem(effectiveVoucherId, atendenteId, reqInfo);
     return res.json(result);
   } catch (err) {
     console.error('[Vouchers API] Falha na confirmação do resgate:', err.message);

@@ -41,6 +41,19 @@ export default function CompanyPortalDashboard() {
   const [companyData, setCompanyData] = useState<any | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
+  // Dados do Restaurante Concedente (Onde os vouchers são válidos)
+  const [restaurantInfo, setRestaurantInfo] = useState<{
+    nome: string;
+    endereco: string;
+    cardapioUrl: string;
+    instagram: string;
+  }>({
+    nome: 'Burguer Plus',
+    endereco: 'Praça Miguel Ortega, 340 - Parque Assunção - Taboão da Serra/SP',
+    cardapioUrl: 'https://www.burguerplus.com.br',
+    instagram: 'https://instagram.com/burguerplus'
+  });
+
   // 2. Vouchers e Ledger
   const [vouchers, setVouchers] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -89,6 +102,25 @@ export default function CompanyPortalDashboard() {
     const companyId = companySession.id;
 
     try {
+      // 0. Busca informações institucionais do Restaurante Concedente
+      try {
+        const { data: compDb } = await supabase
+          .from('companies')
+          .select('name, settings')
+          .eq('id', tenantId)
+          .maybeSingle();
+
+        if (compDb) {
+          const s = compDb.settings || {};
+          setRestaurantInfo({
+            nome: compDb.name || s.nome_ia || s.nome_empresa || s.businessName || 'Burguer Plus',
+            endereco: s.endereco || (s.street ? `${s.street}, ${s.number || ''} - ${s.neighborhood || ''} - ${s.city || ''}/${s.state || ''}` : 'Praça Miguel Ortega, 340 - Parque Assunção - Taboão da Serra/SP'),
+            cardapioUrl: s.link_cardapio || 'https://www.burguerplus.com.br',
+            instagram: s.instagram || 'https://instagram.com/burguerplus'
+          });
+        }
+      } catch (_) {}
+
       // 1. Busca dados atualizados da empresa (LocalStorage + Supabase)
       const compRaw = localStorage.getItem(`voucher_companies_${tenantId}`) || localStorage.getItem('voucher_companies_global');
       let companies: any[] = [];
@@ -121,93 +153,35 @@ export default function CompanyPortalDashboard() {
         };
       }
 
-      // 2. Busca vouchers da empresa no LocalStorage
-      const vRaw = localStorage.getItem(`voucher_items_${tenantId}`) || localStorage.getItem('voucher_items_global');
-      let allVouchers: any[] = [];
-      if (vRaw) {
-        try { allVouchers = JSON.parse(vRaw); } catch (_) {}
-      }
-
-      // 3. Sincroniza em tempo real com o Supabase para capturar baixas efetuadas no Caixa
+      // 2. Busca vouchers da empresa diretamente no Supabase (Fonte da Verdade)
+      let companyVouchersList: any[] = [];
       try {
         const { data: dbVouchers, error: dbErr } = await supabase
           .from('vouchers')
-          .select('*');
+          .select('*')
+          .eq('tenant_id', tenantId);
 
-        if (!dbErr && dbVouchers && dbVouchers.length > 0) {
-          const merged = allVouchers.map((v: any) => {
-            const match = dbVouchers.find((dbV: any) =>
-              (dbV.public_token && (dbV.public_token || '').toLowerCase() === (v.public_token || '').toLowerCase()) ||
-              dbV.id === v.id
-            );
-            if (match) {
-              return {
-                ...v,
-                status: match.status,
-                data_resgate: match.data_resgate,
-                atendente_id: match.atendente_id
-              };
-            }
-            return v;
-          });
-
-          // Adiciona os vouchers do banco vinculados a esta empresa
-          dbVouchers.forEach((dbV: any) => {
-            const isMine = dbV.empresa_id === companyId || 
-              (dbV.empresa_nome && currentComp.razao_social && dbV.empresa_nome.toLowerCase().includes(currentComp.razao_social.toLowerCase()));
-            
-            if (isMine) {
-              const exists = merged.some((m: any) =>
-                (m.public_token && (m.public_token || '').toLowerCase() === (dbV.public_token || '').toLowerCase()) ||
-                m.id === dbV.id
-              );
-              if (!exists) {
-                merged.push({
-                  ...dbV,
-                  empresa_id: companyId,
-                  empresa_nome: currentComp.razao_social
-                });
-              }
-            }
-          });
-
-          // Sincroniza vouchers locais para a nuvem caso ainda não existam no Supabase
-          const unpersisted = allVouchers.filter(
-            (v: any) => !dbVouchers.some((dbV: any) => (dbV.public_token || '').toLowerCase() === (v.public_token || '').toLowerCase() || dbV.id === v.id)
+        if (!dbErr && dbVouchers) {
+          companyVouchersList = dbVouchers.filter((dbV: any) =>
+            dbV.empresa_id === companyId || 
+            (dbV.empresa_nome && currentComp.razao_social && dbV.empresa_nome.toLowerCase().includes(currentComp.razao_social.toLowerCase()))
           );
-          if (unpersisted.length > 0) {
-            const payloadsToSync = unpersisted.map((v: any) => ({
-              id: v.id,
-              tenant_id: v.tenant_id || tenantId,
-              empresa_id: v.empresa_id || companyId,
-              empresa_nome: v.empresa_nome || currentComp.razao_social,
-              empresa_razao_social: v.empresa_razao_social || currentComp.razao_social,
-              campanha_id: v.campanha_id || null,
-              public_token: v.public_token,
-              valor: Number(v.valor || 0),
-              status: v.status || 'CRIADO',
-              beneficiario_nome: v.beneficiario_nome || 'Colaborador',
-              beneficiario_whatsapp: v.beneficiario_whatsapp || '',
-              observacoes: v.observacoes || `Emitido via Portal B2B por ${currentComp.razao_social}`,
-              validade_fim: v.validade_fim || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-              created_at: v.created_at || new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            }));
+        } else {
+          // Fallback somente se offline
+          const vRaw = localStorage.getItem(`voucher_items_${tenantId}`) || localStorage.getItem('voucher_items_global');
+          if (vRaw) {
             try {
-              await supabase.from('vouchers').upsert(payloadsToSync);
+              const parsed = JSON.parse(vRaw);
+              companyVouchersList = parsed.filter((v: any) => v.empresa_id === companyId);
             } catch (_) {}
           }
-
-          allVouchers = merged;
-          localStorage.setItem(`voucher_items_${tenantId}`, JSON.stringify(allVouchers));
         }
-      } catch (dbErr) {
-        console.warn('[CompanyPortal] Erro ao sincronizar com Supabase:', dbErr);
+      } catch (sbErr) {
+        console.warn('[B2B Portal] Erro ao carregar vouchers do Supabase:', sbErr);
       }
 
       setCompanyData(currentComp);
-      const myVouchers = allVouchers.filter((v: any) => v.empresa_id === companyId || (v.empresa_nome && currentComp.razao_social && v.empresa_nome.toLowerCase().includes(currentComp.razao_social.toLowerCase())));
-      setVouchers(myVouchers);
+      setVouchers(companyVouchersList);
 
       // 4. Define data limite padrão do formulário
       if (currentComp.credito_fim) {
@@ -426,7 +400,10 @@ export default function CompanyPortalDashboard() {
 
   // Helpers de Compartilhamento
   const getProductionBaseUrl = () => {
-    return 'https://voucher-xpointsolucoes.vercel.app';
+    if (typeof window !== 'undefined' && window.location.origin) {
+      return window.location.origin;
+    }
+    return 'https://chat-boot-theta.vercel.app';
   };
 
   const getVoucherUrl = (token: string) => `${getProductionBaseUrl()}/voucher/${token}`;
@@ -475,13 +452,13 @@ export default function CompanyPortalDashboard() {
     const cleanPhone = rawPhone.startsWith('55') ? rawPhone : `55${rawPhone}`;
     const targetJid = `${cleanPhone}@s.whatsapp.net`;
     const link = getVoucherUrl(vItem.public_token);
-    const empresaNome = companyData?.razao_social || companyData?.nome_fantasia || 'TERRAS GONÇALVES SOCIEDADE DE ADVOGADOS';
+    const empresaNome = companyData?.nome_fantasia || companyData?.razao_social || 'Empresa Parceira';
     const valorFormatado = Number(vItem.valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
     const dataValidade = new Date(vItem.validade_fim).toLocaleDateString('pt-BR');
 
-    const restauranteNome = 'BURGUER PLUS';
-    const restauranteEndereco = 'Praça Miguel Ortega, 340 - Parque Assunção - Taboão da Serra/SP';
-    const cardapioUrl = 'https://www.burguerplus.com.br';
+    const restauranteNome = restaurantInfo.nome || 'Burguer Plus';
+    const restauranteEndereco = restaurantInfo.endereco || 'Praça Miguel Ortega, 340 - Parque Assunção - Taboão da Serra/SP';
+    const cardapioUrl = restaurantInfo.cardapioUrl || 'https://www.burguerplus.com.br';
 
     const msg = `✨ *PRESENTE CORPORATIVO EXCLUSIVO* ✨\n` +
       `🏢 *Oferecido por:* ${empresaNome}\n\n` +
@@ -871,8 +848,8 @@ export default function CompanyPortalDashboard() {
               <!-- Estabelecimento de Consumo -->
               <div class="restaurant-box">
                 <div class="restaurant-tag">🍔 LOCAL DE CONSUMO EXCLUSIVO:</div>
-                <div class="restaurant-name">BURGUER PLUS</div>
-                <div class="restaurant-address">📍 Praça Miguel Ortega, 340 - Parque Assunção - Taboão da Serra/SP</div>
+                <div class="restaurant-name">${restaurantInfo.nome}</div>
+                <div class="restaurant-address">📍 ${restaurantInfo.endereco}</div>
               </div>
 
               <div class="middle-row">
@@ -890,10 +867,10 @@ export default function CompanyPortalDashboard() {
               <div class="footer-info">
                 <div>
                   <strong>Validade:</strong> ${formattedDate}<br/>
-                  <strong>Site / Cardápio:</strong> www.burguerplus.com.br
+                  <strong>Site / Cardápio:</strong> ${restaurantInfo.cardapioUrl}
                 </div>
                 <div style="text-align: right;">
-                  Apresente este voucher no balcão da BURGUER PLUS para resgate.
+                  Apresente este voucher no balcão da ${restaurantInfo.nome} para resgate.
                 </div>
               </div>
             </div>
@@ -905,7 +882,7 @@ export default function CompanyPortalDashboard() {
             <div class="ticket-stub">
               <div>
                 <div class="stub-header">CANHOTO DO CAIXA</div>
-                <div style="font-size: 10px; font-weight: 800; color: #00a884; text-transform: uppercase; margin-top: 2px;">BURGUER PLUS</div>
+                <div style="font-size: 10px; font-weight: 800; color: #00a884; text-transform: uppercase; margin-top: 2px;">${restaurantInfo.nome}</div>
               </div>
               
               <div class="qr-box">
@@ -999,6 +976,45 @@ export default function CompanyPortalDashboard() {
       {/* ========================================================= */}
       <main className="max-w-7xl mx-auto px-4 sm:px-8 pt-6 space-y-6">
 
+        {/* Banner Institucional do Restaurante Concedente */}
+        <div className="bg-gradient-to-r from-emerald-500/15 via-teal-500/10 to-transparent border border-emerald-500/30 rounded-3xl p-4 sm:p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 text-left shadow-lg relative overflow-hidden">
+          <div className="flex items-center gap-3.5">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 text-[#0b141a] flex items-center justify-center shrink-0 shadow-md shadow-emerald-500/20">
+              <Building2 className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[11px] font-black uppercase tracking-wider text-emerald-400">
+                  Restaurante Parceiro Conveniado
+                </span>
+                <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-black uppercase tracking-wider border border-emerald-500/30">
+                  Uso Exclusivo
+                </span>
+              </div>
+              <h2 className="text-base sm:text-lg font-black text-white mt-0.5">
+                {restaurantInfo.nome}
+              </h2>
+              <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                <span>📍 {restaurantInfo.endereco}</span>
+                <span>•</span>
+                <span className="text-slate-300">Vouchers emitidos aqui são válidos exclusivamente para resgate no restaurante <strong>{restaurantInfo.nome}</strong>.</span>
+              </p>
+            </div>
+          </div>
+
+          {restaurantInfo.cardapioUrl && (
+            <a
+              href={restaurantInfo.cardapioUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-4 py-2.5 bg-white/5 hover:bg-white/10 text-slate-200 hover:text-white rounded-xl text-xs font-bold border border-white/10 transition-all flex items-center gap-2 shrink-0 self-stretch md:self-auto justify-center"
+            >
+              <ExternalLink className="w-4 h-4 text-emerald-400" />
+              <span>Cardápio Online {restaurantInfo.nome}</span>
+            </a>
+          )}
+        </div>
+
         {/* Grid de Métricas Principais */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           
@@ -1013,7 +1029,7 @@ export default function CompanyPortalDashboard() {
                 {saldoCredito.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
               </div>
               <p className="text-[11px] text-slate-400">
-                de {totalConcedido.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} concedidos
+                Crédito concedido por {restaurantInfo.nome}
               </p>
             </div>
             {/* Barra de Progresso de Consumo */}
@@ -1133,20 +1149,23 @@ export default function CompanyPortalDashboard() {
                 />
               </div>
 
-              {/* Filtros de Status */}
-              <div className="flex items-center gap-1 bg-black/30 p-1 rounded-xl border border-white/10">
+              {/* Filtros de Status com Rastreabilidade Total */}
+              <div className="flex items-center gap-1 bg-black/30 p-1 rounded-xl border border-white/10 overflow-x-auto scrollbar-none">
                 {[
                   { id: 'ALL', label: 'Todos' },
                   { id: 'CRIADO', label: 'Disponíveis' },
-                  { id: 'UTILIZADO', label: 'Resgatados' }
+                  { id: 'UTILIZADO', label: 'Resgatados' },
+                  { id: 'CANCELADO', label: 'Cancelados' }
                 ].map((f) => (
                   <button
                     key={f.id}
                     type="button"
                     onClick={() => setStatusFilter(f.id as any)}
-                    className={`px-3 py-1 rounded-lg text-[11px] font-black uppercase transition-all cursor-pointer ${
+                    className={`px-3 py-1.5 rounded-lg text-[11px] font-black uppercase transition-all cursor-pointer whitespace-nowrap ${
                       statusFilter === f.id
-                        ? 'bg-emerald-500 text-[#0b141a]'
+                        ? f.id === 'CANCELADO'
+                          ? 'bg-red-500 text-white'
+                          : 'bg-emerald-500 text-[#0b141a]'
                         : 'text-slate-400 hover:text-white'
                     }`}
                   >
@@ -1187,7 +1206,15 @@ export default function CompanyPortalDashboard() {
                     (v.beneficiario_whatsapp && v.beneficiario_whatsapp.includes(searchTerm));
 
                   if (!matchesSearch) return false;
-                  if (statusFilter !== 'ALL' && v.status !== statusFilter) return false;
+                  if (statusFilter === 'CRIADO') {
+                    return v.status === 'CRIADO' || v.status === 'DISPONIBILIZADO' || v.status === 'ATIVO' || v.status === 'ENVIADO';
+                  }
+                  if (statusFilter === 'UTILIZADO') {
+                    return v.status === 'UTILIZADO';
+                  }
+                  if (statusFilter === 'CANCELADO') {
+                    return v.status === 'CANCELADO' || v.status === 'EXCLUIDO';
+                  }
                   return true;
                 })
                 .map((vItem) => {
@@ -1458,6 +1485,14 @@ export default function CompanyPortalDashboard() {
                     className="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
+              </div>
+
+              {/* Aviso de Uso Exclusivo no Restaurante */}
+              <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-center gap-2.5 text-[11px] text-emerald-300">
+                <span className="text-base">🍔</span>
+                <span>
+                  Este voucher gerado será de <strong>uso exclusivo no restaurante {restaurantInfo.nome}</strong>.
+                </span>
               </div>
 
               {/* Botão Emitir */}

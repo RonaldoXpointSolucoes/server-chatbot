@@ -75,15 +75,20 @@ export default function VoucherViewer() {
     try {
       const tId = tenantId || '8b1e427b-2321-4ea7-9d7e-90f7d5cbad21';
 
-      // 1. Tenta recuperar do localStorage
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && (key.startsWith('account_settings_') || key.startsWith('tenant_settings_'))) {
-          const raw = localStorage.getItem(key);
-          if (raw) {
+      // 1. Tenta recuperar do localStorage específico do tenant
+      const specificKeys = [
+        `account_settings_${tId}`,
+        `tenant_settings_${tId}`,
+        `company_profile_${tId}`
+      ];
+
+      for (const key of specificKeys) {
+        const raw = localStorage.getItem(key);
+        if (raw) {
+          try {
             const parsed = JSON.parse(raw);
             if (parsed) {
-              const resName = parsed.nome_ia || parsed.nome_empresa || parsed.businessName || defaultInfo.nome;
+              const resName = parsed.nome_ia || parsed.nome_empresa || parsed.name || parsed.businessName || defaultInfo.nome;
               const resEnd = parsed.endereco || defaultInfo.endereco;
               const resCardapio = parsed.link_cardapio || defaultInfo.cardapioUrl;
               const resInsta = parsed.instagram || defaultInfo.instagram;
@@ -97,7 +102,7 @@ export default function VoucherViewer() {
               });
               return;
             }
-          }
+          } catch (_) {}
         }
       }
 

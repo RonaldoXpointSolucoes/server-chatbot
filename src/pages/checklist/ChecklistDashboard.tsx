@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { supabase } from '../../services/supabase';
+import { useChatStore } from '../../store/chatStore';
 import { 
   BarChart3, 
   CheckCircle2, 
@@ -60,7 +61,8 @@ interface ExecutionDetail {
 
 export default function ChecklistDashboard() {
   const { showMainSidebar, setShowMainSidebar } = (useOutletContext() as { showMainSidebar: boolean, setShowMainSidebar: (v: boolean) => void }) || { showMainSidebar: true, setShowMainSidebar: () => {} };
-  const tenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+  const storeTenantId = useChatStore((state) => state.tenantInfo?.id);
+  const tenantId = storeTenantId || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
 
   // Estados Principais
   const [stats, setStats] = useState<KPIStats>({
@@ -126,7 +128,7 @@ export default function ChecklistDashboard() {
         supabase.removeChannel(alertsChannel);
       };
     }
-  }, [tenantId, selectedUnit, selectedPeriod]);
+  }, [tenantId, storeTenantId, selectedUnit, selectedPeriod]);
 
   const loadUnits = async () => {
     try {

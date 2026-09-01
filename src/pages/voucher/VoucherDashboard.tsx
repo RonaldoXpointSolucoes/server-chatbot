@@ -46,6 +46,9 @@ import {
   CreditCard,
   Coins,
   Eye,
+  EyeOff,
+  Key,
+  Globe,
   CheckCircle,
   Printer,
   Trash2,
@@ -140,7 +143,14 @@ export const getVoucherCampanhaNome = (v: any, campanhasList: any[] = []): strin
 export default function VoucherDashboard() {
   const tenantInfo = useChatStore((state) => state.tenantInfo);
   const currentAccount = useChatStore((state) => state.currentAccount);
-  const tenantId = tenantInfo?.id || currentAccount?.id || '8b1e427b-2321-4ea7-9d7e-90f7d5cbad21';
+  const storedTenantId = typeof window !== 'undefined'
+    ? (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'))
+    : null;
+  const storedTenantName = typeof window !== 'undefined'
+    ? (localStorage.getItem('current_tenant_name') || sessionStorage.getItem('current_tenant_name'))
+    : null;
+  const tenantId = tenantInfo?.id || storedTenantId || currentAccount?.id || '8b1e427b-2321-4ea7-9d7e-90f7d5cbad21';
+  const currentTenantName = tenantInfo?.name || storedTenantName || currentAccount?.name || 'Estabelecimento';
 
   const [activeTab, setActiveTab] = useState<'vouchers' | 'campanhas' | 'empresas' | 'auditoria'>('vouchers');
   const [loading, setLoading] = useState<boolean>(true);
@@ -174,6 +184,11 @@ export default function VoucherDashboard() {
   const [showCompanyModal, setShowCompanyModal] = useState<boolean>(false);
   const [editingCompany, setEditingCompany] = useState<any | null>(null);
 
+  // Estados de Exclusão de Empresa Parceira
+  const [companyToDelete, setCompanyToDelete] = useState<any | null>(null);
+  const [showDeleteCompanyModal, setShowDeleteCompanyModal] = useState<boolean>(false);
+  const [isDeletingCompany, setIsDeletingCompany] = useState<boolean>(false);
+
   // Estados de Acesso Corporativo & Gestão de Créditos de Empresas Parceiras
   const [selectedCompanyForAccess, setSelectedCompanyForAccess] = useState<any | null>(null);
   const [showCompanyAccessModal, setShowCompanyAccessModal] = useState<boolean>(false);
@@ -182,6 +197,8 @@ export default function VoucherDashboard() {
   const [creditAdjustmentAmount, setCreditAdjustmentAmount] = useState<string>('500');
   const [creditAdjustmentValidity, setCreditAdjustmentValidity] = useState<string>('');
   const [copiedAccessInfo, setCopiedAccessInfo] = useState<boolean>(false);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [showAccessPassword, setShowAccessPassword] = useState<boolean>(false);
 
   const [showCampaignModal, setShowCampaignModal] = useState<boolean>(false);
   const [editingCampaign, setEditingCampaign] = useState<any | null>(null);
@@ -196,6 +213,9 @@ export default function VoucherDashboard() {
   const [selectedVoucherForPrint, setSelectedVoucherForPrint] = useState<any | null>(null);
   const [showPrintModal, setShowPrintModal] = useState<boolean>(false);
   const [printLayout, setPrintLayout] = useState<'thermal' | 'pdf'>('thermal');
+
+  // Filtro de Status na Aba Vouchers (Rastreabilidade Total)
+  const [voucherStatusFilter, setVoucherStatusFilter] = useState<'ALL' | 'ATIVO' | 'UTILIZADO' | 'CANCELADO'>('ALL');
 
   // Estados de Exclusão Individual e em Massa
   const [selectedVoucherIds, setSelectedVoucherIds] = useState<string[]>([]);
@@ -247,17 +267,19 @@ export default function VoucherDashboard() {
     }));
   };
 
-  // Helper de URL Base Oficial (Garante domínio de produção da Vercel mesmo em testes locais)
+  // Helper de URL Base Oficial (Utiliza a origem atual dinamicamente ou produção Vercel)
   const getVoucherBaseUrl = () => {
-    const origin = window.location.origin;
-    if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
-      return 'https://voucher-xpointsolucoes.vercel.app';
+    if (typeof window !== 'undefined' && window.location.origin) {
+      return window.location.origin;
     }
-    return origin;
+    return 'https://chat-boot-theta.vercel.app';
   };
 
   const getB2BPortalBaseUrl = () => {
-    return 'https://voucher-xpointsolucoes.vercel.app';
+    if (typeof window !== 'undefined' && window.location.origin) {
+      return window.location.origin;
+    }
+    return 'https://chat-boot-theta.vercel.app';
   };
 
   // Motor de Impressão (Cupom Térmico 40 Colunas ESC/POS e Ingresso VIP Pass com Canhoto Destacável)
@@ -795,119 +817,69 @@ export default function VoucherDashboard() {
     }
   }, [empresas, campanhas]);
 
-  // Carrega e sincroniza dados do Supabase e LocalStorage unificando todas as fontes
+  // Carregamento unificado dos dados corporativos isolado por Inquilino (Tenant)
   const fetchData = useCallback(async () => {
     if (!tenantId) return;
     try {
       setLoading(true);
 
-      // 1. Carrega o estado local atual de todas as possíveis chaves do navegador
+      // 1. Carrega o estado local atual EXCLUSIVO do inquilino selecionado
       const localVouchers = getTenantStorage('voucher_items', tenantId, []);
       const localCompanies = getTenantStorage('voucher_companies', tenantId, []);
       const localCampaigns = getTenantStorage('voucher_campaigns', tenantId, []);
       const localEvents = getTenantStorage('voucher_events', tenantId, []);
 
-      // Varredura de vouchers órfãos ou legados no localStorage
-      const extraLocalVouchers: any[] = [];
-      try {
-        for (let i = 0; i < localStorage.length; i++) {
-          const k = localStorage.key(i);
-          if (k && (k.startsWith('voucher_items_') || k.startsWith('vouchers_'))) {
-            const raw = localStorage.getItem(k);
-            if (raw) {
-              const list = JSON.parse(raw);
-              if (Array.isArray(list)) {
-                list.forEach((it) => {
-                  if (it && (it.public_token || it.id)) {
-                    extraLocalVouchers.push(it);
-                  }
-                });
-              }
-            }
-          } else if (k && k.startsWith('voucher_token_')) {
-            const raw = localStorage.getItem(k);
-            if (raw) {
-              const single = JSON.parse(raw);
-              if (single && (single.public_token || single.id)) {
-                extraLocalVouchers.push(single);
-              }
-            }
-          }
-        }
-      } catch (_) {}
-
-      // 2. Consulta em nuvem no Supabase (com tratamento resiliente)
+      // 2. Consulta em nuvem no Supabase com isolamento ESTRITO por tenant_id
       const [vRes, cRes, eRes, instRes] = await Promise.allSettled([
-        supabase.from('vouchers').select('*').order('created_at', { ascending: false }).limit(500),
-        supabase.from('voucher_campanhas').select('*').order('created_at', { ascending: false }),
-        supabase.from('voucher_empresas_parceiras').select('*').order('created_at', { ascending: false }),
-        supabase.from('whatsapp_instances').select('id, name, display_name, phone_number, status, is_active, session_name, api_key').eq('tenant_id', tenantId)
+        supabase.from('vouchers').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(500),
+        supabase.from('voucher_campanhas').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }),
+        supabase.from('voucher_empresas_parceiras').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }),
+        supabase.from('whatsapp_instances').select('id, display_name, phone_number, status, api_key').eq('tenant_id', tenantId)
       ]);
 
-      // Eventos de auditoria carregados com fallback seguro
+      // Eventos de auditoria carregados com isolamento estrito por tenant_id
       let dbEventsList: any[] = [];
       try {
-        const evRes = await supabase.from('voucher_events').select('*').order('created_at', { ascending: false }).limit(100);
+        const evRes = await supabase.from('voucher_events').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(100);
         if (!evRes.error && evRes.data) {
           dbEventsList = evRes.data;
         }
       } catch (_) {}
 
-      // 3. Merge de Empresas
-      let mergedEmpresas = [...localCompanies];
-      if (eRes.status === 'fulfilled' && eRes.value.data && eRes.value.data.length > 0) {
-        eRes.value.data.forEach((dbEmp: any) => {
-          const idx = mergedEmpresas.findIndex((m) => m.id === dbEmp.id);
-          if (idx >= 0) mergedEmpresas[idx] = { ...mergedEmpresas[idx], ...dbEmp };
-          else mergedEmpresas.push(dbEmp);
-        });
+      // 3. Empresas do Tenant Ativo (Fonte da Verdade: Supabase Cloud)
+      let finalEmpresas: any[] = [];
+      if (eRes.status === 'fulfilled' && eRes.value.data) {
+        finalEmpresas = eRes.value.data;
+      } else {
+        finalEmpresas = localCompanies.filter((c: any) => !c.tenant_id || c.tenant_id === tenantId);
       }
-      setEmpresas(mergedEmpresas);
-      setTenantStorage('voucher_companies', tenantId, mergedEmpresas);
+      setEmpresas(finalEmpresas);
+      setTenantStorage('voucher_companies', tenantId, finalEmpresas);
 
-      // 4. Merge de Campanhas
-      let mergedCampanhas = [...localCampaigns];
-      if (cRes.status === 'fulfilled' && cRes.value.data && cRes.value.data.length > 0) {
-        cRes.value.data.forEach((dbCmp: any) => {
-          const idx = mergedCampanhas.findIndex((m) => m.id === dbCmp.id);
-          if (idx >= 0) mergedCampanhas[idx] = { ...mergedCampanhas[idx], ...dbCmp };
-          else mergedCampanhas.push(dbCmp);
-        });
+      // 4. Campanhas do Tenant Ativo (Fonte da Verdade: Supabase Cloud)
+      let finalCampanhas: any[] = [];
+      if (cRes.status === 'fulfilled' && cRes.value.data) {
+        finalCampanhas = cRes.value.data;
+      } else {
+        finalCampanhas = localCampaigns.filter((c: any) => !c.tenant_id || c.tenant_id === tenantId);
       }
-      setCampanhas(mergedCampanhas);
-      setTenantStorage('voucher_campaigns', tenantId, mergedCampanhas);
+      setCampanhas(finalCampanhas);
+      setTenantStorage('voucher_campaigns', tenantId, finalCampanhas);
 
-      // 5. Merge Unificado de Vouchers (Supabase + LocalStorage de todas as fontes)
-      const dbVouchersList = (vRes.status === 'fulfilled' && vRes.value.data) ? vRes.value.data : [];
-      const combinedPool = [...dbVouchersList, ...localVouchers, ...extraLocalVouchers];
-      const mergedVouchersMap = new Map<string, any>();
+      // 5. Vouchers do Tenant Ativo (Fonte da Verdade: Supabase Cloud)
+      let finalVouchersList: any[] = [];
+      if (vRes.status === 'fulfilled') {
+        finalVouchersList = vRes.value.data || [];
+      } else {
+        finalVouchersList = localVouchers.filter((v: any) => !v.tenant_id || v.tenant_id === tenantId);
+      }
 
-      combinedPool.forEach((vItem) => {
-        if (!vItem) return;
-        const key = (vItem.public_token || vItem.id || '').toLowerCase().trim();
-        if (!key) return;
-
-        const existing = mergedVouchersMap.get(key);
-        if (!existing) {
-          mergedVouchersMap.set(key, vItem);
-        } else {
-          // Se um item tiver status UTILIZADO ou data mais recente, prevalece
-          mergedVouchersMap.set(key, {
-            ...existing,
-            ...vItem,
-            status: vItem.status === 'UTILIZADO' ? 'UTILIZADO' : (existing.status === 'UTILIZADO' ? 'UTILIZADO' : (vItem.status || existing.status))
-          });
-        }
-      });
-
-      const finalVouchersList = Array.from(mergedVouchersMap.values());
-      // Ordena por data de criação decrescente
       finalVouchersList.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
 
       setVouchers(finalVouchersList);
       setTenantStorage('voucher_items', tenantId, finalVouchersList);
 
-      // Salva cada token em chave direta para acesso instantâneo
+      // Salva cada token em chave direta
       finalVouchersList.forEach((vItem: any) => {
         if (vItem.public_token) {
           try {
@@ -916,43 +888,15 @@ export default function VoucherDashboard() {
         }
       });
 
-      // Sincroniza silenciosamente no Supabase vouchers que estavam apenas locais
-      const unpersisted = finalVouchersList.filter(
-        (v) => !dbVouchersList.some((dbV: any) => (dbV.public_token || '').toLowerCase() === (v.public_token || '').toLowerCase() || dbV.id === v.id)
-      );
-      if (unpersisted.length > 0) {
-        const payloadsToSync = unpersisted.map((v) => ({
-          id: v.id,
-          tenant_id: v.tenant_id || tenantId,
-          empresa_id: v.empresa_id || null,
-          campanha_id: v.campanha_id || null,
-          public_token: v.public_token,
-          valor: Number(v.valor || 0),
-          status: v.status || 'CRIADO',
-          beneficiario_nome: v.beneficiario_nome || 'Colaborador',
-          beneficiario_whatsapp: v.beneficiario_whatsapp || '',
-          empresa_nome: v.empresa_nome || v.empresa_razao_social || 'Burguer Plus (Venda Direta)',
-          empresa_razao_social: v.empresa_razao_social || v.empresa_nome || 'Burguer Plus (Venda Direta)',
-          campanha_nome: v.campanha_nome || 'Crédito Corporativo',
-          validade_fim: v.validade_fim || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-          created_at: v.created_at || new Date().toISOString()
-        }));
-        try {
-          await supabase.from('vouchers').upsert(payloadsToSync);
-        } catch (_) {}
-      }
-
-      // 6. Merge de Eventos
-      let mergedEvents = [...localEvents];
+      // 6. Eventos do Ledger de Auditoria do Tenant (Fonte da Verdade: Supabase Cloud)
+      let finalEvents: any[] = [];
       if (dbEventsList && dbEventsList.length > 0) {
-        dbEventsList.forEach((dbEv: any) => {
-          const idx = mergedEvents.findIndex((m) => m.id === dbEv.id);
-          if (idx >= 0) mergedEvents[idx] = { ...mergedEvents[idx], ...dbEv };
-          else mergedEvents.push(dbEv);
-        });
+        finalEvents = dbEventsList;
+      } else {
+        finalEvents = localEvents.filter((ev: any) => !ev.tenant_id || ev.tenant_id === tenantId);
       }
-      setEvents(mergedEvents);
-      setTenantStorage('voucher_events', tenantId, mergedEvents);
+      setEvents(finalEvents);
+      setTenantStorage('voucher_events', tenantId, finalEvents);
 
       if (instRes.status === 'fulfilled' && instRes.value.data && instRes.value.data.length > 0) {
         setTenantInstances(instRes.value.data);
@@ -966,7 +910,7 @@ export default function VoucherDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [tenantId]);
+  }, [tenantId, currentTenantName]);
 
   // Re-sincroniza e recarrega imediatamente ao alternar de empresa no topo esquerdo
   useEffect(() => {
@@ -1264,6 +1208,13 @@ export default function VoucherDashboard() {
     setTimeout(() => setCopiedAccessInfo(false), 3000);
   };
 
+  const handleCopyField = (text: string, fieldKey: string) => {
+    if (!text) return;
+    navigator.clipboard.writeText(text);
+    setCopiedField(fieldKey);
+    setTimeout(() => setCopiedField(null), 2500);
+  };
+
   const FOODNEXT_INSTANCE_ID = 'cc4efe36-f391-4b3d-a24c-ddcd8a293cf6';
 
   const handleShareCompanyAccessViaWhatsapp = async (comp: any) => {
@@ -1275,13 +1226,14 @@ export default function VoucherDashboard() {
 
     const msg = `🏢✨ *ACESSO AO PORTAL B2B DE VOUCHERS CORPORATIVOS*\n\n` +
       `Olá *${comp.contato_nome || comp.razao_social}*!\n\n` +
-      `Seu acesso exclusivo ao *Portal B2B de Vouchers Corporativos* foi liberado com sucesso!\n\n` +
+      `Seu acesso exclusivo ao *Portal B2B de Vouchers Corporativos* foi liberado pelo restaurante *${currentTenantName}*!\n\n` +
+      `🍔 *Restaurante Conveniado:* ${currentTenantName} (Vouchers exclusivos para uso nesta loja)\n` +
       `💳 *Saldo de Crédito Liberado:* ${creditStr}\n` +
       `⏳ *Validade do Crédito:* até ${valStr}\n\n` +
       `🔗 *Link Direto de Acesso:*\n${portalUrl}\n\n` +
       `👤 *Usuário:* \`${user}\`\n` +
       `🔑 *Senha de Acesso:* \`${pass}\`\n\n` +
-      `_No portal você pode auto-emitir vouchers digitais personalizados com QR Code e enviar direto para seus colaboradores ou clientes._`;
+      `_No portal você pode auto-emitir vouchers digitais personalizados com QR Code para seus colaboradores utilizarem no restaurante ${currentTenantName}._`;
 
     const rawPhone = (comp.contato_whatsapp || comp.telefone_empresa || '').replace(/\D/g, '');
     if (!rawPhone || rawPhone.length < 10) {
@@ -1391,6 +1343,72 @@ export default function VoucherDashboard() {
       alert(err.message || 'Erro ao ajustar crédito.');
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  // Exclusão de Empresa Parceira
+  const openDeleteCompanyModal = (comp: any, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setCompanyToDelete(comp);
+    setShowDeleteCompanyModal(true);
+  };
+
+  const handleConfirmDeleteCompany = async () => {
+    if (!companyToDelete?.id) return;
+    try {
+      setIsDeletingCompany(true);
+      setActionError(null);
+
+      // 1. Deleta do Supabase
+      try {
+        await supabase.from('voucher_empresas_parceiras').delete().eq('id', companyToDelete.id);
+      } catch (sbErr) {
+        console.warn('[Vouchers] Erro ao deletar empresa do Supabase:', sbErr);
+      }
+
+      // 2. Atualiza estado local e storage
+      const updatedList = empresas.filter((emp) => emp.id !== companyToDelete.id);
+      setEmpresas(updatedList);
+      setTenantStorage('voucher_companies', tenantId, updatedList);
+
+      // 3. Registra no Ledger de auditoria
+      const novoEvento = {
+        id: 'ev-' + Math.random().toString(36).substring(2, 9),
+        tenant_id: tenantId,
+        voucher_id: null,
+        voucher_token: 'EXCLUSAO_EMPRESA_B2B',
+        tipo_operacao: 'EXCLUSAO_EMPRESA_B2B',
+        valor: Number(companyToDelete.saldo_credito ?? companyToDelete.saldo_global ?? 0),
+        status_anterior: 'ATIVO',
+        status_novo: 'EXCLUIDO',
+        data_hora: new Date().toISOString(),
+        usuario_responsavel: 'Restaurante (Gestor de Vouchers)',
+        beneficiario_nome: companyToDelete.razao_social || companyToDelete.nome_fantasia,
+        motivo: `Exclusão da empresa parceira ${companyToDelete.razao_social || companyToDelete.nome_fantasia}`,
+        created_at: new Date().toISOString()
+      };
+      const updatedEvents = [novoEvento, ...events];
+      setEvents(updatedEvents);
+      setTenantStorage('voucher_events', tenantId, updatedEvents);
+
+      try {
+        await supabase.from('voucher_events').insert([novoEvento]);
+      } catch (_) {}
+
+      setShowDeleteCompanyModal(false);
+      if (editingCompany?.id === companyToDelete.id) {
+        setShowCompanyModal(false);
+        setEditingCompany(null);
+      }
+      setCompanyToDelete(null);
+
+      setActionSuccess(`Empresa "${companyToDelete.razao_social || companyToDelete.nome_fantasia}" excluída com sucesso!`);
+      setTimeout(() => setActionSuccess(null), 4000);
+    } catch (err: any) {
+      console.error('Erro ao excluir empresa parceira:', err);
+      setActionError('Falha ao excluir empresa: ' + (err.message || 'Erro inesperado'));
+    } finally {
+      setIsDeletingCompany(false);
     }
   };
 
@@ -1570,7 +1588,7 @@ export default function VoucherDashboard() {
           ? (voucherForm.beneficiarioNome.trim() || 'Cliente / Colaborador')
           : `Colaborador #${i + 1}`;
         const benefWhats = isIndividual ? voucherForm.beneficiarioWhatsapp.replace(/\D/g, '') : '';
-        const empresaNome = selectedEmpresa ? selectedEmpresa.razao_social : 'Cliente Avulso (Venda Direta)';
+        const empresaNome = selectedEmpresa ? selectedEmpresa.razao_social : `${currentTenantName} (Venda Direta)`;
 
         const voucherItem = {
           id: voucherId,
@@ -1582,10 +1600,10 @@ export default function VoucherDashboard() {
           valor: emissionValue,
           beneficiario_nome: benefNome,
           beneficiario_whatsapp: benefWhats,
-          empresa_nome: selectedEmpresa ? selectedEmpresa.razao_social : 'Burguer Plus (Venda Direta)',
-          empresa_razao_social: selectedEmpresa ? selectedEmpresa.razao_social : 'Burguer Plus (Venda Direta)',
+          empresa_nome: selectedEmpresa ? selectedEmpresa.razao_social : `${currentTenantName} (Venda Direta)`,
+          empresa_razao_social: selectedEmpresa ? selectedEmpresa.razao_social : `${currentTenantName} (Venda Direta)`,
           campanha_nome: selectedCampanha ? selectedCampanha.nome : 'Crédito Corporativo Especial',
-          observacoes: selectedCampanha ? selectedCampanha.descricao : 'Crédito Balcão Burguer Plus',
+          observacoes: selectedCampanha ? selectedCampanha.descricao : `Crédito Balcão ${currentTenantName}`,
           validade_fim: new Date(voucherForm.validadeFim).toISOString(),
           created_at: new Date().toISOString()
         };
@@ -1838,6 +1856,7 @@ export default function VoucherDashboard() {
     setShowDeleteConfirmModal(true);
   };
 
+  // Cancelamento / Exclusão com 100% de Rastreabilidade no Ledger Contábil (Soft Delete Auditável)
   const handleConfirmDelete = async () => {
     const idsToDelete = isBulkDelete
       ? selectedVoucherIds
@@ -1849,44 +1868,138 @@ export default function VoucherDashboard() {
       setIsDeletingVouchers(true);
       setActionError(null);
 
-      // 1. Deleta do Supabase
+      const cancelTimestamp = new Date().toISOString();
+
+      // 1. Soft Delete com Rastreabilidade no Supabase (atualiza status para 'CANCELADO')
       try {
-        await supabase.from('vouchers').delete().in('id', idsToDelete);
+        await supabase
+          .from('vouchers')
+          .update({
+            status: 'CANCELADO',
+            observacoes: `Cancelado em ${new Date().toLocaleString('pt-BR')} pelo Gestor`
+          })
+          .in('id', idsToDelete);
       } catch (sbErr) {
-        console.warn('[Vouchers] Erro ao deletar do Supabase:', sbErr);
+        console.warn('[Vouchers] Erro ao atualizar status no Supabase:', sbErr);
       }
 
-      // 2. Atualiza estado local e Tenant Storage
-      const updatedList = vouchers.filter((v) => !idsToDelete.includes(v.id));
+      // 2. Atualiza estado local e Tenant Storage mantendo os vouchers para rastreamento
+      const updatedList = vouchers.map((v) =>
+        idsToDelete.includes(v.id)
+          ? {
+              ...v,
+              status: 'CANCELADO',
+              data_cancelamento: cancelTimestamp,
+              observacoes: `Cancelado em ${new Date().toLocaleString('pt-BR')} pelo Gestor`
+            }
+          : v
+      );
       setVouchers(updatedList);
       setTenantStorage('voucher_items', tenantId, updatedList);
 
-      // 3. Limpa tokens de localStorage
-      idsToDelete.forEach((id) => {
+      // 3. Registra eventos imutáveis no Ledger de Auditoria Contábil (voucher_events)
+      const novosEventos = idsToDelete.map((id) => {
         const v = vouchers.find((item) => item.id === id);
-        if (v?.public_token) {
-          try {
-            localStorage.removeItem(`voucher_token_${v.public_token}`);
-          } catch (_) {}
-        }
+        return {
+          id: 'ev-' + Math.random().toString(36).substring(2, 9),
+          tenant_id: tenantId,
+          voucher_id: id,
+          voucher_token: v?.public_token || 'TOKEN',
+          tipo_operacao: 'CANCELAMENTO_EXCLUSAO',
+          valor: Number(v?.valor || 0),
+          status_anterior: v?.status || 'ATIVO',
+          status_novo: 'CANCELADO',
+          data_hora: cancelTimestamp,
+          usuario_responsavel: 'Gestor (Painel de Vouchers)',
+          beneficiario_nome: v?.beneficiario_nome || 'Colaborador',
+          motivo: 'Voucher cancelado/excluído com registro permanente de rastreabilidade no Ledger',
+          created_at: cancelTimestamp
+        };
       });
 
-      // 4. Limpa seleções
-      setSelectedVoucherIds((prev) => prev.filter((id) => !idsToDelete.includes(id)));
+      const updatedEvents = [...novosEventos, ...events];
+      setEvents(updatedEvents);
+      setTenantStorage('voucher_events', tenantId, updatedEvents);
+
+      try {
+        await supabase.from('voucher_events').insert(novosEventos);
+      } catch (evErr) {
+        console.warn('[Vouchers] Erro ao gravar eventos no Ledger Supabase:', evErr);
+      }
+
+      // 4. Limpa seleções e fecha modal
+      setSelectedVoucherIds([]);
       setVoucherToDelete(null);
       setShowDeleteConfirmModal(false);
 
       setActionSuccess(
         idsToDelete.length === 1
-          ? 'Voucher excluído com sucesso!'
-          : `${idsToDelete.length} vouchers excluídos com sucesso!`
+          ? 'Voucher cancelado e registrado no Ledger com 100% de rastreabilidade!'
+          : `${idsToDelete.length} vouchers cancelados e registrados no Ledger com rastreabilidade total!`
       );
-      setTimeout(() => setActionSuccess(null), 4000);
+      setTimeout(() => setActionSuccess(null), 5000);
     } catch (err: any) {
-      console.error('Erro ao excluir vouchers:', err);
-      setActionError('Falha ao excluir voucher(s): ' + (err.message || 'Erro inesperado'));
+      console.error('Erro ao cancelar vouchers:', err);
+      setActionError('Falha ao cancelar voucher(s): ' + (err.message || 'Erro inesperado'));
     } finally {
       setIsDeletingVouchers(false);
+    }
+  };
+
+  // Reativação de Voucher Cancelado
+  const handleReactivateVoucher = async (voucher: any) => {
+    try {
+      setActionLoading(true);
+      const reactivateTimestamp = new Date().toISOString();
+
+      // 1. Atualiza no Supabase
+      try {
+        await supabase
+          .from('vouchers')
+          .update({
+            status: 'DISPONIVEL',
+            observacoes: `Reativado em ${new Date().toLocaleString('pt-BR')} pelo Gestor`
+          })
+          .eq('id', voucher.id);
+      } catch (_) {}
+
+      // 2. Atualiza estado local
+      const updatedList = vouchers.map((v) =>
+        v.id === voucher.id ? { ...v, status: 'DISPONIVEL', observacoes: `Reativado em ${new Date().toLocaleString('pt-BR')}` } : v
+      );
+      setVouchers(updatedList);
+      setTenantStorage('voucher_items', tenantId, updatedList);
+
+      // 3. Registra evento de reativação no Ledger
+      const novoEvento = {
+        id: 'ev-' + Math.random().toString(36).substring(2, 9),
+        tenant_id: tenantId,
+        voucher_id: voucher.id,
+        voucher_token: voucher.public_token,
+        tipo_operacao: 'REATIVACAO_VOUCHER',
+        valor: Number(voucher.valor || 0),
+        status_anterior: 'CANCELADO',
+        status_novo: 'DISPONIVEL',
+        data_hora: reactivateTimestamp,
+        usuario_responsavel: 'Gestor (Painel de Vouchers)',
+        beneficiario_nome: voucher.beneficiario_nome,
+        motivo: 'Voucher reativado com sucesso para novo resgate',
+        created_at: reactivateTimestamp
+      };
+      const updatedEvents = [novoEvento, ...events];
+      setEvents(updatedEvents);
+      setTenantStorage('voucher_events', tenantId, updatedEvents);
+
+      try {
+        await supabase.from('voucher_events').insert([novoEvento]);
+      } catch (_) {}
+
+      setActionSuccess(`Voucher ${voucher.public_token} reativado com sucesso!`);
+      setTimeout(() => setActionSuccess(null), 4000);
+    } catch (err: any) {
+      setActionError('Falha ao reativar voucher: ' + err.message);
+    } finally {
+      setActionLoading(false);
     }
   };
 
@@ -1907,12 +2020,27 @@ export default function VoucherDashboard() {
 
   const filteredVouchers = vouchers.filter((v) => {
     const q = searchTerm.toLowerCase();
-    return (
+    const matchesSearch =
+      !searchTerm ||
       v.public_token?.toLowerCase().includes(q) ||
       v.beneficiario_nome?.toLowerCase().includes(q) ||
+      v.beneficiario_whatsapp?.includes(q) ||
       v.voucher_campanhas?.nome?.toLowerCase().includes(q) ||
-      v.voucher_empresas_parceiras?.razao_social?.toLowerCase().includes(q)
-    );
+      v.voucher_empresas_parceiras?.razao_social?.toLowerCase().includes(q);
+
+    if (!matchesSearch) return false;
+
+    if (voucherStatusFilter === 'ATIVO') {
+      return v.status !== 'UTILIZADO' && v.status !== 'CANCELADO' && v.status !== 'EXPIRADO';
+    }
+    if (voucherStatusFilter === 'UTILIZADO') {
+      return v.status === 'UTILIZADO';
+    }
+    if (voucherStatusFilter === 'CANCELADO') {
+      return v.status === 'CANCELADO' || v.status === 'EXCLUIDO';
+    }
+
+    return true;
   });
 
   return (
@@ -2114,17 +2242,49 @@ export default function VoucherDashboard() {
       {activeTab === 'vouchers' && (
         <div className="space-y-4">
           
-          {/* Barra de Pesquisa & Ações em Massa */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+          {/* Barra de Pesquisa, Filtros Rápidos & Ações em Massa */}
+          <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
+            
+            {/* Campo de Busca por Código / Beneficiário / WhatsApp */}
             <div className="flex-1 relative">
               <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Buscar por código, beneficiário ou empresa parceira..."
+                placeholder="Buscar por código (ex: BURGUER-), beneficiário, telefone..."
                 className="w-full bg-white dark:bg-[#1f2c34] border border-black/10 dark:border-white/10 rounded-2xl pl-10 pr-4 py-3 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500 font-bold shadow-sm"
               />
+            </div>
+
+            {/* Pílulas de Filtro de Status com Rastreabilidade Total */}
+            <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none py-0.5">
+              {[
+                { id: 'ALL', label: 'Todos', count: vouchers.length },
+                { id: 'ATIVO', label: 'Ativos', count: vouchers.filter((v) => v.status !== 'UTILIZADO' && v.status !== 'CANCELADO' && v.status !== 'EXPIRADO').length },
+                { id: 'UTILIZADO', label: 'Resgatados', count: vouchers.filter((v) => v.status === 'UTILIZADO').length },
+                { id: 'CANCELADO', label: 'Cancelados', count: vouchers.filter((v) => v.status === 'CANCELADO' || v.status === 'EXCLUIDO').length }
+              ].map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => setVoucherStatusFilter(f.id as any)}
+                  className={`px-3 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider transition-all cursor-pointer shrink-0 flex items-center gap-1.5 min-h-[40px] ${
+                    voucherStatusFilter === f.id
+                      ? f.id === 'CANCELADO'
+                        ? 'bg-red-500 text-white shadow-md shadow-red-500/20'
+                        : 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
+                      : 'bg-white dark:bg-[#1f2c34] border border-black/5 dark:border-white/5 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <span>{f.label}</span>
+                  <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold ${
+                    voucherStatusFilter === f.id ? 'bg-white/20 text-white' : 'bg-black/5 dark:bg-white/10 text-slate-400'
+                  }`}>
+                    {f.count}
+                  </span>
+                </button>
+              ))}
             </div>
 
             {/* Barra de Ações em Massa (Ativa quando houver vouchers selecionados) */}
@@ -2151,7 +2311,7 @@ export default function VoucherDashboard() {
                     className="px-3.5 py-2 bg-red-600 hover:bg-red-700 active:scale-95 text-white text-xs font-black uppercase tracking-wider rounded-xl transition-all shadow-md shadow-red-500/20 flex items-center gap-1.5 cursor-pointer disabled:opacity-50 min-h-[40px]"
                   >
                     <Trash2 className="w-3.5 h-3.5 shrink-0" />
-                    <span>Excluir Selecionados</span>
+                    <span>Cancelar Selecionados</span>
                   </button>
                 </div>
               </div>
@@ -2181,6 +2341,7 @@ export default function VoucherDashboard() {
                   const isUtil = v.status === 'UTILIZADO';
                   const isVal = v.status === 'VALIDADO';
                   const isEnv = v.status === 'ENVIADO';
+                  const isCancel = v.status === 'CANCELADO' || v.status === 'EXCLUIDO';
                   const isSelected = selectedVoucherIds.includes(v.id);
 
                   return (
@@ -2189,6 +2350,8 @@ export default function VoucherDashboard() {
                       className={`p-4 rounded-2xl border transition-all space-y-3 shadow-sm text-left ${
                         isUtil
                           ? 'bg-purple-500/[0.04] dark:bg-purple-950/25 border-l-4 border-l-purple-500 border-t-purple-500/20 border-r-purple-500/20 border-b-purple-500/20'
+                          : isCancel
+                          ? 'bg-red-500/[0.03] dark:bg-red-950/20 border-l-4 border-l-red-500 border-t-red-500/20 border-r-red-500/20 border-b-red-500/20 opacity-90'
                           : isSelected 
                           ? 'border-emerald-500/60 ring-2 ring-emerald-500/20 bg-emerald-500/[0.02]' 
                           : 'bg-white dark:bg-[#1f2c34] border-black/10 dark:border-white/10'
@@ -2202,7 +2365,9 @@ export default function VoucherDashboard() {
                             onChange={(e) => handleToggleSelectVoucher(v.id, e as any)}
                             className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer accent-emerald-600"
                           />
-                          <span className={`font-mono font-black text-sm ${isUtil ? 'text-purple-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                          <span className={`font-mono font-black text-sm ${
+                            isUtil ? 'text-purple-400' : isCancel ? 'text-red-400 line-through' : 'text-emerald-600 dark:text-emerald-400'
+                          }`}>
                             {v.public_token}
                           </span>
                         </div>
@@ -2210,13 +2375,15 @@ export default function VoucherDashboard() {
                         <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider inline-flex items-center gap-1 ${
                           isUtil
                             ? 'bg-purple-500/20 text-purple-600 dark:text-purple-300 border border-purple-500/40 shadow-sm'
+                            : isCancel
+                            ? 'bg-red-500/20 text-red-400 border border-red-500/30'
                             : isVal
                             ? 'bg-amber-500/20 text-amber-600 dark:text-amber-300 border border-amber-500/30 animate-pulse'
                             : isEnv
                             ? 'bg-blue-500/20 text-blue-600 dark:text-blue-300 border border-blue-500/30'
                             : 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 border border-emerald-500/30'
                         }`}>
-                          {isUtil ? '✓ UTILIZADO' : v.status}
+                          {isUtil ? '✓ UTILIZADO' : isCancel ? '🔴 CANCELADO' : v.status}
                         </span>
                       </div>
 
@@ -2263,12 +2430,25 @@ export default function VoucherDashboard() {
                       <div className="pt-2 border-t border-black/5 dark:border-white/5 flex items-center justify-between">
                         <div>
                           <span className="text-[10px] text-slate-400 block">Valor</span>
-                          <strong className="text-base font-black text-slate-900 dark:text-white">
+                          <strong className={`text-base font-black ${isCancel ? 'text-slate-400 line-through' : 'text-slate-900 dark:text-white'}`}>
                             {Number(v.valor || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                           </strong>
                         </div>
 
                         <div className="flex items-center gap-1.5">
+                          {/* Botão Ver Ledger / Rastreabilidade */}
+                          <button
+                            onClick={() => {
+                              setSelectedVoucherForLedger(v);
+                              setShowLedgerTimelineModal(true);
+                            }}
+                            className="p-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 rounded-xl cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center transition-all active:scale-95"
+                            title="Ver Rastreabilidade & Histórico no Ledger"
+                          >
+                            <ReceiptText className="w-4 h-4" />
+                          </button>
+
+                          {/* Botão Imprimir */}
                           <button
                             onClick={() => {
                               setSelectedVoucherForPrint(v);
@@ -2280,30 +2460,48 @@ export default function VoucherDashboard() {
                             <Printer className="w-4 h-4" />
                           </button>
 
-                          <button
-                            onClick={() => handleSendWhatsApp(v)}
-                            disabled={actionLoading}
-                            className="p-2 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-600 dark:text-emerald-400 rounded-xl cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center transition-all active:scale-95"
-                            title="Disparar via WhatsApp"
-                          >
-                            <Send className="w-4 h-4" />
-                          </button>
+                          {/* Se Cancelado, oferece botão de Reativação */}
+                          {isCancel ? (
+                            <button
+                              onClick={() => handleReactivateVoucher(v)}
+                              disabled={actionLoading}
+                              className="p-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 rounded-xl cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center transition-all active:scale-95"
+                              title="Reativar este Voucher"
+                            >
+                              <RefreshCw className="w-4 h-4" />
+                            </button>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => handleSendWhatsApp(v)}
+                                disabled={actionLoading || isUtil}
+                                className={`p-2 rounded-xl transition-all min-h-[44px] min-w-[44px] flex items-center justify-center ${
+                                  isUtil
+                                    ? 'bg-black/5 dark:bg-white/5 text-slate-600 cursor-not-allowed opacity-40'
+                                    : 'bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-600 dark:text-emerald-400 cursor-pointer active:scale-95'
+                                }`}
+                                title={isUtil ? 'Voucher já utilizado no caixa.' : 'Disparar via WhatsApp'}
+                              >
+                                <Send className="w-4 h-4" />
+                              </button>
 
-                          <button
-                            onClick={() => handleOpenVoucherDigital(v)}
-                            className="p-2 bg-black/5 dark:bg-white/10 hover:bg-black/10 rounded-xl text-slate-400 hover:text-white cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center transition-all active:scale-95"
-                            title="Abrir Voucher Digital"
-                          >
-                            <ExternalLink className="w-4 h-4" />
-                          </button>
+                              <button
+                                onClick={() => handleOpenVoucherDigital(v)}
+                                className="p-2 bg-black/5 dark:bg-white/10 hover:bg-black/10 rounded-xl text-slate-400 hover:text-white cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center transition-all active:scale-95"
+                                title="Abrir Voucher Digital"
+                              >
+                                <ExternalLink className="w-4 h-4" />
+                              </button>
 
-                          <button
-                            onClick={(e) => openDeleteSingleModal(v, e)}
-                            className="p-2 bg-red-500/10 hover:bg-red-500/25 text-red-500 hover:text-red-600 dark:text-red-400 rounded-xl cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center transition-all active:scale-95"
-                            title="Excluir Voucher"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                              <button
+                                onClick={(e) => openDeleteSingleModal(v, e)}
+                                className="p-2 bg-red-500/10 hover:bg-red-500/25 text-red-500 hover:text-red-600 dark:text-red-400 rounded-xl cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center transition-all active:scale-95"
+                                title="Cancelar / Excluir Voucher"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -2339,6 +2537,7 @@ export default function VoucherDashboard() {
                       const isUtil = v.status === 'UTILIZADO';
                       const isVal = v.status === 'VALIDADO';
                       const isEnv = v.status === 'ENVIADO';
+                      const isCancel = v.status === 'CANCELADO' || v.status === 'EXCLUIDO';
                       const isSelected = selectedVoucherIds.includes(v.id);
 
                       return (
@@ -2347,6 +2546,8 @@ export default function VoucherDashboard() {
                           className={`transition-all ${
                             isUtil
                               ? 'bg-purple-500/[0.05] dark:bg-purple-950/25 border-l-4 border-l-purple-500 shadow-sm'
+                              : isCancel
+                              ? 'bg-red-500/[0.04] dark:bg-red-950/20 border-l-4 border-l-red-500 opacity-85'
                               : isSelected 
                               ? 'bg-emerald-500/[0.06] dark:bg-emerald-500/[0.08]' 
                               : 'hover:bg-slate-50 dark:hover:bg-white/[0.02]'
@@ -2360,7 +2561,9 @@ export default function VoucherDashboard() {
                               className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer accent-emerald-600"
                             />
                           </td>
-                          <td className={`py-3.5 px-4 font-mono font-black text-sm ${isUtil ? 'text-purple-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                          <td className={`py-3.5 px-4 font-mono font-black text-sm ${
+                            isUtil ? 'text-purple-400' : isCancel ? 'text-red-400 line-through' : 'text-emerald-600 dark:text-emerald-400'
+                          }`}>
                             {v.public_token}
                           </td>
                           <td className="py-3.5 px-4">
@@ -2402,26 +2605,41 @@ export default function VoucherDashboard() {
                               );
                             })()}
                           </td>
-                          <td className="py-3.5 px-4 font-black text-slate-900 dark:text-white text-sm">
+                          <td className={`py-3.5 px-4 font-black text-sm ${isCancel ? 'text-slate-400 line-through' : 'text-slate-900 dark:text-white'}`}>
                             {Number(v.valor || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                           </td>
                           <td className="py-3.5 px-4">
                             <span className={`px-2.5 py-1 rounded-full text-[9.5px] font-black uppercase tracking-wider inline-flex items-center gap-1 ${
                               isUtil
                                 ? 'bg-purple-500/20 text-purple-600 dark:text-purple-300 border border-purple-500/40 shadow-sm'
+                                : isCancel
+                                ? 'bg-red-500/20 text-red-400 border border-red-500/30'
                                 : isVal
                                 ? 'bg-amber-500/20 text-amber-600 dark:text-amber-300 border border-amber-500/30 animate-pulse'
                                 : isEnv
                                 ? 'bg-blue-500/20 text-blue-600 dark:text-blue-300 border border-blue-500/30'
                                 : 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 border border-emerald-500/30'
                             }`}>
-                              {isUtil ? '✓ UTILIZADO' : v.status}
+                              {isUtil ? '✓ UTILIZADO' : isCancel ? '🔴 CANCELADO' : v.status}
                             </span>
                           </td>
                           <td className="py-3.5 px-4 text-slate-400 font-medium">
                             {new Date(v.validade_fim).toLocaleDateString('pt-BR')}
                           </td>
                           <td className="py-3.5 px-4 text-right space-x-1.5">
+                            {/* Botão Ver Rastreabilidade no Ledger */}
+                            <button
+                              onClick={() => {
+                                setSelectedVoucherForLedger(v);
+                                setShowLedgerTimelineModal(true);
+                              }}
+                              className="p-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 rounded-xl cursor-pointer transition-all active:scale-95 min-h-[40px] min-w-[40px] inline-flex items-center justify-center"
+                              title="Ver Rastreabilidade & Histórico no Ledger de Auditoria"
+                            >
+                              <ReceiptText className="w-4 h-4" />
+                            </button>
+
+                            {/* Botão Imprimir */}
                             <button
                               onClick={() => {
                                 setSelectedVoucherForPrint(v);
@@ -2433,34 +2651,47 @@ export default function VoucherDashboard() {
                               <Printer className="w-4 h-4" />
                             </button>
 
-                            <button
-                              onClick={() => handleSendWhatsApp(v)}
-                              disabled={actionLoading || isUtil}
-                              className={`p-2 rounded-xl transition-all min-h-[40px] min-w-[40px] inline-flex items-center justify-center ${
-                                isUtil
-                                  ? 'bg-black/5 dark:bg-white/5 text-slate-600 cursor-not-allowed opacity-40'
-                                  : 'bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-600 dark:text-emerald-400 cursor-pointer active:scale-95'
-                              }`}
-                              title={isUtil ? 'Voucher já utilizado no caixa. Reenvio bloqueado.' : 'Disparar via WhatsApp'}
-                            >
-                              <Send className="w-4 h-4" />
-                            </button>
+                            {isCancel ? (
+                              <button
+                                onClick={() => handleReactivateVoucher(v)}
+                                disabled={actionLoading}
+                                className="p-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 rounded-xl cursor-pointer transition-all active:scale-95 min-h-[40px] min-w-[40px] inline-flex items-center justify-center"
+                                title="Reativar Voucher"
+                              >
+                                <RefreshCw className="w-4 h-4" />
+                              </button>
+                            ) : (
+                              <>
+                                <button
+                                  onClick={() => handleSendWhatsApp(v)}
+                                  disabled={actionLoading || isUtil}
+                                  className={`p-2 rounded-xl transition-all min-h-[40px] min-w-[40px] inline-flex items-center justify-center ${
+                                    isUtil
+                                      ? 'bg-black/5 dark:bg-white/5 text-slate-600 cursor-not-allowed opacity-40'
+                                      : 'bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-600 dark:text-emerald-400 cursor-pointer active:scale-95'
+                                  }`}
+                                  title={isUtil ? 'Voucher já utilizado no caixa.' : 'Disparar via WhatsApp'}
+                                >
+                                  <Send className="w-4 h-4" />
+                                </button>
 
-                            <button
-                              onClick={() => handleOpenVoucherDigital(v)}
-                              className="p-2 bg-black/5 dark:bg-white/10 hover:bg-black/10 rounded-xl text-slate-400 hover:text-white cursor-pointer transition-all active:scale-95 min-h-[40px] min-w-[40px] inline-flex items-center justify-center"
-                              title="Abrir Voucher Digital"
-                            >
-                              <ExternalLink className="w-4 h-4" />
-                            </button>
+                                <button
+                                  onClick={() => handleOpenVoucherDigital(v)}
+                                  className="p-2 bg-black/5 dark:bg-white/10 hover:bg-black/10 rounded-xl text-slate-400 hover:text-white cursor-pointer transition-all active:scale-95 min-h-[40px] min-w-[40px] inline-flex items-center justify-center"
+                                  title="Abrir Voucher Digital"
+                                >
+                                  <ExternalLink className="w-4 h-4" />
+                                </button>
 
-                            <button
-                              onClick={(e) => openDeleteSingleModal(v, e)}
-                              className="p-2 bg-red-500/10 hover:bg-red-500/25 text-red-500 hover:text-red-600 dark:text-red-400 rounded-xl cursor-pointer transition-all active:scale-95 min-h-[40px] min-w-[40px] inline-flex items-center justify-center"
-                              title="Excluir Voucher"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                                <button
+                                  onClick={(e) => openDeleteSingleModal(v, e)}
+                                  className="p-2 bg-red-500/10 hover:bg-red-500/25 text-red-500 hover:text-red-600 dark:text-red-400 rounded-xl cursor-pointer transition-all active:scale-95 min-h-[40px] min-w-[40px] inline-flex items-center justify-center"
+                                  title="Cancelar Voucher (Auditável)"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </>
+                            )}
                           </td>
                         </tr>
                       );
@@ -2609,13 +2840,22 @@ export default function VoucherDashboard() {
                             )}
                           </div>
                         </div>
-                        <button
-                          onClick={() => openEditCompanyModal(e)}
-                          className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg cursor-pointer shrink-0 transition-colors"
-                          title="Editar Empresa"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            onClick={() => openEditCompanyModal(e)}
+                            className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg cursor-pointer transition-colors"
+                            title="Editar Empresa"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={(ev) => openDeleteCompanyModal(e, ev)}
+                            className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg cursor-pointer transition-colors"
+                            title="Excluir Empresa Parceira"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
 
                       {/* Bloco de Créditos & Validade B2B */}
@@ -3762,13 +4002,14 @@ export default function VoucherDashboard() {
                         const portalUrl = `${getB2BPortalBaseUrl()}`;
                         const msg = `✨ *ACESSO AO PORTAL DE VOUCHERS CORPORATIVOS* ✨\n\n` +
                           `Olá, *${companyForm.contatoNome || 'Responsável'}* da empresa *${companyForm.razaoSocial || companyForm.nomeFantasia}*! 👋\n\n` +
-                          `Seu acesso exclusivo ao portal de emissão de vouchers da *BURGUER PLUS* está liberado!\n\n` +
+                          `Seu acesso exclusivo ao portal de emissão de vouchers da *${currentTenantName}* está liberado!\n\n` +
+                          `🍔 *Restaurante Conveniado:* ${currentTenantName} (Vouchers exclusivos para uso nesta loja)\n` +
                           `🌐 *Link Exclusivo de Acesso:*\n${portalUrl}\n\n` +
                           `🔑 *Credenciais de Acesso:*\n` +
                           `👤 *E-mail / Usuário:* ${companyForm.emailEmpresa || companyForm.loginUsuario}\n` +
                           `🔒 *Senha Inicial:* ${companyForm.loginSenha || '123456'}\n` +
                           `💳 *Saldo Disponível:* R$ ${Number(companyForm.saldoCredito || 0).toFixed(2)}\n\n` +
-                          `_Você já pode acessar e emitir vouchers para seus colaboradores e convidados._`;
+                          `_Você já pode acessar e emitir vouchers para seus colaboradores e convidados utilizarem no restaurante ${currentTenantName}._`;
                         window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`, '_blank', 'noopener,noreferrer');
                       }}
                       className="w-full py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
@@ -3783,6 +4024,17 @@ export default function VoucherDashboard() {
 
               {/* Botões de Ação */}
               <div className="flex gap-2.5 pt-2 shrink-0">
+                {editingCompany && (
+                  <button
+                    type="button"
+                    onClick={() => openDeleteCompanyModal(editingCompany)}
+                    className="py-3.5 px-4 bg-red-500/15 hover:bg-red-500/25 border border-red-500/30 text-red-400 font-black uppercase text-xs rounded-xl transition-colors cursor-pointer flex items-center justify-center gap-1.5 min-h-[48px]"
+                    title="Excluir esta empresa parceira"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span className="hidden sm:inline">Excluir</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setShowCompanyModal(false)}
@@ -4457,7 +4709,8 @@ export default function VoucherDashboard() {
       )}
 
       {/* ========================================================= */}
-      {/* MODAL DE CONFIRMAÇÃO DE EXCLUSÃO (INDIVIDUAL OU EM MASSA) */}
+      {/* ========================================================= */}
+      {/* MODAL DE CONFIRMAÇÃO DE CANCELAMENTO / AUDITORIA */}
       {/* ========================================================= */}
       {showDeleteConfirmModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
@@ -4471,10 +4724,10 @@ export default function VoucherDashboard() {
               </div>
               <div className="min-w-0">
                 <h3 className="text-base font-black text-white leading-tight">
-                  {isBulkDelete ? 'Excluir Vouchers Selecionados' : 'Excluir Voucher'}
+                  {isBulkDelete ? 'Cancelar Vouchers Selecionados' : 'Cancelar Voucher'}
                 </h3>
-                <p className="text-xs text-red-400/80 font-bold mt-0.5">
-                  Ação Permanente e Irreversível
+                <p className="text-xs text-emerald-400 font-bold mt-0.5 flex items-center gap-1">
+                  <ShieldCheck className="w-3.5 h-3.5" /> 100% de Rastreabilidade no Ledger
                 </p>
               </div>
             </div>
@@ -4483,10 +4736,10 @@ export default function VoucherDashboard() {
               {isBulkDelete ? (
                 <div className="p-4 bg-black/30 border border-red-500/20 rounded-2xl space-y-2">
                   <p className="font-medium text-slate-200">
-                    Você está prestes a excluir <strong className="text-red-400 font-black text-sm">{selectedVoucherIds.length} vouchers</strong> selecionados.
+                    Você está prestes a cancelar <strong className="text-red-400 font-black text-sm">{selectedVoucherIds.length} vouchers</strong> selecionados.
                   </p>
                   <p className="text-[11px] text-slate-400">
-                    Os vouchers serão desativados e removidos do banco de dados e dos terminais de caixa imediatamente.
+                    Os vouchers serão desativados para resgate no caixa, mas seus registros permanecerão no Ledger contábil.
                   </p>
                 </div>
               ) : (
@@ -4508,10 +4761,10 @@ export default function VoucherDashboard() {
                 </div>
               )}
 
-              <div className="flex items-start gap-2 p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-300 text-[11px]">
-                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-400" />
+              <div className="flex items-start gap-2 p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-300 text-[11px]">
+                <ShieldCheck className="w-4 h-4 shrink-0 mt-0.5 text-emerald-400" />
                 <span>
-                  Após a exclusão, os vouchers não poderão mais ser resgatados ou consultados pelos clientes.
+                  <strong>Auditoria Garantida:</strong> O voucher poderá ser consultado a qualquer momento no <em>Extrato / Ledger</em> ou reativado pelo gestor.
                 </span>
               </div>
             </div>
@@ -4527,7 +4780,7 @@ export default function VoucherDashboard() {
                 }}
                 className="flex-1 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-slate-300 font-black uppercase text-xs cursor-pointer transition-all disabled:opacity-50 min-h-[48px]"
               >
-                Cancelar
+                Voltar
               </button>
 
               <button
@@ -4539,12 +4792,12 @@ export default function VoucherDashboard() {
                 {isDeletingVouchers ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Excluindo...</span>
+                    <span>Processando...</span>
                   </>
                 ) : (
                   <>
                     <Trash2 className="w-4 h-4" />
-                    <span>Confirmar Exclusão</span>
+                    <span>Confirmar Cancelamento</span>
                   </>
                 )}
               </button>
@@ -4556,104 +4809,216 @@ export default function VoucherDashboard() {
       {/* ========================================================= */}
       {/* MODAL: CREDENCIAIS & ACESSO AO PORTAL B2B DA EMPRESA */}
       {/* ========================================================= */}
+      {/* ========================================================= */}
+      {/* MODAL: CREDENCIAIS & ACESSO AO PORTAL B2B DA EMPRESA */}
+      {/* ========================================================= */}
       {showCompanyAccessModal && selectedCompanyForAccess && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-[#111b21] border border-white/10 rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl animate-in zoom-in-95 text-left relative overflow-hidden">
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-[#111b21] border border-emerald-500/30 rounded-[32px] max-w-lg w-full p-5 sm:p-7 space-y-5 shadow-2xl animate-in zoom-in-95 text-left relative overflow-hidden my-auto">
             
-            {/* Glow de Fundo */}
-            <div className="absolute top-0 right-0 w-40 h-40 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none" />
+            {/* Glow Decorativo de Fundo */}
+            <div className="absolute top-0 right-0 w-48 h-48 bg-gradient-to-br from-emerald-500/20 via-teal-500/10 to-transparent rounded-full blur-3xl pointer-events-none" />
+            <div className="absolute bottom-0 left-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none" />
 
             {/* Header Modal */}
-            <div className="flex items-center justify-between border-b border-white/5 pb-3">
-              <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
-                  <Building2 className="w-5 h-5" />
+            <div className="flex items-start justify-between gap-3 border-b border-white/10 pb-4 relative z-10">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 text-[#0b141a] flex items-center justify-center shrink-0 shadow-lg shadow-emerald-500/20">
+                  <Building2 className="w-6 h-6" />
                 </div>
-                <div>
-                  <h3 className="font-black text-sm text-white">{selectedCompanyForAccess.razao_social}</h3>
-                  <p className="text-[11px] text-emerald-400 font-bold">Acesso ao Portal B2B de Vouchers</p>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                      B2B Parceiro
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-mono">
+                      CNPJ: {selectedCompanyForAccess.cnpj || 'Não informado'}
+                    </span>
+                  </div>
+                  <h3 className="font-black text-base sm:text-lg text-white leading-tight truncate mt-1" title={selectedCompanyForAccess.razao_social}>
+                    {selectedCompanyForAccess.razao_social}
+                  </h3>
+                  {selectedCompanyForAccess.nome_fantasia && selectedCompanyForAccess.nome_fantasia !== selectedCompanyForAccess.razao_social && (
+                    <p className="text-xs text-slate-400 truncate">{selectedCompanyForAccess.nome_fantasia}</p>
+                  )}
                 </div>
               </div>
+
               <button
                 type="button"
-                onClick={() => setShowCompanyAccessModal(false)}
-                className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer"
+                onClick={() => {
+                  setShowCompanyAccessModal(false);
+                  setShowAccessPassword(false);
+                  setCopiedField(null);
+                }}
+                className="p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-xl cursor-pointer transition-colors shrink-0"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Resumo de Créditos e Validade */}
-            <div className="p-3.5 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex items-center justify-between">
-              <div>
-                <span className="text-[10px] uppercase font-black text-emerald-400 block">Crédito Liberado</span>
-                <span className="text-base font-black text-emerald-400">
-                  {Number(selectedCompanyForAccess.saldo_credito ?? selectedCompanyForAccess.saldo_global ?? 500).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+            {/* Card 1: Resumo de Crédito Disponível & Validade */}
+            <div className="p-4 bg-gradient-to-r from-emerald-500/15 via-teal-500/10 to-transparent border border-emerald-500/30 rounded-2xl flex items-center justify-between gap-3 shadow-md relative z-10">
+              <div className="space-y-0.5">
+                <span className="text-[10px] uppercase font-black tracking-wider text-emerald-400 flex items-center gap-1.5">
+                  <Wallet className="w-3.5 h-3.5" /> Saldo de Crédito Liberado
                 </span>
+                <div className="text-2xl font-black text-emerald-400 tracking-tight">
+                  {Number(selectedCompanyForAccess.saldo_credito ?? selectedCompanyForAccess.saldo_global ?? 500).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                </div>
               </div>
-              <div className="text-right">
-                <span className="text-[10px] uppercase font-black text-slate-400 block">Validade</span>
-                <span className="text-xs font-bold text-white">
+
+              <div className="text-right space-y-1">
+                <span className="text-[10px] uppercase font-black text-slate-400 block tracking-wider">
+                  Vigência / Validade
+                </span>
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-white/5 border border-white/10 text-xs font-bold text-white">
+                  <Clock className="w-3.5 h-3.5 text-amber-400" />
                   {selectedCompanyForAccess.credito_fim ? new Date(selectedCompanyForAccess.credito_fim).toLocaleDateString('pt-BR') : '30 dias'}
                 </span>
               </div>
             </div>
 
-            {/* Cartão de Credenciais */}
-            <div className="bg-black/40 border border-white/10 rounded-2xl p-4 space-y-2.5 text-xs">
-              <div>
-                <span className="text-[10px] uppercase font-black text-slate-400 block">Link Exclusivo do Portal</span>
-                <div className="font-mono text-emerald-400 text-[11px] truncate bg-black/50 p-2 rounded-xl border border-white/5 mt-1">
-                  {`${getB2BPortalBaseUrl()}`}
+            {/* Card 2: Credenciais Detalhadas e Link Direto */}
+            <div className="bg-black/40 border border-white/10 rounded-2xl p-4 space-y-3 relative z-10 text-xs">
+              
+              {/* Link do Portal com Botões de Cópia e Abertura */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] uppercase font-black tracking-wider text-slate-400 flex items-center gap-1">
+                    <Globe className="w-3 h-3 text-emerald-400" /> Link de Acesso ao Portal B2B
+                  </span>
+                  <span className="text-[10px] text-slate-500">Auto-login configurado</span>
+                </div>
+                
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={`${getB2BPortalBaseUrl()}/voucher-empresa/login?tenant=${tenantId}&user=${encodeURIComponent(selectedCompanyForAccess.login_usuario || selectedCompanyForAccess.cnpj || '')}`}
+                    className="w-full bg-black/60 border border-white/10 rounded-xl px-3 py-2.5 font-mono text-[11px] text-emerald-400 focus:outline-none select-all truncate"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleCopyField(`${getB2BPortalBaseUrl()}/voucher-empresa/login?tenant=${tenantId}&user=${encodeURIComponent(selectedCompanyForAccess.login_usuario || selectedCompanyForAccess.cnpj || '')}`, 'link')}
+                    className="px-3 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 rounded-xl border border-emerald-500/30 text-xs font-bold transition-all flex items-center gap-1 shrink-0 cursor-pointer"
+                    title="Copiar Link"
+                  >
+                    {copiedField === 'link' ? <Check className="w-3.5 h-3.5 text-emerald-300" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedField === 'link' ? 'Copiado!' : 'Copiar'}</span>
+                  </button>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-2 pt-1">
-                <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
-                  <span className="text-[10px] uppercase font-black text-slate-400 block">Usuário</span>
-                  <strong className="font-mono text-white text-xs">
-                    {selectedCompanyForAccess.login_usuario || selectedCompanyForAccess.cnpj || 'Usuário'}
-                  </strong>
+              {/* Grid Responsivo de Usuário e Senha (Sem Sobreposição) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                
+                {/* Campo Usuário */}
+                <div className="bg-black/50 border border-white/10 rounded-xl p-3 space-y-1">
+                  <div className="flex items-center justify-between text-slate-400">
+                    <span className="text-[10px] uppercase font-black tracking-wider flex items-center gap-1">
+                      <User className="w-3 h-3 text-slate-400" /> Usuário / E-mail
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleCopyField(selectedCompanyForAccess.login_usuario || selectedCompanyForAccess.cnpj || selectedCompanyForAccess.email_empresa || '', 'user')}
+                      className="text-[10px] text-slate-400 hover:text-emerald-400 transition-colors flex items-center gap-0.5 cursor-pointer"
+                      title="Copiar Usuário"
+                    >
+                      {copiedField === 'user' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                      <span>{copiedField === 'user' ? 'Copiado' : 'Copiar'}</span>
+                    </button>
+                  </div>
+                  <div className="font-mono text-white text-xs font-bold break-all leading-snug select-all pt-0.5">
+                    {selectedCompanyForAccess.login_usuario || selectedCompanyForAccess.cnpj || selectedCompanyForAccess.email_empresa || 'Usuário'}
+                  </div>
                 </div>
 
-                <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
-                  <span className="text-[10px] uppercase font-black text-slate-400 block">Senha</span>
-                  <strong className="font-mono text-emerald-400 text-xs">
-                    {selectedCompanyForAccess.login_senha || '123456'}
-                  </strong>
+                {/* Campo Senha */}
+                <div className="bg-black/50 border border-white/10 rounded-xl p-3 space-y-1">
+                  <div className="flex items-center justify-between text-slate-400">
+                    <span className="text-[10px] uppercase font-black tracking-wider flex items-center gap-1">
+                      <Key className="w-3 h-3 text-slate-400" /> Senha de Acesso
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowAccessPassword(!showAccessPassword)}
+                        className="text-[10px] text-slate-400 hover:text-white transition-colors cursor-pointer"
+                        title={showAccessPassword ? 'Ocultar Senha' : 'Ver Senha'}
+                      >
+                        {showAccessPassword ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleCopyField(String(selectedCompanyForAccess.login_senha || '123456'), 'pass')}
+                        className="text-[10px] text-slate-400 hover:text-emerald-400 transition-colors flex items-center gap-0.5 cursor-pointer"
+                        title="Copiar Senha"
+                      >
+                        {copiedField === 'pass' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                        <span>{copiedField === 'pass' ? 'Copiado' : 'Copiar'}</span>
+                      </button>
+                    </div>
+                  </div>
+                  <div className="font-mono text-emerald-400 text-xs font-black select-all pt-0.5 flex items-center gap-2">
+                    {showAccessPassword ? (
+                      <span>{selectedCompanyForAccess.login_senha || '123456'}</span>
+                    ) : (
+                      <span>••••••••</span>
+                    )}
+                  </div>
                 </div>
+
               </div>
+
+              {/* Contato do Responsável */}
+              {selectedCompanyForAccess.contato_whatsapp && (
+                <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 border-t border-white/5">
+                  <span>Responsável: <strong className="text-slate-200">{selectedCompanyForAccess.contato_nome || 'Não informado'}</strong></span>
+                  <span>WhatsApp: <strong className="text-emerald-400 font-mono">{selectedCompanyForAccess.contato_whatsapp}</strong></span>
+                </div>
+              )}
             </div>
 
             {/* Ações de Envio e Compartilhamento */}
-            <div className="space-y-2 pt-1">
+            <div className="space-y-2.5 pt-1 relative z-10">
               <button
                 type="button"
+                disabled={actionLoading}
                 onClick={() => handleShareCompanyAccessViaWhatsapp(selectedCompanyForAccess)}
-                className="w-full py-3 bg-emerald-500 text-[#0b141a] font-black text-xs uppercase tracking-wider rounded-xl hover:opacity-95 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-emerald-500/20"
+                className="w-full py-3.5 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 active:scale-[0.98] text-[#0b141a] font-black text-xs uppercase tracking-wider rounded-2xl shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-2 transition-all min-h-[48px] cursor-pointer disabled:opacity-50"
               >
-                <Send className="w-4 h-4" />
-                <span>Enviar Acesso no WhatsApp do Responsável</span>
+                {actionLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-[#0b141a]" />
+                    <span>Enviando pelo WhatsApp...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-4 h-4 text-[#0b141a]" />
+                    <span>Enviar Acesso no WhatsApp do Responsável</span>
+                  </>
+                )}
               </button>
 
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-2.5">
                 <button
                   type="button"
                   onClick={() => handleCopyCompanyAccessInfo(selectedCompanyForAccess)}
-                  className="py-2.5 bg-white/5 hover:bg-white/10 text-white font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                  className="py-3 bg-white/5 hover:bg-white/10 active:scale-95 border border-white/10 text-white font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer min-h-[48px]"
                 >
                   {copiedAccessInfo ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
-                  <span>{copiedAccessInfo ? 'Copiado!' : 'Copiar Acesso'}</span>
+                  <span>{copiedAccessInfo ? 'Mensagem Copiada!' : 'Copiar Acesso'}</span>
                 </button>
 
                 <a
                   href={`/voucher-empresa/login?user=${encodeURIComponent(selectedCompanyForAccess.login_usuario || selectedCompanyForAccess.cnpj || '')}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="py-2.5 bg-white/5 hover:bg-white/10 text-slate-300 font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-1.5 text-center"
+                  className="py-3 bg-white/5 hover:bg-emerald-500/20 active:scale-95 border border-white/10 hover:border-emerald-500/30 text-slate-200 hover:text-emerald-300 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2 text-center min-h-[48px]"
                 >
-                  <ExternalLink className="w-4 h-4" />
-                  <span>Abrir Portal</span>
+                  <ExternalLink className="w-4 h-4 text-emerald-400" />
+                  <span>Abrir Portal B2B</span>
                 </a>
               </div>
             </div>
@@ -4787,6 +5152,70 @@ export default function VoucherDashboard() {
               </div>
 
             </form>
+
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* MODAL: CONFIRMAR EXCLUSÃO DE EMPRESA PARCEIRA */}
+      {/* ========================================================= */}
+      {showDeleteCompanyModal && companyToDelete && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-[#111b21] border border-red-500/30 rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl animate-in zoom-in-95 text-left">
+            
+            {/* Header Modal */}
+            <div className="flex items-center gap-3 text-red-400 border-b border-white/5 pb-3">
+              <div className="w-10 h-10 rounded-2xl bg-red-500/20 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5 text-red-400" />
+              </div>
+              <div>
+                <h3 className="font-black text-sm text-white">Excluir Empresa Parceira</h3>
+                <p className="text-[11px] text-slate-400">Esta ação desvinculará a empresa do painel</p>
+              </div>
+            </div>
+
+            {/* Mensagem e Detalhes */}
+            <div className="p-3.5 bg-red-500/10 border border-red-500/20 rounded-2xl space-y-1.5 text-xs text-slate-300">
+              <p>
+                Tem certeza de que deseja excluir a empresa parceira <strong className="text-white">{companyToDelete.razao_social || companyToDelete.nome_fantasia}</strong>?
+              </p>
+              <p className="text-[11px] text-slate-400">
+                O acesso exclusivo desta empresa ao portal B2B será desativado e o saldo restante de <strong className="text-emerald-400">{Number(companyToDelete.saldo_credito ?? companyToDelete.saldo_global ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</strong> será cancelado.
+              </p>
+            </div>
+
+            {/* Ações */}
+            <div className="flex gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDeleteCompanyModal(false);
+                  setCompanyToDelete(null);
+                }}
+                className="flex-1 py-3 bg-white/10 hover:bg-white/15 text-slate-300 font-black uppercase text-xs rounded-xl transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingCompany}
+                onClick={handleConfirmDeleteCompany}
+                className="flex-1 py-3 bg-red-600 hover:bg-red-500 text-white font-black uppercase text-xs rounded-xl transition-colors cursor-pointer flex items-center justify-center gap-2 shadow-lg shadow-red-600/30 disabled:opacity-50"
+              >
+                {isDeletingCompany ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Excluindo...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    <span>Confirmar Exclusão</span>
+                  </>
+                )}
+              </button>
+            </div>
 
           </div>
         </div>

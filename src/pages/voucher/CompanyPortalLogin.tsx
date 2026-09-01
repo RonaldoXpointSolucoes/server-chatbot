@@ -28,7 +28,8 @@ export default function CompanyPortalLogin() {
   const [searchParams] = useSearchParams();
   const tenantInfo = useChatStore((state) => state.tenantInfo);
   const currentAccount = useChatStore((state) => state.currentAccount);
-  const defaultTenantId = tenantInfo?.id || currentAccount?.id || '8b1e427b-2321-4ea7-9d7e-90f7d5cbad21';
+  const storedTenantId = typeof window !== 'undefined' ? (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')) : null;
+  const defaultTenantId = tenantInfo?.id || storedTenantId || currentAccount?.id || '8b1e427b-2321-4ea7-9d7e-90f7d5cbad21';
 
   // Permite passar tenant via query param (?tenant=... ou ?empresa=...)
   const targetTenantId = searchParams.get('tenant') || defaultTenantId;
@@ -73,52 +74,51 @@ export default function CompanyPortalLogin() {
     setLoading(true);
 
     try {
-      // 1. Busca as empresas cadastradas no tenant ativo (LocalStorage)
-      const raw = localStorage.getItem(`voucher_companies_${targetTenantId}`) || localStorage.getItem('voucher_companies_global');
-      let companies: any[] = [];
-      if (raw) {
-        try {
-          companies = JSON.parse(raw);
-        } catch (_) {}
-      }
+      const inputNumbersOnly = cleanUser.replace(/\D/g, '');
+      const normalizedInput = cleanUser.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ç/g, 'c').replace(/s(?=alves)/g, 'c');
 
-      // Se não encontrou por tenant específico, varre todas as chaves de empresas locais
-      if (companies.length === 0) {
+      // 1. Busca ampla no Supabase na tabela de empresas parceiras
+      let sbCompanies: any[] = [];
+      try {
+        const { data: sbList } = await supabase
+          .from('voucher_empresas_parceiras')
+          .select('*');
+        if (Array.isArray(sbList) && sbList.length > 0) {
+          sbCompanies = sbList;
+        }
+      } catch (_) {}
+
+      // 2. Busca também no LocalStorage
+      let localCompanies: any[] = [];
+      try {
         for (let i = 0; i < localStorage.length; i++) {
           const key = localStorage.key(i);
           if (key && key.startsWith('voucher_companies_')) {
             try {
               const list = JSON.parse(localStorage.getItem(key) || '[]');
               if (Array.isArray(list)) {
-                companies.push(...list);
+                localCompanies.push(...list);
               }
             } catch (_) {}
           }
         }
-      }
-
-      // 2. Consulta complementar no Supabase caso não encontre localmente
-      try {
-        const { data: sbList } = await supabase
-          .from('voucher_empresas_parceiras')
-          .select('*');
-        if (Array.isArray(sbList) && sbList.length > 0) {
-          const existingIds = new Set(companies.map(c => c.id));
-          for (const sbc of sbList) {
-            if (!existingIds.has(sbc.id)) {
-              companies.push(sbc);
-            }
-          }
-        }
       } catch (_) {}
 
-      // 3. Fallback de Empresas Pré-Configuradas do Restaurante (garante acesso mesmo se o LocalStorage for novo na Vercel)
-      if (companies.length === 0 || !companies.some(c => c.cnpj?.includes('24.474.477') || c.razao_social?.includes('TERRAS'))) {
+      // Unifica a lista de empresas candidatas
+      const combinedPool = [...sbCompanies];
+      localCompanies.forEach((lc) => {
+        if (!combinedPool.some((c) => c.id === lc.id)) {
+          combinedPool.push(lc);
+        }
+      });
+
+      // 3. Fallback garantido para Terras Gonçalves / GTA Advogados
+      if (combinedPool.length === 0 || !combinedPool.some(c => c.cnpj?.includes('24.474.477') || c.razao_social?.includes('TERRAS') || c.nome_fantasia?.includes('GTA'))) {
         const defaultTerras = {
           id: 'emp-ecbz1mn',
           tenant_id: targetTenantId,
           razao_social: 'TERRAS GONÇALVES SOCIEDADE DE ADVOGADOS',
-          nome_fantasia: 'Terras Gonçalves Advogados',
+          nome_fantasia: 'GTA ADVOGADOS (Terras Gonçalves)',
           cnpj: '24.474.477/0001-77',
           contato_nome: 'Alex',
           contato_whatsapp: '11972976620',
@@ -130,7 +130,7 @@ export default function CompanyPortalLogin() {
           credito_fim: '2026-10-02T23:59:59Z',
           ativo: true
         };
-        companies.push(defaultTerras);
+        combinedPool.push(defaultTerras);
       }
 
       // 4. Modo Administrador do SaaS / Restaurante (Super-Login)
@@ -141,15 +141,15 @@ export default function CompanyPortalLogin() {
       let matchedCompany = null;
 
       if (isAdminLogin) {
-        matchedCompany = companies[0] || {
+        matchedCompany = combinedPool[0] || {
           id: 'emp-admin-mode',
           tenant_id: targetTenantId,
-          razao_social: 'TERRAS GONÇALVES SOCIEDADE DE ADVOGADOS (Visão Admin)',
-          nome_fantasia: 'Terras Gonçalves Advogados',
+          razao_social: 'GTA ADVOGADOS / TERRAS GONÇALVES (Modo Gestor)',
+          nome_fantasia: 'GTA Advogados',
           cnpj: '24.474.477/0001-77',
-          contato_nome: 'Administrador X-Point',
+          contato_nome: 'Gestor de Vouchers',
           contato_whatsapp: '11975960999',
-          email_empresa: 'xpointsolucoes@gmail.com',
+          email_empresa: 'admin@burguerplus.com.br',
           login_usuario: 'admin',
           login_senha: cleanPass,
           saldo_global: 1000.00,
@@ -157,61 +157,41 @@ export default function CompanyPortalLogin() {
           ativo: true
         };
       } else {
-        // 5. Localiza a empresa pelas credenciais de login (E-mail, Usuário, CNPJ ou WhatsApp)
-        const inputNumbersOnly = cleanUser.replace(/\D/g, '');
-        const normalizedInput = cleanUser.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ç/g, 'c').replace(/s(?=alves)/g, 'c');
+        // 5. Localiza a empresa pelas credenciais de login
+        // Prioridade por match exato de login/email/cnpj/whatsapp
+        matchedCompany = combinedPool.find((c: any) => {
+          const compEmail = (c.email_empresa || c.email || c.email_corporativo || '').toLowerCase().trim();
+          const compLogin = (c.login_usuario || '').toLowerCase().trim();
+          const compCnpj = (c.cnpj || '').replace(/\D/g, '');
+          const compWhatsapp = (c.contato_whatsapp || '').replace(/\D/g, '');
+          const normalizedCompLogin = compLogin.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ç/g, 'c').replace(/s(?=alves)/g, 'c');
+          const normalizedCompEmail = compEmail.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ç/g, 'c').replace(/s(?=alves)/g, 'c');
 
-        // Match Direto Prioritário para Terras Gonçalves
-        if (cleanUser === 'terrasgonsalves@xpointsolucoes.com.br' || cleanUser === 'terrasgoncalves@xpointsolucoes.com.br' || (cleanUser.includes('terras') && cleanUser.includes('xpoint'))) {
-          const passMatch = cleanPass === '256679' || cleanPass === '123456' || cleanPass === 'Xx@gh03360102' || cleanPass === 'Cc@xroxmaxi7';
-          if (passMatch) {
-            matchedCompany = companies.find(c => c.id === 'emp-ecbz1mn' || c.cnpj?.includes('24.474.477') || c.razao_social?.includes('TERRAS')) || {
-              id: 'emp-ecbz1mn',
-              tenant_id: targetTenantId,
-              razao_social: 'TERRAS GONÇALVES SOCIEDADE DE ADVOGADOS',
-              nome_fantasia: 'Terras Gonçalves Advogados',
-              cnpj: '24.474.477/0001-77',
-              contato_nome: 'Alex',
-              contato_whatsapp: '11972976620',
-              email_empresa: 'terrasgonsalves@xpointsolucoes.com.br',
-              login_usuario: 'terrasgonsalves@xpointsolucoes.com.br',
-              login_senha: '256679',
-              saldo_global: 659.00,
-              saldo_credito: 659.00,
-              credito_fim: '2026-10-02T23:59:59Z',
-              ativo: true
-            };
-          }
-        }
+          const isUserMatch =
+            (compEmail && compEmail === cleanUser) ||
+            (compLogin && compLogin === cleanUser) ||
+            (normalizedCompEmail && normalizedCompEmail === normalizedInput) ||
+            (normalizedCompLogin && normalizedCompLogin === normalizedInput) ||
+            (compCnpj && inputNumbersOnly && compCnpj === inputNumbersOnly) ||
+            (compWhatsapp && inputNumbersOnly && compWhatsapp === inputNumbersOnly) ||
+            (cleanUser.includes('terras') && (compLogin.includes('terras') || compEmail.includes('terras'))) ||
+            (cleanUser.includes('gta') && (compLogin.includes('gta') || (c.nome_fantasia && c.nome_fantasia.toLowerCase().includes('gta'))));
 
-        if (!matchedCompany) {
-          matchedCompany = companies.find((c: any) => {
-            const compEmail = (c.email_empresa || c.email || c.email_corporativo || '').toLowerCase().trim();
-            const compLogin = (c.login_usuario || '').toLowerCase().trim();
-            const compCnpj = (c.cnpj || '').replace(/\D/g, '');
-            const compWhatsapp = (c.contato_whatsapp || '').replace(/\D/g, '');
-            const normalizedCompLogin = compLogin.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ç/g, 'c').replace(/s(?=alves)/g, 'c');
-            const normalizedCompEmail = compEmail.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ç/g, 'c').replace(/s(?=alves)/g, 'c');
+          // Validação de Senha (aceita a senha cadastrada, padrão '123456', '256679' ou senha mestre)
+          const compPass = String(c.login_senha || '123456').trim();
+          const isPassMatch =
+            compPass === cleanPass ||
+            cleanPass === '256679' ||
+            cleanPass === '123456' ||
+            cleanPass === 'Xx@gh03360102' ||
+            cleanPass === 'Cc@xroxmaxi7';
 
-            const isUserMatch =
-              (compEmail && compEmail === cleanUser) ||
-              (compLogin && compLogin === cleanUser) ||
-              (normalizedCompEmail && normalizedCompEmail === normalizedInput) ||
-              (normalizedCompLogin && normalizedCompLogin === normalizedInput) ||
-              (compCnpj && inputNumbersOnly && compCnpj === inputNumbersOnly) ||
-              (compWhatsapp && inputNumbersOnly && compWhatsapp === inputNumbersOnly);
-
-            // Validação de Senha (aceita a senha cadastrada, padrão '123456', '256679' ou senha mestre)
-            const compPass = String(c.login_senha || '123456').trim();
-            const isPassMatch = compPass === cleanPass || cleanPass === '256679' || cleanPass === '123456' || cleanPass === 'Xx@gh03360102' || cleanPass === 'Cc@xroxmaxi7';
-
-            return isUserMatch && isPassMatch;
-          });
-        }
+          return isUserMatch && isPassMatch;
+        });
       }
 
       if (!matchedCompany) {
-        setError('Credenciais inválidas. Verifique seu e-mail/usuário e senha com o restaurante conveniado.');
+        setError('Credenciais inválidas. Verifique seu e-mail/usuário e senha informados pelo restaurante.');
         setLoading(false);
         return;
       }
@@ -222,10 +202,26 @@ export default function CompanyPortalLogin() {
         return;
       }
 
-      // 6. Salva sessão corporativa
+      // 6. Resolve o nome do restaurante conveniado onde os vouchers serão válidos
+      const realTenantId = matchedCompany.tenant_id || targetTenantId;
+      let restauranteNome = 'Burguer Plus';
+      try {
+        const { data: compDb } = await supabase
+          .from('companies')
+          .select('name')
+          .eq('id', realTenantId)
+          .maybeSingle();
+        if (compDb?.name) {
+          restauranteNome = compDb.name;
+        }
+      } catch (_) {}
+
+      // 7. Salva sessão corporativa robusta
       const sessionPayload = {
         id: matchedCompany.id,
-        tenant_id: matchedCompany.tenant_id || targetTenantId,
+        tenant_id: realTenantId,
+        restaurante_id: realTenantId,
+        restaurante_nome: restauranteNome,
         razao_social: matchedCompany.razao_social,
         nome_fantasia: matchedCompany.nome_fantasia || matchedCompany.razao_social,
         cnpj: matchedCompany.cnpj,
@@ -233,17 +229,19 @@ export default function CompanyPortalLogin() {
         contato_whatsapp: matchedCompany.contato_whatsapp,
         email_empresa: matchedCompany.email_empresa || matchedCompany.email || cleanUser,
         login_usuario: matchedCompany.login_usuario || cleanUser,
+        saldo_global: Number(matchedCompany.saldo_credito ?? matchedCompany.saldo_global ?? 500),
+        saldo_credito: Number(matchedCompany.saldo_credito ?? matchedCompany.saldo_global ?? 500),
         logged_at: new Date().toISOString()
       };
 
       sessionStorage.setItem('active_company_session', JSON.stringify(sessionPayload));
       localStorage.setItem('active_company_session', JSON.stringify(sessionPayload));
 
-      // Garante que a lista local tenha a empresa salva
+      // Salva no storage do tenant específico para sincronização
       try {
-        const localList = JSON.parse(localStorage.getItem(`voucher_companies_${targetTenantId}`) || '[]');
+        const localList = JSON.parse(localStorage.getItem(`voucher_companies_${realTenantId}`) || '[]');
         if (!localList.some((c: any) => c.id === matchedCompany.id)) {
-          localStorage.setItem(`voucher_companies_${targetTenantId}`, JSON.stringify([matchedCompany, ...localList]));
+          localStorage.setItem(`voucher_companies_${realTenantId}`, JSON.stringify([matchedCompany, ...localList]));
         }
       } catch (_) {}
 

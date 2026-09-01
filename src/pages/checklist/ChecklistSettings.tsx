@@ -210,7 +210,8 @@ const calculateCargoHours = (cargo: Partial<Cargo>) => {
 };
 
 export default function ChecklistSettings() {
-  const tenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+  const storeTenantId = useChatStore((state) => state.tenantInfo?.id);
+  const tenantId = storeTenantId || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
   
   // Estados de Abas
   const [activeTab, setActiveTab] = useState<'units' | 'sectors' | 'users' | 'cargos'>('units');
@@ -276,7 +277,7 @@ export default function ChecklistSettings() {
     if (tenantId) {
       loadData();
     }
-  }, [tenantId]);
+  }, [tenantId, storeTenantId]);
 
   const loadData = async () => {
     setLoading(true);

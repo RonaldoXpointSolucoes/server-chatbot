@@ -166,7 +166,14 @@ const extractVoucherToken = (raw: string): string => {
 
 export default function VoucherScanner() {
   const tenantInfo = useChatStore((state) => state.tenantInfo);
-  const currentTenantId = tenantInfo?.id || '8b1e427b-2321-4ea7-9d7e-90f7d5cbad21';
+  const storedTenantId = typeof window !== 'undefined'
+    ? (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'))
+    : null;
+  const storedTenantName = typeof window !== 'undefined'
+    ? (localStorage.getItem('current_tenant_name') || sessionStorage.getItem('current_tenant_name'))
+    : null;
+  const currentTenantId = tenantInfo?.id || storedTenantId || '8b1e427b-2321-4ea7-9d7e-90f7d5cbad21';
+  const currentTenantName = tenantInfo?.name || storedTenantName || 'Estabelecimento';
 
   const [tokenInput, setTokenInput] = useState<string>('');
   const [atendenteName, setAtendenteName] = useState<string>(() => {
@@ -370,12 +377,27 @@ export default function VoucherScanner() {
         const valorNum = Number(foundVoucher.valor || 0) || 50.0;
         const beneficiarioNome = foundVoucher.beneficiario_nome || foundVoucher.voucher_colaboradores?.nome || 'Colaborador / Convidado';
 
+        // 0. Isolamento de Inquilino: Checar se pertence a outro restaurante/tenant
+        if (foundVoucher.tenant_id && currentTenantId && foundVoucher.tenant_id !== currentTenantId) {
+          if (soundEnabled) playTerminalBeep('error');
+          setBlockedVoucher({
+            token: foundVoucher.public_token || searchToken,
+            reason: `Este voucher foi emitido para outro estabelecimento parceiro e não é válido para resgate nesta loja (${currentTenantName}).`,
+            status: 'TENANT_INVALIDO',
+            beneficiarioNome,
+            valor: valorNum,
+            empresaNome,
+            campanhaNome: foundVoucher.voucher_campanhas?.nome || foundVoucher.campanha_nome || 'Crédito Corporativo'
+          });
+          return;
+        }
+
         // 1. Voucher Já Utilizado / Resgatado
         if (foundVoucher.status === 'UTILIZADO') {
           if (soundEnabled) playTerminalBeep('error');
           setBlockedVoucher({
             token: foundVoucher.public_token || searchToken,
-            reason: 'Este voucher já teve sua baixa realizada anteriormente no caixa da Burguer Plus.',
+            reason: `Este voucher já teve sua baixa realizada anteriormente no caixa.`,
             status: 'UTILIZADO',
             beneficiarioNome,
             valor: valorNum,

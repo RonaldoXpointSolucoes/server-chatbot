@@ -102,34 +102,49 @@ class VoucherEngine {
    * Passo 1 do Resgate: Reserva com Lock de 2 minutos e validação de regras
    */
   async reserveVoucher(qrTokenOrPublicToken, atendenteId = 'BALCAO_1', reqInfo = {}) {
-    // 1. Localizar o voucher por token público ou QR Token
-    let publicToken = qrTokenOrPublicToken;
-    let isJwt = false;
+    if (!qrTokenOrPublicToken) {
+      throw new Error('Código ou token do voucher não informado.');
+    }
 
-    if (qrTokenOrPublicToken.includes('.')) {
+    // 1. Localizar o voucher por token público ou QR Token ou ID
+    let publicToken = String(qrTokenOrPublicToken).trim();
+    let isJwt = false;
+    let jwtVoucherId = null;
+
+    if (publicToken.includes('.')) {
       isJwt = true;
       try {
-        const parts = qrTokenOrPublicToken.split('.');
+        const parts = publicToken.split('.');
         const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
-        publicToken = payload.pt;
+        publicToken = payload.pt || publicToken;
+        jwtVoucherId = payload.vid || null;
       } catch (e) {
         throw new Error('QR Code inválido ou corrompido.');
       }
     }
 
-    // 2. Buscar voucher completo no Supabase
-    const { data: voucher, error: vErr } = await supabase
+    // 2. Buscar voucher completo no Supabase (por public_token, id ou ilike)
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(publicToken);
+    let voucherQuery = supabase
       .from('vouchers')
-      .select('*, voucher_campanhas(*), voucher_empresas_parceiras(*)')
-      .eq('public_token', publicToken)
-      .maybeSingle();
+      .select('*, voucher_campanhas(*), voucher_empresas_parceiras(*)');
+
+    if (jwtVoucherId) {
+      voucherQuery = voucherQuery.eq('id', jwtVoucherId);
+    } else if (isUuid) {
+      voucherQuery = voucherQuery.or(`id.eq.${publicToken},public_token.eq.${publicToken}`);
+    } else {
+      voucherQuery = voucherQuery.ilike('public_token', publicToken);
+    }
+
+    const { data: voucher, error: vErr } = await voucherQuery.maybeSingle();
 
     if (vErr || !voucher) {
       throw new Error('Voucher não encontrado no sistema.');
     }
 
     // 3. Se for JWT, validar a assinatura com o segredo do voucher
-    if (isJwt) {
+    if (isJwt && voucher.qr_secret) {
       const tokenVerification = this.verifyQrToken(qrTokenOrPublicToken, voucher.qr_secret);
       if (!tokenVerification.valid) {
         throw new Error(tokenVerification.reason);
@@ -143,7 +158,7 @@ class VoucherEngine {
     if (voucher.status === 'CANCELADO') {
       throw new Error('Este voucher foi CANCELADO pela empresa parceira.');
     }
-    if (voucher.status === 'EXPIRADO' || new Date(voucher.validade_fim) < new Date()) {
+    if (voucher.status === 'EXPIRADO' || (voucher.validade_fim && new Date(voucher.validade_fim) < new Date())) {
       throw new Error('Este voucher está EXPIRADO.');
     }
 
@@ -205,12 +220,41 @@ class VoucherEngine {
   /**
    * Passo 2 do Resgate: Baixa Definitiva do Voucher
    */
-  async confirmRedeem(voucherId, atendenteId = 'BALCAO_1', reqInfo = {}) {
-    const { data: voucher, error: vErr } = await supabase
-      .from('vouchers')
-      .select('*')
-      .eq('id', voucherId)
-      .single();
+  async confirmRedeem(voucherIdOrToken, atendenteId = 'BALCAO_1', reqInfo = {}) {
+    if (!voucherIdOrToken) {
+      throw new Error('Identificador ou token do voucher não informado.');
+    }
+
+    const cleanInput = String(voucherIdOrToken).trim();
+    let isJwt = false;
+    let jwtVoucherId = null;
+    let lookupToken = cleanInput;
+
+    if (cleanInput.includes('.')) {
+      isJwt = true;
+      try {
+        const parts = cleanInput.split('.');
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+        jwtVoucherId = payload.vid || null;
+        lookupToken = payload.pt || lookupToken;
+      } catch (e) {
+        // Ignora erro de JWT se falhar parse
+      }
+    }
+
+    // 1. Localizar o voucher por ID UUID, public_token ou token de JWT
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(lookupToken);
+    let query = supabase.from('vouchers').select('*');
+
+    if (jwtVoucherId) {
+      query = query.eq('id', jwtVoucherId);
+    } else if (isUuid) {
+      query = query.or(`id.eq.${lookupToken},public_token.eq.${lookupToken}`);
+    } else {
+      query = query.ilike('public_token', lookupToken);
+    }
+
+    const { data: voucher, error: vErr } = await query.maybeSingle();
 
     if (vErr || !voucher) {
       throw new Error('Voucher não encontrado.');
@@ -220,9 +264,18 @@ class VoucherEngine {
       throw new Error('Voucher já foi utilizado anteriormente.');
     }
 
+    if (voucher.status === 'CANCELADO') {
+      throw new Error('Este voucher foi cancelado pela empresa parceira.');
+    }
+
     const now = new Date();
-    // Validar se está dentro do lock ou se está validado
-    if (voucher.status !== 'VALIDADO' && voucher.status !== 'VISUALIZADO' && voucher.status !== 'DISPONIBILIZADO' && voucher.status !== 'ENVIADO') {
+    if (voucher.status === 'EXPIRADO' || (voucher.validade_fim && new Date(voucher.validade_fim) < now)) {
+      throw new Error('Este voucher está expirado.');
+    }
+
+    // Validar se status permite baixa (CRIADO, DISPONIBILIZADO, ENVIADO, VISUALIZADO, VALIDADO, PENDENTE, EM_USO)
+    const validStatuses = ['VALIDADO', 'VISUALIZADO', 'DISPONIBILIZADO', 'ENVIADO', 'CRIADO', 'PENDENTE', 'EM_USO'];
+    if (!validStatuses.includes(voucher.status)) {
       throw new Error(`Status inválido para baixa: ${voucher.status}`);
     }
 
