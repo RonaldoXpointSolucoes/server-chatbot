@@ -1483,7 +1483,7 @@ class SessionManager {
                 await eventProcessor.handleMessagesUpdate(tenantId, instanceId, sock, updates);
             });
             // --- Proteção Antiban e Fila de Mensagens Sequencial ---
-            const originalSendMessage = sock.sendMessage.bind(sock);
+            const originalSendMessage = sock.originalSendMessage || sock.sendMessage.bind(sock);
             sock.originalSendMessage = originalSendMessage;
             
             sock.sendMessage = async (jid, content, options) => {
@@ -1532,7 +1532,7 @@ class SessionManager {
                                         const latestSession = this.sessions.get(instanceId);
                                         if (latestSession && isSocketOpen(latestSession.sock)) {
                                             activeSock = latestSession.sock;
-                                            sendFn = activeSock.originalSendMessage || activeSock.sendMessage;
+                                            sendFn = activeSock.originalSendMessage || originalSendMessage;
                                         } else {
                                             // Se já houver reconexão em andamento, aguarda sua conclusão
                                             if (this.connectingState.has(instanceId)) {
@@ -1540,7 +1540,7 @@ class SessionManager {
                                                     const connectingSock = await this.connectingState.get(instanceId);
                                                     if (connectingSock && isSocketOpen(connectingSock)) {
                                                         activeSock = connectingSock;
-                                                        sendFn = activeSock.originalSendMessage || activeSock.sendMessage;
+                                                        sendFn = activeSock.originalSendMessage || originalSendMessage;
                                                     }
                                                 } catch (e) {}
                                             }

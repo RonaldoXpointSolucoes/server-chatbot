@@ -1307,49 +1307,66 @@ class EventProcessor {
              
              let realInserted = [];
              
-             if(messagesToInsert.length > 0) {
-                  // Tenta upsert em lote com ignoreDuplicates para prevenir erros 23505 por concorrência
+             if (messagesToInsert.length > 0) {
+                  // Inserção direta e rápida de lote
                   let { data: insertedMessages, error: msgErr } = await supabase.from('messages')
-                     .upsert(messagesToInsert, { onConflict: 'whatsapp_message_id, instance_id', ignoreDuplicates: true })
+                     .insert(messagesToInsert)
                      .select('*');
                      
-                  // Fallback se a constraint no Supabase for apenas whatsapp_message_id
-                  if (msgErr && msgErr.code === '23505') {
-                      const retryUpsert = await supabase.from('messages')
-                          .upsert(messagesToInsert, { onConflict: 'whatsapp_message_id', ignoreDuplicates: true })
-                          .select('*');
-                      if (!retryUpsert.error) {
-                          insertedMessages = retryUpsert.data;
-                          msgErr = null;
+                  if (msgErr) {
+                      console.warn(`[BatchProcessor] Inserção em lote direta interceptou erro (${msgErr.code}: ${msgErr.message}). Iniciando resolução resiliente com filtro de idempotência...`);
+                      
+                      // 1. Consulta quais whatsapp_message_id do lote já existem no banco
+                      const wIds = messagesToInsert.map(m => m.whatsapp_message_id).filter(Boolean);
+                      const existingSet = new Set();
+                      if (wIds.length > 0) {
+                          try {
+                              const { data: existingRows } = await supabase.from('messages')
+                                  .select('whatsapp_message_id')
+                                  .in('whatsapp_message_id', wIds);
+                              if (existingRows) {
+                                  existingRows.forEach(r => existingSet.add(r.whatsapp_message_id));
+                              }
+                          } catch (checkErr) {
+                              console.warn(`[BatchProcessor] Aviso ao verificar mensagens existentes: ${checkErr.message}`);
+                          }
                       }
-                  }
 
-                  if(msgErr) {
-                      console.warn(`[BatchProcessor] Inserção em lote necessitou resolução resiliente (código ${msgErr.code}). Processando mensagens...`);
-                      // Fallback individual salvando apenas novas mensagens
-                      for (const m of messagesToInsert) {
-                          const { data: singleInserted, error: singleErr } = await supabase.from('messages')
-                              .upsert([m], { onConflict: 'whatsapp_message_id', ignoreDuplicates: true })
+                      // 2. Filtra somente as mensagens genuinamente inéditas
+                      const trulyNewMessages = messagesToInsert.filter(m => !existingSet.has(m.whatsapp_message_id));
+                      
+                      if (trulyNewMessages.length > 0) {
+                          const { data: batchNew, error: batchErr } = await supabase.from('messages')
+                              .insert(trulyNewMessages)
                               .select('*');
                               
-                          if (singleErr) {
-                              if (singleErr.code !== '23505') {
-                                  console.error(`[BatchProcessor] Erro na inserção individual para ID ${m.whatsapp_message_id}:`, singleErr.message || singleErr);
-                                  const originalItem = activeBatch.find(x => x.rawMsg?.key?.id === m.whatsapp_message_id && x.instanceId === m.instance_id);
-                                  if (originalItem) {
-                                      originalItem.retryCount = (originalItem.retryCount || 0) + 1;
-                                      if (originalItem.retryCount < 5) {
-                                          this.messageQueue.push(originalItem);
-                                      } else {
-                                          console.error(`[BatchProcessor] EXCEÇÃO CRÍTICA: Mensagem ID ${m.whatsapp_message_id} descartada individualmente após 5 falhas.`);
-                                          try {
-                                              fs.appendFileSync('discarded_messages.log', `${new Date().toISOString()} [INDIVIDUAL FAILED] MsgId: ${m.whatsapp_message_id} - Payload: ${JSON.stringify(originalItem.rawMsg)}\n`);
-                                          } catch (logErr) {}
+                          if (!batchErr && batchNew) {
+                              realInserted.push(...batchNew);
+                          } else {
+                              // Fallback individual 1 a 1 para salvar com garantia
+                              for (const m of trulyNewMessages) {
+                                  const { data: sData, error: sErr } = await supabase.from('messages')
+                                      .insert([m])
+                                      .select('*');
+                                      
+                                  if (sData && sData.length > 0) {
+                                      realInserted.push(sData[0]);
+                                  } else if (sErr && sErr.code !== '23505') {
+                                      console.error(`[BatchProcessor] Erro na inserção individual para ID ${m.whatsapp_message_id}:`, sErr.message || sErr);
+                                      const originalItem = activeBatch.find(x => x.rawMsg?.key?.id === m.whatsapp_message_id && x.instanceId === m.instance_id);
+                                      if (originalItem) {
+                                          originalItem.retryCount = (originalItem.retryCount || 0) + 1;
+                                          if (originalItem.retryCount < 5) {
+                                              this.messageQueue.push(originalItem);
+                                          } else {
+                                              console.error(`[BatchProcessor] EXCEÇÃO CRÍTICA: Mensagem ID ${m.whatsapp_message_id} descartada individualmente após 5 falhas.`);
+                                              try {
+                                                  fs.appendFileSync('discarded_messages.log', `${new Date().toISOString()} [INDIVIDUAL FAILED] MsgId: ${m.whatsapp_message_id} - Payload: ${JSON.stringify(originalItem.rawMsg)}\n`);
+                                              } catch (logErr) {}
+                                          }
                                       }
                                   }
                               }
-                          } else if (singleInserted && singleInserted.length > 0) {
-                              realInserted.push(singleInserted[0]);
                           }
                       }
                       console.log(`[BatchProcessor] Resolução resiliente concluída. ${realInserted.length} novas mensagens salvas de ${messagesToInsert.length} totais.`);
