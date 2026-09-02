@@ -337,6 +337,33 @@ app.use('/api', apiGateway);
 app.use('/api/logs', systemLogger);
 app.use('/api/v1/system/logs', systemLogger);
 
+// Middleware explícito de captura e auditoria de rotas não encontradas (404 Handler)
+app.use((req, res, next) => {
+    const originIp = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || req.ip || 'N/A';
+    console.warn(`[HTTP 404 Not Found] Rota inexistente solicitada: ${req.method} ${req.originalUrl || req.path} | IP: ${originIp} | User-Agent: ${req.headers['user-agent'] || 'N/A'}`);
+    
+    if (typeof persistSystemLog === 'function') {
+        persistSystemLog({
+            type: 'HTTP 404 Not Found',
+            message: `Rota inexistente: ${req.method} ${req.originalUrl || req.path}`,
+            level: 'warn',
+            payload: {
+                method: req.method,
+                path: req.originalUrl || req.path,
+                ip: originIp,
+                userAgent: req.headers['user-agent'] || 'N/A'
+            }
+        });
+    }
+
+    res.status(404).json({
+        error: 'Route not found',
+        method: req.method,
+        path: req.originalUrl || req.path,
+        timestamp: new Date().toISOString()
+    });
+});
+
 // Middleware global de tratamento de erros (ex: Multer LIMIT_FILE_SIZE, Client Abort)
 app.use((err, req, res, next) => {
     // 1) Erro de tamanho de upload do Multer

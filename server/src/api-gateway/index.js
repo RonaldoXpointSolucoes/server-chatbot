@@ -13,6 +13,9 @@ const router = express.Router();
 
 router.use('/v1', instanceRoutes);
 router.use('/v1', messageRoutes);
+router.use('/v1/messages', messageRoutes);
+router.use('/messages', messageRoutes);
+router.use('/', messageRoutes);
 router.use('/v1/knowledge', knowledgeRoutes);
 router.use('/v1', wacallsRoutes);
 router.use('/v1/vouchers', voucherRoutes);

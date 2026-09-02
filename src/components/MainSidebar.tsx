@@ -1025,36 +1025,6 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
               }} 
             />
             <NavItem icon={<Contact size={16} />} title="Contatos" onClick={() => navigate('/contacts')} />
-          <CollapsibleSection 
-            title="CRM" 
-            icon={<ClipboardList size={16} className="text-amber-500" />} 
-            isOpen={expandedSections.crm} 
-            onToggle={() => toggleSection('crm')}
-          >
-            <NavItem 
-              icon={<LayoutDashboard size={16} className="text-amber-500" />} 
-              title="Painel Estratégico" 
-              isSub
-              onClick={() => navigate('/crm')}
-              isActive={window.location.pathname === '/crm'} 
-            />
-             {crmBoards.map(board => (
-              <NavItem 
-                key={board.id}
-                icon={<Target size={16} className="text-indigo-400" />} 
-                title={board.name} 
-                isSub
-                onClick={() => navigate(`/crm/kanban/${board.id}`)}
-                isActive={window.location.pathname === `/crm/kanban/${board.id}`} 
-              />
-            ))}
-            <NavItem 
-              icon={<Plus size={16} className="text-amber-500" />} 
-              title="Criar Novo Quadro" 
-              isSub
-              onClick={() => setIsBoardCreatorOpen(true)}
-            />
-          </CollapsibleSection>
 
             <NavItem 
               title="Agenda Interna" 
@@ -1063,6 +1033,37 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
               isActive={window.location.pathname === '/apps/agenda'}
             />
           </CollapsibleSection>
+
+          <CollapsibleSection 
+            title="CRM" 
+            icon={<ClipboardList size={16} className="text-amber-500" />} 
+            isOpen={expandedSections.crm} 
+            onToggle={() => toggleSection('crm')}
+          >
+              <NavItem 
+                icon={<LayoutDashboard size={16} className="text-amber-500" />} 
+                title="Painel Estratégico" 
+                isSub
+                onClick={() => navigate('/crm')}
+                isActive={window.location.pathname === '/crm'} 
+              />
+              {crmBoards.map(board => (
+                <NavItem 
+                  key={board.id}
+                  icon={<Target size={16} className="text-indigo-400" />} 
+                  title={board.name} 
+                  isSub
+                  onClick={() => navigate(`/crm/kanban/${board.id}`)}
+                  isActive={window.location.pathname === `/crm/kanban/${board.id}`} 
+                />
+              ))}
+              <NavItem 
+                icon={<Plus size={16} className="text-amber-500" />} 
+                title="Criar Novo Quadro" 
+                isSub
+                onClick={() => setIsBoardCreatorOpen(true)}
+              />
+            </CollapsibleSection>
 
           <CollapsibleSection 
             title="Checklists Operacionais" 

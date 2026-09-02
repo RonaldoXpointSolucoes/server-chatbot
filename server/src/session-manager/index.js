@@ -33,7 +33,7 @@ export const isSocketOpen = (sock) => {
     }
 
     // Se possui credenciais de usuário autenticadas e ws não está explicitamente fechado nem fechando
-    const meId = sock.user?.id || sock.authState?.creds?.me?.id;
+    const meId = sock.user?.id || sock.authState?.creds?.me?.id || sock.authState?.creds?.me?.jid;
     if (meId && !ws.isClosed && !ws.isClosing && (!ws.socket || ws.socket.readyState === 1)) {
         return true;
     }
@@ -1546,22 +1546,24 @@ class SessionManager {
                                             }
 
                                             if (!isSocketOpen(activeSock)) {
-                                                console.warn(`[SessionManager - Antiban] Sem sessão ativa saudável para ${instanceId}. Aguardando/acordando conexão...`);
+                                                console.warn(`[SessionManager - Antiban] Sem sessão ativa saudável para ${instanceId}. Validando status e acordando conexão...`);
+                                                
+                                                // Validação de fast-fail no banco de dados para não gastar retentativas desnecessárias se estiver offline
+                                                const { data: instStatus } = await retryWithBackoff(() => 
+                                                    supabase.from('whatsapp_instances').select('status, last_error').eq('id', instanceId).maybeSingle()
+                                                ).catch(() => ({ data: null }));
+
+                                                const isDefinitiveOffline = instStatus && ['offline', 'logged_out', 'blocked_12h', 'disconnected', 'paused'].includes(instStatus.status);
+                                                if (isDefinitiveOffline) {
+                                                    throw new Error(`Instância ${instanceId} está ${instStatus.status} no banco de dados (${instStatus.last_error || 'desconectada'})`);
+                                                }
+
                                                 const forceRestart = attempts >= 2;
                                                 const wakedSock = await this.getSocketOrWake(tenantId, instanceId, true, forceRestart);
-                                                if (wakedSock) {
+                                                if (wakedSock && isSocketOpen(wakedSock)) {
                                                     activeSock = wakedSock;
                                                     sendFn = activeSock.originalSendMessage || activeSock.sendMessage;
                                                 } else {
-                                                    // Valida status no banco de dados para verificar se é desconexão definitiva ou transitória
-                                                    const { data: instStatus } = await retryWithBackoff(() => 
-                                                        supabase.from('whatsapp_instances').select('status, last_error').eq('id', instanceId).maybeSingle()
-                                                    ).catch(() => ({ data: null }));
-
-                                                    const isDefinitiveOffline = instStatus && ['offline', 'logged_out', 'blocked_12h'].includes(instStatus.status);
-                                                    if (isDefinitiveOffline) {
-                                                        throw new Error(`Instância ${instanceId} está ${instStatus.status} no banco de dados (${instStatus.last_error || 'desconectada'})`);
-                                                    }
                                                     throw new Error(`Connection Closed (Instância ${instanceId} temporariamente reconectando ou restabelecendo socket)`);
                                                 }
                                             }
@@ -1572,7 +1574,7 @@ class SessionManager {
                                     if (activeSock && (!activeSock.ws || activeSock.ws.isConnecting || !isSocketOpen(activeSock))) {
                                         console.log(`[SessionManager - Antiban] Socket de ${instanceId} está conectando. Aguardando abertura da conexão WebSocket...`);
                                         try {
-                                            await waitForSocketOpen(activeSock, 8000);
+                                            await waitForSocketOpen(activeSock, 10000);
                                         } catch (waitErr) {
                                             console.warn(`[SessionManager - Antiban] Aviso ao aguardar abertura do socket: ${waitErr.message}`);
                                         }
@@ -1586,7 +1588,7 @@ class SessionManager {
                                     }
 
                                     // Validação final de integridade do socket autenticado
-                                    const meJid = activeSock?.user?.id || activeSock?.authState?.creds?.me?.id;
+                                    const meJid = activeSock?.user?.id || activeSock?.authState?.creds?.me?.id || activeSock?.authState?.creds?.me?.jid;
                                     if (!activeSock || !isSocketOpen(activeSock) || !meJid) {
                                         throw new Error('Connection Closed (WebSocket não aberto ou autenticação pendente)');
                                     }
@@ -1639,8 +1641,12 @@ class SessionManager {
                                     const isPermanentlyClosed = 
                                         error.message?.includes('logged_out') ||
                                         error.message?.includes('blocked_12h') ||
+                                        error.message?.includes('disconnected') ||
+                                        error.message?.includes('paused') ||
                                         error.message?.includes('está offline no banco') ||
-                                        error.message?.includes('está logged_out no banco');
+                                        error.message?.includes('está logged_out no banco') ||
+                                        error.message?.includes('está disconnected no banco') ||
+                                        error.message?.includes('está paused no banco');
 
                                     if (isPermanentlyClosed) {
                                         console.warn(`[SessionManager - Antiban] Abortando retentativas para ${jid} via instância ${instanceId} (motivo definitivo): ${error.message}`);
@@ -1656,7 +1662,7 @@ class SessionManager {
 
                                     if (attempts < maxAttempts) {
                                         console.warn(`[SessionManager - Antiban] Tentativa ${attempts}/${maxAttempts} para ${jid} via instância ${instanceId}: ${error.message || error}. Aguardando restabelecimento do socket...`);
-                                        const retryDelay = (2000 * attempts) + Math.floor(Math.random() * 1000);
+                                        const retryDelay = Math.min(1500 * Math.pow(1.5, attempts), 8000) + Math.floor(Math.random() * 800);
                                         await new Promise(r => setTimeout(r, retryDelay));
                                     } else {
                                         console.error(`[SessionManager - Antiban] Todas as ${maxAttempts} tentativas falharam para ${jid} via instância ${instanceId}:`, error.message || error);
@@ -1736,7 +1742,7 @@ class SessionManager {
         const rawSession = this.sessions.get(instanceId);
         if (rawSession && rawSession.sock) {
             const rawSock = rawSession.sock;
-            const meId = rawSock.user?.id || rawSock.authState?.creds?.me?.id;
+            const meId = rawSock.user?.id || rawSock.authState?.creds?.me?.id || rawSock.authState?.creds?.me?.jid;
             if (meId && (!isSocketOpen(rawSock) || rawSock.ws?.isConnecting || rawSock.ws?.socket?.readyState === 0)) {
                 try {
                     await waitForSocketOpen(rawSock, 3500);
@@ -1751,7 +1757,7 @@ class SessionManager {
                 const connectingSock = await this.connectingState.get(instanceId);
                 if (connectingSock) {
                     if (requireAuthenticated) {
-                        const meId = connectingSock?.user?.id || connectingSock?.authState?.creds?.me?.id;
+                        const meId = connectingSock?.user?.id || connectingSock?.authState?.creds?.me?.id || connectingSock?.authState?.creds?.me?.jid;
                         if (meId) {
                             if (isSocketOpen(connectingSock)) return connectingSock;
                             try {
@@ -1805,7 +1811,7 @@ class SessionManager {
                 console.log(`[SessionManager] Lazy loading instance ${instanceId} (DB status: ${data.status}, force: ${force})...`);
                 const createdSock = await this.createSession(tenantId, instanceId, force);
                 if (requireAuthenticated) {
-                    const meId = createdSock?.user?.id || createdSock?.authState?.creds?.me?.id;
+                    const meId = createdSock?.user?.id || createdSock?.authState?.creds?.me?.id || createdSock?.authState?.creds?.me?.jid;
                     if (!meId || !isSocketOpen(createdSock)) {
                         if (createdSock?.ws && (createdSock.ws.isConnecting || !isSocketOpen(createdSock))) {
                             try {

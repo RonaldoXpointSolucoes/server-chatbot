@@ -1308,46 +1308,56 @@ class EventProcessor {
              let realInserted = [];
              
              if(messagesToInsert.length > 0) {
-                 const { data: insertedMessages, error: msgErr } = await supabase.from('messages')
-                    .insert(messagesToInsert)
-                    .select('*');
-                    
-                 if(msgErr) {
-                     console.warn(`[BatchProcessor] Insert em lote falhou (código ${msgErr.code}). Iniciando fallback de inserção 1 a 1...`);
-                     // Fallback 1 by 1 salva as mensagens que não são duplicadas (ignora erro 23505 de cada item)
-                     for (const m of messagesToInsert) {
-                         const { data: singleInserted, error: singleErr } = await supabase.from('messages')
-                             .insert([m])
-                             .select('*');
-                             
-                         if (singleErr) {
-                             if (singleErr.code !== '23505') {
-                                 console.error(`[BatchProcessor] Erro na inserção individual falha para ID ${m.whatsapp_message_id}:`, singleErr);
-                                 // Re-enfileira a mensagem para tentar novamente se for erro transiente e não tiver excedido o limite de 5 tentativas
-                                 const originalItem = activeBatch.find(x => x.rawMsg?.key?.id === m.whatsapp_message_id && x.instanceId === m.instance_id);
-                                 if (originalItem) {
-                                     originalItem.retryCount = (originalItem.retryCount || 0) + 1;
-                                     if (originalItem.retryCount < 5) {
-                                         this.messageQueue.push(originalItem);
-                                         console.warn(`[BatchProcessor] Enfileirando individualmente mensagem ID ${m.whatsapp_message_id} para nova tentativa (${originalItem.retryCount}/5).`);
-                                     } else {
-                                         console.error(`[BatchProcessor] EXCEÇÃO CRÍTICA: Mensagem ID ${m.whatsapp_message_id} descartada individualmente após 5 falhas.`);
-                                         try {
-                                             fs.appendFileSync('discarded_messages.log', `${new Date().toISOString()} [INDIVIDUAL FAILED] MsgId: ${m.whatsapp_message_id} - Payload: ${JSON.stringify(originalItem.rawMsg)}\n`);
-                                         } catch (logErr) {}
-                                     }
-                                 }
-                             }
-                         } else if (singleInserted && singleInserted.length > 0) {
-                             realInserted.push(singleInserted[0]);
-                         }
-                     }
-                     console.log(`[BatchProcessor] Fallback 1 a 1 concluído. ${realInserted.length} novas mensagens salvadas de ${messagesToInsert.length} totais.`);
-                 } else {
-                     realInserted = insertedMessages || [];
-                     console.log(`[BatchProcessor] ${realInserted.length} mensagens inseridas no lote com SUCESSO!`);
-                 }
-             }
+                  // Tenta upsert em lote com ignoreDuplicates para prevenir erros 23505 por concorrência
+                  let { data: insertedMessages, error: msgErr } = await supabase.from('messages')
+                     .upsert(messagesToInsert, { onConflict: 'whatsapp_message_id, instance_id', ignoreDuplicates: true })
+                     .select('*');
+                     
+                  // Fallback se a constraint no Supabase for apenas whatsapp_message_id
+                  if (msgErr && msgErr.code === '23505') {
+                      const retryUpsert = await supabase.from('messages')
+                          .upsert(messagesToInsert, { onConflict: 'whatsapp_message_id', ignoreDuplicates: true })
+                          .select('*');
+                      if (!retryUpsert.error) {
+                          insertedMessages = retryUpsert.data;
+                          msgErr = null;
+                      }
+                  }
+
+                  if(msgErr) {
+                      console.warn(`[BatchProcessor] Inserção em lote necessitou resolução resiliente (código ${msgErr.code}). Processando mensagens...`);
+                      // Fallback individual salvando apenas novas mensagens
+                      for (const m of messagesToInsert) {
+                          const { data: singleInserted, error: singleErr } = await supabase.from('messages')
+                              .upsert([m], { onConflict: 'whatsapp_message_id', ignoreDuplicates: true })
+                              .select('*');
+                              
+                          if (singleErr) {
+                              if (singleErr.code !== '23505') {
+                                  console.error(`[BatchProcessor] Erro na inserção individual para ID ${m.whatsapp_message_id}:`, singleErr.message || singleErr);
+                                  const originalItem = activeBatch.find(x => x.rawMsg?.key?.id === m.whatsapp_message_id && x.instanceId === m.instance_id);
+                                  if (originalItem) {
+                                      originalItem.retryCount = (originalItem.retryCount || 0) + 1;
+                                      if (originalItem.retryCount < 5) {
+                                          this.messageQueue.push(originalItem);
+                                      } else {
+                                          console.error(`[BatchProcessor] EXCEÇÃO CRÍTICA: Mensagem ID ${m.whatsapp_message_id} descartada individualmente após 5 falhas.`);
+                                          try {
+                                              fs.appendFileSync('discarded_messages.log', `${new Date().toISOString()} [INDIVIDUAL FAILED] MsgId: ${m.whatsapp_message_id} - Payload: ${JSON.stringify(originalItem.rawMsg)}\n`);
+                                          } catch (logErr) {}
+                                      }
+                                  }
+                              }
+                          } else if (singleInserted && singleInserted.length > 0) {
+                              realInserted.push(singleInserted[0]);
+                          }
+                      }
+                      console.log(`[BatchProcessor] Resolução resiliente concluída. ${realInserted.length} novas mensagens salvas de ${messagesToInsert.length} totais.`);
+                  } else {
+                      realInserted = insertedMessages || [];
+                      console.log(`[BatchProcessor] ${realInserted.length} mensagens processadas no lote com SUCESSO!`);
+                  }
+              }
              
              // 5. Fire socket events para realtime no painel (FrontEnd)
              const fetchedPictures = new Set();

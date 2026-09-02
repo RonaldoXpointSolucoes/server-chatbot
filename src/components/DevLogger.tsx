@@ -1246,40 +1246,41 @@ export default function DevLogger() {
         boardName: 'Desenvolvimento & Roadmap'
       });
 
-      setAiAnalysisStep('4/5 🔍 Localizando quadro Desenvolvimento & Roadmap no CRM...');
+      setAiAnalysisStep('4/5 🔍 Localizando quadro ChatBot CRM na X-Point Soluções...');
 
-      const currentTenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id') || useChatStore.getState().tenantInfo?.id || '8b1e427b-2321-4ea7-9d7e-90f7d5cbad21';
+      // O Antigravity DevLogger é exclusivo da plataforma global do software (X-Point Soluções).
+      // Seus cards de IA SEMPRE pertencem à empresa X-Point Soluções e ao quadro ChatBot CRM.
+      const XPOINT_PLATFORM_TENANT_ID = '8b1e427b-2321-4ea7-9d7e-90f7d5cbad21';
+      const CHATBOT_CRM_BOARD_ID = '95be1dee-9d28-47d9-8ccf-d51a337f1572';
 
-      // 6. Buscar o quadro do CRM
       let targetBoard: any = null;
-      const targetBoardIdDefault = '95be1dee-9d28-47d9-8ccf-d51a337f1572';
 
-      // Tenta primeiro por ID exato
+      // 1. Tenta buscar pelo ID fixo do quadro ChatBot CRM
       const { data: boardById } = await supabase
         .from('crm_boards')
         .select('*')
-        .eq('id', targetBoardIdDefault)
+        .eq('id', CHATBOT_CRM_BOARD_ID)
         .maybeSingle();
 
       if (boardById) {
         targetBoard = boardById;
       } else {
-        // Tenta por nome no tenant
+        // 2. Fallback: busca por nome no tenant da X-Point Soluções
         const { data: boardsByName } = await supabase
           .from('crm_boards')
           .select('*')
-          .eq('tenant_id', currentTenantId)
-          .or('name.ilike.%Desenvolvimento%,name.ilike.%Roadmap%')
+          .eq('tenant_id', XPOINT_PLATFORM_TENANT_ID)
+          .or('name.ilike.%ChatBot%,name.ilike.%Desenvolvimento%,name.ilike.%Roadmap%')
           .limit(1);
 
         if (boardsByName && boardsByName.length > 0) {
           targetBoard = boardsByName[0];
         } else {
-          // Pega o primeiro quadro disponível do tenant
+          // 3. Fallback: qualquer quadro do tenant da X-Point Soluções
           const { data: anyBoards } = await supabase
             .from('crm_boards')
             .select('*')
-            .eq('tenant_id', currentTenantId)
+            .eq('tenant_id', XPOINT_PLATFORM_TENANT_ID)
             .limit(1);
           if (anyBoards && anyBoards.length > 0) {
             targetBoard = anyBoards[0];
@@ -1288,7 +1289,7 @@ export default function DevLogger() {
       }
 
       if (!targetBoard) {
-        throw new Error('Nenhum quadro de CRM encontrado para vincular o card de correção.');
+        throw new Error('Quadro ChatBot CRM da X-Point Soluções não foi encontrado no banco de dados.');
       }
 
       // 7. Localizar o ID do estágio correspondente à coluna "Em Análise"
@@ -1310,16 +1311,16 @@ export default function DevLogger() {
 
       setAiAnalysisStep('5/5 🚀 Publicando card com imagem na coluna Em Análise...');
 
-      // 8. Inserir o Card na tabela crm_leads com a imagem anexada no topo
+      // 8. Inserir o Card na tabela crm_leads vinculado estritamente à X-Point Soluções
       const mediaHeader = uploadedScreenshotUrl 
         ? `![📸 Evidência Visual DevLogger](${uploadedScreenshotUrl})\n\n` 
         : '';
 
       const leadPayload = {
-        tenant_id: targetBoard.tenant_id || currentTenantId,
+        tenant_id: XPOINT_PLATFORM_TENANT_ID,
         board_id: targetBoard.id,
         title: aiPlan.title,
-        status: targetStageId,
+        status: targetStageId, // 'analysis' ("Em Análise")
         position: 0,
         estimated_revenue: 0,
         probability: 80,
@@ -3060,41 +3061,39 @@ export default function DevLogger() {
 
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => setShowAiCardModal(false)}
+                  onClick={() => {
+                    clearLogs();
+                    setTestErrors([]);
+                    setTestLogs([]);
+                    setTestSummary(null);
+                    setShowAiCardModal(false);
+                    useDevStore.setState({ isVisible: false });
+                  }}
                   className="bg-white/5 hover:bg-white/10 text-[#8696a0] hover:text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer"
                 >
                   Fechar
                 </button>
 
                 <button
-                  onClick={async () => {
-                    try {
-                      if (createdCardLead?.id) {
-                        await supabase
-                          .from('crm_leads')
-                          .update({ status: 'development', updated_at: new Date().toISOString() })
-                          .eq('id', createdCardLead.id);
-                      }
-                    } catch (e) {}
-                    setShowAiCardModal(false);
-                    useDevStore.setState({ isVisible: false });
-                    navigate(`/crm/kanban/${createdCardBoardId}`);
-                  }}
-                  className="bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 font-bold px-4 py-2.5 rounded-xl text-xs transition-all flex items-center gap-2 active:scale-95 cursor-pointer"
-                  title="Move o card diretamente para a coluna 'Em Desenvolvimento' e abre o Kanban"
-                >
-                  <Zap size={14} className="text-emerald-400" /> Mover p/ "Em Dev" & Abrir
-                </button>
-
-                <button
                   onClick={() => {
+                    // 1. Limpa todo o histórico de logs e testes
+                    clearLogs();
+                    setTestErrors([]);
+                    setTestLogs([]);
+                    setTestSummary(null);
+                    
+                    // 2. Fecha o modal de IA e o cockpit do DevLogger
                     setShowAiCardModal(false);
                     useDevStore.setState({ isVisible: false });
-                    navigate(`/crm/kanban/${createdCardBoardId}`);
+
+                    // 3. NÃO NAVEGA / PERMANECE NESTA TELA
+                    setCopyFeedback('✨ Card criado no CRM com sucesso e logs limpos!');
+                    setTimeout(() => setCopyFeedback(null), 3500);
                   }}
-                  className="bg-gradient-to-r from-purple-600 via-indigo-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-black px-4 py-2.5 rounded-xl text-xs transition-all flex items-center gap-2 shadow-lg shadow-purple-600/30 active:scale-95 cursor-pointer"
+                  className="bg-gradient-to-r from-purple-600 via-indigo-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-black px-5 py-2.5 rounded-xl text-xs transition-all flex items-center gap-2 shadow-lg shadow-purple-600/30 active:scale-95 cursor-pointer"
+                  title="Confirma a criação do card no CRM, limpa os logs e permanece na tela atual"
                 >
-                  <ArrowUpRight size={15} /> Abrir no Kanban
+                  <Sparkles size={15} className="text-amber-300 animate-pulse" /> Criar Card
                 </button>
               </div>
             </div>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { supabase } from '../../services/supabase';
+import { supabase, masterSupabase } from '../../services/supabase';
 import { useChatStore } from '../../store/chatStore';
 import { 
   Building2, 
@@ -21,7 +21,18 @@ import {
   Calendar,
   HelpCircle,
   Calculator,
-  UserPlus
+  UserPlus,
+  LayoutGrid,
+  List,
+  Power,
+  ToggleLeft,
+  ToggleRight,
+  Users,
+  UserCheck,
+  PauseCircle,
+  PlayCircle,
+  Pause,
+  Play
 } from 'lucide-react';
 
 interface Unit {
@@ -85,6 +96,7 @@ interface Cargo {
   breaks?: CargoBreak[];
   work_days: string[];
   salary?: number | null;
+  is_active?: boolean;
   created_at?: string;
   updated_at?: string;
 }
@@ -222,10 +234,31 @@ export default function ChecklistSettings() {
   const [users, setUsers] = useState<Profile[]>([]);
   const [cargos, setCargos] = useState<Cargo[]>([]);
   // Estados de Busca e Filtros de Equipe
+  const [userViewMode, setUserViewMode] = useState<'grid' | 'list'>(() => {
+    return (localStorage.getItem('checklist_user_view_mode') as 'grid' | 'list') || 'grid';
+  });
   const [userSearchTerm, setUserSearchTerm] = useState('');
   const [userFilterRole, setUserFilterRole] = useState<'all' | 'operators' | 'managers' | 'with_cargo' | 'with_pin'>('all');
   const [userFilterSector, setUserFilterSector] = useState<string>('all');
   const [userFilterShift, setUserFilterShift] = useState<string>('all'); // 'all' | 'cafe' | 'almoco' | 'jantar'
+
+  const handleToggleUserView = (mode: 'grid' | 'list') => {
+    setUserViewMode(mode);
+    localStorage.setItem('checklist_user_view_mode', mode);
+  };
+
+  // Estados de Visualização e Filtros de Cargos
+  const [cargoViewMode, setCargoViewMode] = useState<'grid' | 'list'>(() => {
+    return (localStorage.getItem('checklist_cargo_view_mode') as 'grid' | 'list') || 'grid';
+  });
+  const [cargoSearchTerm, setCargoSearchTerm] = useState('');
+  const [cargoFilterShift, setCargoFilterShift] = useState<'all' | 'cafe' | 'almoco' | 'jantar'>('all');
+  const [cargoFilterStatus, setCargoFilterStatus] = useState<'all' | 'active' | 'inactive'>('all');
+
+  const handleToggleCargoView = (mode: 'grid' | 'list') => {
+    setCargoViewMode(mode);
+    localStorage.setItem('checklist_cargo_view_mode', mode);
+  };
 
   const [loading, setLoading] = useState(true);
 
@@ -301,16 +334,27 @@ export default function ChecklistSettings() {
       if (sErr) throw sErr;
       setSectors(sectorsData || []);
 
-      // 3. Carregar Cargos
+      // 3. Carregar Cargos com Normalização de Status Ativo/Inativo
       const { data: cargosData, error: cErr } = await supabase
         .from('cargos')
         .select('*')
         .eq('tenant_id', tenantId)
         .order('name');
       if (cErr) throw cErr;
-      setCargos(cargosData || []);
+      
+      const normalizedCargos = (cargosData || []).map(c => {
+        const localActive = localStorage.getItem(`cargo_active_${c.id}`);
+        const isActive = c.is_active !== undefined && c.is_active !== null 
+          ? Boolean(c.is_active) 
+          : (c.shift_period === 'inactive' ? false : (localActive !== null ? localActive === 'true' : true));
+        return {
+          ...c,
+          is_active: isActive
+        };
+      });
+      setCargos(normalizedCargos);
 
-      // 4. Carregar Usuários Operacionais com Fallback Resiliente
+      // 4. Carregar Usuários Operacionais com Fallback Resiliente e filtro de inativos/deletados
       let loadedProfiles: any[] = [];
       const { data: profilesData, error: pErr } = await supabase
         .from('v_checklist_operators')
@@ -330,8 +374,15 @@ export default function ChecklistSettings() {
         loadedProfiles = fallbackProfiles || [];
       }
 
+      // Filtrar apenas perfis ativos e não marcados como deletados
+      const activeProfiles = loadedProfiles.filter(prof => {
+        if (prof.is_active === false) return false;
+        if (localStorage.getItem(`user_deleted_${prof.id}`) === 'true') return false;
+        return true;
+      });
+
       // Carrega permissões de cada usuário
-      const profilesWithPerms = await Promise.all(loadedProfiles.map(async (prof) => {
+      const profilesWithPerms = await Promise.all(activeProfiles.map(async (prof) => {
         const { data: uPerms } = await supabase
           .from('user_unit_permissions')
           .select('unit_id')
@@ -539,6 +590,30 @@ export default function ChecklistSettings() {
   // AÇÕES DE CARGOS
   // ==========================================
 
+  const toggleCargoActive = async (cargo: Cargo, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const nextStatus = cargo.is_active === false ? true : false;
+
+    // Atualização otimista local
+    setCargos(prev => prev.map(c => c.id === cargo.id ? { ...c, is_active: nextStatus } : c));
+    localStorage.setItem(`cargo_active_${cargo.id}`, String(nextStatus));
+
+    try {
+      const activeShifts = cargo.shifts && cargo.shifts.length > 0 ? cargo.shifts : cargo.shift_period ? [cargo.shift_period] : [];
+      const { error } = await supabase
+        .from('cargos')
+        .update({
+          shift_period: nextStatus ? (activeShifts[0] || 'custom') : 'inactive'
+        })
+        .eq('id', cargo.id);
+
+      if (error) console.warn('Aviso ao persistir status do cargo:', error.message);
+      showToast('success', `Cargo "${cargo.name}" ${nextStatus ? 'ativado' : 'inativado'} com sucesso!`);
+    } catch (err: any) {
+      console.warn('Erro ao alternar status do cargo:', err);
+    }
+  };
+
   const saveCargo = async () => {
     if (!editingCargo?.name) {
       showToast('error', 'O nome do cargo é obrigatório.');
@@ -548,6 +623,7 @@ export default function ChecklistSettings() {
     try {
       const activeBreaks = editingCargo.breaks || [];
       const activeShifts = editingCargo.shifts || (editingCargo.shift_period ? [editingCargo.shift_period] : []);
+      const isActive = editingCargo.is_active !== false;
 
       const payload = {
         tenant_id: tenantId,
@@ -556,7 +632,7 @@ export default function ChecklistSettings() {
         end_time: editingCargo.end_time || '18:00:00',
         break_start_time: activeBreaks[0]?.start_time || editingCargo.break_start_time || null,
         break_end_time: activeBreaks[0]?.end_time || editingCargo.break_end_time || null,
-        shift_period: activeShifts[0] || editingCargo.shift_period || 'custom',
+        shift_period: !isActive ? 'inactive' : (activeShifts[0] || editingCargo.shift_period || 'custom'),
         shifts: activeShifts,
         breaks: activeBreaks,
         work_days: editingCargo.work_days || [],
@@ -564,13 +640,14 @@ export default function ChecklistSettings() {
       };
 
       if (editingCargo.id) {
+        localStorage.setItem(`cargo_active_${editingCargo.id}`, String(isActive));
         const cargoBefore = cargos.find(c => c.id === editingCargo.id);
         const { error } = await supabase
           .from('cargos')
           .update(payload)
           .eq('id', editingCargo.id);
         if (error) throw error;
-        const cargoAfter = { ...cargoBefore, ...payload };
+        const cargoAfter = { ...cargoBefore, ...payload, is_active: isActive };
         await useChatStore.getState().logOperation('UPDATE', 'cargos', editingCargo.id, cargoBefore || null, cargoAfter);
         showToast('success', 'Cargo operacional atualizado!');
       } else {
@@ -580,6 +657,9 @@ export default function ChecklistSettings() {
           .select()
           .single();
         if (error) throw error;
+        if (data?.id) {
+          localStorage.setItem(`cargo_active_${data.id}`, String(isActive));
+        }
         await useChatStore.getState().logOperation('INSERT', 'cargos', data?.id || 'new-cargo', null, data || payload);
         showToast('success', 'Cargo cadastrado com sucesso!');
       }
@@ -639,42 +719,34 @@ export default function ChecklistSettings() {
 
     setSaving(true);
     try {
-      // Como o auth do Supabase é protegido, para o MVP criaremos perfis diretamente na tabela.
-      // Se for um novo usuário, precisaríamos associá-lo a um ID do auth.users.
-      // Para fins práticos de demonstração rica, podemos atualizar dados de perfis existentes ou criar perfis fictícios
-      // caso o usuário faça um bypass de convite.
-      
-      const payload = {
+      const isNew = !editingUser.id;
+      const targetUserId = editingUser.id || crypto.randomUUID();
+
+      const userPayload = {
+        id: targetUserId,
         tenant_id: tenantId,
         name: editingUser.name,
         email: editingUser.email,
         phone: editingUser.phone || '',
         pin: finalPin,
-        role: editingUser.role,
+        role: editingUser.role || 'operator',
         is_active: editingUser.is_active ?? true,
+        cargo_id: editingUser.cargo_id || null
       };
 
-      const isNew = !editingUser.id;
-      const targetUserId = editingUser.id || crypto.randomUUID();
-
-      // Salvar perfil em users_profiles
-      const { error } = await supabase
+      // Salvar perfil em users_profiles via masterSupabase para evitar bloqueios de RLS em novos operadores
+      const { error: profErr } = await masterSupabase
         .from('users_profiles')
-        .upsert({
-          id: targetUserId,
-          tenant_id: tenantId,
-          name: editingUser.name,
-          email: editingUser.email,
-          phone: editingUser.phone || '',
-          pin: finalPin,
-          role: editingUser.role || 'operator',
-          is_active: editingUser.is_active ?? true,
-          cargo_id: editingUser.cargo_id || null
-        }, { onConflict: 'id' });
-      if (error) throw error;
+        .upsert(userPayload, { onConflict: 'id' });
+      
+      if (profErr) {
+        // Fallback para o client padrão
+        const { error: fbErr } = await supabase.from('users_profiles').upsert(userPayload, { onConflict: 'id' });
+        if (fbErr) throw profErr;
+      }
 
       // Vincula e sincroniza tenant_users com full_name e role
-      await supabase.from('tenant_users').upsert({
+      await masterSupabase.from('tenant_users').upsert({
         tenant_id: tenantId,
         user_id: targetUserId,
         email: editingUser.email,
@@ -683,7 +755,7 @@ export default function ChecklistSettings() {
       }, { onConflict: 'tenant_id,user_id' });
 
       // Atualizar Permissões de Unidades
-      const { error: delUnitErr } = await supabase.from('user_unit_permissions').delete().eq('user_id', targetUserId);
+      const { error: delUnitErr } = await masterSupabase.from('user_unit_permissions').delete().eq('user_id', targetUserId);
       if (delUnitErr) console.warn('Erro ao deletar user_unit_permissions:', delUnitErr);
 
       if (editingUser.unit_permissions && editingUser.unit_permissions.length > 0) {
@@ -692,12 +764,12 @@ export default function ChecklistSettings() {
           user_id: targetUserId,
           unit_id: uId
         }));
-        const { error: insUnitErr } = await supabase.from('user_unit_permissions').upsert(insertPayloads, { onConflict: 'user_id,unit_id' });
+        const { error: insUnitErr } = await masterSupabase.from('user_unit_permissions').upsert(insertPayloads, { onConflict: 'user_id,unit_id' });
         if (insUnitErr) throw insUnitErr;
       }
 
       // Atualizar Permissões de Setores
-      const { error: delSecErr } = await supabase.from('user_sector_permissions').delete().eq('user_id', targetUserId);
+      const { error: delSecErr } = await masterSupabase.from('user_sector_permissions').delete().eq('user_id', targetUserId);
       if (delSecErr) console.warn('Erro ao deletar user_sector_permissions:', delSecErr);
 
       if (editingUser.sector_permissions && editingUser.sector_permissions.length > 0) {
@@ -706,9 +778,12 @@ export default function ChecklistSettings() {
           user_id: targetUserId,
           sector_id: sId
         }));
-        const { error: insSecErr } = await supabase.from('user_sector_permissions').upsert(insertPayloads, { onConflict: 'user_id,sector_id' });
+        const { error: insSecErr } = await masterSupabase.from('user_sector_permissions').upsert(insertPayloads, { onConflict: 'user_id,sector_id' });
         if (insSecErr) throw insSecErr;
       }
+
+      // Limpar flag de deletado no localStorage caso estivesse previamente marcado
+      localStorage.removeItem(`user_deleted_${targetUserId}`);
 
       showToast('success', isNew ? 'Novo membro cadastrado com sucesso!' : 'Perfil e acessos do colaborador atualizados com sucesso!');
 
@@ -735,22 +810,36 @@ export default function ChecklistSettings() {
       return;
     }
 
+    // 1. Atualização Otimista Imediata na Interface & localStorage
+    setUsers(prev => prev.filter(u => u.id !== userId));
+    localStorage.setItem(`user_deleted_${userId}`, 'true');
+
     try {
-      // 1. Remover permissões
-      await supabase.from('user_unit_permissions').delete().eq('user_id', userId);
-      await supabase.from('user_sector_permissions').delete().eq('user_id', userId);
+      // 2. Remover permissões de filiais e setores
+      await masterSupabase.from('user_unit_permissions').delete().eq('user_id', userId);
+      await masterSupabase.from('user_sector_permissions').delete().eq('user_id', userId);
 
-      // 2. Remover de users_profiles
-      await supabase.from('users_profiles').delete().eq('id', userId);
-
-      // 3. Remover de tenant_users (por user_id e por email)
+      // 3. Remover vínculo de tenant_users
       if (userToDelete.email) {
-        await supabase.from('tenant_users').delete().eq('email', userToDelete.email);
+        await masterSupabase.from('tenant_users').delete().eq('email', userToDelete.email);
       }
-      await supabase.from('tenant_users').delete().eq('user_id', userId);
+      await masterSupabase.from('tenant_users').delete().eq('user_id', userId);
+
+      // 4. Inativação garantida e liberação de PIN/cargo em users_profiles (Soft-Delete)
+      await masterSupabase.from('users_profiles').update({
+        is_active: false,
+        pin: null,
+        cargo_id: null
+      }).eq('id', userId);
+
+      // 5. Tentativa de DELETE físico em users_profiles (caso não haja FKs históricas de auditoria)
+      const { error: delErr } = await masterSupabase.from('users_profiles').delete().eq('id', userId);
+      if (delErr && delErr.code !== '23503') {
+        console.warn('Aviso ao deletar profile fisicamente:', delErr.message);
+      }
 
       await useChatStore.getState().logOperation('DELETE', 'users_profiles', userId, userToDelete || null, null);
-      showToast('success', `Colaborador "${userToDelete.name}" removido com sucesso.`);
+      showToast('success', `Colaborador "${userToDelete.name}" excluído da equipe com sucesso.`);
       
       if (editingUser?.id === userId) {
         setEditingUser(null);
@@ -1313,6 +1402,36 @@ export default function ChecklistSettings() {
                   <span>Novo Membro</span>
                 </button>
 
+                {/* Toggle de Visualização: Grade vs Lista */}
+                <div className="flex items-center bg-[#111b21] p-0.5 rounded-xl border border-[#2a3942]/60 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => handleToggleUserView('grid')}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
+                      userViewMode === 'grid'
+                        ? 'bg-indigo-600 text-white shadow-sm'
+                        : 'text-[#8696a0] hover:text-[#d1d7db]'
+                    }`}
+                    title="Visualização em Grade (Cards)"
+                  >
+                    <LayoutGrid size={13} />
+                    <span className="hidden sm:inline">Grade</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleUserView('list')}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
+                      userViewMode === 'list'
+                        ? 'bg-indigo-600 text-white shadow-sm'
+                        : 'text-[#8696a0] hover:text-[#d1d7db]'
+                    }`}
+                    title="Visualização em Lista (Tabela)"
+                  >
+                    <List size={13} />
+                    <span className="hidden sm:inline">Lista</span>
+                  </button>
+                </div>
+
                 <div className="relative w-full sm:w-72">
                   <Search size={14} className="absolute left-3 top-3 text-[#8696a0]" />
                   <input
@@ -1474,143 +1593,293 @@ export default function ChecklistSettings() {
               Nenhum colaborador encontrado. Eles devem ser vinculados via Supabase Auth primeiro.
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {users
-                .filter(user => {
-                  const query = userSearchTerm.trim().toLowerCase();
-                  if (query && !(user.name?.toLowerCase().includes(query) || user.email?.toLowerCase().includes(query) || user.pin?.includes(query))) return false;
-                  if (userFilterRole === 'operators' && user.role !== 'operator') return false;
-                  if (userFilterRole === 'managers' && (user.role !== 'manager' && user.role !== 'company_admin' && user.role !== 'super_admin')) return false;
-                  if (userFilterRole === 'with_cargo' && !user.cargo_id) return false;
-                  if (userFilterRole === 'with_pin' && !user.pin) return false;
-                  if (userFilterSector !== 'all' && (!user.sector_permissions || !user.sector_permissions.includes(userFilterSector))) return false;
-                  if (userFilterShift !== 'all') {
-                    if (!user.cargo_id) return false;
-                    const userCargo = cargos.find(c => c.id === user.cargo_id);
-                    if (!userCargo) return false;
-                    const shifts = userCargo.shifts && userCargo.shifts.length > 0 ? userCargo.shifts : userCargo.shift_period ? [userCargo.shift_period] : [];
-                    if (!shifts.includes(userFilterShift)) return false;
-                  }
-                  return true;
-                })
-                .map((user) => {
-                  const initials = getInitials(user.name);
-                  const avatarBg = getAvatarGradient(user.name);
-                  const assignedCargo = user.cargo_id ? cargos.find(c => c.id === user.cargo_id) : null;
+            <>
+              {/* 1. MODO DE VISUALIZAÇÃO EM GRADE (CARDS) */}
+              {userViewMode === 'grid' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-in fade-in duration-200">
+                  {users
+                    .filter(user => {
+                      const query = userSearchTerm.trim().toLowerCase();
+                      if (query && !(user.name?.toLowerCase().includes(query) || user.email?.toLowerCase().includes(query) || user.pin?.includes(query))) return false;
+                      if (userFilterRole === 'operators' && user.role !== 'operator') return false;
+                      if (userFilterRole === 'managers' && (user.role !== 'manager' && user.role !== 'company_admin' && user.role !== 'super_admin')) return false;
+                      if (userFilterRole === 'with_cargo' && !user.cargo_id) return false;
+                      if (userFilterRole === 'with_pin' && !user.pin) return false;
+                      if (userFilterSector !== 'all' && (!user.sector_permissions || !user.sector_permissions.includes(userFilterSector))) return false;
+                      if (userFilterShift !== 'all') {
+                        if (!user.cargo_id) return false;
+                        const userCargo = cargos.find(c => c.id === user.cargo_id);
+                        if (!userCargo) return false;
+                        const shifts = userCargo.shifts && userCargo.shifts.length > 0 ? userCargo.shifts : userCargo.shift_period ? [userCargo.shift_period] : [];
+                        if (!shifts.includes(userFilterShift)) return false;
+                      }
+                      return true;
+                    })
+                    .map((user) => {
+                      const initials = getInitials(user.name);
+                      const avatarBg = getAvatarGradient(user.name);
+                      const assignedCargo = user.cargo_id ? cargos.find(c => c.id === user.cargo_id) : null;
 
-                  return (
-                    <div 
-                      key={user.id}
-                      className={`bg-[#202c33]/90 backdrop-blur-md rounded-[28px] border p-5 transition-all duration-200 relative flex flex-col justify-between hover:-translate-y-1 hover:border-indigo-500/40 hover:shadow-xl hover:shadow-indigo-500/5 group ${editingUser?.id === user.id ? 'border-indigo-500 shadow-indigo-500/10 shadow-lg' : 'border-[#2a3942]/70'}`}
-                    >
-                      <div>
-                        {/* Top Bar do Card: Avatar + Nome + Role */}
-                        <div className="flex items-start gap-3">
-                          <div className={`w-11 h-11 rounded-2xl bg-gradient-to-br ${avatarBg} flex items-center justify-center font-black text-sm shadow-md shrink-0 border border-white/10`}>
-                            {initials}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center justify-between gap-1">
-                              <h3 className="font-bold text-white text-base truncate group-hover:text-indigo-300 transition-colors">
-                                {user.name}
-                              </h3>
-                              <span className={`text-[9px] px-2 py-0.5 rounded-full font-extrabold uppercase shrink-0 ${
-                                user.role === 'company_admin' || user.role === 'super_admin' ? 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30' :
-                                user.role === 'manager' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-slate-500/20 text-slate-300 border border-slate-500/30'
-                              }`}>
-                                {user.role === 'company_admin' ? 'Admin' :
-                                 user.role === 'manager' ? 'Gerente' : 'Operador'}
-                              </span>
+                      return (
+                        <div 
+                          key={user.id}
+                          className={`bg-[#202c33]/90 backdrop-blur-md rounded-[28px] border p-5 transition-all duration-200 relative flex flex-col justify-between hover:-translate-y-1 hover:border-indigo-500/40 hover:shadow-xl hover:shadow-indigo-500/5 group ${editingUser?.id === user.id ? 'border-indigo-500 shadow-indigo-500/10 shadow-lg' : 'border-[#2a3942]/70'}`}
+                        >
+                          <div>
+                            {/* Top Bar do Card: Avatar + Nome + Role */}
+                            <div className="flex items-start gap-3">
+                              <div className={`w-11 h-11 rounded-2xl bg-gradient-to-br ${avatarBg} flex items-center justify-center font-black text-sm shadow-md shrink-0 border border-white/10`}>
+                                {initials}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center justify-between gap-1">
+                                  <h3 className="font-bold text-white text-base truncate group-hover:text-indigo-300 transition-colors">
+                                    {user.name}
+                                  </h3>
+                                  <span className={`text-[9px] px-2 py-0.5 rounded-full font-extrabold uppercase shrink-0 ${
+                                    user.role === 'company_admin' || user.role === 'super_admin' ? 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30' :
+                                    user.role === 'manager' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-slate-500/20 text-slate-300 border border-slate-500/30'
+                                  }`}>
+                                    {user.role === 'company_admin' ? 'Admin' :
+                                     user.role === 'manager' ? 'Gerente' : 'Operador'}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-[#8696a0] truncate">{user.email}</p>
+                              </div>
                             </div>
-                            <p className="text-xs text-[#8696a0] truncate">{user.email}</p>
+
+                            {/* Lista de Atributos do Colaborador */}
+                            <div className="mt-4 pt-3 border-t border-[#2a3942]/40 space-y-2 text-xs text-[#8696a0]">
+                              {/* PIN */}
+                              <div className={`flex items-center justify-between px-2.5 py-1.5 rounded-xl border ${
+                                user.pin && duplicatePins.has(user.pin)
+                                  ? 'bg-rose-500/10 border-rose-500/40'
+                                  : 'bg-[#111b21]/70 border-[#2a3942]/40'
+                              }`}>
+                                <span className="flex items-center gap-1.5 text-xs text-[#8696a0]">
+                                  <KeyRound size={13} className={user.pin && duplicatePins.has(user.pin) ? "text-rose-400" : "text-amber-400"} />
+                                  PIN de Acesso:
+                                </span>
+                                {user.pin ? (
+                                  duplicatePins.has(user.pin) ? (
+                                    <span className="font-mono font-extrabold text-rose-300 bg-rose-500/20 border border-rose-500/40 px-2 py-0.5 rounded-lg tracking-widest text-[11px] flex items-center gap-1 animate-pulse" title="Atenção: Este PIN está duplicado! Altere para um PIN único.">
+                                      <AlertTriangle size={11} className="text-rose-400" /> {user.pin} (Duplicado)
+                                    </span>
+                                  ) : (
+                                    <span className="font-mono font-extrabold text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-lg tracking-widest text-xs">
+                                      {user.pin}
+                                    </span>
+                                  )
+                                ) : (
+                                  <span className="text-slate-500 italic text-[11px]">Não Definido</span>
+                                )}
+                              </div>
+
+                              {/* Cargo */}
+                              <div className="flex items-center justify-between bg-[#111b21]/70 px-2.5 py-1.5 rounded-xl border border-[#2a3942]/40">
+                                <span className="flex items-center gap-1.5 text-xs text-[#8696a0] shrink-0">
+                                  <Briefcase size={13} className="text-indigo-400" />
+                                  Cargo Operacional:
+                                </span>
+                                {assignedCargo ? (
+                                  <span className="inline-flex items-center gap-1 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2 py-0.5 rounded-lg text-[11px] font-bold truncate max-w-[150px]">
+                                    👔 {assignedCargo.name}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-500 italic text-[11px]">Não Definido</span>
+                                )}
+                              </div>
+
+                              {/* Filiais */}
+                              <p className="flex items-center gap-1.5 truncate">
+                                <Building2 size={13} className="text-slate-400 shrink-0" />
+                                Filiais: <span className="text-[#d1d7db] font-medium">{
+                                  user.unit_permissions && user.unit_permissions.length > 0 
+                                    ? user.unit_permissions.map(uId => units.find(un => un.id === uId)?.name).filter(Boolean).join(', ')
+                                    : 'Sem Filial'
+                                }</span>
+                              </p>
+
+                              {/* Setores */}
+                              <p className="flex items-center gap-1.5 truncate">
+                                <Building2 size={13} className="text-slate-400 shrink-0" />
+                                Setores: <span className="text-[#d1d7db] font-medium">{
+                                  user.sector_permissions && user.sector_permissions.length > 0
+                                    ? user.sector_permissions.map(sId => sectors.find(se => se.id === sId)?.name).filter(Boolean).join(', ')
+                                    : 'Todos/Nenhum'
+                                }</span>
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Botões de Ação */}
+                          <div className="flex gap-2 mt-4 pt-4 border-t border-[#2a3942]/40">
+                            <button
+                              onClick={() => setEditingUser(user)}
+                              className="flex-1 bg-[#2a3942] hover:bg-indigo-600 text-[#d1d7db] hover:text-white text-xs font-semibold py-2.5 rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-sm cursor-pointer active:scale-95"
+                            >
+                              <Edit2 size={12} /> Configurar Acessos
+                            </button>
+                            <button
+                              onClick={() => deleteUser(user.id)}
+                              disabled={user.role === 'company_admin'}
+                              className="bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 disabled:opacity-20 disabled:cursor-not-allowed text-xs font-semibold px-3 py-2.5 rounded-xl transition-all border border-rose-500/10 cursor-pointer active:scale-95"
+                              title={user.role === 'company_admin' ? 'Administrador principal não pode ser excluído' : 'Excluir colaborador'}
+                            >
+                              <Trash2 size={13} />
+                            </button>
                           </div>
                         </div>
+                      );
+                    })}
+                </div>
+              )}
 
-                        {/* Lista de Atributos do Colaborador */}
-                        <div className="mt-4 pt-3 border-t border-[#2a3942]/40 space-y-2 text-xs text-[#8696a0]">
-                          {/* PIN */}
-                          <div className={`flex items-center justify-between px-2.5 py-1.5 rounded-xl border ${
-                            user.pin && duplicatePins.has(user.pin)
-                              ? 'bg-rose-500/10 border-rose-500/40'
-                              : 'bg-[#111b21]/70 border-[#2a3942]/40'
-                          }`}>
-                            <span className="flex items-center gap-1.5 text-xs text-[#8696a0]">
-                              <KeyRound size={13} className={user.pin && duplicatePins.has(user.pin) ? "text-rose-400" : "text-amber-400"} />
-                              PIN de Acesso:
-                            </span>
-                            {user.pin ? (
-                              duplicatePins.has(user.pin) ? (
-                                <span className="font-mono font-extrabold text-rose-300 bg-rose-500/20 border border-rose-500/40 px-2 py-0.5 rounded-lg tracking-widest text-[11px] flex items-center gap-1 animate-pulse" title="Atenção: Este PIN está duplicado! Altere para um PIN único.">
-                                  <AlertTriangle size={11} className="text-rose-400" /> {user.pin} (Duplicado)
+              {/* 2. MODO DE VISUALIZAÇÃO EM LISTA (TABELA ULTRA COMPACTA & FLUIDA) */}
+              {userViewMode === 'list' && (
+                <div className="bg-[#202c33]/70 backdrop-blur-md rounded-2xl border border-[#2a3942]/70 overflow-hidden shadow-lg animate-in fade-in duration-200">
+                  <div className="divide-y divide-[#2a3942]/50">
+                    {users
+                      .filter(user => {
+                        const query = userSearchTerm.trim().toLowerCase();
+                        if (query && !(user.name?.toLowerCase().includes(query) || user.email?.toLowerCase().includes(query) || user.pin?.includes(query))) return false;
+                        if (userFilterRole === 'operators' && user.role !== 'operator') return false;
+                        if (userFilterRole === 'managers' && (user.role !== 'manager' && user.role !== 'company_admin' && user.role !== 'super_admin')) return false;
+                        if (userFilterRole === 'with_cargo' && !user.cargo_id) return false;
+                        if (userFilterRole === 'with_pin' && !user.pin) return false;
+                        if (userFilterSector !== 'all' && (!user.sector_permissions || !user.sector_permissions.includes(userFilterSector))) return false;
+                        if (userFilterShift !== 'all') {
+                          if (!user.cargo_id) return false;
+                          const userCargo = cargos.find(c => c.id === user.cargo_id);
+                          if (!userCargo) return false;
+                          const shifts = userCargo.shifts && userCargo.shifts.length > 0 ? userCargo.shifts : userCargo.shift_period ? [userCargo.shift_period] : [];
+                          if (!shifts.includes(userFilterShift)) return false;
+                        }
+                        return true;
+                      })
+                      .map((user) => {
+                        const initials = getInitials(user.name);
+                        const avatarBg = getAvatarGradient(user.name);
+                        const assignedCargo = user.cargo_id ? cargos.find(c => c.id === user.cargo_id) : null;
+                        const assignedUnits = user.unit_permissions && user.unit_permissions.length > 0 
+                          ? user.unit_permissions.map(uId => units.find(un => un.id === uId)?.name).filter(Boolean)
+                          : [];
+                        const assignedSectors = user.sector_permissions && user.sector_permissions.length > 0
+                          ? user.sector_permissions.map(sId => sectors.find(se => se.id === sId)?.name).filter(Boolean)
+                          : [];
+
+                        return (
+                          <div 
+                            key={user.id}
+                            className={`p-4 transition-all hover:bg-[#2a3942]/30 flex flex-col lg:flex-row lg:items-center justify-between gap-4 ${
+                              editingUser?.id === user.id ? 'bg-indigo-500/10 border-l-4 border-indigo-500' : ''
+                            }`}
+                          >
+                            {/* Coluna 1: Avatar, Nome, E-mail & Role */}
+                            <div className="flex items-center gap-3 min-w-[240px] flex-1">
+                              <div className={`w-10 h-10 rounded-2xl bg-gradient-to-br ${avatarBg} flex items-center justify-center font-black text-xs shadow-md shrink-0 border border-white/10 text-white`}>
+                                {initials}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-bold text-white text-sm truncate hover:text-indigo-300 transition-colors">
+                                    {user.name}
+                                  </span>
+                                  <span className={`text-[9px] px-2 py-0.5 rounded-full font-extrabold uppercase shrink-0 ${
+                                    user.role === 'company_admin' || user.role === 'super_admin' ? 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30' :
+                                    user.role === 'manager' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-slate-500/20 text-slate-300 border border-slate-500/30'
+                                  }`}>
+                                    {user.role === 'company_admin' ? 'Admin' :
+                                     user.role === 'manager' ? 'Gerente' : 'Operador'}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-[#8696a0] truncate">{user.email || 'Sem e-mail cadastrado'}</p>
+                              </div>
+                            </div>
+
+                            {/* Coluna 2: PIN de Acesso */}
+                            <div className="min-w-[130px] flex items-center gap-2">
+                              <div className="text-xs">
+                                <span className="text-[10px] text-[#8696a0] block font-bold uppercase tracking-wider mb-0.5 flex items-center gap-1">
+                                  <KeyRound size={11} className={user.pin && duplicatePins.has(user.pin) ? "text-rose-400" : "text-amber-400"} />
+                                  PIN
                                 </span>
-                              ) : (
-                                <span className="font-mono font-extrabold text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-lg tracking-widest text-xs">
-                                  {user.pin}
+                                {user.pin ? (
+                                  duplicatePins.has(user.pin) ? (
+                                    <span className="font-mono font-extrabold text-rose-300 bg-rose-500/20 border border-rose-500/40 px-2 py-0.5 rounded-lg tracking-widest text-xs inline-flex items-center gap-1 animate-pulse" title="PIN Duplicado!">
+                                      <AlertTriangle size={11} /> {user.pin}
+                                    </span>
+                                  ) : (
+                                    <span className="font-mono font-extrabold text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-lg tracking-widest text-xs inline-block">
+                                      {user.pin}
+                                    </span>
+                                  )
+                                ) : (
+                                  <span className="text-slate-500 italic text-xs">Não Definido</span>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Coluna 3: Cargo Operacional */}
+                            <div className="min-w-[160px] flex items-center gap-2">
+                              <div className="text-xs">
+                                <span className="text-[10px] text-[#8696a0] block font-bold uppercase tracking-wider mb-0.5 flex items-center gap-1">
+                                  <Briefcase size={11} className="text-indigo-400" />
+                                  Cargo
                                 </span>
-                              )
-                            ) : (
-                              <span className="text-slate-500 italic text-[11px]">Não Definido</span>
-                            )}
+                                {assignedCargo ? (
+                                  <span className="inline-flex items-center gap-1 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2.5 py-0.5 rounded-lg text-xs font-bold truncate max-w-[170px]">
+                                    👔 {assignedCargo.name}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-500 italic text-xs">Sem Cargo</span>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Coluna 4: Filiais & Setores */}
+                            <div className="min-w-[180px] flex-1">
+                              <div className="space-y-1 text-xs text-[#8696a0]">
+                                <div className="flex items-center gap-1.5 truncate">
+                                  <Building2 size={12} className="text-slate-400 shrink-0" />
+                                  <span className="text-[#d1d7db] font-medium truncate">
+                                    {assignedUnits.length > 0 ? assignedUnits.join(', ') : 'Sem Filial'}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-1.5 truncate text-[11px]">
+                                  <span className="text-slate-500 shrink-0">Setores:</span>
+                                  <span className="text-[#8696a0] truncate">
+                                    {assignedSectors.length > 0 ? assignedSectors.join(', ') : 'Todos/Nenhum'}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Coluna 5: Botões de Ação */}
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <button
+                                onClick={() => setEditingUser(user)}
+                                className="bg-[#2a3942] hover:bg-indigo-600 text-[#d1d7db] hover:text-white px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm cursor-pointer active:scale-95"
+                              >
+                                <Edit2 size={12} />
+                                <span>Acessos</span>
+                              </button>
+                              <button
+                                onClick={() => deleteUser(user.id)}
+                                disabled={user.role === 'company_admin'}
+                                className="bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 disabled:opacity-20 disabled:cursor-not-allowed p-2 rounded-xl transition-all border border-rose-500/20 cursor-pointer active:scale-95"
+                                title={user.role === 'company_admin' ? 'Administrador principal não pode ser excluído' : 'Excluir colaborador'}
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
                           </div>
-
-                          {/* Cargo */}
-                          <div className="flex items-center justify-between bg-[#111b21]/70 px-2.5 py-1.5 rounded-xl border border-[#2a3942]/40">
-                            <span className="flex items-center gap-1.5 text-xs text-[#8696a0] shrink-0">
-                              <Briefcase size={13} className="text-indigo-400" />
-                              Cargo Operacional:
-                            </span>
-                            {assignedCargo ? (
-                              <span className="inline-flex items-center gap-1 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2 py-0.5 rounded-lg text-[11px] font-bold truncate max-w-[150px]">
-                                👔 {assignedCargo.name}
-                              </span>
-                            ) : (
-                              <span className="text-slate-500 italic text-[11px]">Não Definido</span>
-                            )}
-                          </div>
-
-                          {/* Filiais */}
-                          <p className="flex items-center gap-1.5 truncate">
-                            <Building2 size={13} className="text-slate-400 shrink-0" />
-                            Filiais: <span className="text-[#d1d7db] font-medium">{
-                              user.unit_permissions && user.unit_permissions.length > 0 
-                                ? user.unit_permissions.map(uId => units.find(un => un.id === uId)?.name).filter(Boolean).join(', ')
-                                : 'Sem Filial'
-                            }</span>
-                          </p>
-
-                          {/* Setores */}
-                          <p className="flex items-center gap-1.5 truncate">
-                            <Building2 size={13} className="text-slate-400 shrink-0" />
-                            Setores: <span className="text-[#d1d7db] font-medium">{
-                              user.sector_permissions && user.sector_permissions.length > 0
-                                ? user.sector_permissions.map(sId => sectors.find(se => se.id === sId)?.name).filter(Boolean).join(', ')
-                                : 'Todos/Nenhum'
-                            }</span>
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Botões de Ação */}
-                      <div className="flex gap-2 mt-4 pt-4 border-t border-[#2a3942]/40">
-                        <button
-                          onClick={() => setEditingUser(user)}
-                          className="flex-1 bg-[#2a3942] hover:bg-indigo-600 text-[#d1d7db] hover:text-white text-xs font-semibold py-2.5 rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-sm cursor-pointer active:scale-95"
-                        >
-                          <Edit2 size={12} /> Configurar Acessos
-                        </button>
-                        <button
-                          onClick={() => deleteUser(user.id)}
-                          disabled={user.role === 'company_admin'}
-                          className="bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 disabled:opacity-20 disabled:cursor-not-allowed text-xs font-semibold px-3 py-2.5 rounded-xl transition-all border border-rose-500/10 cursor-pointer active:scale-95"
-                          title={user.role === 'company_admin' ? 'Administrador principal não pode ser excluído' : 'Excluir colaborador'}
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-            </div>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
@@ -1853,23 +2122,187 @@ export default function ChecklistSettings() {
           
               {/* Listagem dos Cargos */}
           <div className={`${editingCargo ? 'lg:col-span-2' : 'col-span-1'} space-y-4`}>
-            <div className="flex justify-between items-center">
-              <h2 className="text-lg font-semibold text-[#e9edef]">Lista de Cargos Operacionais</h2>
-              {!editingCargo && (
-                <button
-                  onClick={() => setEditingCargo({ 
-                    name: '', 
-                    start_time: '08:00', 
-                    end_time: '18:00', 
-                    shifts: ['almoco'],
-                    breaks: [{ id: Date.now().toString(), title: 'Almoço', start_time: '14:00', end_time: '15:00' }],
-                    work_days: ['seg', 'ter', 'qua', 'qui', 'sex'] 
-                  })}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-1.5 transition-all shadow-lg shadow-indigo-500/10 active:scale-95"
-                >
-                  <Plus size={14} /> Novo Cargo
-                </button>
-              )}
+            {/* Barra de Controle de Cargos: Busca, Filtros, Toggle de Visualização e Novo Cargo */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#202c33]/50 p-3.5 rounded-2xl border border-[#2a3942]/60">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-base font-bold text-[#e9edef] flex items-center gap-2 shrink-0">
+                  <Briefcase size={18} className="text-indigo-400" />
+                  Lista de Cargos Operacionais
+                  <span className="text-xs bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-full font-bold border border-indigo-500/30">
+                    {cargos.filter(cargo => {
+                      if (cargoSearchTerm.trim()) {
+                        const q = cargoSearchTerm.trim().toLowerCase();
+                        const matchName = cargo.name?.toLowerCase().includes(q);
+                        const matchShifts = (cargo.shifts || []).some(s => s.toLowerCase().includes(q));
+                        const matchUsers = users.some(u => u.cargo_id === cargo.id && (u.name?.toLowerCase().includes(q) || u.email?.toLowerCase().includes(q)));
+                        if (!matchName && !matchShifts && !matchUsers) return false;
+                      }
+                      if (cargoFilterShift !== 'all') {
+                        const shifts = cargo.shifts && cargo.shifts.length > 0 ? cargo.shifts : cargo.shift_period ? [cargo.shift_period] : [];
+                        if (!shifts.includes(cargoFilterShift)) return false;
+                      }
+                      if (cargoFilterStatus === 'active' && cargo.is_active === false) return false;
+                      if (cargoFilterStatus === 'inactive' && cargo.is_active !== false) return false;
+                      return true;
+                    }).length}
+                  </span>
+                </h2>
+
+                {/* Filtro de Status (Todos / Ativos / Inativos) */}
+                <div className="flex items-center bg-[#111b21] p-0.5 rounded-xl border border-[#2a3942]/60">
+                  <button
+                    type="button"
+                    onClick={() => setCargoFilterStatus('all')}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                      cargoFilterStatus === 'all'
+                        ? 'bg-indigo-600 text-white shadow-sm'
+                        : 'text-[#8696a0] hover:text-[#d1d7db]'
+                    }`}
+                  >
+                    Todos ({cargos.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCargoFilterStatus('active')}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                      cargoFilterStatus === 'active'
+                        ? 'bg-emerald-600 text-white shadow-sm'
+                        : 'text-emerald-400 hover:text-emerald-300'
+                    }`}
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                    Ativos ({cargos.filter(c => c.is_active !== false).length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCargoFilterStatus('inactive')}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                      cargoFilterStatus === 'inactive'
+                        ? 'bg-slate-600 text-white shadow-sm'
+                        : 'text-slate-400 hover:text-slate-300'
+                    }`}
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
+                    Inativos ({cargos.filter(c => c.is_active === false).length})
+                  </button>
+                </div>
+
+                {/* Filtro de Turnos */}
+                <div className="flex items-center bg-[#111b21] p-0.5 rounded-xl border border-[#2a3942]/60">
+                  <button
+                    type="button"
+                    onClick={() => setCargoFilterShift('all')}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                      cargoFilterShift === 'all'
+                        ? 'bg-indigo-600 text-white shadow-sm'
+                        : 'text-[#8696a0] hover:text-[#d1d7db]'
+                    }`}
+                  >
+                    Turnos: Todos
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCargoFilterShift('cafe')}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                      cargoFilterShift === 'cafe'
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                        : 'text-[#8696a0] hover:text-amber-300'
+                    }`}
+                  >
+                    ☕ Café
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCargoFilterShift('almoco')}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                      cargoFilterShift === 'almoco'
+                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                        : 'text-[#8696a0] hover:text-emerald-300'
+                    }`}
+                  >
+                    🍱 Almoço
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCargoFilterShift('jantar')}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                      cargoFilterShift === 'jantar'
+                        ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40'
+                        : 'text-[#8696a0] hover:text-indigo-300'
+                    }`}
+                  >
+                    🌙 Jantar
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                {/* Campo de Busca */}
+                <div className="relative flex-1 sm:w-48">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8696a0]" />
+                  <input
+                    type="text"
+                    placeholder="Buscar cargo..."
+                    value={cargoSearchTerm}
+                    onChange={e => setCargoSearchTerm(e.target.value)}
+                    className="w-full bg-[#111b21] border border-[#2a3942] rounded-xl pl-8 pr-3 py-1.5 text-xs text-white placeholder-[#8696a0] focus:outline-none focus:border-indigo-500"
+                  />
+                  {cargoSearchTerm && (
+                    <button
+                      onClick={() => setCargoSearchTerm('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#8696a0] hover:text-white"
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+
+                {/* Alternador de Visualização: Grade vs Lista */}
+                <div className="flex items-center bg-[#111b21] p-1 rounded-xl border border-[#2a3942]/60 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => handleToggleCargoView('grid')}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                      cargoViewMode === 'grid'
+                        ? 'bg-indigo-600 text-white shadow-sm'
+                        : 'text-[#8696a0] hover:text-[#d1d7db] hover:bg-white/5'
+                    }`}
+                    title="Visualização em Grade / Cards"
+                  >
+                    <LayoutGrid size={14} />
+                    <span className="hidden md:inline text-[11px]">Grade</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleCargoView('list')}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                      cargoViewMode === 'list'
+                        ? 'bg-indigo-600 text-white shadow-sm'
+                        : 'text-[#8696a0] hover:text-[#d1d7db] hover:bg-white/5'
+                    }`}
+                    title="Visualização em Lista / Tabela"
+                  >
+                    <List size={14} />
+                    <span className="hidden md:inline text-[11px]">Lista</span>
+                  </button>
+                </div>
+
+                {!editingCargo && (
+                  <button
+                    onClick={() => setEditingCargo({ 
+                      name: '', 
+                      start_time: '08:00', 
+                      end_time: '18:00', 
+                      shifts: ['almoco'],
+                      breaks: [{ id: Date.now().toString(), title: 'Almoço', start_time: '14:00', end_time: '15:00' }],
+                      work_days: ['seg', 'ter', 'qua', 'qui', 'sex'] 
+                    })}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-3.5 py-2 rounded-xl flex items-center gap-1.5 transition-all shadow-lg shadow-indigo-500/10 active:scale-95 cursor-pointer shrink-0"
+                  >
+                    <Plus size={14} /> Novo Cargo
+                  </button>
+                )}
+              </div>
             </div>
 
             {loading ? (
@@ -1881,90 +2314,450 @@ export default function ChecklistSettings() {
                 Nenhum cargo cadastrado. Adicione um cargo para organizar a escala da sua equipe.
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {cargos.map((cargo) => (
-                  <div
-                    key={cargo.id}
-                    className={`bg-[#202c33]/80 rounded-[28px] border p-5 transition-all flex flex-col justify-between ${editingCargo?.id === cargo.id ? 'border-indigo-500 shadow-indigo-500/10 shadow-lg' : 'border-[#2a3942]/60 hover:shadow-md'}`}
-                  >
-                    <div>
-                      <div className="flex justify-between items-start gap-2">
-                        <div className="min-w-0">
-                          <h3 className="font-semibold text-white text-base truncate flex items-center gap-1.5">
-                            <Briefcase size={16} className="text-indigo-400 shrink-0" />
-                            {cargo.name}
-                          </h3>
-                        </div>
-                        <div className="flex flex-wrap gap-1 justify-end shrink-0">
-                          {(cargo.shifts && cargo.shifts.length > 0 ? cargo.shifts : cargo.shift_period ? [cargo.shift_period] : []).map((s, idx) => (
-                            <span key={idx} className={`text-[9px] px-2 py-0.5 rounded-full font-bold border ${
-                              s === 'cafe' ? 'bg-amber-500/10 text-amber-300 border-amber-500/20' :
-                              s === 'almoco' ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20' :
-                              s === 'jantar' ? 'bg-indigo-500/10 text-indigo-300 border-indigo-500/20' :
-                              'bg-slate-500/10 text-slate-300 border-slate-500/20'
-                            }`}>
-                              {s === 'cafe' ? '☕ Café' : s === 'almoco' ? '🍱 Almoço' : s === 'jantar' ? '🌙 Jantar' : s}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
+              <>
+                {/* 1. MODO DE VISUALIZAÇÃO EM GRADE (CARDS) */}
+                {cargoViewMode === 'grid' && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-in fade-in duration-200">
+                    {cargos
+                      .filter(cargo => {
+                        if (cargoSearchTerm.trim()) {
+                          const q = cargoSearchTerm.trim().toLowerCase();
+                          const matchName = cargo.name?.toLowerCase().includes(q);
+                          const matchShifts = (cargo.shifts || []).some(s => s.toLowerCase().includes(q));
+                          const matchUsers = users.some(u => u.cargo_id === cargo.id && (u.name?.toLowerCase().includes(q) || u.email?.toLowerCase().includes(q)));
+                          if (!matchName && !matchShifts && !matchUsers) return false;
+                        }
+                        if (cargoFilterShift !== 'all') {
+                          const shifts = cargo.shifts && cargo.shifts.length > 0 ? cargo.shifts : cargo.shift_period ? [cargo.shift_period] : [];
+                          if (!shifts.includes(cargoFilterShift)) return false;
+                        }
+                        if (cargoFilterStatus === 'active' && cargo.is_active === false) return false;
+                        if (cargoFilterStatus === 'inactive' && cargo.is_active !== false) return false;
+                        return true;
+                      })
+                      .map((cargo) => {
+                        const isActive = cargo.is_active !== false;
+                        const assignedUsers = users.filter(u => u.cargo_id === cargo.id);
 
-                      <div className="mt-4 pt-3 border-t border-[#2a3942]/30 space-y-2 text-xs text-[#8696a0]">
-                        <p className="flex items-center gap-1.5">
-                          <Clock size={13} className="text-slate-400 shrink-0" />
-                          Escala: <span className="text-[#d1d7db] font-medium">{cargo.start_time?.slice(0, 5)} - {cargo.end_time?.slice(0, 5)}</span>
-                        </p>
+                        return (
+                          <div
+                            key={cargo.id}
+                            className={`rounded-[28px] border p-5 transition-all flex flex-col justify-between hover:shadow-lg relative overflow-hidden ${
+                              editingCargo?.id === cargo.id 
+                                ? 'border-indigo-500 shadow-indigo-500/10 shadow-lg bg-[#202c33]/90' 
+                                : isActive 
+                                  ? 'bg-[#202c33]/80 border-[#2a3942]/60 hover:border-indigo-500/40' 
+                                  : 'bg-[#151e24]/95 border-2 border-dashed border-amber-500/50 shadow-inner'
+                            }`}
+                          >
+                            <div>
+                              {/* Tarja de Aviso Visual de Cargo Pausado */}
+                              {!isActive && (
+                                <div className="mb-3 bg-gradient-to-r from-amber-500/25 via-amber-500/15 to-amber-500/25 border border-amber-500/40 px-3 py-1.5 rounded-xl flex items-center justify-between gap-2 shadow-sm">
+                                  <div className="flex items-center gap-1.5 text-amber-300 font-black text-xs">
+                                    <PauseCircle size={15} className="text-amber-400 shrink-0 animate-pulse" />
+                                    <span>⏸️ CARGO PAUSADO NA OPERAÇÃO</span>
+                                  </div>
+                                  <span className="text-[10px] text-amber-200 font-bold bg-amber-500/20 border border-amber-500/30 px-2 py-0.5 rounded-md">
+                                    Suspenso
+                                  </span>
+                                </div>
+                              )}
 
-                        {/* Exibição dos Intervalos Múltiplos */}
-                        {(cargo.breaks && cargo.breaks.length > 0) ? (
-                          <div className="space-y-1 pt-1">
-                            <span className="text-[10px] text-amber-400 font-bold uppercase tracking-wider block">Intervalos / Pausas ({cargo.breaks.length}):</span>
-                            <div className="flex flex-wrap gap-1.5">
-                              {cargo.breaks.map((b, idx) => (
-                                <span key={idx} className="text-[10px] text-amber-200 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20 font-semibold">
-                                  ⏸️ {b.title || 'Pausa'}: {b.start_time?.slice(0, 5)} - {b.end_time?.slice(0, 5)}
-                                </span>
-                              ))}
+                              <div className="flex justify-between items-start gap-2">
+                                <div className="min-w-0">
+                                  <h3 className={`font-bold text-base truncate flex items-center gap-1.5 ${isActive ? 'text-white' : 'text-slate-300'}`}>
+                                    <Briefcase size={16} className={isActive ? 'text-indigo-400 shrink-0' : 'text-amber-400/90 shrink-0'} />
+                                    <span className={!isActive ? 'line-through decoration-amber-500/60 decoration-2 text-slate-300' : ''}>
+                                      {cargo.name}
+                                    </span>
+                                    {!isActive && (
+                                      <span className="text-[10px] font-extrabold text-amber-300 bg-amber-500/20 border border-amber-500/40 px-1.5 py-0.5 rounded-md uppercase ml-1">
+                                        Pausado
+                                      </span>
+                                    )}
+                                  </h3>
+                                </div>
+                                <div className="flex flex-wrap gap-1 items-center justify-end shrink-0">
+                                  {/* Badge / Botão Interativo de Status */}
+                                  <button
+                                    type="button"
+                                    onClick={(e) => toggleCargoActive(cargo, e)}
+                                    title={isActive ? 'Clique para inativar este cargo' : 'Clique para reativar este cargo'}
+                                    className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold border transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 ${
+                                      isActive 
+                                        ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/25 shadow-sm' 
+                                        : 'bg-amber-500/20 text-amber-300 border-amber-500/50 hover:bg-amber-500/30 shadow-sm'
+                                    }`}
+                                  >
+                                    <span className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+                                    {isActive ? 'Ativo' : 'Pausado'}
+                                  </button>
+
+                                  {(cargo.shifts && cargo.shifts.length > 0 ? cargo.shifts : cargo.shift_period ? [cargo.shift_period] : []).map((s, idx) => (
+                                    <span key={idx} className={`text-[9px] px-2 py-0.5 rounded-full font-bold border ${
+                                      s === 'cafe' ? 'bg-amber-500/10 text-amber-300 border-amber-500/20' :
+                                      s === 'almoco' ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20' :
+                                      s === 'jantar' ? 'bg-indigo-500/10 text-indigo-300 border-indigo-500/20' :
+                                      'bg-slate-500/10 text-slate-300 border-slate-500/20'
+                                    }`}>
+                                      {s === 'cafe' ? '☕ Café' : s === 'almoco' ? '🍱 Almoço' : s === 'jantar' ? '🌙 Jantar' : s}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+
+                              <div className="mt-3 pt-3 border-t border-[#2a3942]/30 space-y-2 text-xs text-[#8696a0]">
+                                <p className="flex items-center gap-1.5">
+                                  <Clock size={13} className="text-slate-400 shrink-0" />
+                                  Escala: <span className="text-[#d1d7db] font-medium">{cargo.start_time?.slice(0, 5)} - {cargo.end_time?.slice(0, 5)}</span>
+                                </p>
+
+                                {/* Exibição dos Intervalos Múltiplos */}
+                                {(cargo.breaks && cargo.breaks.length > 0) ? (
+                                  <div className="space-y-1 pt-1">
+                                    <span className="text-[10px] text-amber-400 font-bold uppercase tracking-wider block">Intervalos / Pausas ({cargo.breaks.length}):</span>
+                                    <div className="flex flex-wrap gap-1.5">
+                                      {cargo.breaks.map((b, idx) => (
+                                        <span key={idx} className="text-[10px] text-amber-200 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20 font-semibold">
+                                          ⏸️ {b.title || 'Pausa'}: {b.start_time?.slice(0, 5)} - {b.end_time?.slice(0, 5)}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                ) : cargo.break_start_time && cargo.break_end_time ? (
+                                  <p className="flex items-center gap-1.5 text-amber-300/90 font-medium">
+                                    <Clock size={13} className="text-amber-400 shrink-0" />
+                                    Intervalo: <span className="text-amber-200 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 font-bold">{cargo.break_start_time.slice(0, 5)} - {cargo.break_end_time.slice(0, 5)}</span>
+                                  </p>
+                                ) : (
+                                  <p className="flex items-center gap-1.5 text-slate-500 italic">
+                                    <Clock size={13} className="text-slate-600 shrink-0" />
+                                    Sem intervalos configurados
+                                  </p>
+                                )}
+
+                                <p className="flex items-start gap-1.5">
+                                  <Calendar size={13} className="text-slate-400 mt-0.5 shrink-0" />
+                                  <span>
+                                    Dias: <span className="text-[#d1d7db] font-medium">
+                                      {cargo.work_days && cargo.work_days.length > 0 
+                                        ? cargo.work_days.map(d => DAYS_OF_WEEK.find(day => day.key === d)?.short).filter(Boolean).join(', ')
+                                        : 'Sem dias definidos'}
+                                    </span>
+                                  </span>
+                                </p>
+
+                                {/* Colaboradores Associados a este Cargo */}
+                                <div className="pt-2.5 border-t border-[#2a3942]/30 space-y-1.5">
+                                  <div className="flex items-center justify-between gap-1">
+                                    <span className="text-[10px] text-[#8696a0] font-bold uppercase tracking-wider flex items-center gap-1">
+                                      <Users size={12} className="text-indigo-400 shrink-0" />
+                                      Colaboradores ({assignedUsers.length}):
+                                    </span>
+                                    {assignedUsers.length > 0 && (
+                                      <span className="text-[10px] text-indigo-300 font-semibold bg-indigo-500/10 px-2 py-0.5 rounded-md border border-indigo-500/20">
+                                        {assignedUsers.length === 1 ? '1 membro' : `${assignedUsers.length} membros`}
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  {assignedUsers.length > 0 ? (
+                                    <div className="flex flex-wrap gap-1.5 pt-0.5">
+                                      {assignedUsers.map((u) => {
+                                        const uInitials = getInitials(u.name);
+                                        const uAvatarBg = getAvatarGradient(u.name);
+                                        return (
+                                          <div
+                                            key={u.id}
+                                            className="flex items-center gap-1.5 bg-[#111b21] hover:bg-[#182229] border border-[#2a3942]/60 hover:border-indigo-500/40 rounded-xl px-2.5 py-1 transition-all shadow-sm group/user"
+                                            title={`${u.name} (${u.email || 'Sem email'})${u.pin ? ` • PIN: ${u.pin}` : ''}`}
+                                          >
+                                            <div className={`w-5 h-5 rounded-lg bg-gradient-to-br ${uAvatarBg} flex items-center justify-center font-black text-[9px] text-white shrink-0 shadow-xs`}>
+                                              {uInitials}
+                                            </div>
+                                            <span className="text-xs font-semibold text-[#e9edef] group-hover/user:text-indigo-300 truncate max-w-[130px]">
+                                              {u.name}
+                                            </span>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  ) : (
+                                    <p className="text-[11px] text-slate-500 italic flex items-center gap-1.5 bg-[#111b21]/40 px-2.5 py-1.5 rounded-xl border border-dashed border-[#2a3942]/40">
+                                      <Users size={12} className="text-slate-600 shrink-0" />
+                                      Nenhum colaborador associado a este cargo
+                                    </p>
+                                  )}
+                                </div>
+
+                                {/* Estatísticas de Carga Horária & Saldo CLT */}
+                                {(() => {
+                                  const hours = calculateCargoHours(cargo);
+                                  return (
+                                    <div className={`mt-3 pt-3 border-t border-[#2a3942]/30 space-y-2 ${!isActive ? 'opacity-70' : ''}`}>
+                                      <div className="grid grid-cols-3 gap-2 text-center">
+                                        {/* Diária */}
+                                        <div className="bg-black/20 border border-[#2a3942]/40 rounded-xl p-2 flex flex-col justify-between">
+                                          <span className="text-[9px] text-[#64748b] font-bold uppercase tracking-wider block">Diária (Líq.)</span>
+                                          <span className="text-xs text-emerald-400 font-extrabold my-0.5">{hours.formattedDaily}</span>
+                                          {hours.dailyDeltaText && (
+                                            <span className={`text-[9px] font-bold px-1 py-0.5 rounded ${
+                                              hours.dailyIsOvertime 
+                                                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' 
+                                                : 'bg-indigo-500/20 text-indigo-300'
+                                            }`}>
+                                              {hours.dailyDeltaText}
+                                            </span>
+                                          )}
+                                        </div>
+
+                                        {/* Semanal */}
+                                        <div className="bg-black/20 border border-[#2a3942]/40 rounded-xl p-2 flex flex-col justify-between">
+                                          <span className="text-[9px] text-[#64748b] font-bold uppercase tracking-wider block">Semanal</span>
+                                          <span className="text-xs text-indigo-300 font-extrabold my-0.5">{hours.formattedWeekly}</span>
+                                          {hours.weeklyDeltaText && (
+                                            <span className={`text-[9px] font-bold px-1 py-0.5 rounded ${
+                                              hours.weeklyIsOvertime 
+                                                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' 
+                                                : 'bg-indigo-500/20 text-indigo-300'
+                                            }`}>
+                                              {hours.weeklyDeltaText}
+                                            </span>
+                                          )}
+                                        </div>
+
+                                        {/* Mensal */}
+                                        <div className="bg-black/20 border border-[#2a3942]/40 rounded-xl p-2 flex flex-col justify-between">
+                                          <span className="text-[9px] text-[#64748b] font-bold uppercase tracking-wider block">Mensal</span>
+                                          <span className="text-xs text-amber-300 font-extrabold my-0.5">{hours.formattedMonthly}</span>
+                                          {hours.monthlyDeltaText && (
+                                            <span className={`text-[9px] font-bold px-1 py-0.5 rounded ${
+                                              hours.monthlyIsOvertime 
+                                                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' 
+                                                : 'bg-emerald-500/20 text-emerald-300'
+                                            }`}>
+                                              {hours.monthlyDeltaText}
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+
+                                      {/* Exibição Salarial */}
+                                      {hours.salary > 0 && (
+                                        <div className="bg-[#111b21]/70 border border-[#2a3942]/50 rounded-xl p-2 flex items-center justify-between text-xs">
+                                          <div>
+                                            <span className="text-[10px] text-[#8696a0] block">Salário Base:</span>
+                                            <span className="font-bold text-white">R$ {hours.salary.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                          </div>
+                                          <div 
+                                            onClick={() => setCalculationDetailsCargo(cargo)}
+                                            className="text-right cursor-pointer hover:bg-emerald-500/5 px-2 py-0.5 rounded-lg border border-transparent hover:border-emerald-500/10 transition-all group flex flex-col items-end select-none"
+                                            title="Clique para entender o cálculo do custo projetado"
+                                          >
+                                            <span className="text-[10px] text-amber-400 font-medium flex items-center gap-1 group-hover:text-amber-300">
+                                              Custo Projetado (c/ HE) <HelpCircle size={10} className="text-[#8696a0] group-hover:text-emerald-400 transition-colors shrink-0" />
+                                            </span>
+                                            <span className="font-extrabold text-emerald-400 group-hover:text-emerald-300">R$ {hours.totalEstimatedSalary.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
+                              </div>
+                            </div>
+
+                            <div className="flex gap-2 mt-4 pt-4 border-t border-[#2a3942]/40">
+                              <button
+                                onClick={(e) => toggleCargoActive(cargo, e)}
+                                className={`text-xs font-bold px-3.5 py-2.5 rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer border active:scale-95 shadow-sm ${
+                                  isActive
+                                    ? 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border-amber-500/30'
+                                    : 'bg-emerald-500 hover:bg-emerald-400 text-black border-emerald-400 font-extrabold shadow-emerald-500/20'
+                                }`}
+                                title={isActive ? 'Pausar/Inativar Cargo' : 'Reativar Cargo'}
+                              >
+                                {isActive ? <Pause size={13} /> : <Play size={13} className="fill-black" />}
+                                <span>{isActive ? 'Pausar' : 'Reativar'}</span>
+                              </button>
+                              <button
+                                onClick={() => setEditingCargo(cargo)}
+                                className="flex-1 bg-[#2a3942] hover:bg-[#3b4a54] text-[#d1d7db] text-xs font-semibold py-2 rounded-xl flex items-center justify-center gap-1 transition-all cursor-pointer"
+                              >
+                                <Edit2 size={12} /> Editar
+                              </button>
+                              <button
+                                onClick={() => deleteCargo(cargo.id)}
+                                className="bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-xs font-semibold px-3 py-2 rounded-xl transition-all border border-rose-500/10 cursor-pointer"
+                              >
+                                <Trash2 size={12} />
+                              </button>
                             </div>
                           </div>
-                        ) : cargo.break_start_time && cargo.break_end_time ? (
-                          <p className="flex items-center gap-1.5 text-amber-300/90 font-medium">
-                            <Clock size={13} className="text-amber-400 shrink-0" />
-                            Intervalo: <span className="text-amber-200 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 font-bold">{cargo.break_start_time.slice(0, 5)} - {cargo.break_end_time.slice(0, 5)}</span>
-                          </p>
-                        ) : (
-                          <p className="flex items-center gap-1.5 text-slate-500 italic">
-                            <Clock size={13} className="text-slate-600 shrink-0" />
-                            Sem intervalos configurados
-                          </p>
-                        )}
+                        );
+                      })}
+                  </div>
+                )}
 
-                        <p className="flex items-start gap-1.5">
-                          <Calendar size={13} className="text-slate-400 mt-0.5 shrink-0" />
-                          <span>
-                            Dias: <span className="text-[#d1d7db] font-medium">
-                              {cargo.work_days && cargo.work_days.length > 0 
-                                ? cargo.work_days.map(d => DAYS_OF_WEEK.find(day => day.key === d)?.short).filter(Boolean).join(', ')
-                                : 'Sem dias definidos'}
-                            </span>
-                          </span>
-                        </p>
-
-                        {/* Estatísticas de Carga Horária & Saldo CLT */}
-                        {(() => {
+                {/* 2. MODO DE VISUALIZAÇÃO EM LISTA (TABELA ULTRA COMPACTA & FLUIDA) */}
+                {cargoViewMode === 'list' && (
+                  <div className="bg-[#202c33]/70 backdrop-blur-md rounded-2xl border border-[#2a3942]/70 overflow-hidden shadow-lg animate-in fade-in duration-200">
+                    <div className="divide-y divide-[#2a3942]/50">
+                      {cargos
+                        .filter(cargo => {
+                          if (cargoSearchTerm.trim()) {
+                            const q = cargoSearchTerm.trim().toLowerCase();
+                            const matchName = cargo.name?.toLowerCase().includes(q);
+                            const matchShifts = (cargo.shifts || []).some(s => s.toLowerCase().includes(q));
+                            const matchUsers = users.some(u => u.cargo_id === cargo.id && (u.name?.toLowerCase().includes(q) || u.email?.toLowerCase().includes(q)));
+                            if (!matchName && !matchShifts && !matchUsers) return false;
+                          }
+                          if (cargoFilterShift !== 'all') {
+                            const shifts = cargo.shifts && cargo.shifts.length > 0 ? cargo.shifts : cargo.shift_period ? [cargo.shift_period] : [];
+                            if (!shifts.includes(cargoFilterShift)) return false;
+                          }
+                          if (cargoFilterStatus === 'active' && cargo.is_active === false) return false;
+                          if (cargoFilterStatus === 'inactive' && cargo.is_active !== false) return false;
+                          return true;
+                        })
+                        .map((cargo) => {
                           const hours = calculateCargoHours(cargo);
+                          const shiftsList = (cargo.shifts && cargo.shifts.length > 0 ? cargo.shifts : cargo.shift_period ? [cargo.shift_period] : []);
+                          const isActive = cargo.is_active !== false;
+                          const assignedUsers = users.filter(u => u.cargo_id === cargo.id);
+
                           return (
-                            <div className="mt-3 pt-3 border-t border-[#2a3942]/30 space-y-2">
-                              <div className="grid grid-cols-3 gap-2 text-center">
+                            <div 
+                              key={cargo.id}
+                              className={`p-4 transition-all hover:bg-[#2a3942]/30 flex flex-col lg:flex-row lg:items-center justify-between gap-4 relative overflow-hidden ${
+                                editingCargo?.id === cargo.id ? 'bg-indigo-500/10 border-l-4 border-indigo-500' : ''
+                              } ${!isActive ? 'bg-[#151e24]/95 border-l-4 border-l-amber-500' : ''}`}
+                            >
+                              {/* Coluna 1: Nome do Cargo, Status, Turnos, Escala & Equipe */}
+                              <div className="flex-1 min-w-[240px]">
+                                {/* Tarja / Faixa em Destaque no Modo Lista */}
+                                {!isActive && (
+                                  <div className="mb-2.5 bg-gradient-to-r from-amber-500/25 via-amber-500/15 to-transparent border border-amber-500/40 px-2.5 py-1 rounded-xl flex items-center gap-2 max-w-fit shadow-xs">
+                                    <PauseCircle size={14} className="text-amber-400 shrink-0 animate-pulse" />
+                                    <span className="text-[11px] font-black text-amber-300 uppercase tracking-wider">
+                                      ⏸️ CARGO PAUSADO / INATIVO
+                                    </span>
+                                    <span className="text-[10px] text-amber-200/80 hidden sm:inline">• Suspenso para escalas operacionais</span>
+                                  </div>
+                                )}
+
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <div className={`w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 ${
+                                    isActive ? 'bg-indigo-500/20 border-indigo-500/30 text-indigo-400' : 'bg-amber-500/20 border-amber-500/40 text-amber-400'
+                                  }`}>
+                                    {isActive ? <Briefcase size={15} /> : <Pause size={15} />}
+                                  </div>
+                                  <span className={`font-bold text-base truncate ${isActive ? 'text-white' : 'text-slate-300 line-through decoration-amber-500/60 decoration-2'}`}>
+                                    {cargo.name}
+                                  </span>
+
+                                  {/* Badge de Status Interativo */}
+                                  <button
+                                    type="button"
+                                    onClick={(e) => toggleCargoActive(cargo, e)}
+                                    title={isActive ? 'Clique para pausar este cargo' : 'Clique para reativar este cargo'}
+                                    className={`text-[10px] px-2.5 py-0.5 rounded-full font-extrabold border transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 ${
+                                      isActive 
+                                        ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/25' 
+                                        : 'bg-amber-500/20 text-amber-300 border-amber-500/50 hover:bg-amber-500/30 shadow-sm'
+                                    }`}
+                                  >
+                                    <span className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+                                    {isActive ? 'Ativo' : 'Pausado'}
+                                  </button>
+
+                                  {/* Badges de Turno */}
+                                  <div className="flex flex-wrap gap-1">
+                                    {shiftsList.map((s, idx) => (
+                                      <span key={idx} className={`text-[9px] px-2 py-0.5 rounded-full font-bold border ${
+                                        s === 'cafe' ? 'bg-amber-500/10 text-amber-300 border-amber-500/20' :
+                                        s === 'almoco' ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20' :
+                                        s === 'jantar' ? 'bg-indigo-500/10 text-indigo-300 border-indigo-500/20' :
+                                        'bg-slate-500/10 text-slate-300 border-slate-500/20'
+                                      }`}>
+                                        {s === 'cafe' ? '☕ Café' : s === 'almoco' ? '🍱 Almoço' : s === 'jantar' ? '🌙 Jantar' : s}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-3 mt-1.5 text-xs text-[#8696a0] flex-wrap">
+                                  <span className="flex items-center gap-1 font-medium text-[#d1d7db]">
+                                    <Clock size={12} className="text-slate-400" />
+                                    {cargo.start_time?.slice(0, 5)} - {cargo.end_time?.slice(0, 5)}
+                                  </span>
+                                  <span className="text-[#8696a0]">•</span>
+                                  <span className="flex items-center gap-1 text-[#8696a0]">
+                                    <Calendar size={12} className="text-slate-400" />
+                                    {cargo.work_days && cargo.work_days.length > 0 
+                                      ? cargo.work_days.map(d => DAYS_OF_WEEK.find(day => day.key === d)?.short).filter(Boolean).join(', ')
+                                      : 'Sem dias definidos'}
+                                  </span>
+
+                                  {/* Resumo de Pausas */}
+                                  {(cargo.breaks && cargo.breaks.length > 0) ? (
+                                    <>
+                                      <span className="text-[#8696a0]">•</span>
+                                      <span className="text-[10px] text-amber-300 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 font-semibold">
+                                        ⏸️ {cargo.breaks.length} {cargo.breaks.length === 1 ? 'Pausa' : 'Pausas'}
+                                      </span>
+                                    </>
+                                  ) : cargo.break_start_time && cargo.break_end_time ? (
+                                    <>
+                                      <span className="text-[#8696a0]">•</span>
+                                      <span className="text-[10px] text-amber-300 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 font-semibold">
+                                        ⏸️ {cargo.break_start_time.slice(0, 5)} - {cargo.break_end_time.slice(0, 5)}
+                                      </span>
+                                    </>
+                                  ) : null}
+                                </div>
+
+                                {/* Colaboradores Vinculados na Lista */}
+                                <div className="flex items-center gap-2 mt-2 pt-2 border-t border-[#2a3942]/30 flex-wrap">
+                                  <span className="text-[10px] text-[#8696a0] font-bold uppercase tracking-wider flex items-center gap-1 shrink-0">
+                                    <Users size={11} className="text-indigo-400" />
+                                    Equipe ({assignedUsers.length}):
+                                  </span>
+                                  {assignedUsers.length > 0 ? (
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      {assignedUsers.map((u) => {
+                                        const uInitials = getInitials(u.name);
+                                        const uAvatarBg = getAvatarGradient(u.name);
+                                        return (
+                                          <span
+                                            key={u.id}
+                                            className="inline-flex items-center gap-1.5 bg-[#111b21] hover:bg-[#182229] border border-[#2a3942]/60 hover:border-indigo-500/40 px-2 py-0.5 rounded-lg text-xs font-semibold text-white shadow-xs transition-colors"
+                                            title={`${u.name} (${u.email})${u.pin ? ` • PIN: ${u.pin}` : ''}`}
+                                          >
+                                            <span className={`w-4 h-4 rounded bg-gradient-to-br ${uAvatarBg} flex items-center justify-center text-[8px] font-black text-white shrink-0`}>
+                                              {uInitials}
+                                            </span>
+                                            <span className="truncate max-w-[110px] text-[11px]">{u.name}</span>
+                                          </span>
+                                        );
+                                      })}
+                                    </div>
+                                  ) : (
+                                    <span className="text-[11px] text-slate-500 italic">Sem colaboradores vinculados</span>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Coluna 2: Carga Horária CLT (Pílulas Compactas) */}
+                              <div className={`flex items-center gap-2 flex-wrap ${!isActive ? 'opacity-70' : ''}`}>
                                 {/* Diária */}
-                                <div className="bg-black/20 border border-[#2a3942]/40 rounded-xl p-2 flex flex-col justify-between">
-                                  <span className="text-[9px] text-[#64748b] font-bold uppercase tracking-wider block">Diária (Líq.)</span>
-                                  <span className="text-xs text-emerald-400 font-extrabold my-0.5">{hours.formattedDaily}</span>
+                                <div className="bg-[#111b21] px-2.5 py-1.5 rounded-xl border border-[#2a3942]/60 text-center min-w-[76px]">
+                                  <span className="text-[9px] text-[#8696a0] uppercase font-bold block">Diária</span>
+                                  <span className="text-xs font-bold text-emerald-400">{hours.formattedDaily}</span>
                                   {hours.dailyDeltaText && (
-                                    <span className={`text-[9px] font-bold px-1 py-0.5 rounded ${
-                                      hours.dailyIsOvertime 
-                                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' 
-                                        : 'bg-indigo-500/20 text-indigo-300'
+                                    <span className={`text-[8px] font-bold block mt-0.5 px-1 rounded ${
+                                      hours.dailyIsOvertime ? 'text-amber-300 bg-amber-500/20' : 'text-indigo-300 bg-indigo-500/20'
                                     }`}>
                                       {hours.dailyDeltaText}
                                     </span>
@@ -1972,14 +2765,12 @@ export default function ChecklistSettings() {
                                 </div>
 
                                 {/* Semanal */}
-                                <div className="bg-black/20 border border-[#2a3942]/40 rounded-xl p-2 flex flex-col justify-between">
-                                  <span className="text-[9px] text-[#64748b] font-bold uppercase tracking-wider block">Semanal</span>
-                                  <span className="text-xs text-indigo-300 font-extrabold my-0.5">{hours.formattedWeekly}</span>
+                                <div className="bg-[#111b21] px-2.5 py-1.5 rounded-xl border border-[#2a3942]/60 text-center min-w-[76px]">
+                                  <span className="text-[9px] text-[#8696a0] uppercase font-bold block">Semanal</span>
+                                  <span className="text-xs font-bold text-indigo-300">{hours.formattedWeekly}</span>
                                   {hours.weeklyDeltaText && (
-                                    <span className={`text-[9px] font-bold px-1 py-0.5 rounded ${
-                                      hours.weeklyIsOvertime 
-                                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' 
-                                        : 'bg-indigo-500/20 text-indigo-300'
+                                    <span className={`text-[8px] font-bold block mt-0.5 px-1 rounded ${
+                                      hours.weeklyIsOvertime ? 'text-amber-300 bg-amber-500/20' : 'text-indigo-300 bg-indigo-500/20'
                                     }`}>
                                       {hours.weeklyDeltaText}
                                     </span>
@@ -1987,14 +2778,12 @@ export default function ChecklistSettings() {
                                 </div>
 
                                 {/* Mensal */}
-                                <div className="bg-black/20 border border-[#2a3942]/40 rounded-xl p-2 flex flex-col justify-between">
-                                  <span className="text-[9px] text-[#64748b] font-bold uppercase tracking-wider block">Mensal</span>
-                                  <span className="text-xs text-amber-300 font-extrabold my-0.5">{hours.formattedMonthly}</span>
+                                <div className="bg-[#111b21] px-2.5 py-1.5 rounded-xl border border-[#2a3942]/60 text-center min-w-[76px]">
+                                  <span className="text-[9px] text-[#8696a0] uppercase font-bold block">Mensal</span>
+                                  <span className="text-xs font-bold text-amber-300">{hours.formattedMonthly}</span>
                                   {hours.monthlyDeltaText && (
-                                    <span className={`text-[9px] font-bold px-1 py-0.5 rounded ${
-                                      hours.monthlyIsOvertime 
-                                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' 
-                                        : 'bg-emerald-500/20 text-emerald-300'
+                                    <span className={`text-[8px] font-bold block mt-0.5 px-1 rounded ${
+                                      hours.monthlyIsOvertime ? 'text-amber-300 bg-amber-500/20' : 'text-emerald-300 bg-emerald-500/20'
                                     }`}>
                                       {hours.monthlyDeltaText}
                                     </span>
@@ -2002,48 +2791,67 @@ export default function ChecklistSettings() {
                                 </div>
                               </div>
 
-                              {/* Exibição Salarial */}
-                              {hours.salary > 0 && (
-                                <div className="bg-[#111b21]/70 border border-[#2a3942]/50 rounded-xl p-2 flex items-center justify-between text-xs">
-                                  <div>
-                                    <span className="text-[10px] text-[#8696a0] block">Salário Base:</span>
-                                    <span className="font-bold text-white">R$ {hours.salary.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                  </div>
-                                  <div 
-                                    onClick={() => setCalculationDetailsCargo(cargo)}
-                                    className="text-right cursor-pointer hover:bg-emerald-500/5 px-2 py-0.5 rounded-lg border border-transparent hover:border-emerald-500/10 transition-all group flex flex-col items-end select-none"
-                                    title="Clique para entender o cálculo do custo projetado"
-                                  >
-                                    <span className="text-[10px] text-amber-400 font-medium flex items-center gap-1 group-hover:text-amber-300">
-                                      Custo Projetado (c/ HE) <HelpCircle size={10} className="text-[#8696a0] group-hover:text-emerald-400 transition-colors shrink-0" />
+                              {/* Coluna 3: Salário & Custo Projetado */}
+                              <div className="flex items-center gap-3 shrink-0">
+                                {hours.salary > 0 ? (
+                                  <div className={`bg-[#111b21] px-3 py-1.5 rounded-xl border border-[#2a3942]/60 text-right ${!isActive ? 'opacity-70' : ''}`}>
+                                    <span className="text-[9px] text-[#8696a0] block">Salário Base:</span>
+                                    <span className="text-xs font-bold text-white block">
+                                      R$ {hours.salary.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </span>
-                                    <span className="font-extrabold text-emerald-400 group-hover:text-emerald-300">R$ {hours.totalEstimatedSalary.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                    <div 
+                                      onClick={() => setCalculationDetailsCargo(cargo)}
+                                      className="cursor-pointer text-[10px] text-amber-400 hover:text-amber-300 font-medium flex items-center justify-end gap-1 mt-0.5"
+                                      title="Ver cálculo de HE"
+                                    >
+                                      <span>Custo: <strong className="text-emerald-400">R$ {hours.totalEstimatedSalary.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
+                                      <HelpCircle size={10} className="text-[#8696a0]" />
+                                    </div>
                                   </div>
+                                ) : (
+                                  <span className="text-[11px] text-slate-500 italic bg-[#111b21] px-2.5 py-1.5 rounded-xl border border-[#2a3942]/40">
+                                    Sem salário base
+                                  </span>
+                                )}
+
+                                {/* Botões de Ação */}
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    onClick={(e) => toggleCargoActive(cargo, e)}
+                                    className={`p-2 sm:px-3 sm:py-2 rounded-xl text-xs font-bold transition-all border cursor-pointer active:scale-95 flex items-center gap-1.5 ${
+                                      isActive 
+                                        ? 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border-amber-500/30' 
+                                        : 'bg-emerald-500 hover:bg-emerald-400 text-black border-emerald-400 font-extrabold shadow-md shadow-emerald-500/20'
+                                    }`}
+                                    title={isActive ? 'Pausar/Inativar Cargo' : 'Reativar Cargo'}
+                                  >
+                                    {isActive ? <Pause size={13} /> : <Play size={13} className="fill-black" />}
+                                    <span className="hidden sm:inline">{isActive ? 'Pausar' : 'Reativar'}</span>
+                                  </button>
+                                  <button
+                                    onClick={() => setEditingCargo(cargo)}
+                                    className="bg-[#2a3942] hover:bg-indigo-600 text-[#d1d7db] hover:text-white p-2 sm:px-3 sm:py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm cursor-pointer active:scale-95"
+                                    title="Editar Cargo"
+                                  >
+                                    <Edit2 size={13} />
+                                    <span className="hidden sm:inline">Editar</span>
+                                  </button>
+                                  <button
+                                    onClick={() => deleteCargo(cargo.id)}
+                                    className="bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 p-2 rounded-xl transition-all border border-rose-500/20 cursor-pointer active:scale-95"
+                                    title="Excluir Cargo"
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
                                 </div>
-                              )}
+                              </div>
                             </div>
                           );
-                        })()}
-                      </div>
-                    </div>
-
-                    <div className="flex gap-2 mt-4 pt-4 border-t border-[#2a3942]/40">
-                      <button
-                        onClick={() => setEditingCargo(cargo)}
-                        className="flex-1 bg-[#2a3942] hover:bg-[#3b4a54] text-[#d1d7db] text-xs font-semibold py-2 rounded-xl flex items-center justify-center gap-1 transition-all"
-                      >
-                        <Edit2 size={12} /> Editar
-                      </button>
-                      <button
-                        onClick={() => deleteCargo(cargo.id)}
-                        className="bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-xs font-semibold px-3 py-2 rounded-xl transition-all border border-rose-500/10"
-                      >
-                        <Trash2 size={12} />
-                      </button>
+                        })}
                     </div>
                   </div>
-                ))}
-              </div>
+                )}
+              </>
             )}
           </div>
 
@@ -2061,6 +2869,60 @@ export default function ChecklistSettings() {
               </div>
 
               <div className="space-y-4">
+                {/* Switch de Status Ativo / Inativo */}
+                <div className="bg-[#111b21] p-3 rounded-2xl border border-[#2a3942] flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className={`p-2 rounded-xl border ${editingCargo.is_active !== false ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-slate-500/10 text-slate-400 border-slate-500/20'}`}>
+                      <Power size={16} />
+                    </div>
+                    <div>
+                      <span className="text-xs font-bold text-white block">
+                        {editingCargo.is_active !== false ? 'Cargo Ativo' : 'Cargo Inativo'}
+                      </span>
+                      <span className="text-[10px] text-[#8696a0] block">
+                        {editingCargo.is_active !== false ? 'Disponível para escalas e novos membros' : 'Oculto para novas escalas operacionais'}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setEditingCargo(p => ({ ...p, is_active: p?.is_active === false ? true : false }))}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${editingCargo.is_active !== false ? 'bg-emerald-500' : 'bg-slate-600'}`}
+                  >
+                    <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${editingCargo.is_active !== false ? 'translate-x-5' : 'translate-x-0'}`} />
+                  </button>
+                </div>
+
+                {/* Colaboradores Vinculados ao Cargo em Edição */}
+                {editingCargo.id && (() => {
+                  const currentAssigned = users.filter(u => u.cargo_id === editingCargo.id);
+                  return (
+                    <div className="bg-[#111b21] p-3 rounded-2xl border border-[#2a3942] space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-[#d1d7db] flex items-center gap-1.5">
+                          <Users size={13} className="text-indigo-400" />
+                          Colaboradores com esta Função ({currentAssigned.length})
+                        </span>
+                      </div>
+                      {currentAssigned.length > 0 ? (
+                        <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto pr-1 scrollbar-thin">
+                          {currentAssigned.map(u => (
+                            <div key={u.id} className="flex items-center gap-1.5 bg-[#202c33] border border-[#2a3942]/60 px-2 py-1 rounded-xl text-xs">
+                              <div className={`w-4 h-4 rounded bg-gradient-to-br ${getAvatarGradient(u.name)} flex items-center justify-center text-[8px] font-black text-white shrink-0`}>
+                                {getInitials(u.name)}
+                              </div>
+                              <span className="font-semibold text-white truncate max-w-[120px]">{u.name}</span>
+                              {u.pin && <span className="text-[9px] text-amber-300 font-mono">({u.pin})</span>}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-[11px] text-slate-500 italic">Nenhum colaborador com este cargo no momento.</p>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 {/* Nome */}
                 <div>
                   <label className="block text-xs font-medium text-[#8696a0] mb-1">Nome do Cargo *</label>

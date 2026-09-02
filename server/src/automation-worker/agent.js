@@ -379,32 +379,71 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
                 if (cardapioToken) {
                     headers['Authorization'] = cardapioToken.startsWith('Bearer ') ? cardapioToken : `Bearer ${cardapioToken}`;
                 }
-                
-                logGastrofoodCall({
-                    direction: 'request',
-                    action: 'Consultar Cardápio',
-                    method: 'POST',
-                    url: cardapioUrl,
-                    payload: bodyObj
-                });
 
-                const res = await fetch(cardapioUrl, {
-                    method: 'POST',
-                    headers,
-                    body: JSON.stringify(bodyObj)
-                });
-                
-                if (res.ok) {
-                    const apiResponse = await res.json();
-                    logGastrofoodCall({
-                        direction: 'response',
-                        action: 'Consultar Cardápio',
-                        method: 'POST',
-                        url: cardapioUrl,
-                        status: res.status,
-                        response: apiResponse
-                    });
+                let apiResponse = null;
+                const maxApiRetries = 3;
 
+                for (let attempt = 1; attempt <= maxApiRetries; attempt++) {
+                    try {
+                        logGastrofoodCall({
+                            direction: 'request',
+                            action: 'Consultar Cardápio',
+                            method: 'POST',
+                            url: cardapioUrl,
+                            payload: bodyObj
+                        });
+
+                        const res = await fetch(cardapioUrl, {
+                            method: 'POST',
+                            headers,
+                            body: JSON.stringify(bodyObj)
+                        });
+
+                        if (res.ok) {
+                            const parsed = await res.json();
+                            const produtosCheck = parsed.produtos || parsed.data?.produtos || [];
+                            const gruposCheck = parsed.grupos || parsed.data?.grupos || [];
+
+                            if (produtosCheck.length > 0 || attempt === maxApiRetries) {
+                                apiResponse = parsed;
+                                logGastrofoodCall({
+                                    direction: 'response',
+                                    action: 'Consultar Cardápio',
+                                    method: 'POST',
+                                    url: cardapioUrl,
+                                    status: res.status,
+                                    response: parsed
+                                });
+                                if (produtosCheck.length > 0) break;
+                            }
+
+                            if (produtosCheck.length === 0 && attempt < maxApiRetries) {
+                                console.warn(`[Gastrofood API] Cardápio retornou 0 produtos (tentativa ${attempt}/${maxApiRetries}). Retentando em ${attempt * 1.5}s...`);
+                                await new Promise(r => setTimeout(r, attempt * 1500));
+                            }
+                        } else {
+                            const errText = await res.text();
+                            logGastrofoodCall({
+                                direction: 'error',
+                                action: 'Consultar Cardápio',
+                                method: 'POST',
+                                url: cardapioUrl,
+                                status: res.status,
+                                error: errText
+                            });
+                            if (attempt < maxApiRetries) {
+                                await new Promise(r => setTimeout(r, attempt * 1500));
+                            }
+                        }
+                    } catch (fetchErr) {
+                        console.warn(`[Gastrofood API] Erro de rede na tentativa ${attempt}/${maxApiRetries}:`, fetchErr.message);
+                        if (attempt < maxApiRetries) {
+                            await new Promise(r => setTimeout(r, attempt * 1500));
+                        }
+                    }
+                }
+                
+                if (apiResponse) {
                     const apiProdutos = apiResponse.produtos || apiResponse.data?.produtos || [];
                     const apiGrupos = apiResponse.grupos || apiResponse.data?.grupos || [];
                     
@@ -467,16 +506,6 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
                         
                         return cache;
                     }
-                } else {
-                    const errText = await res.text();
-                    logGastrofoodCall({
-                        direction: 'error',
-                        action: 'Consultar Cardápio',
-                        method: 'POST',
-                        url: cardapioUrl,
-                        status: res.status,
-                        error: errText
-                    });
                 }
             } catch (apiErr) {
                 console.error(`[CardapioCache - API] Erro ao consultar API externa para a chave ${cacheKey}:`, apiErr);

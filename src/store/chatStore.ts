@@ -3790,7 +3790,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 lastMsgTimestamp: (conv?.last_message_at || conv?.updated_at) ? new Date(conv.last_message_at || conv.updated_at).getTime() : new Date(dbC.created_at).getTime(),
                 is_pinned: conv?.is_pinned || false,
                 is_favorite: conv?.is_favorite || false,
-                conv_status: conv?.status || 'pending',
+                conv_status: conv?.status || (mappedMessages.length > 0 ? 'pending' : 'no_conversation'),
                 snoozed_until: conv?.snoozed_until,
                 snoozed_at: conv?.snoozed_at,
                 snoozed_by: conv?.snoozed_by,
@@ -5090,7 +5090,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (payload.ai_paused) {
             try {
                 const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
-                fetch(`${API_URL}/api/messages/cancel-ai`, {
+                fetch(`${API_URL}/api/v1/messages/cancel-ai`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',

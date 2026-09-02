@@ -340,7 +340,7 @@ router.delete('/instance/:name', requireApiKey, async (req, res) => {
  *                 description: A mensagem de texto a ser enviada
  *                 example: "Olá! Esta é uma mensagem de teste enviada diretamente pelo Swagger UI da Antigravity 🚀"
  */
-router.post('/message/sendText', requireApiKey, async (req, res) => {
+router.post(['/message/sendText', '/message/send-text', '/messages/sendText', '/messages/send-text', '/message/send', '/messages/send', '/api/messages', '/api/message/sendText'], requireApiKey, async (req, res) => {
     const { number, text } = req.body;
     const { id, tenant_id, display_name } = req.instanceData;
     const originIp = req.originIp || 'N/A';

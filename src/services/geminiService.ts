@@ -1228,6 +1228,155 @@ Responda ESTRITAMENTE em formato JSON:
     const text = (await result.response).text().trim();
     return { result: text };
   }
+
+  async generateChecklistFromMultimodal(params: {
+    prompt?: string;
+    audioBase64?: string;
+    audioMimeType?: string;
+    imageBase64?: string;
+    imageMimeType?: string;
+    pdfBase64?: string;
+    excelText?: string;
+    fileName?: string;
+  }): Promise<{
+    title: string;
+    description: string;
+    category: string;
+    suggested_sector?: string;
+    suggested_shifts?: string[];
+    items: Array<{
+      title: string;
+      description: string;
+      response_type: string;
+      is_required: boolean;
+      weight: number;
+      is_critical: boolean;
+      require_evidence: boolean;
+      permit_observation: boolean;
+      min_meta: number | null;
+      max_meta: number | null;
+      measurement_unit: string;
+      options?: string[] | null;
+    }>;
+  }> {
+    if (!this.isConfigured()) {
+      throw new Error('Chave de API do Gemini não configurada. Configure sua chave em Configurações.');
+    }
+
+    const model = this.getGenAI().getGenerativeModel({ model: "gemini-2.5-flash" });
+
+    const systemPrompt = `Você é um Engenheiro de Processos Operacionais e Especialista em Qualidade e Segurança Alimentar para Restaurantes, Franquias, Lanchonetes e Operações Gastronômicas.
+Sua missão é analisar os insumos fornecidos (áudio falado, imagem de prancheta/ficha de inspeção, documento PDF de Procedimento Operacional Padrão - POP, planilha Excel ou prompt de texto) e estruturar um Checklist Operacional de Alto Nível.
+
+REGRAS DE EXTRAÇÃO E ESTRUTURAÇÃO:
+1. Extraia e gere itens objetivos, claros e acionáveis para o operador em campo no tablet/totem.
+2. Identifique o tipo de resposta mais adequado para cada item entre:
+   - 'conformity' (Conforme / Não Conforme / Não se Aplica) -> Ideal para procedimentos operacionais e auditorias.
+   - 'boolean' ou 'yes_no' (Sim / Não).
+   - 'temperature' (com min_meta e max_meta em °C) -> Ex: Freezer (-18°C a -12°C), Pista Fria (0°C a 4°C), Fritadeira/Chapa (160°C a 180°C).
+   - 'numeric' (com min_meta e max_meta) -> Para contagem de estoque, pesagem ou metas numéricas.
+   - 'photo' (onde a evidência fotográfica é essencial, como organização de praça ou fechamento de caixa).
+   - 'text' (para observações ou registros textuais).
+3. Sinalize itens vitais para a saúde pública ou integridade da operação com "is_critical: true" e "require_evidence: true".
+4. Sugira o setor mais apropriado ("COZINHA", "SALÃO", "BAR", "CAIXA", "GERAL") e os turnos recomendados ("cafe", "almoco", "jantar").
+
+RESPONDA ESTRITAMENTE EM FORMATO JSON VÁLIDO (sem comentários ou texto fora do bloco JSON):
+{
+  "title": "Nome profissional do checklist (ex: Abertura e Higiene de Cozinha)",
+  "description": "Explicação resumida do objetivo do checklist",
+  "category": "Abertura / Fechamento / Higiene / Controle de Temperatura / Recebimento / Salão",
+  "suggested_sector": "COZINHA",
+  "suggested_shifts": ["cafe", "almoco", "jantar"],
+  "items": [
+    {
+      "title": "Título claro da tarefa",
+      "description": "Orientação prática para o colaborador executar",
+      "response_type": "conformity",
+      "is_required": true,
+      "weight": 1,
+      "is_critical": false,
+      "require_evidence": false,
+      "permit_observation": true,
+      "min_meta": null,
+      "max_meta": null,
+      "measurement_unit": "un",
+      "options": null
+    }
+  ]
+}`;
+
+    const parts: any[] = [{ text: systemPrompt }];
+
+    if (params.prompt) {
+      parts.push({ text: `Instruções e Prompt do Usuário:\n${params.prompt}` });
+    }
+
+    if (params.excelText) {
+      parts.push({ text: `Conteúdo extraído da planilha Excel/CSV (${params.fileName || 'planilha'}):\n${params.excelText}` });
+    }
+
+    if (params.audioBase64) {
+      parts.push({
+        inlineData: {
+          mimeType: params.audioMimeType || 'audio/webm',
+          data: params.audioBase64
+        }
+      });
+      parts.push({ text: "Analise o áudio gravado/enviado com instruções operacionais e extraia todas as tarefas e regras mencionadas." });
+    }
+
+    if (params.imageBase64) {
+      parts.push({
+        inlineData: {
+          mimeType: params.imageMimeType || 'image/jpeg',
+          data: params.imageBase64
+        }
+      });
+      parts.push({ text: "Analise a imagem/foto acima (ficha, prancheta, anotações ou documento impresso) e extraia todas as rotinas e regras de conformidade visíveis." });
+    }
+
+    if (params.pdfBase64) {
+      parts.push({
+        inlineData: {
+          mimeType: 'application/pdf',
+          data: params.pdfBase64
+        }
+      });
+      parts.push({ text: `Analise o documento PDF anexado (${params.fileName || 'manual.pdf'}) e extraia as etapas de verificação e rotinas operacionais.` });
+    }
+
+    const result = await model.generateContent(parts);
+    const responseText = (await result.response).text().trim();
+    const cleanJson = responseText.replace(/```json/gi, '').replace(/```/g, '').trim();
+    
+    try {
+      const parsed = JSON.parse(cleanJson);
+      return {
+        title: parsed.title || 'Checklist Operacional Inteligente',
+        description: parsed.description || 'Checklist gerado por Inteligência Artificial',
+        category: parsed.category || 'Geral',
+        suggested_sector: parsed.suggested_sector || 'COZINHA',
+        suggested_shifts: Array.isArray(parsed.suggested_shifts) ? parsed.suggested_shifts : ['almoco', 'jantar'],
+        items: Array.isArray(parsed.items) ? parsed.items.map((it: any, idx: number) => ({
+          title: it.title || `Tarefa ${idx + 1}`,
+          description: it.description || '',
+          response_type: it.response_type || 'conformity',
+          is_required: it.is_required ?? true,
+          weight: typeof it.weight === 'number' ? it.weight : 1,
+          is_critical: Boolean(it.is_critical),
+          require_evidence: Boolean(it.require_evidence),
+          permit_observation: it.permit_observation !== false,
+          min_meta: typeof it.min_meta === 'number' ? it.min_meta : null,
+          max_meta: typeof it.max_meta === 'number' ? it.max_meta : null,
+          measurement_unit: it.measurement_unit || (it.response_type === 'temperature' ? '°C' : 'un'),
+          options: Array.isArray(it.options) ? it.options : null
+        })) : []
+      };
+    } catch (parseErr) {
+      console.error('[GeminiService] Erro ao parsear checklist JSON:', parseErr, responseText);
+      throw new Error('A IA não retornou uma estrutura JSON válida. Tente reformular ou anexar um documento mais nítido.');
+    }
+  }
 }
 
 export const geminiService = new GeminiService();

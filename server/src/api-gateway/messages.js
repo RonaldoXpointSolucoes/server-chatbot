@@ -13,7 +13,7 @@ const requireTenant = async (req, res, next) => {
     next();
 };
 
-router.post('/messages/send', requireTenant, async (req, res) => {
+router.post(['/', '/send', '/messages/send', '/sendText', '/send-text'], requireTenant, async (req, res) => {
     const { instanceId, text, contactPhone, conversationId, senderType, is_automation, sender_type } = req.body;
     const tenantId = req.tenantId;
     const isAuto = senderType === 'automation' || is_automation === true || sender_type === 'automation';
@@ -374,7 +374,7 @@ router.post('/conversations/:conversationId/sync-history', requireTenant, async 
     }
 });
 
-router.post('/cancel-ai', requireTenant, async (req, res) => {
+router.post(['/cancel-ai', '/messages/cancel-ai'], requireTenant, async (req, res) => {
     try {
         const { conversationId, remoteJid, contactId, reason } = req.body;
         

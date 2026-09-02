@@ -1669,6 +1669,11 @@ export default function ChatDashboard() {
       if (untilTimestamp > Date.now()) return false;
     }
 
+    // 6) Contatos de busca global sem conversa aberta/mensagens
+    if (c.isSearchResult && (!c.messages || c.messages.length === 0 || c.conv_status === 'none' || c.conv_status === 'no_conversation')) {
+      return false;
+    }
+
     return true;
   }, [activeChannelFilter, activeChannelName, connectedInstanceName, tenantInfo]);
 
@@ -1762,8 +1767,8 @@ export default function ChatDashboard() {
             }
         }
 
-        // 2) FILTRO POR CAIXA ESPECÍFICA (Menu esquerdo) - Ignorado se houver pesquisa ativa
-        if (activeChannelFilter && !searchTerm && activeChannelFilter !== 'all') {
+        // 2) FILTRO POR CAIXA ESPECÍFICA (Menu esquerdo)
+        if (activeChannelFilter && activeChannelFilter !== 'all') {
             const instIdFromContactId = c.id.includes('_') ? c.id.split('_')[1] : null;
             const dbInstId = c.instance_id;
             const targetInst = instIdFromContactId || dbInstId || 'default';
@@ -1798,12 +1803,25 @@ export default function ChatDashboard() {
         const isResolvedOrClosed = c.conv_status === 'resolved' || c.conv_status === 'closed' || c.status === 'resolved' || c.status === 'closed' || c.is_resolved === true || Boolean(c.resolved_at);
         const isSnoozedActive = c.conv_status === 'snoozed' && c.snoozed_until && (new Date(c.snoozed_until).getTime() > Date.now());
 
-        if (isExactActiveChat && !searchTerm) {
+        if (isExactActiveChat) {
             // No Modo Ticket (ou filtros de tickets abertos), se o chat ativo foi RESOLVIDO/ENCERRADO, BLOQUEADO ou está ADIADO, não força visibilidade na lista de tickets abertos
             if ((ticketMode || filterType === 'tickets' || filterType === 'open') && (isResolvedOrClosed || c.is_blocked || (isSnoozedActive && filterType !== 'snoozed' && filterType !== 'appointments'))) {
                 return false;
             }
-            return true;
+            if (!searchTerm) {
+                return true;
+            }
+            const s = searchTerm.toLowerCase();
+            const match = c.name?.toLowerCase().includes(s) ||
+                          c.custom_name?.toLowerCase().includes(s) ||
+                          c.push_name?.toLowerCase().includes(s) ||
+                          c.pushname?.toLowerCase().includes(s) ||
+                          c.whatsapp_jid?.toLowerCase().includes(s) ||
+                          c.phone?.toLowerCase().includes(s) ||
+                          c.fantasy_name?.toLowerCase().includes(s) ||
+                          c.document_number?.includes(searchTerm) ||
+                          c.conv_labels?.some((l: any) => l.name?.toLowerCase().includes(s));
+            if (match) return true;
         }
 
         // 4) LÓGICA DE STATUS: CONTATOS BLOQUEADOS, ADIADOS (SNOOZED) E RESOLVIDOS
@@ -1842,10 +1860,10 @@ export default function ChatDashboard() {
 
         // REGRA DE OURO DO MODO TICKET:
         // - Modo Ticket ATIVO (ticketMode === true OU filterType === 'tickets' OU filterType === 'open'):
-        //   Mostra APENAS tickets abertos na lista lateral. Oculta conversas resolvidas, encerradas e adiadas ativas.
+        //   Mostra APENAS tickets abertos na lista lateral. Oculta conversas resolvidas, encerradas e adiadas ativas (mesmo durante busca).
         // - Modo Ticket DESATIVADO (ticketMode === false E filterType === 'all'):
         //   Mostra TODAS as conversas da caixa (abertas, resolvidas, encerradas, etc.).
-        if (!searchTerm && (ticketMode || filterType === 'tickets' || filterType === 'open')) {
+        if (ticketMode || filterType === 'tickets' || filterType === 'open') {
            if (c.conv_status === 'snoozed' && c.snoozed_until) {
               const untilTimestamp = new Date(c.snoozed_until).getTime();
               if (untilTimestamp > Date.now() && filterType !== 'snoozed' && filterType !== 'appointments') {
@@ -2964,16 +2982,6 @@ export default function ChatDashboard() {
       setIsSendingMessage(false);
     }
   };
-
-  // Debounce para Busca Global
-  useEffect(() => {
-    const handler = setTimeout(() => {
-      if (searchTerm && searchTerm.trim().length >= 3) {
-         searchGlobalContacts(searchTerm);
-      }
-    }, 600);
-    return () => clearTimeout(handler);
-  }, [searchTerm, searchGlobalContacts]);
   
   useEffect(() => {
     const closeCb = () => {
