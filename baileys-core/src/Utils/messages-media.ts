@@ -33,10 +33,9 @@ const getTmpFilesDirectory = () => tmpdir()
 
 const getImageProcessingLibrary = async () => {
 	//@ts-ignore
-	const [jimp, sharp] = await Promise.all([
-		import('jimp').catch(() => {}),
-		import('sharp').catch(() => {})
-	])
+	const jimp = await import('jimp').catch(() => {})
+	//@ts-ignore
+	const sharp = await import('sharp').catch(() => {})
 
 	if (sharp) {
 		return { sharp }
@@ -155,7 +154,7 @@ export const extractImageThumb = async (bufferOrFilePath: Readable | Buffer | st
 			}
 		}
 
-		const jimpLib: any = ('jimp' in lib && lib.jimp) ? (lib.jimp.Jimp || lib.jimp.default || lib.jimp) : null
+		const jimpLib: any = ('jimp' in lib && (lib as any).jimp) ? ((lib as any).jimp.Jimp || (lib as any).jimp.default || (lib as any).jimp) : null
 		if (jimpLib && typeof jimpLib.read === 'function') {
 			const jimp = await jimpLib.read(bufferOrFilePath)
 			const dimensions = {
@@ -210,7 +209,7 @@ export const generateProfilePicture = async (
 			return { img }
 		}
 
-		const jimpLib: any = ('jimp' in lib && lib.jimp) ? (lib.jimp.Jimp || lib.jimp.default || lib.jimp) : null
+		const jimpLib: any = ('jimp' in lib && (lib as any).jimp) ? ((lib as any).jimp.Jimp || (lib as any).jimp.default || (lib as any).jimp) : null
 		if (jimpLib && typeof jimpLib.read === 'function') {
 			const jimp = await jimpLib.read(buffer)
 			const min = Math.min(jimp.width || jimp.bitmap.width, jimp.height || jimp.bitmap.height)
