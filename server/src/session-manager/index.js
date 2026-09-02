@@ -1562,7 +1562,7 @@ class SessionManager {
                                                 const wakedSock = await this.getSocketOrWake(tenantId, instanceId, true, forceRestart);
                                                 if (wakedSock && isSocketOpen(wakedSock)) {
                                                     activeSock = wakedSock;
-                                                    sendFn = activeSock.originalSendMessage || activeSock.sendMessage;
+                                                    sendFn = activeSock.originalSendMessage || originalSendMessage;
                                                 } else {
                                                     throw new Error(`Connection Closed (Instância ${instanceId} temporariamente reconectando ou restabelecendo socket)`);
                                                 }
@@ -1584,7 +1584,7 @@ class SessionManager {
                                     const latestSock = this.sessions.get(instanceId)?.sock;
                                     if (latestSock && isSocketOpen(latestSock)) {
                                         activeSock = latestSock;
-                                        sendFn = activeSock.originalSendMessage || activeSock.sendMessage;
+                                        sendFn = activeSock.originalSendMessage || originalSendMessage;
                                     }
 
                                     // Validação final de integridade do socket autenticado
