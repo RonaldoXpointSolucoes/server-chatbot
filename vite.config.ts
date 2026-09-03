@@ -48,7 +48,7 @@ export default defineConfig({
         name: 'ChatBoot CRM',
         short_name: 'ChatBoot',
         description: 'Plataforma Premium de WhatsApp CRM',
-        theme_color: '#111b21',
+        theme_color: '#202c33',
         background_color: '#0b141a',
         display: 'standalone',
         display_override: ['standalone', 'fullscreen', 'minimal-ui'],

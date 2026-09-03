@@ -1159,7 +1159,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     } else {
       document.documentElement.classList.remove('dark');
     }
-    const currentColor = isDark ? '#111b21' : '#f0f2f5';
+    const currentColor = isDark ? '#202c33' : '#f0f2f5';
     document.querySelectorAll('meta[name="theme-color"]').forEach(el => el.setAttribute('content', currentColor));
     document.querySelector('meta[name="color-scheme"]')?.setAttribute('content', isDark ? 'dark' : 'light');
     document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')?.setAttribute('content', isDark ? 'black-translucent' : 'default');

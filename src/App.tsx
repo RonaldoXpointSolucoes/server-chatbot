@@ -58,7 +58,7 @@ if (isDark) {
 } else {
   document.documentElement.classList.remove('dark');
 }
-const bootThemeColor = isDark ? '#111b21' : '#f0f2f5';
+const bootThemeColor = isDark ? '#202c33' : '#f0f2f5';
 document.querySelectorAll('meta[name="theme-color"]').forEach(el => el.setAttribute('content', bootThemeColor));
 document.querySelector('meta[name="color-scheme"]')?.setAttribute('content', isDark ? 'dark' : 'light');
 document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')?.setAttribute('content', isDark ? 'black-translucent' : 'default');

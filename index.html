@@ -9,8 +9,8 @@
     <link rel="icon" type="image/png" sizes="192x192" href="/pwa-192x192.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f0f2f5" />
-    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#111b21" />
-    <meta name="theme-color" content="#111b21" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#202c33" />
+    <meta name="theme-color" content="#202c33" />
     
     <!-- Apple iOS Safari & Android PWA Tags -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -29,7 +29,7 @@
     <script>
       // Anti-flicker e sincronização da barra de status no Android / PWA
       const applyThemeColor = (isDark) => {
-         const color = isDark ? '#111b21' : '#f0f2f5';
+         const color = isDark ? '#202c33' : '#f0f2f5';
          const metaThemes = document.querySelectorAll('meta[name="theme-color"]');
          if (metaThemes.length > 0) {
             metaThemes.forEach(el => el.setAttribute('content', color));

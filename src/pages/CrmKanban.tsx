@@ -428,6 +428,11 @@ export default function CrmKanban() {
   const [techExecutorInput, setTechExecutorInput] = useState('');
   const [validationAlertMessage, setValidationAlertMessage] = useState<string | null>(null);
 
+  // Estados para Modal de Devolução de Card (Em Testes & QA -> Em Desenvolvimento)
+  const [revertingLead, setRevertingLead] = useState<CRMLead | null>(null);
+  const [revertReason, setRevertReason] = useState('');
+  const [isSubmittingRevert, setIsSubmittingRevert] = useState(false);
+
   // Estados para Criação de Card com Áudio, Imagens, Vídeos & IA Multimodal
   const [isAiCardModalOpen, setIsAiCardModalOpen] = useState(false);
   const [isAiRecording, setIsAiRecording] = useState(false);
@@ -1242,6 +1247,64 @@ export default function CrmKanban() {
     if (error) {
       console.error('Erro ao avançar lead:', error);
       fetchData();
+    }
+  };
+
+  // Reverter / Devolver lead para a coluna 'Em Desenvolvimento'
+  const handleConfirmRevertLead = async () => {
+    if (!revertingLead) return;
+    setIsSubmittingRevert(true);
+    try {
+      const currentIndex = pipelineStages.findIndex(s => s.id === revertingLead.status);
+      let prevStage = 'development';
+      if (currentIndex > 0) {
+        prevStage = pipelineStages[currentIndex - 1].id;
+      }
+
+      const prevColLeads = leads
+        .filter(l => l.status === prevStage && l.id !== revertingLead.id)
+        .sort((a, b) => (a.position || 0) - (b.position || 0));
+
+      let newPosition = 0;
+      if (prevColLeads.length > 0) {
+        newPosition = (prevColLeads[prevColLeads.length - 1].position || 0) + 1000;
+      }
+
+      const historyEntry = {
+        from: revertingLead.status,
+        to: prevStage,
+        by: localStorage.getItem('current_user_name') || 'Agente / QA',
+        at: new Date().toISOString(),
+        delivery_report: revertReason ? { reason: revertReason, note: 'Card devolvido para desenvolvimento' } : undefined
+      };
+      const updatedHistory = [...(revertingLead.history || []), historyEntry];
+      const updatedLead = { ...revertingLead, status: prevStage, position: newPosition, history: updatedHistory };
+
+      setLeads(prev => prev.map(l => l.id === revertingLead.id ? updatedLead : l));
+      if (selectedLead?.id === revertingLead.id) {
+        setSelectedLead(updatedLead);
+      }
+
+      const { error } = await supabase
+        .from('crm_leads')
+        .update({ 
+          status: prevStage,
+          position: newPosition,
+          history: updatedHistory
+        })
+        .eq('id', revertingLead.id);
+
+      if (error) {
+        console.error('Erro ao devolver lead:', error);
+        fetchData();
+      } else {
+        setRevertingLead(null);
+        setRevertReason('');
+      }
+    } catch (err) {
+      console.error('Falha ao reverter card:', err);
+    } finally {
+      setIsSubmittingRevert(false);
     }
   };
 
@@ -2239,6 +2302,24 @@ export default function CrmKanban() {
                                 >
                                   {agentObj.full_name?.split(' ').map(n => n[0]).slice(0, 2).join('') || 'AG'}
                                 </span>
+                              )}
+
+                              {/* Botão Devolver (Exclusivo da etapa Em Testes & QA / Homologação) */}
+                              {(lead.status === 'testing' || stage.id === 'testing' || stage.label?.toLowerCase().includes('teste') || stage.label?.toLowerCase().includes('qa')) && (
+                                <button 
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    e.preventDefault();
+                                    setRevertingLead(lead);
+                                    setRevertReason('');
+                                  }}
+                                  className="group/revert text-[10px] font-black uppercase text-rose-500 dark:text-rose-400 hover:text-rose-600 dark:hover:text-rose-300 flex items-center justify-center gap-1.5 hover:scale-[1.03] active:scale-95 transition-all cursor-pointer bg-rose-500/10 dark:bg-rose-500/15 hover:bg-rose-500/25 px-2.5 py-1.5 rounded-xl border border-rose-500/25 shadow-xs min-h-[32px] select-none z-10"
+                                  title="Devolver para 'Em Desenvolvimento'"
+                                >
+                                  <RotateCcw size={11} className="transition-transform group-hover/revert:-rotate-45" />
+                                  <span>Devolver</span>
+                                </button>
                               )}
 
                               {/* Botão Validar (Exclusivo da etapa Em Testes & QA / Homologação) */}
@@ -3423,6 +3504,19 @@ export default function CrmKanban() {
                 )}
 
                 <div className="flex items-center gap-2">
+                  {(selectedLead.status === 'testing' || pipelineStages.find(s => s.id === selectedLead.status)?.id === 'testing') && (
+                    <button 
+                      onClick={() => {
+                        setRevertingLead(selectedLead);
+                        setRevertReason('');
+                      }}
+                      className="px-4 py-2.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 font-bold rounded-xl text-xs flex items-center gap-1.5 active:scale-95 transition-all cursor-pointer uppercase tracking-wider border border-rose-500/20"
+                    >
+                      <RotateCcw size={13} />
+                      <span>Devolver</span>
+                    </button>
+                  )}
+
                   {pipelineStages.findIndex(s => s.id === selectedLead.status) < pipelineStages.length - 1 && (
                     <button 
                       onClick={() => {
@@ -4478,6 +4572,23 @@ export default function CrmKanban() {
               <button 
                 type="button"
                 onClick={() => {
+                  const leadToRevert = validatingLead;
+                  setValidatingLead(null);
+                  setValidationData(null);
+                  if (leadToRevert) {
+                    setRevertingLead(leadToRevert);
+                    setRevertReason('');
+                  }
+                }}
+                className="w-full sm:w-auto px-4 py-2.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 font-bold rounded-xl text-xs active:scale-95 cursor-pointer flex items-center justify-center gap-1.5 border border-rose-500/20"
+              >
+                <RotateCcw size={13} />
+                <span>Reprovar e Devolver</span>
+              </button>
+
+              <button 
+                type="button"
+                onClick={() => {
                   if (validatingLead) {
                     handleAdvanceLead(validatingLead);
                   }
@@ -4488,6 +4599,91 @@ export default function CrmKanban() {
               >
                 <CheckCircle2 size={14} />
                 <span>Aprovar e Avançar para Concluído</span>
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Devolução de Card para 'Em Desenvolvimento' */}
+      {revertingLead && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-lg bg-white dark:bg-[#182229] rounded-3xl shadow-2xl border border-slate-200 dark:border-white/10 overflow-hidden flex flex-col">
+            
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-slate-200/60 dark:border-white/10 flex items-center justify-between bg-rose-500/10 dark:bg-rose-500/15">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-rose-500/20 text-rose-500 flex items-center justify-center">
+                  <RotateCcw size={18} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-slate-900 dark:text-white">
+                    Devolver Card para Desenvolvimento
+                  </h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    O card retornará para a coluna "Em Desenvolvimento"
+                  </p>
+                </div>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setRevertingLead(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-white rounded-lg"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Conteúdo */}
+            <div className="p-6 space-y-4 text-xs">
+              <div className="p-3.5 rounded-2xl bg-slate-100 dark:bg-slate-800/60 border border-slate-200 dark:border-white/5 space-y-1">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Card Selecionado</span>
+                <p className="font-bold text-slate-800 dark:text-slate-200 text-sm">{revertingLead.title}</p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                  <span>Motivo da Devolução (Opcional):</span>
+                  <span className="text-[10px] text-slate-400 font-normal">Ficará registrado no histórico</span>
+                </label>
+                <textarea
+                  rows={3}
+                  value={revertReason}
+                  onChange={(e) => setRevertReason(e.target.value)}
+                  placeholder="Ex: Validação identificou necessidade de ajuste visual..."
+                  className="w-full p-3 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-white/10 rounded-xl text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:border-rose-500 transition-colors resize-none"
+                />
+              </div>
+            </div>
+
+            {/* Rodapé */}
+            <div className="px-6 py-4 border-t border-slate-200/60 dark:border-white/10 bg-slate-50/50 dark:bg-black/10 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setRevertingLead(null)}
+                disabled={isSubmittingRevert}
+                className="px-4 py-2 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-medium text-xs rounded-xl"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmRevertLead}
+                disabled={isSubmittingRevert}
+                className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs rounded-xl shadow-md shadow-rose-600/20 active:scale-95 transition-all flex items-center gap-1.5"
+              >
+                {isSubmittingRevert ? (
+                  <>
+                    <Loader2 size={13} className="animate-spin" />
+                    <span>Devolvendo...</span>
+                  </>
+                ) : (
+                  <>
+                    <RotateCcw size={13} />
+                    <span>Confirmar Devolução</span>
+                  </>
+                )}
               </button>
             </div>
 
