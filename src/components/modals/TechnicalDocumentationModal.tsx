@@ -7,7 +7,6 @@ import {
   Cpu, 
   Database, 
   MessageSquare, 
-  ArrowLeftRight, 
   ShieldCheck, 
   Code2, 
   Copy, 
@@ -18,7 +17,15 @@ import {
   Boxes,
   Zap,
   Ticket,
-  ClipboardList
+  ClipboardList,
+  Sparkles,
+  Network,
+  HardDrive,
+  Lock,
+  Radio,
+  Gauge,
+  CheckCircle2,
+  AlertTriangle
 } from 'lucide-react';
 
 interface TechnicalDocumentationModalProps {
@@ -26,7 +33,15 @@ interface TechnicalDocumentationModalProps {
   onClose: () => void;
 }
 
-type DocSection = 'overview' | 'architecture' | 'whatsapp' | 'migration' | 'business_rules' | 'database' | 'code_structure';
+type DocSection = 
+  | 'overview' 
+  | 'topology' 
+  | 'whatsmeow' 
+  | 'ai_engine' 
+  | 'business_engine' 
+  | 'appwrite' 
+  | 'ha_scalability' 
+  | 'code_structure';
 
 export default function TechnicalDocumentationModal({ isOpen, onClose }: TechnicalDocumentationModalProps) {
   const [activeSection, setActiveSection] = useState<DocSection>('overview');
@@ -42,24 +57,24 @@ export default function TechnicalDocumentationModal({ isOpen, onClose }: Technic
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 md:p-6 bg-black/75 backdrop-blur-md animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 md:p-6 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
       <div className="relative w-full max-w-6xl h-[92vh] max-h-[950px] bg-slate-900 text-slate-100 rounded-2xl shadow-2xl border border-slate-700/80 flex flex-col overflow-hidden">
         
         {/* Header Superior */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-900/90 backdrop-blur-sm shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shadow-inner">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500/20 to-sky-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shadow-inner">
               <BookOpen size={22} />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-lg font-bold text-white tracking-wide">Documentação Técnica do Sistema</h2>
-                <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                  v7.2.7 Master
+                <h2 className="text-lg font-bold text-white tracking-wide">Documentação Técnica & Nova Arquitetura</h2>
+                <span className="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                  v7.3.0 Next-Gen Master
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                Arquitetura SaaS, Motor WhatsApp Baileys, Supabase RLS, Regras de Negócio e Guia de Migração
+                Plano de Alta Disponibilidade: Whatsmeow Go, Motor de IA Isolado, Core Engine, Appwrite Self-Hosted & Coolify
               </p>
             </div>
           </div>
@@ -69,7 +84,7 @@ export default function TechnicalDocumentationModal({ isOpen, onClose }: Technic
               <Search className="absolute left-3 top-2.5 text-slate-400" size={16} />
               <input
                 type="text"
-                placeholder="Pesquisar na documentação..."
+                placeholder="Pesquisar arquitetura..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full bg-slate-800/80 border border-slate-700/80 rounded-xl pl-9 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-400 focus:outline-none focus:border-indigo-500 transition-colors"
@@ -89,93 +104,105 @@ export default function TechnicalDocumentationModal({ isOpen, onClose }: Technic
         <div className="flex flex-1 overflow-hidden">
           
           {/* Navegação Lateral */}
-          <div className="w-64 border-r border-slate-800 bg-slate-950/40 p-3 space-y-1 overflow-y-auto shrink-0 hidden md:block">
+          <div className="w-72 border-r border-slate-800 bg-slate-950/50 p-3 space-y-1 overflow-y-auto shrink-0 hidden md:block">
             <div className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-              Navegação
+              Módulos Arquiteturais
             </div>
 
             <button
               onClick={() => setActiveSection('overview')}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
                 activeSection === 'overview'
-                  ? 'bg-indigo-600/20 text-indigo-300 border border-indigo-500/30 font-semibold'
+                  ? 'bg-indigo-600/20 text-indigo-300 border border-indigo-500/30 font-semibold shadow-sm'
                   : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
               }`}
             >
               <Layers size={16} className={activeSection === 'overview' ? 'text-indigo-400' : 'text-slate-400'} />
-              <span>Visão Geral & Stack</span>
+              <span>1. Visão Geral & Nova Stack</span>
             </button>
 
             <button
-              onClick={() => setActiveSection('architecture')}
+              onClick={() => setActiveSection('topology')}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
-                activeSection === 'architecture'
-                  ? 'bg-indigo-600/20 text-indigo-300 border border-indigo-500/30 font-semibold'
+                activeSection === 'topology'
+                  ? 'bg-indigo-600/20 text-indigo-300 border border-indigo-500/30 font-semibold shadow-sm'
                   : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
               }`}
             >
-              <Cpu size={16} className={activeSection === 'architecture' ? 'text-indigo-400' : 'text-slate-400'} />
-              <span>Arquitetura de Serviços</span>
+              <Network size={16} className={activeSection === 'topology' ? 'text-indigo-400' : 'text-slate-400'} />
+              <span>2. Topologia VPS & Coolify</span>
             </button>
 
             <button
-              onClick={() => setActiveSection('whatsapp')}
+              onClick={() => setActiveSection('whatsmeow')}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
-                activeSection === 'whatsapp'
-                  ? 'bg-emerald-600/20 text-emerald-300 border border-emerald-500/30 font-semibold'
+                activeSection === 'whatsmeow'
+                  ? 'bg-emerald-600/20 text-emerald-300 border border-emerald-500/30 font-semibold shadow-sm'
                   : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
               }`}
             >
-              <MessageSquare size={16} className={activeSection === 'whatsapp' ? 'text-emerald-400' : 'text-slate-400'} />
-              <span>Motor Baileys / WhatsApp</span>
+              <MessageSquare size={16} className={activeSection === 'whatsmeow' ? 'text-emerald-400' : 'text-slate-400'} />
+              <span>3. Motor Whatsmeow (Go puro)</span>
             </button>
 
             <button
-              onClick={() => setActiveSection('migration')}
+              onClick={() => setActiveSection('ai_engine')}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
-                activeSection === 'migration'
-                  ? 'bg-amber-600/20 text-amber-300 border border-amber-500/30 font-semibold'
+                activeSection === 'ai_engine'
+                  ? 'bg-purple-600/20 text-purple-300 border border-purple-500/30 font-semibold shadow-sm'
                   : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
               }`}
             >
-              <ArrowLeftRight size={16} className={activeSection === 'migration' ? 'text-amber-400' : 'text-slate-400'} />
-              <span>Migração de Provedor (Watts1000)</span>
+              <Sparkles size={16} className={activeSection === 'ai_engine' ? 'text-purple-400' : 'text-slate-400'} />
+              <span>4. Servidor de IA & Chaves</span>
             </button>
 
             <button
-              onClick={() => setActiveSection('business_rules')}
+              onClick={() => setActiveSection('business_engine')}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
-                activeSection === 'business_rules'
-                  ? 'bg-indigo-600/20 text-indigo-300 border border-indigo-500/30 font-semibold'
+                activeSection === 'business_engine'
+                  ? 'bg-sky-600/20 text-sky-300 border border-sky-500/30 font-semibold shadow-sm'
                   : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
               }`}
             >
-              <Workflow size={16} className={activeSection === 'business_rules' ? 'text-indigo-400' : 'text-slate-400'} />
-              <span>Módulos & Regras de Negócio</span>
+              <Workflow size={16} className={activeSection === 'business_engine' ? 'text-sky-400' : 'text-slate-400'} />
+              <span>5. Servidor de Regras (Core)</span>
             </button>
 
             <button
-              onClick={() => setActiveSection('database')}
+              onClick={() => setActiveSection('appwrite')}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
-                activeSection === 'database'
-                  ? 'bg-indigo-600/20 text-indigo-300 border border-indigo-500/30 font-semibold'
+                activeSection === 'appwrite'
+                  ? 'bg-pink-600/20 text-pink-300 border border-pink-500/30 font-semibold shadow-sm'
                   : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
               }`}
             >
-              <Database size={16} className={activeSection === 'database' ? 'text-indigo-400' : 'text-slate-400'} />
-              <span>Supabase, Tabelas & RLS</span>
+              <HardDrive size={16} className={activeSection === 'appwrite' ? 'text-pink-400' : 'text-slate-400'} />
+              <span>6. Appwrite Self-Hosted</span>
+            </button>
+
+            <button
+              onClick={() => setActiveSection('ha_scalability')}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
+                activeSection === 'ha_scalability'
+                  ? 'bg-amber-600/20 text-amber-300 border border-amber-500/30 font-semibold shadow-sm'
+                  : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
+              }`}
+            >
+              <ShieldCheck size={16} className={activeSection === 'ha_scalability' ? 'text-amber-400' : 'text-slate-400'} />
+              <span>7. Alta Disp. & Escalabilidade</span>
             </button>
 
             <button
               onClick={() => setActiveSection('code_structure')}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
                 activeSection === 'code_structure'
-                  ? 'bg-indigo-600/20 text-indigo-300 border border-indigo-500/30 font-semibold'
+                  ? 'bg-slate-700/40 text-slate-200 border border-slate-600/50 font-semibold'
                   : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
               }`}
             >
               <Code2 size={16} className={activeSection === 'code_structure' ? 'text-indigo-400' : 'text-slate-400'} />
-              <span>Estrutura de Pastas & Código</span>
+              <span>8. Estrutura de Pastas & Microserviços</span>
             </button>
           </div>
 
@@ -185,13 +212,14 @@ export default function TechnicalDocumentationModal({ isOpen, onClose }: Technic
             {/* Seletor Mobile de Abas */}
             <div className="md:hidden flex gap-2 overflow-x-auto pb-2 border-b border-slate-800">
               {[
-                { id: 'overview', label: 'Visão Geral' },
-                { id: 'architecture', label: 'Arquitetura' },
-                { id: 'whatsapp', label: 'WhatsApp' },
-                { id: 'migration', label: 'Migração' },
-                { id: 'business_rules', label: 'Regras' },
-                { id: 'database', label: 'Banco' },
-                { id: 'code_structure', label: 'Código' }
+                { id: 'overview', label: '1. Visão Geral' },
+                { id: 'topology', label: '2. Topologia VPS' },
+                { id: 'whatsmeow', label: '3. Whatsmeow Go' },
+                { id: 'ai_engine', label: '4. Servidor IA' },
+                { id: 'business_engine', label: '5. Core Regras' },
+                { id: 'appwrite', label: '6. Appwrite' },
+                { id: 'ha_scalability', label: '7. Alta Disp.' },
+                { id: 'code_structure', label: '8. Estrutura' }
               ].map(tab => (
                 <button
                   key={tab.id}
@@ -207,243 +235,320 @@ export default function TechnicalDocumentationModal({ isOpen, onClose }: Technic
               ))}
             </div>
 
-            {/* SEÇÃO 1: VISÃO GERAL */}
+            {/* SEÇÃO 1: VISÃO GERAL & NOVA STACK */}
             {activeSection === 'overview' && (
               <div className="space-y-6 animate-in fade-in duration-150">
                 <div>
                   <h3 className="text-xl font-bold text-white flex items-center gap-2">
                     <Layers className="text-indigo-400" size={22} />
-                    Visão Geral do ChatBoot CRM
+                    Visão Geral: Evolução para Arquitetura Desacoplada de Alta Performance
                   </h3>
                   <p className="text-sm text-slate-300 mt-1 leading-relaxed">
-                    O <strong>ChatBoot</strong> é uma plataforma SaaS multitenant de mensageria omnicanal, CRM conversacional, gestão de roteiros operacionais (Checklists) e vouchers digitais B2B para o varejo gastronômico e corporativo.
+                    A nova arquitetura Next-Gen substitui os acoplamentos monolíticos por <strong>4 microserviços dedicados e isolados</strong> operando sob o orquestrador <strong>Coolify</strong> em infraestrutura própria (VPS Self-Hosted), migrando do Supabase Cloud para o <strong>Appwrite</strong> e adotando o motor nativo <strong>Whatsmeow em Go (Golang)</strong> para estabilidade ininterrupta.
                   </p>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-2">
-                    <div className="flex items-center gap-2 text-indigo-400 font-semibold text-sm">
-                      <Smartphone size={18} /> Frontend SPA / PWA
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="p-4 rounded-xl bg-emerald-950/20 border border-emerald-800/40 space-y-2">
+                    <div className="flex items-center gap-2 text-emerald-400 font-bold text-sm">
+                      <Zap size={18} /> Whatsmeow (Go)
                     </div>
-                    <p className="text-xs text-slate-300">
-                      React 18 + TypeScript + Vite, TailwindCSS, Zustand Store, PWA WebAPK offline-ready com suporte a Dark Mode nativo.
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      Motor em Go puro com socket WhatsApp nativo multidevice. <strong>10MB a 25MB de RAM por sessão</strong> (10x mais leve que Node/Baileys). Zero garbage collector freeze.
                     </p>
                   </div>
-                  <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-2">
-                    <div className="flex items-center gap-2 text-emerald-400 font-semibold text-sm">
-                      <Server size={18} /> Backend Node.js
+
+                  <div className="p-4 rounded-xl bg-purple-950/20 border border-purple-800/40 space-y-2">
+                    <div className="flex items-center gap-2 text-purple-400 font-bold text-sm">
+                      <Sparkles size={18} /> Servidor de IA
                     </div>
-                    <p className="text-xs text-slate-300">
-                      Servidor Express no Coolify (PaaS), Baileys WebSocket Socket Engine, API Gateway com Fast-Fail e filas assíncronas.
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      Isolamento completo de processamento Gemini / OpenAI, vetores RAG, embeddings e vault de credenciais. Fila assíncrona independente.
                     </p>
                   </div>
-                  <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-2">
-                    <div className="flex items-center gap-2 text-sky-400 font-semibold text-sm">
-                      <Database size={18} /> Supabase PostgreSQL
+
+                  <div className="p-4 rounded-xl bg-sky-950/20 border border-sky-800/40 space-y-2">
+                    <div className="flex items-center gap-2 text-sky-400 font-bold text-sm">
+                      <Workflow size={18} /> Core Business
                     </div>
-                    <p className="text-xs text-slate-300">
-                      PostgreSQL 15 em nuvem com isolamento Multitenant via RLS, Realtime Subscriptions, Storage buckets e Triggers.
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      Servidor de regras de negócio (CRM, Checklists, Vouchers, Tickets, ERP Gastrofood). <strong>100% independente do WhatsApp</strong>: se a conexão cair, a empresa continua operando.
+                    </p>
+                  </div>
+
+                  <div className="p-4 rounded-xl bg-pink-950/20 border border-pink-800/40 space-y-2">
+                    <div className="flex items-center gap-2 text-pink-400 font-bold text-sm">
+                      <HardDrive size={18} /> Appwrite Self-Hosted
+                    </div>
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      Substitui o Supabase na mesma VPS. Banco NoSQL de documentos, Realtime WebSockets, Storage de mídias e Auth Teams sem custos de nuvem de terceiros.
                     </p>
                   </div>
                 </div>
 
-                <div className="p-4 rounded-xl bg-indigo-950/30 border border-indigo-800/40 space-y-3">
-                  <h4 className="text-sm font-bold text-indigo-300 flex items-center gap-2">
-                    <Zap size={16} /> Princípio Arquitetural: Client-Side First
+                <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-3">
+                  <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                    <Gauge size={16} className="text-emerald-400" /> Benefícios Chave da Nova Engenharia
                   </h4>
-                  <p className="text-xs text-slate-300 leading-relaxed">
-                    Para máxima velocidade e desacoplamento, todas as operações de interface, CRM, checklists, vouchers e relatórios consultam diretamente o Supabase via SDK JS. O backend Node.js é reservado estritamente para o que exige credenciais seguras e conexões binárias de socket (WhatsApp Baileys, webhooks ERP e tarefas em background).
-                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs text-slate-300">
+                    <div className="p-3 rounded-lg bg-slate-900/80 border border-slate-800 space-y-1">
+                      <div className="font-semibold text-white flex items-center gap-1.5">
+                        <CheckCircle2 size={14} className="text-emerald-400" /> Custo Previsível & Zero Lock-in
+                      </div>
+                      <p className="text-slate-400 text-[11px]">
+                        Toda a infraestrutura roda na sua VPS com Coolify. Sem taxas por milhão de linhas, sem limites de egress de storage e sem cobranças em dólar.
+                      </p>
+                    </div>
+
+                    <div className="p-3 rounded-lg bg-slate-900/80 border border-slate-800 space-y-1">
+                      <div className="font-semibold text-white flex items-center gap-1.5">
+                        <CheckCircle2 size={14} className="text-emerald-400" /> Desacoplamento à Prova de Falhas
+                      </div>
+                      <p className="text-slate-400 text-[11px]">
+                        Se um microserviço reiniciar ou a IA tiver lentidão de rede externa, os sockets de WhatsApp e as operações do PDV continuam funcionando 100%.
+                      </p>
+                    </div>
+
+                    <div className="p-3 rounded-lg bg-slate-900/80 border border-slate-800 space-y-1">
+                      <div className="font-semibold text-white flex items-center gap-1.5">
+                        <CheckCircle2 size={14} className="text-emerald-400" /> Escalabilidade Linear
+                      </div>
+                      <p className="text-slate-400 text-[11px]">
+                        Em Go, 500 instâncias de WhatsApp consomem menos de 6GB de memória, suportando milhares de mensagens simultâneas com goroutines nativas.
+                      </p>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
 
-            {/* SEÇÃO 2: ARQUITETURA DE SERVIÇOS */}
-            {activeSection === 'architecture' && (
+            {/* SEÇÃO 2: TOPOLOGIA VPS & COOLIFY */}
+            {activeSection === 'topology' && (
               <div className="space-y-6 animate-in fade-in duration-150">
                 <div>
                   <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                    <Cpu className="text-indigo-400" size={22} />
-                    Arquitetura de Serviços & Ambientes
+                    <Network className="text-indigo-400" size={22} />
+                    Topologia da VPS: Orquestração Centralizada no Coolify
                   </h3>
                   <p className="text-sm text-slate-300 mt-1">
-                    Isolamento rígido entre Produção e Homologação (Staging) para proteção de clientes reais.
+                    Como todos os containers convivem de forma isolada, segura e com altíssima velocidade na mesma VPS dedicada.
                   </p>
+                </div>
+
+                <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 font-mono text-[11px] text-slate-300 space-y-2 overflow-x-auto">
+                  <div className="text-indigo-400 font-bold"># TOPOLOGIA DE REDE INTERNA (Docker Network: app-internal-net)</div>
+                  <div className="text-slate-400">─────────────────────────────────────────────────────────────────────────────────</div>
+                  <div>Internet (Clientes / WhatsApp Web / Webhooks)</div>
+                  <div className="text-slate-500">  │</div>
+                  <div className="text-emerald-400">  ▼ [Portas 80 / 443 com SSL Automático Let's Encrypt]</div>
+                  <div>[ COOLIFY PROXY: Traefik / Caddy Gateway ]</div>
+                  <div className="text-slate-500">  │</div>
+                  <div className="text-slate-300">  ├─► api.whatsapp.seudominio.com ──► [ Whatsmeow Engine (Go) - Porta 8080 ]</div>
+                  <div className="text-slate-300">  ├─► api.ai.seudominio.com       ──► [ AI Worker Engine (Node) - Porta 4000 ]</div>
+                  <div className="text-slate-300">  ├─► api.core.seudominio.com     ──► [ Business Engine (Node) - Porta 3000 ]</div>
+                  <div className="text-slate-300">  ├─► appwrite.seudominio.com     ──► [ Appwrite Console & API - Porta 80/443 ]</div>
+                  <div className="text-slate-300">  └─► app.seudominio.com          ──► [ Frontend React SPA (Vite / Nginx) ]</div>
+                  <div className="text-slate-400">─────────────────────────────────────────────────────────────────────────────────</div>
+                  <div className="text-amber-400">[ CAMADA DE PERSISTÊNCIA INTERNA (Isolada do Acesso Externo) ]</div>
+                  <div className="text-slate-300">  ├─► Appwrite MariaDB / PostgreSQL Server (Localhost Docker Volume SSD)</div>
+                  <div className="text-slate-300">  ├─► Redis Broker (Filas assíncronas e pub/sub entre serviços)</div>
+                  <div className="text-slate-300">  └─► Appwrite Storage Engine (Armazenamento local persistido em /data/storage)</div>
                 </div>
 
                 <div className="overflow-hidden rounded-xl border border-slate-700 bg-slate-800/50">
                   <table className="w-full text-left text-xs text-slate-300">
                     <thead className="bg-slate-800 text-slate-200 uppercase font-semibold text-[11px] border-b border-slate-700">
                       <tr>
-                        <th className="p-3">Componente</th>
-                        <th className="p-3">Ambiente de Homologação (Alfa / Staging)</th>
-                        <th className="p-3">Ambiente de Produção</th>
+                        <th className="p-3">Serviço</th>
+                        <th className="p-3">Tecnologia</th>
+                        <th className="p-3">Alocação de Memória</th>
+                        <th className="p-3">Responsabilidade Principal</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-700/60">
                       <tr>
-                        <td className="p-3 font-semibold text-white">Frontend Web</td>
-                        <td className="p-3"><code>chat-boot-staging.vercel.app</code> (branch staging)</td>
-                        <td className="p-3"><code>chat-boot-theta.vercel.app</code> (branch main)</td>
+                        <td className="p-3 font-semibold text-emerald-400">Whatsmeow Engine</td>
+                        <td className="p-3">Go 1.22+ (Compilado)</td>
+                        <td className="p-3">~200MB a 1GB (50+ sessões)</td>
+                        <td className="p-3">Protocolo binário WhatsApp, QR code, envio e recebimento de mensagens</td>
                       </tr>
                       <tr>
-                        <td className="p-3 font-semibold text-white">Backend Node.js</td>
-                        <td className="p-3"><code>ServerChatBaileys-Alpha</code> (Coolify wh1ss8...)</td>
-                        <td className="p-3"><code>ServerChatBaileys-Produção</code> (Coolify owckk0...)</td>
+                        <td className="p-3 font-semibold text-purple-400">AI Worker Service</td>
+                        <td className="p-3">Node.js 22 LTS / Python</td>
+                        <td className="p-3">~500MB a 1.5GB</td>
+                        <td className="p-3">Orquestração Gemini, RAG vetorial, prompt engineering e segurança de chaves</td>
                       </tr>
                       <tr>
-                        <td className="p-3 font-semibold text-white">Banco Supabase</td>
-                        <td className="p-3">Supabase Isolado / Tenant Dev</td>
-                        <td className="p-3">Supabase Oficial (Clientes Reais)</td>
+                        <td className="p-3 font-semibold text-sky-400">Core Business Service</td>
+                        <td className="p-3">Node.js Express / Fastify</td>
+                        <td className="p-3">~400MB a 800MB</td>
+                        <td className="p-3">CRM, Checklists, Vouchers, Tickets, integrações Gastrofood e webhook dispatch</td>
+                      </tr>
+                      <tr>
+                        <td className="p-3 font-semibold text-pink-400">Appwrite Suite</td>
+                        <td className="p-3">Appwrite + Redis + DB</td>
+                        <td className="p-3">~1.5GB a 2.5GB</td>
+                        <td className="p-3">Banco de dados documental, Realtime WebSocket, Storage de mídias e Auth</td>
+                      </tr>
+                      <tr>
+                        <td className="p-3 font-semibold text-indigo-400">Coolify Host Engine</td>
+                        <td className="p-3">PaaS Docker Swarm</td>
+                        <td className="p-3">~300MB</td>
+                        <td className="p-3">Deploy contínuo, monitoramento, rotação de logs e reinicialização automática</td>
                       </tr>
                     </tbody>
                   </table>
                 </div>
-
-                <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-3">
-                  <h4 className="text-sm font-bold text-slate-200 flex items-center gap-2">
-                    <Workflow size={16} className="text-indigo-400" /> Fluxo de Dados E2E
-                  </h4>
-                  <div className="p-3 rounded-lg bg-slate-950 font-mono text-[11px] text-emerald-400 overflow-x-auto">
-                    UI (React Chat) ➔ Zustand (chatStore) ➔ HTTP API Gateway Node ➔ Baileys Socket ➔ Supabase DB (idempotente) ➔ Realtime Sync
-                  </div>
-                </div>
               </div>
             )}
 
-            {/* SEÇÃO 3: MOTOR BAILEYS & WHATSAPP */}
-            {activeSection === 'whatsapp' && (
+            {/* SEÇÃO 3: MOTOR WHATSMEOW EM GO */}
+            {activeSection === 'whatsmeow' && (
               <div className="space-y-6 animate-in fade-in duration-150">
                 <div>
                   <h3 className="text-xl font-bold text-white flex items-center gap-2">
                     <MessageSquare className="text-emerald-400" size={22} />
-                    Motor Baileys: Sessões, Sockets e Eventos
+                    Motor Whatsmeow: Por que Go é Superior ao Node.js
                   </h3>
                   <p className="text-sm text-slate-300 mt-1">
-                    Como o WhatsApp é integrado no ChatBoot utilizando o Baileys (protocolo binário WS).
+                    Adoção da biblioteca oficial <a href="https://github.com/tulir/whatsmeow" target="_blank" rel="noreferrer" className="text-emerald-400 underline font-semibold">tulir/whatsmeow</a> para máxima estabilidade operacional.
                   </p>
                 </div>
 
-                <div className="space-y-3 text-xs text-slate-300">
-                  <h4 className="text-sm font-bold text-slate-200">1. Gerenciamento de Sessões (`SessionManager.js`)</h4>
-                  <p>
-                    Cada caixa de entrada do ChatBoot possui um registro em <code>whatsapp_instances</code> associado a um <code>tenant_id</code>. O servidor instancia um socket individual via <code>makeWASocket</code> com autenticação multi-arquivo salva em diretório ou sincronizada com Supabase.
-                  </p>
-
-                  <h4 className="text-sm font-bold text-slate-200">2. Tratamento de Desconexões e Fast-Fail 400</h4>
-                  <p>
-                    Para evitar acúmulo de requisições pendentes em instâncias cujo QR Code expirou ou que foram deslogadas, o <code>whatsappRoutes.js</code> executa validação prévia de estado: se a instância estiver marcada como <code>disconnected</code> no banco, rejeita imediatamente com <code>Fast-Fail 400</code>, alertando o operador a reconectar sem travar filas do sistema.
-                  </p>
-
-                  <h4 className="text-sm font-bold text-slate-200">3. Idempotência em Inserções (`BatchProcessor.js`)</h4>
-                  <p>
-                    Para evitar colisões com <code>unique_whatsapp_message_id</code> (código 23505), o processador em lote filtra mensagens duplicadas na memória e realiza inserções seguras sem gerar falsos erros no DevLogger.
-                  </p>
-                </div>
-
-                <div className="relative">
-                  <div className="flex items-center justify-between px-3 py-1.5 bg-slate-800 rounded-t-xl text-[11px] text-slate-400">
-                    <span>Exemplo: Envio de Mensagem via API Gateway</span>
-                    <button
-                      onClick={() => copyCode('send-msg', `curl -X POST https://server.exemplo.com/api/whatsapp/sendText \\
-  -H "Content-Type: application/json" \\
-  -d '{"instanceId": "UUID", "to": "5511999999999@s.whatsapp.net", "text": "Olá!"}'`)}
-                      className="flex items-center gap-1 hover:text-white"
-                    >
-                      {copiedId === 'send-msg' ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
-                      <span>{copiedId === 'send-msg' ? 'Copiado!' : 'Copiar'}</span>
-                    </button>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-2">
+                    <h4 className="text-sm font-bold text-rose-400 flex items-center gap-2">
+                      <AlertTriangle size={16} /> Limitações do Baileys (Node.js)
+                    </h4>
+                    <ul className="list-disc pl-5 space-y-1 text-xs text-slate-300">
+                      <li>Consumo de memória elevado (150MB a 300MB por sessão ativa).</li>
+                      <li>Garbage collector do V8 causa pausas temporárias com muitas conexões.</li>
+                      <li>Vulnerável a memory leaks em uploads e downloads pesados de mídias.</li>
+                      <li>Reinicializações completas do Node afetam todas as instâncias concorrentes.</li>
+                    </ul>
                   </div>
-                  <pre className="p-3 bg-slate-950 rounded-b-xl font-mono text-[11px] text-indigo-300 overflow-x-auto">
-{`POST /api/whatsapp/sendText
-Headers: Content-Type: application/json
-Body:
-{
-  "instanceId": "bee44f96-e22c-4820-aaa5-8b66b73bb99f",
-  "to": "5511947758860@s.whatsapp.net",
-  "text": "Mensagem enviada com sucesso"
-}`}
-                  </pre>
-                </div>
-              </div>
-            )}
 
-            {/* SEÇÃO 4: GUIA DE MIGRAÇÃO DE PROVEDOR (WATTS1000) */}
-            {activeSection === 'migration' && (
-              <div className="space-y-6 animate-in fade-in duration-150">
-                <div>
-                  <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                    <ArrowLeftRight className="text-amber-400" size={22} />
-                    Guia de Migração: Baileys ➔ Watts1000 / Meta Cloud API
-                  </h3>
-                  <p className="text-sm text-slate-300 mt-1">
-                    Instruções para desenvolvedores e IAs realizarem a substituição do provedor de WhatsApp de forma 100% autônoma e sem quebra de compatibilidade.
-                  </p>
+                  <div className="p-4 rounded-xl bg-emerald-950/20 border border-emerald-800/40 space-y-2">
+                    <h4 className="text-sm font-bold text-emerald-400 flex items-center gap-2">
+                      <CheckCircle2 size={16} /> Vantagens Reais do Whatsmeow (Go)
+                    </h4>
+                    <ul className="list-disc pl-5 space-y-1 text-xs text-slate-300">
+                      <li><strong>Código Nativo Compilado</strong>: Criptografia Signal executada com velocidade de hardware.</li>
+                      <li><strong>Goroutines Ultraleves</strong>: Milhares de canais WebSocket gerenciados sem consumo de threads.</li>
+                      <li><strong>Pegada de Memória Mínima</strong>: 10MB a 25MB por sessão conectada.</li>
+                      <li><strong>Persistência Robusta de Chaves</strong>: Suporte nativo a Postgres ou SQLite via ORM oficial do Whatsmeow.</li>
+                    </ul>
+                  </div>
                 </div>
 
-                <div className="p-4 rounded-xl bg-amber-950/20 border border-amber-800/40 space-y-2">
-                  <h4 className="text-sm font-bold text-amber-300 flex items-center gap-2">
-                    <ShieldCheck size={16} /> Contrato de Compatibilidade Blindado
+                <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-3">
+                  <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                    <Radio size={16} className="text-emerald-400" /> Contrato de Comunicação REST / Webhook do Whatsmeow
                   </h4>
                   <p className="text-xs text-slate-300 leading-relaxed">
-                    O frontend React do ChatBoot <strong>NÃO</strong> se comunica diretamente com o Baileys; ele consome o <code>src/services/whatsappEngine.ts</code> e as tabelas do Supabase (<code>conversations</code> e <code>messages</code>). Toda a substituição do motor por <strong>Watts1000</strong> ocorre apenas no backend, mantendo o frontend intacto!
+                    O servidor Whatsmeow em Go funcionará como um microserviço REST enxuto. Ele expõe endpoints simples para o <strong>Core Business Engine</strong> e dispara Webhooks HTTP para entregar mensagens recebidas:
                   </p>
-                </div>
 
-                <div className="space-y-4 text-xs text-slate-300">
-                  <div className="space-y-1">
-                    <h5 className="font-bold text-white">Etapa 1: Adaptador de Conexão no Backend</h5>
-                    <p>
-                      Criar um novo adaptador <code>server/src/services/providers/Watts1000Adapter.js</code> que implemente os mesmos métodos: <code>createSession(instanceId)</code>, <code>sendMessage(instanceId, to, content)</code>, <code>disconnectSession(instanceId)</code>.
-                    </p>
-                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-1 font-mono">
+                      <div className="text-emerald-400 font-bold">ENDPOINTS EXPOSTOS PELO GO:</div>
+                      <div className="text-slate-300">POST /session/start      ➔ Gera QR Code</div>
+                      <div className="text-slate-300">POST /session/disconnect ➔ Desconecta sessão</div>
+                      <div className="text-slate-300">POST /messages/send-text ➔ Envia mensagem</div>
+                      <div className="text-slate-300">POST /messages/send-media➔ Envia áudio/imagem</div>
+                      <div className="text-slate-300">GET  /session/status     ➔ Status da conexão</div>
+                    </div>
 
-                  <div className="space-y-1">
-                    <h5 className="font-bold text-white">Etapa 2: Webhook de Recebimento de Mensagens</h5>
-                    <p>
-                      Criar a rota <code>POST /api/webhooks/watts1000</code> para receber as mensagens entrantes. Converter o payload para o formato padrão do ChatBoot e acionar <code>EventProcessor.handleIncomingMessage()</code> para gravação na tabela <code>messages</code> do Supabase.
-                    </p>
-                  </div>
-
-                  <div className="space-y-1">
-                    <h5 className="font-bold text-white">Etapa 3: Mapeamento de Status de Mensagem</h5>
-                    <p>
-                      Mapear os recibos do Watts1000 (sent, delivered, read) para os valores já suportados pelo ChatBoot: <code>pending</code>, <code>sent</code>, <code>delivered</code>, <code>read</code>, atualizando via Supabase Realtime.
-                    </p>
+                    <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-1 font-mono">
+                      <div className="text-sky-400 font-bold">WEBHOOKS DISPARADOS PARA O CORE:</div>
+                      <div className="text-slate-300">POST /webhook/on-message  ➔ Mensagem recebida</div>
+                      <div className="text-slate-300">POST /webhook/on-receipt  ➔ Delivered / Read</div>
+                      <div className="text-slate-300">POST /webhook/on-status   ➔ Connected / Dropped</div>
+                      <div className="text-slate-300">POST /webhook/on-qrcode   ➔ Atualização de QR</div>
+                    </div>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* SEÇÃO 5: MÓDULOS E REGRAS DE NEGÓCIO */}
-            {activeSection === 'business_rules' && (
+            {/* SEÇÃO 4: SERVIDOR DE IA & CHAVES DE ACESSO */}
+            {activeSection === 'ai_engine' && (
               <div className="space-y-6 animate-in fade-in duration-150">
                 <div>
                   <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                    <Workflow className="text-indigo-400" size={22} />
-                    Módulos & Regras de Negócio do ChatBoot
+                    <Sparkles className="text-purple-400" size={22} />
+                    Servidor Exclusivo de IA: Vault de Credenciais & RAG
                   </h3>
                   <p className="text-sm text-slate-300 mt-1">
-                    Detalhamento dos subsistemas integrados ao ecossistema SaaS.
+                    Isolamento completo da inteligência artificial para proteção das chaves de API, controle de custos e não-bloqueio das rotinas operacionais.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-2">
+                    <div className="flex items-center gap-2 text-purple-400 font-bold text-sm">
+                      <Lock size={18} /> Vault de Chaves
+                    </div>
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      Chaves de API (Google Gemini, OpenAI, Claude) residem exclusivamente dentro das variáveis deste microserviço. O frontend e o Whatsmeow nunca têm acesso às credenciais.
+                    </p>
+                  </div>
+
+                  <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-2">
+                    <div className="flex items-center gap-2 text-indigo-400 font-bold text-sm">
+                      <Cpu size={18} /> RAG & Embeddings
+                    </div>
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      Vetorização de cardápios, manuais e políticas de atendimento. Busca semântica executada localmente para enriquecer o contexto dos prompts antes de consultar o LLM.
+                    </p>
+                  </div>
+
+                  <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-2">
+                    <div className="flex items-center gap-2 text-sky-400 font-bold text-sm">
+                      <Gauge size={18} /> Rate Limit & Fila
+                    </div>
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      Fila de geração assíncrona gerenciada via Redis. Se 100 clientes enviarem mensagens simultâneas, o servidor de IA distribui os lotes sem estourar quotas da API externa.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-xl bg-purple-950/20 border border-purple-800/40 space-y-3">
+                  <h4 className="text-sm font-bold text-purple-300 flex items-center gap-2">
+                    <Workflow size={16} /> Fluxo de Atendimento com o Microserviço de IA
+                  </h4>
+                  <div className="p-3 rounded-lg bg-slate-950 font-mono text-[11px] text-purple-300 overflow-x-auto leading-relaxed">
+                    1. Mensagem chega no Whatsmeow (Go) ➔<br/>
+                    2. Whatsmeow dispara Webhook para o Core Business Engine ➔<br/>
+                    3. Core verifica se o ticket está em modo BOT ou HUMANO ➔<br/>
+                    4. Se BOT: Core repassa o histórico para o AI Service (POST /ai/generate-response) ➔<br/>
+                    5. AI Service busca vetores no RAG, consulta o Gemini com as chaves protegidas e retorna a resposta pronta ➔<br/>
+                    6. Core envia a resposta para o Whatsmeow disparar ao cliente e grava no Appwrite!
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* SEÇÃO 5: SERVIDOR DE REGRAS DE NEGÓCIO (CORE) */}
+            {activeSection === 'business_engine' && (
+              <div className="space-y-6 animate-in fade-in duration-150">
+                <div>
+                  <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                    <Workflow className="text-sky-400" size={22} />
+                    Servidor de Regras de Negócio: Total Independência do WhatsApp
+                  </h3>
+                  <p className="text-sm text-slate-300 mt-1">
+                    O coração operacional do SaaS funciona 24/7 sem qualquer dependência ou acoplamento direto com a conexão do WhatsApp.
                   </p>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-2">
                     <div className="flex items-center gap-2 text-indigo-400 font-bold text-sm">
-                      <Ticket size={18} /> Atendimento & Tickets
+                      <Boxes size={18} /> CRM Kanban & Fila Dev
                     </div>
                     <p className="text-xs text-slate-300 leading-relaxed">
-                      Gerenciamento de tickets com status (Aberto, Pendente, Resolvido, Adiado). Handoff automático entre Bot IA (Gemini) e atendente humano. Seletor de canal e etiquetas coloridas para segmentação de leads.
-                    </p>
-                  </div>
-
-                  <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-2">
-                    <div className="flex items-center gap-2 text-amber-400 font-bold text-sm">
-                      <Zap size={18} /> Vouchers Digitais B2B
-                    </div>
-                    <p className="text-xs text-slate-300 leading-relaxed">
-                      Emissão de vales de benefício por empresas parceiras com extrato financeiro (ledger) auditável. Validação rápida no PDV via leitor de QR Code ou token único, prevenindo reuso de vouchers.
+                      Gerenciamento de leads, negócios, colunas de funil e o quadro automatizado de desenvolvimento. As alterações são sincronizadas em tempo real via Appwrite Realtime.
                     </p>
                   </div>
 
@@ -452,86 +557,205 @@ Body:
                       <ClipboardList size={18} /> Checklists Operacionais
                     </div>
                     <p className="text-xs text-slate-300 leading-relaxed">
-                      Roteiros de conformidade, limpeza, abertura e fechamento por setor e unidade. Interface otimizada para tablets de cozinha (<code>/checklist/tablet</code>) sem barra de navegação, com registro fotográfico e auditoria.
+                      Roteiros diários de abertura, fechamento e manipulação de alimentos. Funciona em tablets de cozinha sem depender de WhatsApp ou instâncias conectadas.
+                    </p>
+                  </div>
+
+                  <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-2">
+                    <div className="flex items-center gap-2 text-amber-400 font-bold text-sm">
+                      <Ticket size={18} /> Vouchers Digitais B2B
+                    </div>
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      Emissão, validação no PDV e reconciliação financeira de benefícios corporativos. Sistema à prova de duplicidade com extrato contábil imutável.
                     </p>
                   </div>
 
                   <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-2">
                     <div className="flex items-center gap-2 text-sky-400 font-bold text-sm">
-                      <Boxes size={18} /> CRM Kanban & Fila Dev
+                      <Cpu size={18} /> Integração ERP Gastrofood
                     </div>
                     <p className="text-xs text-slate-300 leading-relaxed">
-                      Quadros Kanban totalmente customizáveis. Inclui o quadro governado <strong>Desenvolvimento & Roadmap</strong> onde cards na coluna 'Em Desenvolvimento' são consumidos e codificados autonomamente pela IA.
+                      Sincronização de cardápios com cache persistente e janela de 1 hora, consulta de CEP, validação de pedidos e emissão de PIX.
                     </p>
                   </div>
+                </div>
+
+                <div className="p-4 rounded-xl bg-sky-950/20 border border-sky-800/40 space-y-2">
+                  <h4 className="text-sm font-bold text-sky-300 flex items-center gap-2">
+                    <ShieldCheck size={16} /> Isolamento de Falhas (Resilience Pattern)
+                  </h4>
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    Se o número de WhatsApp de um cliente for desconectado ou sofrer banimento temporário pela Meta, <strong>o CRM, os Checklists, os Vouchers e os Pedidos continuam 100% operacionais</strong>. O operador pode reconectar o QR Code em segundos sem que o restante do sistema sofra qualquer instabilidade.
+                  </p>
                 </div>
               </div>
             )}
 
-            {/* SEÇÃO 6: SUPABASE, TABELAS & RLS */}
-            {activeSection === 'database' && (
+            {/* SEÇÃO 6: APPWRITE SELF-HOSTED */}
+            {activeSection === 'appwrite' && (
               <div className="space-y-6 animate-in fade-in duration-150">
                 <div>
                   <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                    <Database className="text-indigo-400" size={22} />
-                    Banco de Dados: Supabase PostgreSQL & RLS
+                    <HardDrive className="text-pink-400" size={22} />
+                    Appwrite Self-Hosted: Substituindo o Supabase Cloud
                   </h3>
                   <p className="text-sm text-slate-300 mt-1">
-                    Esquema de dados principal, políticas de segurança multitenant e integridade referencial.
+                    Migração do banco para a própria VPS gerenciada pelo Coolify, trazendo controle total, privacidade de dados e custo fixo.
                   </p>
                 </div>
 
-                <div className="space-y-3 text-xs text-slate-300">
-                  <div className="p-3 rounded-xl bg-slate-800/60 border border-slate-700">
-                    <div className="font-bold text-white mb-1">Tabelas Principais:</div>
-                    <ul className="list-disc pl-5 space-y-1 text-slate-300">
-                      <li><code>whatsapp_instances</code>: Instâncias do motor com credenciais, status e webhook.</li>
-                      <li><code>conversations</code>: Chats WhatsApp com cliente, canal, setor e agente atribuído.</li>
-                      <li><code>messages</code>: Histórico de mensagens com <code>unique_whatsapp_message_id</code> e status.</li>
-                      <li><code>checklists</code>, <code>checklist_items</code>, <code>checklist_runs</code>: Motor de conformidade.</li>
-                      <li><code>vouchers</code>, <code>voucher_companies</code>, <code>voucher_transactions</code>: Ecossistema B2B.</li>
-                      <li><code>crm_cards</code>, <code>crm_columns</code>, <code>crm_boards</code>: Pipelines de vendas e dev.</li>
-                    </ul>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-2">
+                    <h4 className="text-sm font-bold text-pink-400 flex items-center gap-2">
+                      <Database size={16} /> Appwrite Databases (Documentos)
+                    </h4>
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      Estrutura flexível baseada em Coleções e Atributos tipados. Suporta índices compostos, paginação rápida com cursores e permissões granulares por Usuário e por Time (Equipe multitenant).
+                    </p>
                   </div>
 
-                  <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700 space-y-2">
-                    <div className="font-bold text-white">Multi-Tenancy & RLS:</div>
-                    <p>
-                      Todas as tabelas contêm a coluna <code>tenant_id</code>. Consultas executadas pelo SDK padrão respeitam o tenant autenticado. O <code>masterSupabase</code> (Service Role) é restrito a rotas administrativas ou rotinas protegidas.
+                  <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-2">
+                    <h4 className="text-sm font-bold text-sky-400 flex items-center gap-2">
+                      <Radio size={16} /> Appwrite Realtime WebSockets
+                    </h4>
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      Canal de eventos em tempo real nativo. O frontend React conecta via <code>client.subscribe('databases.main.collections.messages.documents')</code> e recebe novas mensagens e atualizações instantâneas.
+                    </p>
+                  </div>
+
+                  <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-2">
+                    <h4 className="text-sm font-bold text-amber-400 flex items-center gap-2">
+                      <HardDrive size={16} /> Appwrite Storage (Buckets Locais)
+                    </h4>
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      Armazenamento local no disco SSD/NVMe da VPS. Permite guardar centenas de gigabytes de áudios de WhatsApp, imagens de produtos e comprovantes fotográficos de checklists com custo $0 de tráfego.
+                    </p>
+                  </div>
+
+                  <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-2">
+                    <h4 className="text-sm font-bold text-emerald-400 flex items-center gap-2">
+                      <Lock size={16} /> Appwrite Auth & Teams (Multitenancy)
+                    </h4>
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      Isolamento multi-empresa nativo através de <strong>Appwrite Teams</strong>. Cada empresa é um Time com membros e papéis (Admin, Operador, Auditor). Cada documento no banco só pode ser lido pelo respectivo time.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                  <div className="flex items-center justify-between text-xs text-slate-400">
+                    <span>Mapeamento de Coleções do Appwrite</span>
+                  </div>
+                  <pre className="font-mono text-[11px] text-pink-300 overflow-x-auto p-2 bg-slate-900 rounded-lg">
+{`Database: chatboot_production
+├── Collection: whatsapp_instances (id, name, status, phone, apiKey, createdAt)
+├── Collection: conversations (id, customerPhone, customerName, channel, status, tenantId)
+├── Collection: messages (id, conversationId, text, mediaUrl, status, sender, messageId)
+├── Collection: checklists (id, title, cargoIds, unitId, items, active, tenantId)
+├── Collection: checklist_runs (id, checklistId, completedBy, photos, status, answers)
+├── Collection: vouchers (id, token, companyId, balance, status, expiresAt)
+└── Collection: crm_cards (id, title, columnId, order, tags, attachments, tenantId)`}
+                  </pre>
+                </div>
+              </div>
+            )}
+
+            {/* SEÇÃO 7: ALTA DISPONIBILIDADE & ESCALABILIDADE */}
+            {activeSection === 'ha_scalability' && (
+              <div className="space-y-6 animate-in fade-in duration-150">
+                <div>
+                  <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                    <ShieldCheck className="text-amber-400" size={22} />
+                    Alta Disponibilidade (HA) & Estratégia de Escalabilidade
+                  </h3>
+                  <p className="text-sm text-slate-300 mt-1">
+                    Diretrizes de engenharia para suportar picos de tráfego, recuperação instantânea de falhas e crescimento contínuo.
+                  </p>
+                </div>
+
+                <div className="space-y-4 text-xs text-slate-300">
+                  <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-2">
+                    <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                      <CheckCircle2 size={16} className="text-emerald-400" /> 1. Reinicialização Automática & Healthchecks no Coolify
+                    </h4>
+                    <p className="leading-relaxed">
+                      Cada container possui <code>HEALTHCHECK</code> configurado. Se o microserviço de IA ou Whatsmeow travar ou apresentar timeout por 3 tentativas consecutivas, o Coolify executa restart automático em menos de 4 segundos sem afetar os outros serviços.
+                    </p>
+                  </div>
+
+                  <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-2">
+                    <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                      <CheckCircle2 size={16} className="text-sky-400" /> 2. Fila Assíncrona com Redis (Zero Perda de Mensagens)
+                    </h4>
+                    <p className="leading-relaxed">
+                      Todas as mensagens recebidas pelo Whatsmeow entram imediatamente numa fila Redis persistida em disco (AOF). Mesmo que o Core Business Engine passe por um deploy ou atualização, as mensagens ficam em buffer na fila e são consumidas assim que o serviço volta, garantindo <strong>Zero Perda de Dados</strong>.
+                    </p>
+                  </div>
+
+                  <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-2">
+                    <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                      <CheckCircle2 size={16} className="text-purple-400" /> 3. Escalabilidade Horizontal Futura (Multi-VPS Ready)
+                    </h4>
+                    <p className="leading-relaxed">
+                      Como a arquitetura é 100% orientada a microserviços HTTP/WebSocket desacoplados, no futuro podemos mover o <strong>Whatsmeow Engine</strong> ou o <strong>Appwrite</strong> para uma segunda VPS com apenas 1 clique no Coolify, bastando alterar as URLs de endpoint sem reescrever nenhuma linha de código!
+                    </p>
+                  </div>
+
+                  <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-2">
+                    <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                      <CheckCircle2 size={16} className="text-amber-400" /> 4. Backup Automático Local & Externo (S3 Offsite)
+                    </h4>
+                    <p className="leading-relaxed">
+                      Rotina cron diária orquestrada pelo Coolify: dump dos volumes do Appwrite e do banco de sessões do Whatsmeow, com retenção de 7 dias localmente e espelhamento criptografado para bucket S3 de contingência.
                     </p>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* SEÇÃO 7: ESTRUTURA DE CÓDIGO */}
+            {/* SEÇÃO 8: ESTRUTURA DE PASTAS & MICROSERVIÇOS */}
             {activeSection === 'code_structure' && (
               <div className="space-y-6 animate-in fade-in duration-150">
                 <div>
                   <h3 className="text-xl font-bold text-white flex items-center gap-2">
                     <Code2 className="text-indigo-400" size={22} />
-                    Estrutura de Pastas & Código-Fonte
+                    Estrutura de Pastas dos Microserviços no Repositório
                   </h3>
                   <p className="text-sm text-slate-300 mt-1">
-                    Mapeamento dos diretórios do repositório para facilitar navegação e manutenção.
+                    Organização monorepo dos microserviços para facilitar manutenção, CI/CD e deploys isolados.
                   </p>
                 </div>
 
                 <div className="p-4 bg-slate-950 rounded-xl font-mono text-xs text-indigo-300 overflow-x-auto space-y-1">
                   <div>ChatBoot/</div>
-                  <div className="pl-4">├── src/                   # Frontend SPA React 18 + Vite</div>
-                  <div className="pl-8">├── components/        # Componentes UI (modals, chat, layout)</div>
-                  <div className="pl-8">├── pages/             # Telas da aplicação (ChatDashboard, CRM, etc.)</div>
-                  <div className="pl-8">├── store/             # Zustand chatStore (estado central)</div>
-                  <div className="pl-8">├── services/          # Supabase client, WhatsApp engine, IA</div>
-                  <div className="pl-8">└── hooks/             # Hooks customizados (PWA, áudio, notificações)</div>
-                  <div className="pl-4">├── server/                # Backend Node.js Express (Coolify)</div>
-                  <div className="pl-8">├── src/api/           # Rotas Express (whatsappRoutes, etc.)</div>
-                  <div className="pl-8">├── src/services/      # Baileys SessionManager, BatchProcessor</div>
-                  <div className="pl-8">└── src/database/      # Conexões Supabase backend</div>
-                  <div className="pl-4">└── .agents/               # Governança Antigravity & Skills</div>
-                  <div className="pl-8">├── skills/            # fila-dev, baileys-e2e-testing, rca</div>
-                  <div className="pl-8">└── AGENTS.md          # Regras invioláveis de deploy e arquitetura</div>
+                  <div className="pl-4 text-emerald-400">├── services/whatsmeow-engine/     # Microserviço WhatsApp em GO nativo</div>
+                  <div className="pl-8">├── main.go                     # Entrypoint Fiber/Gin REST + WebSocket</div>
+                  <div className="pl-8">├── handlers/                   # Envio, recebimento, QR code</div>
+                  <div className="pl-8">├── session/                    # Gerenciador de sessões e SQLite/PG store</div>
+                  <div className="pl-8">├── Dockerfile                  # Build multi-stage otimizado (~18MB final)</div>
+                  <div className="pl-8">└── go.mod & go.sum             # Dependências Go (tulir/whatsmeow)</div>
+                  <div className="pl-4 text-purple-400">├── services/ai-engine/            # Microserviço de IA & Vault de Chaves</div>
+                  <div className="pl-8">├── src/gemini/                 # Orquestração de LLMs e Fallbacks</div>
+                  <div className="pl-8">├── src/rag/                    # Embeddings e busca vetorial</div>
+                  <div className="pl-8">├── src/vault/                  # Gestão segura de tokens e rate-limits</div>
+                  <div className="pl-8">└── Dockerfile                  # Container Node.js 22 LTS</div>
+                  <div className="pl-4 text-sky-400">├── services/business-engine/      # Servidor de Regras de Negócio (Core)</div>
+                  <div className="pl-8">├── src/crm/                    # Kanban, estágios e automações</div>
+                  <div className="pl-8">├── src/checklist/              # Motor de conformidade e auditorias</div>
+                  <div className="pl-8">├── src/voucher/                # Validação B2B e extratos ledger</div>
+                  <div className="pl-8">├── src/tickets/                # Filas de atendimento e handoff</div>
+                  <div className="pl-8">├── src/integrations/           # Gastrofood ERP (Cache 1h)</div>
+                  <div className="pl-8">└── Dockerfile                  # Container Node.js Express/Fastify</div>
+                  <div className="pl-4 text-pink-400">├── services/appwrite-config/        # Configurações de Deploy do Appwrite</div>
+                  <div className="pl-8">├── docker-compose.yml          # Stack oficial Appwrite para Coolify</div>
+                  <div className="pl-8">└── schema/                     # Definições de coleções e atributos</div>
+                  <div className="pl-4 text-indigo-400">├── src/                             # Frontend SPA React 18 + Vite</div>
+                  <div className="pl-8">├── components/                 # Componentes UI (modals, CRM, chat)</div>
+                  <div className="pl-8">├── pages/                      # Telas da aplicação</div>
+                  <div className="pl-8">├── services/appwrite.ts        # SDK Client Appwrite (substitui supabase.ts)</div>
+                  <div className="pl-8">└── store/                      # Zustand store central</div>
+                  <div className="pl-4 text-amber-400">└── .agents/                        # Governança Antigravity & Skills</div>
+                  <div className="pl-8">└── AGENTS.md                   # Pipeline oficial de deploys e regras</div>
                 </div>
               </div>
             )}
@@ -540,10 +764,10 @@ Body:
         </div>
 
         {/* Rodapé */}
-        <div className="px-6 py-3 border-t border-slate-800 bg-slate-950/60 flex items-center justify-between text-xs text-slate-400 shrink-0">
+        <div className="px-6 py-3 border-t border-slate-800 bg-slate-950/70 flex items-center justify-between text-xs text-slate-400 shrink-0">
           <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-            <span>Documentação Oficial ChatBoot CRM Master</span>
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span>Documentação Oficial ChatBoot SaaS • Arquitetura Next-Gen v7.3.0</span>
           </div>
           <button
             onClick={onClose}
