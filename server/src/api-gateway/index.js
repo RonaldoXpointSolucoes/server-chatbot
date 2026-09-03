@@ -713,5 +713,121 @@ DIRETRIZES TÉCNICAS:
     }
 });
 
+// Endpoint robusto para localizar/garantir o quadro ChatBot CRM e inserir o card de IA via Service Role
+router.post('/v1/crm/cards/create-ai-card', async (req, res) => {
+    try {
+        const { leadPayload, boardId, tenantId } = req.body;
+        const XPOINT_PLATFORM_TENANT_ID = '8b1e427b-2321-4ea7-9d7e-90f7d5cbad21';
+        const CHATBOT_CRM_BOARD_ID = '95be1dee-9d28-47d9-8ccf-d51a337f1572';
+
+        const targetTenantId = tenantId || leadPayload?.tenant_id || XPOINT_PLATFORM_TENANT_ID;
+        const targetBoardId = boardId || leadPayload?.board_id || CHATBOT_CRM_BOARD_ID;
+
+        let targetBoard = null;
+
+        // 1. Busca pelo ID fixo do quadro
+        if (targetBoardId) {
+            const { data: bById } = await supabase
+                .from('crm_boards')
+                .select('*')
+                .eq('id', targetBoardId)
+                .maybeSingle();
+            if (bById) targetBoard = bById;
+        }
+
+        // 2. Fallback: busca por nome no tenant X-Point
+        if (!targetBoard) {
+            const { data: bByName } = await supabase
+                .from('crm_boards')
+                .select('*')
+                .eq('tenant_id', targetTenantId)
+                .or('name.ilike.%ChatBot%,name.ilike.%Desenvolvimento%,name.ilike.%Roadmap%')
+                .limit(1);
+            if (bByName && bByName.length > 0) targetBoard = bByName[0];
+        }
+
+        // 3. Fallback: qualquer board existente no tenant
+        if (!targetBoard) {
+            const { data: anyBoard } = await supabase
+                .from('crm_boards')
+                .select('*')
+                .eq('tenant_id', targetTenantId)
+                .limit(1);
+            if (anyBoard && anyBoard.length > 0) targetBoard = anyBoard[0];
+        }
+
+        // 4. Se ainda assim não existir, cria o quadro automaticamente
+        if (!targetBoard) {
+            const newBoardData = {
+                id: CHATBOT_CRM_BOARD_ID,
+                tenant_id: targetTenantId,
+                name: 'ChatBot CRM da X-Point Soluções',
+                type: 'kanban',
+                config: {
+                    stages: [
+                        { id: 'backlog', label: 'Backlog / Ideias', color: '#64748b' },
+                        { id: 'analysis', label: 'Em Análise', color: '#a855f7' },
+                        { id: 'development', label: 'Em Desenvolvimento', color: '#3b82f6' },
+                        { id: 'testing', label: 'Em Testes & QA', color: '#eab308' },
+                        { id: 'done', label: 'Concluído / Produção', color: '#22c55e' }
+                    ]
+                }
+            };
+            const { data: createdBoard, error: bCreateErr } = await supabase
+                .from('crm_boards')
+                .upsert([newBoardData])
+                .select()
+                .single();
+            if (!bCreateErr && createdBoard) {
+                targetBoard = createdBoard;
+            } else {
+                console.error('[API Gateway] Falha ao criar quadro automaticamente:', bCreateErr);
+            }
+        }
+
+        if (!targetBoard) {
+            return res.status(404).json({ error: 'Quadro Kanban ChatBot CRM não pôde ser localizado ou inicializado no banco.' });
+        }
+
+        // Resolvendo estágio 'analysis'
+        let targetStageId = 'analysis';
+        if (targetBoard.config?.stages && Array.isArray(targetBoard.config.stages)) {
+            const foundStage = targetBoard.config.stages.find(s => 
+                s.id === 'analysis' || 
+                s.label?.toLowerCase().includes('análise') || 
+                s.label?.toLowerCase().includes('analise')
+            );
+            if (foundStage) targetStageId = foundStage.id;
+            else if (targetBoard.config.stages.length > 1) targetStageId = targetBoard.config.stages[1].id;
+            else if (targetBoard.config.stages[0]) targetStageId = targetBoard.config.stages[0].id;
+        }
+
+        // Inserir card via Service Role
+        const finalLeadPayload = {
+            ...leadPayload,
+            tenant_id: targetBoard.tenant_id,
+            board_id: targetBoard.id,
+            status: targetStageId
+        };
+
+        const { data: insertedLead, error: leadErr } = await supabase
+            .from('crm_leads')
+            .insert([finalLeadPayload])
+            .select()
+            .single();
+
+        if (leadErr) throw leadErr;
+
+        return res.json({
+            success: true,
+            lead: insertedLead,
+            board: targetBoard
+        });
+    } catch (err) {
+        console.error('[API Gateway] Erro ao criar card de IA no CRM:', err);
+        return res.status(500).json({ error: err.message || 'Erro ao persistir card no CRM.' });
+    }
+});
+
 export default router;
 
