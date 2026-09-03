@@ -88,11 +88,15 @@ router.post('/v1/utils/test-cardapio', async (req, res) => {
                 );
 
                 let responseForLog = parsedResponse;
-                if (action === 'Consultar Cardápio' && parsedResponse && (parsedResponse.grupos || parsedResponse.produtos)) {
+                if ((action === 'Consultar Cardápio' || action === 'Buscar Cardapio') && parsedResponse) {
+                    const gCount = parsedResponse.grupos?.length || 0;
+                    const pCount = parsedResponse.produtos?.length || 0;
                     responseForLog = {
-                        summary: `Cardápio consultado com sucesso: ${parsedResponse.grupos?.length || 0} grupos, ${parsedResponse.produtos?.length || 0} produtos.`,
-                        gruposCount: parsedResponse.grupos?.length || 0,
-                        produtosCount: parsedResponse.produtos?.length || 0
+                        summary: pCount > 0 
+                            ? `Cardápio consultado com sucesso: ${gCount} grupos, ${pCount} produtos.` 
+                            : `Cardápio consultado (0 produtos cadastrados no PDV/Gastrofood deste tenant).`,
+                        gruposCount: gCount,
+                        produtosCount: pCount
                     };
                 }
 

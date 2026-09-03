@@ -1011,7 +1011,11 @@ export default function DevLogger() {
               data.message?.includes('[History Sync]') ||
               data.message?.includes('gastrofood') ||
               data.message?.includes('Gastrofood') ||
-              data.message?.includes('GetCardapioCompleto');
+              data.message?.includes('GetCardapioCompleto') ||
+              data.message?.includes('Sem sessão ativa saudável') ||
+              data.message?.includes('Aguardando restabelecimento do socket') ||
+              data.message?.includes('Tentativa 1/') ||
+              data.message?.includes('Tentativa 2/');
 
             if (!isRoutineNoise && (data.level === 'error' || data.level === 'warn' || (data.level !== 'info' && data.message && (data.message.toLowerCase().includes('error') || data.message.toLowerCase().includes('falha') || data.message.toLowerCase().includes('loop'))))) {
               addLog({

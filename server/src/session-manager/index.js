@@ -1519,7 +1519,7 @@ class SessionManager {
                     setTimeout(async () => {
                         try {
                             let attempts = 0;
-                            const maxAttempts = 5;
+                            const maxAttempts = 2;
                             let lastError;
                             
                             while (attempts < maxAttempts) {
@@ -1650,6 +1650,15 @@ class SessionManager {
 
                                     if (isPermanentlyClosed) {
                                         console.warn(`[SessionManager - Antiban] Abortando retentativas para ${jid} via instância ${instanceId} (motivo definitivo): ${error.message}`);
+                                        break;
+                                    }
+
+                                    if (error.message && error.message.includes('Connection Closed') && attempts >= 2) {
+                                        console.warn(`[SessionManager - Antiban] Abortando retentativas para ${jid} via instância ${instanceId}: socket permanece fechado após ${attempts} tentativas.`);
+                                        supabase.from('whatsapp_instances').update({
+                                            status: 'disconnected',
+                                            last_error: 'Conexão encerrada pelo WhatsApp. Clique em Conectar para parear novamente.'
+                                        }).eq('id', instanceId).then(() => {}).catch(() => {});
                                         break;
                                     }
 
