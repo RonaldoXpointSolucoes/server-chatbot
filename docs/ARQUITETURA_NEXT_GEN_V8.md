@@ -18,7 +18,7 @@ A infraestrutura foi testada e aprovada com sucesso via **SSH Root** e **Coolify
 | **Memória RAM** | **7.8 GB Total** • 1.1 GB Usado • **6.7 GB Livres** | 🟢 Ampla |
 | **Armazenamento SSD** | **96 GB Total** • 7.2 GB Usado • **89 GB Livres (8% de uso)** | 🟢 89 GB NVMe |
 | **Portas Abertas & Validadas** | 22 (SSH), 80 (HTTP), 443 (HTTPS), 8000 (Painel Coolify) | 🟢 Aprovadas |
-| **Painel de Orquestração** | `http://179.199.142.157:8000` (Coolify Engine v4) | 🟢 Online |
+| **Painel de Orquestração** | `https://coolify.xpointsolucoes.com.br` (SSL Let's Encrypt Ativo) | 🟢 Online Oficial |
 
 ### 🐳 Containers Ativos e Saudáveis no Coolify:
 ```

@@ -449,20 +449,39 @@ export default function TechnicalDocumentationModal({ isOpen, onClose }: Technic
                   </table>
                 </div>
 
-                <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
-                  <div className="flex items-center justify-between text-xs text-slate-400">
-                    <span className="font-mono text-emerald-400 font-bold">Comando de Conexão Rápida SSH:</span>
-                    <button
-                      onClick={() => copyCode('ssh-conn', 'ssh root@179.199.142.157')}
-                      className="flex items-center gap-1 hover:text-white"
-                    >
-                      {copiedId === 'ssh-conn' ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
-                      <span>{copiedId === 'ssh-conn' ? 'Copiado!' : 'Copiar'}</span>
-                    </button>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between text-xs text-slate-400">
+                      <span className="font-mono text-emerald-400 font-bold">Painel Web Oficial Coolify (SSL Ativo):</span>
+                      <button
+                        onClick={() => copyCode('coolify-url', 'https://coolify.xpointsolucoes.com.br')}
+                        className="flex items-center gap-1 hover:text-white"
+                      >
+                        {copiedId === 'coolify-url' ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                        <span>{copiedId === 'coolify-url' ? 'Copiado!' : 'Copiar'}</span>
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between p-2.5 bg-slate-900 rounded-lg font-mono text-xs text-sky-300">
+                      <span>https://coolify.xpointsolucoes.com.br</span>
+                      <span className="text-[10px] text-emerald-400 font-bold">HTTPS 200 OK</span>
+                    </div>
                   </div>
-                  <pre className="p-2.5 bg-slate-900 rounded-lg font-mono text-xs text-indigo-300 overflow-x-auto">
+
+                  <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between text-xs text-slate-400">
+                      <span className="font-mono text-emerald-400 font-bold">Comando de Conexão Rápida SSH:</span>
+                      <button
+                        onClick={() => copyCode('ssh-conn', 'ssh root@179.199.142.157')}
+                        className="flex items-center gap-1 hover:text-white"
+                      >
+                        {copiedId === 'ssh-conn' ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                        <span>{copiedId === 'ssh-conn' ? 'Copiado!' : 'Copiar'}</span>
+                      </button>
+                    </div>
+                    <pre className="p-2.5 bg-slate-900 rounded-lg font-mono text-xs text-indigo-300 overflow-x-auto">
 ssh root@179.199.142.157
-                  </pre>
+                    </pre>
+                  </div>
                 </div>
               </div>
             )}
