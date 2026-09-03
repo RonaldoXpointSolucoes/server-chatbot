@@ -758,14 +758,55 @@ ssh root@179.199.142.157
             {/* SEÇÃO 7: APPWRITE SELF-HOSTED */}
             {activeSection === 'appwrite' && (
               <div className="space-y-6 animate-in fade-in duration-150">
-                <div>
-                  <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                    <HardDrive className="text-pink-400" size={22} />
-                    Appwrite Self-Hosted: Substituindo o Supabase Cloud
-                  </h3>
-                  <p className="text-sm text-slate-300 mt-1">
-                    Migração do banco para a própria VPS gerenciada pelo Coolify, trazendo controle total, privacidade de dados e custo fixo.
-                  </p>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                      <HardDrive className="text-pink-400" size={22} />
+                      Appwrite Self-Hosted: Substituindo o Supabase Cloud
+                    </h3>
+                    <p className="text-sm text-slate-300 mt-1">
+                      Serviço oficial implantado e em operação na VPS sob o Coolify, trazendo controle total, privacidade de dados e custo zero de cloud.
+                    </p>
+                  </div>
+                  <span className="px-3 py-1 text-xs font-bold rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 whitespace-nowrap self-start sm:self-auto flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    24 CONTAINERS SAUDÁVEIS
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between text-xs text-slate-400">
+                      <span className="font-mono text-pink-400 font-bold">Console Web Appwrite:</span>
+                      <button
+                        onClick={() => copyCode('appwrite-console', 'http://appwrite-inwbueezn2gkpm4tqwvzkswy.179.199.142.157.sslip.io/console')}
+                        className="flex items-center gap-1 hover:text-white"
+                      >
+                        {copiedId === 'appwrite-console' ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                        <span>{copiedId === 'appwrite-console' ? 'Copiado!' : 'Copiar'}</span>
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between p-2.5 bg-slate-900 rounded-lg font-mono text-[11px] text-pink-300 overflow-x-auto">
+                      <span>http://appwrite-inwbueezn2gkpm4tqwvzkswy.179.199.142.157.sslip.io/console</span>
+                    </div>
+                  </div>
+
+                  <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between text-xs text-slate-400">
+                      <span className="font-mono text-sky-400 font-bold">Porta Direta VPS (API & Console):</span>
+                      <button
+                        onClick={() => copyCode('appwrite-direct', 'http://179.199.142.157:8088')}
+                        className="flex items-center gap-1 hover:text-white"
+                      >
+                        {copiedId === 'appwrite-direct' ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                        <span>{copiedId === 'appwrite-direct' ? 'Copiado!' : 'Copiar'}</span>
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between p-2.5 bg-slate-900 rounded-lg font-mono text-[11px] text-sky-300">
+                      <span>http://179.199.142.157:8088</span>
+                      <span className="text-[10px] text-emerald-400 font-bold">ONLINE</span>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -841,26 +882,25 @@ ssh root@179.199.142.157
                   <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-2">
                     <div className="flex items-center justify-between">
                       <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                        <span className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center justify-center text-xs font-bold">1</span>
+                        <span className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center justify-center text-xs font-bold">✓</span>
                         Fase 1: Provisionamento do Appwrite Self-Hosted no Coolify
                       </h4>
-                      <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-sky-500/20 text-sky-400 border border-sky-500/30">Próxima Etapa</span>
+                      <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">Concluído & Ativo</span>
                     </div>
                     <ul className="list-disc pl-6 space-y-1 text-slate-300">
-                      <li>Criar o serviço Docker Compose do Appwrite na VPS via Coolify na porta 8080/443.</li>
-                      <li>Persistir volumes MariaDB, Redis e Storage no SSD da VPS.</li>
-                      <li>Criar o projeto <code>chatboot-production</code> e criar as Coleções e Índices correspondentes.</li>
-                      <li>Gerar API Keys com escopos completos para o backend.</li>
+                      <li>Stack Docker com 24 containers saudáveis (MariaDB 10.11, Redis 7.2, Appwrite 1.7, Realtime e Console).</li>
+                      <li>Volumes persistentes montados no SSD NVMe da VPS.</li>
+                      <li>Acesso via Console Web, API REST e porta direta 8088 100% operacionais.</li>
                     </ul>
                   </div>
 
                   <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-2">
                     <div className="flex items-center justify-between">
                       <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                        <span className="w-6 h-6 rounded-full bg-slate-700 text-slate-300 flex items-center justify-center text-xs font-bold">2</span>
+                        <span className="w-6 h-6 rounded-full bg-sky-500/20 text-sky-400 border border-sky-500/40 flex items-center justify-center text-xs font-bold">2</span>
                         Fase 2: Motor Whatsmeow em Go puro (`services/whatsmeow-engine`)
                       </h4>
-                      <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-slate-700 text-slate-400">Em Planejamento</span>
+                      <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-sky-500/20 text-sky-400 border border-sky-500/30">Próxima Etapa</span>
                     </div>
                     <ul className="list-disc pl-6 space-y-1 text-slate-300">
                       <li>Inicializar o projeto Go com a biblioteca oficial <code>tulir/whatsmeow</code>.</li>

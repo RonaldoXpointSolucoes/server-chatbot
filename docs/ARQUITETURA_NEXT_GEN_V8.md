@@ -142,11 +142,15 @@ flowchart TD
 
 ## 📅 5. Roadmap Prático de Implementação (Passo a Passo)
 
-### 📍 Fase 1: Provisionamento do Appwrite Self-Hosted
-1. Deploy da stack oficial do Appwrite via Docker Compose no Coolify na porta 8080/443.
-2. Mapeamento de volumes persistentes do MariaDB/Postgres e Storage no SSD da VPS.
-3. Criação do projeto `chatboot-production` e configuração de coleções, atributos e índices.
-4. Geração de chaves de API com escopos completos para o backend.
+### 📍 Fase 1: Provisionamento do Appwrite Self-Hosted ✅ [CONCLUÍDO & ONLINE]
+1. **Stack Operacional no Coolify**: 24 containers Docker ativos e com health check aprovado (`mariadb:10.11`, `redis:7.2.4`, `appwrite/appwrite:1.7.4`, `appwrite-console:6.1.28`, `appwrite-realtime:1.7.4` e workers).
+2. **Volumes Persistentes Mapeados**: Dados gravados no SSD NVMe local da VPS sob volumes isolados Coolify.
+3. **Acesso Oficial & Console**:
+   - **Console Web Appwrite**: `http://appwrite-inwbueezn2gkpm4tqwvzkswy.179.199.142.157.sslip.io/console`
+   - **Porta Direta VPS**: `http://179.199.142.157:8088` (API & Console)
+   - **API Endpoint**: `http://appwrite-inwbueezn2gkpm4tqwvzkswy.179.199.142.157.sslip.io/v1`
+   - **Domínio SSL Customizado**: `https://appwrite.xpointsolucoes.com.br` (aguardando apontamento DNS).
+
 
 ### 📍 Fase 2: Motor Whatsmeow em Go Puro
 1. Criação do módulo Go `services/whatsmeow-engine` utilizando `tulir/whatsmeow`.
