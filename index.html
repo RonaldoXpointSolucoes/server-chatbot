@@ -8,11 +8,13 @@
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/pwa-192x192.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <meta name="theme-color" content="#f0f2f5" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f0f2f5" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#111b21" />
+    <meta name="theme-color" content="#111b21" />
     
-    <!-- Apple iOS Safari PWA Tags -->
+    <!-- Apple iOS Safari & Android PWA Tags -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="ChatBoot" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="apple-touch-icon" sizes="152x152" href="/pwa-152x152.png" />
@@ -25,15 +27,26 @@
     
     <title>SaaS WhatsApp Master</title>
     <script>
-      // Anti-flicker for dark mode
+      // Anti-flicker e sincronização da barra de status no Android / PWA
       const applyThemeColor = (isDark) => {
-         let metaTheme = document.querySelector('meta[name="theme-color"]');
-         if (!metaTheme) {
-            metaTheme = document.createElement('meta');
+         const color = isDark ? '#111b21' : '#f0f2f5';
+         const metaThemes = document.querySelectorAll('meta[name="theme-color"]');
+         if (metaThemes.length > 0) {
+            metaThemes.forEach(el => el.setAttribute('content', color));
+         } else {
+            const metaTheme = document.createElement('meta');
             metaTheme.name = 'theme-color';
+            metaTheme.content = color;
             document.head.appendChild(metaTheme);
          }
-         metaTheme.setAttribute('content', isDark ? '#111b21' : '#f0f2f5');
+         const metaScheme = document.querySelector('meta[name="color-scheme"]');
+         if (metaScheme) {
+            metaScheme.setAttribute('content', isDark ? 'dark' : 'light');
+         }
+         const metaApple = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+         if (metaApple) {
+            metaApple.setAttribute('content', isDark ? 'black-translucent' : 'default');
+         }
       };
 
       if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {

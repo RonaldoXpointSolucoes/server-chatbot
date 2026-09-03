@@ -1535,7 +1535,7 @@ export default function ChecklistBuilder() {
         description: chk.description || '',
         category: chk.category || 'Higiene',
         sector_id: chk.sector_id || null,
-        cargo_id: chk.cargo_id || null,
+        tags: chk.tags || [],
         responsible_ids: chk.responsible_ids || [],
         use_unit_schedule_rules: chk.use_unit_schedule_rules ?? true,
         min_time_lead_minutes: chk.min_time_lead_minutes || 60,

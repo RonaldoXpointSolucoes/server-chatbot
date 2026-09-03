@@ -48,16 +48,20 @@ import VoucherViewer from './pages/voucher/VoucherViewer';
 import VoucherScanner from './pages/voucher/VoucherScanner';
 import CompanyPortalLogin from './pages/voucher/CompanyPortalLogin';
 import CompanyPortalDashboard from './pages/voucher/CompanyPortalDashboard';
+import TechnicalDocumentationPage from './pages/TechnicalDocumentationPage';
 
 // Inicializa o tema globalmente no boot
-const savedTheme = localStorage.getItem('theme') || 'light';
-if (savedTheme === 'dark') {
+const savedTheme = localStorage.getItem('theme') || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+const isDark = savedTheme === 'dark';
+if (isDark) {
   document.documentElement.classList.add('dark');
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', '#111b21');
 } else {
   document.documentElement.classList.remove('dark');
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', '#f0f2f5');
 }
+const bootThemeColor = isDark ? '#111b21' : '#f0f2f5';
+document.querySelectorAll('meta[name="theme-color"]').forEach(el => el.setAttribute('content', bootThemeColor));
+document.querySelector('meta[name="color-scheme"]')?.setAttribute('content', isDark ? 'dark' : 'light');
+document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')?.setAttribute('content', isDark ? 'black-translucent' : 'default');
 
 function PushNotificationManager() {
   usePushNotifications();
@@ -112,6 +116,7 @@ export default function App() {
             <Route path="/instances/:id/settings" element={<InstanceSettings />} />
             <Route path="/knowledge" element={<ErrorBoundary><KnowledgeBase /></ErrorBoundary>} />
             <Route path="/help" element={<HelpCenter />} />
+            <Route path="/docs" element={<ErrorBoundary><TechnicalDocumentationPage /></ErrorBoundary>} />
 
 
             {/* Configurações Globais originais conectadas à Sidebar Principal */}

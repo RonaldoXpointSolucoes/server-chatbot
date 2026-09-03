@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
-import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, ChevronRight, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, Save, ShieldCheck, Smile, Briefcase, Flag, Clock, Calendar, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, CheckSquare, MessageSquare, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList, UploadCloud, FolderCheck, Globe, Lock, Zap, Folder, FolderOpen, FolderTree, CornerDownRight } from 'lucide-react';
+import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, ChevronRight, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, Save, ShieldCheck, Smile, Briefcase, Flag, Clock, Calendar, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, CheckSquare, MessageSquare, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList, UploadCloud, FolderCheck, Globe, Lock, Zap, Folder, FolderOpen, FolderTree, CornerDownRight, BookOpen } from 'lucide-react';
 import { getCurrentEnvironment, setEnvironment, validateServerEnvironment, ENVIRONMENTS } from '../services/environmentService';
 import { useNavigate, useOutletContext, useLocation } from 'react-router-dom';
 import { useChatStore, QuickReplyCategory, instanceCache, resolveInstanceUuid, sortMessagesChronologically, getEffectiveContactTime, getRealContactId, getUniquePersonKey } from '../store/chatStore';
@@ -11,6 +11,7 @@ import { DeleteModal, RenameModal, NewChatModal, BlockModal, ContactLabelsModal,
 import ImageEditorModal from '../components/ImageEditorModal';
 import { SettingsModal } from '../components/SettingsModal';
 import { AgentSettingsModal } from '../components/AgentSettingsModal';
+import TechnicalDocumentationModal from '../components/modals/TechnicalDocumentationModal';
 import { CreateInboxModal } from '../components/modals/CreateInboxModal';
 import { ChatOmniMenu } from '../components/ChatOmniMenu';
 import { MainSidebar } from '../components/MainSidebar';
@@ -1354,6 +1355,7 @@ export default function ChatDashboard() {
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAgentSettingsOpen, setIsAgentSettingsOpen] = useState(false);
+  const [isTechDocsOpen, setIsTechDocsOpen] = useState(false);
   const [isSnoozedListOpen, setIsSnoozedListOpen] = useState(false);
   const location = useLocation();
   const isClosedTicketsOpen = location.pathname === '/chat/closed-tickets';
@@ -1364,7 +1366,7 @@ export default function ChatDashboard() {
       navigate('/chat');
     }
   };
-  const isModalOpen = !!modalReason || isSettingsOpen || isAgentSettingsOpen || isSnoozedListOpen || isClosedTicketsOpen;
+  const isModalOpen = !!modalReason || isSettingsOpen || isAgentSettingsOpen || isTechDocsOpen || isSnoozedListOpen || isClosedTicketsOpen;
   const [inputText, setInputText] = useState('');
   const [isSendingMessage, setIsSendingMessage] = useState(false);
   const [showQuickReplies, setShowQuickReplies] = useState(false);
@@ -4928,6 +4930,7 @@ export default function ChatDashboard() {
 
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
       <AgentSettingsModal isOpen={isAgentSettingsOpen} onClose={() => setIsAgentSettingsOpen(false)} />
+      <TechnicalDocumentationModal isOpen={isTechDocsOpen} onClose={() => setIsTechDocsOpen(false)} />
       <SnoozedListModal isOpen={isSnoozedListOpen} onClose={() => setIsSnoozedListOpen(false)} />
 
       {/* Cockpit Premium em Tela Cheia para Alterar Raciocínio da IA */}
@@ -5952,6 +5955,21 @@ export default function ChatDashboard() {
                         </button>
                       );
                     })()}
+
+                    <button
+                      onClick={() => { setIsTechDocsOpen(true); setActiveDropdown(null); }}
+                      className="w-full text-left px-5 py-3 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3 border-t border-gray-100 dark:border-[#304046]"
+                    >
+                      <BookOpen size={18} className="text-indigo-500 dark:text-indigo-400" />
+                      <div className="flex flex-col">
+                        <span className="text-[14px] font-bold text-[#3b4a54] dark:text-[#d1d7db]">
+                          Documentação Técnica
+                        </span>
+                        <span className="text-[11px] text-gray-400">
+                          Arquitetura, APIs & Migrações
+                        </span>
+                      </div>
+                    </button>
                   </div>
                 )}
               </div>

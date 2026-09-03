@@ -1153,13 +1153,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setTheme: (theme) => {
     localStorage.setItem('theme', theme);
-    if (theme === 'dark') {
+    const isDark = theme === 'dark';
+    if (isDark) {
       document.documentElement.classList.add('dark');
-      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', '#111b21');
     } else {
       document.documentElement.classList.remove('dark');
-      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', '#f0f2f5');
     }
+    const currentColor = isDark ? '#111b21' : '#f0f2f5';
+    document.querySelectorAll('meta[name="theme-color"]').forEach(el => el.setAttribute('content', currentColor));
+    document.querySelector('meta[name="color-scheme"]')?.setAttribute('content', isDark ? 'dark' : 'light');
+    document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')?.setAttribute('content', isDark ? 'black-translucent' : 'default');
     set({ theme });
   },
 
