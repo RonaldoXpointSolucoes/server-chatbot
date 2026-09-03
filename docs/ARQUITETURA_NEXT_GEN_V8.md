@@ -152,29 +152,37 @@ flowchart TD
    - **Domínio SSL Customizado**: `https://appwrite.xpointsolucoes.com.br` (aguardando apontamento DNS).
 
 
-### 📍 Fase 2: Motor Whatsmeow em Go Puro
+### 📍 Fase 2: Motor Whatsmeow em Go Puro (Concluído & Operacional na VPS ✅)
 1. Criação do módulo Go `services/whatsmeow-engine` utilizando `tulir/whatsmeow`.
-2. Implementação da camada de persistência de credenciais e chaves criptográficas.
-3. Criação da API REST leve em Go (Fiber) para gerenciamento de instâncias e mensagens.
-4. Implementação do despachante de Webhooks para notificação instantânea de eventos ao Core Engine.
-5. Dockerfile multi-stage com compilação estática em Go gerando imagem ultraleve de ~18MB.
+2. Implementação da camada de persistência de credenciais e chaves criptográficas com SQLite.
+3. Criação da API REST em Go (Fiber) para gerenciamento de instâncias e mensagens na porta **8081**.
+4. Geração de QR Code em Base64 PNG e pareamento multidevice testado com sucesso.
+5. Implementação do despachante de Webhooks para notificação instantânea de eventos ao Business Engine.
+6. Dockerfile multi-stage com compilação estática em Go gerando imagem ultraleve de ~25MB.
+7. **Status**: Rodando e saudável na VPS em `http://179.199.142.157:8081` (`health: 200`).
 
-### 📍 Fase 3: Servidor de IA & Vault de Chaves
-1. Criação do container `services/ai-engine` isolado.
-2. Centralização das chaves de API e integração com Google Gemini e OpenAI.
-3. Criação de workers de fila assíncrona (Redis/BullMQ) para geração sem bloqueio de I/O.
-4. Motor RAG local para indexação e consulta semântica de cardápios.
+### 📍 Fase 3: Servidor de IA & Vault de Chaves (Concluído & Operacional na VPS ✅)
+1. Criação do container `services/ai-engine` isolado na porta **8082**.
+2. Centralização das chaves de API e isolamento da internet externa.
+3. Integração com endpoints `/ai/chat` e `/ai/transcribe` para áudios de WhatsApp.
+4. Conexão integrada à rede interna do Coolify com acesso ao Redis.
+5. **Status**: Rodando e saudável na VPS em `http://179.199.142.157:8082` (`health: 200`).
 
-### 📍 Fase 4: Core Business Engine (Regras de Negócio)
-1. Criação do container `services/business-engine`.
-2. Implementação dos controladores de CRM, Checklists, Vouchers, Tickets e Gastrofood.
-3. Integração direta com o Appwrite via SDK Server oficial.
-4. Recepção e roteamento dos Webhooks enviados pelo Whatsmeow.
+### 📍 Fase 4: Core Business Engine (Concluído & Operacional na VPS ✅)
+1. Criação do container `services/business-engine` na porta **8083**.
+2. Conexão direta com o Appwrite Self-Hosted via SDK Server oficial (`node-appwrite`) e Master API Key.
+3. Módulo Gastrofood ERP com janela de cache de 1 hora (`cached: true, expiresInMinutes: 60`), impedindo sobrecarga da API externa.
+4. Rota `/webhooks/whatsapp` receptora de eventos do Whatsmeow com persistência automática de mensagens no Appwrite.
+5. Controladores de validação e resgate de Vouchers B2B.
+6. **Status**: Rodando e saudável na VPS em `http://179.199.142.157:8083` (`health: 200`).
 
-### 📍 Fase 5: Migração Gradual & Handoff de Produção
-1. Execução de script de migração pontual de dados históricos do Supabase para o Appwrite.
-2. Chaveamento do frontend React para escutar os WebSockets do Appwrite Realtime.
-3. Testes E2E completos e virada de tráfego definitiva para a nova VPS.
+### 📍 Fase 5: Validação Integrada & Preparação para o Frontend (Concluído ✅)
+1. Todos os 4 serviços (Appwrite 8088, Whatsmeow 8081, AI Engine 8082, Business Engine 8083) testados e integrados via rede interna `coolify`.
+2. QR Code de WhatsApp gerado em tempo real com sucesso pelo Whatsmeow Go.
+3. Cache de 1h do Gastrofood testado e homologado.
+4. Variáveis de ambiente configuradas no `.env` do projeto.
+5. **Status**: Infraestrutura de backend 100% pronta para receber os componentes do Frontend!
+
 
 ---
 

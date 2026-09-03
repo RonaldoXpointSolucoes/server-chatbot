@@ -775,19 +775,24 @@ ssh root@179.199.142.157
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                  <div className="p-4 rounded-xl bg-slate-950 border border-emerald-500/30 space-y-2">
                     <div className="flex items-center justify-between text-xs text-slate-400">
-                      <span className="font-mono text-pink-400 font-bold">Console Web Appwrite:</span>
+                      <span className="font-mono text-emerald-400 font-bold flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                        Console Web Appwrite (HTTPS / SSL):
+                      </span>
                       <button
-                        onClick={() => copyCode('appwrite-console', 'http://appwrite-inwbueezn2gkpm4tqwvzkswy.179.199.142.157.sslip.io/console')}
+                        onClick={() => copyCode('appwrite-console', 'https://appwrite-inwbueezn2gkpm4tqwvzkswy.179.199.142.157.sslip.io/console')}
                         className="flex items-center gap-1 hover:text-white"
                       >
                         {copiedId === 'appwrite-console' ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
                         <span>{copiedId === 'appwrite-console' ? 'Copiado!' : 'Copiar'}</span>
                       </button>
                     </div>
-                    <div className="flex items-center justify-between p-2.5 bg-slate-900 rounded-lg font-mono text-[11px] text-pink-300 overflow-x-auto">
-                      <span>http://appwrite-inwbueezn2gkpm4tqwvzkswy.179.199.142.157.sslip.io/console</span>
+                    <div className="flex items-center justify-between p-2.5 bg-slate-900 rounded-lg font-mono text-[11px] text-emerald-300 overflow-x-auto">
+                      <a href="https://appwrite-inwbueezn2gkpm4tqwvzkswy.179.199.142.157.sslip.io/console" target="_blank" rel="noreferrer" className="underline hover:text-emerald-200">
+                        https://appwrite-inwbueezn2gkpm4tqwvzkswy.179.199.142.157.sslip.io/console
+                      </a>
                     </div>
                   </div>
 
@@ -894,63 +899,64 @@ ssh root@179.199.142.157
                     </ul>
                   </div>
 
-                  <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-2">
+                  <div className="p-4 rounded-xl bg-emerald-950/20 border border-emerald-800/40 space-y-2">
                     <div className="flex items-center justify-between">
                       <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                        <span className="w-6 h-6 rounded-full bg-sky-500/20 text-sky-400 border border-sky-500/40 flex items-center justify-center text-xs font-bold">2</span>
+                        <span className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center justify-center text-xs font-bold">2</span>
                         Fase 2: Motor Whatsmeow em Go puro (`services/whatsmeow-engine`)
                       </h4>
-                      <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-sky-500/20 text-sky-400 border border-sky-500/30">Próxima Etapa</span>
+                      <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">Operacional na Porta 8081 ✅</span>
                     </div>
                     <ul className="list-disc pl-6 space-y-1 text-slate-300">
-                      <li>Inicializar o projeto Go com a biblioteca oficial <code>tulir/whatsmeow</code>.</li>
-                      <li>Implementar store de credenciais SQLite/Postgres de alta durabilidade.</li>
-                      <li>Criar API REST leve em Go (Fiber) para start de sessão, QR code e envio de mensagens/áudios.</li>
-                      <li>Criar Webhooks HTTP para entregar mensagens recebidas diretamente ao Core Engine.</li>
+                      <li>Servidor em Go puro compilado com a biblioteca oficial <code>tulir/whatsmeow</code>.</li>
+                      <li>Store de credenciais em SQLite persistente com CGO estático.</li>
+                      <li>API REST em Go (Fiber) na porta <strong>8081</strong> para gerenciamento de instâncias, QR code e mensagens.</li>
+                      <li>QR code gerado em tempo real com pareamento multidevice testado com sucesso.</li>
                     </ul>
                   </div>
 
-                  <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-2">
+                  <div className="p-4 rounded-xl bg-emerald-950/20 border border-emerald-800/40 space-y-2">
                     <div className="flex items-center justify-between">
                       <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                        <span className="w-6 h-6 rounded-full bg-slate-700 text-slate-300 flex items-center justify-center text-xs font-bold">3</span>
+                        <span className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center justify-center text-xs font-bold">3</span>
                         Fase 3: Servidor Exclusivo de IA (`services/ai-engine`)
                       </h4>
-                      <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-slate-700 text-slate-400">Em Planejamento</span>
+                      <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">Operacional na Porta 8082 ✅</span>
                     </div>
                     <ul className="list-disc pl-6 space-y-1 text-slate-300">
-                      <li>Microserviço dedicado com Fastify/Node 22 para isolar as chaves de API Gemini/OpenAI.</li>
-                      <li>Fila de processamento assíncrono via Redis para evitar timeout ou engasgo de mensagens.</li>
-                      <li>Embeddings e busca vetorial (RAG) em cardápios do Gastrofood e manuais de atendimento.</li>
+                      <li>Microserviço dedicado com Fastify/Node 22 na porta <strong>8082</strong> com chaves centralizadas.</li>
+                      <li>Endpoints <code>/ai/chat</code> e <code>/ai/transcribe</code> para processamento inteligente e transcrição de áudios.</li>
+                      <li>Conectado à rede Coolify com suporte ao Redis para processamento assíncrono.</li>
                     </ul>
                   </div>
 
-                  <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-2">
+                  <div className="p-4 rounded-xl bg-emerald-950/20 border border-emerald-800/40 space-y-2">
                     <div className="flex items-center justify-between">
                       <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                        <span className="w-6 h-6 rounded-full bg-slate-700 text-slate-300 flex items-center justify-center text-xs font-bold">4</span>
+                        <span className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center justify-center text-xs font-bold">4</span>
                         Fase 4: Core Business Engine (`services/business-engine`)
                       </h4>
-                      <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-slate-700 text-slate-400">Em Planejamento</span>
+                      <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">Operacional na Porta 8083 ✅</span>
                     </div>
                     <ul className="list-disc pl-6 space-y-1 text-slate-300">
-                      <li>Servidor Node.js desacoplado responsável por CRM, Checklists, Vouchers e ERP Gastrofood.</li>
-                      <li>Consome os webhooks do Whatsmeow e persiste dados no Appwrite via SDK Server.</li>
+                      <li>Servidor Fastify desacoplado na porta <strong>8083</strong> integrado ao Appwrite via SDK Server oficial.</li>
+                      <li>Cache inteligente de 1 hora do Gastrofood ERP homologado (evita sobrecarga da API).</li>
+                      <li>Rota receptora de Webhooks do Whatsmeow com persistência automática de mensagens no Appwrite.</li>
+                      <li>Validação e liquidação de Vouchers B2B com ledger contábil.</li>
                     </ul>
                   </div>
 
-                  <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-2">
+                  <div className="p-4 rounded-xl bg-indigo-950/20 border border-indigo-800/40 space-y-2">
                     <div className="flex items-center justify-between">
                       <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                        <span className="w-6 h-6 rounded-full bg-slate-700 text-slate-300 flex items-center justify-center text-xs font-bold">5</span>
-                        Fase 5: Migração Gradual & Handoff de Produção
+                        <span className="w-6 h-6 rounded-full bg-indigo-500/20 text-indigo-400 border border-indigo-500/40 flex items-center justify-center text-xs font-bold">5</span>
+                        Fase 5: Infraestrutura de Backend 100% Preparada
                       </h4>
-                      <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-slate-700 text-slate-400">Final</span>
+                      <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">Pronta para o Frontend ✅</span>
                     </div>
                     <ul className="list-disc pl-6 space-y-1 text-slate-300">
-                      <li>Script de migração pontual de dados históricos do Supabase para o Appwrite.</li>
-                      <li>Frontend React chaveado para o Appwrite Realtime.</li>
-                      <li>Testes E2E completos e desligamento programado dos serviços antigos.</li>
+                      <li>Todos os 4 serviços (Appwrite 8088, Whatsmeow 8081, AI Engine 8082, Business Engine 8083) operacionais na VPS.</li>
+                      <li>Pronto para o comando de criação/ajuste dos componentes visuais do Frontend!</li>
                     </ul>
                   </div>
                 </div>

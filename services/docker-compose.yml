@@ -1,0 +1,95 @@
+name: chatboot-nextgen-stack
+
+services:
+  whatsmeow-engine:
+    build:
+      context: ./whatsmeow-engine
+      dockerfile: Dockerfile
+    container_name: whatsmeow-engine
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      - PORT=8081
+      - DB_PATH=/data/sessions.db
+      - WEBHOOK_URL=http://business-engine:8083/webhooks/whatsapp
+      - TZ=America/Sao_Paulo
+    volumes:
+      - /data/whatsmeow:/data
+    networks:
+      - coolify
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=coolify"
+      - "traefik.http.routers.whatsmeow.rule=Host(`whatsmeow.179.199.142.157.sslip.io`)"
+      - "traefik.http.routers.whatsmeow.entrypoints=https"
+      - "traefik.http.routers.whatsmeow.tls=true"
+      - "traefik.http.routers.whatsmeow.tls.certresolver=letsencrypt"
+      - "traefik.http.services.whatsmeow.loadbalancer.server.port=8081"
+      - "traefik.http.routers.whatsmeow-http.rule=Host(`whatsmeow.179.199.142.157.sslip.io`)"
+      - "traefik.http.routers.whatsmeow-http.entrypoints=http"
+      - "traefik.http.routers.whatsmeow-http.middlewares=redirect-to-https"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+
+  ai-engine:
+    build:
+      context: ./ai-engine
+      dockerfile: Dockerfile
+    container_name: ai-engine
+    restart: unless-stopped
+    ports:
+      - "8082:8082"
+    environment:
+      - PORT=8082
+      - GEMINI_API_KEY=AIzaSyDcuvXqNj2j16iZ55f2S5lMdcB1unwYwts
+      - REDIS_URL=redis://appwrite-redis:6379
+    networks:
+      - coolify
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=coolify"
+      - "traefik.http.routers.ai-engine.rule=Host(`ai.179.199.142.157.sslip.io`)"
+      - "traefik.http.routers.ai-engine.entrypoints=https"
+      - "traefik.http.routers.ai-engine.tls=true"
+      - "traefik.http.routers.ai-engine.tls.certresolver=letsencrypt"
+      - "traefik.http.services.ai-engine.loadbalancer.server.port=8082"
+      - "traefik.http.routers.ai-engine-http.rule=Host(`ai.179.199.142.157.sslip.io`)"
+      - "traefik.http.routers.ai-engine-http.entrypoints=http"
+      - "traefik.http.routers.ai-engine-http.middlewares=redirect-to-https"
+
+  business-engine:
+    build:
+      context: ./business-engine
+      dockerfile: Dockerfile
+    container_name: business-engine
+    restart: unless-stopped
+    ports:
+      - "8083:8083"
+    environment:
+      - PORT=8083
+      - APPWRITE_ENDPOINT=http://appwrite:80/v1
+      - APPWRITE_PROJECT_ID=chatboot-production
+      - APPWRITE_DATABASE_ID=chatboot_db
+      - APPWRITE_API_KEY=standard_bc50daa650a82f0d19717cbbc3b277af8c84ee084ab50232baf2b21cfaaabc4fa80ca0af9669163cd644c8676097eefbe001d9cd77a01b60e9b598222ab8117f341729ad3e5330e06af8c63da6e79e8cc3affa6e54cb87056f542c01f934bf21c37b43d1ddaaa5be0c7aff2f0ff2a060dc7d452ee763a2e22830b35da14db7b1
+      - WHATSMEOW_URL=http://whatsmeow-engine:8081
+      - AI_ENGINE_URL=http://ai-engine:8082
+    depends_on:
+      - whatsmeow-engine
+      - ai-engine
+    networks:
+      - coolify
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=coolify"
+      - "traefik.http.routers.business-engine.rule=Host(`api.179.199.142.157.sslip.io`)"
+      - "traefik.http.routers.business-engine.entrypoints=https"
+      - "traefik.http.routers.business-engine.tls=true"
+      - "traefik.http.routers.business-engine.tls.certresolver=letsencrypt"
+      - "traefik.http.services.business-engine.loadbalancer.server.port=8083"
+      - "traefik.http.routers.business-engine-http.rule=Host(`api.179.199.142.157.sslip.io`)"
+      - "traefik.http.routers.business-engine-http.entrypoints=http"
+      - "traefik.http.routers.business-engine-http.middlewares=redirect-to-https"
+
+networks:
+  coolify:
+    external: true

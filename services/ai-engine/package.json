@@ -1,0 +1,15 @@
+{
+  "name": "ai-engine",
+  "version": "1.0.0",
+  "description": "ChatBoot AI Engine - Gemini & OpenAI Isolation Vault",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "fastify": "^4.28.1",
+    "@fastify/cors": "^9.0.1",
+    "dotenv": "^16.4.5"
+  }
+}

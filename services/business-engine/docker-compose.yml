@@ -1,0 +1,25 @@
+name: business-engine
+
+services:
+  business-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: business-engine
+    restart: unless-stopped
+    ports:
+      - "8083:8083"
+    environment:
+      - PORT=8083
+      - APPWRITE_ENDPOINT=http://appwrite:80/v1
+      - APPWRITE_PROJECT_ID=chatboot-production
+      - APPWRITE_DATABASE_ID=chatboot_db
+      - APPWRITE_API_KEY=${APPWRITE_API_KEY}
+      - WHATSMEOW_URL=http://whatsmeow-engine:8081
+      - AI_ENGINE_URL=http://ai-engine:8082
+    networks:
+      - coolify
+
+networks:
+  coolify:
+    external: true
