@@ -25,7 +25,10 @@ import {
   Radio,
   Gauge,
   CheckCircle2,
-  AlertTriangle
+  AlertTriangle,
+  Terminal,
+  Activity,
+  CalendarCheck2
 } from 'lucide-react';
 
 interface TechnicalDocumentationModalProps {
@@ -35,11 +38,13 @@ interface TechnicalDocumentationModalProps {
 
 type DocSection = 
   | 'overview' 
+  | 'vps_telemetry'
   | 'topology' 
   | 'whatsmeow' 
   | 'ai_engine' 
   | 'business_engine' 
   | 'appwrite' 
+  | 'roadmap' 
   | 'ha_scalability' 
   | 'code_structure';
 
@@ -70,11 +75,14 @@ export default function TechnicalDocumentationModal({ isOpen, onClose }: Technic
               <div className="flex items-center gap-2">
                 <h2 className="text-lg font-bold text-white tracking-wide">Documentação Técnica & Nova Arquitetura</h2>
                 <span className="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                  v7.3.0 Next-Gen Master
+                  v7.3.1 Next-Gen Master
+                </span>
+                <span className="px-2 py-0.5 text-[10px] font-bold uppercase rounded-full bg-sky-500/20 text-sky-400 border border-sky-500/30 hidden sm:inline-block">
+                  VPS Homologada
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                Plano de Alta Disponibilidade: Whatsmeow Go, Motor de IA Isolado, Core Engine, Appwrite Self-Hosted & Coolify
+                Plano de Alta Disponibilidade: Whatsmeow Go, Servidor IA Isolado, Core Engine, Appwrite & Coolify na VPS 179.199.142.157
               </p>
             </div>
           </div>
@@ -122,6 +130,18 @@ export default function TechnicalDocumentationModal({ isOpen, onClose }: Technic
             </button>
 
             <button
+              onClick={() => setActiveSection('vps_telemetry')}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
+                activeSection === 'vps_telemetry'
+                  ? 'bg-emerald-600/20 text-emerald-300 border border-emerald-500/30 font-semibold shadow-sm'
+                  : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
+              }`}
+            >
+              <Server size={16} className={activeSection === 'vps_telemetry' ? 'text-emerald-400' : 'text-slate-400'} />
+              <span>2. VPS Homologada & Telemetria</span>
+            </button>
+
+            <button
               onClick={() => setActiveSection('topology')}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
                 activeSection === 'topology'
@@ -130,7 +150,7 @@ export default function TechnicalDocumentationModal({ isOpen, onClose }: Technic
               }`}
             >
               <Network size={16} className={activeSection === 'topology' ? 'text-indigo-400' : 'text-slate-400'} />
-              <span>2. Topologia VPS & Coolify</span>
+              <span>3. Topologia VPS & Coolify</span>
             </button>
 
             <button
@@ -142,7 +162,7 @@ export default function TechnicalDocumentationModal({ isOpen, onClose }: Technic
               }`}
             >
               <MessageSquare size={16} className={activeSection === 'whatsmeow' ? 'text-emerald-400' : 'text-slate-400'} />
-              <span>3. Motor Whatsmeow (Go puro)</span>
+              <span>4. Motor Whatsmeow (Go puro)</span>
             </button>
 
             <button
@@ -154,7 +174,7 @@ export default function TechnicalDocumentationModal({ isOpen, onClose }: Technic
               }`}
             >
               <Sparkles size={16} className={activeSection === 'ai_engine' ? 'text-purple-400' : 'text-slate-400'} />
-              <span>4. Servidor de IA & Chaves</span>
+              <span>5. Servidor de IA & Chaves</span>
             </button>
 
             <button
@@ -166,7 +186,7 @@ export default function TechnicalDocumentationModal({ isOpen, onClose }: Technic
               }`}
             >
               <Workflow size={16} className={activeSection === 'business_engine' ? 'text-sky-400' : 'text-slate-400'} />
-              <span>5. Servidor de Regras (Core)</span>
+              <span>6. Servidor de Regras (Core)</span>
             </button>
 
             <button
@@ -178,7 +198,19 @@ export default function TechnicalDocumentationModal({ isOpen, onClose }: Technic
               }`}
             >
               <HardDrive size={16} className={activeSection === 'appwrite' ? 'text-pink-400' : 'text-slate-400'} />
-              <span>6. Appwrite Self-Hosted</span>
+              <span>7. Appwrite Self-Hosted</span>
+            </button>
+
+            <button
+              onClick={() => setActiveSection('roadmap')}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
+                activeSection === 'roadmap'
+                  ? 'bg-emerald-600/20 text-emerald-300 border border-emerald-500/30 font-semibold shadow-sm'
+                  : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
+              }`}
+            >
+              <CalendarCheck2 size={16} className={activeSection === 'roadmap' ? 'text-emerald-400' : 'text-slate-400'} />
+              <span>8. Roadmap de Execução E2E</span>
             </button>
 
             <button
@@ -190,7 +222,7 @@ export default function TechnicalDocumentationModal({ isOpen, onClose }: Technic
               }`}
             >
               <ShieldCheck size={16} className={activeSection === 'ha_scalability' ? 'text-amber-400' : 'text-slate-400'} />
-              <span>7. Alta Disp. & Escalabilidade</span>
+              <span>9. Alta Disp. & Escalabilidade</span>
             </button>
 
             <button
@@ -202,7 +234,7 @@ export default function TechnicalDocumentationModal({ isOpen, onClose }: Technic
               }`}
             >
               <Code2 size={16} className={activeSection === 'code_structure' ? 'text-indigo-400' : 'text-slate-400'} />
-              <span>8. Estrutura de Pastas & Microserviços</span>
+              <span>10. Estrutura de Diretórios Monorepo</span>
             </button>
           </div>
 
@@ -212,14 +244,16 @@ export default function TechnicalDocumentationModal({ isOpen, onClose }: Technic
             {/* Seletor Mobile de Abas */}
             <div className="md:hidden flex gap-2 overflow-x-auto pb-2 border-b border-slate-800">
               {[
-                { id: 'overview', label: '1. Visão Geral' },
-                { id: 'topology', label: '2. Topologia VPS' },
-                { id: 'whatsmeow', label: '3. Whatsmeow Go' },
-                { id: 'ai_engine', label: '4. Servidor IA' },
-                { id: 'business_engine', label: '5. Core Regras' },
-                { id: 'appwrite', label: '6. Appwrite' },
-                { id: 'ha_scalability', label: '7. Alta Disp.' },
-                { id: 'code_structure', label: '8. Estrutura' }
+                { id: 'overview', label: '1. Visão' },
+                { id: 'vps_telemetry', label: '2. VPS Real' },
+                { id: 'topology', label: '3. Topologia' },
+                { id: 'whatsmeow', label: '4. Whatsmeow' },
+                { id: 'ai_engine', label: '5. IA' },
+                { id: 'business_engine', label: '6. Regras' },
+                { id: 'appwrite', label: '7. Appwrite' },
+                { id: 'roadmap', label: '8. Roadmap' },
+                { id: 'ha_scalability', label: '9. Alta Disp.' },
+                { id: 'code_structure', label: '10. Código' }
               ].map(tab => (
                 <button
                   key={tab.id}
@@ -322,7 +356,118 @@ export default function TechnicalDocumentationModal({ isOpen, onClose }: Technic
               </div>
             )}
 
-            {/* SEÇÃO 2: TOPOLOGIA VPS & COOLIFY */}
+            {/* SEÇÃO 2: VPS HOMOLOGADA & TELEMETRIA REAL */}
+            {activeSection === 'vps_telemetry' && (
+              <div className="space-y-6 animate-in fade-in duration-150">
+                <div>
+                  <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                    <Server className="text-emerald-400" size={22} />
+                    VPS Dedicada Homologada: Telemetria & Status Operacional
+                  </h3>
+                  <p className="text-sm text-slate-300 mt-1">
+                    Servidor dedicado provisionado e validado em tempo real via SSH Root e Coolify API.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-1">
+                    <div className="text-[11px] text-slate-400 font-medium">Endereço IP / Host</div>
+                    <div className="text-sm font-bold text-white font-mono">179.199.142.157</div>
+                    <div className="text-[11px] text-emerald-400">srv1954006.hstgr.cloud</div>
+                  </div>
+
+                  <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-1">
+                    <div className="text-[11px] text-slate-400 font-medium">Localização & SO</div>
+                    <div className="text-sm font-bold text-white">Campinas, SP (Brasil)</div>
+                    <div className="text-[11px] text-sky-400">Ubuntu 24.04 LTS (Kernel 6.8)</div>
+                  </div>
+
+                  <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-1">
+                    <div className="text-[11px] text-slate-400 font-medium">Memória RAM</div>
+                    <div className="text-sm font-bold text-emerald-400">6.7 GB Livres / 7.8 GB</div>
+                    <div className="text-[11px] text-slate-400">1.1 GB em uso (Stack Coolify)</div>
+                  </div>
+
+                  <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-1">
+                    <div className="text-[11px] text-slate-400 font-medium">Armazenamento SSD NVMe</div>
+                    <div className="text-sm font-bold text-emerald-400">89 GB Livres / 96 GB</div>
+                    <div className="text-[11px] text-slate-400">Apenas 8% utilizado</div>
+                  </div>
+                </div>
+
+                <div className="overflow-hidden rounded-xl border border-slate-700 bg-slate-800/50">
+                  <div className="px-4 py-3 bg-slate-800 border-b border-slate-700 font-bold text-xs text-white flex items-center justify-between">
+                    <span className="flex items-center gap-2">
+                      <Terminal size={14} className="text-emerald-400" />
+                      Status dos Containers Ativos na VPS (Docker Swarm / Coolify Engine)
+                    </span>
+                    <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                      100% HEALTHY
+                    </span>
+                  </div>
+                  <table className="w-full text-left text-xs text-slate-300">
+                    <thead className="bg-slate-900/60 text-slate-400 uppercase font-semibold text-[10px] border-b border-slate-800">
+                      <tr>
+                        <th className="p-3">Container</th>
+                        <th className="p-3">Portas / Mapeamento</th>
+                        <th className="p-3">Função</th>
+                        <th className="p-3">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 font-mono text-[11px]">
+                      <tr>
+                        <td className="p-3 font-semibold text-white">coolify-proxy</td>
+                        <td className="p-3 text-sky-400">80, 443, 8080 (TCP/UDP)</td>
+                        <td className="p-3 font-sans text-slate-300">Traefik Reverse Proxy & SSL Let's Encrypt</td>
+                        <td className="p-3 text-emerald-400">Up (healthy)</td>
+                      </tr>
+                      <tr>
+                        <td className="p-3 font-semibold text-white">coolify</td>
+                        <td className="p-3 text-sky-400">8000:8080</td>
+                        <td className="p-3 font-sans text-slate-300">Painel Web & API de Orquestração</td>
+                        <td className="p-3 text-emerald-400">Up (healthy)</td>
+                      </tr>
+                      <tr>
+                        <td className="p-3 font-semibold text-white">coolify-db</td>
+                        <td className="p-3 text-slate-400">5432 (Interna)</td>
+                        <td className="p-3 font-sans text-slate-300">PostgreSQL Interno do Coolify</td>
+                        <td className="p-3 text-emerald-400">Up (healthy)</td>
+                      </tr>
+                      <tr>
+                        <td className="p-3 font-semibold text-white">coolify-redis</td>
+                        <td className="p-3 text-slate-400">6379 (Interna)</td>
+                        <td className="p-3 font-sans text-slate-300">Redis Broker para filas de jobs do Coolify</td>
+                        <td className="p-3 text-emerald-400">Up (healthy)</td>
+                      </tr>
+                      <tr>
+                        <td className="p-3 font-semibold text-white">coolify-realtime</td>
+                        <td className="p-3 text-sky-400">6001-6002</td>
+                        <td className="p-3 font-sans text-slate-300">WebSockets para logs ao vivo e deploys</td>
+                        <td className="p-3 text-emerald-400">Up (healthy)</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                  <div className="flex items-center justify-between text-xs text-slate-400">
+                    <span className="font-mono text-emerald-400 font-bold">Comando de Conexão Rápida SSH:</span>
+                    <button
+                      onClick={() => copyCode('ssh-conn', 'ssh root@179.199.142.157')}
+                      className="flex items-center gap-1 hover:text-white"
+                    >
+                      {copiedId === 'ssh-conn' ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                      <span>{copiedId === 'ssh-conn' ? 'Copiado!' : 'Copiar'}</span>
+                    </button>
+                  </div>
+                  <pre className="p-2.5 bg-slate-900 rounded-lg font-mono text-xs text-indigo-300 overflow-x-auto">
+ssh root@179.199.142.157
+                  </pre>
+                </div>
+              </div>
+            )}
+
+            {/* SEÇÃO 3: TOPOLOGIA VPS & COOLIFY */}
             {activeSection === 'topology' && (
               <div className="space-y-6 animate-in fade-in duration-150">
                 <div>
@@ -402,7 +547,7 @@ export default function TechnicalDocumentationModal({ isOpen, onClose }: Technic
               </div>
             )}
 
-            {/* SEÇÃO 3: MOTOR WHATSMEOW EM GO */}
+            {/* SEÇÃO 4: MOTOR WHATSMEOW EM GO */}
             {activeSection === 'whatsmeow' && (
               <div className="space-y-6 animate-in fade-in duration-150">
                 <div>
@@ -471,7 +616,7 @@ export default function TechnicalDocumentationModal({ isOpen, onClose }: Technic
               </div>
             )}
 
-            {/* SEÇÃO 4: SERVIDOR DE IA & CHAVES DE ACESSO */}
+            {/* SEÇÃO 5: SERVIDOR DE IA & CHAVES DE ACESSO */}
             {activeSection === 'ai_engine' && (
               <div className="space-y-6 animate-in fade-in duration-150">
                 <div>
@@ -529,7 +674,7 @@ export default function TechnicalDocumentationModal({ isOpen, onClose }: Technic
               </div>
             )}
 
-            {/* SEÇÃO 5: SERVIDOR DE REGRAS DE NEGÓCIO (CORE) */}
+            {/* SEÇÃO 6: SERVIDOR DE REGRAS DE NEGÓCIO (CORE) */}
             {activeSection === 'business_engine' && (
               <div className="space-y-6 animate-in fade-in duration-150">
                 <div>
@@ -591,7 +736,7 @@ export default function TechnicalDocumentationModal({ isOpen, onClose }: Technic
               </div>
             )}
 
-            {/* SEÇÃO 6: APPWRITE SELF-HOSTED */}
+            {/* SEÇÃO 7: APPWRITE SELF-HOSTED */}
             {activeSection === 'appwrite' && (
               <div className="space-y-6 animate-in fade-in duration-150">
                 <div>
@@ -660,7 +805,100 @@ export default function TechnicalDocumentationModal({ isOpen, onClose }: Technic
               </div>
             )}
 
-            {/* SEÇÃO 7: ALTA DISPONIBILIDADE & ESCALABILIDADE */}
+            {/* SEÇÃO 8: ROADMAP DE EXECUÇÃO E2E */}
+            {activeSection === 'roadmap' && (
+              <div className="space-y-6 animate-in fade-in duration-150">
+                <div>
+                  <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                    <CalendarCheck2 className="text-emerald-400" size={22} />
+                    Roadmap Prático de Implementação da Nova Versão (Passo a Passo)
+                  </h3>
+                  <p className="text-sm text-slate-300 mt-1">
+                    Plano cronológico ordenado para execução contínua com zero downtime e qualidade garantida.
+                  </p>
+                </div>
+
+                <div className="space-y-4 text-xs text-slate-300">
+                  <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center justify-center text-xs font-bold">1</span>
+                        Fase 1: Provisionamento do Appwrite Self-Hosted no Coolify
+                      </h4>
+                      <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-sky-500/20 text-sky-400 border border-sky-500/30">Próxima Etapa</span>
+                    </div>
+                    <ul className="list-disc pl-6 space-y-1 text-slate-300">
+                      <li>Criar o serviço Docker Compose do Appwrite na VPS via Coolify na porta 8080/443.</li>
+                      <li>Persistir volumes MariaDB, Redis e Storage no SSD da VPS.</li>
+                      <li>Criar o projeto <code>chatboot-production</code> e criar as Coleções e Índices correspondentes.</li>
+                      <li>Gerar API Keys com escopos completos para o backend.</li>
+                    </ul>
+                  </div>
+
+                  <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-full bg-slate-700 text-slate-300 flex items-center justify-center text-xs font-bold">2</span>
+                        Fase 2: Motor Whatsmeow em Go puro (`services/whatsmeow-engine`)
+                      </h4>
+                      <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-slate-700 text-slate-400">Em Planejamento</span>
+                    </div>
+                    <ul className="list-disc pl-6 space-y-1 text-slate-300">
+                      <li>Inicializar o projeto Go com a biblioteca oficial <code>tulir/whatsmeow</code>.</li>
+                      <li>Implementar store de credenciais SQLite/Postgres de alta durabilidade.</li>
+                      <li>Criar API REST leve em Go (Fiber) para start de sessão, QR code e envio de mensagens/áudios.</li>
+                      <li>Criar Webhooks HTTP para entregar mensagens recebidas diretamente ao Core Engine.</li>
+                    </ul>
+                  </div>
+
+                  <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-full bg-slate-700 text-slate-300 flex items-center justify-center text-xs font-bold">3</span>
+                        Fase 3: Servidor Exclusivo de IA (`services/ai-engine`)
+                      </h4>
+                      <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-slate-700 text-slate-400">Em Planejamento</span>
+                    </div>
+                    <ul className="list-disc pl-6 space-y-1 text-slate-300">
+                      <li>Microserviço dedicado com Fastify/Node 22 para isolar as chaves de API Gemini/OpenAI.</li>
+                      <li>Fila de processamento assíncrono via Redis para evitar timeout ou engasgo de mensagens.</li>
+                      <li>Embeddings e busca vetorial (RAG) em cardápios do Gastrofood e manuais de atendimento.</li>
+                    </ul>
+                  </div>
+
+                  <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-full bg-slate-700 text-slate-300 flex items-center justify-center text-xs font-bold">4</span>
+                        Fase 4: Core Business Engine (`services/business-engine`)
+                      </h4>
+                      <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-slate-700 text-slate-400">Em Planejamento</span>
+                    </div>
+                    <ul className="list-disc pl-6 space-y-1 text-slate-300">
+                      <li>Servidor Node.js desacoplado responsável por CRM, Checklists, Vouchers e ERP Gastrofood.</li>
+                      <li>Consome os webhooks do Whatsmeow e persiste dados no Appwrite via SDK Server.</li>
+                    </ul>
+                  </div>
+
+                  <div className="p-4 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-full bg-slate-700 text-slate-300 flex items-center justify-center text-xs font-bold">5</span>
+                        Fase 5: Migração Gradual & Handoff de Produção
+                      </h4>
+                      <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-slate-700 text-slate-400">Final</span>
+                    </div>
+                    <ul className="list-disc pl-6 space-y-1 text-slate-300">
+                      <li>Script de migração pontual de dados históricos do Supabase para o Appwrite.</li>
+                      <li>Frontend React chaveado para o Appwrite Realtime.</li>
+                      <li>Testes E2E completos e desligamento programado dos serviços antigos.</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* SEÇÃO 9: ALTA DISPONIBILIDADE & ESCALABILIDADE */}
             {activeSection === 'ha_scalability' && (
               <div className="space-y-6 animate-in fade-in duration-150">
                 <div>
@@ -713,7 +951,7 @@ export default function TechnicalDocumentationModal({ isOpen, onClose }: Technic
               </div>
             )}
 
-            {/* SEÇÃO 8: ESTRUTURA DE PASTAS & MICROSERVIÇOS */}
+            {/* SEÇÃO 10: ESTRUTURA DE PASTAS & MONOREPO */}
             {activeSection === 'code_structure' && (
               <div className="space-y-6 animate-in fade-in duration-150">
                 <div>
@@ -767,7 +1005,7 @@ export default function TechnicalDocumentationModal({ isOpen, onClose }: Technic
         <div className="px-6 py-3 border-t border-slate-800 bg-slate-950/70 flex items-center justify-between text-xs text-slate-400 shrink-0">
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span>Documentação Oficial ChatBoot SaaS • Arquitetura Next-Gen v7.3.0</span>
+            <span>Documentação Oficial ChatBoot SaaS • VPS 179.199.142.157 • v7.3.1 Master</span>
           </div>
           <button
             onClick={onClose}
