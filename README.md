@@ -1,13 +1,30 @@
-# React + TypeScript + Vite
+# 🚀 ChatBoot Next-Gen (v8.0) • SaaS WhatsApp Master
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+> **Nova Arquitetura de Produção na VPS Hostinger (`179.199.142.157`)**  
+> Motor WhatsApp em Go puro (**Whatsmeow**), Banco de Dados Próprio (**Appwrite Self-Hosted**), Cofre de IA (**AI Engine**) e Regras de Negócio (**Business Engine**) operando com **HTTPS Let's Encrypt**.
 
-Currently, two official plugins are available:
+---
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+### 📚 Documentações Oficiais de Transição & Arquitetura
 
-## Expanding the ESLint configuration
+* 📘 **[Manual Mestre de Transição ChatBoot-New](docs/MANUAL_MIGRACAO_CHATBOOT_NEW.md)**: Guia completo para inicializar e evoluir a nova pasta `ChatBoot-New` com todos os endpoints, credenciais e passos de desenvolvimento.
+* 🏛️ **[Especificação Arquitetural Next-Gen v8](docs/ARQUITETURA_NEXT_GEN_V8.md)**: Topologia detalhada de microserviços, comparativo técnico e mapeamento de coleções.
+
+---
+
+## 🌐 Endpoints Oficiais com HTTPS Seguro (SSL Let's Encrypt)
+
+* **Appwrite Console**: [https://appwrite-inwbueezn2gkpm4tqwvzkswy.179.199.142.157.sslip.io/console](https://appwrite-inwbueezn2gkpm4tqwvzkswy.179.199.142.157.sslip.io/console)
+* **Appwrite API**: `https://appwrite-inwbueezn2gkpm4tqwvzkswy.179.199.142.157.sslip.io/v1`
+* **Coolify Console**: [https://coolify.xpointsolucoes.com.br](https://coolify.xpointsolucoes.com.br)
+* **Whatsmeow Go**: `https://whatsmeow.179.199.142.157.sslip.io`
+* **AI Engine**: `https://ai.179.199.142.157.sslip.io`
+* **Business Engine**: `https://api.179.199.142.157.sslip.io`
+
+---
+
+## React + TypeScript + Vite
+
 
 If you are developing a production application, we recommend updating the configuration to enable type aware lint rules:
 
