@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import QRCode from 'react-qr-code';
 import {
+  Building2,
+  Terminal,
   Smartphone,
   CheckCircle2,
   Loader2,
