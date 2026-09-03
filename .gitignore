@@ -28,3 +28,4 @@ chatboot-engine/.env
 *.txt
 
 .vercel
+server/data/

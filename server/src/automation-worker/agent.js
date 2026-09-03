@@ -3,6 +3,7 @@ import { supabase, NODE_ID } from '../supabase.js';
 import { pipeline } from '@xenova/transformers';
 import { AsyncLocalStorage } from 'async_hooks';
 import { getBrPhoneVariations, getCanonicalBrPhone } from '../event-processor/helpers.js';
+import { gastrofoodCache } from './gastrofood-cache.js';
 
 const tenantStorage = new AsyncLocalStorage();
 
@@ -308,17 +309,17 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
     const cardapioToken = (botSettings && botSettings.cardapio_json_token) || companySettings.cardapio_json_token || GASTROFOOD_DEFAULT_TOKEN;
     const cardapioPayload = (botSettings && botSettings.cardapio_json_payload) || companySettings.cardapio_json_payload || DEFAULT_CARDAPIO_PAYLOAD;
 
-    // Regra dos 60 minutos: se a última consulta foi realizada há menos de 60 minutos,
-    // mudamos a origem efetiva para 'supabase' para evitar batidas desnecessárias na API externa.
+    // Regra dos 60 minutos (1 Hora) com Cache Persistente: se a última consulta foi realizada há menos de 60 minutos,
+    // forçamos a origem efetiva para 'supabase' para proteger e não sobrecarregar a infraestrutura da Gastrofood.
     let effectiveCardapioOrigem = cardapioOrigem;
+    const isRecent = gastrofoodCache.isCardapioRecent(tenantId, 60 * 60 * 1000);
     const lastSyncTimeStr = companySettings.last_cardapio_sync_time;
-    if (cardapioOrigem === 'api' && lastSyncTimeStr) {
-        const lastSync = new Date(lastSyncTimeStr).getTime();
-        const sixtyMinutes = 60 * 60 * 1000;
-        if (now - lastSync < sixtyMinutes) {
-            console.log(`[CardapioCache] Pulando consulta externa da API para o tenant ${tenantId}. Última consulta foi em ${new Date(lastSync).toLocaleString('pt-BR')} (há menos de 60m). Carregando dados locais.`);
-            effectiveCardapioOrigem = 'supabase';
-        }
+    const isSettingsRecent = lastSyncTimeStr && (now - new Date(lastSyncTimeStr).getTime() < 60 * 60 * 1000);
+
+    if (cardapioOrigem === 'api' && (isRecent || isSettingsRecent)) {
+        const remainingMinutes = gastrofoodCache.getMinutesUntilNextAllowedSync(tenantId, 60 * 60 * 1000);
+        console.log(`[CardapioCache] ⏳ Pulando consulta externa da API para o tenant ${tenantId}. Cardápio consultado há menos de 60m (próxima liberação em ~${remainingMinutes}m). Carregando dados locais para poupar Gastrofood.`);
+        effectiveCardapioOrigem = 'supabase';
     }
 
     console.log(`[CardapioCache] Cache MISS para a chave ${cacheKey}. Origem configurada: ${cardapioOrigem}. Origem efetiva: ${effectiveCardapioOrigem}`);
@@ -497,6 +498,7 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
                                     console.log(`[CardapioCache - SyncTime] settings.last_cardapio_sync_time atualizada com sucesso para ${tenantId}.`);
                                     companySettings.last_cardapio_sync_time = updatedSettings.last_cardapio_sync_time;
                                 }
+                                gastrofoodCache.markCardapioSynced(tenantId);
                             });
                         
                         // Dispara Auto-Healing em background se a origem geral do tenant permitir ou for o fluxo fallback
@@ -655,206 +657,199 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
             }
         }
         
-        console.log(`[AutoHealing] Sincronizando adicionais para os produtos...`);
+        console.log(`[AutoHealing] Sincronizando adicionais para os produtos (com Deduplicação Total de Cache)...`);
 
-        // Busca passos e adicionais já existentes no banco de dados para evitar requisições redundantes
-        let existingPassos = [];
-        try {
-            const { data: fetchPassos, error: errPassos } = await supabase
-                .from('cardapio_passos')
-                .select('id, produto_id, created_at')
-                .eq('tenant_id', tenantId);
-            if (!errPassos && fetchPassos) {
-                existingPassos = fetchPassos;
-            }
-        } catch (dbErr) {
-            console.error('[AutoHealing] Erro ao carregar passos existentes:', dbErr.message);
-        }
+        // 1. Inicializa o mapa de produtos já consultados a partir do banco e do disco
+        await gastrofoodCache.initTenantFromDatabase(tenantId, supabase);
 
-        // Mapeia produto_id para seu created_at e se é dummy
-        const productPassosMap = new Map();
-        existingPassos.forEach(p => {
-            const t = p.created_at ? new Date(p.created_at).getTime() : 0;
-            const isDummy = String(p.id).startsWith('no_steps_');
-            if (!productPassosMap.has(p.produto_id) || t > productPassosMap.get(p.produto_id).lastSync) {
-                productPassosMap.set(p.produto_id, { lastSync: t, isDummy });
-            }
-        });
-
+        // 2. Identifica produtos que REALMENTE ainda não foram consultados na história do sistema
         const productsToSync = [];
-
         for (const product of produtos) {
-            if (!productPassosMap.has(product.id)) {
-                // Produto novo que não possui adicionais gravados. Sincroniza obrigatoriamente!
+            const normId = gastrofoodCache.normalizeId(product.id);
+            if (!normId) continue;
+            if (!gastrofoodCache.isProductStepsSynced(tenantId, normId)) {
                 productsToSync.push(product);
             }
         }
 
-        const finalProductsToSync = productsToSync;
+        if (productsToSync.length === 0) {
+            console.log(`[AutoHealing] 🛡️ Deduplicação Gastrofood: Todos os ${produtos.length} produtos do tenant ${tenantId} já foram consultados e estão guardados no banco/cache. ZERO chamadas externas necessárias.`);
+        } else {
+            // Limita a um lote seguro por ciclo (máximo 15 produtos) com intervalo seguro para JAMAIS sobrecarregar a API da Gastrofood
+            const MAX_NEW_PRODUCTS_PER_CYCLE = 15;
+            const finalProductsToSync = productsToSync.slice(0, MAX_NEW_PRODUCTS_PER_CYCLE);
 
-        console.log(`[AutoHealing] Total de produtos do cardápio: ${produtos.length}. Novos a sincronizar (sem adicionais locais): ${productsToSync.length}`);
+            console.log(`[AutoHealing] Total de produtos do cardápio: ${produtos.length}. Novos a sincronizar: ${productsToSync.length}. Processando lote seguro de ${finalProductsToSync.length} produtos neste ciclo para preservar a infraestrutura Gastrofood.`);
 
-        for (let i = 0; i < finalProductsToSync.length; i++) {
-            const product = finalProductsToSync[i];
-            
-            // Delay de 3 segundos para evitar requisições simultâneas ou sobrecarregar o servidor do cliente
-            await new Promise(resolve => setTimeout(resolve, 3000));
-            
-            try {
-                let stepsPayload = { AIdProduto: product.id };
-                if (companySettings && companySettings.gfood_store_id) {
-                    stepsPayload = injectStoreId(stepsPayload, companySettings.gfood_store_id);
-                }
-
-                logGastrofoodCall({
-                    direction: 'request',
-                    action: 'Consultar Adicionais',
-                    method: 'POST',
-                    url: stepsUrl,
-                    payload: stepsPayload
-                });
-
-                const resSteps = await fetch(stepsUrl, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': cardapioToken.startsWith('Bearer ') ? cardapioToken : `Bearer ${cardapioToken}`
-                    },
-                    body: JSON.stringify(stepsPayload)
-                });
+            for (let i = 0; i < finalProductsToSync.length; i++) {
+                const product = finalProductsToSync[i];
+                const normId = gastrofoodCache.normalizeId(product.id);
                 
-                if (resSteps.ok) {
-                    const stepsData = await resSteps.json();
+                // Delay de 3.5 segundos para garantir espaçamento seguro entre requisições
+                await new Promise(resolve => setTimeout(resolve, 3500));
+                
+                try {
+                    let stepsPayload = { AIdProduto: product.id };
+                    if (companySettings && companySettings.gfood_store_id) {
+                        stepsPayload = injectStoreId(stepsPayload, companySettings.gfood_store_id);
+                    }
+
                     logGastrofoodCall({
-                        direction: 'response',
+                        direction: 'request',
                         action: 'Consultar Adicionais',
                         method: 'POST',
                         url: stepsUrl,
-                        status: resSteps.status,
-                        response: stepsData
+                        payload: stepsPayload
                     });
 
-                    // Check if response contains steps/passos at top level or wrapped in status/data
-                    const passosRaw = stepsData.passos || stepsData.Passos || (stepsData.data ? (stepsData.data.passos || stepsData.data.Passos) : null) || [];
-                    const passos = Array.isArray(passosRaw) ? passosRaw : [];
+                    const resSteps = await fetch(stepsUrl, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': cardapioToken.startsWith('Bearer ') ? cardapioToken : `Bearer ${cardapioToken}`
+                        },
+                        body: JSON.stringify(stepsPayload)
+                    });
+                    
+                    if (resSteps.ok) {
+                        const stepsData = await resSteps.json();
+                        logGastrofoodCall({
+                            direction: 'response',
+                            action: 'Consultar Adicionais',
+                            method: 'POST',
+                            url: stepsUrl,
+                            status: resSteps.status,
+                            response: stepsData
+                        });
 
-                    if (passos.length > 0) {
-                        // Se o produto passou a ter passos reais, remove o registro dummy se existir
-                        try {
-                            await supabase.from('cardapio_passos').delete().eq('id', `no_steps_${product.id}`);
-                        } catch (delErr) {}
-                        
-                        const passosToUpsert = passos.map((p, idx) => {
-                            const rawIdPasso = p.IdProdutoPassos || p.id || p.Id;
-                            // Make ID unique to product to prevent overwrites when multiple products share the same step ID
-                            const idPasso = `${rawIdPasso}_${product.id}`;
-                            const pergunta = p.Pergunta || p.pergunta || p.SubTitulo || p.subTitulo || 'Opções';
-                            const subTitulo = p.SubTitulo || p.subTitulo || null;
-                            const qtdMin = p.QtdMin !== undefined ? p.QtdMin : (p.qtdMin !== undefined ? p.qtdMin : 0);
-                            const qtdMax = p.QtdMax !== undefined ? p.QtdMax : (p.qtdMax !== undefined ? p.qtdMax : 1);
-                            const ativo = p.Ativo !== false && p.ativo !== false;
-                            return {
-                                id: idPasso,
+                        // Check if response contains steps/passos at top level or wrapped in status/data
+                        const passosRaw = stepsData.passos || stepsData.Passos || (stepsData.data ? (stepsData.data.passos || stepsData.data.Passos) : null) || [];
+                        const passos = Array.isArray(passosRaw) ? passosRaw : [];
+
+                        if (passos.length > 0) {
+                            // Se o produto passou a ter passos reais, remove o registro dummy se existir
+                            try {
+                                await supabase.from('cardapio_passos').delete().eq('id', `no_steps_${normId}`);
+                            } catch (delErr) {}
+                            
+                            const passosToUpsert = passos.map((p, idx) => {
+                                const rawIdPasso = p.IdProdutoPassos || p.id || p.Id;
+                                const idPasso = `${rawIdPasso}_${product.id}`;
+                                const pergunta = p.Pergunta || p.pergunta || p.SubTitulo || p.subTitulo || 'Opções';
+                                const subTitulo = p.SubTitulo || p.subTitulo || null;
+                                const qtdMin = p.QtdMin !== undefined ? p.QtdMin : (p.qtdMin !== undefined ? p.qtdMin : 0);
+                                const qtdMax = p.QtdMax !== undefined ? p.QtdMax : (p.qtdMax !== undefined ? p.qtdMax : 1);
+                                const ativo = p.Ativo !== false && p.ativo !== false;
+                                return {
+                                    id: idPasso,
+                                    tenant_id: tenantId,
+                                    produto_id: product.id,
+                                    pergunta,
+                                    sub_titulo: subTitulo,
+                                    qtd_min: qtdMin,
+                                    qtd_max: qtdMax,
+                                    ordem: idx,
+                                    ativo
+                                };
+                            });
+                            
+                            try {
+                                await supabase.from('cardapio_passos').upsert(passosToUpsert, { onConflict: 'tenant_id,id' });
+                            } catch(stepErr) {
+                                console.warn(`[Gastrofood/Sync] Aviso ao gravar passos do produto ${product.id}:`, stepErr.message);
+                            }
+                            
+                            const opcoesToUpsert = [];
+                            passos.forEach(p => {
+                                const rawLista = p.ListaProdutos || p.listaProdutos || p.produtos || p.Produtos || [];
+                                const rawIdPasso = p.IdProdutoPassos || p.id || p.Id;
+                                const idPasso = `${rawIdPasso}_${product.id}`;
+                                if (Array.isArray(rawLista)) {
+                                    rawLista.forEach(opt => {
+                                        const precoList = opt.ListaPreco || opt.listaPreco || [];
+                                        const precoAdicional = precoList?.[0]?.Preco !== undefined 
+                                            ? precoList[0].Preco 
+                                            : (precoList?.[0]?.preco !== undefined 
+                                                ? precoList[0].preco 
+                                                : (opt.Preco !== undefined 
+                                                    ? opt.Preco 
+                                                    : (opt.preco !== undefined ? opt.preco : 0)));
+                                        const rawIdOpcao = opt.IdProduto || opt.id || opt.Id;
+                                        const idOpcao = `${rawIdOpcao}_${idPasso}`;
+                                        const descricao = opt.Descricao || opt.descricao || 'Opção';
+                                        const imagem = opt.Imagem || opt.imagem || opt.image || null;
+                                        const ativoOpcao = opt.Ativo !== false && opt.ativo !== false;
+                                        
+                                        opcoesToUpsert.push({
+                                            id: idOpcao,
+                                            tenant_id: tenantId,
+                                            passo_id: idPasso,
+                                            descricao,
+                                            preco: precoAdicional,
+                                            imagem,
+                                            ativo: ativoOpcao
+                                        });
+                                    });
+                                }
+                            });
+                            
+                            if (opcoesToUpsert.length > 0) {
+                                try {
+                                    await supabase.from('cardapio_opcoes').upsert(opcoesToUpsert, { onConflict: 'tenant_id,id' });
+                                } catch(optErr) {
+                                    console.warn(`[Gastrofood/Sync] Aviso ao gravar opções do produto ${product.id}:`, optErr.message);
+                                }
+                            }
+
+                            // Registra no cache persistente para NUNCA mais consultar na Gastrofood
+                            gastrofoodCache.markProductStepsSynced(tenantId, normId, true, passos.length);
+                        } else {
+                            // Se o produto NÃO possui passos (passos.length === 0), gravamos o registro "dummy" de controle
+                            const dummyPasso = {
+                                id: `no_steps_${normId}`,
                                 tenant_id: tenantId,
                                 produto_id: product.id,
-                                pergunta,
-                                sub_titulo: subTitulo,
-                                qtd_min: qtdMin,
-                                qtd_max: qtdMax,
-                                ordem: idx,
-                                ativo
+                                pergunta: 'Nenhum Adicional',
+                                ativo: false
                             };
-                        });
-                        
-                        try {
-                            await supabase.from('cardapio_passos').upsert(passosToUpsert, { onConflict: 'tenant_id,id' });
-                        } catch(stepErr) {
-                            console.warn(`[Gastrofood/Sync] Aviso ao gravar passos do produto ${product.id}:`, stepErr.message);
-                        }
-                        
-                        const opcoesToUpsert = [];
-                        passos.forEach(p => {
-                            const rawLista = p.ListaProdutos || p.listaProdutos || p.produtos || p.Produtos || [];
-                            const rawIdPasso = p.IdProdutoPassos || p.id || p.Id;
-                            const idPasso = `${rawIdPasso}_${product.id}`;
-                            if (Array.isArray(rawLista)) {
-                                rawLista.forEach(opt => {
-                                    const precoList = opt.ListaPreco || opt.listaPreco || [];
-                                    const precoAdicional = precoList?.[0]?.Preco !== undefined 
-                                        ? precoList[0].Preco 
-                                        : (precoList?.[0]?.preco !== undefined 
-                                            ? precoList[0].preco 
-                                            : (opt.Preco !== undefined 
-                                                ? opt.Preco 
-                                                : (opt.preco !== undefined ? opt.preco : 0)));
-                                    const rawIdOpcao = opt.IdProduto || opt.id || opt.Id;
-                                    // Make ID unique to step to prevent conflict between same option in different steps
-                                    const idOpcao = `${rawIdOpcao}_${idPasso}`;
-                                    const descricao = opt.Descricao || opt.descricao || 'Opção';
-                                    const imagem = opt.Imagem || opt.imagem || opt.image || null;
-                                    const ativoOpcao = opt.Ativo !== false && opt.ativo !== false;
-                                    
-                                    opcoesToUpsert.push({
-                                        id: idOpcao,
-                                        tenant_id: tenantId,
-                                        passo_id: idPasso,
-                                        descricao,
-                                        preco: precoAdicional,
-                                        imagem,
-                                        ativo: ativoOpcao
-                                    });
-                                });
-                            }
-                        });
-                        
-                        if (opcoesToUpsert.length > 0) {
                             try {
-                                await supabase.from('cardapio_opcoes').upsert(opcoesToUpsert, { onConflict: 'tenant_id,id' });
-                            } catch(optErr) {
-                                console.warn(`[Gastrofood/Sync] Aviso ao gravar opções do produto ${product.id}:`, optErr.message);
+                                await supabase.from('cardapio_passos').upsert(dummyPasso, { onConflict: 'tenant_id,id' });
+                            } catch(dummyErr) {
+                                console.warn(`[Gastrofood/Sync] Aviso ao gravar dummyPasso do produto ${product.id}:`, dummyErr.message);
                             }
+
+                            // Registra no cache persistente para NUNCA mais consultar na Gastrofood
+                            gastrofoodCache.markProductStepsSynced(tenantId, normId, false, 0);
                         }
                     } else {
-                        // Se o produto NÃO possui passos (passos.length === 0), gravamos um registro "dummy" de controle
-                        // para sabermos que este produto foi sincronizado com sucesso e não tem adicionais.
-                        // Isso impede que o sistema o classifique como "novo" e o consulte repetidamente a cada ciclo!
-                        const dummyPasso = {
-                            id: `no_steps_${product.id}`,
-                            tenant_id: tenantId,
-                            produto_id: product.id,
-                            pergunta: 'Nenhum Adicional',
-                            ativo: false
-                        };
-                        try {
-                            await supabase.from('cardapio_passos').upsert(dummyPasso, { onConflict: 'tenant_id,id' });
-                        } catch(dummyErr) {
-                            console.warn(`[Gastrofood/Sync] Aviso ao gravar dummyPasso do produto ${product.id}:`, dummyErr.message);
+                        const errText = await resSteps.text();
+                        logGastrofoodCall({
+                            direction: 'error',
+                            action: 'Consultar Adicionais',
+                            method: 'POST',
+                            url: stepsUrl,
+                            status: resSteps.status,
+                            error: errText
+                        });
+                        if (resSteps.status === 404 || resSteps.status === 400) {
+                            // Se o produto não existe mais no PDV, marca como sem passos para não ficar repetindo
+                            gastrofoodCache.markProductStepsSynced(tenantId, normId, false, 0);
                         }
                     }
-                } else {
-                    const errText = await resSteps.text();
+                } catch (stepErr) {
+                    if (stepErr.message?.includes('fetch failed') || stepErr.message?.includes('timeout') || stepErr.message?.includes('aborted') || stepErr.name === 'AbortError') {
+                        console.warn(`[AutoHealing] Sincronização de adicionais para o produto ${product.name} falhou temporariamente (rede):`, stepErr.message);
+                    } else {
+                        console.error(`[AutoHealing] Erro ao sincronizar adicionais para o produto ${product.name}:`, stepErr);
+                    }
                     logGastrofoodCall({
                         direction: 'error',
                         action: 'Consultar Adicionais',
                         method: 'POST',
                         url: stepsUrl,
-                        status: resSteps.status,
-                        error: errText
+                        error: stepErr.message
                     });
                 }
-            } catch (stepErr) {
-                if (stepErr.message?.includes('fetch failed') || stepErr.message?.includes('timeout') || stepErr.message?.includes('aborted') || stepErr.name === 'AbortError') {
-                    console.warn(`[AutoHealing] Sincronização de adicionais para o produto ${product.name} falhou temporariamente (rede):`, stepErr.message);
-                } else {
-                    console.error(`[AutoHealing] Erro ao sincronizar adicionais para o produto ${product.name}:`, stepErr);
-                }
-                logGastrofoodCall({
-                    direction: 'error',
-                    action: 'Consultar Adicionais',
-                    method: 'POST',
-                    url: stepsUrl,
-                    error: stepErr.message
-                });
             }
         }
     }
@@ -1173,6 +1168,13 @@ class AutomationWorker {
                         continue;
                     }
 
+                    // Regra de 1 Hora: Se a empresa já foi sincronizada há menos de 60 minutos, pula para proteger a API Gastrofood
+                    if (gastrofoodCache.isCardapioRecent(tenantId, 60 * 60 * 1000)) {
+                        const remainingMins = gastrofoodCache.getMinutesUntilNextAllowedSync(tenantId, 60 * 60 * 1000);
+                        console.log(`[CardapioSync] ⏳ Empresa ${company.name} (${tenantId}) sincronizada há menos de 60m. Próxima consulta externa em ~${remainingMins}m. Preservando a infraestrutura Gastrofood.`);
+                        continue;
+                    }
+
                     if (!AutomationWorker.cardapioSyncInProgress) {
                         AutomationWorker.cardapioSyncInProgress = new Set();
                     }
@@ -1184,9 +1186,6 @@ class AutomationWorker {
                     
                     try {
                         console.log(`[CardapioSync] Sincronizando cardápio para a empresa ${company.name} (${tenantId})...`);
-                        
-                        // Limpa caches anteriores para forçar a API externa
-                        this.clearCardapioCache(tenantId);
                         
                         const mockBotSettings = {
                             cardapio_origem: 'api',

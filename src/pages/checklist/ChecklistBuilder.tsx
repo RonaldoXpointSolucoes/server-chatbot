@@ -532,6 +532,54 @@ export default function ChecklistBuilder() {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [showTemplateSelector, setShowTemplateSelector] = useState(false);
 
+  // Seleção e vinculação exclusiva por Cargo
+  const [modalSelectedCargoIds, setModalSelectedCargoIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (editingChecklist) {
+      const respIds = editingChecklist.responsible_ids || [];
+      const derived = Array.from(new Set(
+        users.filter(u => respIds.includes(u.id)).map(u => u.cargo_id).filter(Boolean)
+      )) as string[];
+      setModalSelectedCargoIds(derived);
+    } else {
+      setModalSelectedCargoIds([]);
+    }
+  }, [editingChecklist?.id]);
+
+  const handleAddCargoToModal = (cargoId: string) => {
+    if (!cargoId) return;
+    if (modalSelectedCargoIds.includes(cargoId)) return;
+
+    const newCargoIds = [...modalSelectedCargoIds, cargoId];
+    setModalSelectedCargoIds(newCargoIds);
+
+    const cargoUsers = users.filter(u => u.cargo_id === cargoId).map(u => u.id);
+    setEditingChecklist(prev => {
+      const current = prev?.responsible_ids || [];
+      const merged = Array.from(new Set([...current, ...cargoUsers]));
+      return { ...prev, responsible_ids: merged };
+    });
+  };
+
+  const handleRemoveCargoFromModal = (cargoId: string) => {
+    const newCargoIds = modalSelectedCargoIds.filter(id => id !== cargoId);
+    setModalSelectedCargoIds(newCargoIds);
+
+    const remainingCargoUsers = users
+      .filter(u => u.cargo_id && newCargoIds.includes(u.cargo_id))
+      .map(u => u.id);
+
+    setEditingChecklist(prev => ({
+      ...prev,
+      responsible_ids: remainingCargoUsers
+    }));
+  };
+
+  const assignedUsersBySelectedCargos = users.filter(
+    u => u.cargo_id && modalSelectedCargoIds.includes(u.cargo_id)
+  );
+
   // Estados para Tolerância baseada em Janela Operacional
   const [toleranceMode, setToleranceMode] = useState<'minutes' | 'window'>('window');
   const [refPrevTime, setRefPrevTime] = useState<string>('10:00');
@@ -800,10 +848,16 @@ export default function ChecklistBuilder() {
 
   const handleEditChecklist = (chk: Checklist) => {
     setEditingChecklist(chk);
+    const respIds = chk.responsible_ids || [];
+    const derived = Array.from(new Set(
+      users.filter(u => respIds.includes(u.id)).map(u => u.cargo_id).filter(Boolean)
+    )) as string[];
+    setModalSelectedCargoIds(derived);
     loadChecklistItemsAndSchedules(chk.id);
   };
 
   const handleAddChecklist = () => {
+    setModalSelectedCargoIds([]);
     setEditingChecklist({
       title: '',
       description: '',
@@ -821,6 +875,7 @@ export default function ChecklistBuilder() {
   };
 
   const handleSelectTemplate = (template: typeof TEMPLATES_LIST[0]) => {
+    setModalSelectedCargoIds([]);
     if (template.id === 'novo_em_branco') {
       handleAddChecklist();
       setShowTemplateSelector(false);
@@ -4202,208 +4257,145 @@ export default function ChecklistBuilder() {
                     </div>
                   </div>
 
-                  {/* Seletor Primário de Cargo Responsável */}
-                  <div className="pt-4 border-t border-[#2a3942]/40 space-y-3">
+                  {/* Seletor Exclusivo de Cargo Responsável */}
+                  <div className="pt-4 border-t border-[#2a3942]/40 space-y-4">
                     <div className="flex items-center justify-between">
                       <label className="block text-xs font-bold text-amber-300 flex items-center gap-1.5 uppercase tracking-wider">
                         <Briefcase size={14} className="text-amber-400" />
                         Cargo Responsável pelo Checklist
                       </label>
-                      <span className="text-[10px] text-[#8696a0]">A rotina pertence ao cargo</span>
+                      <span className="text-[10px] text-[#8696a0]">A rotina pertence ao cargo • Atribuição automática</span>
                     </div>
 
-                    {/* Dropdown de Cargo com Auto-Atribuição de Colaboradores */}
+                    {/* Seleção do Cargo + Card Informativo */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       <div>
                         <select
-                          onChange={(e) => {
-                            const cargoId = e.target.value;
-                            if (!cargoId) return;
-                            const cargoUsers = users.filter(u => u.cargo_id === cargoId).map(u => u.id);
-                            setEditingChecklist(prev => {
-                              const current = prev?.responsible_ids || [];
-                              const merged = Array.from(new Set([...current, ...cargoUsers]));
-                              return { ...prev, responsible_ids: merged };
-                            });
-                          }}
-                          defaultValue=""
+                          value=""
+                          onChange={(e) => handleAddCargoToModal(e.target.value)}
                           className="w-full bg-[#111b21] border border-amber-500/30 hover:border-amber-500/60 rounded-xl px-3 py-2.5 text-xs text-amber-300 focus:outline-none transition-all cursor-pointer"
                         >
-                          <option value="" disabled>+ Atribuir operadores por Cargo</option>
-                          {cargos.map(cargo => {
-                            const count = users.filter(u => u.cargo_id === cargo.id).length;
-                            return (
-                              <option key={cargo.id} value={cargo.id}>
-                                💼 {cargo.name} ({count} colaborador{count !== 1 ? 'es' : ''})
-                              </option>
-                            );
-                          })}
+                          <option value="" disabled>+ Selecionar Cargo Responsável...</option>
+                          {cargos
+                            .filter(cargo => !modalSelectedCargoIds.includes(cargo.id))
+                            .map(cargo => {
+                              const count = users.filter(u => u.cargo_id === cargo.id).length;
+                              return (
+                                <option key={cargo.id} value={cargo.id}>
+                                  💼 {cargo.name} ({count} colaborador{count !== 1 ? 'es' : ''})
+                                </option>
+                              );
+                            })}
                         </select>
                       </div>
 
                       {/* Card informativo de vinculação perpétua */}
                       <div className="p-2.5 rounded-xl bg-amber-500/5 border border-amber-500/15 text-[11px] text-[#d1d7db] flex items-center gap-2">
                         <span className="text-amber-400 font-bold shrink-0">💡 Vínculo:</span>
-                        <span className="line-clamp-2 text-[10px] text-[#8696a0]">
-                          O checklist é associado ao cargo. Ao mudar o colaborador de cargo, a rotina é mantida.
+                        <span className="text-[10px] text-[#8696a0] leading-tight">
+                          O checklist é associado ao cargo. Ao mudar o colaborador de cargo ou cadastrar novos, a rotina é mantida automaticamente.
                         </span>
                       </div>
                     </div>
-                  </div>
 
-                  {/* Seletor Premium de Operadores Responsáveis */}
-                  <div className="pt-2 relative">
-                    <label className="block text-xs font-semibold text-[#8696a0] mb-2 flex items-center gap-1.5">
-                      <Users size={14} className="text-indigo-400" />
-                      Colaboradores Vinculados ao Checklist
-                    </label>
-
-                    {/* Área de Visualização e Chips selecionados */}
-                    <div className="flex flex-wrap gap-2 p-3 bg-[#111b21] border border-[#2a3942] rounded-xl min-h-[46px] items-center">
-                      {(editingChecklist.responsible_ids || []).length === 0 ? (
-                        <span className="text-xs text-[#8696a0]/50 pl-1 select-none">
-                          Nenhum responsável associado. Clique para gerenciar.
-                        </span>
-                      ) : (
-                        (editingChecklist.responsible_ids || []).map(userId => {
-                          const user = users.find(u => u.id === userId);
-                          if (!user) return null;
-                          const initials = user.name
-                            ? user.name.split(' ').map((n: string) => n[0]).slice(0, 2).join('').toUpperCase()
-                            : 'OP';
-                          const cargoObj = cargos.find(c => c.id === user.cargo_id);
+                    {/* Chips dos Cargos Selecionados */}
+                    {modalSelectedCargoIds.length > 0 ? (
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        {modalSelectedCargoIds.map(cargoId => {
+                          const cargo = cargos.find(c => c.id === cargoId);
+                          if (!cargo) return null;
+                          const count = users.filter(u => u.cargo_id === cargo.id).length;
                           return (
-                            <div 
-                              key={userId} 
-                              className="flex items-center gap-1.5 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 pl-1.5 pr-1 py-1 rounded-xl text-xs font-semibold animate-in fade-in zoom-in-95 duration-150"
+                            <div
+                              key={cargo.id}
+                              className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/30 text-amber-300 px-3 py-1.5 rounded-xl text-xs font-semibold shadow-sm animate-in fade-in zoom-in-95 duration-150"
                             >
-                              <div className="w-5 h-5 rounded-lg bg-indigo-500/20 flex items-center justify-center text-[10px] text-indigo-300 font-bold shrink-0">
-                                {initials}
-                              </div>
-                              <div className="flex flex-col min-w-0 pr-1">
-                                <span className="truncate max-w-[120px] text-white">{user.name}</span>
-                                {cargoObj && (
-                                  <span className="text-[9px] text-amber-300 truncate max-w-[120px] flex items-center gap-0.5">
-                                    <Briefcase size={8} /> {cargoObj.name}
-                                  </span>
-                                )}
+                              <Briefcase size={13} className="text-amber-400 shrink-0" />
+                              <div className="flex flex-col">
+                                <span className="font-bold text-white text-xs">{cargo.name}</span>
+                                <span className="text-[9px] text-amber-300/80 font-normal">
+                                  {count} colaborador{count !== 1 ? 'es associados' : ' associado'}
+                                </span>
                               </div>
                               <button
                                 type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setEditingChecklist(prev => ({
-                                    ...prev,
-                                    responsible_ids: (prev.responsible_ids || []).filter(id => id !== userId)
-                                  }));
-                                }}
-                                className="p-0.5 hover:bg-indigo-500/20 rounded-md text-indigo-400 hover:text-indigo-300 transition-all shrink-0"
+                                onClick={() => handleRemoveCargoFromModal(cargo.id)}
+                                className="ml-1 p-1 hover:bg-amber-500/20 rounded-md text-amber-400 hover:text-amber-200 transition-all"
+                                title={`Remover cargo ${cargo.name}`}
                               >
-                                <X size={12} />
+                                <X size={13} />
                               </button>
                             </div>
                           );
-                        })
-                      )}
-
-                      {/* Botão de Adição no Canto Direito */}
-                      <button
-                        type="button"
-                        onClick={() => setShowResponsiblesDropdown(!showResponsiblesDropdown)}
-                        className="ml-auto text-xs text-indigo-400 hover:text-indigo-300 font-bold flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-500/5 hover:bg-indigo-500/10 border border-indigo-500/10 hover:border-indigo-500/20 transition-all shrink-0"
-                      >
-                        <Plus size={12} />
-                        Gerenciar
-                      </button>
-                    </div>
-
-                    {/* Dropdown Flutuante Premium de Seleção (Estilo Glassmorphism) */}
-                    {showResponsiblesDropdown && (
-                      <>
-                        {/* Overlay para fechar ao clicar fora */}
-                        <div 
-                          className="fixed inset-0 z-[99]"
-                          onClick={() => {
-                            setShowResponsiblesDropdown(false);
-                            setResponsiblesSearchQuery('');
-                          }}
-                        />
-                        <div className="absolute right-0 bottom-full mb-2 w-72 bg-[#202c33]/95 backdrop-blur-md rounded-2xl border border-[#2a3942] p-3 shadow-2xl z-[100] animate-in fade-in slide-in-from-bottom-2 duration-200">
-                          <div className="flex items-center gap-1.5 bg-[#111b21] border border-[#2a3942] rounded-xl px-2.5 py-2 mb-2">
-                            <Search size={13} className="text-[#8696a0]" />
-                            <input
-                              type="text"
-                              value={responsiblesSearchQuery}
-                              onChange={(e) => setResponsiblesSearchQuery(e.target.value)}
-                              placeholder="Pesquisar operadores..."
-                              className="w-full bg-transparent border-none text-xs text-white focus:outline-none placeholder-[#8696a0]/50"
-                            />
-                          </div>
-
-                          <div className="max-h-48 overflow-y-auto space-y-0.5 pr-1 scrollbar-thin">
-                            {users
-                              .filter(u => u.name.toLowerCase().includes(responsiblesSearchQuery.toLowerCase()))
-                              .length === 0 ? (
-                                <p className="text-center text-[10px] text-[#8696a0] py-4">Nenhum operador encontrado.</p>
-                              ) : (
-                                users
-                                  .filter(u => u.name.toLowerCase().includes(responsiblesSearchQuery.toLowerCase()))
-                                  .map(user => {
-                                    const isSelected = (editingChecklist.responsible_ids || []).includes(user.id);
-                                    const initials = user.name
-                                      ? user.name.split(' ').map((n: string) => n[0]).slice(0, 2).join('').toUpperCase()
-                                      : 'OP';
-                                    return (
-                                      <button
-                                        type="button"
-                                        key={user.id}
-                                        onClick={() => {
-                                          setEditingChecklist(prev => {
-                                            const ids = prev.responsible_ids || [];
-                                            const newIds = ids.includes(user.id)
-                                              ? ids.filter(id => id !== user.id)
-                                              : [...ids, user.id];
-                                            return { ...prev, responsible_ids: newIds };
-                                          });
-                                        }}
-                                        className={`w-full flex items-center justify-between p-2 rounded-xl text-left text-xs transition-all ${
-                                          isSelected 
-                                            ? 'bg-indigo-600/10 text-indigo-400 hover:bg-indigo-600/20' 
-                                            : 'hover:bg-[#111b21] text-slate-300'
-                                        }`}
-                                      >
-                                        <div className="flex items-center gap-2 min-w-0">
-                                          <div className={`w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-bold shrink-0 ${
-                                            isSelected ? 'bg-indigo-500/20 text-indigo-300' : 'bg-[#111b21] text-[#8696a0]'
-                                          }`}>
-                                            {initials}
-                                          </div>
-                                          <div className="flex flex-col min-w-0">
-                                            <span className="truncate pr-2 font-medium text-white">{user.name}</span>
-                                            {user.cargo_id && (
-                                              <span className="text-[10px] text-indigo-400 truncate">
-                                                {getJobBadgeText(user.cargo_id)}
-                                              </span>
-                                            )}
-                                          </div>
-                                        </div>
-                                        <div className="shrink-0">
-                                          {isSelected ? (
-                                            <div className="w-4 h-4 rounded-full bg-indigo-500 flex items-center justify-center text-white text-[10px]">
-                                              <Check size={10} strokeWidth={3} />
-                                            </div>
-                                          ) : (
-                                            <div className="w-4 h-4 rounded-full border border-[#2a3942] hover:border-indigo-500 transition-all" />
-                                          )}
-                                        </div>
-                                      </button>
-                                    );
-                                  })
-                              )}
-                          </div>
-                        </div>
-                      </>
+                        })}
+                      </div>
+                    ) : (
+                      <div className="p-3 rounded-xl border border-dashed border-[#2a3942] bg-[#111b21]/40 text-center">
+                        <p className="text-xs text-[#8696a0]">
+                          Nenhum cargo selecionado. Selecione o cargo responsável no campo acima para vincular este checklist.
+                        </p>
+                      </div>
                     )}
+
+                    {/* Exibição dos Colaboradores Vinculados ao Cargo */}
+                    <div className="pt-2">
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="block text-xs font-semibold text-[#8696a0] flex items-center gap-1.5">
+                          <Users size={14} className="text-indigo-400" />
+                          Colaboradores Vinculados ao Checklist (via Cargo)
+                        </label>
+                        <span className="text-[10px] text-[#8696a0]">
+                          {assignedUsersBySelectedCargos.length} operador{assignedUsersBySelectedCargos.length !== 1 ? 'es ativos' : ' ativo'}
+                        </span>
+                      </div>
+
+                      {assignedUsersBySelectedCargos.length > 0 ? (
+                        <div className="flex flex-wrap gap-2 p-3 bg-[#111b21] border border-[#2a3942] rounded-xl min-h-[50px] items-center">
+                          {assignedUsersBySelectedCargos.map(user => {
+                            const initials = user.name
+                              ? user.name.split(' ').map((n: string) => n[0]).slice(0, 2).join('').toUpperCase()
+                              : 'OP';
+                            const cargoObj = cargos.find(c => c.id === user.cargo_id);
+                            return (
+                              <div
+                                key={user.id}
+                                className="flex items-center gap-2 bg-[#202c33] border border-indigo-500/20 pl-2 pr-3 py-1.5 rounded-xl text-xs font-medium text-white shadow-sm animate-in fade-in zoom-in-95 duration-150"
+                              >
+                                <div className="w-6 h-6 rounded-lg bg-indigo-500/20 flex items-center justify-center text-[10px] text-indigo-300 font-bold shrink-0">
+                                  {initials}
+                                </div>
+                                <div className="flex flex-col min-w-0 pr-1">
+                                  <span className="font-semibold text-white truncate">{user.name}</span>
+                                  {cargoObj && (
+                                    <span className="text-[10px] text-amber-300 truncate flex items-center gap-1">
+                                      <Briefcase size={9} /> {cargoObj.name}
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="text-[9px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded-md shrink-0 ml-1">
+                                  Vinculado
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : modalSelectedCargoIds.length > 0 ? (
+                        <div className="p-3 bg-[#111b21] border border-[#2a3942] rounded-xl text-center">
+                          <p className="text-xs text-[#8696a0]">
+                            ℹ️ Nenhum colaborador associado a este cargo no momento.
+                          </p>
+                          <p className="text-[10px] text-[#8696a0]/70 mt-0.5">
+                            Assim que você cadastrar ou associar um colaborador a este cargo em <b>Configurações &gt; Colaboradores</b>, este checklist será liberado para ele automaticamente.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="p-3 bg-[#111b21] border border-[#2a3942] rounded-xl text-center">
+                          <p className="text-xs text-[#8696a0]/60">
+                            Selecione um cargo acima para visualizar os colaboradores vinculados.
+                          </p>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   <div className="flex items-center justify-between pt-4 border-t border-[#2a3942]/40">

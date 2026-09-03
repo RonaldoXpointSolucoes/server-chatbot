@@ -83,7 +83,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
   const [isCreateInboxModalOpen, setIsCreateInboxModalOpen] = useState(false);
   const [manageGroupsTarget, setManageGroupsTarget] = useState<{ id: string; name: string } | null>(null);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>(() => {
-    const saved = localStorage.getItem('sidebar_expanded_sections');
+    const saved = localStorage.getItem('sidebar_expanded_sections_v2');
     if (saved) {
       try {
         return JSON.parse(saved);
@@ -93,8 +93,9 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
     }
     return {
       conversations: true,
-      crm: true,
-      checklists: true,
+      crm: false,
+      checklists: false,
+      vouchers: false,
       apps: false,
       channels: true,
       labels: false,
@@ -119,7 +120,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
   const toggleSection = (section: string) => {
     setExpandedSections(prev => {
       const next = { ...prev, [section]: !prev[section] };
-      localStorage.setItem('sidebar_expanded_sections', JSON.stringify(next));
+      localStorage.setItem('sidebar_expanded_sections_v2', JSON.stringify(next));
       return next;
     });
   };
@@ -1104,7 +1105,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
           <CollapsibleSection 
             title="Vouchers Corporativos" 
             icon={<Ticket size={16} className="text-emerald-400" />} 
-            isOpen={expandedSections.vouchers ?? true} 
+            isOpen={Boolean(expandedSections.vouchers)} 
             onToggle={() => toggleSection('vouchers')}
           >
             <NavItem 
