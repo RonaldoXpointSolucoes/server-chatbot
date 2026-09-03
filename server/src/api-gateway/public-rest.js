@@ -487,7 +487,22 @@ router.post('/message/sendMedia', requireApiKey, upload.single('file'), async (r
             return res.status(400).json({ error: 'Missing file, number, mediatype or instance' });
         }
 
-        const sock = await getSocketWithRetry(tenant_id, id, 3);
+        let sock;
+        try {
+            sock = await getSocketWithRetry(tenant_id, id, 3);
+        } catch (sockErr) {
+            if (sockErr.isDefinitive) {
+                console.warn(`[API Gateway] [sendMedia] ❌ Fast-Fail 400: ${sockErr.message} | Instância: ${id} ("${display_name}")`);
+                return res.status(400).json({
+                    error: sockErr.message,
+                    code: 'INSTANCE_DISCONNECTED',
+                    instance_id: id,
+                    status: sockErr.instanceStatus
+                });
+            }
+            throw sockErr;
+        }
+
         if (!sock) {
             console.error(`[API Gateway] [sendMedia] ❌ Falha 400: Socket Offline na RAM | Instância: ${id} ("${display_name}") | Destino: ${number}`);
             return res.status(400).json({ error: 'Socket offline or not authenticated' });
@@ -656,7 +671,22 @@ router.post('/message/sendLocation', requireApiKey, async (req, res) => {
             return res.status(400).json({ error: 'number, latitude and longitude required' });
         }
 
-        const sock = await getSocketWithRetry(tenant_id, id, 3);
+        let sock;
+        try {
+            sock = await getSocketWithRetry(tenant_id, id, 3);
+        } catch (sockErr) {
+            if (sockErr.isDefinitive) {
+                console.warn(`[API Gateway] [sendLocation] ❌ Fast-Fail 400: ${sockErr.message} | Instância: ${id} ("${display_name}")`);
+                return res.status(400).json({
+                    error: sockErr.message,
+                    code: 'INSTANCE_DISCONNECTED',
+                    instance_id: id,
+                    status: sockErr.instanceStatus
+                });
+            }
+            throw sockErr;
+        }
+
         if (!sock) {
             console.error(`[API Gateway] [sendLocation] ❌ Falha 400: Socket Offline na RAM | Instância: ${id} ("${display_name}") | Destino: ${number}`);
             return res.status(400).json({ error: 'Socket offline or not authenticated' });
@@ -728,7 +758,22 @@ router.post('/message/sendContact', requireApiKey, async (req, res) => {
             return res.status(400).json({ error: 'number, contactName and contactNumber required' });
         }
 
-        const sock = await getSocketWithRetry(tenant_id, id, 3);
+        let sock;
+        try {
+            sock = await getSocketWithRetry(tenant_id, id, 3);
+        } catch (sockErr) {
+            if (sockErr.isDefinitive) {
+                console.warn(`[API Gateway] [sendContact] ❌ Fast-Fail 400: ${sockErr.message} | Instância: ${id} ("${display_name}")`);
+                return res.status(400).json({
+                    error: sockErr.message,
+                    code: 'INSTANCE_DISCONNECTED',
+                    instance_id: id,
+                    status: sockErr.instanceStatus
+                });
+            }
+            throw sockErr;
+        }
+
         if (!sock) {
             console.error(`[API Gateway] [sendContact] ❌ Falha 400: Socket Offline na RAM | Instância: ${id} ("${display_name}") | Destino: ${number}`);
             return res.status(400).json({ error: 'Socket offline or not authenticated' });
@@ -814,7 +859,22 @@ router.post('/message/sendReaction', requireApiKey, async (req, res) => {
             return res.status(400).json({ error: 'number, messageId and reaction required' });
         }
 
-        const sock = await getSocketWithRetry(tenant_id, id, 3);
+        let sock;
+        try {
+            sock = await getSocketWithRetry(tenant_id, id, 3);
+        } catch (sockErr) {
+            if (sockErr.isDefinitive) {
+                console.warn(`[API Gateway] [sendReaction] ❌ Fast-Fail 400: ${sockErr.message} | Instância: ${id} ("${display_name}")`);
+                return res.status(400).json({
+                    error: sockErr.message,
+                    code: 'INSTANCE_DISCONNECTED',
+                    instance_id: id,
+                    status: sockErr.instanceStatus
+                });
+            }
+            throw sockErr;
+        }
+
         if (!sock) {
             console.error(`[API Gateway] [sendReaction] ❌ Falha 400: Socket Offline na RAM | Instância: ${id} ("${display_name}") | Destino: ${number}`);
             return res.status(400).json({ error: 'Socket offline or not authenticated' });

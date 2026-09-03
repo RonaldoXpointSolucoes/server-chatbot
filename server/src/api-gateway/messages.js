@@ -38,6 +38,23 @@ router.post(['/', '/send', '/messages/send', '/sendText', '/send-text'], require
             } catch (e) {}
         }
         
+        // 1. Verificação prévia de fast-fail no banco de dados para instâncias desconectadas/offline
+        const { data: instCheck } = await supabase
+            .from('whatsapp_instances')
+            .select('status, last_error, display_name')
+            .eq('id', instanceId)
+            .maybeSingle();
+
+        if (instCheck && ['offline', 'logged_out', 'blocked_12h', 'disconnected', 'paused'].includes(instCheck.status)) {
+            console.warn(`[API Gateway] [messages/send] ❌ Fast-Fail 400: Instância ${instanceId} está ${instCheck.status} no banco de dados (${instCheck.last_error || 'desconectada'})`);
+            return res.status(400).json({
+                error: `Instância ${instanceId} está ${instCheck.status} no banco de dados (${instCheck.last_error || 'desconectada'})`,
+                code: 'INSTANCE_DISCONNECTED',
+                instance_id: instanceId,
+                status: instCheck.status
+            });
+        }
+
         // Se o socket não existe na memória, tenta acordar com até 3 tentativas
         if (!sock) {
             const delays = [0, 1000, 2000];

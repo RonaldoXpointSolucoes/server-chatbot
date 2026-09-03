@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase, masterSupabase } from '../../services/supabase';
 import { useChatStore } from '../../store/chatStore';
+import { useGlobalViewMode } from '../../utils/viewModePreference';
 import { 
   Building2, 
   MapPin, 
@@ -234,31 +235,17 @@ export default function ChecklistSettings() {
   const [users, setUsers] = useState<Profile[]>([]);
   const [cargos, setCargos] = useState<Cargo[]>([]);
   // Estados de Busca e Filtros de Equipe
-  const [userViewMode, setUserViewMode] = useState<'grid' | 'list'>(() => {
-    return (localStorage.getItem('checklist_user_view_mode') as 'grid' | 'list') || 'grid';
-  });
+  const [userViewMode, handleToggleUserView] = useGlobalViewMode('grid');
   const [userSearchTerm, setUserSearchTerm] = useState('');
   const [userFilterRole, setUserFilterRole] = useState<'all' | 'operators' | 'managers' | 'with_cargo' | 'with_pin'>('all');
   const [userFilterSector, setUserFilterSector] = useState<string>('all');
   const [userFilterShift, setUserFilterShift] = useState<string>('all'); // 'all' | 'cafe' | 'almoco' | 'jantar'
 
-  const handleToggleUserView = (mode: 'grid' | 'list') => {
-    setUserViewMode(mode);
-    localStorage.setItem('checklist_user_view_mode', mode);
-  };
-
   // Estados de Visualização e Filtros de Cargos
-  const [cargoViewMode, setCargoViewMode] = useState<'grid' | 'list'>(() => {
-    return (localStorage.getItem('checklist_cargo_view_mode') as 'grid' | 'list') || 'grid';
-  });
+  const [cargoViewMode, handleToggleCargoView] = useGlobalViewMode('grid');
   const [cargoSearchTerm, setCargoSearchTerm] = useState('');
   const [cargoFilterShift, setCargoFilterShift] = useState<'all' | 'cafe' | 'almoco' | 'jantar'>('all');
   const [cargoFilterStatus, setCargoFilterStatus] = useState<'all' | 'active' | 'inactive'>('all');
-
-  const handleToggleCargoView = (mode: 'grid' | 'list') => {
-    setCargoViewMode(mode);
-    localStorage.setItem('checklist_cargo_view_mode', mode);
-  };
 
   const [loading, setLoading] = useState(true);
 

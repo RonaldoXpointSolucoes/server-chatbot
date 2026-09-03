@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { createClient } from '@supabase/supabase-js';
 import QRCode from 'react-qr-code';
 import {
   Smartphone,
@@ -40,24 +39,17 @@ import {
   ArrowUpRight,
   Share2,
   Link as LinkIcon,
-  Building2,
-  Terminal
+  Send,
+  Square
 } from 'lucide-react';
 
-import { masterSupabase } from '../services/supabase';
 import { migrateInstanceHistory } from '../services/whatsappEngine';
 import { InstanceLogsModal } from '../components/InstanceLogsModal';
-
-// Configurações do Supabase & Engines com Fallback Automático
-const SUPABASE_URL = 'https://yzbxsxabzncdzuxvlppt.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl6YnhzeGFiem5jZHp1eHZscHB0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTIyMDcwMywiZXhwIjoyMDkwNzk2NzAzfQ.rU4sjTTwrIu1YrF-bkHKN9vvfBUGr2cIWppepT1uY0k';
 
 const ENGINE_CANDIDATES = [
   import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim(),
   'https://owckk0k8w8soo40w40owc4ss.69.62.92.212.sslip.io'
 ].filter(Boolean) as string[];
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // Helper resiliente com auto-fallback de servidor backend
 const fetchEngineApi = async (path: string, options: RequestInit = {}) => {

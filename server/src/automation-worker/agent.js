@@ -381,7 +381,7 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
                 }
 
                 let apiResponse = null;
-                const maxApiRetries = 3;
+                const maxApiRetries = 2;
 
                 for (let attempt = 1; attempt <= maxApiRetries; attempt++) {
                     try {
@@ -414,12 +414,17 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
                                     status: res.status,
                                     response: parsed
                                 });
-                                if (produtosCheck.length > 0) break;
+                                if (produtosCheck.length > 0) {
+                                    break;
+                                } else {
+                                    console.log(`[Gastrofood API] Cardápio consultado: 0 produtos retornados (status 200).`);
+                                    break;
+                                }
                             }
 
                             if (produtosCheck.length === 0 && attempt < maxApiRetries) {
-                                console.warn(`[Gastrofood API] Cardápio retornou 0 produtos (tentativa ${attempt}/${maxApiRetries}). Retentando em ${attempt * 1.5}s...`);
-                                await new Promise(r => setTimeout(r, attempt * 1500));
+                                console.log(`[Gastrofood API] Cardápio retornou 0 produtos na 1ª tentativa. Revalidando em 1s...`);
+                                await new Promise(r => setTimeout(r, 1000));
                             }
                         } else {
                             const errText = await res.text();
@@ -432,13 +437,13 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
                                 error: errText
                             });
                             if (attempt < maxApiRetries) {
-                                await new Promise(r => setTimeout(r, attempt * 1500));
+                                await new Promise(r => setTimeout(r, 1000));
                             }
                         }
                     } catch (fetchErr) {
-                        console.warn(`[Gastrofood API] Erro de rede na tentativa ${attempt}/${maxApiRetries}:`, fetchErr.message);
+                        console.warn(`[Gastrofood API] Aviso de rede na tentativa ${attempt}/${maxApiRetries}:`, fetchErr.message);
                         if (attempt < maxApiRetries) {
-                            await new Promise(r => setTimeout(r, attempt * 1500));
+                            await new Promise(r => setTimeout(r, 1000));
                         }
                     }
                 }

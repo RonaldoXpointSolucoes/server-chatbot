@@ -848,10 +848,12 @@ export default function VoucherDashboard() {
 
       // 3. Empresas do Tenant Ativo (Fonte da Verdade: Supabase Cloud)
       let finalEmpresas: any[] = [];
-      if (eRes.status === 'fulfilled' && eRes.value.data) {
+      if (eRes.status === 'fulfilled' && Array.isArray(eRes.value.data) && eRes.value.data.length > 0) {
         finalEmpresas = eRes.value.data;
-      } else {
+      } else if (localCompanies && localCompanies.length > 0) {
         finalEmpresas = localCompanies.filter((c: any) => !c.tenant_id || c.tenant_id === tenantId);
+      } else if (eRes.status === 'fulfilled' && Array.isArray(eRes.value.data)) {
+        finalEmpresas = eRes.value.data;
       }
       setEmpresas(finalEmpresas);
       setTenantStorage('voucher_companies', tenantId, finalEmpresas);
@@ -1115,8 +1117,27 @@ export default function VoucherDashboard() {
           updated_at: new Date().toISOString()
         };
 
+        // Sanitização de colunas existentes no Supabase para evitar erro PGRST204
+        const dbPayload: any = {
+          razao_social: updatedObj.razao_social,
+          nome_fantasia: updatedObj.nome_fantasia,
+          cnpj: updatedObj.cnpj,
+          contato_nome: updatedObj.contato_nome,
+          contato_whatsapp: updatedObj.contato_whatsapp,
+          email_empresa: updatedObj.email_empresa,
+          login_usuario: updatedObj.login_usuario,
+          login_senha: updatedObj.login_senha,
+          saldo_global: updatedObj.saldo_global,
+          saldo_credito: updatedObj.saldo_credito,
+          credito_total_concedido: updatedObj.credito_total_concedido,
+          credito_fim: updatedObj.credito_fim,
+          ativo: true,
+          updated_at: updatedObj.updated_at
+        };
+
         try {
-          await supabase.from('voucher_empresas_parceiras').update(updatedObj).eq('id', editingCompany.id);
+          const { error: upErr } = await supabase.from('voucher_empresas_parceiras').update(dbPayload).eq('id', editingCompany.id);
+          if (upErr) console.warn('[Voucher] Erro ao atualizar empresa no Supabase:', upErr);
         } catch (dbErr) {
           console.warn('Update via store local:', dbErr);
         }
@@ -1157,11 +1178,34 @@ export default function VoucherDashboard() {
           credito_inicio: companyForm.creditoInicio ? new Date(companyForm.creditoInicio + 'T00:00:00').toISOString() : new Date().toISOString(),
           credito_fim: companyForm.creditoFim ? new Date(companyForm.creditoFim + 'T23:59:59').toISOString() : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
           ativo: true,
-          created_at: new Date().toISOString()
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+
+        // Sanitização estrita para o schema existente do Supabase (impede PGRST204)
+        const dbPayload: any = {
+          id: newCompany.id,
+          tenant_id: newCompany.tenant_id,
+          razao_social: newCompany.razao_social,
+          nome_fantasia: newCompany.nome_fantasia,
+          cnpj: newCompany.cnpj,
+          contato_nome: newCompany.contato_nome,
+          contato_whatsapp: newCompany.contato_whatsapp,
+          email_empresa: newCompany.email_empresa,
+          login_usuario: newCompany.login_usuario,
+          login_senha: newCompany.login_senha,
+          saldo_global: newCompany.saldo_global,
+          saldo_credito: newCompany.saldo_credito,
+          credito_total_concedido: newCompany.credito_total_concedido,
+          credito_fim: newCompany.credito_fim,
+          ativo: true,
+          created_at: newCompany.created_at,
+          updated_at: newCompany.updated_at
         };
 
         try {
-          await supabase.from('voucher_empresas_parceiras').insert(newCompany);
+          const { error: insErr } = await supabase.from('voucher_empresas_parceiras').insert(dbPayload);
+          if (insErr) console.warn('[Voucher] Erro ao inserir empresa no Supabase:', insErr);
         } catch (dbErr) {
           console.warn('Insert via store local:', dbErr);
         }
@@ -1333,7 +1377,7 @@ export default function VoucherDashboard() {
       setTenantStorage('voucher_events', tenantId, evList);
 
       try {
-        await supabase.from('voucher_empresas_parceiras').update({ saldo_global: newCredit }).eq('id', selectedCompanyForCredit.id);
+        await supabase.from('voucher_empresas_parceiras').update({ saldo_global: newCredit, saldo_credito: newCredit }).eq('id', selectedCompanyForCredit.id);
       } catch (_) {}
 
       setActionSuccess(`Crédito de R$ ${addVal.toFixed(2)} adicionado com sucesso para ${selectedCompanyForCredit.razao_social}!`);

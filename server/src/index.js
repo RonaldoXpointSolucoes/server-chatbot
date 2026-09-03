@@ -340,20 +340,38 @@ app.use('/api/v1/system/logs', systemLogger);
 // Middleware explícito de captura e auditoria de rotas não encontradas (404 Handler)
 app.use((req, res, next) => {
     const originIp = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || req.ip || 'N/A';
-    console.warn(`[HTTP 404 Not Found] Rota inexistente solicitada: ${req.method} ${req.originalUrl || req.path} | IP: ${originIp} | User-Agent: ${req.headers['user-agent'] || 'N/A'}`);
+    const reqPath = (req.originalUrl || req.path || '').toLowerCase();
     
-    if (typeof persistSystemLog === 'function') {
-        persistSystemLog({
-            type: 'HTTP 404 Not Found',
-            message: `Rota inexistente: ${req.method} ${req.originalUrl || req.path}`,
-            level: 'warn',
-            payload: {
-                method: req.method,
-                path: req.originalUrl || req.path,
-                ip: originIp,
-                userAgent: req.headers['user-agent'] || 'N/A'
-            }
-        });
+    // Filtro de varreduras automatizadas conhecidas (bots / scanners WordPress, PHP, .env, etc.)
+    const isBotScannerProbe = 
+        reqPath.includes('wp-json') ||
+        reqPath.includes('rest_route') ||
+        reqPath.includes('wp-admin') ||
+        reqPath.includes('wp-login') ||
+        reqPath.includes('xmlrpc') ||
+        reqPath.includes('phpmyadmin') ||
+        reqPath.includes('.env') ||
+        reqPath.includes('.git') ||
+        reqPath.includes('.php') ||
+        reqPath.includes('actuator') ||
+        reqPath.includes('solr');
+
+    if (!isBotScannerProbe) {
+        console.warn(`[HTTP 404 Not Found] Rota inexistente solicitada: ${req.method} ${req.originalUrl || req.path} | IP: ${originIp} | User-Agent: ${req.headers['user-agent'] || 'N/A'}`);
+        
+        if (typeof persistSystemLog === 'function') {
+            persistSystemLog({
+                type: 'HTTP 404 Not Found',
+                message: `Rota inexistente: ${req.method} ${req.originalUrl || req.path}`,
+                level: 'warn',
+                payload: {
+                    method: req.method,
+                    path: req.originalUrl || req.path,
+                    ip: originIp,
+                    userAgent: req.headers['user-agent'] || 'N/A'
+                }
+            });
+        }
     }
 
     res.status(404).json({
@@ -622,6 +640,20 @@ async function runMigrations() {
             updated_at timestamp with time zone DEFAULT now()
           );
           ALTER TABLE public.voucher_empresas_parceiras ENABLE ROW LEVEL SECURITY;
+          ALTER TABLE public.voucher_empresas_parceiras ADD COLUMN IF NOT EXISTS limite_vouchers integer DEFAULT 100;
+          ALTER TABLE public.voucher_empresas_parceiras ADD COLUMN IF NOT EXISTS cep text;
+          ALTER TABLE public.voucher_empresas_parceiras ADD COLUMN IF NOT EXISTS logradouro text;
+          ALTER TABLE public.voucher_empresas_parceiras ADD COLUMN IF NOT EXISTS numero text;
+          ALTER TABLE public.voucher_empresas_parceiras ADD COLUMN IF NOT EXISTS complemento text;
+          ALTER TABLE public.voucher_empresas_parceiras ADD COLUMN IF NOT EXISTS bairro text;
+          ALTER TABLE public.voucher_empresas_parceiras ADD COLUMN IF NOT EXISTS municipio text;
+          ALTER TABLE public.voucher_empresas_parceiras ADD COLUMN IF NOT EXISTS uf text;
+          ALTER TABLE public.voucher_empresas_parceiras ADD COLUMN IF NOT EXISTS telefone_empresa text;
+          ALTER TABLE public.voucher_empresas_parceiras ADD COLUMN IF NOT EXISTS atividade_principal text;
+          ALTER TABLE public.voucher_empresas_parceiras ADD COLUMN IF NOT EXISTS natureza_juridica text;
+          ALTER TABLE public.voucher_empresas_parceiras ADD COLUMN IF NOT EXISTS data_abertura_cnpj text;
+          ALTER TABLE public.voucher_empresas_parceiras ADD COLUMN IF NOT EXISTS status_cnpj text DEFAULT 'ATIVA';
+          ALTER TABLE public.voucher_empresas_parceiras ADD COLUMN IF NOT EXISTS credito_inicio timestamp with time zone DEFAULT now();
           DROP POLICY IF EXISTS "Permitir tudo em voucher_empresas_parceiras" ON public.voucher_empresas_parceiras;
           CREATE POLICY "Permitir tudo em voucher_empresas_parceiras" ON public.voucher_empresas_parceiras FOR ALL USING (true) WITH CHECK (true);
           GRANT ALL ON public.voucher_empresas_parceiras TO authenticated, anon, service_role;

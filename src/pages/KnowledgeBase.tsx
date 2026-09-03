@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { BrainCircuit, UploadCloud, FileText, File, Trash2, CheckCircle2, AlertCircle, Loader2, Search, Zap, Info, Server, ArrowLeft, Eye, Save, Database, X, Plus, Edit3, PlusCircle, List, Grid, ChevronLeft, ChevronRight, Square, CheckSquare, ChevronDown } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useNavigate } from 'react-router-dom';
+import { useGlobalViewMode } from '../utils/viewModePreference';
 
 const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
 
@@ -261,7 +262,7 @@ export default function KnowledgeBase() {
   const [selectedType, setSelectedType] = useState<'all' | 'pdf' | 'text'>('all');
 
   // Estados para paginação, visualização e seleção em massa
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [viewMode, setViewMode] = useGlobalViewMode('grid');
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(12);
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);

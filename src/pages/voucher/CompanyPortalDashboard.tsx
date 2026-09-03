@@ -68,11 +68,24 @@ export default function CompanyPortalDashboard() {
   // 4. Formulário de Emissão
   const [beneficiarioNome, setBeneficiarioNome] = useState<string>('');
   const [beneficiarioWhatsapp, setBeneficiarioWhatsapp] = useState<string>('');
-  const [voucherValor, setVoucherValor] = useState<string>('50');
+  const [voucherValor, setVoucherValor] = useState<number>(50);
+  const [voucherValorInput, setVoucherValorInput] = useState<string>('R$ 50,00');
   const [voucherValidade, setVoucherValidade] = useState<string>('');
   const [voucherObs, setVoucherObs] = useState<string>('');
   const [issueLoading, setIssueLoading] = useState<boolean>(false);
   const [issueError, setIssueError] = useState<string | null>(null);
+
+  const handleVoucherCurrencyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const rawDigits = e.target.value.replace(/\D/g, '');
+    if (!rawDigits) {
+      setVoucherValor(0);
+      setVoucherValorInput('');
+      return;
+    }
+    const num = Number(rawDigits) / 100;
+    setVoucherValor(num);
+    setVoucherValorInput(num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }));
+  };
 
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
 
@@ -256,7 +269,7 @@ export default function CompanyPortalDashboard() {
     e.preventDefault();
     setIssueError(null);
 
-    const valorNum = parseFloat(voucherValor.replace(',', '.'));
+    const valorNum = voucherValor;
     if (isNaN(valorNum) || valorNum <= 0) {
       setIssueError('Informe um valor válido em R$ para o voucher.');
       return;
@@ -389,7 +402,8 @@ export default function CompanyPortalDashboard() {
       setShowSuccessModal(true);
       setBeneficiarioNome('');
       setBeneficiarioWhatsapp('');
-      setVoucherValor('50');
+      setVoucherValor(50);
+      setVoucherValorInput('R$ 50,00');
       setVoucherObs('');
     } catch (err: any) {
       setIssueError(err.message || 'Erro ao emitir voucher.');
@@ -1433,13 +1447,16 @@ export default function CompanyPortalDashboard() {
                     WhatsApp com DDD *
                   </label>
                   <input
-                    type="text"
+                    type="tel"
                     value={beneficiarioWhatsapp}
                     onChange={(e) => setBeneficiarioWhatsapp(e.target.value)}
                     placeholder="11988887777"
                     required
                     className="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-mono"
                   />
+                  <span className="text-[10px] text-slate-400 pl-1 block">
+                    O WhatsApp do destinatário do voucher.
+                  </span>
                 </div>
 
                 <div className="space-y-1">
@@ -1447,15 +1464,13 @@ export default function CompanyPortalDashboard() {
                     Valor do Voucher (R$) *
                   </label>
                   <input
-                    type="number"
-                    step="0.01"
-                    min="1"
-                    max={saldoCredito}
-                    value={voucherValor}
-                    onChange={(e) => setVoucherValor(e.target.value)}
-                    placeholder="50.00"
+                    type="text"
+                    inputMode="numeric"
+                    value={voucherValorInput}
+                    onChange={handleVoucherCurrencyChange}
+                    placeholder="R$ 50,00"
                     required
-                    className="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-emerald-400 font-black focus:outline-none focus:border-emerald-500"
+                    className="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-emerald-400 font-black focus:outline-none focus:border-emerald-500 font-mono"
                   />
                 </div>
               </div>
@@ -1507,7 +1522,7 @@ export default function CompanyPortalDashboard() {
                   ) : (
                     <>
                       <Sparkles className="w-4 h-4" />
-                      <span>Confirmar e Debitar R$ {parseFloat(voucherValor || '0').toFixed(2)}</span>
+                      <span>Confirmar e Debitar {voucherValor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
                     </>
                   )}
                 </button>

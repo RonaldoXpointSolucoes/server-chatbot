@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDevStore } from '../store/devStore';
-import { Terminal, AlertTriangle, Bug, Info, CheckCircle2, ChevronDown, ChevronUp, Trash2, Copy, Activity, Layers, Calendar, Rocket, Database, Smartphone, AppWindow, ExternalLink, Network, Cpu, Play, Pause, RefreshCw, UserCheck, ShieldAlert, Sparkles, Wand2, BrainCircuit, Check, Loader2, Send, ArrowUpRight, FileCode, CheckCircle, X, Zap } from 'lucide-react';
+import { Terminal, AlertTriangle, Bug, Info, CheckCircle2, ChevronDown, ChevronUp, Trash2, Copy, Activity, Layers, Calendar, Rocket, Database, Smartphone, AppWindow, ExternalLink, Network, Cpu, Play, Pause, RefreshCw, UserCheck, ShieldAlert, Sparkles, Wand2, BrainCircuit, Check, Loader2, Send, ArrowUpRight, FileCode, CheckCircle, X, Zap, Mic, MicOff, Image as ImageIcon, Paperclip, Volume2, UploadCloud, Square, Plus, Radio, Film } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { ServerLogsTerminal } from './ServerLogsTerminal';
 import { useChatStore } from '../store/chatStore';
@@ -343,6 +343,117 @@ export default function DevLogger() {
   const [createdCardLead, setCreatedCardLead] = useState<any>(null);
   const [createdCardBoardId, setCreatedCardBoardId] = useState<string>('95be1dee-9d28-47d9-8ccf-d51a337f1572');
   const [createdCardBoardName, setCreatedCardBoardName] = useState<string>('Desenvolvimento & Roadmap');
+
+  // Estados do Modal de Entrada Multimídia & Confirmação de IA
+  const [showAiMediaPromptModal, setShowAiMediaPromptModal] = useState(false);
+  const [aiPromptTab, setAiPromptTab] = useState<'quick' | 'enriched'>('enriched');
+  const [userPromptNotes, setUserPromptNotes] = useState('');
+  const [attachedImagesList, setAttachedImagesList] = useState<Array<{ id: string; name: string; dataUrl: string; file: File }>>([]);
+  const [attachedAudioItem, setAttachedAudioItem] = useState<{ id: string; name: string; blob: Blob; url: string; duration: number } | null>(null);
+  const [isRecordingAudio, setIsRecordingAudio] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<any>(null);
+
+  const startAudioRecording = async () => {
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        alert('Seu navegador não suporta gravação de áudio direta.');
+        return;
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+      audioChunksRef.current = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const audioUrl = URL.createObjectURL(audioBlob);
+        setAttachedAudioItem({
+          id: `audio_${Date.now()}`,
+          name: `audio_gravado_${new Date().toLocaleTimeString('pt-BR').replace(/:/g, '-')}.webm`,
+          blob: audioBlob,
+          url: audioUrl,
+          duration: recordingSeconds
+        });
+        stream.getTracks().forEach(t => t.stop());
+      };
+
+      recorder.start();
+      setIsRecordingAudio(true);
+      setRecordingSeconds(0);
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingSeconds(prev => prev + 1);
+      }, 1000);
+    } catch (err: any) {
+      console.error('Erro ao acessar microfone:', err);
+      alert('Não foi possível acessar o microfone: ' + (err.message || 'Permissão negada.'));
+    }
+  };
+
+  const stopAudioRecording = () => {
+    if (mediaRecorderRef.current && isRecordingAudio) {
+      mediaRecorderRef.current.stop();
+      setIsRecordingAudio(false);
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+    }
+  };
+
+  const handleImageFilesSelected = (files: FileList | null) => {
+    if (!files) return;
+    Array.from(files).forEach(file => {
+      if (!file.type.startsWith('image/')) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const dataUrl = e.target?.result as string;
+        setAttachedImagesList(prev => [
+          ...prev,
+          {
+            id: `img_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+            name: file.name,
+            dataUrl,
+            file
+          }
+        ]);
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleAudioFileSelected = (files: FileList | null) => {
+    if (!files || !files[0]) return;
+    const file = files[0];
+    const url = URL.createObjectURL(file);
+    setAttachedAudioItem({
+      id: `audio_${Date.now()}`,
+      name: file.name,
+      blob: file,
+      url,
+      duration: 0
+    });
+  };
+
+  const removeImageItem = (id: string) => {
+    setAttachedImagesList(prev => prev.filter(img => img.id !== id));
+  };
+
+  const removeAudioItem = () => {
+    if (attachedAudioItem?.url) {
+      URL.revokeObjectURL(attachedAudioItem.url);
+    }
+    setAttachedAudioItem(null);
+  };
 
   const loopContinuousRef = useRef(false);
   const loopTimeoutRef = useRef<any>(null);
@@ -1143,10 +1254,15 @@ export default function DevLogger() {
     addLog({ type: 'success', message: `App React em Execução. Hooks ativos.\nHost: ${window.location.origin}`, source: 'Tester' });
   };
 
-  const handleAnalyzeLogsAndCreateKanbanCard = async () => {
+  const handleAnalyzeLogsAndCreateKanbanCard = async (options?: {
+    userNotes?: string;
+    images?: Array<{ name: string; file: File; dataUrl: string }>;
+    audio?: { name: string; blob: Blob; url: string; duration: number } | null;
+  }) => {
     if (isAnalyzingAiLogs) return;
 
     try {
+      setShowAiMediaPromptModal(false);
       setIsAnalyzingAiLogs(true);
       setAiAnalysisStep('1/5 📸 Capturando print do DevLogger & evidências visuais...');
 
@@ -1182,6 +1298,48 @@ export default function DevLogger() {
           }
         } catch (captureErr) {
           console.warn('[DevLogger] Falha ao capturar screenshot visual do DevLogger:', captureErr);
+        }
+      }
+
+      // Upload de imagens adicionais fornecidas pelo usuário
+      const uploadedUserMediaUrls: Array<{ name: string; url: string; type: 'image' | 'audio' }> = [];
+      const userImagesBase64: string[] = [];
+
+      if (options?.images && options.images.length > 0) {
+        for (const imgItem of options.images) {
+          try {
+            userImagesBase64.push(imgItem.dataUrl);
+            const safeName = imgItem.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+            const filePath = `crm_cards/${Date.now()}_${safeName}`;
+            const { error: upImgErr } = await supabase.storage
+              .from('chat_media')
+              .upload(filePath, imgItem.file, { contentType: imgItem.file.type || 'image/jpeg', upsert: true });
+
+            if (!upImgErr) {
+              const { data: { publicUrl } } = supabase.storage.from('chat_media').getPublicUrl(filePath);
+              uploadedUserMediaUrls.push({ name: imgItem.name, url: publicUrl, type: 'image' });
+            }
+          } catch (e) {
+            console.warn('[DevLogger] Falha ao fazer upload de imagem do usuário:', e);
+          }
+        }
+      }
+
+      // Upload de áudio fornecido pelo usuário
+      if (options?.audio && options.audio.blob) {
+        try {
+          const safeName = options.audio.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+          const filePath = `crm_cards/${Date.now()}_${safeName}`;
+          const { error: upAudErr } = await supabase.storage
+            .from('chat_media')
+            .upload(filePath, options.audio.blob, { contentType: options.audio.blob.type || 'audio/webm', upsert: true });
+
+          if (!upAudErr) {
+            const { data: { publicUrl } } = supabase.storage.from('chat_media').getPublicUrl(filePath);
+            uploadedUserMediaUrls.push({ name: options.audio.name, url: publicUrl, type: 'audio' });
+          }
+        } catch (e) {
+          console.warn('[DevLogger] Falha ao fazer upload de áudio do usuário:', e);
         }
       }
 
@@ -1234,15 +1392,17 @@ export default function DevLogger() {
         ...currentLogs.filter(l => l.source?.toLowerCase().includes('server') || l.source?.toLowerCase().includes('node'))
       ];
 
-      setAiAnalysisStep('3/5 🧠 Processando diagnóstico profundo e causa raiz com Gemini 2.5 Flash...');
+      setAiAnalysisStep('3/5 🧠 Processando diagnóstico profundo e causa raiz com Gemini...');
 
-      // 5. Invocar a IA para diagnosticar e criar o plano com análise multimodal (texto + print)
+      // 5. Invocar a IA para diagnosticar e criar o plano com análise multimodal (texto + print + mídia do usuário)
       const aiPlan = await geminiService.analyzeLogsAndGenerateFixPlan({
         consoleLogs: activeLogsToAnalyze,
         serverErrors: combinedServerErrors,
         gastrofoodLogs: gastrofoodLogs,
         astsErrors: testErrors,
         screenshotBase64: screenshotBase64,
+        userNotes: options?.userNotes,
+        attachedImages: userImagesBase64,
         boardName: 'Desenvolvimento & Roadmap'
       });
 
@@ -1311,9 +1471,24 @@ export default function DevLogger() {
 
       setAiAnalysisStep('5/5 🚀 Publicando card com imagem na coluna Em Análise...');
 
-      // 8. Inserir o Card na tabela crm_leads vinculado estritamente à X-Point Soluções
-      const mediaHeader = uploadedScreenshotUrl 
+      // 8. Formatação das notas com prints e anexos
+      let mediaHeader = uploadedScreenshotUrl 
         ? `![📸 Evidência Visual DevLogger](${uploadedScreenshotUrl})\n\n` 
+        : '';
+
+      if (uploadedUserMediaUrls.length > 0) {
+        mediaHeader += `### 📎 Mídias & Evidências Anexadas pelo Desenvolvedor\n`;
+        uploadedUserMediaUrls.forEach(m => {
+          if (m.type === 'image') {
+            mediaHeader += `![${m.name}](${m.url})\n\n`;
+          } else {
+            mediaHeader += `🔊 [Ouvir Áudio: ${m.name}](${m.url})\n\n`;
+          }
+        });
+      }
+
+      const userNotesSection = options?.userNotes 
+        ? `### 📝 Observações Adicionais do Desenvolvedor\n${options.userNotes}\n\n` 
         : '';
 
       const leadPayload = {
@@ -1329,7 +1504,7 @@ export default function DevLogger() {
         agent_id: null,
         due_date: null,
         tags: Array.from(new Set([...(aiPlan.tags || []), aiPlan.category || 'Correção', 'IA-PLANO', 'DEVLOGGER'])),
-        notes: `${mediaHeader}${aiPlan.summary}\n\n${aiPlan.technical_plan}`
+        notes: `${mediaHeader}${userNotesSection}${aiPlan.summary}\n\n${aiPlan.technical_plan}`
       };
 
       const { data: insertedLead, error: insertError } = await supabase
@@ -1340,11 +1515,14 @@ export default function DevLogger() {
 
       if (insertError) throw insertError;
 
-      // 9. Limpeza Automática do Histórico de Erros, Avisos e Alertas
+      // 9. Limpeza Automática do Histórico e Estados de Mídia
       clearLogs();
       setTestErrors([]);
       setTestLogs([]);
       setTestSummary(null);
+      setUserPromptNotes('');
+      setAttachedImagesList([]);
+      setAttachedAudioItem(null);
 
       // 10. Sucesso, Notificação e Exibição do Modal
       setCreatedCardLead(insertedLead);
@@ -1355,7 +1533,7 @@ export default function DevLogger() {
 
       addLog({
         type: 'success',
-        message: `✨ Card de Correção Criado com Sucesso com I.A!\nQuadro: "${targetBoard.name}" | Coluna: "Em Análise"\nTítulo: ${aiPlan.title}${uploadedScreenshotUrl ? '\n📸 Print do DevLogger anexado à galeria do Card.' : ''}\n🧹 Histórico de erros e alertas arquivado com sucesso no CRM e limpo no DevLogger.`,
+        message: `✨ Card de Correção Criado com Sucesso com I.A!\nQuadro: "${targetBoard.name}" | Coluna: "Em Análise"\nTítulo: ${aiPlan.title}${uploadedScreenshotUrl ? '\n📸 Print do DevLogger anexado à galeria do Card.' : ''}${uploadedUserMediaUrls.length > 0 ? `\n📎 ${uploadedUserMediaUrls.length} mídia(s) do usuário vinculada(s).` : ''}\n🧹 Histórico arquivado com sucesso no CRM e limpo no DevLogger.`,
         source: 'Gemini AI (SRE)',
         details: { leadId: insertedLead.id, boardId: targetBoard.id, title: aiPlan.title, priority: aiPlan.priority, tags: aiPlan.tags, mediaUrl: uploadedScreenshotUrl }
       });
@@ -1367,7 +1545,7 @@ export default function DevLogger() {
         message: `Falha na Análise de Logs com I.A: ${err.message || String(err)}`,
         source: 'Gemini AI (SRE)'
       });
-      alert(`Falha ao gerar card com IA: ${err.message || 'Verifique a chave do Gemini em Configurações'}`);
+      alert(`Falha ao gerar card com IA: ${err.message || 'Verifique a conexão ou tente novamente.'}`);
     } finally {
       setIsAnalyzingAiLogs(false);
       setAiAnalysisStep('');
@@ -2038,14 +2216,14 @@ export default function DevLogger() {
 
               {/* Botão de Análise de Logs com IA e Criação de Card no CRM Kanban */}
               <button 
-                onClick={(e) => { e.stopPropagation(); handleAnalyzeLogsAndCreateKanbanCard(); }} 
+                onClick={(e) => { e.stopPropagation(); setShowAiMediaPromptModal(true); }} 
                 disabled={isAnalyzingAiLogs}
                 className={`p-1.5 sm:py-1.5 sm:px-2.5 rounded-xl transition-all cursor-pointer relative active:scale-95 border shrink-0 flex items-center gap-1.5 font-mono text-[10px] font-black ${
                   isAnalyzingAiLogs 
                     ? 'bg-purple-500/20 text-purple-300 border-purple-500/50 animate-pulse' 
                     : 'bg-gradient-to-r from-purple-500/25 via-indigo-500/25 to-pink-500/25 hover:from-purple-500/40 hover:to-pink-500/40 text-purple-200 hover:text-white border-purple-500/40 hover:border-purple-400 hover:shadow-lg hover:shadow-purple-500/20'
                 }`}
-                title="Analisar todos os logs com IA (Gemini 2.5 Flash) e criar Card de Correção no CRM Kanban (Quadro Desenvolvimento & Roadmap)"
+                title="Analisar todos os logs com IA e criar Card de Correção no CRM Kanban"
               >
                 {isAnalyzingAiLogs ? (
                   <Loader2 size={13} className="animate-spin text-purple-300" />
@@ -2677,7 +2855,7 @@ export default function DevLogger() {
                   <div className="flex items-center gap-1.5">
                     {/* Botão de Análise de Logs com IA e Criação de Card no CRM Kanban */}
                     <button
-                      onClick={handleAnalyzeLogsAndCreateKanbanCard}
+                      onClick={() => setShowAiMediaPromptModal(true)}
                       disabled={isAnalyzingAiLogs}
                       className={`px-3 py-1.5 rounded-xl text-[10px] font-black transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 shadow-sm border ${
                         isAnalyzingAiLogs
@@ -2910,6 +3088,296 @@ export default function DevLogger() {
           )}
         </div>
       </div>
+
+      {/* Modal Interativo de Entrada Multimídia & Confirmação de IA */}
+      {showAiMediaPromptModal && (
+        <div className="fixed inset-0 z-[100000] flex items-center justify-center p-3 sm:p-6 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="bg-[#0a1015] border border-purple-500/30 rounded-3xl shadow-[0_25px_80px_rgba(0,0,0,0.95)] w-full max-w-2xl max-h-[92vh] flex flex-col overflow-hidden text-[#d1d7db] font-mono relative animate-in zoom-in-95 duration-200">
+            
+            {/* Brilhos de Fundo */}
+            <div className="absolute -top-20 -right-20 w-64 h-64 bg-purple-500/15 rounded-full blur-3xl pointer-events-none" />
+            <div className="absolute -bottom-20 -left-20 w-64 h-64 bg-indigo-500/15 rounded-full blur-3xl pointer-events-none" />
+
+            {/* Header do Modal */}
+            <div className="p-4 sm:p-5 border-b border-white/10 flex items-center justify-between gap-3 bg-gradient-to-r from-purple-500/15 via-indigo-500/10 to-transparent relative z-10">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-purple-600 via-indigo-500 to-pink-500 flex items-center justify-center text-white shadow-lg shadow-purple-500/30 shrink-0">
+                  <Sparkles size={20} className="animate-pulse text-amber-300" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm sm:text-base font-black text-white tracking-tight">Criar Card CRM com I.A</h3>
+                    <span className="text-[9px] bg-purple-500/20 text-purple-300 border border-purple-500/40 px-2 py-0.5 rounded-full font-bold uppercase">
+                      Gemini Vision
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-purple-300/80 font-medium">
+                    Diagnóstico multimodal &bull; Destino: <strong className="text-emerald-400">Em Análise</strong>
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => {
+                  stopAudioRecording();
+                  setShowAiMediaPromptModal(false);
+                }}
+                className="text-[#8696a0] hover:text-white bg-white/5 hover:bg-white/10 p-2 rounded-xl transition-all cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Seletor de Modo (Abas) */}
+            <div className="px-4 sm:px-6 pt-4 pb-1 border-b border-white/5 bg-[#0e161c]/60 flex items-center gap-2 relative z-10">
+              <button
+                onClick={() => setAiPromptTab('enriched')}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer border ${
+                  aiPromptTab === 'enriched'
+                    ? 'bg-purple-500/20 border-purple-500/50 text-purple-200 shadow-sm'
+                    : 'bg-transparent border-transparent text-[#8696a0] hover:text-white hover:bg-white/5'
+                }`}
+              >
+                <Paperclip size={13} />
+                <span>📎 Adicionar Observações & Mídia</span>
+                {(attachedImagesList.length > 0 || attachedAudioItem || userPromptNotes.trim().length > 0) && (
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                )}
+              </button>
+
+              <button
+                onClick={() => setAiPromptTab('quick')}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer border ${
+                  aiPromptTab === 'quick'
+                    ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-200 shadow-sm'
+                    : 'bg-transparent border-transparent text-[#8696a0] hover:text-white hover:bg-white/5'
+                }`}
+              >
+                <Zap size={13} className="text-amber-300" />
+                <span>⚡ Análise Rápida de Logs</span>
+              </button>
+            </div>
+
+            {/* Corpo do Modal (Scrollável) */}
+            <div className="p-4 sm:p-6 overflow-y-auto custom-scrollbar flex-1 space-y-4 text-xs relative z-10">
+              
+              {aiPromptTab === 'quick' ? (
+                /* Modo Rápido */
+                <div className="bg-[#101820] border border-white/10 rounded-2xl p-5 space-y-4 text-center">
+                  <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-300 mx-auto">
+                    <Zap size={28} className="text-amber-300 animate-pulse" />
+                  </div>
+                  <div className="space-y-1.5 max-w-md mx-auto">
+                    <h4 className="text-sm font-bold text-white">Análise Automática e Imediata</h4>
+                    <p className="text-xs text-[#8696a0] leading-relaxed">
+                      A Inteligência Artificial irá capturar o print do DevLogger, correlacionar os logs do Console, Servidor Node.js, Gastrofood e formular um plano técnico completo pronto na coluna <strong className="text-emerald-400">Em Análise</strong>.
+                    </p>
+                  </div>
+
+                  <div className="bg-[#070c10] border border-white/5 rounded-xl p-3.5 text-left space-y-2 text-[11px] text-slate-300 font-mono">
+                    <div className="flex items-center gap-2 text-emerald-400 font-bold">
+                      <CheckCircle2 size={13} /> 📸 Captura de screenshot automática
+                    </div>
+                    <div className="flex items-center gap-2 text-emerald-400 font-bold">
+                      <CheckCircle2 size={13} /> 🖥️ Extração de {logs.length} logs e erros do servidor
+                    </div>
+                    <div className="flex items-center gap-2 text-emerald-400 font-bold">
+                      <CheckCircle2 size={13} /> 🎯 Direcionamento fixo para o quadro ChatBot CRM
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                /* Modo Enriquecido com Mídia e Observações */
+                <div className="space-y-4">
+                  
+                  {/* Textarea de Observações do Desenvolvedor */}
+                  <div className="bg-[#101820] border border-white/10 rounded-2xl p-3.5 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-[#8696a0] uppercase font-bold tracking-wider flex items-center gap-1.5">
+                        <FileCode size={12} className="text-purple-400" /> Observações e Contexto do Desenvolvedor
+                      </span>
+                      <span className="text-[9px] text-[#8696a0]">
+                        {userPromptNotes.length} caracteres
+                      </span>
+                    </div>
+                    <textarea
+                      value={userPromptNotes}
+                      onChange={(e) => setUserPromptNotes(e.target.value)}
+                      placeholder="Ex: 'Ao testar o fluxo de envio para a caixa FoodNext, o botão ficou em loop. O comportamento esperado era abrir o QR Code...'"
+                      rows={3}
+                      className="w-full bg-[#070c10] border border-white/10 rounded-xl p-3 text-xs text-slate-200 placeholder-[#8696a0]/60 focus:outline-none focus:border-purple-500/50 resize-none font-sans"
+                    />
+                  </div>
+
+                  {/* Seção de Anexo de Imagens */}
+                  <div className="bg-[#101820] border border-white/10 rounded-2xl p-3.5 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-[#8696a0] uppercase font-bold tracking-wider flex items-center gap-1.5">
+                        <ImageIcon size={12} className="text-cyan-400" /> Imagens & Prints Adicionais ({attachedImagesList.length})
+                      </span>
+                      
+                      <label className="bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-300 px-2.5 py-1 rounded-lg text-[10px] font-bold cursor-pointer transition-all flex items-center gap-1">
+                        <Plus size={12} /> Adicionar Print
+                        <input
+                          type="file"
+                          accept="image/*"
+                          multiple
+                          onChange={(e) => handleImageFilesSelected(e.target.files)}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
+
+                    {attachedImagesList.length === 0 ? (
+                      <label className="border border-dashed border-white/15 hover:border-cyan-500/40 rounded-xl p-4 flex flex-col items-center justify-center text-center cursor-pointer transition-all bg-[#070c10]/50 hover:bg-[#070c10]">
+                        <UploadCloud size={22} className="text-cyan-400/70 mb-1" />
+                        <span className="text-[11px] text-slate-300 font-medium">Clique para selecionar imagens ou arraste prints aqui</span>
+                        <span className="text-[9px] text-[#8696a0]">Formatos PNG, JPG, JPEG, WebP</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          multiple
+                          onChange={(e) => handleImageFilesSelected(e.target.files)}
+                          className="hidden"
+                        />
+                      </label>
+                    ) : (
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                        {attachedImagesList.map((img) => (
+                          <div key={img.id} className="relative group/img bg-[#070c10] border border-white/10 rounded-xl overflow-hidden p-1.5">
+                            <img src={img.dataUrl} alt={img.name} className="w-full h-20 object-cover rounded-lg" />
+                            <div className="mt-1 flex items-center justify-between text-[9px] text-[#8696a0] px-1 truncate">
+                              <span className="truncate max-w-[100px]">{img.name}</span>
+                              <button
+                                onClick={() => removeImageItem(img.id)}
+                                className="text-rose-400 hover:text-rose-300 p-0.5"
+                                title="Remover imagem"
+                              >
+                                <Trash2 size={11} />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Seção de Áudio e Voz */}
+                  <div className="bg-[#101820] border border-white/10 rounded-2xl p-3.5 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-[#8696a0] uppercase font-bold tracking-wider flex items-center gap-1.5">
+                        <Volume2 size={12} className="text-emerald-400" /> Instrução por Áudio / Microfone
+                      </span>
+                    </div>
+
+                    {isRecordingAudio ? (
+                      /* Estado de Gravação Ativa */
+                      <div className="bg-rose-950/30 border border-rose-500/40 rounded-xl p-3 flex items-center justify-between gap-3 animate-pulse">
+                        <div className="flex items-center gap-2 text-rose-300 text-xs font-bold">
+                          <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping" />
+                          <span>Gravando áudio... 00:{recordingSeconds < 10 ? `0${recordingSeconds}` : recordingSeconds}</span>
+                        </div>
+                        <button
+                          onClick={stopAudioRecording}
+                          className="bg-rose-600 hover:bg-rose-500 text-white font-bold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 cursor-pointer shadow-lg active:scale-95"
+                        >
+                          <Square size={12} /> Parar Gravação
+                        </button>
+                      </div>
+                    ) : attachedAudioItem ? (
+                      /* Áudio Gravado ou Anexado */
+                      <div className="bg-[#070c10] border border-emerald-500/30 rounded-xl p-3 flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-300 flex items-center justify-center shrink-0">
+                            <Volume2 size={16} />
+                          </div>
+                          <div className="truncate">
+                            <span className="text-xs font-bold text-white block truncate">{attachedAudioItem.name}</span>
+                            <audio src={attachedAudioItem.url} controls className="h-7 w-48 mt-1" />
+                          </div>
+                        </div>
+                        <button
+                          onClick={removeAudioItem}
+                          className="text-rose-400 hover:text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 p-2 rounded-lg transition-all cursor-pointer"
+                          title="Remover áudio"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    ) : (
+                      /* Botões de Iniciar Gravação ou Upload de Arquivo */
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={startAudioRecording}
+                          className="flex-1 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+                        >
+                          <Mic size={14} className="text-emerald-400" />
+                          <span>Gravar Áudio pelo Microfone</span>
+                        </button>
+
+                        <label className="bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer">
+                          <Paperclip size={13} />
+                          <span>Arquivo de Áudio</span>
+                          <input
+                            type="file"
+                            accept="audio/*"
+                            onChange={(e) => handleAudioFileSelected(e.target.files)}
+                            className="hidden"
+                          />
+                        </label>
+                      </div>
+                    )}
+                  </div>
+
+                </div>
+              )}
+
+            </div>
+
+            {/* Footer do Modal */}
+            <div className="p-4 sm:p-5 border-t border-white/10 bg-[#070c10] flex items-center justify-between gap-3 relative z-10 flex-wrap">
+              <button
+                onClick={() => {
+                  stopAudioRecording();
+                  setShowAiMediaPromptModal(false);
+                }}
+                className="bg-white/5 hover:bg-white/10 text-[#8696a0] hover:text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer"
+              >
+                Cancelar
+              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleAnalyzeLogsAndCreateKanbanCard()}
+                  disabled={isAnalyzingAiLogs}
+                  className="bg-white/5 hover:bg-white/10 border border-white/15 text-[#d1d7db] hover:text-white px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 active:scale-95 cursor-pointer"
+                  title="Executar análise padrão com logs e captura de tela sem observações adicionais"
+                >
+                  <Zap size={13} className="text-amber-300" /> Analisar Diretamente
+                </button>
+
+                <button
+                  onClick={() => handleAnalyzeLogsAndCreateKanbanCard({
+                    userNotes: userPromptNotes,
+                    images: attachedImagesList,
+                    audio: attachedAudioItem
+                  })}
+                  disabled={isAnalyzingAiLogs}
+                  className="bg-gradient-to-r from-purple-600 via-indigo-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-black px-5 py-2.5 rounded-xl text-xs transition-all flex items-center gap-2 shadow-lg shadow-purple-600/30 active:scale-95 cursor-pointer"
+                >
+                  {isAnalyzingAiLogs ? (
+                    <Loader2 size={14} className="animate-spin text-white" />
+                  ) : (
+                    <Sparkles size={14} className="text-amber-300 animate-pulse" />
+                  )}
+                  <span>{isAnalyzingAiLogs ? 'Processando...' : '🚀 Analisar c/ IA & Criar Card'}</span>
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
 
       {/* Modal de Card Gerado por I.A & Publicado no CRM Kanban */}
       {showAiCardModal && generatedAiCard && (

@@ -984,6 +984,8 @@ Gere o JSON contendo exatamente as informações solicitadas no schema.`;
     gastrofoodLogs?: any[];
     astsErrors?: any[];
     screenshotBase64?: string;
+    userNotes?: string;
+    attachedImages?: string[];
     boardName?: string;
   }): Promise<{
     title: string;
@@ -1000,86 +1002,87 @@ Gere o JSON contendo exatamente as informações solicitadas no schema.`;
       asts: number;
     };
   }> {
-    if (!this.isConfigured()) {
-      throw new Error('Chave de API do Gemini não configurada. Configure a sua chave de API nas Configurações.');
-    }
-
-    const model = this.getGenAI().getGenerativeModel({
-      model: "gemini-2.5-flash",
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: "object",
-          properties: {
-            title: {
-              type: "string",
-              description: "Título conciso, técnico e profissional do card de correção (ex: '[Sistema / Correção Crítica] Resolução de Loop de Lock no SessionManager e Estabilização Baileys')."
-            },
-            category: {
-              type: "string",
-              description: "Categoria do card: 'Correção', 'Backend / API', 'Sistema / SaaS', 'Chat' ou 'Integração'."
-            },
-            priority: {
-              type: "integer",
-              description: "Prioridade: 1 (Baixa), 2 (Média) ou 3 (Alta/Crítica se houver erros de conexão, loops de lock ou exceções de servidor)."
-            },
-            tags: {
-              type: "array",
-              description: "Lista de 4 a 6 tags técnicas em maiúsculas (ex: ['BACKEND', 'NODE.JS', 'SESSION-MANAGER', 'CONCORRENCIA', 'IA-PLANO', 'DEVLOGGER']).",
-              items: { type: "string" }
-            },
-            summary: {
-              type: "string",
-              description: "Resumo executivo de 2 a 3 linhas com o diagnóstico consolidado das falhas de todas as abas e a solução definitiva recomendada."
-            },
-            suggested_stage_label: {
-              type: "string",
-              description: "Coluna de destino no Kanban (deve ser 'Em Análise')."
-            },
-            technical_plan: {
-              type: "string",
-              description: "Plano técnico completo em Markdown com seções detalhadas: 🚨 Diagnóstico & Causa Raiz, 🎯 Objetivo da Correção, 🛠️ Arquivos & Modificações Necessárias, 🧪 Critérios de Aceite & Testes, e 📜 Extrato Chave dos Logs."
+    // 1. Tentar primeiro via Frontend SDK se a chave estiver configurada
+    if (this.isConfigured()) {
+      try {
+        const model = this.getGenAI().getGenerativeModel({
+          model: "gemini-2.5-flash",
+          generationConfig: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: "object",
+              properties: {
+                title: {
+                  type: "string",
+                  description: "Título conciso, técnico e profissional do card de correção (ex: '[Sistema / Correção Crítica] Resolução de Loop de Lock no SessionManager e Estabilização Baileys')."
+                },
+                category: {
+                  type: "string",
+                  description: "Categoria do card: 'Correção', 'Backend / API', 'Sistema / SaaS', 'Chat' ou 'Integração'."
+                },
+                priority: {
+                  type: "integer",
+                  description: "Prioridade: 1 (Baixa), 2 (Média) ou 3 (Alta/Crítica se houver erros de conexão, loops de lock ou exceções de servidor)."
+                },
+                tags: {
+                  type: "array",
+                  description: "Lista de 4 a 6 tags técnicas em maiúsculas (ex: ['BACKEND', 'NODE.JS', 'SESSION-MANAGER', 'CONCORRENCIA', 'IA-PLANO', 'DEVLOGGER']).",
+                  items: { type: "string" }
+                },
+                summary: {
+                  type: "string",
+                  description: "Resumo executivo de 2 a 3 linhas com o diagnóstico consolidado das falhas de todas as abas e a solução definitiva recomendada."
+                },
+                suggested_stage_label: {
+                  type: "string",
+                  description: "Coluna de destino no Kanban (deve ser 'Em Análise')."
+                },
+                technical_plan: {
+                  type: "string",
+                  description: "Plano técnico completo em Markdown com seções detalhadas: 🚨 Diagnóstico & Causa Raiz, 🎯 Objetivo da Correção, 🛠️ Arquivos & Modificações Necessárias, 🧪 Critérios de Aceite & Testes, e 📜 Extrato Chave dos Logs."
+                }
+              },
+              required: ["title", "category", "priority", "tags", "summary", "suggested_stage_label", "technical_plan"]
             }
-          },
-          required: ["title", "category", "priority", "tags", "summary", "suggested_stage_label", "technical_plan"]
-        }
-      }
-    });
+          }
+        });
 
-    // Consolidar e limpar logs para o prompt
-    const sanitizeLogsForPrompt = (list: any[], maxCount: number = 35) => {
-      if (!list || !Array.isArray(list)) return [];
-      return list.slice(0, maxCount).map(item => {
-        if (typeof item === 'string') return item;
-        if (item.type === 'gastrofood_api') {
-          const action = item.action || 'API Gastrofood';
-          const method = item.method || 'POST';
-          const url = item.url ? ` (${item.url})` : '';
-          const status = item.status ? ` - Status: ${item.status}` : '';
-          const dir = item.direction ? ` [${item.direction.toUpperCase()}]` : '';
-          const err = item.error ? ` | Erro: ${typeof item.error === 'object' ? JSON.stringify(item.error).substring(0, 250) : item.error}` : '';
-          const resp = item.response ? ` | Retorno: ${typeof item.response === 'object' ? JSON.stringify(item.response).substring(0, 250) : item.response}` : '';
-          return `[GASTROFOOD_API]${dir} ${action} - ${method}${url}${status}${err}${resp}`;
-        }
-        const type = item.type || item.level || 'log';
-        const src = item.source || item.type || 'App';
-        const msg = item.message || item.error || '';
-        const dt = item.details ? JSON.stringify(item.details).substring(0, 300) : '';
-        return `[${type.toUpperCase()}] (${src}): ${msg}${dt ? ` | Detalhes: ${dt}` : ''}`;
-      });
-    };
+        // Consolidar e limpar logs para o prompt
+        const sanitizeLogsForPrompt = (list: any[], maxCount: number = 35) => {
+          if (!list || !Array.isArray(list)) return [];
+          return list.slice(0, maxCount).map(item => {
+            if (typeof item === 'string') return item;
+            if (item.type === 'gastrofood_api') {
+              const action = item.action || 'API Gastrofood';
+              const method = item.method || 'POST';
+              const url = item.url ? ` (${item.url})` : '';
+              const status = item.status ? ` - Status: ${item.status}` : '';
+              const dir = item.direction ? ` [${item.direction.toUpperCase()}]` : '';
+              const err = item.error ? ` | Erro: ${typeof item.error === 'object' ? JSON.stringify(item.error).substring(0, 250) : item.error}` : '';
+              const resp = item.response ? ` | Retorno: ${typeof item.response === 'object' ? JSON.stringify(item.response).substring(0, 250) : item.response}` : '';
+              return `[GASTROFOOD_API]${dir} ${action} - ${method}${url}${status}${err}${resp}`;
+            }
+            const type = item.type || item.level || 'log';
+            const src = item.source || item.type || 'App';
+            const msg = item.message || item.error || '';
+            const dt = item.details ? JSON.stringify(item.details).substring(0, 300) : '';
+            return `[${type.toUpperCase()}] (${src}): ${msg}${dt ? ` | Detalhes: ${dt}` : ''}`;
+          });
+        };
 
-    const sanitizedConsole = sanitizeLogsForPrompt(params.consoleLogs, 40);
-    const sanitizedServer = sanitizeLogsForPrompt(params.serverErrors, 40);
-    const sanitizedGastrofood = sanitizeLogsForPrompt(params.gastrofoodLogs || [], 20);
-    const sanitizedAsts = sanitizeLogsForPrompt(params.astsErrors || [], 20);
+        const sanitizedConsole = sanitizeLogsForPrompt(params.consoleLogs, 40);
+        const sanitizedServer = sanitizeLogsForPrompt(params.serverErrors, 40);
+        const sanitizedGastrofood = sanitizeLogsForPrompt(params.gastrofoodLogs || [], 20);
+        const sanitizedAsts = sanitizeLogsForPrompt(params.astsErrors || [], 20);
 
-    const systemPrompt = `Você é um Engenheiro de Software Sênior Staff / SRE & Arquiteto de Sistemas Fullstack com 25+ anos de experiência, especializado em NodeJS, React/Vite, Supabase Postgres, Baileys WhatsApp Engine e APIs REST.
+        const systemPrompt = `Você é um Engenheiro de Software Sênior Staff / SRE & Arquiteto de Sistemas Fullstack com 25+ anos de experiência, especializado em NodeJS, React/Vite, Supabase Postgres, Baileys WhatsApp Engine e APIs REST.
 
-Sua tarefa é analisar PROFUNDAMENTE e SEM SUPERFICIALIDADE todo o conjunto de logs de diagnóstico, contadores e erros capturados no Antigravity DevLogger e no Servidor Node.js. Se uma captura de tela (screenshot) foi fornecida, analise visualmente os contadores no topo, abas, alertas e erros exibidos na interface.
+Sua tarefa é analisar PROFUNDAMENTE e SEM SUPERFICIALIDADE todo o conjunto de logs de diagnóstico, contadores e erros capturados no Antigravity DevLogger e no Servidor Node.js.
 
 Quadro Kanban de Destino: ${params.boardName || 'Desenvolvimento & Roadmap'}
 Coluna Destino Obrigatória: 'Em Análise'
+
+${params.userNotes ? `=== OBSERVAÇÕES E CONTEXTO ADICIONAL DO DESENVOLVEDOR ===\n${params.userNotes}\n` : ''}
 
 === LOGS DO SERVIDOR NODE.JS (${params.serverErrors.length} capturados) ===
 ${sanitizedServer.length > 0 ? sanitizedServer.join('\n') : 'Nenhum erro direto do servidor Node.'}
@@ -1094,48 +1097,92 @@ ${sanitizedGastrofood.length > 0 ? sanitizedGastrofood.join('\n') : 'Nenhuma fal
 ${sanitizedAsts.length > 0 ? sanitizedAsts.join('\n') : 'Nenhuma anomalia ASTS.'}
 
 DIRETRIZES TÉCNICAS OBRIGATÓRIAS:
-1. Se houver loops de lock no SessionManager ('Aguardando liberação do lock... tentativa X/4' ou 'possui lock ativo e saudável no nó alpha-worker'), analise a causa raiz da concorrência de nós, lease do Supabase e normalize a identificação de nós para evitar loops de espera infinitos.
-2. Identifique os problemas REAIS em cada aba (Console, Servidor Node, Gastrofood, ASTS), sem ignorar falhas de rede, 404 de tabelas Supabase ou chamadas de API.
-3. Elabore um plano técnico extremamente acionável, de nível sênior, pronto para o Antigravity codificar e resolver definitivamente.
+1. Se houver falhas Baileys ou disconexões, analise a causa raiz e re-autenticação.
+2. Se houver logs Gastrofood, foque em performance, resiliência e caching inteligente.
+3. Se o desenvolvedor enviou observações adicionais, incorpore-as integralmente nos objetivos e critérios de aceite.
 4. Estruture o "technical_plan" em Markdown contendo:
    - 🚨 **Diagnóstico e Causa Raiz dos Erros Identificados**
    - 🎯 **Objetivo da Correção**
-   - 🛠️ **Arquivos do Projeto & Passo a Passo de Código** (especifique os caminhos exatos dos arquivos ex: 'server/src/session-manager/index.js', 'src/...', e funções a ajustar)
+   - 🛠️ **Arquivos do Projeto & Passo a Passo de Código**
    - 🧪 **Critérios de Aceite & Validação**
    - 📜 **Extrato Relevante dos Logs Analisados**
 `;
 
-    const promptContents: any[] = [systemPrompt];
-    if (params.screenshotBase64) {
-      promptContents.push({
-        inlineData: {
-          mimeType: "image/jpeg",
-          data: params.screenshotBase64
+        const promptContents: any[] = [systemPrompt];
+        if (params.screenshotBase64) {
+          promptContents.push({
+            inlineData: {
+              mimeType: "image/jpeg",
+              data: params.screenshotBase64.replace(/^data:image\/[a-z]+;base64,/, '')
+            }
+          });
         }
-      });
+
+        if (Array.isArray(params.attachedImages)) {
+          for (const img of params.attachedImages) {
+            if (typeof img === 'string' && img.startsWith('data:image')) {
+              const match = img.match(/^data:(image\/[a-z]+);base64,(.+)$/);
+              if (match) {
+                promptContents.push({
+                  inlineData: {
+                    mimeType: match[1],
+                    data: match[2]
+                  }
+                });
+              }
+            }
+          }
+        }
+
+        const result = await model.generateContent(promptContents);
+        const response = await result.response;
+        const text = response.text().trim();
+        
+        const cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+        const parsed = JSON.parse(cleaned);
+        return {
+          ...parsed,
+          suggested_stage_label: 'Em Análise',
+          analyzed_count: {
+            console: params.consoleLogs.length,
+            server: params.serverErrors.length,
+            gastrofood: (params.gastrofoodLogs || []).length,
+            asts: (params.astsErrors || []).length
+          }
+        };
+      } catch (browserSdkErr: any) {
+        console.warn('[GeminiService] Falha na chamada direta do navegador (bloqueio de rede/CORS). Acionando backend proxy...', browserSdkErr.message);
+      }
     }
 
-    const result = await model.generateContent(promptContents);
-    const response = await result.response;
-    const text = response.text().trim();
-    
-    try {
-      const cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();
-      const parsed = JSON.parse(cleaned);
-      return {
-        ...parsed,
-        suggested_stage_label: 'Em Análise',
-        analyzed_count: {
-          console: params.consoleLogs.length,
-          server: params.serverErrors.length,
-          gastrofood: (params.gastrofoodLogs || []).length,
-          asts: (params.astsErrors || []).length
-        }
-      };
-    } catch (e) {
-      console.error("Erro ao analisar JSON retornado da IA:", text);
-      throw new Error("Falha ao analisar a resposta da IA para os logs.");
+    // 2. Fallback via Servidor Node.js Backend Proxy
+    const engineUrl = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'https://owckk0k8w8soo40w40owc4ss.69.62.92.212.sslip.io';
+    const backendRes = await fetch(`${engineUrl}/api/v1/ai/analyze-logs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        consoleLogs: params.consoleLogs,
+        serverErrors: params.serverErrors,
+        gastrofoodLogs: params.gastrofoodLogs || [],
+        astsErrors: params.astsErrors || [],
+        screenshotBase64: params.screenshotBase64,
+        userNotes: params.userNotes,
+        attachedImages: params.attachedImages || [],
+        boardName: params.boardName || 'Desenvolvimento & Roadmap'
+      })
+    });
+
+    if (!backendRes.ok) {
+      const errBody = await backendRes.text();
+      throw new Error(`Falha na análise de logs com IA: ${errBody || backendRes.statusText}`);
     }
+
+    const backendData = await backendRes.json();
+    if (!backendData?.success || !backendData?.plan) {
+      throw new Error(backendData?.error || 'Resposta inválida recebida do servidor de IA.');
+    }
+
+    return backendData.plan;
   }
 
   async enhanceCardText(params: {

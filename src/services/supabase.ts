@@ -109,7 +109,7 @@ const customAuthStorage = {
 // Mutex assíncrono in-memory para serializar operações de Auth com 100% de integridade transacional sem conflitos de Web Locks API
 const authLocks = new Map<string, Promise<any>>();
 
-const customAuthLock = async (name: string, _acquireTimeout: number, fn: () => Promise<any>) => {
+const customAuthLock = async (name: string, acquireTimeout: number, fn: () => Promise<any>) => {
   const currentLock = authLocks.get(name) || Promise.resolve();
   let release: () => void;
   const nextLock = new Promise<void>((resolve) => {
@@ -117,10 +117,24 @@ const customAuthLock = async (name: string, _acquireTimeout: number, fn: () => P
   });
   authLocks.set(name, nextLock);
 
+  const timeoutMs = typeof acquireTimeout === 'number' && acquireTimeout > 0 ? acquireTimeout : 10000;
+  let timeoutHandle: any;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutHandle = setTimeout(() => reject(new Error(`Auth lock timeout on ${name}`)), timeoutMs);
+  });
+
   try {
-    await currentLock;
+    await Promise.race([currentLock.catch(() => {}), timeoutPromise]);
+    clearTimeout(timeoutHandle);
     return await fn();
+  } catch (err: any) {
+    if (err?.message?.includes('Auth lock timeout')) {
+      console.warn(`[Supabase Auth Lock] Timeout ao aguardar lock '${name}'. Executando diretamente.`);
+      return await fn();
+    }
+    throw err;
   } finally {
+    clearTimeout(timeoutHandle);
     release!();
     if (authLocks.get(name) === nextLock) {
       authLocks.delete(name);
@@ -143,7 +157,12 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 
 const MASTER_SERVICE_ROLE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl6YnhzeGFiem5jZHp1eHZscHB0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTIyMDcwMywiZXhwIjoyMDkwNzk2NzAzfQ.rU4sjTTwrIu1YrF-bkHKN9vvfBUGr2cIWppepT1uY0k';
 export const masterSupabase = createClient(supabaseUrl, MASTER_SERVICE_ROLE_KEY, {
-  auth: { persistSession: false },
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+    detectSessionInUrl: false,
+    lock: async (_n: string, _t: number, fn: () => Promise<any>) => fn()
+  },
   global: { fetch: customFetch }
 });
 

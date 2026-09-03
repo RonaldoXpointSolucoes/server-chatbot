@@ -6,6 +6,7 @@ import { useChatStore } from '../../store/chatStore';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { geminiService } from '../../services/geminiService';
 import * as XLSX from 'xlsx';
+import { useGlobalViewMode } from '../../utils/viewModePreference';
 import { 
   Sparkles, 
   Plus, 
@@ -54,7 +55,9 @@ import {
   List,
   Briefcase,
   UserCheck,
-  RotateCcw
+  RotateCcw,
+  Copy,
+  Loader2
 } from 'lucide-react';
 
 interface Checklist {
@@ -624,11 +627,11 @@ export default function ChecklistBuilder() {
   const excelFileInputRef = useRef<HTMLInputElement>(null);
 
   // Estados de Visualização e Busca das Tarefas
-  const [tasksViewMode, setTasksViewMode] = useState<'grid' | 'list'>('grid');
+  const [tasksViewMode, setTasksViewMode] = useGlobalViewMode('grid');
   const [tasksSearchQuery, setTasksSearchQuery] = useState('');
 
   // Estados de Visualização e Filtros da Listagem Principal de Checklists
-  const [checklistsViewMode, setChecklistsViewMode] = useState<'grid' | 'list'>('grid');
+  const [checklistsViewMode, setChecklistsViewMode] = useGlobalViewMode('grid');
   const [checklistsSearchQuery, setChecklistsSearchQuery] = useState('');
   const [checklistsStatusFilter, setChecklistsStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [checklistsSectorFilter, setChecklistsSectorFilter] = useState<string>('all');
@@ -639,6 +642,7 @@ export default function ChecklistBuilder() {
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [saving, setSaving] = useState(false);
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (tenantId) {
@@ -1494,6 +1498,117 @@ export default function ChecklistBuilder() {
     } catch (err: any) {
       console.error(err);
       showToast('error', `Erro ao deletar: ${err.message}`);
+    }
+  };
+
+  const handleDuplicateChecklist = async (chk: Checklist) => {
+    if (!tenantId) return;
+    setDuplicatingId(chk.id);
+    try {
+      showToast('success', `Duplicando "${chk.title}"...`);
+
+      // 1. Obter itens originais
+      const { data: sourceItems, error: itemsErr } = await supabase
+        .from('checklist_items')
+        .select('*')
+        .eq('checklist_id', chk.id)
+        .order('sort_order', { ascending: true });
+      if (itemsErr) throw itemsErr;
+
+      // 2. Obter agendamentos originais
+      const { data: sourceSchedules } = await supabase
+        .from('checklist_schedules')
+        .select('*')
+        .eq('checklist_id', chk.id);
+
+      // 3. Obter unidades vinculadas originais
+      const { data: sourceUnits } = await supabase
+        .from('checklist_units')
+        .select('*')
+        .eq('checklist_id', chk.id);
+
+      // 4. Inserir checklist duplicado
+      const newTitle = `${chk.title} (Cópia)`;
+      const newChecklistPayload = {
+        tenant_id: tenantId,
+        title: newTitle,
+        description: chk.description || '',
+        category: chk.category || 'Higiene',
+        sector_id: chk.sector_id || null,
+        cargo_id: chk.cargo_id || null,
+        responsible_ids: chk.responsible_ids || [],
+        use_unit_schedule_rules: chk.use_unit_schedule_rules ?? true,
+        min_time_lead_minutes: chk.min_time_lead_minutes || 60,
+        max_time_lag_minutes: chk.max_time_lag_minutes || 60,
+        weight: chk.weight || 1,
+        is_active: chk.is_active ?? true
+      };
+
+      const { data: createdChk, error: chkErr } = await supabase
+        .from('checklists')
+        .insert(newChecklistPayload)
+        .select()
+        .single();
+      if (chkErr) throw chkErr;
+
+      // 5. Inserir itens duplicados
+      if (sourceItems && sourceItems.length > 0) {
+        const clonedItemsPayload = sourceItems.map(item => ({
+          checklist_id: createdChk.id,
+          title: item.title,
+          description: item.description || '',
+          response_type: item.response_type,
+          is_required: item.is_required,
+          weight: item.weight || 1,
+          sort_order: item.sort_order,
+          is_critical: item.is_critical,
+          require_evidence: item.require_evidence,
+          permit_observation: item.permit_observation,
+          min_meta: item.min_meta || null,
+          max_meta: item.max_meta || null,
+          measurement_unit: item.measurement_unit || '',
+          options: item.options || null
+        }));
+        const { error: insItemsErr } = await supabase.from('checklist_items').insert(clonedItemsPayload);
+        if (insItemsErr) console.warn('Aviso ao duplicar itens:', insItemsErr);
+      }
+
+      // 6. Inserir agendamentos duplicados
+      if (sourceSchedules && sourceSchedules.length > 0) {
+        const clonedSchedulesPayload = sourceSchedules.map(sch => ({
+          tenant_id: tenantId,
+          checklist_id: createdChk.id,
+          unit_id: sch.unit_id,
+          responsible_user_id: sch.responsible_user_id,
+          start_time: sch.start_time,
+          recurrency: sch.recurrency,
+          days_of_week: sch.days_of_week,
+          days_of_month: sch.days_of_month,
+          shift: sch.shift,
+          start_date: sch.start_date,
+          end_date: sch.end_date,
+          is_active: sch.is_active
+        }));
+        await supabase.from('checklist_schedules').insert(clonedSchedulesPayload);
+      }
+
+      // 7. Inserir vínculos de unidades duplicados
+      if (sourceUnits && sourceUnits.length > 0) {
+        const clonedUnitsPayload = sourceUnits.map(u => ({
+          checklist_id: createdChk.id,
+          unit_id: u.unit_id
+        }));
+        await supabase.from('checklist_units').insert(clonedUnitsPayload);
+      }
+
+      await useChatStore.getState().logOperation('INSERT', 'checklists', createdChk.id, null, createdChk);
+      showToast('success', `Checklist "${newTitle}" duplicado com sucesso!`);
+      await loadInitialData();
+    } catch (err: any) {
+      console.error('Erro ao duplicar checklist:', err);
+      showToast('error', `Falha ao duplicar checklist: ${err.message}`);
+    } finally {
+      setDuplicatingId(null);
     }
   };
 
@@ -3344,6 +3459,19 @@ export default function ChecklistBuilder() {
                           </button>
                           <button
                             type="button"
+                            onClick={() => handleDuplicateChecklist(chk)}
+                            disabled={duplicatingId === chk.id}
+                            className="p-2 bg-indigo-500/10 hover:bg-indigo-500/20 active:bg-indigo-500/30 text-indigo-300 hover:text-white rounded-xl border border-indigo-500/20 hover:border-indigo-500/40 transition-all active:scale-95 cursor-pointer flex items-center justify-center disabled:opacity-50"
+                            title="Duplicar Checklist (Clonar Roteiro e Tarefas)"
+                          >
+                            {duplicatingId === chk.id ? (
+                              <Loader2 size={14} className="animate-spin text-indigo-400" />
+                            ) : (
+                              <Copy size={14} />
+                            )}
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => handleDeleteChecklist(chk.id)}
                             className="p-2 bg-rose-500/10 hover:bg-rose-500/20 active:bg-rose-500/30 text-rose-400 hover:text-rose-300 rounded-xl border border-rose-500/20 hover:border-rose-500/40 transition-all active:scale-95 cursor-pointer"
                             title="Deletar Checklist"
@@ -3862,13 +3990,26 @@ export default function ChecklistBuilder() {
                         )}
                       </div>
 
-                      <div className="flex gap-2.5 mt-5 pt-4 border-t border-[#2a3942]/40">
+                      <div className="flex items-center gap-2 mt-5 pt-4 border-t border-[#2a3942]/40">
                         <button
                           type="button"
                           onClick={() => handleEditChecklist(chk)}
                           className="flex-1 bg-gradient-to-r from-indigo-600/80 to-indigo-700/80 hover:from-indigo-600 hover:to-indigo-700 active:from-indigo-700 active:to-indigo-800 text-white text-xs font-bold py-2.5 rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-md shadow-indigo-600/10 active:scale-[0.98] cursor-pointer"
                         >
                           <Edit2 size={12} /> Gerenciar Roteiro
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDuplicateChecklist(chk)}
+                          disabled={duplicatingId === chk.id}
+                          className="p-2.5 bg-indigo-500/10 hover:bg-indigo-500/20 active:bg-indigo-500/30 text-indigo-300 hover:text-white rounded-xl border border-indigo-500/20 hover:border-indigo-500/40 transition-all active:scale-95 cursor-pointer flex items-center justify-center disabled:opacity-50"
+                          title="Duplicar Checklist (Clonar Roteiro e Tarefas)"
+                        >
+                          {duplicatingId === chk.id ? (
+                            <Loader2 size={14} className="animate-spin text-indigo-400" />
+                          ) : (
+                            <Copy size={14} />
+                          )}
                         </button>
                         <button
                           type="button"
@@ -3903,17 +4044,33 @@ export default function ChecklistBuilder() {
             </div>
             
             {/* Botões do Topo (Escondidos no mobile pois há a barra ergonômica fixa no rodapé) */}
-            <div className="hidden lg:flex gap-2">
+            <div className="hidden lg:flex items-center gap-2">
+              {editingChecklist.id && (
+                <button
+                  type="button"
+                  onClick={() => handleDuplicateChecklist(editingChecklist as Checklist)}
+                  disabled={duplicatingId === editingChecklist.id}
+                  className="bg-indigo-500/10 hover:bg-indigo-500/20 active:bg-indigo-500/30 text-indigo-300 hover:text-white text-xs font-bold px-3.5 py-2.5 rounded-xl border border-indigo-500/30 transition-all flex items-center gap-1.5 active:scale-95 disabled:opacity-50 cursor-pointer"
+                  title="Criar uma cópia deste checklist"
+                >
+                  {duplicatingId === editingChecklist.id ? (
+                    <Loader2 size={14} className="animate-spin text-indigo-400" />
+                  ) : (
+                    <Copy size={14} />
+                  )}
+                  Duplicar
+                </button>
+              )}
               <button
                 onClick={handleSaveAll}
                 disabled={saving}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all shadow-md active:scale-95 disabled:opacity-50"
+                className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all shadow-md active:scale-95 disabled:opacity-50 cursor-pointer"
               >
                 {saving ? 'Gravando Alterações...' : 'Salvar Checklist Completo'}
               </button>
               <button
                 onClick={() => setEditingChecklist(null)}
-                className="bg-[#202c33] hover:bg-[#2a3942] text-[#d1d7db] text-xs font-bold px-4 py-2.5 rounded-xl border border-[#2a3942] transition-all"
+                className="bg-[#202c33] hover:bg-[#2a3942] text-[#d1d7db] text-xs font-bold px-4 py-2.5 rounded-xl border border-[#2a3942] transition-all cursor-pointer"
               >
                 Cancelar
               </button>
@@ -5243,6 +5400,21 @@ export default function ChecklistBuilder() {
 
           {/* Rodapé Fixo Mobile para Ações Globais (Ergonomia Ergonômica) */}
           <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-[#202c33]/95 backdrop-blur-md border-t border-[#2a3942]/60 p-4 flex gap-3 z-30 shadow-2xl animate-in slide-in-from-bottom duration-300">
+            {editingChecklist.id && (
+              <button
+                type="button"
+                onClick={() => handleDuplicateChecklist(editingChecklist as Checklist)}
+                disabled={duplicatingId === editingChecklist.id}
+                className="bg-indigo-500/10 hover:bg-indigo-500/20 active:bg-indigo-500/30 text-indigo-300 hover:text-white text-xs font-bold px-3 py-3 rounded-xl border border-indigo-500/30 flex items-center justify-center gap-1.5 active:scale-95 disabled:opacity-50"
+                title="Duplicar Checklist"
+              >
+                {duplicatingId === editingChecklist.id ? (
+                  <Loader2 size={16} className="animate-spin text-indigo-400" />
+                ) : (
+                  <Copy size={16} />
+                )}
+              </button>
+            )}
             <button
               onClick={() => setEditingChecklist(null)}
               className="flex-1 bg-[#182229] hover:bg-[#111b21] text-[#d1d7db] text-xs font-bold py-3 rounded-xl border border-[#2a3942] active:scale-95 transition-all"

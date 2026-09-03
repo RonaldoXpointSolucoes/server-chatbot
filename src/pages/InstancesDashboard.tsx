@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { createClient } from '@supabase/supabase-js';
 import { useWaCallsStore } from '../store/useWaCallsStore';
 import QRCode from 'react-qr-code';
 import { useDevStore } from '../store/devStore';

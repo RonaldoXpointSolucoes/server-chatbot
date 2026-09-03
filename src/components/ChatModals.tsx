@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { AlertCircle, AlertTriangle, Edit2, Trash2, X, User, Users, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, UserMinus, CheckCircle2, Tag, Check, Clock, CalendarDays, MessageSquare, MessageSquarePlus, Building2, Copy, Building, CircleDollarSign, ExternalLink, CalendarClock, RefreshCw, Pencil, ChevronDown, ChevronUp, Plus, BrainCircuit, FolderCheck, Frown, Smile, Activity, TrendingUp, MoreVertical, Inbox, Ticket, Sparkles, CheckSquare, History } from 'lucide-react';
+import { AlertCircle, AlertTriangle, Edit2, Trash2, X, User, Users, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, UserMinus, CheckCircle2, Tag, Check, Clock, CalendarDays, MessageSquare, MessageSquarePlus, Building2, Copy, Building, CircleDollarSign, ExternalLink, CalendarClock, RefreshCw, Pencil, ChevronDown, ChevronUp, Plus, BrainCircuit, FolderCheck, Frown, Smile, Activity, TrendingUp, MoreVertical, Inbox, Ticket, Sparkles, CheckSquare, History, LayoutGrid } from 'lucide-react';
 import { useChatStore } from '../store/chatStore';
 import { cn } from '../lib/utils';
 import { formatDocumentNumber } from '../utils/format';
@@ -5576,6 +5576,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                     : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
                 )}
               >
+                <LayoutGrid size={13} />
                 <span>Mosaico</span>
               </button>
               <button
@@ -5591,6 +5592,7 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
                     : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
                 )}
               >
+                <Sparkles size={13} />
                 <span>Insights I.A.</span>
               </button>
             </div>

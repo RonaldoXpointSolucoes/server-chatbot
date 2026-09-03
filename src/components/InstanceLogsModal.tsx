@@ -29,12 +29,7 @@ import {
   Send,
   Zap
 } from 'lucide-react';
-import { createClient } from '@supabase/supabase-js';
-
-// Configurações do Supabase & Engines com Fallback Automático
-const SUPABASE_URL = 'https://yzbxsxabzncdzuxvlppt.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl6YnhzeGFiem5jZHp1eHZscHB0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTIyMDcwMywiZXhwIjoyMDkwNzk2NzAzfQ.rU4sjTTwrIu1YrF-bkHKN9vvfBUGr2cIWppepT1uY0k';
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+import { masterSupabase as supabase } from '../services/supabase';
 
 const ENGINE_CANDIDATES = [
   import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim(),
