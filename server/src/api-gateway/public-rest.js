@@ -13,6 +13,24 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 500
 
 // Helper de obtenção de socket com retry, auto-reconnect e backoff inteligente
 async function getSocketWithRetry(tenantId, instanceId, maxRetries = 3) {
+    // 1. Verificação de fast-fail no banco de dados para evitar loops em instâncias desconectadas
+    try {
+        const { data: inst } = await supabase
+            .from('whatsapp_instances')
+            .select('status, last_error')
+            .eq('id', instanceId)
+            .maybeSingle();
+
+        if (inst && ['offline', 'logged_out', 'blocked_12h', 'disconnected', 'paused'].includes(inst.status)) {
+            const err = new Error(`Instância ${instanceId} está ${inst.status} no banco de dados (${inst.last_error || 'requer nova conexão/pareamento'})`);
+            err.isDefinitive = true;
+            err.instanceStatus = inst.status;
+            throw err;
+        }
+    } catch (checkErr) {
+        if (checkErr.isDefinitive) throw checkErr;
+    }
+
     const delays = [0, 1000, 2000, 3000];
     for (let attempt = 0; attempt < maxRetries; attempt++) {
         if (delays[attempt] > 0) {
@@ -353,25 +371,34 @@ router.post(['/message/sendText', '/message/send-text', '/messages/sendText', '/
             return res.status(400).json({ error: 'number and text are required in body' });
         }
 
-        const sock = await getSocketWithRetry(tenant_id, id, 3);
+        let sock;
+        try {
+            sock = await getSocketWithRetry(tenant_id, id, 3);
+        } catch (sockErr) {
+            if (sockErr.isDefinitive) {
+                console.warn(`[API Gateway] [sendText] ❌ Fast-Fail 400: ${sockErr.message} | Instância: ${id} ("${display_name}")`);
+                return res.status(400).json({
+                    error: sockErr.message,
+                    code: 'INSTANCE_DISCONNECTED',
+                    instance_id: id,
+                    status: sockErr.instanceStatus
+                });
+            }
+            throw sockErr;
+        }
+
         if (!sock) {
-            console.warn(`[API Gateway] [sendText] ⚠️ Falha 400: Socket Offline ou não autenticado na RAM | Instância: ${id} ("${display_name}") | Destino: ${number}`);
-            return res.status(400).json({ error: 'WhatsApp socket offline or not authenticated for this instance.' });
+            console.warn(`[API Gateway] [sendText] ⚠️ Falha 503: Socket Offline ou não autenticado na RAM | Instância: ${id} ("${display_name}") | Destino: ${number}`);
+            return res.status(503).json({
+                error: 'WhatsApp socket offline or not authenticated for this instance.',
+                code: 'WHATSAPP_SOCKET_UNAVAILABLE',
+                instance_id: id,
+                status: 'offline'
+            });
         }
         
         const remoteJid = await resolveTargetJid(sock, number, tenant_id);
-        let msgResult;
-        try {
-            msgResult = await sock.sendMessage(remoteJid, { text }, { isAutomation: true });
-        } catch (sendErr) {
-            console.warn(`[API Gateway] [sendText] Aviso na 1ª tentativa de envio (${sendErr.message}). Tentando obter socket atualizado e retentar...`);
-            const retrySock = await getSocketWithRetry(tenant_id, id, 2);
-            if (retrySock) {
-                msgResult = await retrySock.sendMessage(remoteJid, { text }, { isAutomation: true });
-            } else {
-                throw sendErr;
-            }
-        }
+        const msgResult = await sock.sendMessage(remoteJid, { text }, { isAutomation: true });
 
         try {
             const { EventProcessor } = await import('../event-processor/index.js');

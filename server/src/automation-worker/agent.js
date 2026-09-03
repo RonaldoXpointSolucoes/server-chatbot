@@ -520,10 +520,10 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
         }
     }
 
-    // Fallback de Resiliência: se o bot estava configurado como 'api', tentou a API, mas ela falhou, tenta carregar do Supabase para não deixar o cliente sem atendimento.
-    if (effectiveCardapioOrigem === 'api' && apiAttempted && !cache) {
+    // Fallback de Resiliência: se a API foi consultada mas falhou ou retornou 0 produtos, tenta carregar do Supabase local para não deixar o cliente sem atendimento.
+    if (apiAttempted && !cache) {
         try {
-            console.log(`[CardapioCache - Fallback Resiliência] API falhou. Tentando resgatar cardápio do Supabase local...`);
+            console.log(`[CardapioCache - Fallback Resiliência] API não retornou produtos válidos. Tentando resgatar cardápio do Supabase local...`);
             const { data: dbProdutos } = await supabase
                 .from('cardapio_produtos')
                 .select('*')

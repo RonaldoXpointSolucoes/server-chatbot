@@ -38,9 +38,9 @@ export type MessageType = {
   status?: string; // PENDING, SENT, DELIVERY_ACK, READ
   timestamp: Date;
   quoted?: {
-      id: string;
-      sender: string;
-      text: string;
+    id: string;
+    sender: string;
+    text: string;
   };
   buttons?: Array<{ id: string; text: string; url?: string; type: string }>; // Novo campo!
   transcription?: string; // Transcrição de áudio via Gemini
@@ -63,12 +63,12 @@ export const sortMessagesChronologically = (msgs: MessageType[]): MessageType[] 
   return [...msgs].sort((a, b) => {
     const timeA = a.timestamp instanceof Date ? a.timestamp.getTime() : new Date(a.timestamp || 0).getTime();
     const timeB = b.timestamp instanceof Date ? b.timestamp.getTime() : new Date(b.timestamp || 0).getTime();
-    
+
     // 1. Fator principal: Timestamp cronológico ascendente (mais antiga primeiro, mais recente por último)
     if (timeA !== timeB) {
       return timeA - timeB;
     }
-    
+
     // 2. Desempate para mensagens otimistas: se 'a' for otimista ('optimistic-...'), fica por último
     const isOptA = String(a.id || '').startsWith('optimistic-');
     const isOptB = String(b.id || '').startsWith('optimistic-');
@@ -83,44 +83,44 @@ export const sortMessagesChronologically = (msgs: MessageType[]): MessageType[] 
 };
 
 export const getEffectiveContactTime = (c: any): number => {
-    if (!c) return 0;
-    
-    let maxTime = 0;
-    
-    if (Array.isArray(c.messages) && c.messages.length > 0) {
-        const lastMsg = c.messages[c.messages.length - 1];
-        if (lastMsg && lastMsg.timestamp) {
-            const t = lastMsg.timestamp instanceof Date ? lastMsg.timestamp.getTime() : new Date(lastMsg.timestamp).getTime();
-            if (!isNaN(t) && t > 0) maxTime = Math.max(maxTime, t);
-        }
-    }
-    
-    if (c.last_message_at) {
-        const t = new Date(c.last_message_at).getTime();
-        if (!isNaN(t) && t > 0) maxTime = Math.max(maxTime, t);
-    }
-    
-    if (c.lastMsgTimestamp) {
-        const t = typeof c.lastMsgTimestamp === 'number' ? c.lastMsgTimestamp : new Date(c.lastMsgTimestamp).getTime();
-        if (!isNaN(t) && t > 0) maxTime = Math.max(maxTime, t);
-    }
+  if (!c) return 0;
 
-    if (c.timestamp) {
-        const t = typeof c.timestamp === 'number' ? c.timestamp : new Date(c.timestamp).getTime();
-        if (!isNaN(t) && t > 0) maxTime = Math.max(maxTime, t);
-    }
+  let maxTime = 0;
 
-    if (c.last_interaction_at) {
-        const t = new Date(c.last_interaction_at).getTime();
-        if (!isNaN(t) && t > 0) maxTime = Math.max(maxTime, t);
+  if (Array.isArray(c.messages) && c.messages.length > 0) {
+    const lastMsg = c.messages[c.messages.length - 1];
+    if (lastMsg && lastMsg.timestamp) {
+      const t = lastMsg.timestamp instanceof Date ? lastMsg.timestamp.getTime() : new Date(lastMsg.timestamp).getTime();
+      if (!isNaN(t) && t > 0) maxTime = Math.max(maxTime, t);
     }
+  }
 
-    if (c.created_at) {
-        const t = new Date(c.created_at).getTime();
-        if (!isNaN(t) && t > 0) maxTime = Math.max(maxTime, t);
-    }
+  if (c.last_message_at) {
+    const t = new Date(c.last_message_at).getTime();
+    if (!isNaN(t) && t > 0) maxTime = Math.max(maxTime, t);
+  }
 
-    return maxTime;
+  if (c.lastMsgTimestamp) {
+    const t = typeof c.lastMsgTimestamp === 'number' ? c.lastMsgTimestamp : new Date(c.lastMsgTimestamp).getTime();
+    if (!isNaN(t) && t > 0) maxTime = Math.max(maxTime, t);
+  }
+
+  if (c.timestamp) {
+    const t = typeof c.timestamp === 'number' ? c.timestamp : new Date(c.timestamp).getTime();
+    if (!isNaN(t) && t > 0) maxTime = Math.max(maxTime, t);
+  }
+
+  if (c.last_interaction_at) {
+    const t = new Date(c.last_interaction_at).getTime();
+    if (!isNaN(t) && t > 0) maxTime = Math.max(maxTime, t);
+  }
+
+  if (c.created_at) {
+    const t = new Date(c.created_at).getTime();
+    if (!isNaN(t) && t > 0) maxTime = Math.max(maxTime, t);
+  }
+
+  return maxTime;
 };
 
 
@@ -191,7 +191,7 @@ export const getUniquePersonKey = (c: any): string => {
   if (!c) return '';
   const phone = c.phone ? String(c.phone).replace(/\D/g, '') : '';
   if (phone && phone.length >= 8) return `phone_${phone}`;
-  
+
   if (c.whatsapp_jid) {
     const cleanJid = String(c.whatsapp_jid).split('@')[0].replace(/\D/g, '');
     if (cleanJid && cleanJid.length >= 8) return `phone_${cleanJid}`;
@@ -286,15 +286,15 @@ export const instanceCache = {
     if (phoneNumber) this.phoneNumbers[id] = phoneNumber;
     if (settings !== undefined) this.settings[id] = settings;
   },
-  
+
   getId(name: string): string | null {
     return this.byName[name.toLowerCase()] || null;
   },
-  
+
   getName(id: string): string | null {
     return this.byId[id] || null;
   },
-  
+
   getApiKey(id: string): string | null {
     return this.apiKeys[id] || null;
   },
@@ -335,7 +335,7 @@ export const getOrFetchApiKey = async (instanceId: string | null | undefined): P
   if (!instanceId) return '';
   const cachedKey = instanceCache.getApiKey(instanceId);
   if (cachedKey) return cachedKey;
-  
+
   try {
     const { data: instDataDB } = await supabase
       .from('whatsapp_instances')
@@ -371,24 +371,24 @@ export const resolveInstanceUuid = async (tenantId: string, identifier: string |
   if (!identifier || identifier === 'default' || identifier === 'all') return null;
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   if (uuidRegex.test(identifier)) return identifier;
-  
+
   const cachedId = instanceCache.getId(identifier);
   if (cachedId) return cachedId;
-  
+
   try {
-     const { data } = await supabase
-        .from('whatsapp_instances')
-        .select('id, display_name, whatsapp_name, api_key, phone_number')
-        .eq('tenant_id', tenantId)
-        .or(`display_name.eq.${identifier},whatsapp_name.eq.${identifier}`)
-        .limit(1);
-     if (data && data.length > 0) {
-        const inst = data[0];
-        instanceCache.set(inst.id, inst.display_name || inst.whatsapp_name || '', inst.api_key || '', inst.phone_number || '');
-        return inst.id;
-     }
+    const { data } = await supabase
+      .from('whatsapp_instances')
+      .select('id, display_name, whatsapp_name, api_key, phone_number')
+      .eq('tenant_id', tenantId)
+      .or(`display_name.eq.${identifier},whatsapp_name.eq.${identifier}`)
+      .limit(1);
+    if (data && data.length > 0) {
+      const inst = data[0];
+      instanceCache.set(inst.id, inst.display_name || inst.whatsapp_name || '', inst.api_key || '', inst.phone_number || '');
+      return inst.id;
+    }
   } catch (e) {
-     console.error('[resolveInstanceUuid] Error:', e);
+    console.error('[resolveInstanceUuid] Error:', e);
   }
   return null;
 };
@@ -406,10 +406,10 @@ export const hasUserAccessToInstance = (sessionId: string | null | undefined): b
   const targetName = instanceCache.getName(sessionId) || (sessionId.includes('-') ? null : sessionId);
 
   // Proteção da caixa Ronaldo-Web (ID: 5c78d358-d449-41c4-b396-a04ab20a39e4)
-  const isRonaldoWebInstance = 
-    sessionId === '5c78d358-d449-41c4-b396-a04ab20a39e4' || 
-    sessionId === 'Ronaldo-Web' || 
-    targetUuid === '5c78d358-d449-41c4-b396-a04ab20a39e4' || 
+  const isRonaldoWebInstance =
+    sessionId === '5c78d358-d449-41c4-b396-a04ab20a39e4' ||
+    sessionId === 'Ronaldo-Web' ||
+    targetUuid === '5c78d358-d449-41c4-b396-a04ab20a39e4' ||
     targetName === 'Ronaldo-Web';
 
   if (isRonaldoWebInstance && !isRonaldo) {
@@ -417,14 +417,14 @@ export const hasUserAccessToInstance = (sessionId: string | null | undefined): b
       try {
         const allowedArr = JSON.parse(allowedStr);
         if (Array.isArray(allowedArr)) {
-          const hasExplicit = allowedArr.some((inst: string) => 
+          const hasExplicit = allowedArr.some((inst: string) =>
             inst === '5c78d358-d449-41c4-b396-a04ab20a39e4' || inst === 'Ronaldo-Web'
           );
           if (!hasExplicit) return false;
         } else {
           return false;
         }
-      } catch(e) {
+      } catch (e) {
         return false;
       }
     } else {
@@ -437,9 +437,9 @@ export const hasUserAccessToInstance = (sessionId: string | null | undefined): b
     try {
       const allowedArr = JSON.parse(allowedStr);
       if (Array.isArray(allowedArr) && allowedArr.length > 0) {
-        const hasAccess = allowedArr.some((inst: string) => 
-          inst === sessionId || 
-          (targetUuid && inst === targetUuid) || 
+        const hasAccess = allowedArr.some((inst: string) =>
+          inst === sessionId ||
+          (targetUuid && inst === targetUuid) ||
           (targetName && inst === targetName) ||
           instanceCache.getId(inst) === sessionId ||
           instanceCache.getName(inst) === sessionId ||
@@ -450,7 +450,7 @@ export const hasUserAccessToInstance = (sessionId: string | null | undefined): b
       } else if (roleStr === 'agent' || roleStr === 'Agente') {
         return false;
       }
-    } catch(e) {
+    } catch (e) {
       if (roleStr === 'agent' || roleStr === 'Agente') return false;
     }
   }
@@ -552,16 +552,16 @@ interface ChatState {
   setGlobalAiAuditInfo: (audit: any) => void;
   toggleGlobalAi: () => Promise<void>;
   syncMissedMessages: () => Promise<void>;
-  
+
   searchGlobalContacts: (term: string) => Promise<void>;
   openQRModal: (instanceId?: string | null) => void;
   closeQRModal: () => void;
-  
+
   setActiveChannelFilter: (channelId: string | null, channelName?: string) => void;
   setEvolutionConnection: (status: boolean, instanceName?: string | null) => void;
   setActiveChat: (id: string | null) => void;
   setBotStatus: (contactId: string, status: 'active' | 'paused') => Promise<void>;
-  
+
   // Real DB actions
   fetchTenantConfig: () => Promise<void>;
   setModalReason: (reason: string | null) => void;
@@ -574,7 +574,7 @@ interface ChatState {
   // Historical Sync
   syncEvolutionContacts: (instanceName: string) => Promise<void>;
   loadHistoricalMessages: (contactId: string, instanceName: string, forceSync?: boolean) => Promise<void>;
-  
+
   // Local state updaters
   addMessageLocally: (contactId: string, msg: MessageType) => void;
   upsertContactLocally: (contact: ContactRow) => void;
@@ -593,7 +593,7 @@ interface ChatState {
   toggleBlockContact: (contactId: string) => Promise<void>;
   markAllAsRead: () => Promise<void>;
   fetchContactPicture: (contactId: string, jid: string, instanceName: string) => Promise<void>;
-  
+
   // Omnichannel Actions
   fetchTenantAgents: () => Promise<void>;
   createAgent: (payload: { full_name: string; email: string; role: string; password?: string; allowed_instances?: string[]; allowed_companies?: string[]; signature?: string; use_signature?: boolean; }) => Promise<void>;
@@ -602,12 +602,12 @@ interface ChatState {
   updateConversationField: (contactId: string, payload: Record<string, any>) => Promise<void>;
   updateAgentProfile: (fullName: string, signature: string, use_signature: boolean) => Promise<void>;
   updateInstanceEnabledGroups: (instanceId: string, groupJids: string[], activeGroupItems?: any[]) => Promise<void>;
-  
+
   // Gemini Actions
   // Automations
   automations: any[];
   fetchAutomations: () => Promise<void>;
-  
+
   // User Settings
   userSettings: any;
   filterType: string;
@@ -618,38 +618,38 @@ interface ChatState {
   assignLabelToConversation: (contactId: string, labelId: string) => Promise<void>;
   removeLabelFromConversation: (contactId: string, labelId: string) => Promise<void>;
   syncConversationLabelsWithTags: (realContactId: string, tags: string[]) => Promise<void>;
-  
+
   // Quick Replies
   quickReplies: QuickReply[];
   fetchQuickReplies: () => Promise<void>;
   addQuickReply: (shortcut: string, content: string, mediaUrl?: string, mediaType?: string, type?: CannedResponseType, categoryId?: string | null) => Promise<void>;
   updateQuickReply: (id: string, shortcut: string, content: string, mediaUrl?: string, mediaType?: string, type?: CannedResponseType, categoryId?: string | null) => Promise<void>;
   deleteQuickReply: (id: string) => Promise<void>;
-  
+
   // Quick Reply Categories (Pastas e Subcategorias)
   addQuickReplyCategory: (category: Omit<QuickReplyCategory, 'id' | 'created_at'>) => Promise<void>;
   updateQuickReplyCategory: (id: string, updates: Partial<QuickReplyCategory>) => Promise<void>;
   deleteQuickReplyCategory: (id: string) => Promise<void>;
-  
+
   // Contact Groups (Grupos Empresariais)
   addContactGroup: (group: Omit<ContactGroup, 'id'>) => Promise<void>;
   updateContactGroup: (id: string, group: Partial<ContactGroup>) => Promise<void>;
   deleteContactGroup: (id: string) => Promise<void>;
-  
+
   // Theme Global
   theme: 'light' | 'dark';
   setTheme: (theme: 'light' | 'dark') => void;
 
   // Operations Logs
   logOperation: (action: 'INSERT' | 'UPDATE' | 'DELETE', tableName: string, recordId: string, beforeState: any, afterState: any) => Promise<void>;
-  undoOperation: (logId: string, password: string) => Promise<{success: boolean; error?: string}>;
+  undoOperation: (logId: string, password: string) => Promise<{ success: boolean; error?: string }>;
   toggleUnread: (contactId: string, currentUnread: number) => Promise<void>;
   markAsRead: (contactId: string) => Promise<void>;
   ticketMode: boolean;
   setTicketMode: (active: boolean) => void;
   reopenConversation: (contactId: string) => Promise<void>;
   resolveConversation: (contactId: string, reactivateAi?: boolean) => Promise<void>;
-  
+
   // Detalhes de Tickets e Histórico
   activeTicket: ChatTicket | null;
   contactTickets: ChatTicket[];
@@ -669,32 +669,32 @@ interface ChatState {
 
   // Ações de Anotações Internas e CRM
   createInternalNote: (
-    contactId: string, 
-    text: string, 
-    mediaUrl?: string, 
-    mediaType?: string, 
-    mediaMetadata?: any, 
-    isTask?: boolean, 
-    assignedTo?: string | null, 
+    contactId: string,
+    text: string,
+    mediaUrl?: string,
+    mediaType?: string,
+    mediaMetadata?: any,
+    isTask?: boolean,
+    assignedTo?: string | null,
     checklistItems?: any[]
   ) => Promise<void>;
-  
+
   editInternalNote: (
-    noteId: string, 
-    text: string, 
-    isTask?: boolean, 
-    assignedTo?: string | null, 
+    noteId: string,
+    text: string,
+    isTask?: boolean,
+    assignedTo?: string | null,
     checklistItems?: any[]
   ) => Promise<void>;
-  
+
   deleteInternalNote: (
     noteId: string,
     contactId: string
   ) => Promise<void>;
-  
+
   toggleChecklistItem: (
-    noteId: string, 
-    itemId: string, 
+    noteId: string,
+    itemId: string,
     completed: boolean
   ) => Promise<void>;
 
@@ -738,63 +738,63 @@ function parseAdvancedMsgMetadata(m: any) {
   let vcardWaid: string | undefined = undefined;
 
   try {
-      const payloadMessage = m.raw_payload?.message;
-      if (payloadMessage) {
-          let contextInfo = null;
-          if (payloadMessage.extendedTextMessage?.contextInfo) {
-              contextInfo = payloadMessage.extendedTextMessage.contextInfo;
-          } else if (payloadMessage.imageMessage?.contextInfo) {
-              contextInfo = payloadMessage.imageMessage.contextInfo;
-          } else if (payloadMessage.videoMessage?.contextInfo) {
-              contextInfo = payloadMessage.videoMessage.contextInfo;
-          } else if (payloadMessage.documentMessage?.contextInfo) {
-              contextInfo = payloadMessage.documentMessage.contextInfo;
-          } else if (payloadMessage.audioMessage?.contextInfo) {
-              contextInfo = payloadMessage.audioMessage.contextInfo;
-          } else if (payloadMessage.contactMessage?.contextInfo) {
-              contextInfo = payloadMessage.contactMessage.contextInfo;
-          }
-
-          if (contextInfo && contextInfo.quotedMessage) {
-              const qm = contextInfo.quotedMessage;
-              let qText = '📎 Mídia';
-              if (qm.conversation) qText = qm.conversation;
-              else if (qm.extendedTextMessage?.text) qText = qm.extendedTextMessage.text;
-              else if (qm.imageMessage) qText = qm.imageMessage.caption || '📸 Imagem';
-              else if (qm.videoMessage) qText = qm.videoMessage.caption || '🎥 Vídeo';
-              else if (qm.audioMessage) qText = '🎵 Áudio';
-              else if (qm.documentMessage) qText = '📁 Documento';
-
-              derivedQuoted = {
-                  id: contextInfo.stanzaId,
-                  sender: contextInfo.participant,
-                  text: qText
-              };
-          }
-
-          if (payloadMessage.locationMessage || payloadMessage.liveLocationMessage) {
-              derivedType = 'location';
-              const loc = payloadMessage.locationMessage || payloadMessage.liveLocationMessage;
-              derivedText = `${loc.degreesLatitude},${loc.degreesLongitude}`;
-          } else if (payloadMessage.contactMessage) {
-              derivedType = 'contact';
-              derivedText = payloadMessage.contactMessage.displayName || payloadMessage.contactMessage.vcard?.match(/FN:(.+)/)?.[1] || 'Contato';
-              const waidMatch = payloadMessage.contactMessage.vcard?.match(/waid=(\d+)/);
-              if (waidMatch) {
-                  vcardWaid = waidMatch[1];
-              }
-          } else if (payloadMessage.contactsArrayMessage) {
-              derivedType = 'contact';
-              derivedText = payloadMessage.contactsArrayMessage.displayName || 'Vários Contatos';
-          }
+    const payloadMessage = m.raw_payload?.message;
+    if (payloadMessage) {
+      let contextInfo = null;
+      if (payloadMessage.extendedTextMessage?.contextInfo) {
+        contextInfo = payloadMessage.extendedTextMessage.contextInfo;
+      } else if (payloadMessage.imageMessage?.contextInfo) {
+        contextInfo = payloadMessage.imageMessage.contextInfo;
+      } else if (payloadMessage.videoMessage?.contextInfo) {
+        contextInfo = payloadMessage.videoMessage.contextInfo;
+      } else if (payloadMessage.documentMessage?.contextInfo) {
+        contextInfo = payloadMessage.documentMessage.contextInfo;
+      } else if (payloadMessage.audioMessage?.contextInfo) {
+        contextInfo = payloadMessage.audioMessage.contextInfo;
+      } else if (payloadMessage.contactMessage?.contextInfo) {
+        contextInfo = payloadMessage.contactMessage.contextInfo;
       }
-  } catch(e) {}
+
+      if (contextInfo && contextInfo.quotedMessage) {
+        const qm = contextInfo.quotedMessage;
+        let qText = '📎 Mídia';
+        if (qm.conversation) qText = qm.conversation;
+        else if (qm.extendedTextMessage?.text) qText = qm.extendedTextMessage.text;
+        else if (qm.imageMessage) qText = qm.imageMessage.caption || '📸 Imagem';
+        else if (qm.videoMessage) qText = qm.videoMessage.caption || '🎥 Vídeo';
+        else if (qm.audioMessage) qText = '🎵 Áudio';
+        else if (qm.documentMessage) qText = '📁 Documento';
+
+        derivedQuoted = {
+          id: contextInfo.stanzaId,
+          sender: contextInfo.participant,
+          text: qText
+        };
+      }
+
+      if (payloadMessage.locationMessage || payloadMessage.liveLocationMessage) {
+        derivedType = 'location';
+        const loc = payloadMessage.locationMessage || payloadMessage.liveLocationMessage;
+        derivedText = `${loc.degreesLatitude},${loc.degreesLongitude}`;
+      } else if (payloadMessage.contactMessage) {
+        derivedType = 'contact';
+        derivedText = payloadMessage.contactMessage.displayName || payloadMessage.contactMessage.vcard?.match(/FN:(.+)/)?.[1] || 'Contato';
+        const waidMatch = payloadMessage.contactMessage.vcard?.match(/waid=(\d+)/);
+        if (waidMatch) {
+          vcardWaid = waidMatch[1];
+        }
+      } else if (payloadMessage.contactsArrayMessage) {
+        derivedType = 'contact';
+        derivedText = payloadMessage.contactsArrayMessage.displayName || 'Vários Contatos';
+      }
+    }
+  } catch (e) { }
 
   // Extração resiliente para mensagens de Contato / vCard
   if (m.message_type === 'contact' || derivedType === 'contact') {
     derivedType = 'contact';
-    const vcardCandidate = 
-      m.raw_payload?.message?.contactMessage?.vcard || 
+    const vcardCandidate =
+      m.raw_payload?.message?.contactMessage?.vcard ||
       m.raw_payload?.contacts?.contacts?.[0]?.vcard ||
       m.raw_payload?.vcard ||
       (typeof m.raw_payload === 'string' && m.raw_payload.includes('BEGIN:VCARD') ? m.raw_payload : '');
@@ -815,91 +815,91 @@ function parseAdvancedMsgMetadata(m: any) {
   }
 
   let buttons: any[] = [];
-  
-  try {
-      const payloadMessage = m.raw_payload?.message;
-      if (payloadMessage) {
-          let targetMsg = payloadMessage;
-          if (targetMsg?.viewOnceMessageV2?.message) targetMsg = targetMsg.viewOnceMessageV2.message;
-          else if (targetMsg?.viewOnceMessage?.message) targetMsg = targetMsg.viewOnceMessage.message;
-          else if (targetMsg?.documentWithCaptionMessage?.message) targetMsg = targetMsg.documentWithCaptionMessage.message;
 
-          if (targetMsg?.templateMessage?.interactiveMessageTemplate) {
-              const imt = targetMsg.templateMessage.interactiveMessageTemplate;
-              const full = [];
-              if (imt.header?.title) full.push(`*${imt.header.title.trim()}*`);
-              if (imt.body?.text) full.push(imt.body.text.trim());
-              if (imt.footer?.text) full.push(`_${imt.footer.text.trim()}_`);
-              if (full.length > 0) derivedText = full.join('\n\n');
-              derivedType = 'interactive';
-              
-              if (imt.nativeFlowMessage?.buttons) {
-                 buttons = imt.nativeFlowMessage.buttons.map((b: any, i: number) => {
-                     let dt = b.name;
-                     let url;
-                     try { if (b.buttonParamsJson) { const pj = JSON.parse(b.buttonParamsJson); dt = pj.display_text || dt; url = pj.url; } } catch(e){}
-                     return { id: `btn_${i}`, text: dt, url, type: 'action' };
-                 });
-              }
-          } else if (targetMsg?.interactiveMessage) {
-              const im = targetMsg.interactiveMessage;
-              const full = [];
-              if (im.header?.title) full.push(`*${im.header.title.trim()}*`);
-              else if (im.header?.subtitle) full.push(`*${im.header.subtitle.trim()}*`);
-              if (im.body?.text) full.push(im.body.text.trim());
-              if (im.footer?.text) full.push(`_${im.footer.text.trim()}_`);
-              if (full.length > 0) derivedText = full.join('\n\n');
-              derivedType = 'interactive';
-              
-              if (im.nativeFlowMessage?.buttons) {
-                 buttons = im.nativeFlowMessage.buttons.map((b: any, i: number) => {
-                     let dt = b.name;
-                     let url;
-                     try { if (b.buttonParamsJson) { const pj = JSON.parse(b.buttonParamsJson); dt = pj.display_text || dt; url = pj.url; } } catch(e){}
-                     return { id: `btn_${i}`, text: dt, url, type: 'action' };
-                 });
-              }
-          } else if (targetMsg?.templateMessage?.hydratedTemplate) {
-             const ht = targetMsg.templateMessage.hydratedTemplate;
-             const full = [];
-             if (ht.hydratedTitleText) full.push(`*${ht.hydratedTitleText.trim()}*`);
-             if (ht.hydratedContentText) full.push(ht.hydratedContentText.trim());
-             if (ht.hydratedFooterText) full.push(`_${ht.hydratedFooterText.trim()}_`);
-             if (full.length > 0) derivedText = full.join('\n\n');
-             derivedType = 'template';
-             
-             if (ht.hydratedButtons) {
-                 buttons = ht.hydratedButtons.map((b: any, i: number) => {
-                     const btn = b.quickReplyButton || b.urlButton || b.callButton;
-                     return { id: `btn_${i}`, text: btn?.displayText || btn?.text || 'Botão', url: btn?.url, type: 'action' };
-                 });
-             }
-          } else if (targetMsg?.buttonsMessage) {
-             const bm = targetMsg.buttonsMessage;
-             const full = [];
-             if (bm.contentText) full.push(bm.contentText.trim());
-             if (bm.footerText) full.push(`_${bm.footerText.trim()}_`);
-             if (full.length > 0) derivedText = full.join('\n\n');
-             derivedType = 'buttons';
-             
-             if (bm.buttons) {
-                 buttons = bm.buttons.map((b: any, i: number) => ({
-                     id: b.buttonId || `btn_${i}`, text: b.buttonText?.displayText || 'Botão', type: 'action'
-                 }));
-             }
-          } else if (targetMsg?.listMessage) {
-             const lm = targetMsg.listMessage;
-             const full = [];
-             if (lm.title) full.push(`*${lm.title.trim()}*`);
-             if (lm.description) full.push(lm.description.trim());
-             if (lm.footerText) full.push(`_${lm.footerText.trim()}_`);
-             if (full.length > 0) derivedText = full.join('\n\n');
-             derivedType = 'list';
-             
-             buttons = [{ id: 'list_btn', text: lm.buttonText || 'Ver Opções', type: 'action' }];
-          }
+  try {
+    const payloadMessage = m.raw_payload?.message;
+    if (payloadMessage) {
+      let targetMsg = payloadMessage;
+      if (targetMsg?.viewOnceMessageV2?.message) targetMsg = targetMsg.viewOnceMessageV2.message;
+      else if (targetMsg?.viewOnceMessage?.message) targetMsg = targetMsg.viewOnceMessage.message;
+      else if (targetMsg?.documentWithCaptionMessage?.message) targetMsg = targetMsg.documentWithCaptionMessage.message;
+
+      if (targetMsg?.templateMessage?.interactiveMessageTemplate) {
+        const imt = targetMsg.templateMessage.interactiveMessageTemplate;
+        const full = [];
+        if (imt.header?.title) full.push(`*${imt.header.title.trim()}*`);
+        if (imt.body?.text) full.push(imt.body.text.trim());
+        if (imt.footer?.text) full.push(`_${imt.footer.text.trim()}_`);
+        if (full.length > 0) derivedText = full.join('\n\n');
+        derivedType = 'interactive';
+
+        if (imt.nativeFlowMessage?.buttons) {
+          buttons = imt.nativeFlowMessage.buttons.map((b: any, i: number) => {
+            let dt = b.name;
+            let url;
+            try { if (b.buttonParamsJson) { const pj = JSON.parse(b.buttonParamsJson); dt = pj.display_text || dt; url = pj.url; } } catch (e) { }
+            return { id: `btn_${i}`, text: dt, url, type: 'action' };
+          });
+        }
+      } else if (targetMsg?.interactiveMessage) {
+        const im = targetMsg.interactiveMessage;
+        const full = [];
+        if (im.header?.title) full.push(`*${im.header.title.trim()}*`);
+        else if (im.header?.subtitle) full.push(`*${im.header.subtitle.trim()}*`);
+        if (im.body?.text) full.push(im.body.text.trim());
+        if (im.footer?.text) full.push(`_${im.footer.text.trim()}_`);
+        if (full.length > 0) derivedText = full.join('\n\n');
+        derivedType = 'interactive';
+
+        if (im.nativeFlowMessage?.buttons) {
+          buttons = im.nativeFlowMessage.buttons.map((b: any, i: number) => {
+            let dt = b.name;
+            let url;
+            try { if (b.buttonParamsJson) { const pj = JSON.parse(b.buttonParamsJson); dt = pj.display_text || dt; url = pj.url; } } catch (e) { }
+            return { id: `btn_${i}`, text: dt, url, type: 'action' };
+          });
+        }
+      } else if (targetMsg?.templateMessage?.hydratedTemplate) {
+        const ht = targetMsg.templateMessage.hydratedTemplate;
+        const full = [];
+        if (ht.hydratedTitleText) full.push(`*${ht.hydratedTitleText.trim()}*`);
+        if (ht.hydratedContentText) full.push(ht.hydratedContentText.trim());
+        if (ht.hydratedFooterText) full.push(`_${ht.hydratedFooterText.trim()}_`);
+        if (full.length > 0) derivedText = full.join('\n\n');
+        derivedType = 'template';
+
+        if (ht.hydratedButtons) {
+          buttons = ht.hydratedButtons.map((b: any, i: number) => {
+            const btn = b.quickReplyButton || b.urlButton || b.callButton;
+            return { id: `btn_${i}`, text: btn?.displayText || btn?.text || 'Botão', url: btn?.url, type: 'action' };
+          });
+        }
+      } else if (targetMsg?.buttonsMessage) {
+        const bm = targetMsg.buttonsMessage;
+        const full = [];
+        if (bm.contentText) full.push(bm.contentText.trim());
+        if (bm.footerText) full.push(`_${bm.footerText.trim()}_`);
+        if (full.length > 0) derivedText = full.join('\n\n');
+        derivedType = 'buttons';
+
+        if (bm.buttons) {
+          buttons = bm.buttons.map((b: any, i: number) => ({
+            id: b.buttonId || `btn_${i}`, text: b.buttonText?.displayText || 'Botão', type: 'action'
+          }));
+        }
+      } else if (targetMsg?.listMessage) {
+        const lm = targetMsg.listMessage;
+        const full = [];
+        if (lm.title) full.push(`*${lm.title.trim()}*`);
+        if (lm.description) full.push(lm.description.trim());
+        if (lm.footerText) full.push(`_${lm.footerText.trim()}_`);
+        if (full.length > 0) derivedText = full.join('\n\n');
+        derivedType = 'list';
+
+        buttons = [{ id: 'list_btn', text: lm.buttonText || 'Ver Opções', type: 'action' }];
       }
-  } catch(e){}
+    }
+  } catch (e) { }
 
   return { mediaType: derivedType, text: derivedText, quoted: derivedQuoted, buttons: buttons.length > 0 ? buttons : undefined, vcardWaid };
 }
@@ -911,10 +911,10 @@ function sanitizeContactName(targetName: string | null | undefined, fallbackPhon
   const tname = tenantName ? tenantName.toLowerCase().trim() : '';
   // Apenas limpa se for EXATAMENTE o nome da empresa isolado (evita que nomes de clientes/contatos que contêm o nome da empresa sejam apagados)
   if (tname && (lname === tname || lname === tname.replace(/\s+/g, ''))) {
-      return fallbackPhone || targetName; 
+    return fallbackPhone || targetName;
   }
   if (lname === 'empresa' || lname === 'sem nome' || lname === 'null' || lname === 'undefined') {
-      return fallbackPhone || targetName;
+    return fallbackPhone || targetName;
   }
   return targetName;
 }
@@ -934,62 +934,62 @@ export const useChatStore = create<ChatState>((set, get) => ({
         delete instanceStatusTimeouts[id];
       }
       if ((window as any)[`_offline_checks_${id}`]) {
-         clearInterval((window as any)[`_offline_checks_${id}`]);
-         delete (window as any)[`_offline_checks_${id}`];
+        clearInterval((window as any)[`_offline_checks_${id}`]);
+        delete (window as any)[`_offline_checks_${id}`];
       }
       set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: status } }));
     } else {
       const currentState = get().instancesStatus[id];
       // Se a instância já estava conectada, não rebaixa visualmente de imediato (tolerância de 35s contra falsos positivos de oscilação transitória)
       if (currentState === 'connected' || currentState === 'connected_local') {
-         if ((window as any)[`_offline_checks_${id}`] || instanceStatusTimeouts[id]) {
-            return;
-         }
+        if ((window as any)[`_offline_checks_${id}`] || instanceStatusTimeouts[id]) {
+          return;
+        }
 
-         let checkCount = 0;
-         const maxChecks = 2;
-         const checkIntervalMs = 18000; // 18s por verificação (total ~36s de carência)
-         
-         const intervalId = setInterval(async () => {
-            checkCount++;
-            try {
-               const { data } = await supabase.from('whatsapp_instances').select('status').eq('id', id).maybeSingle();
-               const dbStatus = data?.status || 'offline';
-               
-               if (dbStatus === 'connected' || dbStatus === 'connected_local') {
-                  set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: dbStatus } }));
-                  clearInterval(intervalId);
-                  delete (window as any)[`_offline_checks_${id}`];
-                  return;
-               }
-               
-               if (checkCount >= maxChecks) {
-                  set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: dbStatus } }));
-                  clearInterval(intervalId);
-                  delete (window as any)[`_offline_checks_${id}`];
-               }
-            } catch (err) {
-               console.error(`[Status Debounce] Erro ao checar status da instância ${id}:`, err);
+        let checkCount = 0;
+        const maxChecks = 2;
+        const checkIntervalMs = 18000; // 18s por verificação (total ~36s de carência)
+
+        const intervalId = setInterval(async () => {
+          checkCount++;
+          try {
+            const { data } = await supabase.from('whatsapp_instances').select('status').eq('id', id).maybeSingle();
+            const dbStatus = data?.status || 'offline';
+
+            if (dbStatus === 'connected' || dbStatus === 'connected_local') {
+              set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: dbStatus } }));
+              clearInterval(intervalId);
+              delete (window as any)[`_offline_checks_${id}`];
+              return;
             }
-         }, checkIntervalMs);
-         
-         (window as any)[`_offline_checks_${id}`] = intervalId;
+
+            if (checkCount >= maxChecks) {
+              set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: dbStatus } }));
+              clearInterval(intervalId);
+              delete (window as any)[`_offline_checks_${id}`];
+            }
+          } catch (err) {
+            console.error(`[Status Debounce] Erro ao checar status da instância ${id}:`, err);
+          }
+        }, checkIntervalMs);
+
+        (window as any)[`_offline_checks_${id}`] = intervalId;
       } else {
-         set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: status } }));
-         // Se o status for transitório (connecting/reconnecting) no boot inicial, agenda revalidação rápida
-         if (status === 'connecting' || status === 'reconnecting' || status === 'reconnecting_local') {
-            if (!instanceStatusTimeouts[id]) {
-               instanceStatusTimeouts[id] = setTimeout(async () => {
-                  delete instanceStatusTimeouts[id];
-                  try {
-                     const { data } = await supabase.from('whatsapp_instances').select('status').eq('id', id).maybeSingle();
-                     if (data?.status && data.status !== status) {
-                        set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: data.status } }));
-                     }
-                  } catch (e) {}
-               }, 5000);
-            }
-         }
+        set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: status } }));
+        // Se o status for transitório (connecting/reconnecting) no boot inicial, agenda revalidação rápida
+        if (status === 'connecting' || status === 'reconnecting' || status === 'reconnecting_local') {
+          if (!instanceStatusTimeouts[id]) {
+            instanceStatusTimeouts[id] = setTimeout(async () => {
+              delete instanceStatusTimeouts[id];
+              try {
+                const { data } = await supabase.from('whatsapp_instances').select('status').eq('id', id).maybeSingle();
+                if (data?.status && data.status !== status) {
+                  set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: data.status } }));
+                }
+              } catch (e) { }
+            }, 5000);
+          }
+        }
       }
     }
   },
@@ -1040,10 +1040,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const currentUserEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
     const currentUserName = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_name') || localStorage.getItem('current_user_name')) : null;
     const me = get().agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail?.toLowerCase());
-    
+
     let operatorName = currentUserName || me?.full_name || currentUserEmail?.split('@')[0] || 'Usuário';
     if (operatorName.includes('@')) {
-       operatorName = operatorName.split('@')[0];
+      operatorName = operatorName.split('@')[0];
     }
     operatorName = operatorName.trim();
 
@@ -1054,7 +1054,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       updated_at: nowIso
     };
 
-    set({ 
+    set({
       globalAiEnabled: newValue,
       globalAiAuditInfo: auditData
     });
@@ -1068,7 +1068,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         global_ai_audit: auditData
       };
 
-      const { error } = await supabase.from('companies').update({ 
+      const { error } = await supabase.from('companies').update({
         global_ai_enabled: newValue,
         settings: updatedSettings
       }).eq('id', tenant.id);
@@ -1094,7 +1094,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   clearStore: () => {
     if (get().isSubscribed) {
-       supabase.removeAllChannels();
+      supabase.removeAllChannels();
     }
     set({
       contacts: [],
@@ -1126,7 +1126,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       filterType: 'all'
     });
   },
-  
+
   setFilterType: async (filter) => {
     localStorage.setItem('chat_filter_preference', filter);
     set({ filterType: filter });
@@ -1134,19 +1134,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const email = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
       const state = get();
       if (email && state.tenantInfo) {
-         const newSettings = { ...state.userSettings, filterType: filter };
-         const { error } = await supabase.from('tenant_users')
-            .update({ settings: newSettings })
-            .eq('email', email)
-            .eq('tenant_id', state.tenantInfo.id);
-         
-         if (error) {
-           console.error("Erro ao salvar filtro no Supabase:", error);
-         } else {
-           set({ userSettings: newSettings });
-         }
+        const newSettings = { ...state.userSettings, filterType: filter };
+        const { error } = await supabase.from('tenant_users')
+          .update({ settings: newSettings })
+          .eq('email', email)
+          .eq('tenant_id', state.tenantInfo.id);
+
+        if (error) {
+          console.error("Erro ao salvar filtro no Supabase:", error);
+        } else {
+          set({ userSettings: newSettings });
+        }
       }
-    } catch(e) {
+    } catch (e) {
       console.error('[setFilterType] Exceção:', e);
     }
   },
@@ -1180,16 +1180,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
       let agentName = 'Agente';
       let agentId: string | null = null;
       if (currentUserEmail) {
-          const agent = state.agents.find(a => a.email === currentUserEmail);
-          if (agent) {
-             if (agent.full_name) agentName = agent.full_name;
-             agentId = agent.id;
-          }
+        const agent = state.agents.find(a => a.email === currentUserEmail);
+        if (agent) {
+          if (agent.full_name) agentName = agent.full_name;
+          agentId = agent.id;
+        }
       }
 
       const activeChannel = state.activeChannelFilter;
       const resolvedActiveChannel = await resolveInstanceUuid(tenantInfo.id, activeChannel);
-      
+
       let query = supabase.from('conversations')
         .select('id, contact_id, status, assigned_to, instance_id')
         .eq('tenant_id', tenantInfo.id)
@@ -1204,7 +1204,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
 
       const { data: convsToResolve, error } = await query;
-      
+
       if (error || !convsToResolve || convsToResolve.length === 0) {
         return { success: true, count: 0 };
       }
@@ -1229,7 +1229,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       await supabase.from('messages').insert(systemMessages);
 
       const convIds = undoData.map(c => c.conversationId);
-      
+
       // Processamento em lotes (chunks) de no máximo 100 para evitar Bad Request no PostgREST
       const chunkSize = 100;
       for (let i = 0; i < convIds.length; i += chunkSize) {
@@ -1244,7 +1244,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (contactIdsForTickets.length > 0) {
         for (let i = 0; i < contactIdsForTickets.length; i += chunkSize) {
           const chunk = contactIdsForTickets.slice(i, i + chunkSize);
-          
+
           const { data: openChunkTickets } = await supabase
             .from('chat_tickets')
             .select('id, contact_id, opened_at')
@@ -1262,8 +1262,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
               }
 
               await supabase.from('chat_tickets')
-                .update({ 
-                  status: 'resolved', 
+                .update({
+                  status: 'resolved',
                   opened_at: effOpenedAt,
                   closed_at: closedAt,
                   resolution_summary: 'Encerrado em lote (análise I.A ignorada)',
@@ -1304,7 +1304,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const userStr = typeof window !== 'undefined' ? localStorage.getItem('user_info') : null;
         const storedEmail = typeof window !== 'undefined' ? (localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email')) : null;
         const storedName = typeof window !== 'undefined' ? (localStorage.getItem('current_user_name') || sessionStorage.getItem('current_user_name')) : null;
-        
+
         let userName = 'Sistema';
         if (storedEmail) {
           userName = storedEmail;
@@ -1312,9 +1312,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           userName = storedName;
         } else if (userStr) {
           try {
-             const user = JSON.parse(userStr);
-             userName = user.email || user.name || 'Sistema';
-          } catch(e) {}
+            const user = JSON.parse(userStr);
+            userName = user.email || user.name || 'Sistema';
+          } catch (e) { }
         }
 
         const logsToInsert = convsToResolve.map(conv => ({
@@ -1403,7 +1403,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const userStr = typeof window !== 'undefined' ? localStorage.getItem('user_info') : null;
         const storedEmail = typeof window !== 'undefined' ? (localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email')) : null;
         const storedName = typeof window !== 'undefined' ? (localStorage.getItem('current_user_name') || sessionStorage.getItem('current_user_name')) : null;
-        
+
         let userName = 'Sistema';
         if (storedEmail) {
           userName = storedEmail;
@@ -1411,9 +1411,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           userName = storedName;
         } else if (userStr) {
           try {
-             const user = JSON.parse(userStr);
-             userName = user.email || user.name || 'Sistema';
-          } catch(e) {}
+            const user = JSON.parse(userStr);
+            userName = user.email || user.name || 'Sistema';
+          } catch (e) { }
         }
 
         const logsToInsert = undoData.map(item => ({
@@ -1446,14 +1446,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const currentUserEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
       let agentName = 'Agente';
       if (currentUserEmail) {
-          const agent = get().agents.find(a => a.email === currentUserEmail);
-          if (agent && agent.full_name) agentName = agent.full_name;
+        const agent = get().agents.find(a => a.email === currentUserEmail);
+        if (agent && agent.full_name) agentName = agent.full_name;
       }
 
       const realContactId = getRealContactId(contactId);
       const instId = getInstanceIdFromContact(contactId);
       const resolvedInstId = await resolveInstanceUuid(tenantInfo.id, instId);
-      
+
       const { data: convs } = await supabase
         .from('conversations')
         .select('id, instance_id')
@@ -1465,29 +1465,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const allConvIds = convs ? convs.map(c => c.id) : [];
 
       if (conv) {
-          // 1. Inserir a mensagem interna System de reabertura
-          const msgText = `🔓 Reaberta por ${agentName} dia ${new Date().toLocaleString('pt-BR')}`;
-          
-          const dbMsg = {
-             conversation_id: conv.id,
-             tenant_id: tenantInfo.id,
-             text_content: msgText,
-             sender_type: 'system',
-             direction: 'outgoing',
-             instance_id: conv.instance_id || resolvedInstId
-          };
+        // 1. Inserir a mensagem interna System de reabertura
+        const msgText = `🔓 Reaberta por ${agentName} dia ${new Date().toLocaleString('pt-BR')}`;
 
-          const { data: insertedMsg, error } = await supabase.from('messages').insert(dbMsg).select().single();
-          
-          if (!error && insertedMsg) {
-              const msgTypeObj: MessageType = {
-                 id: insertedMsg.id,
-                 text: insertedMsg.text_content,
-                 sender: 'system',
-                 timestamp: new Date(insertedMsg.timestamp || insertedMsg.created_at || Date.now())
-              };
-              get().addMessageLocally(contactId, msgTypeObj);
-          }
+        const dbMsg = {
+          conversation_id: conv.id,
+          tenant_id: tenantInfo.id,
+          text_content: msgText,
+          sender_type: 'system',
+          direction: 'outgoing',
+          instance_id: conv.instance_id || resolvedInstId
+        };
+
+        const { data: insertedMsg, error } = await supabase.from('messages').insert(dbMsg).select().single();
+
+        if (!error && insertedMsg) {
+          const msgTypeObj: MessageType = {
+            id: insertedMsg.id,
+            text: insertedMsg.text_content,
+            sender: 'system',
+            timestamp: new Date(insertedMsg.timestamp || insertedMsg.created_at || Date.now())
+          };
+          get().addMessageLocally(contactId, msgTypeObj);
+        }
       }
 
       const targetContact = get().contacts.find(c => getRealContactId(c.id) === realContactId);
@@ -1505,36 +1505,36 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       // 3. Atualização local de TODOS os registros de contato correspondentes ao realContactId para 'open'
       set((state) => ({
-          contacts: state.contacts.map((c) => getRealContactId(c.id) === realContactId ? { 
-            ...c, 
-            conv_status: 'open',
-            ai_paused: isDefinitivelyPaused ? true : c.ai_paused,
-            ai_paused_manually: isDefinitivelyPaused ? true : c.ai_paused_manually,
-            bot_status: isDefinitivelyPaused ? 'paused' : c.bot_status
-          } : c)
+        contacts: state.contacts.map((c) => getRealContactId(c.id) === realContactId ? {
+          ...c,
+          conv_status: 'open',
+          ai_paused: isDefinitivelyPaused ? true : c.ai_paused,
+          ai_paused_manually: isDefinitivelyPaused ? true : c.ai_paused_manually,
+          bot_status: isDefinitivelyPaused ? 'paused' : c.bot_status
+        } : c)
       }));
 
     } catch (e) {
       console.error('Erro ao reabrir conversa:', e);
     }
   },
-  
+
   fetchAutomations: async () => {
     try {
       const state = get();
       if (!state.tenantInfo) return;
-      
+
       const { data, error } = await supabase
         .from('tenant_automations')
         .select('*')
         .eq('tenant_id', state.tenantInfo.id)
         .eq('is_active', true);
-        
+
       if (error) {
         console.error('Error fetching automations:', error);
         return;
       }
-      
+
       set({ automations: data || [] });
     } catch (err) {
       console.error('Failed to fetch automations:', err);
@@ -1545,18 +1545,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
       const state = get();
       if (!state.tenantInfo) return;
-      
+
       const { data, error } = await supabase
         .from('quick_replies')
         .select('*')
         .eq('tenant_id', state.tenantInfo.id)
         .order('created_at', { ascending: false });
-        
+
       if (error) {
         console.error('Error fetching quick replies:', error);
         return;
       }
-      
+
       set({ quickReplies: data || [] });
     } catch (err) {
       console.error('Failed to fetch quick replies:', err);
@@ -1564,88 +1564,88 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   addQuickReply: async (shortcut: string, content: string, mediaUrl?: string, mediaType?: string, type?: CannedResponseType, categoryId?: string | null) => {
-      const state = get();
-      if (!state.tenantInfo) throw new Error('Tenant não encontrado');
-      const finalType = type || 'STANDARD';
-      const payload: any = {
-         tenant_id: state.tenantInfo.id,
-         shortcut,
-         content,
-         media_url: mediaUrl,
-         media_type: mediaType,
-         type: finalType
-      };
-      if (categoryId !== undefined && categoryId !== null) {
-         payload.category_id = categoryId;
-      }
+    const state = get();
+    if (!state.tenantInfo) throw new Error('Tenant não encontrado');
+    const finalType = type || 'STANDARD';
+    const payload: any = {
+      tenant_id: state.tenantInfo.id,
+      shortcut,
+      content,
+      media_url: mediaUrl,
+      media_type: mediaType,
+      type: finalType
+    };
+    if (categoryId !== undefined && categoryId !== null) {
+      payload.category_id = categoryId;
+    }
 
-      let data: any = null;
-      try {
+    let data: any = null;
+    try {
+      const res = await supabase.from('quick_replies').insert(payload).select().single();
+      if (res.error) throw res.error;
+      data = res.data;
+    } catch (err: any) {
+      if (err?.message?.includes('category_id') || err?.code === 'PGRST204') {
+        delete payload.category_id;
         const res = await supabase.from('quick_replies').insert(payload).select().single();
         if (res.error) throw res.error;
-        data = res.data;
-      } catch (err: any) {
-        if (err?.message?.includes('category_id') || err?.code === 'PGRST204') {
-          delete payload.category_id;
-          const res = await supabase.from('quick_replies').insert(payload).select().single();
-          if (res.error) throw res.error;
-          data = res.data ? { ...res.data, category_id: categoryId || null } : null;
-        } else {
-          throw err;
-        }
+        data = res.data ? { ...res.data, category_id: categoryId || null } : null;
+      } else {
+        throw err;
       }
-      
-      if (data) {
-         set({ quickReplies: [{ ...data, category_id: categoryId || data.category_id || null }, ...state.quickReplies] });
-      }
+    }
+
+    if (data) {
+      set({ quickReplies: [{ ...data, category_id: categoryId || data.category_id || null }, ...state.quickReplies] });
+    }
   },
 
   updateQuickReply: async (id: string, shortcut: string, content: string, mediaUrl?: string, mediaType?: string, type?: CannedResponseType, categoryId?: string | null) => {
-      const finalType = type || 'STANDARD';
-      const payload: any = {
-         shortcut,
-         content,
-         media_url: mediaUrl,
-         media_type: mediaType,
-         type: finalType
-      };
-      if (categoryId !== undefined) {
-         payload.category_id = categoryId;
-      }
+    const finalType = type || 'STANDARD';
+    const payload: any = {
+      shortcut,
+      content,
+      media_url: mediaUrl,
+      media_type: mediaType,
+      type: finalType
+    };
+    if (categoryId !== undefined) {
+      payload.category_id = categoryId;
+    }
 
-      try {
+    try {
+      const { error } = await supabase.from('quick_replies').update(payload).eq('id', id);
+      if (error) throw error;
+    } catch (err: any) {
+      if (err?.message?.includes('category_id') || err?.code === 'PGRST204') {
+        delete payload.category_id;
         const { error } = await supabase.from('quick_replies').update(payload).eq('id', id);
         if (error) throw error;
-      } catch (err: any) {
-        if (err?.message?.includes('category_id') || err?.code === 'PGRST204') {
-          delete payload.category_id;
-          const { error } = await supabase.from('quick_replies').update(payload).eq('id', id);
-          if (error) throw error;
-        } else {
-          throw err;
-        }
+      } else {
+        throw err;
       }
-      
-      set(s => ({
-         quickReplies: s.quickReplies.map(q => q.id === id ? { 
-           ...q, 
-           shortcut, 
-           content, 
-           media_url: mediaUrl, 
-           media_type: mediaType, 
-           type: finalType, 
-           category_id: categoryId !== undefined ? categoryId : q.category_id 
-         } : q)
-      }));
+    }
+
+    set(s => ({
+      quickReplies: s.quickReplies.map(q => q.id === id ? {
+        ...q,
+        shortcut,
+        content,
+        media_url: mediaUrl,
+        media_type: mediaType,
+        type: finalType,
+        category_id: categoryId !== undefined ? categoryId : q.category_id
+      } : q)
+    }));
   },
 
   deleteQuickReply: async (id: string) => {
-      const { error } = await supabase.from('quick_replies').delete().eq('id', id);
-      
-      if (error) throw error;
-      set(s => ({
-         quickReplies: s.quickReplies.filter(q => q.id !== id)
-      }));
+    const { error } = await supabase.from('quick_replies').delete().eq('id', id);
+
+    if (error) throw error;
+    set(s => ({
+      quickReplies: s.quickReplies.filter(q => q.id !== id)
+    }));
   },
 
   addQuickReplyCategory: async (category: Omit<QuickReplyCategory, 'id' | 'created_at'>) => {
@@ -1673,7 +1673,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const state = get();
     if (!state.tenantInfo) return;
     const currentCategories: QuickReplyCategory[] = state.tenantInfo.settings?.quickReplyCategories || [];
-    
+
     // Identificar recursivamente todos os IDs de subcategorias a deletar
     const idsToDelete = new Set<string>([id]);
     let added = true;
@@ -1723,22 +1723,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
       const tenantId = get().tenantInfo?.id || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
       if (!tenantId) return;
-      
+
       const userStr = localStorage.getItem('user_info');
       const storedEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
       const storedName = localStorage.getItem('current_user_name') || sessionStorage.getItem('current_user_name');
-      
+
       let userName = 'Sistema';
-      
+
       if (storedEmail) {
         userName = storedEmail;
       } else if (storedName) {
         userName = storedName;
       } else if (userStr) {
         try {
-           const user = JSON.parse(userStr);
-           userName = user.email || user.name || 'Sistema';
-        } catch(e) {}
+          const user = JSON.parse(userStr);
+          userName = user.email || user.name || 'Sistema';
+        } catch (e) { }
       }
 
       await supabase.from('operation_logs').insert({
@@ -1750,7 +1750,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         before_state: beforeState,
         after_state: afterState
       });
-    } catch(e) {
+    } catch (e) {
       console.error('Falha ao gerar log de operação:', e);
     }
   },
@@ -1794,7 +1794,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       );
 
       return { success: true };
-    } catch(err: any) {
+    } catch (err: any) {
       console.error('Erro ao desfazer:', err);
       return { success: false, error: err.message };
     }
@@ -1821,7 +1821,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }))
         }));
       }
-    } catch(e) {
+    } catch (e) {
       console.error('Erro na transcrição de áudio:', e);
       throw e;
     }
@@ -1832,19 +1832,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setActiveChannelFilter: (id, name) => {
     if (id) {
-        localStorage.setItem('activeChannelFilter', id);
+      localStorage.setItem('activeChannelFilter', id);
     } else {
-        localStorage.removeItem('activeChannelFilter');
+      localStorage.removeItem('activeChannelFilter');
     }
     if (name) {
-        localStorage.setItem('activeChannelName', name);
+      localStorage.setItem('activeChannelName', name);
     } else {
-        localStorage.removeItem('activeChannelName');
+      localStorage.removeItem('activeChannelName');
     }
-    
+
     // Mantém os contatos atuais exibidos durante o carregamento dos novos contatos para transição suave
     set({ activeChannelFilter: id, activeChannelName: name || null, activeChatId: null, isChannelLoading: true });
-    
+
     // Timer de segurança para desativar isChannelLoading em caso de oscilação de rede
     setTimeout(() => {
       if (get().isChannelLoading) {
@@ -1899,7 +1899,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (error) throw error;
 
       const state = get();
-      const updatedRawInstances = (state.rawInstances || []).map((inst: any) => 
+      const updatedRawInstances = (state.rawInstances || []).map((inst: any) =>
         inst.id === instanceId ? { ...inst, settings: updatedSettings } : inst
       );
 
@@ -1907,7 +1907,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const tenantId = state.tenantInfo?.id || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id') || '';
       if (Array.isArray(activeGroupItems) && activeGroupItems.length > 0 && tenantId) {
         const activeJids = activeGroupItems.filter(g => g.enabled && (g.jid || g.whatsapp_jid)).map(g => g.jid || g.whatsapp_jid);
-        
+
         if (activeJids.length > 0) {
           const { data: existingDbContacts } = await supabase
             .from('contacts')
@@ -1986,51 +1986,51 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const realContactId = getRealContactId(contactId);
     const contact = state.contacts.find(c => c.id === contactId || c.conv_id === contactId || (c.id && getRealContactId(c.id) === realContactId));
     if (!contact) {
-       console.warn("[sendHumanMessage] Contact not found in store!", contactId);
-       return;
+      console.warn("[sendHumanMessage] Contact not found in store!", contactId);
+      return;
     }
 
     // Injeção Mágica de Assinatura Síncrona (Signature) para evitar atrasos na UI
     let finalMessageText = text;
     try {
-        const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
-        if (currentUserEmail) {
-            let agent = state.agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail.toLowerCase());
-            let useSignature = false;
-            let signature = '';
+      const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
+      if (currentUserEmail) {
+        let agent = state.agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail.toLowerCase());
+        let useSignature = false;
+        let signature = '';
 
-            if (agent) {
-                useSignature = !!agent.use_signature;
-                signature = agent.signature || '';
-            } else {
-                // Fallback síncrono do cache no localStorage
-                useSignature = localStorage.getItem('current_user_use_signature') === 'true';
-                signature = localStorage.getItem('current_user_signature') || '';
-            }
-
-            if (useSignature && signature.trim().length > 0) {
-               finalMessageText = `*${signature}*\n\n${text}`;
-            }
-
-            // Se o agente não está mapeado no cache local de forma alguma,
-            // disparamos uma query em background para popular o localStorage para futuros envios,
-            // mas SEM usar await para não bloquear o render do chat atual.
-            if (!agent && !signature && state.tenantInfo) {
-               supabase.from('tenant_users')
-                  .select('use_signature, signature')
-                  .eq('email', currentUserEmail)
-                  .eq('tenant_id', state.tenantInfo.id)
-                  .limit(1)
-                  .maybeSingle()
-                  .then(({ data: agentData }) => {
-                     if (agentData) {
-                        localStorage.setItem('current_user_signature', agentData.signature || '');
-                        localStorage.setItem('current_user_use_signature', String(!!agentData.use_signature));
-                     }
-                  })
-                  .catch(e => console.warn('[sendHumanMessage] Falha ao recuperar assinatura em background:', e));
-            }
+        if (agent) {
+          useSignature = !!agent.use_signature;
+          signature = agent.signature || '';
+        } else {
+          // Fallback síncrono do cache no localStorage
+          useSignature = localStorage.getItem('current_user_use_signature') === 'true';
+          signature = localStorage.getItem('current_user_signature') || '';
         }
+
+        if (useSignature && signature.trim().length > 0) {
+          finalMessageText = `*${signature}*\n\n${text}`;
+        }
+
+        // Se o agente não está mapeado no cache local de forma alguma,
+        // disparamos uma query em background para popular o localStorage para futuros envios,
+        // mas SEM usar await para não bloquear o render do chat atual.
+        if (!agent && !signature && state.tenantInfo) {
+          supabase.from('tenant_users')
+            .select('use_signature, signature')
+            .eq('email', currentUserEmail)
+            .eq('tenant_id', state.tenantInfo.id)
+            .limit(1)
+            .maybeSingle()
+            .then(({ data: agentData }) => {
+              if (agentData) {
+                localStorage.setItem('current_user_signature', agentData.signature || '');
+                localStorage.setItem('current_user_use_signature', String(!!agentData.use_signature));
+              }
+            })
+            .catch(e => console.warn('[sendHumanMessage] Falha ao recuperar assinatura em background:', e));
+        }
+      }
     } catch (e) {
       console.error("Erro na injeção de assinatura síncrona:", e);
     }
@@ -2041,25 +2041,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     // Auto-pause da IA por 30 minutos se o atendente mandou mensagem manual e ela não está pausada definitivamente
     if (state.globalAiEnabled && contact.bot_status !== 'paused') {
-        const pauseUntil = new Date(Date.now() + 30 * 60000).toISOString();
-        state.updateConversationField(contactId, { ai_paused: true, ai_paused_manually: true, ai_paused_until: pauseUntil });
+      const pauseUntil = new Date(Date.now() + 30 * 60000).toISOString();
+      state.updateConversationField(contactId, { ai_paused: true, ai_paused_manually: true, ai_paused_until: pauseUntil });
     }
 
     // Auto-atribuição do agente quando envia mensagem
     try {
-        const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
-        if (currentUserEmail) {
-            const agent = state.agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail.toLowerCase());
-            if (agent) {
-                const assignedIds = contact.assigned_to ? contact.assigned_to.split(',') : [];
-                if (!assignedIds.includes(agent.id)) {
-                    const newAssigned = [...assignedIds, agent.id].join(',');
-                    state.updateConversationField(contactId, { assigned_to: newAssigned });
-                }
-            }
+      const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
+      if (currentUserEmail) {
+        const agent = state.agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail.toLowerCase());
+        if (agent) {
+          const assignedIds = contact.assigned_to ? contact.assigned_to.split(',') : [];
+          if (!assignedIds.includes(agent.id)) {
+            const newAssigned = [...assignedIds, agent.id].join(',');
+            state.updateConversationField(contactId, { assigned_to: newAssigned });
+          }
         }
+      }
     } catch (e) {
-        console.warn('Erro ao auto-atribuir agente:', e);
+      console.warn('Erro ao auto-atribuir agente:', e);
     }
 
     try {
@@ -2073,32 +2073,32 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       // VALIDAÇÃO IMPETRANTE DE SEGURANÇA: Bloqueia vazamentos forçando a instância estrita da conversa aberta
       if (resolvedExpectedInstance && resolvedInstanceId !== resolvedExpectedInstance) {
-         console.warn(`[Security Guard] Bloqueada tentativa de envio por canal incorreto! Esperado: ${resolvedExpectedInstance}, Recebido: ${resolvedInstanceId}. Forçando canal da conversa.`);
+        console.warn(`[Security Guard] Bloqueada tentativa de envio por canal incorreto! Esperado: ${resolvedExpectedInstance}, Recebido: ${resolvedInstanceId}. Forçando canal da conversa.`);
       }
-      
+
       // Verifica a conexão da instância específica da conversa: bloqueia apenas se explicitamente offline
       if (resolvedInstanceId && state.instancesStatus[resolvedInstanceId] === 'offline') {
-         set({ modalReason: 'A instância do WhatsApp atrelada a esta conversa está offline. Por favor, reconecte para enviar mensagens.' });
-         throw new Error('whatsapp_offline');
+        set({ modalReason: 'A instância do WhatsApp atrelada a esta conversa está offline. Por favor, reconecte para enviar mensagens.' });
+        throw new Error('whatsapp_offline');
       }
 
       const { sendTextMessage } = await import('../services/whatsappEngine');
       // 1. Manda pra Baileys Engine Local
       if (!state.tenantInfo) return;
-      
+
       const apiKey = resolvedInstanceId ? await getOrFetchApiKey(resolvedInstanceId) : '';
 
       if (resolvedInstanceId) {
-         const targetJid = getContactJid(contact);
-         if (!targetJid) {
-            throw new Error('Número de telefone do contato inválido ou incompleto.');
-         }
-         await sendTextMessage(state.tenantInfo.id, resolvedInstanceId, targetJid, finalMessageText, apiKey);
+        const targetJid = getContactJid(contact);
+        if (!targetJid) {
+          throw new Error('Número de telefone do contato inválido ou incompleto.');
+        }
+        await sendTextMessage(state.tenantInfo.id, resolvedInstanceId, targetJid, finalMessageText, apiKey);
       }
-      
-    } catch(err: any) {
+
+    } catch (err: any) {
       console.error(err);
-      
+
       // Reverter mensagem otimista e alertar o usuario
       set((s) => ({
         contacts: s.contacts.map(c => {
@@ -2108,17 +2108,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
           return c;
         })
       }));
-      
+
       if (err.message === 'whatsapp_offline') {
-         return;
+        return;
       }
-      
+
       if (err.message === 'Failed to fetch') {
-         window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Falha crítica de comunicação com o Motor Baileys. Verifique se o backend está rodando e online.', type: 'error' } }));
+        window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Falha crítica de comunicação com o Motor Baileys. Verifique se o backend está rodando e online.', type: 'error' } }));
       } else if (err.message.includes('Connection Closed')) {
-         window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Conexão instável com o WhatsApp (Connection Closed). O motor Baileys está tentando reconectar em segundo plano. Aguarde 5 segundos e tente novamente.', type: 'warning', duration: 7000 } }));
+        window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Conexão instável com o WhatsApp (Connection Closed). O motor Baileys está tentando reconectar em segundo plano. Aguarde 5 segundos e tente novamente.', type: 'warning', duration: 7000 } }));
       } else {
-         window.dispatchEvent(new CustomEvent('toast', { detail: { message: `Não foi possível enviar a mensagem: ${err.message}`, type: 'error' } }));
+        window.dispatchEvent(new CustomEvent('toast', { detail: { message: `Não foi possível enviar a mensagem: ${err.message}`, type: 'error' } }));
       }
     }
   },
@@ -2128,8 +2128,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const state = get();
     const contact = state.contacts.find(c => c.id === contactId);
     if (!contact) {
-       console.warn("[shareContactMessage] Contact not found in store!", contactId);
-       return;
+      console.warn("[shareContactMessage] Contact not found in store!", contactId);
+      return;
     }
 
     const contactName = selectedContact.custom_name || selectedContact.name || selectedContact.push_name || selectedContact.phone || 'Contato';
@@ -2140,14 +2140,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const cleanPhone = contactPhone.replace(/\D/g, '');
 
     const pseudoId = 'optimistic-' + Math.random().toString();
-    state.addMessageLocally(contactId, { 
-      id: pseudoId, 
-      text: contactName, 
-      sender: 'human', 
+    state.addMessageLocally(contactId, {
+      id: pseudoId,
+      text: contactName,
+      sender: 'human',
       mediaType: 'contact',
       vcardWaid: cleanPhone,
       status: 'sent',
-      timestamp: new Date() 
+      timestamp: new Date()
     });
 
     try {
@@ -2162,21 +2162,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
 
       if (state.instancesStatus[resolvedInstanceId] && state.instancesStatus[resolvedInstanceId] !== 'connected' && state.instancesStatus[resolvedInstanceId] !== 'connected_local') {
-         set({ modalReason: 'A instância do WhatsApp atrelada a esta conversa está offline. Por favor, reconecte para enviar contatos.' });
-         throw new Error('whatsapp_offline');
+        set({ modalReason: 'A instância do WhatsApp atrelada a esta conversa está offline. Por favor, reconecte para enviar contatos.' });
+        throw new Error('whatsapp_offline');
       }
 
       const apiKey = await getOrFetchApiKey(resolvedInstanceId);
       const targetJid = getContactJid(contact);
       if (!targetJid) {
-         throw new Error('Número de telefone do contato destino inválido.');
+        throw new Error('Número de telefone do contato destino inválido.');
       }
 
       const { sendContactMessage } = await import('../services/whatsappEngine');
       await sendContactMessage(state.tenantInfo?.id || '', resolvedInstanceId, targetJid, contactName, contactPhone, apiKey);
 
       window.dispatchEvent(new CustomEvent('toast', { detail: { message: `Contato "${contactName}" compartilhado com sucesso!`, type: 'success' } }));
-    } catch(err: any) {
+    } catch (err: any) {
       console.error('[shareContactMessage] Erro:', err);
       set((s) => ({
         contacts: s.contacts.map(c => {
@@ -2222,44 +2222,44 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   editHumanMessage: async (contactId, messageId, newText, instanceName) => {
-     const state = get();
-     const resolvedInstanceId = await resolveInstanceUuid(state.tenantInfo?.id || '', instanceName);
-     
-     if (!resolvedInstanceId || !state.instancesStatus[resolvedInstanceId] || (state.instancesStatus[resolvedInstanceId] !== 'connected' && state.instancesStatus[resolvedInstanceId] !== 'connected_local')) {
-        set({ modalReason: 'A instância do WhatsApp atrelada a esta conversa está offline. Por favor, reconecte para editar mensagens.' });
-        return;
-     }
-     
-     const contact = state.contacts.find(c => c.id === contactId);
-     if (!contact || !state.tenantInfo) return;
-     
-     const msgToEdit = contact.messages.find(m => m.id === messageId);
-     if (!msgToEdit || !msgToEdit.whatsapp_id) {
-        window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Não é possível editar esta mensagem pois a chave nativa não foi encontrada.', type: 'warning' } }));
-        return;
-     }
- 
-     try {
-       const { editNativeMessage } = await import('../services/whatsappEngine');
-       
-       const apiKey = await getOrFetchApiKey(resolvedInstanceId);
-       const targetJid = getContactJid(contact);
+    const state = get();
+    const resolvedInstanceId = await resolveInstanceUuid(state.tenantInfo?.id || '', instanceName);
 
-       const messageKey = {
-          remoteJid: targetJid,
-          fromMe: true,
-          id: msgToEdit.whatsapp_id
-       };
- 
-       await editNativeMessage(state.tenantInfo.id, resolvedInstanceId, targetJid, newText, messageKey, apiKey);
-      
+    if (!resolvedInstanceId || !state.instancesStatus[resolvedInstanceId] || (state.instancesStatus[resolvedInstanceId] !== 'connected' && state.instancesStatus[resolvedInstanceId] !== 'connected_local')) {
+      set({ modalReason: 'A instância do WhatsApp atrelada a esta conversa está offline. Por favor, reconecte para editar mensagens.' });
+      return;
+    }
+
+    const contact = state.contacts.find(c => c.id === contactId);
+    if (!contact || !state.tenantInfo) return;
+
+    const msgToEdit = contact.messages.find(m => m.id === messageId);
+    if (!msgToEdit || !msgToEdit.whatsapp_id) {
+      window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Não é possível editar esta mensagem pois a chave nativa não foi encontrada.', type: 'warning' } }));
+      return;
+    }
+
+    try {
+      const { editNativeMessage } = await import('../services/whatsappEngine');
+
+      const apiKey = await getOrFetchApiKey(resolvedInstanceId);
+      const targetJid = getContactJid(contact);
+
+      const messageKey = {
+        remoteJid: targetJid,
+        fromMe: true,
+        id: msgToEdit.whatsapp_id
+      };
+
+      await editNativeMessage(state.tenantInfo.id, resolvedInstanceId, targetJid, newText, messageKey, apiKey);
+
       // Update Database
       const finalNewText = newText.endsWith(' *(Editado)*') ? newText : newText + ' *(Editado)*';
       const { error: dbError } = await supabase
         .from('messages')
         .update({ text_content: finalNewText })
         .eq('id', messageId);
-        
+
       if (dbError) throw dbError;
 
       // Update Local State Optimistically
@@ -2267,15 +2267,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
         contacts: s.contacts.map(c => {
           if (c.id === contactId) {
             return {
-               ...c, 
-               messages: c.messages.map(m => m.id === messageId ? { ...m, text: finalNewText } : m)
+              ...c,
+              messages: c.messages.map(m => m.id === messageId ? { ...m, text: finalNewText } : m)
             };
           }
           return c;
         })
       }));
 
-    } catch(err: any) {
+    } catch (err: any) {
       console.error('Erro ao editar mensagem:', err);
       window.dispatchEvent(new CustomEvent('toast', { detail: { message: `Falha ao editar a mensagem: ${err.message}`, type: 'error' } }));
     }
@@ -2286,39 +2286,39 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const resolvedInstanceId = await resolveInstanceUuid(state.tenantInfo?.id || '', instanceName);
 
     if (!resolvedInstanceId || !state.instancesStatus[resolvedInstanceId] || (state.instancesStatus[resolvedInstanceId] !== 'connected' && state.instancesStatus[resolvedInstanceId] !== 'connected_local')) {
-       set({ modalReason: 'A instância do WhatsApp atrelada a esta conversa está offline. Por favor, reconecte para apagar mensagens.' });
-       return;
+      set({ modalReason: 'A instância do WhatsApp atrelada a esta conversa está offline. Por favor, reconecte para apagar mensagens.' });
+      return;
     }
-    
+
     const contact = state.contacts.find(c => c.id === contactId);
     if (!contact || !state.tenantInfo) return;
-    
+
     const msgToDelete = contact.messages.find(m => m.id === messageId);
     if (!msgToDelete) return;
 
     if (String(messageId).startsWith('optimistic-')) {
-       // Mensagem otimista: apenas define status deletado localmente sem tentar DB
-       set((s) => ({
-         contacts: s.contacts.map(c => {
-           if (c.id === contactId) {
-             return {
-                ...c, 
-                messages: c.messages.map(m => m.id === messageId ? {
-                   ...m, 
-                   status: 'deleted'
-                } : m)
-             };
-           }
-           return c;
-         })
-       }));
-       return;
+      // Mensagem otimista: apenas define status deletado localmente sem tentar DB
+      set((s) => ({
+        contacts: s.contacts.map(c => {
+          if (c.id === contactId) {
+            return {
+              ...c,
+              messages: c.messages.map(m => m.id === messageId ? {
+                ...m,
+                status: 'deleted'
+              } : m)
+            };
+          }
+          return c;
+        })
+      }));
+      return;
     }
 
     const waId = msgToDelete.whatsapp_id || (msgToDelete as any).whatsapp_message_id;
 
     if (!waId) {
-       window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Não é possível apagar remotamente esta mensagem no WhatsApp (chave ID de envio ausente). Ela será marcada apenas localmente.', type: 'warning' } }));
+      window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Não é possível apagar remotamente esta mensagem no WhatsApp (chave ID de envio ausente). Ela será marcada apenas localmente.', type: 'warning' } }));
     }
 
     const originalStatus = msgToDelete.status;
@@ -2328,11 +2328,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       contacts: s.contacts.map(c => {
         if (c.id === contactId) {
           return {
-             ...c, 
-             messages: c.messages.map(m => m.id === messageId ? {
-                ...m, 
-                status: 'deleted'
-             } : m)
+            ...c,
+            messages: c.messages.map(m => m.id === messageId ? {
+              ...m,
+              status: 'deleted'
+            } : m)
           };
         }
         return c;
@@ -2341,44 +2341,44 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     try {
       if (msgToDelete && waId) {
-         const { deleteNativeMessage } = await import('../services/whatsappEngine');
-         
-         const apiKey = await getOrFetchApiKey(resolvedInstanceId);
-         const targetJid = getContactJid(contact);
-         const isFromMe = msgToDelete.from_me !== false && (msgToDelete as any).sender_type !== 'client';
+        const { deleteNativeMessage } = await import('../services/whatsappEngine');
 
-         const messageKey = {
-            remoteJid: targetJid,
-            fromMe: isFromMe,
-            id: waId
-         };
+        const apiKey = await getOrFetchApiKey(resolvedInstanceId);
+        const targetJid = getContactJid(contact);
+        const isFromMe = msgToDelete.from_me !== false && (msgToDelete as any).sender_type !== 'client';
 
-         await deleteNativeMessage(state.tenantInfo.id, resolvedInstanceId, targetJid, messageKey, apiKey);
+        const messageKey = {
+          remoteJid: targetJid,
+          fromMe: isFromMe,
+          id: waId
+        };
+
+        await deleteNativeMessage(state.tenantInfo.id, resolvedInstanceId, targetJid, messageKey, apiKey);
       }
-      
+
       // Update Database
       const { error: dbError } = await supabase
         .from('messages')
-        .update({ 
-           status: 'deleted'
+        .update({
+          status: 'deleted'
         })
         .eq('id', messageId);
-        
+
       if (dbError) throw dbError;
 
-    } catch(err: any) {
+    } catch (err: any) {
       console.error('Erro ao apagar mensagem:', err);
-      
+
       // Reversão para o status original em caso de erro nas chamadas assíncronas
       set((s) => ({
         contacts: s.contacts.map(c => {
           if (c.id === contactId) {
             return {
-               ...c, 
-               messages: c.messages.map(m => m.id === messageId ? {
-                  ...m, 
-                  status: originalStatus
-               } : m)
+              ...c,
+              messages: c.messages.map(m => m.id === messageId ? {
+                ...m,
+                status: originalStatus
+              } : m)
             };
           }
           return c;
@@ -2404,94 +2404,94 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     // VALIDAÇÃO IMPETRANTE DE SEGURANÇA: Bloqueia vazamentos forçando a instância estrita da conversa aberta
     if (resolvedExpectedInstance && resolvedInstanceId !== resolvedExpectedInstance) {
-       console.warn(`[Security Guard - Media] Bloqueada tentativa de envio por canal incorreto! Esperado: ${resolvedExpectedInstance}, Recebido: ${resolvedInstanceId}. Forçando canal da conversa.`);
+      console.warn(`[Security Guard - Media] Bloqueada tentativa de envio por canal incorreto! Esperado: ${resolvedExpectedInstance}, Recebido: ${resolvedInstanceId}. Forçando canal da conversa.`);
     }
 
     if (!resolvedInstanceId || !state.instancesStatus[resolvedInstanceId] || (state.instancesStatus[resolvedInstanceId] !== 'connected' && state.instancesStatus[resolvedInstanceId] !== 'connected_local')) {
-        set({ modalReason: 'A instância do WhatsApp está offline. Por favor, reconecte para enviar arquivos.' });
-        return;
+      set({ modalReason: 'A instância do WhatsApp está offline. Por favor, reconecte para enviar arquivos.' });
+      return;
     }
 
     // Injeção Mágica de Assinatura Síncrona na mídia para evitar atrasos na UI
     let finalCaption = caption?.trim() ? caption.trim() : (mediaType === 'image' || mediaType === 'video' ? '' : (file.name || ''));
-    
+
     if (!isPtt) {
-       try {
-           const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
-           if (currentUserEmail) {
-               let agent = state.agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail.toLowerCase());
-               let useSignature = false;
-               let signature = '';
+      try {
+        const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
+        if (currentUserEmail) {
+          let agent = state.agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail.toLowerCase());
+          let useSignature = false;
+          let signature = '';
 
-               if (agent) {
-                   useSignature = !!agent.use_signature;
-                   signature = agent.signature || '';
-               } else {
-                   // Fallback síncrono do cache no localStorage
-                   useSignature = localStorage.getItem('current_user_use_signature') === 'true';
-                   signature = localStorage.getItem('current_user_signature') || '';
-               }
+          if (agent) {
+            useSignature = !!agent.use_signature;
+            signature = agent.signature || '';
+          } else {
+            // Fallback síncrono do cache no localStorage
+            useSignature = localStorage.getItem('current_user_use_signature') === 'true';
+            signature = localStorage.getItem('current_user_signature') || '';
+          }
 
-               if (useSignature && signature.trim().length > 0) {
-                  finalCaption = finalCaption ? `*${signature}*\n\n${finalCaption}` : `*${signature}*`;
-               }
+          if (useSignature && signature.trim().length > 0) {
+            finalCaption = finalCaption ? `*${signature}*\n\n${finalCaption}` : `*${signature}*`;
+          }
 
-               // Se o agente não está mapeado no cache local de forma alguma,
-               // disparamos uma query em background para popular o localStorage para futuros envios.
-               if (!agent && !signature && state.tenantInfo) {
-                  supabase.from('tenant_users')
-                     .select('use_signature, signature')
-                     .eq('email', currentUserEmail)
-                     .eq('tenant_id', state.tenantInfo.id)
-                     .limit(1)
-                     .maybeSingle()
-                     .then(({ data: agentData }) => {
-                        if (agentData) {
-                           localStorage.setItem('current_user_signature', agentData.signature || '');
-                           localStorage.setItem('current_user_use_signature', String(!!agentData.use_signature));
-                        }
-                     })
-                     .catch(e => console.warn('[uploadAndSendMedia] Falha ao recuperar assinatura em background:', e));
-               }
-           }
-       } catch (e) {
-          console.error("Erro na injeção de assinatura síncrona na mídia:", e);
-       }
+          // Se o agente não está mapeado no cache local de forma alguma,
+          // disparamos uma query em background para popular o localStorage para futuros envios.
+          if (!agent && !signature && state.tenantInfo) {
+            supabase.from('tenant_users')
+              .select('use_signature, signature')
+              .eq('email', currentUserEmail)
+              .eq('tenant_id', state.tenantInfo.id)
+              .limit(1)
+              .maybeSingle()
+              .then(({ data: agentData }) => {
+                if (agentData) {
+                  localStorage.setItem('current_user_signature', agentData.signature || '');
+                  localStorage.setItem('current_user_use_signature', String(!!agentData.use_signature));
+                }
+              })
+              .catch(e => console.warn('[uploadAndSendMedia] Falha ao recuperar assinatura em background:', e));
+          }
+        }
+      } catch (e) {
+        console.error("Erro na injeção de assinatura síncrona na mídia:", e);
+      }
     }
 
     // Atualiza otimista (Render Instantâneo Premium)
     const pseudoId = 'optimistic-media-' + Math.random().toString();
     const tempUrl = URL.createObjectURL(file);
-    state.addMessageLocally(contactId, { 
-      id: pseudoId, 
-      text: finalCaption, 
-      sender: 'human', 
+    state.addMessageLocally(contactId, {
+      id: pseudoId,
+      text: finalCaption,
+      sender: 'human',
       mediaType: mediaType,
       mediaUrl: tempUrl,
-      timestamp: new Date() 
+      timestamp: new Date()
     });
 
     // Auto-pause da IA por 30 minutos se o atendente mandou mensagem manual e ela não está pausada definitivamente
     if (contact.bot_status !== 'paused') {
-        const pauseUntil = new Date(Date.now() + 30 * 60000).toISOString();
-        state.updateConversationField(contactId, { ai_paused: true, ai_paused_manually: true, ai_paused_until: pauseUntil });
+      const pauseUntil = new Date(Date.now() + 30 * 60000).toISOString();
+      state.updateConversationField(contactId, { ai_paused: true, ai_paused_manually: true, ai_paused_until: pauseUntil });
     }
 
     // Auto-atribuição do agente quando envia mensagem
     try {
-        const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
-        if (currentUserEmail) {
-            const agent = state.agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail.toLowerCase());
-            if (agent) {
-                const assignedIds = contact.assigned_to ? contact.assigned_to.split(',') : [];
-                if (!assignedIds.includes(agent.id)) {
-                    const newAssigned = [...assignedIds, agent.id].join(',');
-                    state.updateConversationField(contactId, { assigned_to: newAssigned });
-                }
-            }
+      const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
+      if (currentUserEmail) {
+        const agent = state.agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail.toLowerCase());
+        if (agent) {
+          const assignedIds = contact.assigned_to ? contact.assigned_to.split(',') : [];
+          if (!assignedIds.includes(agent.id)) {
+            const newAssigned = [...assignedIds, agent.id].join(',');
+            state.updateConversationField(contactId, { assigned_to: newAssigned });
+          }
         }
+      }
     } catch (e) {
-        console.warn('Erro ao auto-atribuir agente:', e);
+      console.warn('Erro ao auto-atribuir agente:', e);
     }
 
     try {
@@ -2501,9 +2501,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const jid = getContactJid(contact);
       formData.append('jid', jid);
       formData.append('messageType', mediaType);
-      
+
       if (finalCaption) formData.append('caption', finalCaption);
-      
+
       if (isPtt) formData.append('ptt', 'true');
 
       // Chamada HTTP pro Node (único dono do upload Supabase e Baileys)
@@ -2523,14 +2523,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (!res.ok) throw new Error(data.error || 'Erro ao processar mídia no servidor');
 
       console.log('[uploadAndSendMedia] Resposta do server:', data);
-      
+
       if (data.media_url || (data.result?.key?.id)) {
         set((s) => ({
           contacts: s.contacts.map(c => c.id === contactId ? {
             ...c,
             // Procura o pseudoId, substitui a url temporaria e adiciona o whatsapp_id correspondente
-            messages: c.messages.map(m => m.id === pseudoId ? { 
-              ...m, 
+            messages: c.messages.map(m => m.id === pseudoId ? {
+              ...m,
               ...(data.media_url && { mediaUrl: data.media_url }),
               ...(data.result?.key?.id && { whatsapp_id: data.result.key.id })
             } : m)
@@ -2550,19 +2550,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const state = get();
     // Se a mensagem original tiver texto ou caption e não tiver media, envia como text
     if (!message.mediaUrl) {
-       await state.sendHumanMessage(contactId, message.text || "Mensagem encaminhada vazia", instanceName);
-       return;
+      await state.sendHumanMessage(contactId, message.text || "Mensagem encaminhada vazia", instanceName);
+      return;
     }
-    
+
     // Se tiver media, precisamos baixar para subir localmente
     try {
       const response = await fetch(message.mediaUrl);
       if (!response.ok) throw new Error("Erro ao obter a mídia para encaminhamento.");
       const blob = await response.blob();
-      
+
       const initialType = blob.type;
       let ext = initialType.split('/')[1] || 'bin';
-      
+
       // Mapeia extensões
       if (ext.startsWith('ogg')) ext = 'ogg';
       else if (ext.startsWith('jpeg')) ext = 'jpg';
@@ -2571,11 +2571,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       else if (ext.startsWith('mp4')) ext = 'mp4';
 
       const file = new File([blob], `encaminhado_${Date.now()}.${ext}`, { type: initialType });
-      
+
       const basicType = message.mediaType || (initialType.includes('image') ? 'image' : initialType.includes('video') ? 'video' : initialType.includes('audio') ? 'audio' : 'document');
-      
+
       await state.uploadAndSendMedia(contactId, file, basicType as any, instanceName, false, message.text);
-    } catch(err) {
+    } catch (err) {
       console.error("[forwardMessage] Erro ao extrair/encaminhar media:", err);
       window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Houve uma falha ao preparar a mídia para o envio. Se possível, faça o download e envio manual.', type: 'error' } }));
     }
@@ -2588,45 +2588,45 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     // Injeção Mágica de Assinatura Síncrona na mídia para evitar atrasos na UI
     let finalCaption = caption?.trim() ? caption.trim() : '';
-    
+
     try {
-       const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
-       if (currentUserEmail) {
-           let agent = state.agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail.toLowerCase());
-           let useSignature = false;
-           let signature = '';
+      const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
+      if (currentUserEmail) {
+        let agent = state.agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail.toLowerCase());
+        let useSignature = false;
+        let signature = '';
 
-           if (agent) {
-               useSignature = !!agent.use_signature;
-               signature = agent.signature || '';
-           } else {
-               // Fallback síncrono do cache no localStorage
-               useSignature = localStorage.getItem('current_user_use_signature') === 'true';
-               signature = localStorage.getItem('current_user_signature') || '';
-           }
+        if (agent) {
+          useSignature = !!agent.use_signature;
+          signature = agent.signature || '';
+        } else {
+          // Fallback síncrono do cache no localStorage
+          useSignature = localStorage.getItem('current_user_use_signature') === 'true';
+          signature = localStorage.getItem('current_user_signature') || '';
+        }
 
-           if (useSignature && signature.trim().length > 0) {
-               finalCaption = finalCaption ? `*${signature}*\n\n${finalCaption}` : `*${signature}*`;
-           }
+        if (useSignature && signature.trim().length > 0) {
+          finalCaption = finalCaption ? `*${signature}*\n\n${finalCaption}` : `*${signature}*`;
+        }
 
-           // Se o agente não está mapeado no cache local de forma alguma,
-           // disparamos uma query em background para popular o localStorage para futuros envios.
-           if (!agent && !signature && state.tenantInfo) {
-              supabase.from('tenant_users')
-                 .select('use_signature, signature')
-                 .eq('email', currentUserEmail)
-                 .eq('tenant_id', state.tenantInfo.id)
-                 .limit(1)
-                 .maybeSingle()
-                 .then(({ data: agentData }) => {
-                    if (agentData) {
-                       localStorage.setItem('current_user_signature', agentData.signature || '');
-                       localStorage.setItem('current_user_use_signature', String(!!agentData.use_signature));
-                    }
-                 })
-                 .catch(e => console.warn('[sendMediaFromUrl] Falha ao recuperar assinatura em background:', e));
-           }
-       }
+        // Se o agente não está mapeado no cache local de forma alguma,
+        // disparamos uma query em background para popular o localStorage para futuros envios.
+        if (!agent && !signature && state.tenantInfo) {
+          supabase.from('tenant_users')
+            .select('use_signature, signature')
+            .eq('email', currentUserEmail)
+            .eq('tenant_id', state.tenantInfo.id)
+            .limit(1)
+            .maybeSingle()
+            .then(({ data: agentData }) => {
+              if (agentData) {
+                localStorage.setItem('current_user_signature', agentData.signature || '');
+                localStorage.setItem('current_user_use_signature', String(!!agentData.use_signature));
+              }
+            })
+            .catch(e => console.warn('[sendMediaFromUrl] Falha ao recuperar assinatura em background:', e));
+        }
+      }
     } catch (e) {
       console.warn("Erro ao injetar assinatura síncrona na midia por URL:", e);
     }
@@ -2634,37 +2634,37 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // 1) Otimistic render - Criamos a bolha de mensagem simulando carregamento
     const pseudoId = 'optimistic-media-' + Math.random().toString();
     const isLocalUrl = mediaUrl.startsWith('blob:') || mediaUrl.startsWith('data:');
-    
-    state.addMessageLocally(contactId, { 
-      id: pseudoId, 
-      text: finalCaption, 
-      sender: 'human', 
+
+    state.addMessageLocally(contactId, {
+      id: pseudoId,
+      text: finalCaption,
+      sender: 'human',
       mediaType: mediaType,
       mediaUrl: mediaUrl, // Always keep the mediaUrl so it renders the video properly
-      timestamp: new Date() 
+      timestamp: new Date()
     });
 
     // Auto-pause da IA por 30 minutos se o atendente mandou mensagem manual e ela não está pausada definitivamente
     if (state.globalAiEnabled && contact.bot_status !== 'paused') {
-        const pauseUntil = new Date(Date.now() + 30 * 60000).toISOString();
-        state.updateConversationField(contactId, { ai_paused: true, ai_paused_manually: true, ai_paused_until: pauseUntil });
+      const pauseUntil = new Date(Date.now() + 30 * 60000).toISOString();
+      state.updateConversationField(contactId, { ai_paused: true, ai_paused_manually: true, ai_paused_until: pauseUntil });
     }
 
     // Auto-atribuição do agente quando envia mensagem
     try {
-        const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
-        if (currentUserEmail) {
-            const agent = state.agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail.toLowerCase());
-            if (agent) {
-                const assignedIds = contact.assigned_to ? contact.assigned_to.split(',') : [];
-                if (!assignedIds.includes(agent.id)) {
-                    const newAssigned = [...assignedIds, agent.id].join(',');
-                    state.updateConversationField(contactId, { assigned_to: newAssigned });
-                }
-            }
+      const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
+      if (currentUserEmail) {
+        const agent = state.agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail.toLowerCase());
+        if (agent) {
+          const assignedIds = contact.assigned_to ? contact.assigned_to.split(',') : [];
+          if (!assignedIds.includes(agent.id)) {
+            const newAssigned = [...assignedIds, agent.id].join(',');
+            state.updateConversationField(contactId, { assigned_to: newAssigned });
+          }
         }
+      }
     } catch (e) {
-        console.warn('Erro ao auto-atribuir agente:', e);
+      console.warn('Erro ao auto-atribuir agente:', e);
     }
 
     try {
@@ -2678,12 +2678,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       // VALIDAÇÃO IMPETRANTE DE SEGURANÇA: Bloqueia vazamentos forçando a instância estrita da conversa aberta
       if (resolvedExpectedInstance && resolvedInstanceId !== resolvedExpectedInstance) {
-         console.warn(`[Security Guard - Canned Media] Bloqueada tentativa de envio por canal incorreto! Esperado: ${resolvedExpectedInstance}, Recebido: ${resolvedInstanceId}. Forçando canal da conversa.`);
+        console.warn(`[Security Guard - Canned Media] Bloqueada tentativa de envio por canal incorreto! Esperado: ${resolvedExpectedInstance}, Recebido: ${resolvedInstanceId}. Forçando canal da conversa.`);
       }
 
       if (!resolvedInstanceId || !state.instancesStatus[resolvedInstanceId] || (state.instancesStatus[resolvedInstanceId] !== 'connected' && state.instancesStatus[resolvedInstanceId] !== 'connected_local')) {
-          set({ modalReason: 'A instância do WhatsApp está offline. Por favor, reconecte para enviar mídias.' });
-          throw new Error('whatsapp_offline');
+        set({ modalReason: 'A instância do WhatsApp está offline. Por favor, reconecte para enviar mídias.' });
+        throw new Error('whatsapp_offline');
       }
 
       const jid = getContactJid(contact);
@@ -2697,8 +2697,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       else if (mediaType === 'document') mimetype = 'application/pdf';
 
       // Preserva o nome do arquivo original se enviado, higienizando-o de caracteres especiais
-      const cleanFileName = fileName 
-        ? fileName.replace(/[^a-zA-Z0-9.\-_]/g, '_') 
+      const cleanFileName = fileName
+        ? fileName.replace(/[^a-zA-Z0-9.\-_]/g, '_')
         : `canned_media_${Date.now()}`;
 
       console.log(`[sendMediaFromUrl] Disparando webhook para URL: ${mediaUrl} com nome: ${cleanFileName} e responseType: ${responseType || 'STANDARD'}`);
@@ -2731,7 +2731,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     } catch (err: any) {
       console.error('[sendMediaFromUrl] Falha:', err);
-      
+
       // Reverter mídia otimista
       set((s) => ({
         contacts: s.contacts.map(c => {
@@ -2743,9 +2743,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }));
 
       if (err.message === 'whatsapp_offline') {
-         return;
+        return;
       }
-      
+
       window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Falha ao enviar mídia da resposta pronta: ' + err.message, type: 'error' } }));
     }
   },
@@ -2754,28 +2754,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const state = get();
     const now = Date.now();
     const lastFetch = state.pictureFetchLocks[contactId];
-    
+
     // Bloqueia e impede um novo fetch se tiver ocorrido nos últimos 60 minutos (3600000ms)
     // Isso evita o loop infinito de tentar puxar um avatar que realmente não existe ou a engine não conseguiu
     if (lastFetch && (now - lastFetch) < 3600000) {
-       console.log(`[Anti-Spam/Loop] Fetch picture para ${jid} (${contactId}) ignorado. Último sync foi há menos de 1h.`);
-       return;
+      console.log(`[Anti-Spam/Loop] Fetch picture para ${jid} (${contactId}) ignorado. Último sync foi há menos de 1h.`);
+      return;
     }
 
     if (!state.tenantInfo) return;
     const resolvedInstanceId = await resolveInstanceUuid(state.tenantInfo.id, instanceName);
 
     if (!resolvedInstanceId || !state.instancesStatus[resolvedInstanceId] || (state.instancesStatus[resolvedInstanceId] !== 'connected' && state.instancesStatus[resolvedInstanceId] !== 'connected_local')) {
-       return; // Previne requisições 400 previsiveis caso o socket esteja offline
+      return; // Previne requisições 400 previsiveis caso o socket esteja offline
     }
-    
+
     // Atualiza o lock IMEDIATAMENTE (mesmo se falhar depois)
     set((s) => ({ pictureFetchLocks: { ...s.pictureFetchLocks, [contactId]: now } }));
-    
+
     try {
       const apiKey = await getOrFetchApiKey(resolvedInstanceId);
       const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
-      
+
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 3500);
 
@@ -2790,18 +2790,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (res.ok && data.ok && data.result) {
         const baileysUrl = data.result;
         let finalUrl = baileysUrl;
-        
+
         try {
           // Tenta baixar a imagem diretamente para contornar expirações futuras (WhatsApp CDN expiry)
           const imgRes = await fetch(baileysUrl);
           if (imgRes.ok) {
             const blob = await imgRes.blob();
             const fileName = `avatars/${state.tenantInfo.id}/${contactId}-${Date.now()}.jpg`;
-            
+
             const { data: uploadData, error: uploadError } = await supabase.storage
               .from('chat_media')
               .upload(fileName, blob, { upsert: true, contentType: blob.type || 'image/jpeg' });
-              
+
             if (!uploadError && uploadData) {
               const { data: publicUrlData } = supabase.storage.from('chat_media').getPublicUrl(fileName);
               finalUrl = publicUrlData.publicUrl;
@@ -2818,7 +2818,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           contacts: s.contacts.map(c => c.id === contactId ? { ...c, avatar: finalUrl } : c)
         }));
       }
-    } catch(err: any) {
+    } catch (err: any) {
       if (err.name === 'AbortError') {
         console.warn("[fetchContactPicture] Requisição cancelada por timeout de 3.5s (possível atraso na resposta ou contato sem avatar).");
       } else {
@@ -2864,14 +2864,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     const isAiPaused = targetContact ? (targetContact.ai_paused === true || targetContact.bot_status === 'paused') : false;
     if (targetContact && msg.sender === 'client' && targetContact.conv_status !== 'open' && !targetContact.is_blocked && isAiPaused) {
-        shouldWakeUp = true;
+      shouldWakeUp = true;
     }
 
     // 2. Dispara a atualização no banco (se necessário) fora do escopo do set síncrono
     if (shouldWakeUp) {
-        setTimeout(() => {
-           get().updateConversationField(contactId, { status: 'open', snoozed_until: null });
-        }, 100);
+      setTimeout(() => {
+        get().updateConversationField(contactId, { status: 'open', snoozed_until: null });
+      }, 100);
     }
 
     // 3. Executa a atualização de estado puramente síncrona
@@ -2881,26 +2881,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
           let updatedStatus = c.conv_status;
           let updatedSnooze = c.snoozed_until;
           if (shouldWakeUp) {
-              updatedStatus = 'open';
-              updatedSnooze = undefined;
+            updatedStatus = 'open';
+            updatedSnooze = undefined;
           }
 
           // Previne duplicados por ID do DB ou whatsapp_id
           if (c.messages.some(m => m.id === msg.id || (msg.whatsapp_id && m.whatsapp_id === msg.whatsapp_id))) {
-             if (updatedStatus !== c.conv_status) return { ...c, conv_status: updatedStatus, snoozed_until: updatedSnooze };
-             return c;
+            if (updatedStatus !== c.conv_status) return { ...c, conv_status: updatedStatus, snoozed_until: updatedSnooze };
+            return c;
           }
-          
+
           // Tratamento de UI otimista: varre se ja tem uma mensagem igualzinha pendente
           if (msg.sender === 'human' || msg.sender === 'bot') {
             const optIndex = c.messages.findIndex(m => {
-                if (msg.whatsapp_id && m.whatsapp_id === msg.whatsapp_id) return true;
-                if (!String(m.id).startsWith('optimistic-')) return false;
-                if (m.mediaType && msg.mediaType && m.mediaType === msg.mediaType) return true;
-                
-                const normM = (m.text || '').replace(/^\*([^*:]+):\*\s*/, '').trim().toLowerCase();
-                const normMsg = (msg.text || '').replace(/^\*([^*:]+):\*\s*/, '').trim().toLowerCase();
-                return normM === normMsg || (!!normM && !!normMsg && (normM.includes(normMsg) || normMsg.includes(normM)));
+              if (msg.whatsapp_id && m.whatsapp_id === msg.whatsapp_id) return true;
+              if (!String(m.id).startsWith('optimistic-')) return false;
+              if (m.mediaType && msg.mediaType && m.mediaType === msg.mediaType) return true;
+
+              const normM = (m.text || '').replace(/^\*([^*:]+):\*\s*/, '').trim().toLowerCase();
+              const normMsg = (msg.text || '').replace(/^\*([^*:]+):\*\s*/, '').trim().toLowerCase();
+              return normM === normMsg || (!!normM && !!normMsg && (normM.includes(normMsg) || normMsg.includes(normM)));
             });
             if (optIndex !== -1) {
               let updatedMsgs = [...c.messages];
@@ -2909,30 +2909,30 @@ export const useChatStore = create<ChatState>((set, get) => ({
               return { ...c, messages: updatedMsgs, conv_status: updatedStatus, snoozed_until: updatedSnooze };
             }
           }
-          
+
           // Prevenção de Bug de Ordenação Otimista: se for uma mensagem otimista, garante que ela vá para o fim
           if (String(msg.id).startsWith('optimistic-') && c.messages.length > 0) {
-             const lastTimestamp = c.messages[c.messages.length - 1].timestamp.getTime();
-             if (msg.timestamp.getTime() <= lastTimestamp) {
-                 msg.timestamp = new Date(lastTimestamp + 1000);
-             }
+            const lastTimestamp = c.messages[c.messages.length - 1].timestamp.getTime();
+            if (msg.timestamp.getTime() <= lastTimestamp) {
+              msg.timestamp = new Date(lastTimestamp + 1000);
+            }
           }
-          
+
           const newMessages = sortMessagesChronologically([...c.messages, msg]);
           const isChatCurrentlyFocused = state.activeChatId === contactId && (typeof document !== 'undefined' ? document.hasFocus() : true);
-          
+
           let newUnread = c.unread || 0;
           if (msg.sender === 'client' && !isChatCurrentlyFocused) {
-              newUnread = (c.unread || 0) + 1;
+            newUnread = (c.unread || 0) + 1;
           }
 
           const msgTs = msg.timestamp ? new Date(msg.timestamp).getTime() : Date.now();
           const previewText = msg.text || (msg.mediaType === 'image' ? '📸 Imagem' : msg.mediaType === 'video' ? '🎥 Vídeo' : msg.mediaType === 'audio' ? '🎵 Áudio' : msg.mediaType === 'document' ? '📁 Documento' : 'Mensagem');
-          
-          return { 
-            ...c, 
-            messages: newMessages, 
-            conv_status: updatedStatus, 
+
+          return {
+            ...c,
+            messages: newMessages,
+            conv_status: updatedStatus,
             snoozed_until: updatedSnooze,
             unread: newUnread,
             lastMsgTimestamp: Math.max(c.lastMsgTimestamp || 0, msgTs),
@@ -2947,7 +2947,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   upsertContactLocally: (contact) => {
     // RBAC: Se o usuário não possui acesso à caixa (instance_id), ignora o contato
     if (contact.instance_id && !hasUserAccessToInstance(contact.instance_id)) {
-        return;
+      return;
     }
 
     // VALIDAÇÃO INTELIGENTE APPWEB (Realtime Barreira)
@@ -2964,93 +2964,93 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       let foundAny = false;
       const updatedContacts = state.contacts.map((c) => {
-         const cRealId = getRealContactId(c.id);
-         const cInst = c.instance_id || (c.id.includes('_') ? c.id.split('_')[1] : null);
-         const targetInst = contact.instance_id || (contact.id.includes('_') ? contact.id.split('_')[1] : null);
-         const sameInst = !cInst || !targetInst || cInst === 'default' || targetInst === 'default' || cInst === targetInst;
+        const cRealId = getRealContactId(c.id);
+        const cInst = c.instance_id || (c.id.includes('_') ? c.id.split('_')[1] : null);
+        const targetInst = contact.instance_id || (contact.id.includes('_') ? contact.id.split('_')[1] : null);
+        const sameInst = !cInst || !targetInst || cInst === 'default' || targetInst === 'default' || cInst === targetInst;
 
-         const isMatch = sameInst && (
-                         cRealId === realContactId ||
-                         (c.whatsapp_jid && contact.whatsapp_jid && c.whatsapp_jid === contact.whatsapp_jid) ||
-                         (c.phone && contactPhoneMatch && isSameBrPhone(c.phone, contactPhoneMatch)) ||
-                         (c.whatsapp_jid && contact.whatsapp_jid && isSameBrPhone(c.whatsapp_jid.split('@')[0], contact.whatsapp_jid.split('@')[0]))
-         );
-                         
-         if (isMatch) {
-            foundAny = true;
-            const isExistingTemp = c.id.includes('temp-');
-            const isNewTemp = contact.id.includes('temp-');
-            
-            const baseId = (!isExistingTemp) ? getRealContactId(c.id) : (!isNewTemp ? getRealContactId(contact.id) : c.id);
-            // Preserva o composite ID original daquela caixa (priorizando a instância informada)
-            const effectiveInstanceId = contact.instance_id || c.instance_id || 'default';
-            const finalId = c.id.includes('_') ? c.id : (baseId.includes('temp-') ? baseId : `${baseId}_${effectiveInstanceId}`);
-            
-            const finalCustomName = c.custom_name || contact.custom_name;
-            const fallbackName = c.name !== c.phone && c.name ? c.name : contact.name;
-            
-            const tname = get().tenantInfo?.name || '';
-            let finalName = finalCustomName || fallbackName;
-            if (!finalCustomName) {
-              finalName = sanitizeContactName(finalName, contactPhoneMatch || contact.phone, tname) || finalName;
-            }
+        const isMatch = sameInst && (
+          cRealId === realContactId ||
+          (c.whatsapp_jid && contact.whatsapp_jid && c.whatsapp_jid === contact.whatsapp_jid) ||
+          (c.phone && contactPhoneMatch && isSameBrPhone(c.phone, contactPhoneMatch)) ||
+          (c.whatsapp_jid && contact.whatsapp_jid && isSameBrPhone(c.whatsapp_jid.split('@')[0], contact.whatsapp_jid.split('@')[0]))
+        );
 
-            // Converter a coluna tags (array de IDs) em conv_labels usando tenantLabels da store
-            const updatedTags = Array.isArray(contact.tags) ? contact.tags : (Array.isArray(c.tags) ? c.tags : []);
-            const conv_labels = get().tenantLabels.filter(tl => updatedTags.includes(tl.id));
+        if (isMatch) {
+          foundAny = true;
+          const isExistingTemp = c.id.includes('temp-');
+          const isNewTemp = contact.id.includes('temp-');
 
-            return {
-              ...c,
-              ...contact,
-              id: finalId,
-              custom_name: finalCustomName,
-              name: finalName,
-              avatar: contact.profile_picture_url || contact.avatar || c.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(finalName || contactPhoneMatch || 'U')}&background=random&color=fff`,
-              conv_labels: conv_labels
-            };
-         }
-         return c;
+          const baseId = (!isExistingTemp) ? getRealContactId(c.id) : (!isNewTemp ? getRealContactId(contact.id) : c.id);
+          // Preserva o composite ID original daquela caixa (priorizando a instância informada)
+          const effectiveInstanceId = contact.instance_id || c.instance_id || 'default';
+          const finalId = c.id.includes('_') ? c.id : (baseId.includes('temp-') ? baseId : `${baseId}_${effectiveInstanceId}`);
+
+          const finalCustomName = c.custom_name || contact.custom_name;
+          const fallbackName = c.name !== c.phone && c.name ? c.name : contact.name;
+
+          const tname = get().tenantInfo?.name || '';
+          let finalName = finalCustomName || fallbackName;
+          if (!finalCustomName) {
+            finalName = sanitizeContactName(finalName, contactPhoneMatch || contact.phone, tname) || finalName;
+          }
+
+          // Converter a coluna tags (array de IDs) em conv_labels usando tenantLabels da store
+          const updatedTags = Array.isArray(contact.tags) ? contact.tags : (Array.isArray(c.tags) ? c.tags : []);
+          const conv_labels = get().tenantLabels.filter(tl => updatedTags.includes(tl.id));
+
+          return {
+            ...c,
+            ...contact,
+            id: finalId,
+            custom_name: finalCustomName,
+            name: finalName,
+            avatar: contact.profile_picture_url || contact.avatar || c.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(finalName || contactPhoneMatch || 'U')}&background=random&color=fff`,
+            conv_labels: conv_labels
+          };
+        }
+        return c;
       });
 
       if (!foundAny) {
-         // Contato novinho folha
-         const effectiveInstanceId = contact.instance_id || 'default';
-         const compositeId = contact.id.includes('_') ? contact.id : `${contact.id}_${effectiveInstanceId}`;
-         const tname = get().tenantInfo?.name || '';
-         let finalName = contact.custom_name || contact.name;
-         if (!contact.custom_name) {
-           finalName = sanitizeContactName(finalName, contactPhoneMatch || contact.phone, tname) || finalName;
-         }
-         
-         const updatedTags = Array.isArray(contact.tags) ? contact.tags : [];
-         const conv_labels = get().tenantLabels.filter(tl => updatedTags.includes(tl.id));
+        // Contato novinho folha
+        const effectiveInstanceId = contact.instance_id || 'default';
+        const compositeId = contact.id.includes('_') ? contact.id : `${contact.id}_${effectiveInstanceId}`;
+        const tname = get().tenantInfo?.name || '';
+        let finalName = contact.custom_name || contact.name;
+        if (!contact.custom_name) {
+          finalName = sanitizeContactName(finalName, contactPhoneMatch || contact.phone, tname) || finalName;
+        }
 
-         const newContact: ContactType = {
-           ...contact,
-           id: compositeId,
-           name: finalName,
-           avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(finalName || contact.phone)}&background=random&color=fff`,
-           messages: [],
-           unread: 0,
-           instance_id: contact.instance_id || null,
-           lastMsgTimestamp: new Date(contact.created_at || Date.now()).getTime(),
-           conv_labels: conv_labels
-         };
-         updatedContacts.push(newContact);
+        const updatedTags = Array.isArray(contact.tags) ? contact.tags : [];
+        const conv_labels = get().tenantLabels.filter(tl => updatedTags.includes(tl.id));
+
+        const newContact: ContactType = {
+          ...contact,
+          id: compositeId,
+          name: finalName,
+          avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(finalName || contact.phone)}&background=random&color=fff`,
+          messages: [],
+          unread: 0,
+          instance_id: contact.instance_id || null,
+          lastMsgTimestamp: new Date(contact.created_at || Date.now()).getTime(),
+          conv_labels: conv_labels
+        };
+        updatedContacts.push(newContact);
       }
 
       // DEDUPLICAÇÃO RÍGIDA DE SEGURANÇA: Garante que NUNCA existam dois contatos com o mesmo ID
       const seen = new Set();
       const deduped: any[] = [];
-      
+
       updatedContacts.forEach(c => {
-         const key = c.id;
-         if (!seen.has(key)) {
-            seen.add(key);
-            deduped.push(c);
-         } else {
-            console.warn(`[upsertContactLocally] Removendo duplicata rígida de contato detectada no state:`, c.id);
-         }
+        const key = c.id;
+        if (!seen.has(key)) {
+          seen.add(key);
+          deduped.push(c);
+        } else {
+          console.warn(`[upsertContactLocally] Removendo duplicata rígida de contato detectada no state:`, c.id);
+        }
       });
 
       return { contacts: deduped };
@@ -3072,7 +3072,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             .eq('tenant_id', tenantId)
             .neq('id', realContactId)
             .or(`document_number.eq.${rawDocNum},document_number.eq.${formattedCnpj}`);
-            
+
           const { data: duplicates } = await query;
           if (duplicates && duplicates.length > 0) {
             alert(`Erro: O CNPJ ${payload.document_number} já está cadastrado no contato/empresa "${duplicates[0].name}". Não é permitido duplicar o CNPJ.`);
@@ -3089,22 +3089,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const targetPhone = currentState?.phone;
     set((state) => ({
       contacts: state.contacts.map((c) => {
-         const isSameId = getRealContactId(c.id) === realContactId;
-         const isSamePhone = targetPhone && c.phone && isSameBrPhone(c.phone, targetPhone);
-         if (isSameId || isSamePhone) {
-             const customNameUpdate = payload.name ? { custom_name: payload.name, name: payload.name } : {};
-             return { ...c, ...payload, ...customNameUpdate };
-         }
-         return c;
+        const isSameId = getRealContactId(c.id) === realContactId;
+        const isSamePhone = targetPhone && c.phone && isSameBrPhone(c.phone, targetPhone);
+        if (isSameId || isSamePhone) {
+          const customNameUpdate = payload.name ? { custom_name: payload.name, name: payload.name } : {};
+          return { ...c, ...payload, ...customNameUpdate };
+        }
+        return c;
       })
     }));
 
     try {
       const dbPayload = { ...payload } as any;
       if (payload.name) {
-         dbPayload.custom_name = payload.name; // Proteção para a trigger DB e lógica interna
+        dbPayload.custom_name = payload.name; // Proteção para a trigger DB e lógica interna
       }
-      
+
       // Omit values that do not exist strictly in the Supabase Schema to prevent PGRST204 errors
       delete dbPayload.bot_status;
       delete dbPayload.assigned_to;
@@ -3118,7 +3118,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       try {
         const { data } = await supabase.from('contacts').select('*').eq('id', realContactId).single();
         if (data) rawBeforeState = data;
-      } catch (e) {}
+      } catch (e) { }
 
       const { error } = await supabase.from('contacts').update(dbPayload).eq('id', realContactId);
       if (error) throw error;
@@ -3149,155 +3149,155 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   resolveConversation: async (contactId, reactivateAi) => {
     try {
-        const tenantInfo = get().tenantInfo;
-        if (!tenantInfo) return;
-        
-        const currentUserEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
-        let agentName = 'Agente';
-        if (currentUserEmail) {
-            const agent = get().agents.find(a => a.email === currentUserEmail);
-            if (agent && agent.full_name) agentName = agent.full_name;
-        }
+      const tenantInfo = get().tenantInfo;
+      if (!tenantInfo) return;
 
-        // Descobre todas as conversas vinculadas ao contato para update de Status/Assigned_to e Insert de Message
-        const realContactId = getRealContactId(contactId);
-        const instId = getInstanceIdFromContact(contactId);
-        const resolvedInstId = await resolveInstanceUuid(tenantInfo.id, instId);
-        
-        const { data: convs } = await supabase
-          .from('conversations')
-          .select('id, instance_id')
-          .eq('contact_id', realContactId)
+      const currentUserEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
+      let agentName = 'Agente';
+      if (currentUserEmail) {
+        const agent = get().agents.find(a => a.email === currentUserEmail);
+        if (agent && agent.full_name) agentName = agent.full_name;
+      }
+
+      // Descobre todas as conversas vinculadas ao contato para update de Status/Assigned_to e Insert de Message
+      const realContactId = getRealContactId(contactId);
+      const instId = getInstanceIdFromContact(contactId);
+      const resolvedInstId = await resolveInstanceUuid(tenantInfo.id, instId);
+
+      const { data: convs } = await supabase
+        .from('conversations')
+        .select('id, instance_id')
+        .eq('contact_id', realContactId)
+        .eq('tenant_id', tenantInfo.id)
+        .order('last_message_at', { ascending: false });
+
+      const conv = convs && convs.length > 0 ? convs[0] : null;
+      const allConvIds = convs ? convs.map(c => c.id) : [];
+
+      if (conv) {
+        // 1. Inserir a mensagem interna System
+        const msgText = `✅ Resolvido por ${agentName} dia ${new Date().toLocaleString('pt-BR')}`;
+
+        const dbMsg = {
+          conversation_id: conv.id,
+          tenant_id: tenantInfo.id,
+          text_content: msgText,
+          sender_type: 'system',
+          direction: 'outgoing',
+          instance_id: conv.instance_id || resolvedInstId
+        };
+
+        const { data: insertedMsg, error } = await supabase.from('messages').insert(dbMsg).select().single();
+
+        if (!error && insertedMsg) {
+          const msgTypeObj: MessageType = {
+            id: insertedMsg.id,
+            text: insertedMsg.text_content,
+            sender: 'system',
+            timestamp: new Date(insertedMsg.timestamp || insertedMsg.created_at || Date.now())
+          };
+          get().addMessageLocally(contactId, msgTypeObj);
+        }
+      }
+
+      const targetContact = get().contacts.find(c => getRealContactId(c.id) === realContactId);
+
+      // Verifica se o contato estava pausado definitivamente por tempo indeterminado
+      const isDefinitivelyPaused = targetContact?.bot_status === 'paused' || (targetContact?.ai_paused_manually && !targetContact?.bot_paused_until);
+
+      let nextAiPaused = false;
+      if (isDefinitivelyPaused) {
+        // Se o contato foi pausado definitivamente, NUNCA reativa a IA automaticamente ao resolver a conversa
+        nextAiPaused = true;
+      } else if (reactivateAi !== undefined) {
+        nextAiPaused = !reactivateAi;
+      } else {
+        const isPausedManually = targetContact?.ai_paused_manually || false;
+        nextAiPaused = isPausedManually ? true : false;
+      }
+
+      // 2. Sincroniza o status da IA no contato
+      await supabase
+        .from('contacts')
+        .update({
+          bot_status: nextAiPaused ? 'paused' : 'active',
+          bot_paused_until: isDefinitivelyPaused ? null : (nextAiPaused ? targetContact?.bot_paused_until || null : null)
+        })
+        .eq('id', realContactId);
+
+      // 3. Remove o assignment e altera status para 'resolved' em TODAS as conversas do contato
+      if (allConvIds.length > 0) {
+        await supabase.from('conversations').update({
+          assigned_to: null,
+          status: 'resolved',
+          ai_paused: nextAiPaused,
+          ai_paused_manually: nextAiPaused,
+          snoozed_until: null,
+          snoozed_at: null,
+          snoozed_by: null
+        }).in('id', allConvIds);
+      }
+
+      // Encerra ou registra ticket em chat_tickets
+      try {
+        const { data: openTickets } = await supabase.from('chat_tickets')
+          .select('id, opened_at')
           .eq('tenant_id', tenantInfo.id)
-          .order('last_message_at', { ascending: false });
+          .eq('status', 'open')
+          .eq('contact_id', realContactId);
 
-        const conv = convs && convs.length > 0 ? convs[0] : null;
-        const allConvIds = convs ? convs.map(c => c.id) : [];
+        const closedAt = await getTicketResolutionDate(supabase, conv?.id, conv?.last_message_at);
 
-        if (conv) {
-            // 1. Inserir a mensagem interna System
-            const msgText = `✅ Resolvido por ${agentName} dia ${new Date().toLocaleString('pt-BR')}`;
-            
-            const dbMsg = {
-               conversation_id: conv.id,
-               tenant_id: tenantInfo.id,
-               text_content: msgText,
-               sender_type: 'system',
-               direction: 'outgoing',
-               instance_id: conv.instance_id || resolvedInstId
-            };
-
-            const { data: insertedMsg, error } = await supabase.from('messages').insert(dbMsg).select().single();
-            
-            if (!error && insertedMsg) {
-                const msgTypeObj: MessageType = {
-                   id: insertedMsg.id,
-                   text: insertedMsg.text_content,
-                   sender: 'system',
-                   timestamp: new Date(insertedMsg.timestamp || insertedMsg.created_at || Date.now())
-                };
-                get().addMessageLocally(contactId, msgTypeObj);
+        if (openTickets && openTickets.length > 0) {
+          for (const t of openTickets) {
+            let effOpenedAt = t.opened_at;
+            if (effOpenedAt && new Date(effOpenedAt).getTime() > new Date(closedAt).getTime()) {
+              effOpenedAt = closedAt;
             }
-        }
-
-        const targetContact = get().contacts.find(c => getRealContactId(c.id) === realContactId);
-        
-        // Verifica se o contato estava pausado definitivamente por tempo indeterminado
-        const isDefinitivelyPaused = targetContact?.bot_status === 'paused' || (targetContact?.ai_paused_manually && !targetContact?.bot_paused_until);
-
-        let nextAiPaused = false;
-        if (isDefinitivelyPaused) {
-          // Se o contato foi pausado definitivamente, NUNCA reativa a IA automaticamente ao resolver a conversa
-          nextAiPaused = true;
-        } else if (reactivateAi !== undefined) {
-          nextAiPaused = !reactivateAi;
-        } else {
-          const isPausedManually = targetContact?.ai_paused_manually || false;
-          nextAiPaused = isPausedManually ? true : false;
-        }
-
-        // 2. Sincroniza o status da IA no contato
-        await supabase
-          .from('contacts')
-          .update({ 
-            bot_status: nextAiPaused ? 'paused' : 'active',
-            bot_paused_until: isDefinitivelyPaused ? null : (nextAiPaused ? targetContact?.bot_paused_until || null : null)
-          })
-          .eq('id', realContactId);
-
-        // 3. Remove o assignment e altera status para 'resolved' em TODAS as conversas do contato
-        if (allConvIds.length > 0) {
-            await supabase.from('conversations').update({ 
-              assigned_to: null, 
-              status: 'resolved', 
-              ai_paused: nextAiPaused,
-              ai_paused_manually: nextAiPaused,
-              snoozed_until: null,
-              snoozed_at: null,
-              snoozed_by: null
-            }).in('id', allConvIds);
-        }
-
-        // Encerra ou registra ticket em chat_tickets
-        try {
-          const { data: openTickets } = await supabase.from('chat_tickets')
-            .select('id, opened_at')
-            .eq('tenant_id', tenantInfo.id)
-            .eq('status', 'open')
-            .eq('contact_id', realContactId);
-
-          const closedAt = await getTicketResolutionDate(supabase, conv?.id, conv?.last_message_at);
-
-          if (openTickets && openTickets.length > 0) {
-            for (const t of openTickets) {
-              let effOpenedAt = t.opened_at;
-              if (effOpenedAt && new Date(effOpenedAt).getTime() > new Date(closedAt).getTime()) {
-                effOpenedAt = closedAt;
-              }
-              await supabase.from('chat_tickets')
-                .update({ 
-                  status: 'resolved', 
-                  opened_at: effOpenedAt,
-                  closed_at: closedAt,
-                  resolution_summary: `Resolvido por ${agentName}`
-                })
-                .eq('id', t.id);
-            }
-          } else {
-            await supabase.from('chat_tickets').insert({
-              tenant_id: tenantInfo.id,
-              contact_id: realContactId,
-              status: 'resolved',
-              opened_at: conv?.last_message_at || closedAt,
-              closed_at: closedAt,
-              problem_description: 'Atendimento finalizado pelo atendente',
-              resolution_summary: `Resolvido por ${agentName}`,
-              metadata: { closed_by: agentName, instance_id: conv?.instance_id || resolvedInstId }
-            });
+            await supabase.from('chat_tickets')
+              .update({
+                status: 'resolved',
+                opened_at: effOpenedAt,
+                closed_at: closedAt,
+                resolution_summary: `Resolvido por ${agentName}`
+              })
+              .eq('id', t.id);
           }
-        } catch (err) {
-          console.error('Erro ao sincronizar chat_tickets:', err);
+        } else {
+          await supabase.from('chat_tickets').insert({
+            tenant_id: tenantInfo.id,
+            contact_id: realContactId,
+            status: 'resolved',
+            opened_at: conv?.last_message_at || closedAt,
+            closed_at: closedAt,
+            problem_description: 'Atendimento finalizado pelo atendente',
+            resolution_summary: `Resolvido por ${agentName}`,
+            metadata: { closed_by: agentName, instance_id: conv?.instance_id || resolvedInstId }
+          });
         }
+      } catch (err) {
+        console.error('Erro ao sincronizar chat_tickets:', err);
+      }
 
-        // 4. Atualização local do estado para TODOS os cards do contato sumirem da lista e fechar o chat ativo
-        set((state) => ({
-            contacts: state.contacts.map((c) => getRealContactId(c.id) === realContactId ? { 
-                ...c, 
-                assigned_to: null, 
-                conv_status: 'resolved', 
-                ai_paused: nextAiPaused, 
-                ai_paused_manually: nextAiPaused,
-                bot_status: nextAiPaused ? 'paused' : 'active',
-                bot_paused_until: isDefinitivelyPaused ? null : (nextAiPaused ? c.bot_paused_until : null),
-                snoozed_until: null,
-                snoozed_at: null,
-                snoozed_by: null
-            } : c),
-            activeChatId: (state.activeChatId && getRealContactId(state.activeChatId) === realContactId) ? null : state.activeChatId
-        }));
+      // 4. Atualização local do estado para TODOS os cards do contato sumirem da lista e fechar o chat ativo
+      set((state) => ({
+        contacts: state.contacts.map((c) => getRealContactId(c.id) === realContactId ? {
+          ...c,
+          assigned_to: null,
+          conv_status: 'resolved',
+          ai_paused: nextAiPaused,
+          ai_paused_manually: nextAiPaused,
+          bot_status: nextAiPaused ? 'paused' : 'active',
+          bot_paused_until: isDefinitivelyPaused ? null : (nextAiPaused ? c.bot_paused_until : null),
+          snoozed_until: null,
+          snoozed_at: null,
+          snoozed_by: null
+        } : c),
+        activeChatId: (state.activeChatId && getRealContactId(state.activeChatId) === realContactId) ? null : state.activeChatId
+      }));
 
     } catch (e) {
-        console.error('Erro ao resolver conversa:', e);
+      console.error('Erro ao resolver conversa:', e);
     }
   },
 
@@ -3306,7 +3306,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       contacts: state.contacts.filter((c) => c.id !== contactId),
       activeChatId: state.activeChatId === contactId ? null : state.activeChatId
     }));
-    
+
     try {
       const realId = getRealContactId(contactId);
       // Garantimos exclusão forte apagando mensagens via conversa antes de contatos, prevenindo falta de CASCADE
@@ -3325,70 +3325,70 @@ export const useChatStore = create<ChatState>((set, get) => ({
   togglePinContact: async (contactId, instanceId) => {
     const contact = get().contacts.find(c => c.id === contactId);
     if (!contact) return;
-    
+
     const tenant = get().tenantInfo;
     const state = get();
     // Resolvemos a instancia alvo para array
     const currentBox = state.activeChannelFilter || contact.instance_id || state.connectedInstanceName;
     const effectiveInstanceId = instanceId || currentBox;
-    
+
     let newPinned = [...(contact.pinned_instances || [])];
     const isCurrentlyPinned = contact.is_pinned || (effectiveInstanceId && newPinned.includes(effectiveInstanceId));
     const newStatus = !isCurrentlyPinned;
 
     if (effectiveInstanceId) {
-       if (newStatus) {
-          if (!newPinned.includes(effectiveInstanceId)) newPinned.push(effectiveInstanceId);
-       } else {
-          newPinned = newPinned.filter(id => id !== effectiveInstanceId);
-       }
+      if (newStatus) {
+        if (!newPinned.includes(effectiveInstanceId)) newPinned.push(effectiveInstanceId);
+      } else {
+        newPinned = newPinned.filter(id => id !== effectiveInstanceId);
+      }
     }
 
     // Atualiza otimista UI
     set((state) => ({
-      contacts: state.contacts.map((c) => c.id === contactId ? { 
-          ...c, 
-          is_pinned: newStatus,
-          pinned_instances: newPinned 
+      contacts: state.contacts.map((c) => c.id === contactId ? {
+        ...c,
+        is_pinned: newStatus,
+        pinned_instances: newPinned
       } : c)
     }));
 
     try {
       // 1. Atualiza na tabela Contacts (Legacy & Arrays)
-      await supabase.from('contacts').update({ 
-         is_pinned: newStatus,
-         pinned_instances: newPinned 
+      await supabase.from('contacts').update({
+        is_pinned: newStatus,
+        pinned_instances: newPinned
       }).eq('id', getRealContactId(contactId));
 
       // 2. Atualiza na tabela Conversations (Nova Arquitetura)
       if (tenant) {
-         const realContactId = getRealContactId(contactId);
-         const instId = getInstanceIdFromContact(contactId);
-         const resolvedInstId = await resolveInstanceUuid(tenant.id, instId);
-         let query = supabase.from('conversations')
-            .select('id')
-            .eq('contact_id', realContactId)
-            .eq('tenant_id', tenant.id);
-            
-         if (resolvedInstId) query = query.eq('instance_id', resolvedInstId);
+        const realContactId = getRealContactId(contactId);
+        const instId = getInstanceIdFromContact(contactId);
+        const resolvedInstId = await resolveInstanceUuid(tenant.id, instId);
+        let query = supabase.from('conversations')
+          .select('id')
+          .eq('contact_id', realContactId)
+          .eq('tenant_id', tenant.id);
 
-         const { data: conv } = await query
-            .order('last_message_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-            
-         if (conv) {
-            await supabase.from('conversations').update({ is_pinned: newStatus }).eq('id', conv.id);
-         }
+        if (resolvedInstId) query = query.eq('instance_id', resolvedInstId);
+
+        const { data: conv } = await query
+          .order('last_message_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (conv) {
+          await supabase.from('conversations').update({ is_pinned: newStatus }).eq('id', conv.id);
+        }
       }
     } catch (e) {
       console.error('Erro ao fixar contato no DB:', e);
       // Reverter alteração otimista
       set((state) => ({
-        contacts: state.contacts.map((c) => c.id === contactId ? { 
-            ...c, 
-            is_pinned: contact.is_pinned,
-            pinned_instances: contact.pinned_instances
+        contacts: state.contacts.map((c) => c.id === contactId ? {
+          ...c,
+          is_pinned: contact.is_pinned,
+          pinned_instances: contact.pinned_instances
         } : c)
       }));
     }
@@ -3403,10 +3403,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((state) => ({
       contacts: state.contacts.map((c) => c.id === contactId ? { ...c, is_favorite: newStatus } : c)
     }));
-    
+
     // Obter conversation. Pq favorites fica na conversation
     const tenant = get().tenantInfo;
-    if(tenant) {
+    if (tenant) {
       try {
         const realContactId = getRealContactId(contactId);
         const instId = getInstanceIdFromContact(contactId);
@@ -3414,14 +3414,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
         let query = supabase.from('conversations').select('id').eq('contact_id', realContactId).eq('tenant_id', tenant.id);
         if (resolvedInstId) query = query.eq('instance_id', resolvedInstId);
         const { data: conv } = await query.order('last_message_at', { ascending: false }).limit(1).maybeSingle();
-        if(conv) {
+        if (conv) {
           await supabase.from('conversations').update({ is_favorite: newStatus }).eq('id', conv.id);
         }
       } catch (e) {
         console.error('Erro no Favorite:', e);
-         set((state) => ({
-            contacts: state.contacts.map((c) => c.id === contactId ? { ...c, is_favorite: !newStatus } : c)
-         }));
+        set((state) => ({
+          contacts: state.contacts.map((c) => c.id === contactId ? { ...c, is_favorite: !newStatus } : c)
+        }));
       }
     }
   },
@@ -3436,7 +3436,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
       const { data } = await supabase.from('contacts').select('*').eq('id', getRealContactId(contactId)).single();
       if (data) rawBeforeState = data;
-    } catch (e) {}
+    } catch (e) { }
 
     // Atualização otimista local
     set((state) => ({
@@ -3467,41 +3467,41 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // UI Otimista
     set((state) => ({
       contacts: state.contacts.map(c => {
-         let isMatch = true;
-         if (activeChannelFilter) {
-            const currentBox = c.instance_id || state.connectedInstanceName;
-            if (currentBox !== activeChannelFilter && currentBox !== activeChannelName) {
-                // tenta fallback para url de evolution
-                const isEvoUrlMatch = c.instance_id && c.instance_id.includes(activeChannelFilter);
-                if (!isEvoUrlMatch) {
-                    isMatch = false;
-                }
+        let isMatch = true;
+        if (activeChannelFilter) {
+          const currentBox = c.instance_id || state.connectedInstanceName;
+          if (currentBox !== activeChannelFilter && currentBox !== activeChannelName) {
+            // tenta fallback para url de evolution
+            const isEvoUrlMatch = c.instance_id && c.instance_id.includes(activeChannelFilter);
+            if (!isEvoUrlMatch) {
+              isMatch = false;
             }
-         }
-         return isMatch ? { ...c, unread: 0 } : c;
+          }
+        }
+        return isMatch ? { ...c, unread: 0 } : c;
       })
     }));
-    
+
     const tenant = get().tenantInfo;
-    if(tenant) {
+    if (tenant) {
       try {
-         let query = supabase.from('conversations').update({ unread_count: 0 }).eq('tenant_id', tenant.id).gt('unread_count', 0);
-         
-         const resolvedActiveChannel = await resolveInstanceUuid(tenant.id, activeChannelFilter);
-         if (resolvedActiveChannel) {
-             query = query.eq('instance_id', resolvedActiveChannel);
-         }
-         
-         await query;
-      } catch(e) {
-         console.error('Erro ao marcar_todas_lidas: ', e);
+        let query = supabase.from('conversations').update({ unread_count: 0 }).eq('tenant_id', tenant.id).gt('unread_count', 0);
+
+        const resolvedActiveChannel = await resolveInstanceUuid(tenant.id, activeChannelFilter);
+        if (resolvedActiveChannel) {
+          query = query.eq('instance_id', resolvedActiveChannel);
+        }
+
+        await query;
+      } catch (e) {
+        console.error('Erro ao marcar_todas_lidas: ', e);
       }
     }
   },
 
   toggleUnread: async (contactId: string, currentUnread: number) => {
     const newUnread = currentUnread > 0 ? 0 : 1; // Alterna entre 0 (lida) e 1 (não lida)
-    
+
     // UI Otimista
     set((state) => ({
       contacts: state.contacts.map(c => c.id === contactId ? { ...c, unread: newUnread, isManuallyUnread: newUnread > 0 } : c)
@@ -3538,8 +3538,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const unreadMsgs = clientMsgs.slice(-unreadCount);
     const unreadIds = unreadMsgs
       .map(m => m.id)
-      .filter(id => 
-        typeof id === 'string' && 
+      .filter(id =>
+        typeof id === 'string' &&
         /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(id)
       );
 
@@ -3550,8 +3550,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     };
 
     set((s) => ({
-      contacts: s.contacts.map(c => c.id === contactId ? { 
-        ...c, 
+      contacts: s.contacts.map(c => c.id === contactId ? {
+        ...c,
         unread: 0,
         isManuallyUnread: false,
         messages: c.messages.map(m => unreadIds.includes(m.id) ? {
@@ -3570,13 +3570,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
       await query;
 
       if (unreadIds.length > 0) {
-          const { data: currentRecords } = await supabase.from('messages').select('id, raw_payload').in('id', unreadIds);
-          if (currentRecords) {
-             for (const record of currentRecords) {
-                 const newPayload = { ...((record as any).raw_payload || {}), read_receipt: readReceipt };
-                 await supabase.from('messages').update({ raw_payload: newPayload }).eq('id', record.id);
-             }
+        const { data: currentRecords } = await supabase.from('messages').select('id, raw_payload').in('id', unreadIds);
+        if (currentRecords) {
+          for (const record of currentRecords) {
+            const newPayload = { ...((record as any).raw_payload || {}), read_receipt: readReceipt };
+            await supabase.from('messages').update({ raw_payload: newPayload }).eq('id', record.id);
           }
+        }
       }
     } catch (e) {
       console.error('Erro ao marcar como lida:', e);
@@ -3584,115 +3584,115 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   fetchTenantLabels: async () => {
-     const tenant = get().tenantInfo;
-     if (!tenant) return;
-     try {
-         const { data, error } = await supabase.from('tenant_labels').select('*').eq('tenant_id', tenant.id);
-         if (!error && data) {
-             set({ tenantLabels: data });
-         }
-     } catch (e) {
-         console.error('Erro ao buscar labels do tenant', e);
-     }
-   },
-   
-   syncConversationLabelsWithTags: async (realContactId: string, tags: string[]) => {
-      const state = get();
-      const tenant = state.tenantInfo;
-      if (!tenant) return;
-      try {
-        const { data: convs } = await supabase
-          .from('conversations')
-          .select('id')
-          .eq('contact_id', realContactId)
-          .eq('tenant_id', tenant.id);
+    const tenant = get().tenantInfo;
+    if (!tenant) return;
+    try {
+      const { data, error } = await supabase.from('tenant_labels').select('*').eq('tenant_id', tenant.id);
+      if (!error && data) {
+        set({ tenantLabels: data });
+      }
+    } catch (e) {
+      console.error('Erro ao buscar labels do tenant', e);
+    }
+  },
 
-        if (convs && convs.length > 0) {
-          const convIds = convs.map(c => c.id);
-          
-          await supabase
-            .from('conversation_labels')
-            .delete()
-            .in('conversation_id', convIds);
+  syncConversationLabelsWithTags: async (realContactId: string, tags: string[]) => {
+    const state = get();
+    const tenant = state.tenantInfo;
+    if (!tenant) return;
+    try {
+      const { data: convs } = await supabase
+        .from('conversations')
+        .select('id')
+        .eq('contact_id', realContactId)
+        .eq('tenant_id', tenant.id);
 
-          if (tags && tags.length > 0) {
-            const insertRows = convIds.flatMap(convId => 
-              tags.map(tagId => ({
-                conversation_id: convId,
-                label_id: tagId
-              }))
-            );
-            if (insertRows.length > 0) {
-              await supabase.from('conversation_labels').insert(insertRows);
-            }
+      if (convs && convs.length > 0) {
+        const convIds = convs.map(c => c.id);
+
+        await supabase
+          .from('conversation_labels')
+          .delete()
+          .in('conversation_id', convIds);
+
+        if (tags && tags.length > 0) {
+          const insertRows = convIds.flatMap(convId =>
+            tags.map(tagId => ({
+              conversation_id: convId,
+              label_id: tagId
+            }))
+          );
+          if (insertRows.length > 0) {
+            await supabase.from('conversation_labels').insert(insertRows);
           }
         }
-      } catch (e) {
-        console.error('Erro ao sincronizar labels de conversas', e);
       }
-    },
+    } catch (e) {
+      console.error('Erro ao sincronizar labels de conversas', e);
+    }
+  },
 
-    assignLabelToConversation: async (contactId: string, labelId: string) => {
-       const state = get();
-       const tenant = state.tenantInfo;
-       if (!tenant) return;
-       const conv = state.contacts.find(c => c.id === contactId);
-       if (!conv) return;
+  assignLabelToConversation: async (contactId: string, labelId: string) => {
+    const state = get();
+    const tenant = state.tenantInfo;
+    if (!tenant) return;
+    const conv = state.contacts.find(c => c.id === contactId);
+    if (!conv) return;
 
-       const realContactId = getRealContactId(contactId);
+    const realContactId = getRealContactId(contactId);
 
-       const { data: contactData } = await supabase
-         .from('contacts')
-         .select('tags')
-         .eq('id', realContactId)
-         .single();
+    const { data: contactData } = await supabase
+      .from('contacts')
+      .select('tags')
+      .eq('id', realContactId)
+      .single();
 
-       let currentTags: string[] = [];
-       if (contactData && Array.isArray(contactData.tags)) {
-         currentTags = contactData.tags;
-       }
+    let currentTags: string[] = [];
+    if (contactData && Array.isArray(contactData.tags)) {
+      currentTags = contactData.tags;
+    }
 
-       if (!currentTags.includes(labelId)) {
-         currentTags = [...currentTags, labelId];
-         await supabase
-           .from('contacts')
-           .update({ tags: currentTags })
-           .eq('id', realContactId);
-         
-         await state.syncConversationLabelsWithTags(realContactId, currentTags);
-       }
+    if (!currentTags.includes(labelId)) {
+      currentTags = [...currentTags, labelId];
+      await supabase
+        .from('contacts')
+        .update({ tags: currentTags })
+        .eq('id', realContactId);
 
-       await state.fetchInitialData();
-    },
+      await state.syncConversationLabelsWithTags(realContactId, currentTags);
+    }
 
-    removeLabelFromConversation: async (contactId: string, labelId: string) => {
-       const state = get();
-       const tenant = state.tenantInfo;
-       if (!tenant) return;
+    await state.fetchInitialData();
+  },
 
-       const realContactId = getRealContactId(contactId);
+  removeLabelFromConversation: async (contactId: string, labelId: string) => {
+    const state = get();
+    const tenant = state.tenantInfo;
+    if (!tenant) return;
 
-       const { data: contactData } = await supabase
-         .from('contacts')
-         .select('tags')
-         .eq('id', realContactId)
-         .single();
+    const realContactId = getRealContactId(contactId);
 
-       if (contactData && Array.isArray(contactData.tags)) {
-         const currentTags = contactData.tags;
-         if (currentTags.includes(labelId)) {
-           const updatedTags = currentTags.filter((t: string) => t !== labelId);
-           await supabase
-             .from('contacts')
-             .update({ tags: updatedTags })
-             .eq('id', realContactId);
-           
-           await state.syncConversationLabelsWithTags(realContactId, updatedTags);
-         }
-       }
+    const { data: contactData } = await supabase
+      .from('contacts')
+      .select('tags')
+      .eq('id', realContactId)
+      .single();
 
-       await state.fetchInitialData();
-    },
+    if (contactData && Array.isArray(contactData.tags)) {
+      const currentTags = contactData.tags;
+      if (currentTags.includes(labelId)) {
+        const updatedTags = currentTags.filter((t: string) => t !== labelId);
+        await supabase
+          .from('contacts')
+          .update({ tags: updatedTags })
+          .eq('id', realContactId);
+
+        await state.syncConversationLabelsWithTags(realContactId, updatedTags);
+      }
+    }
+
+    await state.fetchInitialData();
+  },
 
   searchGlobalContacts: async (term: string) => {
     const state = get();
@@ -3702,126 +3702,127 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ isSearchingGlobally: true });
 
     try {
-        const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
-        let allowedInstances: string[] = [];
-        const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
-        if (allowedStr) {
-            try { allowedInstances = JSON.parse(allowedStr); } catch(e) {}
+      const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
+      let allowedInstances: string[] = [];
+      const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
+      if (allowedStr) {
+        try { allowedInstances = JSON.parse(allowedStr); } catch (e) { }
+      }
+
+      const { data: dbContacts, error: contactError } = await supabase
+        .from('contacts')
+        .select('*')
+        .eq('tenant_id', tenant.id)
+        .or(`name.ilike.%${term}%,custom_name.ilike.%${term}%,phone.ilike.%${term}%,whatsapp_jid.ilike.%${term}%`)
+        .limit(50);
+
+      if (contactError || !dbContacts || dbContacts.length === 0) {
+        set({ isSearchingGlobally: false });
+        return;
+      }
+
+      const contactIds = dbContacts.map(c => c.id);
+      const { data: dbConvs } = await supabase
+        .from('conversations')
+        .select('*, conversation_labels(label_id)')
+        .in('contact_id', contactIds)
+        .order('updated_at', { ascending: false });
+
+      const conversationIds = dbConvs?.map(cv => cv.id) || [];
+
+      const { data: dbMessages } = await supabase
+        .from('messages')
+        .select('conversation_id, text_content, message_type, timestamp, sender_type, status')
+        .in('conversation_id', conversationIds)
+        .order('timestamp', { ascending: false })
+        .limit(100);
+
+      const validContacts = dbContacts.filter(c => {
+        const conv = dbConvs?.find(cv => cv.contact_id === c.id);
+        const effectiveInstanceId = conv?.instance_id || c.instance_id;
+        const loggedEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
+        const isRonaldo = loggedEmail?.toLowerCase() === 'ronaldo.xpointsolucoes@gmail.com';
+        const isGlobalAdmin = isRonaldo || roleStr === 'owner' || roleStr === 'admin';
+
+        if (effectiveInstanceId && !isGlobalAdmin) {
+          if (Array.isArray(allowedInstances) && allowedInstances.length > 0) {
+            const matchInst = allowedInstances.some(inst =>
+              inst === effectiveInstanceId ||
+              instanceCache.getId(inst) === effectiveInstanceId ||
+              instanceCache.getName(inst) === effectiveInstanceId
+            );
+            if (!matchInst) return false;
+          } else if (roleStr === 'agent' || roleStr === 'Agente') {
+            return false;
+          }
         }
+        const jid = c.whatsapp_jid || '';
+        const phone = c.phone || '';
+        if (jid.includes('@lid') || jid.includes('undefined') || jid.includes('null')) return false;
+        if (phone === 'undefined' || phone === 'null' || !phone) return false;
+        const isGroup = jid.endsWith('@g.us');
+        if (phone.length > 15 && !phone.includes('+') && !isGroup) return false;
+        return true;
+      });
 
-        const { data: dbContacts, error: contactError } = await supabase
-            .from('contacts')
-            .select('*')
-            .eq('tenant_id', tenant.id)
-            .or(`name.ilike.%${term}%,custom_name.ilike.%${term}%,phone.ilike.%${term}%,whatsapp_jid.ilike.%${term}%`)
-            .limit(50);
+      const newContacts: ContactType[] = validContacts.map(dbC => {
+        const targetInstanceId = state.activeChannelFilter || dbC.instance_id || state.connectedInstanceName;
+        const compositeId = targetInstanceId ? `${dbC.id}_${targetInstanceId}` : dbC.id;
 
-        if (contactError || !dbContacts || dbContacts.length === 0) {
-            set({ isSearchingGlobally: false });
-            return;
+        const conv = dbConvs?.find(cv => cv.contact_id === dbC.id && cv.instance_id === targetInstanceId);
+        const msgs = conv ? (dbMessages?.filter(m => m.conversation_id === conv.id) || []) : [];
+
+        const mappedMessages: MessageType[] = msgs.map((m: any) => ({
+          id: m.id || Math.random().toString(),
+          text: m.text_content,
+          sender: m.sender_type,
+          timestamp: new Date(m.timestamp),
+          mediaType: m.message_type,
+          status: m.status
+        })).sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+
+        return {
+          ...dbC,
+          id: compositeId,
+          avatar: dbC.profile_picture_url || '',
+          messages: mappedMessages,
+          unread: conv?.unread_count || 0,
+          lastMsgTimestamp: (conv?.last_message_at || conv?.updated_at) ? new Date(conv.last_message_at || conv.updated_at).getTime() : new Date(dbC.created_at).getTime(),
+          is_pinned: conv?.is_pinned || false,
+          is_favorite: conv?.is_favorite || false,
+          conv_status: conv?.status || (mappedMessages.length > 0 ? 'pending' : 'no_conversation'),
+          snoozed_until: conv?.snoozed_until,
+          snoozed_at: conv?.snoozed_at,
+          snoozed_by: conv?.snoozed_by,
+          priority: conv?.priority,
+          assigned_to: conv?.assigned_to,
+          conv_labels: conv?.conversation_labels || [],
+          instance_id: targetInstanceId,
+          isSearchResult: true
+        } as ContactType;
+      });
+
+      set(state => {
+        const existingContacts = [...state.contacts];
+
+        let changed = false;
+        newContacts.forEach(nc => {
+          const idx = existingContacts.findIndex(c => c.id === nc.id);
+          if (idx === -1) {
+            existingContacts.push(nc);
+            changed = true;
+          }
+        });
+        // Ordenar contatos para que os recém pesquisados possam aparecer no topo caso tenham lastMsgTimestamp maior
+        if (changed) {
+          existingContacts.sort((a, b) => b.lastMsgTimestamp - a.lastMsgTimestamp);
         }
-
-        const contactIds = dbContacts.map(c => c.id);
-        const { data: dbConvs } = await supabase
-            .from('conversations')
-            .select('*, conversation_labels(label_id)')
-            .in('contact_id', contactIds)
-            .order('updated_at', { ascending: false });
-
-        const conversationIds = dbConvs?.map(cv => cv.id) || [];
-
-        const { data: dbMessages } = await supabase
-            .from('messages')
-            .select('conversation_id, text_content, message_type, timestamp, sender_type, status')
-            .in('conversation_id', conversationIds)
-            .order('timestamp', { ascending: false })
-            .limit(100);
-
-        const validContacts = dbContacts.filter(c => {
-             const conv = dbConvs?.find(cv => cv.contact_id === c.id);
-             const effectiveInstanceId = conv?.instance_id || c.instance_id;
-             const loggedEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
-             const isRonaldo = loggedEmail?.toLowerCase() === 'ronaldo.xpointsolucoes@gmail.com';
-             const isGlobalAdmin = isRonaldo || roleStr === 'owner' || roleStr === 'admin';
-             
-             if (effectiveInstanceId && !isGlobalAdmin) {
-                 if (Array.isArray(allowedInstances) && allowedInstances.length > 0) {
-                    const matchInst = allowedInstances.some(inst => 
-                      inst === effectiveInstanceId || 
-                      instanceCache.getId(inst) === effectiveInstanceId || 
-                      instanceCache.getName(inst) === effectiveInstanceId
-                    );
-                    if (!matchInst) return false;
-                 } else if (roleStr === 'agent' || roleStr === 'Agente') {
-                    return false;
-                 }
-             }
-             const jid = c.whatsapp_jid || '';
-             const phone = c.phone || '';
-             if (jid.includes('@lid') || jid.includes('undefined') || jid.includes('null')) return false;
-             if (phone === 'undefined' || phone === 'null' || !phone) return false;
-             const isGroup = jid.endsWith('@g.us');
-             if (phone.length > 15 && !phone.includes('+') && !isGroup) return false;
-             return true;
-        });
-
-        const newContacts: ContactType[] = validContacts.map(dbC => {
-            const targetInstanceId = state.activeChannelFilter || dbC.instance_id || state.connectedInstanceName;
-            const compositeId = targetInstanceId ? `${dbC.id}_${targetInstanceId}` : dbC.id;
-            
-            const conv = dbConvs?.find(cv => cv.contact_id === dbC.id && cv.instance_id === targetInstanceId);
-            const msgs = conv ? (dbMessages?.filter(m => m.conversation_id === conv.id) || []) : [];
-            
-            const mappedMessages: MessageType[] = msgs.map((m: any) => ({
-                id: m.id || Math.random().toString(),
-                text: m.text_content,
-                sender: m.sender_type,
-                timestamp: new Date(m.timestamp),
-                mediaType: m.message_type,
-                status: m.status
-            })).sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-
-            return {
-                ...dbC,
-                id: compositeId,
-                avatar: dbC.profile_picture_url || '',
-                messages: mappedMessages,
-                unread: conv?.unread_count || 0,
-                lastMsgTimestamp: (conv?.last_message_at || conv?.updated_at) ? new Date(conv.last_message_at || conv.updated_at).getTime() : new Date(dbC.created_at).getTime(),
-                is_pinned: conv?.is_pinned || false,
-                is_favorite: conv?.is_favorite || false,
-                conv_status: conv?.status || (mappedMessages.length > 0 ? 'pending' : 'no_conversation'),
-                snoozed_until: conv?.snoozed_until,
-                snoozed_at: conv?.snoozed_at,
-                snoozed_by: conv?.snoozed_by,
-                priority: conv?.priority,
-                assigned_to: conv?.assigned_to,
-                conv_labels: conv?.conversation_labels || [],
-                instance_id: targetInstanceId,
-                isSearchResult: true
-            } as ContactType;
-        });
-
-        set(state => {
-            const existingContacts = [...state.contacts];
-            let changed = false;
-            newContacts.forEach(nc => {
-                const idx = existingContacts.findIndex(c => c.id === nc.id);
-                if (idx === -1) {
-                    existingContacts.push(nc);
-                    changed = true;
-                }
-            });
-            // Ordenar contatos para que os recém pesquisados possam aparecer no topo caso tenham lastMsgTimestamp maior
-            if (changed) {
-                existingContacts.sort((a, b) => b.lastMsgTimestamp - a.lastMsgTimestamp);
-            }
-            return changed ? { contacts: existingContacts, isSearchingGlobally: false } : { isSearchingGlobally: false };
-        });
+        return changed ? { contacts: existingContacts, isSearchingGlobally: false } : { isSearchingGlobally: false };
+      });
 
     } catch (e) {
-        console.error("Global search failed", e);
-        set({ isSearchingGlobally: false });
+      console.error("Global search failed", e);
+      set({ isSearchingGlobally: false });
     }
   },
 
@@ -3841,391 +3842,391 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }, 5000);
 
     try {
-        // Disparar buscas auxiliares de forma concorrente e resiliente em background
-        const supportPromises = Promise.allSettled([
-          get().fetchAutomations(),
-          get().fetchTenantLabels(),
-          get().fetchQuickReplies(),
-          get().fetchAppointments(),
-          get().fetchCrmBoards(),
-          (async () => {
-            try {
-              const email = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
-              if (email) {
-                const { data: userData } = await supabase.from('tenant_users')
-                  .select('settings')
-                  .eq('email', email)
-                  .eq('tenant_id', tenant.id)
-                  .maybeSingle();
-                  
-                if (userData && userData.settings) {
-                  set({ userSettings: userData.settings });
-                }
+      // Disparar buscas auxiliares de forma concorrente e resiliente em background
+      const supportPromises = Promise.allSettled([
+        get().fetchAutomations(),
+        get().fetchTenantLabels(),
+        get().fetchQuickReplies(),
+        get().fetchAppointments(),
+        get().fetchCrmBoards(),
+        (async () => {
+          try {
+            const email = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
+            if (email) {
+              const { data: userData } = await supabase.from('tenant_users')
+                .select('settings')
+                .eq('email', email)
+                .eq('tenant_id', tenant.id)
+                .maybeSingle();
+
+              if (userData && userData.settings) {
+                set({ userSettings: userData.settings });
               }
-            } catch (err) {
-              console.warn('Erro ao carregar settings do usuario:', err);
             }
-          })(),
-          (async () => {
-            try {
-              const { data: appVersionData } = await supabase.from('app_version').select('*').order('deploy_date', { ascending: false }).limit(1).maybeSingle();
-              if (appVersionData) {
-                set({ appVersion: { version: appVersionData.version, deploy_date: appVersionData.deploy_date } });
+          } catch (err) {
+            console.warn('Erro ao carregar settings do usuario:', err);
+          }
+        })(),
+        (async () => {
+          try {
+            const { data: appVersionData } = await supabase.from('app_version').select('*').order('deploy_date', { ascending: false }).limit(1).maybeSingle();
+            if (appVersionData) {
+              set({ appVersion: { version: appVersionData.version, deploy_date: appVersionData.deploy_date } });
+            }
+          } catch (err) {
+            console.warn('Erro ao carregar versao do app:', err);
+          }
+        })()
+      ]);
+
+      // 1. Puxa as conversas recentes, garantindo a mesma ordem do WhatsApp Web
+      let convQuery = supabase.from('conversations')
+        .select('*, conversation_labels(tenant_labels(*))')
+        .eq('tenant_id', tenant.id);
+
+      const activeChannel = get().activeChannelFilter;
+      if (activeChannel) {
+        const resolvedChannelUuid = instanceCache.getId(activeChannel) || (await resolveInstanceUuid(tenant.id, activeChannel)) || activeChannel;
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(resolvedChannelUuid);
+        if (isUuid) {
+          convQuery = convQuery.eq('instance_id', resolvedChannelUuid);
+        }
+      }
+
+      // Puxa até 300 conversas mais recentes para carregamento instantâneo da sidebar
+      const { data: dbConvs } = await convQuery
+        .order('is_pinned', { ascending: false })
+        .order('last_message_at', { ascending: false })
+        .limit(300);
+
+      if (!dbConvs || dbConvs.length === 0) {
+        await supportPromises;
+        set({ isChannelLoading: false });
+        return;
+      }
+
+      const contactIds = dbConvs.map(cv => cv.contact_id);
+
+      // 2. Puxa os contatos em Lotes (Chunks) PARALELIZADOS com Promise.all para máxima performance
+      const chunkSize = 150;
+      const chunkPromises = [];
+      for (let i = 0; i < contactIds.length; i += chunkSize) {
+        const chunk = contactIds.slice(i, i + chunkSize);
+        chunkPromises.push(
+          supabase.from('contacts')
+            .select('*')
+            .eq('tenant_id', tenant.id)
+            .in('id', chunk)
+        );
+      }
+
+      const chunkResults = await Promise.all(chunkPromises);
+      let dbContacts: any[] = [];
+      for (const res of chunkResults) {
+        if (res.data) {
+          dbContacts = dbContacts.concat(res.data);
+        }
+        if (res.error) {
+          console.warn('Erro ao buscar dbContacts chunk', res.error);
+        }
+      }
+
+      // Puxar também contatos de todos os grupos de WhatsApp ativados nas caixas
+      const rawInstsForGroups = get().rawInstances || [];
+      const enabledGroupJids = new Set<string>();
+      rawInstsForGroups.forEach((inst: any) => {
+        if (Array.isArray(inst.settings?.enabled_groups)) {
+          inst.settings.enabled_groups.forEach((jid: string) => {
+            if (jid && jid.endsWith('@g.us')) enabledGroupJids.add(jid);
+          });
+        }
+      });
+
+      if (enabledGroupJids.size > 0) {
+        try {
+          const { data: grpContacts } = await supabase
+            .from('contacts')
+            .select('*')
+            .eq('tenant_id', tenant.id)
+            .in('whatsapp_jid', Array.from(enabledGroupJids));
+
+          if (grpContacts && grpContacts.length > 0) {
+            grpContacts.forEach(gc => {
+              if (!dbContacts.some(c => c.id === gc.id || c.whatsapp_jid === gc.whatsapp_jid)) {
+                dbContacts.push(gc);
               }
-            } catch (err) {
-              console.warn('Erro ao carregar versao do app:', err);
-            }
-          })()
-        ]);
+            });
+          }
+        } catch (e) {
+          console.warn('Erro ao carregar contatos de grupos habilitados:', e);
+        }
+      }
 
-        // 1. Puxa as conversas recentes, garantindo a mesma ordem do WhatsApp Web
-        let convQuery = supabase.from('conversations')
-           .select('*, conversation_labels(tenant_labels(*))')
-           .eq('tenant_id', tenant.id);
-           
-        const activeChannel = get().activeChannelFilter;
-        if (activeChannel) {
-           const resolvedChannelUuid = instanceCache.getId(activeChannel) || (await resolveInstanceUuid(tenant.id, activeChannel)) || activeChannel;
-           const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(resolvedChannelUuid);
-           if (isUuid) {
-              convQuery = convQuery.eq('instance_id', resolvedChannelUuid);
-           }
+      // Puxar tarefas CRM ativas para popular reativamente os contatos de imediato
+      let dbActiveTasks: any[] = [];
+      try {
+        const { data } = await supabase.from('contact_notes')
+          .select('*')
+          .eq('tenant_id', tenant.id)
+          .eq('is_task', true)
+          .eq('task_completed', false);
+        if (data) dbActiveTasks = data;
+      } catch (e) {
+        console.warn('Erro ao carregar active CRM tasks:', e);
+      }
+
+      // Aguarda a conclusão das buscas auxiliares de apoio
+      await supportPromises;
+
+      if (dbContacts && dbContacts.length > 0) {
+        // RBAC: Se for agente, só carrega contatos de instâncias permitidas
+        let allowedInstances: string[] = [];
+        const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
+        const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
+        const loggedEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
+        const isRonaldo = loggedEmail?.toLowerCase() === 'ronaldo.xpointsolucoes@gmail.com';
+        if (allowedStr) {
+          try { allowedInstances = JSON.parse(allowedStr); } catch (e) { }
         }
 
-        // Puxa até 300 conversas mais recentes para carregamento instantâneo da sidebar
-        const { data: dbConvs } = await convQuery
-           .order('is_pinned', { ascending: false })
-           .order('last_message_at', { ascending: false })
-           .limit(300);
-           
-        if (!dbConvs || dbConvs.length === 0) {
-           await supportPromises;
-           set({ isChannelLoading: false });
-           return;
-        }
-
-        const contactIds = dbConvs.map(cv => cv.contact_id);
-
-        // 2. Puxa os contatos em Lotes (Chunks) PARALELIZADOS com Promise.all para máxima performance
-        const chunkSize = 150;
-        const chunkPromises = [];
-        for (let i = 0; i < contactIds.length; i += chunkSize) {
-            const chunk = contactIds.slice(i, i + chunkSize);
-            chunkPromises.push(
-                supabase.from('contacts')
-                    .select('*')
-                    .eq('tenant_id', tenant.id)
-                    .in('id', chunk)
-            );
-        }
-
-        const chunkResults = await Promise.all(chunkPromises);
-        let dbContacts: any[] = [];
-        for (const res of chunkResults) {
-            if (res.data) {
-                dbContacts = dbContacts.concat(res.data);
-            }
-            if (res.error) {
-                console.warn('Erro ao buscar dbContacts chunk', res.error);
-            }
-        }
-
-        // Puxar também contatos de todos os grupos de WhatsApp ativados nas caixas
-        const rawInstsForGroups = get().rawInstances || [];
-        const enabledGroupJids = new Set<string>();
-        rawInstsForGroups.forEach((inst: any) => {
-           if (Array.isArray(inst.settings?.enabled_groups)) {
-              inst.settings.enabled_groups.forEach((jid: string) => {
-                 if (jid && jid.endsWith('@g.us')) enabledGroupJids.add(jid);
-              });
-           }
+        // VALIDAÇÃO INTELIGENTE APPWEB: Filtra contatos que não tem telefone válido ou são LIDs de sistema (fantasma)
+        const validContacts = dbContacts.filter(c => {
+          const jid = c.whatsapp_jid || '';
+          const phone = c.phone || '';
+          if (jid.includes('@lid') || jid.includes('undefined') || jid.includes('null')) return false; // Bloqueia LIDs e undefined/null
+          if (phone === 'undefined' || phone === 'null' || !phone) return false;
+          const isGroup = jid.endsWith('@g.us');
+          if (phone.length > 15 && !phone.includes('+') && !isGroup) return false; // Provável ID mascarado
+          return true;
         });
 
-        if (enabledGroupJids.size > 0) {
-           try {
-              const { data: grpContacts } = await supabase
-                 .from('contacts')
-                 .select('*')
-                 .eq('tenant_id', tenant.id)
-                 .in('whatsapp_jid', Array.from(enabledGroupJids));
-              
-              if (grpContacts && grpContacts.length > 0) {
-                 grpContacts.forEach(gc => {
-                    if (!dbContacts.some(c => c.id === gc.id || c.whatsapp_jid === gc.whatsapp_jid)) {
-                       dbContacts.push(gc);
-                    }
-                 });
+        // RBAC: Filtra as conversas pela instância permitida
+        const isGlobalAdmin = roleStr === 'owner' || roleStr === 'admin';
+        const validConvs = dbConvs.filter(conv => {
+          const dbC = validContacts.find(c => c.id === conv.contact_id);
+          if (!dbC) return false; // Ignora se perder integridade ou for LID bloqueado
+
+          const effectiveInstanceId = conv.instance_id || dbC.instance_id;
+
+          // --- FILTRO DE CONVERSAS FANTASMAS ---
+          // Ignorar conversas vazias (sem mensagens nem data de interacao) no carregamento inicial para evitar poluição no painel.
+          const isEmpty = !conv.last_message_preview && !conv.last_message_at && (conv.unread_count === 0 || !conv.unread_count);
+          if (isEmpty) {
+            return false;
+          }
+          // --- RBAC CENTRALIZADO E PROTEÇÃO DE CAIXAS ---
+          if (effectiveInstanceId && !hasUserAccessToInstance(effectiveInstanceId)) {
+            return false;
+          }
+          return true;
+        });
+
+        set((s) => {
+          const newContacts = [...s.contacts];
+
+          validConvs.forEach(conv => {
+            const dbC = validContacts.find(c => c.id === conv.contact_id);
+            if (!dbC) return; // Segurança extra
+
+            const phoneMatch = dbC.phone || (dbC.whatsapp_jid ? dbC.whatsapp_jid.split('@')[0] : null);
+            const effectiveInst = conv.instance_id || dbC.instance_id || 'default';
+            const compositeId = dbC.id + '_' + effectiveInst;
+
+            const idx = newContacts.findIndex(c => {
+              if (c.id === compositeId) return true;
+              const cInst = c.instance_id || (c.id.includes('_') ? c.id.split('_')[1] : null);
+              if (cInst && effectiveInst && cInst !== 'default' && effectiveInst !== 'default' && cInst !== effectiveInst) {
+                return false;
               }
-           } catch(e) {
-              console.warn('Erro ao carregar contatos de grupos habilitados:', e);
-           }
-        }
-
-        // Puxar tarefas CRM ativas para popular reativamente os contatos de imediato
-         let dbActiveTasks: any[] = [];
-         try {
-           const { data } = await supabase.from('contact_notes')
-              .select('*')
-              .eq('tenant_id', tenant.id)
-              .eq('is_task', true)
-              .eq('task_completed', false);
-           if (data) dbActiveTasks = data;
-         } catch (e) {
-           console.warn('Erro ao carregar active CRM tasks:', e);
-         }
-
-         // Aguarda a conclusão das buscas auxiliares de apoio
-         await supportPromises;
-
-        if (dbContacts && dbContacts.length > 0) {
-           // RBAC: Se for agente, só carrega contatos de instâncias permitidas
-           let allowedInstances: string[] = [];
-           const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
-           const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
-           const loggedEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
-           const isRonaldo = loggedEmail?.toLowerCase() === 'ronaldo.xpointsolucoes@gmail.com';
-           if (allowedStr) {
-               try { allowedInstances = JSON.parse(allowedStr); } catch(e) {}
-           }
-
-           // VALIDAÇÃO INTELIGENTE APPWEB: Filtra contatos que não tem telefone válido ou são LIDs de sistema (fantasma)
-           const validContacts = dbContacts.filter(c => {
-               const jid = c.whatsapp_jid || '';
-               const phone = c.phone || '';
-               if (jid.includes('@lid') || jid.includes('undefined') || jid.includes('null')) return false; // Bloqueia LIDs e undefined/null
-               if (phone === 'undefined' || phone === 'null' || !phone) return false;
-               const isGroup = jid.endsWith('@g.us');
-               if (phone.length > 15 && !phone.includes('+') && !isGroup) return false; // Provável ID mascarado
-               return true;
-           });
-
-           // RBAC: Filtra as conversas pela instância permitida
-           const isGlobalAdmin = roleStr === 'owner' || roleStr === 'admin';
-           const validConvs = dbConvs.filter(conv => {
-               const dbC = validContacts.find(c => c.id === conv.contact_id);
-               if (!dbC) return false; // Ignora se perder integridade ou for LID bloqueado
-               
-               const effectiveInstanceId = conv.instance_id || dbC.instance_id;
-               
-               // --- FILTRO DE CONVERSAS FANTASMAS ---
-                // Ignorar conversas vazias (sem mensagens nem data de interacao) no carregamento inicial para evitar poluição no painel.
-                const isEmpty = !conv.last_message_preview && !conv.last_message_at && (conv.unread_count === 0 || !conv.unread_count);
-                if (isEmpty) {
-                    return false;
-                }
-                // --- RBAC CENTRALIZADO E PROTEÇÃO DE CAIXAS ---
-                if (effectiveInstanceId && !hasUserAccessToInstance(effectiveInstanceId)) {
-                    return false;
-                }
-                return true;
+              return getRealContactId(c.id) === dbC.id || (c.phone && phoneMatch && isSameBrPhone(c.phone, phoneMatch));
             });
 
-           set((s) => {
-               const newContacts = [...s.contacts];
-               
-               validConvs.forEach(conv => {
-                  const dbC = validContacts.find(c => c.id === conv.contact_id);
-                  if (!dbC) return; // Segurança extra
+            const tname = tenant?.name || '';
+            let finalName = dbC.custom_name || dbC.name || dbC.push_name || phoneMatch || dbC.phone;
+            if (!dbC.custom_name) {
+              finalName = sanitizeContactName(finalName, phoneMatch || dbC.phone, tname) || finalName;
+            }
 
-                  const phoneMatch = dbC.phone || (dbC.whatsapp_jid ? dbC.whatsapp_jid.split('@')[0] : null);
-                  const effectiveInst = conv.instance_id || dbC.instance_id || 'default';
-                  const compositeId = dbC.id + '_' + effectiveInst;
-                  
-                  const idx = newContacts.findIndex(c => {
-                       if (c.id === compositeId) return true;
-                       const cInst = c.instance_id || (c.id.includes('_') ? c.id.split('_')[1] : null);
-                       if (cInst && effectiveInst && cInst !== 'default' && effectiveInst !== 'default' && cInst !== effectiveInst) {
-                           return false;
-                       }
-                       return getRealContactId(c.id) === dbC.id || (c.phone && phoneMatch && isSameBrPhone(c.phone, phoneMatch));
-                   });
-                  
-                  const tname = tenant?.name || '';
-                  let finalName = dbC.custom_name || dbC.name || dbC.push_name || phoneMatch || dbC.phone;
-                  if (!dbC.custom_name) {
-                     finalName = sanitizeContactName(finalName, phoneMatch || dbC.phone, tname) || finalName;
-                  }
-                  
-                  const fallbackAvatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(finalName)}&background=random&color=fff`;
-                  
-                  const preview = conv.last_message_preview || '';
-                  const unread = conv.unread_count || 0;
-                  const isFavorite = conv.is_favorite || false;
-                  // Garante a prioridade absoluta pro is_pinned da conversa (já que WA fixa conversas, não contatos globalmente)
-                  const isPinned = conv.is_pinned !== undefined ? conv.is_pinned : dbC.is_pinned;
-                  // Se não tiver last_message_at (muito raro), usa a data de criação do contato
-                  const ts = conv.last_message_at ? new Date(conv.last_message_at).getTime() : new Date(dbC.created_at).getTime();
+            const fallbackAvatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(finalName)}&background=random&color=fff`;
 
-                  if (idx !== -1) {
-                     const existing = newContacts[idx];
-                     const finalCustomName = dbC.custom_name || existing.custom_name;
-                     let finalName = finalCustomName || dbC.name || existing.name;
-                     if (!finalCustomName) {
-                        finalName = sanitizeContactName(finalName, phoneMatch || dbC.phone, tname) || finalName;
-                     }
-                     
-                     const avatarFallback = `https://ui-avatars.com/api/?name=${encodeURIComponent(finalName || dbC.phone)}&background=random&color=fff`;
-                     
-                     // validConvs está ordenado por last_message_at DESC.
-                     // Se o contato já existe no array, existing possui a conversa MAIS RECENTE.
-                     // Não devemos sobrescrever conv_id e conv_status com conversas mais antigas.
-                     const isExistingNewer = (existing.lastMsgTimestamp || 0) >= ts;
+            const preview = conv.last_message_preview || '';
+            const unread = conv.unread_count || 0;
+            const isFavorite = conv.is_favorite || false;
+            // Garante a prioridade absoluta pro is_pinned da conversa (já que WA fixa conversas, não contatos globalmente)
+            const isPinned = conv.is_pinned !== undefined ? conv.is_pinned : dbC.is_pinned;
+            // Se não tiver last_message_at (muito raro), usa a data de criação do contato
+            const ts = conv.last_message_at ? new Date(conv.last_message_at).getTime() : new Date(dbC.created_at).getTime();
 
-                     newContacts[idx] = {
-                        ...existing,
-                        ...dbC,
-                        id: existing.id || compositeId,
-                        custom_name: finalCustomName,
-                        name: finalName,
-                        avatar: dbC.profile_picture_url || (existing.avatar?.includes('ui-avatars') ? avatarFallback : (existing.avatar || avatarFallback)),
-                        unread: isExistingNewer ? (existing.unread > 0 ? existing.unread : Math.max(unread, existing.unread || 0)) : Math.max(unread, existing.unread || 0),
-                        is_favorite: existing.is_favorite || isFavorite,
-                        is_pinned: existing.is_pinned || isPinned,
-                        lastMsgTimestamp: isExistingNewer ? existing.lastMsgTimestamp : ts,
-                        messages: existing.messages || [],
-                        conv_status: isExistingNewer ? (existing.conv_status || conv.status) : conv.status,
-                        snoozed_until: isExistingNewer ? existing.snoozed_until : conv.snoozed_until,
-                        snoozed_at: isExistingNewer ? existing.snoozed_at : conv.snoozed_at,
-                        snoozed_by: isExistingNewer ? existing.snoozed_by : conv.snoozed_by,
-                        priority: isExistingNewer ? existing.priority : conv.priority,
-                        assigned_to: isExistingNewer ? existing.assigned_to : conv.assigned_to,
-                        conv_labels: conv.conversation_labels ? conv.conversation_labels.map((cl: any) => cl.tenant_labels).filter(Boolean) : existing.conv_labels || [],
-                        instance_id: conv.instance_id || dbC.instance_id || existing.instance_id || null,
-                        conv_id: isExistingNewer ? existing.conv_id : conv.id,
-                        ai_paused: isExistingNewer ? (existing.ai_paused || dbC.bot_status === 'paused') : (dbC.bot_status === 'paused' || conv.ai_paused || false),
-                        ai_paused_manually: isExistingNewer ? (existing.ai_paused_manually || dbC.bot_status === 'paused') : (dbC.bot_status === 'paused' || conv.ai_paused_manually || false),
-                        bot_status: dbC.bot_status || (conv.ai_paused ? 'paused' : 'active'),
-                        bot_paused_until: dbC.bot_paused_until || null
-                     };
-                     
-                     // Injeta um preview fake se messages tiver vazio e tem preview no banco 
-                     if (newContacts[idx].messages.length === 0 && preview) {
-                        newContacts[idx].messages = [{
-                           id: 'preview-' + conv.id,
-                           text: preview,
-                           sender: 'client',
-                           timestamp: new Date(ts)
-                        }];
-                     }
-                  } else {
-                     const finalCustomName = dbC.custom_name;
-                     let finalName = finalCustomName || dbC.name || dbC.push_name || phoneMatch || dbC.phone;
-                     if (!finalCustomName) {
-                        finalName = sanitizeContactName(finalName, phoneMatch || dbC.phone, tname) || finalName;
-                     }
-                     const avatarFallback = `https://ui-avatars.com/api/?name=${encodeURIComponent(finalName || dbC.phone)}&background=random&color=fff`;
+            if (idx !== -1) {
+              const existing = newContacts[idx];
+              const finalCustomName = dbC.custom_name || existing.custom_name;
+              let finalName = finalCustomName || dbC.name || existing.name;
+              if (!finalCustomName) {
+                finalName = sanitizeContactName(finalName, phoneMatch || dbC.phone, tname) || finalName;
+              }
 
-                     newContacts.push({
-                        ...dbC,
-                        id: compositeId,
-                        custom_name: finalCustomName,
-                        name: finalName,
-                        avatar: dbC.profile_picture_url || avatarFallback,
-                        messages: preview ? [{ id: 'preview-' + conv.id, text: preview, sender: 'client', timestamp: new Date(ts) }] : [],
-                        unread: unread,
-                        is_favorite: isFavorite,
-                        is_pinned: isPinned,
-                        lastMsgTimestamp: ts,
-                        timestamp: ts,
-                        conv_status: conv.status,
-                        snoozed_until: conv.snoozed_until,
-                        snoozed_at: conv.snoozed_at,
-                        snoozed_by: conv.snoozed_by,
-                        priority: conv.priority,
-                        assigned_to: conv.assigned_to,
-                        instance_id: conv.instance_id || dbC.instance_id || null,
-                        conv_id: conv.id,
-                        ai_paused: dbC.bot_status === 'paused' ? true : (conv.ai_paused || false),
-                        ai_paused_manually: dbC.bot_status === 'paused' ? true : (conv.ai_paused_manually || false),
-                        bot_status: dbC.bot_status || (conv.ai_paused ? 'paused' : 'active'),
-                        bot_paused_until: dbC.bot_paused_until || null
-                      });
-                   }
+              const avatarFallback = `https://ui-avatars.com/api/?name=${encodeURIComponent(finalName || dbC.phone)}&background=random&color=fff`;
+
+              // validConvs está ordenado por last_message_at DESC.
+              // Se o contato já existe no array, existing possui a conversa MAIS RECENTE.
+              // Não devemos sobrescrever conv_id e conv_status com conversas mais antigas.
+              const isExistingNewer = (existing.lastMsgTimestamp || 0) >= ts;
+
+              newContacts[idx] = {
+                ...existing,
+                ...dbC,
+                id: existing.id || compositeId,
+                custom_name: finalCustomName,
+                name: finalName,
+                avatar: dbC.profile_picture_url || (existing.avatar?.includes('ui-avatars') ? avatarFallback : (existing.avatar || avatarFallback)),
+                unread: isExistingNewer ? (existing.unread > 0 ? existing.unread : Math.max(unread, existing.unread || 0)) : Math.max(unread, existing.unread || 0),
+                is_favorite: existing.is_favorite || isFavorite,
+                is_pinned: existing.is_pinned || isPinned,
+                lastMsgTimestamp: isExistingNewer ? existing.lastMsgTimestamp : ts,
+                messages: existing.messages || [],
+                conv_status: isExistingNewer ? (existing.conv_status || conv.status) : conv.status,
+                snoozed_until: isExistingNewer ? existing.snoozed_until : conv.snoozed_until,
+                snoozed_at: isExistingNewer ? existing.snoozed_at : conv.snoozed_at,
+                snoozed_by: isExistingNewer ? existing.snoozed_by : conv.snoozed_by,
+                priority: isExistingNewer ? existing.priority : conv.priority,
+                assigned_to: isExistingNewer ? existing.assigned_to : conv.assigned_to,
+                conv_labels: conv.conversation_labels ? conv.conversation_labels.map((cl: any) => cl.tenant_labels).filter(Boolean) : existing.conv_labels || [],
+                instance_id: conv.instance_id || dbC.instance_id || existing.instance_id || null,
+                conv_id: isExistingNewer ? existing.conv_id : conv.id,
+                ai_paused: isExistingNewer ? (existing.ai_paused || dbC.bot_status === 'paused') : (dbC.bot_status === 'paused' || conv.ai_paused || false),
+                ai_paused_manually: isExistingNewer ? (existing.ai_paused_manually || dbC.bot_status === 'paused') : (dbC.bot_status === 'paused' || conv.ai_paused_manually || false),
+                bot_status: dbC.bot_status || (conv.ai_paused ? 'paused' : 'active'),
+                bot_paused_until: dbC.bot_paused_until || null
+              };
+
+              // Injeta um preview fake se messages tiver vazio e tem preview no banco 
+              if (newContacts[idx].messages.length === 0 && preview) {
+                newContacts[idx].messages = [{
+                  id: 'preview-' + conv.id,
+                  text: preview,
+                  sender: 'client',
+                  timestamp: new Date(ts)
+                }];
+              }
+            } else {
+              const finalCustomName = dbC.custom_name;
+              let finalName = finalCustomName || dbC.name || dbC.push_name || phoneMatch || dbC.phone;
+              if (!finalCustomName) {
+                finalName = sanitizeContactName(finalName, phoneMatch || dbC.phone, tname) || finalName;
+              }
+              const avatarFallback = `https://ui-avatars.com/api/?name=${encodeURIComponent(finalName || dbC.phone)}&background=random&color=fff`;
+
+              newContacts.push({
+                ...dbC,
+                id: compositeId,
+                custom_name: finalCustomName,
+                name: finalName,
+                avatar: dbC.profile_picture_url || avatarFallback,
+                messages: preview ? [{ id: 'preview-' + conv.id, text: preview, sender: 'client', timestamp: new Date(ts) }] : [],
+                unread: unread,
+                is_favorite: isFavorite,
+                is_pinned: isPinned,
+                lastMsgTimestamp: ts,
+                timestamp: ts,
+                conv_status: conv.status,
+                snoozed_until: conv.snoozed_until,
+                snoozed_at: conv.snoozed_at,
+                snoozed_by: conv.snoozed_by,
+                priority: conv.priority,
+                assigned_to: conv.assigned_to,
+                instance_id: conv.instance_id || dbC.instance_id || null,
+                conv_id: conv.id,
+                ai_paused: dbC.bot_status === 'paused' ? true : (conv.ai_paused || false),
+                ai_paused_manually: dbC.bot_status === 'paused' ? true : (conv.ai_paused_manually || false),
+                bot_status: dbC.bot_status || (conv.ai_paused ? 'paused' : 'active'),
+                bot_paused_until: dbC.bot_paused_until || null
+              });
+            }
+          });
+
+          // CRM: Injeta mensagens das tarefas ativas carregadas no início para manter as badges da sidebar reativas de imediato
+          newContacts.forEach(c => {
+            const rawContactId = getRealContactId(c.id);
+            const contactTasks = dbActiveTasks.filter(t => t.contact_id === rawContactId);
+
+            contactTasks.forEach(task => {
+              const alreadyHasTask = c.messages.some(m => m.id === task.id);
+              if (!alreadyHasTask) {
+                c.messages.push({
+                  id: task.id,
+                  text: task.text || '',
+                  sender: 'internal_note',
+                  mediaUrl: task.media_url || undefined,
+                  mediaType: task.media_type || undefined,
+                  mediaMetadata: task.media_metadata || undefined,
+                  isTask: true,
+                  assignedTo: task.assigned_to || undefined,
+                  checklistItems: task.checklist_items || [],
+                  taskCompleted: task.task_completed || false,
+                  timestamp: new Date(task.created_at)
                 });
+              }
+            });
+          });
 
-                // CRM: Injeta mensagens das tarefas ativas carregadas no início para manter as badges da sidebar reativas de imediato
-               newContacts.forEach(c => {
-                  const rawContactId = getRealContactId(c.id);
-                  const contactTasks = dbActiveTasks.filter(t => t.contact_id === rawContactId);
-                  
-                  contactTasks.forEach(task => {
-                     const alreadyHasTask = c.messages.some(m => m.id === task.id);
-                     if (!alreadyHasTask) {
-                        c.messages.push({
-                           id: task.id,
-                           text: task.text || '',
-                           sender: 'internal_note',
-                           mediaUrl: task.media_url || undefined,
-                           mediaType: task.media_type || undefined,
-                           mediaMetadata: task.media_metadata || undefined,
-                           isTask: true,
-                           assignedTo: task.assigned_to || undefined,
-                           checklistItems: task.checklist_items || [],
-                           taskCompleted: task.task_completed || false,
-                           timestamp: new Date(task.created_at)
-                        });
-                     }
-                  });
-               });
+          const deduplicated: any[] = [];
+          const seenIds = new Set();
 
-               const deduplicated: any[] = [];
-               const seenIds = new Set();
-               
-               // Força que todos os contatos no estado tenham ID composto, para evitar bugs de state antigo
-               const normalizedContacts = newContacts.map(c => {
-                   if (!String(c.id).includes('_')) {
-                       return { ...c, id: `${c.id}_${c.instance_id || 'default'}` };
-                   }
-                   return c;
-               });
+          // Força que todos os contatos no estado tenham ID composto, para evitar bugs de state antigo
+          const normalizedContacts = newContacts.map(c => {
+            if (!String(c.id).includes('_')) {
+              return { ...c, id: `${c.id}_${c.instance_id || 'default'}` };
+            }
+            return c;
+          });
 
-               // Mantém a ordem decrescente pra pegar sempre o mais recente em caso de duplicatas
-               normalizedContacts.sort((a,b) => {
-                  return getEffectiveContactTime(b) - getEffectiveContactTime(a);
-               });
-               
-               for (const c of normalizedContacts) {
-                   if (!seenIds.has(c.id)) {
-                       seenIds.add(c.id);
-                       deduplicated.push(c);
-                   }
-               }
-               
-               return { contacts: deduplicated };
-           });
+          // Mantém a ordem decrescente pra pegar sempre o mais recente em caso de duplicatas
+          normalizedContacts.sort((a, b) => {
+            return getEffectiveContactTime(b) - getEffectiveContactTime(a);
+          });
 
-           // Gatilho Automático: Busca capa na instância caso falte (após popular o state)
-           const instanceName = tenant.evolution_instance_name;
-           if (instanceName) {
-               const missingDataContacts = dbContacts.filter(c => 
-                 !c.profile_picture_url
-               );
-               
-               if (missingDataContacts.length > 0) {
-                 // Processa em background para não travar a UI
-                 setTimeout(() => {
-                   const storeState = get();
-                   missingDataContacts.forEach(c => {
-                     const jid = c.whatsapp_jid || (c.phone ? `${c.phone}@s.whatsapp.net` : null);
-                     if (jid) {
-                       storeState.fetchContactPicture(c.id, jid, instanceName);
-                     }
-                   });
-                 }, 3000);
-               }
-           }
-       }
-    } catch(e) {
-        console.error("Erro ao puxar initialDBContacts", e);
-     } finally {
-        set({ isChannelLoading: false });
+          for (const c of normalizedContacts) {
+            if (!seenIds.has(c.id)) {
+              seenIds.add(c.id);
+              deduplicated.push(c);
+            }
+          }
+
+          return { contacts: deduplicated };
+        });
+
+        // Gatilho Automático: Busca capa na instância caso falte (após popular o state)
+        const instanceName = tenant.evolution_instance_name;
+        if (instanceName) {
+          const missingDataContacts = dbContacts.filter(c =>
+            !c.profile_picture_url
+          );
+
+          if (missingDataContacts.length > 0) {
+            // Processa em background para não travar a UI
+            setTimeout(() => {
+              const storeState = get();
+              missingDataContacts.forEach(c => {
+                const jid = c.whatsapp_jid || (c.phone ? `${c.phone}@s.whatsapp.net` : null);
+                if (jid) {
+                  storeState.fetchContactPicture(c.id, jid, instanceName);
+                }
+              });
+            }, 3000);
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Erro ao puxar initialDBContacts", e);
+    } finally {
+      set({ isChannelLoading: false });
     }
   },
 
   fetchTenantConfig: async () => {
     try {
       let currentTenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
-      
+
       const { data: userData } = await supabase.auth.getUser();
       if (userData?.user?.id) {
         const { data: tu } = await supabase
@@ -4240,13 +4241,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
           const allAllowed = Array.from(new Set([tu.tenant_id, ...allowedCompanies].filter(Boolean)));
 
           if (currentTenantId && allAllowed.includes(currentTenantId)) {
-             // Mantém a empresa selecionada no dropdown
+            // Mantém a empresa selecionada no dropdown
           } else if (allAllowed.length > 0) {
-             currentTenantId = (tu.tenant_id && allAllowed.includes(tu.tenant_id)) ? tu.tenant_id : allAllowed[0];
-             localStorage.setItem('current_tenant_id', currentTenantId);
-             if (sessionStorage.getItem('current_tenant_id')) {
-                sessionStorage.setItem('current_tenant_id', currentTenantId);
-             }
+            currentTenantId = (tu.tenant_id && allAllowed.includes(tu.tenant_id)) ? tu.tenant_id : allAllowed[0];
+            localStorage.setItem('current_tenant_id', currentTenantId);
+            if (sessionStorage.getItem('current_tenant_id')) {
+              sessionStorage.setItem('current_tenant_id', currentTenantId);
+            }
           }
         }
       }
@@ -4254,70 +4255,70 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (!currentTenantId) return;
 
       const { data: tenantData } = await supabase.from('companies').select('*').eq('id', currentTenantId).maybeSingle();
-      
+
       if (tenantData) {
         set({
-           tenantInfo: tenantData,
-           connectedInstanceName: tenantData.evolution_api_instance || null,
-           globalAiEnabled: tenantData.global_ai_enabled ?? true,
-           globalAiAuditInfo: tenantData.settings?.global_ai_audit || null
+          tenantInfo: tenantData,
+          connectedInstanceName: tenantData.evolution_api_instance || null,
+          globalAiEnabled: tenantData.global_ai_enabled ?? true,
+          globalAiAuditInfo: tenantData.settings?.global_ai_audit || null
         });
 
         // Pré-popular cache com todas as instâncias do tenant para máxima performance de mensagens
         try {
-           const { data: instances } = await supabase
-              .from('whatsapp_instances')
-              .select('id, display_name, api_key, status, phone_number, settings')
-              .eq('tenant_id', currentTenantId);
+          const { data: instances } = await supabase
+            .from('whatsapp_instances')
+            .select('id, display_name, api_key, status, phone_number, settings')
+            .eq('tenant_id', currentTenantId);
 
-           if (instances) {
-              const statusUpdates: Record<string, string> = {};
-              instances.forEach(inst => {
-                 instanceCache.set(inst.id, inst.display_name || '', inst.api_key || '', inst.phone_number || '', inst.settings || {});
-                 if (inst.status === 'connected') {
-                    statusUpdates[inst.id] = 'connected';
-                 } else if (inst.status) {
-                    // Aciona a checagem inteligente para instâncias offline inicialmente
-                    get().setInstanceStatus(inst.id, inst.status);
-                 }
-              });
-              set(s => ({ instancesStatus: { ...s.instancesStatus, ...statusUpdates } }));
-           }
+          if (instances) {
+            const statusUpdates: Record<string, string> = {};
+            instances.forEach(inst => {
+              instanceCache.set(inst.id, inst.display_name || '', inst.api_key || '', inst.phone_number || '', inst.settings || {});
+              if (inst.status === 'connected') {
+                statusUpdates[inst.id] = 'connected';
+              } else if (inst.status) {
+                // Aciona a checagem inteligente para instâncias offline inicialmente
+                get().setInstanceStatus(inst.id, inst.status);
+              }
+            });
+            set(s => ({ instancesStatus: { ...s.instancesStatus, ...statusUpdates } }));
+          }
         } catch (cacheErr) {
-           console.warn("[fetchTenantConfig] Falha ao pré-popular cache de instâncias:", cacheErr);
+          console.warn("[fetchTenantConfig] Falha ao pré-popular cache de instâncias:", cacheErr);
         }
 
         if (tenantData.evolution_api_instance) {
-           const { fetchEngineStatus } = await import('../services/whatsappEngine');
-           
-           const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key, status').eq('id', tenantData.evolution_api_instance).maybeSingle();
-           const apiKey = instDataDB?.api_key || '';
-           
-           try {
-              const res = await fetchEngineStatus(currentTenantId, tenantData.evolution_api_instance, apiKey);
-              const realSt = res?.data?.status || instDataDB?.status;
-              const isConnected = realSt === 'connected' || realSt === 'connected_local';
+          const { fetchEngineStatus } = await import('../services/whatsappEngine');
 
-              if (isConnected) {
-                 set({ evolutionConnected: true, modalReason: null, isOffline: false });
-                 get().setInstanceStatus(tenantData.evolution_api_instance, realSt);
-                 get().fetchInitialData();
-              } else if (realSt === 'connecting') {
-                 set({ evolutionConnected: false, isOffline: false });
-                 get().setInstanceStatus(tenantData.evolution_api_instance, 'connecting');
-              } else {
-                 set({ evolutionConnected: false, isOffline: false });
-                 get().setInstanceStatus(tenantData.evolution_api_instance, 'offline');
-              }
-           } catch (e: any) {
-              if (e.message === 'Failed to fetch' || e.message?.includes('network') || e.message?.includes('fetch') || (typeof navigator !== 'undefined' && !navigator.onLine)) {
-                set({ isOffline: true });
-              } else {
-                set({ evolutionConnected: false, modalReason: 'Servidor Node Offline - A API principal não está respondendo. O serviço pode estar em manutenção ou reiniciando.' });
-              }
-           }
+          const { data: instDataDB } = await supabase.from('whatsapp_instances').select('api_key, status').eq('id', tenantData.evolution_api_instance).maybeSingle();
+          const apiKey = instDataDB?.api_key || '';
+
+          try {
+            const res = await fetchEngineStatus(currentTenantId, tenantData.evolution_api_instance, apiKey);
+            const realSt = res?.data?.status || instDataDB?.status;
+            const isConnected = realSt === 'connected' || realSt === 'connected_local';
+
+            if (isConnected) {
+              set({ evolutionConnected: true, modalReason: null, isOffline: false });
+              get().setInstanceStatus(tenantData.evolution_api_instance, realSt);
+              get().fetchInitialData();
+            } else if (realSt === 'connecting') {
+              set({ evolutionConnected: false, isOffline: false });
+              get().setInstanceStatus(tenantData.evolution_api_instance, 'connecting');
+            } else {
+              set({ evolutionConnected: false, isOffline: false });
+              get().setInstanceStatus(tenantData.evolution_api_instance, 'offline');
+            }
+          } catch (e: any) {
+            if (e.message === 'Failed to fetch' || e.message?.includes('network') || e.message?.includes('fetch') || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+              set({ isOffline: true });
+            } else {
+              set({ evolutionConnected: false, modalReason: 'Servidor Node Offline - A API principal não está respondendo. O serviço pode estar em manutenção ou reiniciando.' });
+            }
+          }
         } else {
-           set({ evolutionConnected: false });
+          set({ evolutionConnected: false });
         }
       }
     } catch (e) {
@@ -4333,11 +4334,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
       const currentSettings = tenant.settings || {};
       const mergedSettings = { ...currentSettings, ...newSettings };
-      
+
       const { error } = await supabase
         .from('companies')
-                        .update({ settings: mergedSettings })
-                        .eq('id', tenant.id);
+        .update({ settings: mergedSettings })
+        .eq('id', tenant.id);
 
       if (error) throw error;
 
@@ -4357,13 +4358,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setEvolutionConnection: async (status, newInst) => {
     const tenant = get().tenantInfo;
     if (!tenant) return;
-    
+
     await supabase.from('companies').update({ evolution_api_instance: newInst }).eq('id', tenant.id);
-    
-    set({ 
-       connectedInstanceName: newInst || null, 
-       tenantInfo: { ...tenant, evolution_api_instance: newInst || null },
-       modalReason: null
+
+    set({
+      connectedInstanceName: newInst || null,
+      tenantInfo: { ...tenant, evolution_api_instance: newInst || null },
+      modalReason: null
     });
   },
 
@@ -4389,419 +4390,419 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const isUuid = (val: any) => typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
         const realContactId = getRealContactId(contactId);
 
-        const activeContactObj = get().contacts.find(c => 
-            c.id === contactId || 
-            (c.conv_id && c.conv_id === contactId) || 
-            (c.id && getRealContactId(c.id) === realContactId)
+        const activeContactObj = get().contacts.find(c =>
+          c.id === contactId ||
+          (c.conv_id && c.conv_id === contactId) ||
+          (c.id && getRealContactId(c.id) === realContactId)
         );
         const knownConvId = activeContactObj?.conv_id;
 
         // Hidratação imediata da RAM (0ms) se houver mensagens em cache e o contato estiver sem mensagens
         const memoryCached = messagesMemoryCache.get(contactId) || (realContactId ? messagesMemoryCache.get(realContactId) : null);
         if (memoryCached && memoryCached.length > 0 && (!activeContactObj?.messages || activeContactObj.messages.length === 0)) {
-            set((s) => {
-                const updated = [...s.contacts];
-                const idx = updated.findIndex(c => c.id === contactId || (c.conv_id && c.conv_id === contactId) || (c.id && getRealContactId(c.id) === realContactId));
-                if (idx !== -1) {
-                    updated[idx] = { ...updated[idx], messages: memoryCached };
-                }
-                return { contacts: updated };
-            });
+          set((s) => {
+            const updated = [...s.contacts];
+            const idx = updated.findIndex(c => c.id === contactId || (c.conv_id && c.conv_id === contactId) || (c.id && getRealContactId(c.id) === realContactId));
+            if (idx !== -1) {
+              updated[idx] = { ...updated[idx], messages: memoryCached };
+            }
+            return { contacts: updated };
+          });
         }
 
         // 1. Determinar o UUID do contato (contact_id) e da instância alvo
         let targetContactUuid: string | null = null;
         if (isUuid(contactId)) {
-            targetContactUuid = contactId;
+          targetContactUuid = contactId;
         } else if (isUuid(realContactId)) {
-            targetContactUuid = realContactId;
+          targetContactUuid = realContactId;
         } else if (activeContactObj?.id && isUuid(getRealContactId(activeContactObj.id))) {
-            targetContactUuid = getRealContactId(activeContactObj.id);
+          targetContactUuid = getRealContactId(activeContactObj.id);
         } else if (realContactId && contactUuidCache.has(realContactId)) {
-            targetContactUuid = contactUuidCache.get(realContactId) || null;
+          targetContactUuid = contactUuidCache.get(realContactId) || null;
         }
 
         // Se ainda não temos o UUID do contato, busca no banco pelo número de telefone e salva no cache
         if (!targetContactUuid && realContactId) {
-            const cleanPhone = realContactId.replace(/\D/g, '');
-            if (cleanPhone) {
-                const { data: dbContact } = await supabase
-                    .from('contacts')
-                    .select('id')
-                    .eq('tenant_id', tenant.id)
-                    .or(`phone.eq.${cleanPhone},whatsapp_jid.ilike.%${cleanPhone}%`)
-                    .limit(1)
-                    .maybeSingle();
+          const cleanPhone = realContactId.replace(/\D/g, '');
+          if (cleanPhone) {
+            const { data: dbContact } = await supabase
+              .from('contacts')
+              .select('id')
+              .eq('tenant_id', tenant.id)
+              .or(`phone.eq.${cleanPhone},whatsapp_jid.ilike.%${cleanPhone}%`)
+              .limit(1)
+              .maybeSingle();
 
-                if (dbContact?.id && isUuid(dbContact.id)) {
-                    targetContactUuid = dbContact.id;
-                    contactUuidCache.set(realContactId, dbContact.id);
-                }
+            if (dbContact?.id && isUuid(dbContact.id)) {
+              targetContactUuid = dbContact.id;
+              contactUuidCache.set(realContactId, dbContact.id);
             }
+          }
         }
 
         // Determina o instance_id alvo estrito
         const activeFilter = get().activeChannelFilter;
         let targetInstanceId: string | null = activeContactObj?.instance_id || null;
         if (!targetInstanceId && instanceName) {
-            targetInstanceId = instanceCache.getId(instanceName) || (await resolveInstanceUuid(tenant.id, instanceName)) || instanceName;
+          targetInstanceId = instanceCache.getId(instanceName) || (await resolveInstanceUuid(tenant.id, instanceName)) || instanceName;
         }
         if (!targetInstanceId && activeFilter && activeFilter !== 'all' && activeFilter !== 'default') {
-            targetInstanceId = instanceCache.getId(activeFilter) || (await resolveInstanceUuid(tenant.id, activeFilter)) || activeFilter;
+          targetInstanceId = instanceCache.getId(activeFilter) || (await resolveInstanceUuid(tenant.id, activeFilter)) || activeFilter;
         }
         const hasValidInstanceId = targetInstanceId && isUuid(targetInstanceId);
 
         // 2. Montar queries paralelizadas
         let convsQuery = supabase.from('conversations')
-            .select('id, status, last_message_at, updated_at, instance_id')
-            .eq('tenant_id', tenant.id);
+          .select('id, status, last_message_at, updated_at, instance_id')
+          .eq('tenant_id', tenant.id);
 
         if (knownConvId && isUuid(knownConvId)) {
-            convsQuery = convsQuery.eq('id', knownConvId);
+          convsQuery = convsQuery.eq('id', knownConvId);
         } else if (targetContactUuid) {
-            convsQuery = convsQuery.eq('contact_id', targetContactUuid);
-            if (hasValidInstanceId) {
-                convsQuery = convsQuery.eq('instance_id', targetInstanceId);
-            }
+          convsQuery = convsQuery.eq('contact_id', targetContactUuid);
+          if (hasValidInstanceId) {
+            convsQuery = convsQuery.eq('instance_id', targetInstanceId);
+          }
         }
 
         const notesQuery = targetContactUuid
-            ? supabase.from('contact_notes')
-                .select('id, content, media_url, media_type, media_metadata, is_task, assigned_to, checklist_items, task_completed, created_by_name, created_at')
-                .eq('tenant_id', tenant.id)
-                .eq('contact_id', targetContactUuid)
-                .order('created_at', { ascending: true })
-            : Promise.resolve({ data: [] });
+          ? supabase.from('contact_notes')
+            .select('id, content, media_url, media_type, media_metadata, is_task, assigned_to, checklist_items, task_completed, created_by_name, created_at')
+            .eq('tenant_id', tenant.id)
+            .eq('contact_id', targetContactUuid)
+            .order('created_at', { ascending: true })
+          : Promise.resolve({ data: [] });
 
         // Query direta e antecipada de mensagens se knownConvId já for conhecido
         const directMsgPromise = (knownConvId && isUuid(knownConvId))
-            ? supabase.from('messages')
-                .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
-                .eq('tenant_id', tenant.id)
-                .eq('conversation_id', knownConvId)
-                .order('timestamp', { ascending: false })
-                .limit(80)
-            : Promise.resolve({ data: null });
+          ? supabase.from('messages')
+            .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
+            .eq('tenant_id', tenant.id)
+            .eq('conversation_id', knownConvId)
+            .order('timestamp', { ascending: false })
+            .limit(80)
+          : Promise.resolve({ data: null });
 
         // 3. Executa TODAS as buscas simultaneamente em um único Round-Trip Time
         const [notesRes, resolvedInstanceId, allConvsRes, directMsgRes] = await Promise.all([
-             notesQuery,
-             resolveInstanceUuid(tenant.id, instanceName),
-             convsQuery.order('updated_at', { ascending: false }),
-             directMsgPromise
+          notesQuery,
+          resolveInstanceUuid(tenant.id, instanceName),
+          convsQuery.order('updated_at', { ascending: false }),
+          directMsgPromise
         ]);
 
         let dbNotes: any[] = notesRes.data || [];
         const allConvs = (allConvsRes.data || []).filter(c => !hasValidInstanceId || c.instance_id === targetInstanceId);
         const conv = allConvs.length > 0 ? allConvs[0] : null;
         const convIds = Array.from(new Set([
-            ...allConvs.map(c => c.id),
-            ...(knownConvId ? [knownConvId] : [])
+          ...allConvs.map(c => c.id),
+          ...(knownConvId ? [knownConvId] : [])
         ])).filter(id => isUuid(id));
 
         const mappedNotes = dbNotes.map(n => ({
-           id: n.id,
-           whatsapp_id: undefined,
-           text: n.content || n.text || '',
-           sender: 'internal_note' as const,
-           mediaUrl: n.media_url || undefined,
-           mediaType: n.media_type || undefined,
-           mediaMetadata: n.media_metadata || undefined,
-           isTask: n.is_task || false,
-           assignedTo: n.assigned_to || null,
-           checklistItems: n.checklist_items || [],
-           taskCompleted: n.task_completed || false,
-           created_by_name: n.created_by_name || null,
-           timestamp: new Date(n.created_at)
+          id: n.id,
+          whatsapp_id: undefined,
+          text: n.content || n.text || '',
+          sender: 'internal_note' as const,
+          mediaUrl: n.media_url || undefined,
+          mediaType: n.media_type || undefined,
+          mediaMetadata: n.media_metadata || undefined,
+          isTask: n.is_task || false,
+          assignedTo: n.assigned_to || null,
+          checklistItems: n.checklist_items || [],
+          taskCompleted: n.task_completed || false,
+          created_by_name: n.created_by_name || null,
+          timestamp: new Date(n.created_at)
         }));
 
         const handleMapping = (messagesArray: any[]) => {
-            const mappedMsgs = messagesArray.map(m => {
-                const advanced = parseAdvancedMsgMetadata(m);
-                const realTimestamp = new Date(m.timestamp);
+          const mappedMsgs = messagesArray.map(m => {
+            const advanced = parseAdvancedMsgMetadata(m);
+            const realTimestamp = new Date(m.timestamp);
 
-                return {
-                    id: m.id,
-                    whatsapp_id: m.whatsapp_message_id,
-                    text: advanced.text || m.text_content,
-                    sender: m.sender_type,
-                    mediaUrl: m.media_url,
-                    mediaType: advanced.mediaType,
-                    status: m.status,
-                    timestamp: realTimestamp,
-                    quoted: advanced.quoted,
-                    buttons: advanced.buttons,
-                    transcription: m.transcription,
-                    vcardWaid: advanced.vcardWaid,
-                    payload: m.raw_payload || m.payload
-                };
-            });
+            return {
+              id: m.id,
+              whatsapp_id: m.whatsapp_message_id,
+              text: advanced.text || m.text_content,
+              sender: m.sender_type,
+              mediaUrl: m.media_url,
+              mediaType: advanced.mediaType,
+              status: m.status,
+              timestamp: realTimestamp,
+              quoted: advanced.quoted,
+              buttons: advanced.buttons,
+              transcription: m.transcription,
+              vcardWaid: advanced.vcardWaid,
+              payload: m.raw_payload || m.payload
+            };
+          });
 
-            const combinedMsgs = sortMessagesChronologically([...mappedMsgs, ...mappedNotes]);
-            
-            const uniqueMsgs: any[] = [];
-            const seenIds = new Set();
-            for (const m of combinedMsgs) {
-                const checkId = m.whatsapp_id || m.id;
-                if (checkId) {
-                    if (seenIds.has(checkId)) continue;
-                    seenIds.add(checkId);
-                }
-                uniqueMsgs.push(m);
+          const combinedMsgs = sortMessagesChronologically([...mappedMsgs, ...mappedNotes]);
+
+          const uniqueMsgs: any[] = [];
+          const seenIds = new Set();
+          for (const m of combinedMsgs) {
+            const checkId = m.whatsapp_id || m.id;
+            if (checkId) {
+              if (seenIds.has(checkId)) continue;
+              seenIds.add(checkId);
             }
+            uniqueMsgs.push(m);
+          }
 
-            // Grava no cache em memória
-            messagesMemoryCache.set(contactId, uniqueMsgs);
-            if (realContactId) messagesMemoryCache.set(realContactId, uniqueMsgs);
+          // Grava no cache em memória
+          messagesMemoryCache.set(contactId, uniqueMsgs);
+          if (realContactId) messagesMemoryCache.set(realContactId, uniqueMsgs);
 
-            set((s) => {
-               const updated = [...s.contacts];
-               const idx = updated.findIndex(c => c.id === contactId || (c.conv_id && c.conv_id === contactId) || (c.id && getRealContactId(c.id) === realContactId));
-               if (idx !== -1) {
-                   const currentMsgs = updated[idx].messages || [];
-                   const optimisticMsgs = currentMsgs.filter(m => String(m.id).startsWith('optimistic-'));
+          set((s) => {
+            const updated = [...s.contacts];
+            const idx = updated.findIndex(c => c.id === contactId || (c.conv_id && c.conv_id === contactId) || (c.id && getRealContactId(c.id) === realContactId));
+            if (idx !== -1) {
+              const currentMsgs = updated[idx].messages || [];
+              const optimisticMsgs = currentMsgs.filter(m => String(m.id).startsWith('optimistic-'));
 
-                   const normalizeTextForCompare = (txt: any) => {
-                       if (!txt) return '';
-                       return String(txt).replace(/^\*([^*:]+):\*\s*/, '').trim().toLowerCase();
-                   };
+              const normalizeTextForCompare = (txt: any) => {
+                if (!txt) return '';
+                return String(txt).replace(/^\*([^*:]+):\*\s*/, '').trim().toLowerCase();
+              };
 
-                   const nowMs = Date.now();
-                   const pendingOptimistic = optimisticMsgs.filter(opt => {
-                       const optTime = opt.timestamp instanceof Date ? opt.timestamp.getTime() : new Date(opt.timestamp || 0).getTime();
-                       const isExpired = (nowMs - optTime) > 5 * 60 * 1000;
-                       if (isExpired) return false;
+              const nowMs = Date.now();
+              const pendingOptimistic = optimisticMsgs.filter(opt => {
+                const optTime = opt.timestamp instanceof Date ? opt.timestamp.getTime() : new Date(opt.timestamp || 0).getTime();
+                const isExpired = (nowMs - optTime) > 5 * 60 * 1000;
+                if (isExpired) return false;
 
-                       const optNormText = normalizeTextForCompare(opt.text);
-                       const alreadyInDb = uniqueMsgs.some(dbMsg => {
-                           if (opt.whatsapp_id && dbMsg.whatsapp_id === opt.whatsapp_id) return true;
-                           const dbNormText = normalizeTextForCompare(dbMsg.text);
-                           if (optNormText && dbNormText && (optNormText === dbNormText || dbNormText.includes(optNormText) || optNormText.includes(dbNormText))) return true;
-                           return false;
-                       });
+                const optNormText = normalizeTextForCompare(opt.text);
+                const alreadyInDb = uniqueMsgs.some(dbMsg => {
+                  if (opt.whatsapp_id && dbMsg.whatsapp_id === opt.whatsapp_id) return true;
+                  const dbNormText = normalizeTextForCompare(dbMsg.text);
+                  if (optNormText && dbNormText && (optNormText === dbNormText || dbNormText.includes(optNormText) || optNormText.includes(dbNormText))) return true;
+                  return false;
+                });
 
-                       return !alreadyInDb;
-                   });
+                return !alreadyInDb;
+              });
 
-                   const finalMsgs = sortMessagesChronologically([...uniqueMsgs, ...pendingOptimistic]);
+              const finalMsgs = sortMessagesChronologically([...uniqueMsgs, ...pendingOptimistic]);
 
-                   updated[idx] = {
-                       ...updated[idx],
-                       conv_id: conv?.id || updated[idx].conv_id,
-                       unread: 0,
-                       isManuallyUnread: false,
-                       messages: finalMsgs
-                   };
-               }
-               return { contacts: updated };
-            });
+              updated[idx] = {
+                ...updated[idx],
+                conv_id: conv?.id || updated[idx].conv_id,
+                unread: 0,
+                isManuallyUnread: false,
+                messages: finalMsgs
+              };
+            }
+            return { contacts: updated };
+          });
         };
 
         // 4. Se a query direta antecipada já trouxe mensagens, usa imediatamente
         let rawFetchedMsgs: any[] = (directMsgRes?.data && Array.isArray(directMsgRes.data)) ? directMsgRes.data : [];
 
         if (conv?.id) {
-            supabase.from('conversations').update({ unread_count: 0 }).eq('id', conv.id).then(({ error }) => {
-                if (error) console.error("[loadHistoricalMessages] Erro ao limpar unread_count:", error);
-            });
+          supabase.from('conversations').update({ unread_count: 0 }).eq('id', conv.id).then(({ error }) => {
+            if (error) console.error("[loadHistoricalMessages] Erro ao limpar unread_count:", error);
+          });
         }
-        
+
         if (rawFetchedMsgs.length === 0 && convIds.length > 0) {
-            let msgQuery = supabase.from('messages')
-                   .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
-                   .eq('tenant_id', tenant.id)
-                   .in('conversation_id', convIds);
-            
-            if (hasValidInstanceId) {
-                msgQuery = msgQuery.eq('instance_id', targetInstanceId);
-            }
+          let msgQuery = supabase.from('messages')
+            .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
+            .eq('tenant_id', tenant.id)
+            .in('conversation_id', convIds);
 
-            const { data, error: msgErr } = await msgQuery
-                   .order('timestamp', { ascending: false })
-                   .limit(80);
+          if (hasValidInstanceId) {
+            msgQuery = msgQuery.eq('instance_id', targetInstanceId);
+          }
 
-            if (msgErr) {
-                console.error("[loadHistoricalMessages] Erro ao buscar mensagens por conversation_id:", msgErr);
-            }
-            rawFetchedMsgs = data || [];
+          const { data, error: msgErr } = await msgQuery
+            .order('timestamp', { ascending: false })
+            .limit(80);
+
+          if (msgErr) {
+            console.error("[loadHistoricalMessages] Erro ao buscar mensagens por conversation_id:", msgErr);
+          }
+          rawFetchedMsgs = data || [];
         }
-        
+
         // Fallback defensivo: Se a busca por conversation_id trouxer 0 mensagens, busca as conversas do contato pelo contact_id UUID e instância
         if (rawFetchedMsgs.length === 0 && targetContactUuid) {
-            let contactConvsQuery = supabase.from('conversations')
-                   .select('id')
-                   .eq('tenant_id', tenant.id)
-                   .eq('contact_id', targetContactUuid);
-            
+          let contactConvsQuery = supabase.from('conversations')
+            .select('id')
+            .eq('tenant_id', tenant.id)
+            .eq('contact_id', targetContactUuid);
+
+          if (hasValidInstanceId) {
+            contactConvsQuery = contactConvsQuery.eq('instance_id', targetInstanceId);
+          }
+
+          const { data: contactConvs } = await contactConvsQuery;
+
+          const allContactConvIds = (contactConvs || []).map(c => c.id);
+          if (allContactConvIds.length > 0) {
+            let fallbackMsgQuery = supabase.from('messages')
+              .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
+              .eq('tenant_id', tenant.id)
+              .in('conversation_id', allContactConvIds);
+
             if (hasValidInstanceId) {
-                contactConvsQuery = contactConvsQuery.eq('instance_id', targetInstanceId);
+              fallbackMsgQuery = fallbackMsgQuery.eq('instance_id', targetInstanceId);
             }
 
-            const { data: contactConvs } = await contactConvsQuery;
-                   
-            const allContactConvIds = (contactConvs || []).map(c => c.id);
-            if (allContactConvIds.length > 0) {
-                let fallbackMsgQuery = supabase.from('messages')
-                       .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
-                       .eq('tenant_id', tenant.id)
-                       .in('conversation_id', allContactConvIds);
-                
-                if (hasValidInstanceId) {
-                    fallbackMsgQuery = fallbackMsgQuery.eq('instance_id', targetInstanceId);
-                }
+            const { data, error: msgErr } = await fallbackMsgQuery
+              .order('timestamp', { ascending: false })
+              .limit(150);
 
-                const { data, error: msgErr } = await fallbackMsgQuery
-                       .order('timestamp', { ascending: false })
-                       .limit(150);
-
-                if (msgErr) {
-                    console.error("[loadHistoricalMessages] Erro ao buscar mensagens do contato:", msgErr);
-                } else if (data && data.length > 0) {
-                    rawFetchedMsgs = data;
-                }
+            if (msgErr) {
+              console.error("[loadHistoricalMessages] Erro ao buscar mensagens do contato:", msgErr);
+            } else if (data && data.length > 0) {
+              rawFetchedMsgs = data;
             }
+          }
         }
 
         const msgs = rawFetchedMsgs ? [...rawFetchedMsgs].reverse() : [];
         handleMapping(msgs);
 
         if (forceSync) {
-            // Conversa tem base, prossegue com o sync on demand
-            if (!get().isSyncingHistory[contactId]) {
-                set((s) => ({ isSyncingHistory: { ...s.isSyncingHistory, [contactId]: true } }));
-                
-                window.dispatchEvent(new CustomEvent('toast', { 
-                    detail: { 
-                        message: 'Buscando histórico com o WhatsApp... Aguarde alguns instantes.', 
-                        type: 'info' 
-                    } 
-                }));
+          // Conversa tem base, prossegue com o sync on demand
+          if (!get().isSyncingHistory[contactId]) {
+            set((s) => ({ isSyncingHistory: { ...s.isSyncingHistory, [contactId]: true } }));
 
-                try {
-                    const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
-                    const apiKey = resolvedInstanceId ? await getOrFetchApiKey(resolvedInstanceId) : '';
-                    const targetConvId = conv?.id || targetContactUuid || contactId;
+            window.dispatchEvent(new CustomEvent('toast', {
+              detail: {
+                message: 'Buscando histórico com o WhatsApp... Aguarde alguns instantes.',
+                type: 'info'
+              }
+            }));
 
-                    const res = await fetch(`${API_URL}/api/v1/conversations/${targetConvId}/sync-history`, {
-                        method: 'POST',
-                        headers: { 
-                           'Content-Type': 'application/json',
-                           'x-tenant-id': tenant.id,
-                           'apikey': apiKey
-                        },
-                        body: JSON.stringify({ instanceId: resolvedInstanceId, count: 50, limit: 50 })
-                    });
-                    
-                    const result = await res.json();
-                    if (!res.ok) {
-                        useDevStore.getState().addLog({
-                            type: 'error',
-                            message: `[History Sync] Erro no gateway ao solicitar histórico da API (Status ${res.status}).`,
-                            source: 'ChatStore',
-                            details: result
-                        });
-                        
-                        let errorMessage = 'Falha técnica ao solicitar histórico. Verifique se o servidor está online.';
-                        let errorTitle = 'Falha na Sincronização';
-                        
-                        if (result?.error) {
-                            errorMessage = result.error;
-                        }
+            try {
+              const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+              const apiKey = resolvedInstanceId ? await getOrFetchApiKey(resolvedInstanceId) : '';
+              const targetConvId = conv?.id || targetContactUuid || contactId;
 
-                        set({
-                            historySyncError: {
-                                title: errorTitle,
-                                message: errorMessage,
-                                details: JSON.stringify(result)
-                            }
-                        });
-                    } else {
-                        // O gateway do Node despacha a History Sync que entra numa fila assíncrona.
-                        // Fazemos 2 checagens progressivas (em 3.5s e 7s) para carregar as mensagens conforme chegam do Baileys
-                        await new Promise(r => setTimeout(r, 3500));
+              const res = await fetch(`${API_URL}/api/v1/conversations/${targetConvId}/sync-history`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'x-tenant-id': tenant.id,
+                  'apikey': apiKey
+                },
+                body: JSON.stringify({ instanceId: resolvedInstanceId, count: 50, limit: 50 })
+              });
 
-                        const currentMsgsLength = (msgs && msgs.length) || 0;
-                        const newLimit = currentMsgsLength + 100;
-                        const validConvIds = convIds.length > 0 ? convIds : (conv?.id ? [conv.id] : []);
+              const result = await res.json();
+              if (!res.ok) {
+                useDevStore.getState().addLog({
+                  type: 'error',
+                  message: `[History Sync] Erro no gateway ao solicitar histórico da API (Status ${res.status}).`,
+                  source: 'ChatStore',
+                  details: result
+                });
 
-                        // 1ª checagem intermediária
-                        if (validConvIds.length > 0) {
-                            const { data: firstBatch } = await supabase.from('messages')
-                               .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
-                               .eq('tenant_id', tenant.id)
-                               .in('conversation_id', validConvIds)
-                               .order('timestamp', { ascending: false })
-                               .limit(newLimit);
-                            if (firstBatch && firstBatch.length > currentMsgsLength) {
-                                handleMapping(firstBatch);
-                            }
-                        }
+                let errorMessage = 'Falha técnica ao solicitar histórico. Verifique se o servidor está online.';
+                let errorTitle = 'Falha na Sincronização';
 
-                        // Aguarda mais 3.5s para consolidação total
-                        await new Promise(r => setTimeout(r, 3500));
-
-                        // 2ª checagem final
-                        let fetchNewMsgs: any[] | null = null;
-                        if (validConvIds.length > 0) {
-                            const { data: finalBatch } = await supabase.from('messages')
-                               .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
-                               .eq('tenant_id', tenant.id)
-                               .in('conversation_id', validConvIds)
-                               .order('timestamp', { ascending: false })
-                               .limit(newLimit);
-                            fetchNewMsgs = finalBatch;
-                        }
-                           
-                        const newMsgsLength = fetchNewMsgs ? fetchNewMsgs.length : 0;
-                        const initialIds = new Set((msgs || []).map(m => m.id));
-                        const addedCount = (fetchNewMsgs || []).filter(m => !initialIds.has(m.id)).length;
-                        
-                        if (addedCount > 0) {
-                            useDevStore.getState().addLog({
-                                type: 'success',
-                                message: `[History Sync] Sincronização concluída! ${addedCount} novas mensagens carregadas.`,
-                                source: 'ChatStore',
-                                details: { fetchCount: newMsgsLength, addedCount }
-                            });
-                            window.dispatchEvent(new CustomEvent('toast', { 
-                                detail: { 
-                                    message: `Sincronização concluída! ${addedCount} novas mensagens carregadas.`, 
-                                    type: 'success' 
-                                } 
-                            }));
-                        } else {
-                            useDevStore.getState().addLog({
-                                type: 'info',
-                                message: `[History Sync] O WhatsApp concluiu a consulta para este contato.`,
-                                source: 'ChatStore',
-                                details: { 
-                                    mensagensRetornadas: newMsgsLength, 
-                                    mensagensAtuais: currentMsgsLength,
-                                    instancia: instanceName
-                                }
-                            });
-                            window.dispatchEvent(new CustomEvent('toast', { 
-                                detail: { 
-                                    message: 'Histórico verificado. Todas as conversas disponíveis já estão carregadas.', 
-                                    type: 'info' 
-                                } 
-                            }));
-                        }
-                           
-                        if (fetchNewMsgs && fetchNewMsgs.length > 0) handleMapping(fetchNewMsgs);
-                    }
-                } catch (err: any) {
-                    useDevStore.getState().addLog({
-                        type: 'error',
-                        message: `[History Sync] Exceção crítica ao tentar carregar histórico. Possível falha de rede/proxy no VITE_WHATSAPP_ENGINE_URL.`,
-                        source: 'ChatStore',
-                        details: err?.message || String(err)
-                    });
-                    console.error("Falha ao sincronizar histórico da Baileys (on demand):", err);
-                } finally {
-                    set((s) => ({ isSyncingHistory: { ...s.isSyncingHistory, [contactId]: false } }));
+                if (result?.error) {
+                  errorMessage = result.error;
                 }
+
+                set({
+                  historySyncError: {
+                    title: errorTitle,
+                    message: errorMessage,
+                    details: JSON.stringify(result)
+                  }
+                });
+              } else {
+                // O gateway do Node despacha a History Sync que entra numa fila assíncrona.
+                // Fazemos 2 checagens progressivas (em 3.5s e 7s) para carregar as mensagens conforme chegam do Baileys
+                await new Promise(r => setTimeout(r, 3500));
+
+                const currentMsgsLength = (msgs && msgs.length) || 0;
+                const newLimit = currentMsgsLength + 100;
+                const validConvIds = convIds.length > 0 ? convIds : (conv?.id ? [conv.id] : []);
+
+                // 1ª checagem intermediária
+                if (validConvIds.length > 0) {
+                  const { data: firstBatch } = await supabase.from('messages')
+                    .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
+                    .eq('tenant_id', tenant.id)
+                    .in('conversation_id', validConvIds)
+                    .order('timestamp', { ascending: false })
+                    .limit(newLimit);
+                  if (firstBatch && firstBatch.length > currentMsgsLength) {
+                    handleMapping(firstBatch);
+                  }
+                }
+
+                // Aguarda mais 3.5s para consolidação total
+                await new Promise(r => setTimeout(r, 3500));
+
+                // 2ª checagem final
+                let fetchNewMsgs: any[] | null = null;
+                if (validConvIds.length > 0) {
+                  const { data: finalBatch } = await supabase.from('messages')
+                    .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
+                    .eq('tenant_id', tenant.id)
+                    .in('conversation_id', validConvIds)
+                    .order('timestamp', { ascending: false })
+                    .limit(newLimit);
+                  fetchNewMsgs = finalBatch;
+                }
+
+                const newMsgsLength = fetchNewMsgs ? fetchNewMsgs.length : 0;
+                const initialIds = new Set((msgs || []).map(m => m.id));
+                const addedCount = (fetchNewMsgs || []).filter(m => !initialIds.has(m.id)).length;
+
+                if (addedCount > 0) {
+                  useDevStore.getState().addLog({
+                    type: 'success',
+                    message: `[History Sync] Sincronização concluída! ${addedCount} novas mensagens carregadas.`,
+                    source: 'ChatStore',
+                    details: { fetchCount: newMsgsLength, addedCount }
+                  });
+                  window.dispatchEvent(new CustomEvent('toast', {
+                    detail: {
+                      message: `Sincronização concluída! ${addedCount} novas mensagens carregadas.`,
+                      type: 'success'
+                    }
+                  }));
+                } else {
+                  useDevStore.getState().addLog({
+                    type: 'info',
+                    message: `[History Sync] O WhatsApp concluiu a consulta para este contato.`,
+                    source: 'ChatStore',
+                    details: {
+                      mensagensRetornadas: newMsgsLength,
+                      mensagensAtuais: currentMsgsLength,
+                      instancia: instanceName
+                    }
+                  });
+                  window.dispatchEvent(new CustomEvent('toast', {
+                    detail: {
+                      message: 'Histórico verificado. Todas as conversas disponíveis já estão carregadas.',
+                      type: 'info'
+                    }
+                  }));
+                }
+
+                if (fetchNewMsgs && fetchNewMsgs.length > 0) handleMapping(fetchNewMsgs);
+              }
+            } catch (err: any) {
+              useDevStore.getState().addLog({
+                type: 'error',
+                message: `[History Sync] Exceção crítica ao tentar carregar histórico. Possível falha de rede/proxy no VITE_WHATSAPP_ENGINE_URL.`,
+                source: 'ChatStore',
+                details: err?.message || String(err)
+              });
+              console.error("Falha ao sincronizar histórico da Baileys (on demand):", err);
+            } finally {
+              set((s) => ({ isSyncingHistory: { ...s.isSyncingHistory, [contactId]: false } }));
             }
+          }
         }
       } catch (err: any) {
         console.error('[loadHistoricalMessages] Erro ao carregar mensagens:', err);
@@ -4817,24 +4818,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
   syncMissedMessages: async () => {
     const tenant = get().tenantInfo;
     if (!tenant) return;
-    
+
     console.log('[Realtime Sync] Iniciando sincronização reativa de mensagens perdidas (Catch-up Sync)...');
-    
+
     try {
-        // 1. Recarrega as conversas atuais (atualiza status, visualizações de mensagens, unread, etc)
-        await get().fetchInitialData();
-        
-        // 2. Se houver um chat ativo, recarrega as mensagens dele para preencher lacunas
-        const activeId = get().activeChatId;
-        if (activeId) {
-            const activeChannelName = localStorage.getItem('activeChannelName') || 'default';
-            await get().loadHistoricalMessages(activeId, activeChannelName, false);
-            console.log(`[Realtime Sync] Mensagens do chat ativo (${activeId}) sincronizadas com sucesso.`);
-        }
-        
-        console.log('[Realtime Sync] Sincronização reativa finalizada com sucesso.');
+      // 1. Recarrega as conversas atuais (atualiza status, visualizações de mensagens, unread, etc)
+      await get().fetchInitialData();
+
+      // 2. Se houver um chat ativo, recarrega as mensagens dele para preencher lacunas
+      const activeId = get().activeChatId;
+      if (activeId) {
+        const activeChannelName = localStorage.getItem('activeChannelName') || 'default';
+        await get().loadHistoricalMessages(activeId, activeChannelName, false);
+        console.log(`[Realtime Sync] Mensagens do chat ativo (${activeId}) sincronizadas com sucesso.`);
+      }
+
+      console.log('[Realtime Sync] Sincronização reativa finalizada com sucesso.');
     } catch (err) {
-        console.error('[Realtime Sync] Falha ao sincronizar mensagens perdidas:', err);
+      console.error('[Realtime Sync] Falha ao sincronizar mensagens perdidas:', err);
     }
   },
 
@@ -4907,7 +4908,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         signature: payload.signature !== undefined ? payload.signature : null,
         use_signature: payload.use_signature !== undefined ? payload.use_signature : false
       }).eq('id', id).eq('tenant_id', tenantId);
-      
+
       if (error) throw error;
 
       const agentAfter = { ...agentBefore, ...payload };
@@ -4916,14 +4917,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // Update storage if the updated agent is the currently logged in user
       const currentEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
       if (currentEmail === payload.email) {
-          const allowedStr = JSON.stringify(payload.allowed_instances || []);
-          if (localStorage.getItem('current_user_email')) {
-              localStorage.setItem('allowed_instances', allowedStr);
-          }
-          if (sessionStorage.getItem('current_user_email')) {
-              sessionStorage.setItem('allowed_instances', allowedStr);
-          }
-          window.location.reload();
+        const allowedStr = JSON.stringify(payload.allowed_instances || []);
+        if (localStorage.getItem('current_user_email')) {
+          localStorage.setItem('allowed_instances', allowedStr);
+        }
+        if (sessionStorage.getItem('current_user_email')) {
+          sessionStorage.setItem('allowed_instances', allowedStr);
+        }
+        window.location.reload();
       }
 
       await get().fetchTenantAgents();
@@ -4940,7 +4941,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const agentBefore = get().agents.find(a => a.id === id);
       const { error } = await supabase.from('tenant_users').delete()
         .eq('id', id).eq('tenant_id', tenantId);
-      
+
       if (error) throw error;
       await get().logOperation('DELETE', 'tenant_users', id, agentBefore || null, null);
       await get().fetchTenantAgents();
@@ -4958,51 +4959,51 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (!currentUserEmail) return;
 
       let me = get().agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail.toLowerCase());
-      
+
       if (!me) {
-          const { data: dbMe } = await supabase.from('tenant_users')
-              .select('id')
-              .eq('email', currentUserEmail)
-              .eq('tenant_id', tenantId)
-              .limit(1)
-              .maybeSingle();
-          if (dbMe) me = dbMe as any;
+        const { data: dbMe } = await supabase.from('tenant_users')
+          .select('id')
+          .eq('email', currentUserEmail)
+          .eq('tenant_id', tenantId)
+          .limit(1)
+          .maybeSingle();
+        if (dbMe) me = dbMe as any;
       }
-      
+
       if (!me) {
-          // Criar on the fly para o Owner (Company Admin)
-          const { v4: uuidv4 } = await import('uuid');
-          const tempUserId = uuidv4();
-          const newAgentPayload = {
-             tenant_id: tenantId,
-             user_id: tempUserId,
-             role: 'admin',
-             full_name: fullName,
-             email: currentUserEmail,
-             signature: signature,
-             use_signature: use_signature
-          };
-          const { data: newMe, error: insertErr } = await supabase.from('tenant_users').insert([newAgentPayload]).select().single();
-          
-          if (insertErr) throw insertErr;
-          me = newMe as any;
-          await get().logOperation('INSERT', 'tenant_users', me.id, null, me);
+        // Criar on the fly para o Owner (Company Admin)
+        const { v4: uuidv4 } = await import('uuid');
+        const tempUserId = uuidv4();
+        const newAgentPayload = {
+          tenant_id: tenantId,
+          user_id: tempUserId,
+          role: 'admin',
+          full_name: fullName,
+          email: currentUserEmail,
+          signature: signature,
+          use_signature: use_signature
+        };
+        const { data: newMe, error: insertErr } = await supabase.from('tenant_users').insert([newAgentPayload]).select().single();
+
+        if (insertErr) throw insertErr;
+        me = newMe as any;
+        await get().logOperation('INSERT', 'tenant_users', me.id, null, me);
       } else {
-          const agentBefore = { ...me };
-          const { error } = await supabase.from('tenant_users')
-              .update({ full_name: fullName, signature: signature, use_signature: use_signature })
-              .eq('tenant_id', tenantId)
-              .eq('id', me.id);
-          
-          if (error) throw error;
-          const agentAfter = { ...me, full_name: fullName, signature: signature, use_signature: use_signature };
-          await get().logOperation('UPDATE', 'tenant_users', me.id, agentBefore, agentAfter);
+        const agentBefore = { ...me };
+        const { error } = await supabase.from('tenant_users')
+          .update({ full_name: fullName, signature: signature, use_signature: use_signature })
+          .eq('tenant_id', tenantId)
+          .eq('id', me.id);
+
+        if (error) throw error;
+        const agentAfter = { ...me, full_name: fullName, signature: signature, use_signature: use_signature };
+        await get().logOperation('UPDATE', 'tenant_users', me.id, agentBefore, agentAfter);
       }
 
       // Sincroniza no cache do localStorage local
       localStorage.setItem('current_user_signature', signature || '');
       localStorage.setItem('current_user_use_signature', String(use_signature));
-      
+
       await get().fetchTenantAgents(); // Sincroniza localmente
     } catch (e) {
       console.error('Erro ao atualizar perfil do agente:', e);
@@ -5013,7 +5014,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   updateConversationField: async (contactId, payload) => {
     const tenant = get().tenantInfo;
     if (!tenant) return;
-    
+
     // UI Otimista (Separa flags internas que não pertencem ao schema de conversations)
     const { snoozed_by_system, ai_paused_until, ...dbPayload } = payload as any;
     if ('ai_paused' in payload) {
@@ -5021,39 +5022,39 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
 
     set((state) => ({
-       contacts: state.contacts.map((c) => {
-         if (c.id === contactId) {
-            const stateUpdates: any = {};
-            if ('status' in payload) stateUpdates.conv_status = payload.status;
-            if ('snoozed_until' in payload) stateUpdates.snoozed_until = payload.snoozed_until;
-            if ('snoozed_at' in payload) stateUpdates.snoozed_at = payload.snoozed_at;
-            if ('snoozed_by' in payload) stateUpdates.snoozed_by = payload.snoozed_by;
-            if ('priority' in payload) stateUpdates.priority = payload.priority;
-            if ('assigned_to' in payload) stateUpdates.assigned_to = payload.assigned_to;
-            if ('ai_paused' in payload) {
-               stateUpdates.ai_paused = payload.ai_paused;
-               stateUpdates.ai_paused_manually = payload.ai_paused_manually;
-               
-               if (payload.ai_paused_until) {
-                  // Pausa temporária: status do contato continua active (o backend lida com bot_paused_until)
-                  // Mas marcamos ai_paused no app para refletir a UI
-                  stateUpdates.bot_paused_until = payload.ai_paused_until;
-                  stateUpdates.bot_status = 'active'; 
-               } else if (payload.ai_paused === false) {
-                  // Retomada: limpa data e volta pra active
-                  stateUpdates.bot_paused_until = null;
-                  stateUpdates.bot_status = 'active';
-               } else {
-                  // Pausa definitiva
-                  stateUpdates.bot_paused_until = null;
-                  stateUpdates.bot_status = 'paused';
-               }
-               stateUpdates.conv_status = payload.ai_paused ? 'open' : 'bot';
+      contacts: state.contacts.map((c) => {
+        if (c.id === contactId) {
+          const stateUpdates: any = {};
+          if ('status' in payload) stateUpdates.conv_status = payload.status;
+          if ('snoozed_until' in payload) stateUpdates.snoozed_until = payload.snoozed_until;
+          if ('snoozed_at' in payload) stateUpdates.snoozed_at = payload.snoozed_at;
+          if ('snoozed_by' in payload) stateUpdates.snoozed_by = payload.snoozed_by;
+          if ('priority' in payload) stateUpdates.priority = payload.priority;
+          if ('assigned_to' in payload) stateUpdates.assigned_to = payload.assigned_to;
+          if ('ai_paused' in payload) {
+            stateUpdates.ai_paused = payload.ai_paused;
+            stateUpdates.ai_paused_manually = payload.ai_paused_manually;
+
+            if (payload.ai_paused_until) {
+              // Pausa temporária: status do contato continua active (o backend lida com bot_paused_until)
+              // Mas marcamos ai_paused no app para refletir a UI
+              stateUpdates.bot_paused_until = payload.ai_paused_until;
+              stateUpdates.bot_status = 'active';
+            } else if (payload.ai_paused === false) {
+              // Retomada: limpa data e volta pra active
+              stateUpdates.bot_paused_until = null;
+              stateUpdates.bot_status = 'active';
+            } else {
+              // Pausa definitiva
+              stateUpdates.bot_paused_until = null;
+              stateUpdates.bot_status = 'paused';
             }
-            return { ...c, ...stateUpdates };
-         }
-         return c;
-       })
+            stateUpdates.conv_status = payload.ai_paused ? 'open' : 'bot';
+          }
+          return { ...c, ...stateUpdates };
+        }
+        return c;
+      })
     }));
 
     try {
@@ -5063,7 +5064,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       let query = supabase.from('conversations').select('id').eq('contact_id', realContactId).eq('tenant_id', tenant.id);
       if (resolvedInstId) query = query.eq('instance_id', resolvedInstId);
       const { data: conv, error: convErr } = await query.order('last_message_at', { ascending: false }).limit(1).maybeSingle();
-      
+
       if (convErr) {
         console.error('Erro ao buscar conversa no Supabase:', convErr.message);
         throw convErr;
@@ -5080,32 +5081,32 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const contact = currentContacts.find(c => c.id === contactId);
 
       if ('ai_paused' in payload) {
-        const botStatusPayload: any = { 
-            bot_status: payload.ai_paused && !payload.ai_paused_until ? 'paused' : 'active',
-            bot_paused_until: payload.ai_paused_until || null
+        const botStatusPayload: any = {
+          bot_status: payload.ai_paused && !payload.ai_paused_until ? 'paused' : 'active',
+          bot_paused_until: payload.ai_paused_until || null
         };
         await supabase.from('contacts').update(botStatusPayload).eq('id', realContactId);
 
         // Notifica o backend imediatamente para abortar qualquer geração ou envio pendente da IA na memória
         if (payload.ai_paused) {
-            try {
-                const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
-                fetch(`${API_URL}/api/v1/messages/cancel-ai`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'x-tenant-id': tenant.id
-                    },
-                    body: JSON.stringify({
-                        conversationId: conv.id,
-                        contactId: realContactId,
-                        remoteJid: contact?.phone ? `${contact.phone.replace(/\D/g, '')}@s.whatsapp.net` : undefined,
-                        reason: payload.ai_paused_until ? 'pausa_temporaria_ui' : 'pausa_definitiva_ui'
-                    })
-                }).catch(err => console.warn('[ChatStore] Falha ao notificar cancel-ai no backend:', err));
-            } catch (notifyErr) {
-                console.warn('[ChatStore] Erro ao disparar cancel-ai:', notifyErr);
-            }
+          try {
+            const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+            fetch(`${API_URL}/api/v1/messages/cancel-ai`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-tenant-id': tenant.id
+              },
+              body: JSON.stringify({
+                conversationId: conv.id,
+                contactId: realContactId,
+                remoteJid: contact?.phone ? `${contact.phone.replace(/\D/g, '')}@s.whatsapp.net` : undefined,
+                reason: payload.ai_paused_until ? 'pausa_temporaria_ui' : 'pausa_definitiva_ui'
+              })
+            }).catch(err => console.warn('[ChatStore] Falha ao notificar cancel-ai no backend:', err));
+          } catch (notifyErr) {
+            console.warn('[ChatStore] Erro ao disparar cancel-ai:', notifyErr);
+          }
         }
 
         // Only insert system logs and messages if the pause state is actually changing
@@ -5119,60 +5120,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
           let statusText = '▶️ IA Luna Retomada';
           if (payload.ai_paused) {
-             if (payload.ai_paused_until) {
-                const minutes = Math.round((new Date(payload.ai_paused_until).getTime() - Date.now()) / 60000);
-                statusText = `⏸️ IA Luna Pausada (${minutes}m)`;
-             } else {
-                statusText = '⏸️ IA Luna Pausada Definitivamente';
-             }
+            if (payload.ai_paused_until) {
+              const minutes = Math.round((new Date(payload.ai_paused_until).getTime() - Date.now()) / 60000);
+              statusText = `⏸️ IA Luna Pausada (${minutes}m)`;
+            } else {
+              statusText = '⏸️ IA Luna Pausada Definitivamente';
+            }
           }
           const msgText = `${statusText} por ${operatorName}`;
 
           const dbMsg = {
-             conversation_id: conv.id,
-             tenant_id: tenant.id,
-             text_content: msgText,
-             sender_type: 'system',
-             direction: 'outgoing',
-             timestamp: new Date().toISOString(),
-             status: 'sent',
-             instance_id: instId && instId !== 'default' ? instId : null
-          };
-          
-          await supabase.from('messages').insert(dbMsg);
-          
-          const pseudoId = 'system-aipaused-' + Date.now();
-          get().addMessageLocally(contactId, { id: pseudoId, text: msgText, sender: 'system', timestamp: new Date() });
-        }
-      }
-
-      // 1. Identificar se foi uma reabertura de atendimento reagendado/adiado (snoozed -> open)
-
-      if (contact && contact.conv_status === 'snoozed' && payload.status === 'open') {
-         const currentUserEmail = typeof window !== 'undefined' ? (localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email')) : null;
-         const currentUserName = typeof window !== 'undefined' ? (localStorage.getItem('current_user_name') || sessionStorage.getItem('current_user_name')) : null;
-         const me = get().agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail?.toLowerCase());
-         const operatorName = currentUserName || me?.full_name || me?.email || 'Sistema';
-
-         const formatDateSystem = (dateInput: any) => {
-           if (!dateInput) return 'Data Indisponível';
-           const d = new Date(dateInput);
-           return d.toLocaleString('pt-BR', {
-             day: '2-digit',
-             month: '2-digit',
-             year: 'numeric',
-             hour: '2-digit',
-             minute: '2-digit'
-           });
-         };
-
-         const dateSnoozeStr = formatDateSystem(contact.snoozed_at || contact.created_at);
-         const dateReopenStr = formatDateSystem(new Date());
-         const rebuilderName = snoozed_by_system ? 'Sistema (Prazo Expirado)' : operatorName;
-         
-         const msgText = `🔄 Esta conversa foi reagendada dia ${dateSnoozeStr} e reaberta hoje, ${dateReopenStr} por ${rebuilderName}`;
-
-         const dbMsg = {
             conversation_id: conv.id,
             tenant_id: tenant.id,
             text_content: msgText,
@@ -5181,36 +5138,80 @@ export const useChatStore = create<ChatState>((set, get) => ({
             timestamp: new Date().toISOString(),
             status: 'sent',
             instance_id: instId && instId !== 'default' ? instId : null
-         };
-         
-         await supabase.from('messages').insert(dbMsg);
-         
-         const pseudoId = 'system-reopen-' + Date.now();
-         get().addMessageLocally(contactId, { id: pseudoId, text: msgText, sender: 'system', timestamp: new Date() });
+          };
+
+          await supabase.from('messages').insert(dbMsg);
+
+          const pseudoId = 'system-aipaused-' + Date.now();
+          get().addMessageLocally(contactId, { id: pseudoId, text: msgText, sender: 'system', timestamp: new Date() });
+        }
+      }
+
+      // 1. Identificar se foi uma reabertura de atendimento reagendado/adiado (snoozed -> open)
+
+      if (contact && contact.conv_status === 'snoozed' && payload.status === 'open') {
+        const currentUserEmail = typeof window !== 'undefined' ? (localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email')) : null;
+        const currentUserName = typeof window !== 'undefined' ? (localStorage.getItem('current_user_name') || sessionStorage.getItem('current_user_name')) : null;
+        const me = get().agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail?.toLowerCase());
+        const operatorName = currentUserName || me?.full_name || me?.email || 'Sistema';
+
+        const formatDateSystem = (dateInput: any) => {
+          if (!dateInput) return 'Data Indisponível';
+          const d = new Date(dateInput);
+          return d.toLocaleString('pt-BR', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+          });
+        };
+
+        const dateSnoozeStr = formatDateSystem(contact.snoozed_at || contact.created_at);
+        const dateReopenStr = formatDateSystem(new Date());
+        const rebuilderName = snoozed_by_system ? 'Sistema (Prazo Expirado)' : operatorName;
+
+        const msgText = `🔄 Esta conversa foi reagendada dia ${dateSnoozeStr} e reaberta hoje, ${dateReopenStr} por ${rebuilderName}`;
+
+        const dbMsg = {
+          conversation_id: conv.id,
+          tenant_id: tenant.id,
+          text_content: msgText,
+          sender_type: 'system',
+          direction: 'outgoing',
+          timestamp: new Date().toISOString(),
+          status: 'sent',
+          instance_id: instId && instId !== 'default' ? instId : null
+        };
+
+        await supabase.from('messages').insert(dbMsg);
+
+        const pseudoId = 'system-reopen-' + Date.now();
+        get().addMessageLocally(contactId, { id: pseudoId, text: msgText, sender: 'system', timestamp: new Date() });
       }
 
       // 2. Identificar se foi uma atribuição de agente
       if ('assigned_to' in payload && payload.assigned_to) {
-          let agentName = 'Agente';
-          const agent = get().agents.find(a => a.id === payload.assigned_to);
-          if (agent && agent.full_name) agentName = agent.full_name;
-          
-          const msgText = `🎫 Atribuído para ${agentName} dia ${new Date().toLocaleString('pt-BR')}`;
-          const dbMsg = {
-             conversation_id: conv.id,
-             tenant_id: tenant.id,
-             text_content: msgText,
-             sender_type: 'system',
-             direction: 'outgoing',
-             timestamp: new Date().toISOString(),
-             status: 'sent',
-             instance_id: instId && instId !== 'default' ? instId : null
-          };
-          
-          await supabase.from('messages').insert(dbMsg);
-          
-          const pseudoId = 'system-assign-' + Date.now();
-          get().addMessageLocally(contactId, { id: pseudoId, text: msgText, sender: 'system', timestamp: new Date() });
+        let agentName = 'Agente';
+        const agent = get().agents.find(a => a.id === payload.assigned_to);
+        if (agent && agent.full_name) agentName = agent.full_name;
+
+        const msgText = `🎫 Atribuído para ${agentName} dia ${new Date().toLocaleString('pt-BR')}`;
+        const dbMsg = {
+          conversation_id: conv.id,
+          tenant_id: tenant.id,
+          text_content: msgText,
+          sender_type: 'system',
+          direction: 'outgoing',
+          timestamp: new Date().toISOString(),
+          status: 'sent',
+          instance_id: instId && instId !== 'default' ? instId : null
+        };
+
+        await supabase.from('messages').insert(dbMsg);
+
+        const pseudoId = 'system-assign-' + Date.now();
+        get().addMessageLocally(contactId, { id: pseudoId, text: msgText, sender: 'system', timestamp: new Date() });
       }
     } catch (e) {
       console.error('Erro ao atualizar campo da conversa:', e);
@@ -5227,7 +5228,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         .eq('tenant_id', tenant.id)
         .order('created_at', { ascending: true });
       if (error) throw error;
-      
+
       if (!data || data.length === 0) {
         const defaultBoard = {
           tenant_id: tenant.id,
@@ -5311,9 +5312,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (error) throw error;
 
       const active = tickets?.find(t => t.status === 'open') || null;
-      set({ 
-        contactTickets: tickets || [], 
-        activeTicket: active 
+      set({
+        contactTickets: tickets || [],
+        activeTicket: active
       });
 
       // Se o contato está ativo (não resolvido/bloqueado) e não tem ticket ativo, abre um automaticamente
@@ -5434,10 +5435,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (error) throw error;
 
       set((state) => {
-        const updatedTickets = state.contactTickets.map(t => 
+        const updatedTickets = state.contactTickets.map(t =>
           t.id === ticketId ? { ...t, problem_description: description } : t
         );
-        const updatedActive = state.activeTicket && state.activeTicket.id === ticketId 
+        const updatedActive = state.activeTicket && state.activeTicket.id === ticketId
           ? { ...state.activeTicket, problem_description: description }
           : state.activeTicket;
 
@@ -5507,19 +5508,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const getSimilarityScore = (s1: string, s2: string): number => {
           const norm1 = s1.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(w => w.length > 2);
           const norm2 = s2.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(w => w.length > 2);
-          
+
           if (norm1.length === 0 || norm2.length === 0) return 0.0;
 
           const set1 = new Set(norm1);
           const set2 = new Set(norm2);
-          
+
           let intersection = 0;
           set2.forEach(w => {
             if (set1.has(w)) intersection++;
           });
-          
+
           const wordSimilarity = intersection / Math.max(set1.size, set2.size);
-          
+
           const clean1 = s1.toLowerCase().replace(/[^\w\s]/g, '').trim();
           const clean2 = s2.toLowerCase().replace(/[^\w\s]/g, '').trim();
           if (clean1 === clean2) return 1.0;
@@ -5540,7 +5541,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           });
 
           const bigramSimilarity = (2.0 * bigramIntersection) / (bigrams1.size + bigrams2.size);
-          
+
           return 0.4 * wordSimilarity + 0.6 * bigramSimilarity;
         };
 
@@ -5593,7 +5594,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       const { error } = await supabase
         .from('chat_tickets')
-        .update({ 
+        .update({
           status: 'resolved',
           opened_at: effectiveOpenedAt,
           closed_at: closedAt,
@@ -5606,10 +5607,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (error) throw error;
 
       set((state) => {
-        const updatedTickets = state.contactTickets.map(t => 
-          t.id === ticketId ? { 
-            ...t, 
-            status: 'resolved' as const, 
+        const updatedTickets = state.contactTickets.map(t =>
+          t.id === ticketId ? {
+            ...t,
+            status: 'resolved' as const,
             opened_at: effectiveOpenedAt,
             closed_at: closedAt,
             problem_description: problemDescription,
@@ -5634,48 +5635,48 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (state.isSubscribed && !force) return; // React 18 protection
     let tenantId = state.tenantInfo?.id;
     if (!tenantId) {
-        tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
+      tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
     }
     if (!tenantId) {
-        console.error('[Realtime] Cannot subscribe without tenantId. Ensure user is logged in.');
-        return;
+      console.error('[Realtime] Cannot subscribe without tenantId. Ensure user is logged in.');
+      return;
     }
     set({ isSubscribed: true, realtimeStatus: 'connecting' } as any);
 
     // Inicia monitor Keep-Alive do Realtime
     if (typeof window !== 'undefined') {
-        const win = window as any;
-        if (!win._realtimeCheckInterval) {
-            win._realtimeCheckInterval = setInterval(() => {
-                const currentStatus = get().realtimeStatus;
-                console.log('[Realtime Monitor] Status atual:', currentStatus);
-                if (currentStatus === 'disconnected') {
-                    console.log('[Realtime Monitor] Detectado canal desconectado. Forçando auto-reparo do realtime...');
-                    get().subscribeToNewMessages(true);
-                }
-            }, 10000); // Checa a cada 10 segundos para reconexão super rápida
-        }
+      const win = window as any;
+      if (!win._realtimeCheckInterval) {
+        win._realtimeCheckInterval = setInterval(() => {
+          const currentStatus = get().realtimeStatus;
+          console.log('[Realtime Monitor] Status atual:', currentStatus);
+          if (currentStatus === 'disconnected') {
+            console.log('[Realtime Monitor] Detectado canal desconectado. Forçando auto-reparo do realtime...');
+            get().subscribeToNewMessages(true);
+          }
+        }, 10000); // Checa a cada 10 segundos para reconexão super rápida
+      }
 
-        if (!win._hasRealtimeListeners) {
-            win._hasRealtimeListeners = true;
-            
-            const triggerRepair = () => {
-                const currentStatus = get().realtimeStatus;
-                // Se estiver offline ou se não houver canais ativos no cliente Supabase
-                if (currentStatus === 'disconnected' || supabase.getChannels().length === 0) {
-                    console.log('[Realtime Window Events] Foco ou rede restabelecidos, mas Realtime inativo. Reparando...');
-                    get().subscribeToNewMessages(true);
-                }
-            };
-            
-            window.addEventListener('visibilitychange', () => {
-                if (document.visibilityState === 'visible') {
-                    triggerRepair();
-                }
-            });
-            window.addEventListener('online', triggerRepair);
-            window.addEventListener('focus', triggerRepair);
-        }
+      if (!win._hasRealtimeListeners) {
+        win._hasRealtimeListeners = true;
+
+        const triggerRepair = () => {
+          const currentStatus = get().realtimeStatus;
+          // Se estiver offline ou se não houver canais ativos no cliente Supabase
+          if (currentStatus === 'disconnected' || supabase.getChannels().length === 0) {
+            console.log('[Realtime Window Events] Foco ou rede restabelecidos, mas Realtime inativo. Reparando...');
+            get().subscribeToNewMessages(true);
+          }
+        };
+
+        window.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') {
+            triggerRepair();
+          }
+        });
+        window.addEventListener('online', triggerRepair);
+        window.addEventListener('focus', triggerRepair);
+      }
     }
 
     const channelName = `realtime_chat_${tenantId}`;
@@ -5683,14 +5684,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
       const existingChannel = supabase.getChannels().find(c => c.topic === `realtime:${channelName}`);
       if (existingChannel) {
-          supabase.removeChannel(existingChannel);
+        supabase.removeChannel(existingChannel);
       }
-    } catch(e) {
+    } catch (e) {
       console.warn('[Realtime] Erro ao limpar canal anterior:', e);
     }
-    
+
     const channel = supabase.channel(channelName);
-    
+
     // Escuta novas mensagens
     channel
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `tenant_id=eq.${tenantId}` }, async (payload) => {
@@ -5701,84 +5702,84 @@ export const useChatStore = create<ChatState>((set, get) => ({
         let convInstanceId = m.instance_id || null;
 
         const currentState = get();
-        
+
         // 1. Tenta achar o contato localmente pelo conv_id
-        let targetContactLocally = m.conversation_id 
-             ? currentState.contacts.find((c: any) => c.conv_id === m.conversation_id) 
-             : null;
+        let targetContactLocally = m.conversation_id
+          ? currentState.contacts.find((c: any) => c.conv_id === m.conversation_id)
+          : null;
 
         if (targetContactLocally) {
-             targetContactId = targetContactLocally.id.split('_')[0];
-             convInstanceId = m.instance_id || targetContactLocally.instance_id;
+          targetContactId = targetContactLocally.id.split('_')[0];
+          convInstanceId = m.instance_id || targetContactLocally.instance_id;
         }
 
         // 2. Se não achou localmente, busca o contact_id na tabela conversations
         if (!targetContactId && m.conversation_id) {
-             try {
-                 const { data: conv } = await supabase
-                     .from('conversations')
-                     .select('contact_id, instance_id')
-                     .eq('id', m.conversation_id)
-                     .maybeSingle();
-                 if (conv) {
-                     targetContactId = conv.contact_id;
-                     convInstanceId = conv.instance_id;
-                 }
-             } catch (err) {
-                 console.error('[Realtime] Erro ao buscar conversa:', err);
-             }
+          try {
+            const { data: conv } = await supabase
+              .from('conversations')
+              .select('contact_id, instance_id')
+              .eq('id', m.conversation_id)
+              .maybeSingle();
+            if (conv) {
+              targetContactId = conv.contact_id;
+              convInstanceId = conv.instance_id;
+            }
+          } catch (err) {
+            console.error('[Realtime] Erro ao buscar conversa:', err);
+          }
         }
 
         // 3. Concorrência: se ainda não achou a conversa, aguarda 600ms e tenta novamente
         if (!targetContactId && m.conversation_id) {
-             await new Promise(resolve => setTimeout(resolve, 600));
-             try {
-                 const { data: conv } = await supabase
-                     .from('conversations')
-                     .select('contact_id, instance_id')
-                     .eq('id', m.conversation_id)
-                     .maybeSingle();
-                 if (conv) {
-                     targetContactId = conv.contact_id;
-                     convInstanceId = conv.instance_id;
-                 }
-             } catch (err) {
-                 console.error('[Realtime Retry] Erro ao buscar conversa:', err);
-             }
+          await new Promise(resolve => setTimeout(resolve, 600));
+          try {
+            const { data: conv } = await supabase
+              .from('conversations')
+              .select('contact_id, instance_id')
+              .eq('id', m.conversation_id)
+              .maybeSingle();
+            if (conv) {
+              targetContactId = conv.contact_id;
+              convInstanceId = conv.instance_id;
+            }
+          } catch (err) {
+            console.error('[Realtime Retry] Erro ao buscar conversa:', err);
+          }
         }
 
         // Se realmente não tem contato associado, ignora
         if (!targetContactId) {
-             console.warn('[Realtime] Ignorando msg INSERT por falta de contact_id mapeado:', m);
-             return;
+          console.warn('[Realtime] Ignorando msg INSERT por falta de contact_id mapeado:', m);
+          return;
         }
-        
+
         const expectedCompositeId = targetContactId + '_' + (convInstanceId || 'default');
-        
+
         // Re-verifica localmente com o targetContactId e expectedCompositeId
         if (!targetContactLocally) {
-             targetContactLocally = currentState.contacts.find((c: any) => 
-                 c.id === expectedCompositeId ||
-                 (c.conv_id && m.conversation_id && c.conv_id === m.conversation_id)
-             );
+          targetContactLocally = currentState.contacts.find((c: any) =>
+            c.id === expectedCompositeId ||
+            (c.conv_id && m.conversation_id && c.conv_id === m.conversation_id)
+          );
         }
 
         let cData = null;
         if (!targetContactLocally) {
-             try {
-                 const { data } = await supabase.from('contacts').select('*').eq('id', targetContactId).single();
-                 cData = data;
-                 if (!cData) return;
-             } catch (err) {
-                 console.error('[Realtime] Erro ao buscar contato no Supabase:', err);
-                 return;
-             }
+          try {
+            const { data } = await supabase.from('contacts').select('*').eq('id', targetContactId).single();
+            cData = data;
+            if (!cData) return;
+          } catch (err) {
+            console.error('[Realtime] Erro ao buscar contato no Supabase:', err);
+            return;
+          }
         } else {
-             cData = { ...targetContactLocally };
-             cData.id = targetContactId;
-             if (cData.conv_id === undefined || cData.conv_id === null) {
-                 cData.conv_id = m.conversation_id;
-             }
+          cData = { ...targetContactLocally };
+          cData.id = targetContactId;
+          if (cData.conv_id === undefined || cData.conv_id === null) {
+            cData.conv_id = m.conversation_id;
+          }
         }
 
         // --- BARREIRA DE SEGURANÇA CONTRA MENSAGENS CRUZADAS ---
@@ -5786,8 +5787,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // em qualquer outra conversa que não seja do próprio Ronaldo-Web.
         const isRonaldoContact = cData.instance_id === '5c78d358-d449-41c4-b396-a04ab20a39e4';
         if (isRonaldoContact && convInstanceId !== '5c78d358-d449-41c4-b396-a04ab20a39e4') {
-             console.log(`[Realtime Barreira] Ignorando msg INSERT da conversa ${m.conversation_id} porque o contato pertence ao Ronaldo-Web`);
-             return;
+          console.log(`[Realtime Barreira] Ignorando msg INSERT da conversa ${m.conversation_id} porque o contato pertence ao Ronaldo-Web`);
+          return;
         }
 
         // CRITICAL FIX: O contato local deve assumir a instância da conversa ativa para não sumir da caixa correta
@@ -5796,32 +5797,32 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
         // RBAC RIGOROSO: Verifica se a caixa (effectiveInstanceId) é permitida para o usuário logado
         if (effectiveInstanceId && !hasUserAccessToInstance(effectiveInstanceId)) {
-            console.log(`[Realtime RBAC] Bloqueando mensagem da caixa sem permissão: ${effectiveInstanceId}`);
-            return;
+          console.log(`[Realtime RBAC] Bloqueando mensagem da caixa sem permissão: ${effectiveInstanceId}`);
+          return;
         }
 
         const expectedCompositeIdRefined = targetContactId + '_' + (effectiveInstanceId || 'default');
 
         if (!targetContactLocally) {
-             targetContactLocally = currentState.contacts.find((c: any) => 
-                 c.id === expectedCompositeIdRefined ||
-                 (
-                     ((c.whatsapp_jid && c.whatsapp_jid === cData.whatsapp_jid) || (c.phone && c.phone === cData.phone)) &&
-                     (c.instance_id === effectiveInstanceId || (!c.instance_id && effectiveInstanceId === 'default'))
-                 )
-             );
+          targetContactLocally = currentState.contacts.find((c: any) =>
+            c.id === expectedCompositeIdRefined ||
+            (
+              ((c.whatsapp_jid && c.whatsapp_jid === cData.whatsapp_jid) || (c.phone && c.phone === cData.phone)) &&
+              (c.instance_id === effectiveInstanceId || (!c.instance_id && effectiveInstanceId === 'default'))
+            )
+          );
         }
-        
+
         if (!targetContactLocally) {
-           get().upsertContactLocally(cData as any);
+          get().upsertContactLocally(cData as any);
         }
 
         const cid = targetContactLocally ? targetContactLocally.id : expectedCompositeId;
 
         const isBlocked = cData.is_blocked || (targetContactLocally && targetContactLocally.is_blocked);
         if (isBlocked) {
-            console.log(`[Realtime] Mensagem ignorada silenciosamente (Contato Bloqueado). CID: ${cid}`);
-            return;
+          console.log(`[Realtime] Mensagem ignorada silenciosamente (Contato Bloqueado). CID: ${cid}`);
+          return;
         }
 
         const advanced = parseAdvancedMsgMetadata(m);
@@ -5829,40 +5830,40 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // Verifica automações
         let isIgnored = false;
         let isIgnoredSilent = false;
-        
+
         const activeAutomations = get().automations.filter((auto: any) => auto.is_active && m.text_content);
-        
+
         for (const auto of activeAutomations) {
-           const patternText = auto.condition_text || auto.keyword || '';
-           if (!patternText) continue;
-           
-           // Escapa caracteres especiais de regex
-           const escapedPattern = patternText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-           // Substitui o (X) escapado por um grupo de captura (.*) que pega até o final da linha
-           const finalPattern = escapedPattern.replace(/\\\(X\\\)/ig, '(.*)');
-           // Flag 'i' para case-insensitive, 'm' para tratar múltiplas linhas (^ e $ funcionam por linha)
-           const regex = new RegExp(finalPattern, 'im');
-           const match = m.text_content.match(regex);
-           
-           if (match) {
-               if (['ignore', 'ignore_message', 'ignore_message_silent'].includes(auto.action_type)) {
-                   isIgnored = true;
-                   if (auto.action_type === 'ignore_message_silent') isIgnoredSilent = true;
-               } else if (auto.action_type === 'extract_contact_name') {
-                   // O grupo 1 (se houver) conterá o valor extraído de (X)
-                   const extractedVal = match.length > 1 ? match[1] : match[0];
-                   const extractedName = extractedVal?.trim();
-                   
-                   // Atualiza o nome apenas se for válido e diferente do vazio
-                   if (extractedName && extractedName.length > 1 && cid) {
-                       console.log(`[Automation] Extraindo e salvando nome do contato: ${extractedName}`);
-                       // Executa assincronamente sem bloquear o canal do Realtime
-                       setTimeout(() => {
-                           get().updateContactCRM(cid, { name: extractedName });
-                       }, 200);
-                   }
-               }
-           }
+          const patternText = auto.condition_text || auto.keyword || '';
+          if (!patternText) continue;
+
+          // Escapa caracteres especiais de regex
+          const escapedPattern = patternText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          // Substitui o (X) escapado por um grupo de captura (.*) que pega até o final da linha
+          const finalPattern = escapedPattern.replace(/\\\(X\\\)/ig, '(.*)');
+          // Flag 'i' para case-insensitive, 'm' para tratar múltiplas linhas (^ e $ funcionam por linha)
+          const regex = new RegExp(finalPattern, 'im');
+          const match = m.text_content.match(regex);
+
+          if (match) {
+            if (['ignore', 'ignore_message', 'ignore_message_silent'].includes(auto.action_type)) {
+              isIgnored = true;
+              if (auto.action_type === 'ignore_message_silent') isIgnoredSilent = true;
+            } else if (auto.action_type === 'extract_contact_name') {
+              // O grupo 1 (se houver) conterá o valor extraído de (X)
+              const extractedVal = match.length > 1 ? match[1] : match[0];
+              const extractedName = extractedVal?.trim();
+
+              // Atualiza o nome apenas se for válido e diferente do vazio
+              if (extractedName && extractedName.length > 1 && cid) {
+                console.log(`[Automation] Extraindo e salvando nome do contato: ${extractedName}`);
+                // Executa assincronamente sem bloquear o canal do Realtime
+                setTimeout(() => {
+                  get().updateContactCRM(cid, { name: extractedName });
+                }, 200);
+              }
+            }
+          }
         }
 
         get().addMessageLocally(cid, {
@@ -5885,74 +5886,74 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
         // Reordena o card pra cima e joga notificação +1 Unread caso a aba não seja ele
         set((s) => {
-           const u = [...s.contacts];
-           const i = u.findIndex(c => c.id === cid);
-           if (i !== -1) {
-              const updatedContact = { ...u[i] };
-              
-              // MEMORY LEAK PROTECTION: Limita o número de mensagens locais mantidas em contatos inativos para prevenir congelamento da aba do browser
-              if (s.activeChatId !== cid && updatedContact.messages && updatedContact.messages.length > 100) {
-                  updatedContact.messages = updatedContact.messages.slice(-100);
+          const u = [...s.contacts];
+          const i = u.findIndex(c => c.id === cid);
+          if (i !== -1) {
+            const updatedContact = { ...u[i] };
+
+            // MEMORY LEAK PROTECTION: Limita o número de mensagens locais mantidas em contatos inativos para prevenir congelamento da aba do browser
+            if (s.activeChatId !== cid && updatedContact.messages && updatedContact.messages.length > 100) {
+              updatedContact.messages = updatedContact.messages.slice(-100);
+            }
+
+            if (!isIgnored) {
+              const msgTimestamp = new Date(m.timestamp).getTime();
+              const isHistorical = (Date.now() - msgTimestamp) > (5 * 60000); // Mais de 5 minutos = histórico
+              const currentLastMsgTs = updatedContact.lastMsgTimestamp || 0;
+
+              if (msgTimestamp > currentLastMsgTs) {
+                updatedContact.lastMsgTimestamp = msgTimestamp;
               }
-              
-              if (!isIgnored) {
-                 const msgTimestamp = new Date(m.timestamp).getTime();
-                 const isHistorical = (Date.now() - msgTimestamp) > (5 * 60000); // Mais de 5 minutos = histórico
-                 const currentLastMsgTs = updatedContact.lastMsgTimestamp || 0;
-                 
-                 if (msgTimestamp > currentLastMsgTs) {
-                     updatedContact.lastMsgTimestamp = msgTimestamp;
-                 }
 
-                 const isOutbound = m.from_me === true || m.sender_type === 'agent' || m.sender_type === 'bot' || m.sender_type === 'system' || m.sender_type === 'automation';
-                 const isClient = !isOutbound && (m.sender_type === 'client' || !m.sender_type);
-                 
-                 // Impede notificação/Unread em mensagens antigas de sincronismo de histórico
-                 if (isClient && !isHistorical && !updatedContact.is_blocked) {
-                     const isFocused = typeof document !== 'undefined' && document.hasFocus();
-                     if (s.activeChatId !== cid || !isFocused) {
-                         updatedContact.unread = (updatedContact.unread || 0) + 1;
-                     } else {
-                         updatedContact.isManuallyUnread = false;
-                     }
-                     
-                     if (!isIgnoredSilent && hasUserAccessToInstance(effectiveInstanceId)) {
-                         const curUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email') || '';
-                         const curUserId = localStorage.getItem('current_user_id') || sessionStorage.getItem('current_user_id') || curUserEmail;
-                         const isAssignedToMe = updatedContact.assigned_to ? updatedContact.assigned_to.split(',').some((id: string) => id.trim() === curUserId || id.trim() === curUserEmail) : false;
-                         const isMention = m.content && (m.content.includes('@') || (curUserId && m.content.includes(curUserId)));
+              const isOutbound = m.from_me === true || m.sender_type === 'agent' || m.sender_type === 'bot' || m.sender_type === 'system' || m.sender_type === 'automation';
+              const isClient = !isOutbound && (m.sender_type === 'client' || !m.sender_type);
 
-                         let evType: NotificationEventType = 'unassigned_message';
-                         if (isMention) {
-                             evType = 'mention';
-                         } else if (isAssignedToMe) {
-                             evType = 'new_message';
-                         }
+              // Impede notificação/Unread em mensagens antigas de sincronismo de histórico
+              if (isClient && !isHistorical && !updatedContact.is_blocked) {
+                const isFocused = typeof document !== 'undefined' && document.hasFocus();
+                if (s.activeChatId !== cid || !isFocused) {
+                  updatedContact.unread = (updatedContact.unread || 0) + 1;
+                } else {
+                  updatedContact.isManuallyUnread = false;
+                }
 
-                         if (shouldNotifyForEvent(effectiveInstanceId, evType, 'sound')) {
-                             if (effectiveInstanceId) {
-                                 supabase.from('whatsapp_instances').select('notification_sound').eq('id', effectiveInstanceId).single()
-                                   .then(({ data }) => {
-                                       playNotificationSound(data?.notification_sound || 'default');
-                                   }).catch(() => {
-                                       playNotificationSound('default');
-                                   });
-                             } else {
-                                 playNotificationSound('default');
-                             }
-                         }
-                     }
-                 }
+                if (!isIgnoredSilent && hasUserAccessToInstance(effectiveInstanceId)) {
+                  const curUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email') || '';
+                  const curUserId = localStorage.getItem('current_user_id') || sessionStorage.getItem('current_user_id') || curUserEmail;
+                  const isAssignedToMe = updatedContact.assigned_to ? updatedContact.assigned_to.split(',').some((id: string) => id.trim() === curUserId || id.trim() === curUserEmail) : false;
+                  const isMention = m.content && (m.content.includes('@') || (curUserId && m.content.includes(curUserId)));
+
+                  let evType: NotificationEventType = 'unassigned_message';
+                  if (isMention) {
+                    evType = 'mention';
+                  } else if (isAssignedToMe) {
+                    evType = 'new_message';
+                  }
+
+                  if (shouldNotifyForEvent(effectiveInstanceId, evType, 'sound')) {
+                    if (effectiveInstanceId) {
+                      supabase.from('whatsapp_instances').select('notification_sound').eq('id', effectiveInstanceId).single()
+                        .then(({ data }) => {
+                          playNotificationSound(data?.notification_sound || 'default');
+                        }).catch(() => {
+                          playNotificationSound('default');
+                        });
+                    } else {
+                      playNotificationSound('default');
+                    }
+                  }
+                }
               }
-              
-              u[i] = updatedContact;
-           }
+            }
 
-           u.sort((a, b) => {
-              return getEffectiveContactTime(b) - getEffectiveContactTime(a);
-           });
-           
-           return { contacts: u };
+            u[i] = updatedContact;
+          }
+
+          u.sort((a, b) => {
+            return getEffectiveContactTime(b) - getEffectiveContactTime(a);
+          });
+
+          return { contacts: u };
         });
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages', filter: `tenant_id=eq.${tenantId}` }, async (payload) => {
@@ -5961,295 +5962,295 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // BARREIRA DE INSTÂNCIA: Bloqueia UPDATEs irrelevantes
         const currentActiveFilter = get().activeChannelFilter;
         if (currentActiveFilter && currentActiveFilter !== 'default' && currentActiveFilter !== 'all') {
-            if (m.instance_id && m.instance_id !== currentActiveFilter) {
-                 return;
-            }
+          if (m.instance_id && m.instance_id !== currentActiveFilter) {
+            return;
+          }
         }
 
         console.log('[Realtime] Message UPDATE:', m);
         set((s) => {
-           const updatedContacts = [...s.contacts];
-           const normalizeTextForCompare = (txt: any) => {
-               if (!txt) return '';
-               return String(txt).replace(/^\*([^*:]+):\*\s*/, '').trim().toLowerCase();
-           };
-           const normUpdateText = normalizeTextForCompare(m.text_content);
+          const updatedContacts = [...s.contacts];
+          const normalizeTextForCompare = (txt: any) => {
+            if (!txt) return '';
+            return String(txt).replace(/^\*([^*:]+):\*\s*/, '').trim().toLowerCase();
+          };
+          const normUpdateText = normalizeTextForCompare(m.text_content);
 
-           // Tenta achar com fallback iterando as mensagens para bypassar conversa ausente no state.
-           for (let i = 0; i < updatedContacts.length; i++) {
-              if (!updatedContacts[i].messages) continue;
-              const msgIndex = updatedContacts[i].messages.findIndex(msg => {
-                  if (msg.id === m.id) return true;
-                  if (m.whatsapp_message_id && msg.whatsapp_id === m.whatsapp_message_id) return true;
-                  if (String(msg.id).startsWith('optimistic-')) {
-                      const normMsgText = normalizeTextForCompare(msg.text);
-                      if (normUpdateText && normMsgText && (normUpdateText === normMsgText || normUpdateText.includes(normMsgText) || normMsgText.includes(normUpdateText))) {
-                          return true;
-                      }
-                  }
-                  return false;
-              });
-              if (msgIndex !== -1) {
-                  const newMessages = [...updatedContacts[i].messages];
-                  const advanced = parseAdvancedMsgMetadata(m);
-                  newMessages[msgIndex] = { 
-                    ...newMessages[msgIndex], 
-                    id: m.id,
-                    whatsapp_id: m.whatsapp_message_id || newMessages[msgIndex].whatsapp_id,
-                    status: m.status,
-                    raw_payload: m.raw_payload || newMessages[msgIndex].raw_payload,
-                    ...(m.text_content !== undefined && { text: advanced.text || m.text_content }),
-                    ...(m.media_url !== undefined && { media_url: m.media_url }),
-                    ...(advanced.mediaType !== undefined && { mediaType: advanced.mediaType }),
-                    ...(advanced.quoted !== undefined && { quoted: advanced.quoted }),
-                    ...(advanced.buttons !== undefined && { buttons: advanced.buttons })
-                  };
-                  updatedContacts[i] = { ...updatedContacts[i], messages: newMessages };
-                  break;
+          // Tenta achar com fallback iterando as mensagens para bypassar conversa ausente no state.
+          for (let i = 0; i < updatedContacts.length; i++) {
+            if (!updatedContacts[i].messages) continue;
+            const msgIndex = updatedContacts[i].messages.findIndex(msg => {
+              if (msg.id === m.id) return true;
+              if (m.whatsapp_message_id && msg.whatsapp_id === m.whatsapp_message_id) return true;
+              if (String(msg.id).startsWith('optimistic-')) {
+                const normMsgText = normalizeTextForCompare(msg.text);
+                if (normUpdateText && normMsgText && (normUpdateText === normMsgText || normUpdateText.includes(normMsgText) || normMsgText.includes(normUpdateText))) {
+                  return true;
+                }
               }
-           }
-           return { contacts: updatedContacts };
+              return false;
+            });
+            if (msgIndex !== -1) {
+              const newMessages = [...updatedContacts[i].messages];
+              const advanced = parseAdvancedMsgMetadata(m);
+              newMessages[msgIndex] = {
+                ...newMessages[msgIndex],
+                id: m.id,
+                whatsapp_id: m.whatsapp_message_id || newMessages[msgIndex].whatsapp_id,
+                status: m.status,
+                raw_payload: m.raw_payload || newMessages[msgIndex].raw_payload,
+                ...(m.text_content !== undefined && { text: advanced.text || m.text_content }),
+                ...(m.media_url !== undefined && { media_url: m.media_url }),
+                ...(advanced.mediaType !== undefined && { mediaType: advanced.mediaType }),
+                ...(advanced.quoted !== undefined && { quoted: advanced.quoted }),
+                ...(advanced.buttons !== undefined && { buttons: advanced.buttons })
+              };
+              updatedContacts[i] = { ...updatedContacts[i], messages: newMessages };
+              break;
+            }
+          }
+          return { contacts: updatedContacts };
         });
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'contacts', filter: `tenant_id=eq.${tenantId}` }, (payload) => {
-        if(payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-           get().upsertContactLocally(payload.new as ContactRow);
+        if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+          get().upsertContactLocally(payload.new as ContactRow);
         }
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'appointments', filter: `tenant_id=eq.${tenantId}` }, (payload) => {
-         console.log('[Realtime] Appointment change:', payload);
-         const { eventType, new: newRecord, old: oldRecord } = payload;
-         
-         set((s: any) => {
-            let nextAppointments = [...(s.appointments || [])];
-            if (eventType === 'INSERT') {
-               const alreadyHas = nextAppointments.some(a => a.id === newRecord.id);
-               if (!alreadyHas) nextAppointments.push(newRecord as any);
-            } else if (eventType === 'UPDATE') {
-               nextAppointments = nextAppointments.map(a => a.id === newRecord.id ? (newRecord as any) : a);
-            } else if (eventType === 'DELETE') {
-               nextAppointments = nextAppointments.filter(a => a.id !== oldRecord.id);
-            }
-            return { appointments: nextAppointments };
-         });
+        console.log('[Realtime] Appointment change:', payload);
+        const { eventType, new: newRecord, old: oldRecord } = payload;
+
+        set((s: any) => {
+          let nextAppointments = [...(s.appointments || [])];
+          if (eventType === 'INSERT') {
+            const alreadyHas = nextAppointments.some(a => a.id === newRecord.id);
+            if (!alreadyHas) nextAppointments.push(newRecord as any);
+          } else if (eventType === 'UPDATE') {
+            nextAppointments = nextAppointments.map(a => a.id === newRecord.id ? (newRecord as any) : a);
+          } else if (eventType === 'DELETE') {
+            nextAppointments = nextAppointments.filter(a => a.id !== oldRecord.id);
+          }
+          return { appointments: nextAppointments };
+        });
       })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'conversations', filter: `tenant_id=eq.${tenantId}` }, async (payload) => {
-         const conv = payload.new as any;
-         console.log('[Realtime] Conversation INSERT:', conv);
-         if (!conv || !conv.contact_id) return;
-         try {
-            const { data: dbContact } = await supabase.from('contacts').select('*').eq('id', conv.contact_id).maybeSingle();
-            if (dbContact) {
-               const instanceId = conv.instance_id || dbContact.instance_id || 'default';
-               const compositeId = `${dbContact.id}_${instanceId}`;
-               const formattedContact: ContactType = {
-                  ...dbContact,
-                  id: compositeId,
-                  conv_id: conv.id,
-                  conv_status: conv.status || 'open',
-                  assigned_to: conv.assigned_to,
-                  unread: conv.unread_count || 0,
-                  instance_id: instanceId,
-                  messages: [],
-                  lastMsgTimestamp: conv.last_message_at ? new Date(conv.last_message_at).getTime() : Date.now()
-               };
-               get().upsertContactLocally(formattedContact);
-            }
-         } catch (err) {
-            console.error('[Realtime] Erro ao sincronizar nova conversa inserida:', err);
-         }
+        const conv = payload.new as any;
+        console.log('[Realtime] Conversation INSERT:', conv);
+        if (!conv || !conv.contact_id) return;
+        try {
+          const { data: dbContact } = await supabase.from('contacts').select('*').eq('id', conv.contact_id).maybeSingle();
+          if (dbContact) {
+            const instanceId = conv.instance_id || dbContact.instance_id || 'default';
+            const compositeId = `${dbContact.id}_${instanceId}`;
+            const formattedContact: ContactType = {
+              ...dbContact,
+              id: compositeId,
+              conv_id: conv.id,
+              conv_status: conv.status || 'open',
+              assigned_to: conv.assigned_to,
+              unread: conv.unread_count || 0,
+              instance_id: instanceId,
+              messages: [],
+              lastMsgTimestamp: conv.last_message_at ? new Date(conv.last_message_at).getTime() : Date.now()
+            };
+            get().upsertContactLocally(formattedContact);
+          }
+        } catch (err) {
+          console.error('[Realtime] Erro ao sincronizar nova conversa inserida:', err);
+        }
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'conversations', filter: `tenant_id=eq.${tenantId}` }, (payload) => {
-         const conv = payload.new as any;
-         console.log('[Realtime] Conversation UPDATE:', conv);
-         
-         // 1. Coleta e avalia o status antes do update, fora do set, para decidir se deve disparar o toast
-         const currentContacts = get().contacts;
-         let shouldToast = false;
-         let toastType: 'reopen' | 'snooze' | null = null;
-         let contactName = '';
+        const conv = payload.new as any;
+        console.log('[Realtime] Conversation UPDATE:', conv);
 
-         for (const c of currentContacts) {
+        // 1. Coleta e avalia o status antes do update, fora do set, para decidir se deve disparar o toast
+        const currentContacts = get().contacts;
+        let shouldToast = false;
+        let toastType: 'reopen' | 'snooze' | null = null;
+        let contactName = '';
+
+        for (const c of currentContacts) {
+          const realId = getRealContactId(c.id);
+          const contactInstance = getInstanceIdFromContact(c.id) || c.instance_id || 'default';
+          const convInstance = conv.instance_id || 'default';
+
+          const cUuid = instanceCache.getId(contactInstance) || contactInstance;
+          const convUuid = instanceCache.getId(convInstance) || convInstance;
+          const isSameInstance = contactInstance === 'default' || convInstance === 'default' || contactInstance === convInstance || cUuid === convUuid;
+
+          if (realId === conv.contact_id && isSameInstance) {
+            contactName = c.custom_name || c.name || c.phone;
+            if ((c.conv_status === 'resolved' || c.conv_status === 'closed') && conv.status === 'open') {
+              shouldToast = true;
+              toastType = 'reopen';
+              break; // Achou o contato correspondente
+            } else if (c.conv_status === 'snoozed' && conv.status === 'open') {
+              shouldToast = true;
+              toastType = 'snooze';
+              break;
+            }
+          }
+        }
+
+        // 2. Dispara o toast e o log de auditoria de reabertura (fora do set síncrono da store)
+        if (shouldToast && contactName && toastType) {
+          const nameToUse = contactName;
+          const typeToUse = toastType;
+
+          // Disparar o Toast informativo do cabeçalho
+          setTimeout(() => {
+            get().setReopenedTicketToast({
+              contactName: nameToUse,
+              ...(typeToUse === 'snooze' && { reason: 'snooze' })
+            });
+            // Fecha o toast automaticamente após 4 segundos
+            setTimeout(() => {
+              get().setReopenedTicketToast(null);
+            }, 4000);
+          }, 100);
+
+          // PERSISTÊNCIA DO LOG DE AUDITORIA DE REABERTURA AUTOMÁTICA - REMOVIDO A PEDIDO DO USUÁRIO PARA EVITAR POLUIÇÃO NO CHAT
+          console.log('[Realtime] Conversa reaberta automaticamente, omitindo geração de mensagem de sistema a pedido do usuário.');
+        }
+
+        // 3. Agora atualiza o estado síncrono dos contatos sem disparar efeitos colaterais
+        set((s: any) => {
+          const updatedContacts = s.contacts.map((c: any) => {
             const realId = getRealContactId(c.id);
             const contactInstance = getInstanceIdFromContact(c.id) || c.instance_id || 'default';
             const convInstance = conv.instance_id || 'default';
-            
+
             const cUuid = instanceCache.getId(contactInstance) || contactInstance;
             const convUuid = instanceCache.getId(convInstance) || convInstance;
             const isSameInstance = contactInstance === 'default' || convInstance === 'default' || contactInstance === convInstance || cUuid === convUuid;
 
             if (realId === conv.contact_id && isSameInstance) {
-               contactName = c.custom_name || c.name || c.phone;
-               if ((c.conv_status === 'resolved' || c.conv_status === 'closed') && conv.status === 'open') {
-                  shouldToast = true;
-                  toastType = 'reopen';
-                  break; // Achou o contato correspondente
-               } else if (c.conv_status === 'snoozed' && conv.status === 'open') {
-                  shouldToast = true;
-                  toastType = 'snooze';
-                  break;
-               }
+              const stillManuallyUnread = c.isManuallyUnread && conv.unread_count === 1;
+              return {
+                ...c,
+                conv_status: conv.status,
+                assigned_to: conv.assigned_to,
+                unread: conv.unread_count,
+                isManuallyUnread: stillManuallyUnread,
+                is_pinned: conv.is_pinned,
+                is_favorite: conv.is_favorite,
+                snoozed_until: conv.snoozed_until,
+                snoozed_at: conv.snoozed_at,
+                snoozed_by: conv.snoozed_by,
+                instance_id: conv.instance_id || c.instance_id,
+                ai_paused: conv.ai_paused,
+                ai_paused_manually: conv.ai_paused_manually,
+                lastMsgTimestamp: conv.last_message_at ? new Date(conv.last_message_at).getTime() : c.lastMsgTimestamp
+              };
             }
-         }
-
-         // 2. Dispara o toast e o log de auditoria de reabertura (fora do set síncrono da store)
-         if (shouldToast && contactName && toastType) {
-            const nameToUse = contactName;
-            const typeToUse = toastType;
-            
-            // Disparar o Toast informativo do cabeçalho
-            setTimeout(() => {
-               get().setReopenedTicketToast({ 
-                  contactName: nameToUse, 
-                  ...(typeToUse === 'snooze' && { reason: 'snooze' }) 
-               });
-               // Fecha o toast automaticamente após 4 segundos
-               setTimeout(() => {
-                  get().setReopenedTicketToast(null);
-               }, 4000);
-            }, 100);
-
-            // PERSISTÊNCIA DO LOG DE AUDITORIA DE REABERTURA AUTOMÁTICA - REMOVIDO A PEDIDO DO USUÁRIO PARA EVITAR POLUIÇÃO NO CHAT
-            console.log('[Realtime] Conversa reaberta automaticamente, omitindo geração de mensagem de sistema a pedido do usuário.');
-         }
-
-         // 3. Agora atualiza o estado síncrono dos contatos sem disparar efeitos colaterais
-         set((s: any) => {
-            const updatedContacts = s.contacts.map((c: any) => {
-               const realId = getRealContactId(c.id);
-               const contactInstance = getInstanceIdFromContact(c.id) || c.instance_id || 'default';
-               const convInstance = conv.instance_id || 'default';
-               
-               const cUuid = instanceCache.getId(contactInstance) || contactInstance;
-               const convUuid = instanceCache.getId(convInstance) || convInstance;
-               const isSameInstance = contactInstance === 'default' || convInstance === 'default' || contactInstance === convInstance || cUuid === convUuid;
-
-               if (realId === conv.contact_id && isSameInstance) {
-                  const stillManuallyUnread = c.isManuallyUnread && conv.unread_count === 1;
-                  return {
-                     ...c,
-                     conv_status: conv.status,
-                     assigned_to: conv.assigned_to,
-                     unread: conv.unread_count,
-                     isManuallyUnread: stillManuallyUnread,
-                     is_pinned: conv.is_pinned,
-                     is_favorite: conv.is_favorite,
-                     snoozed_until: conv.snoozed_until,
-                     snoozed_at: conv.snoozed_at,
-                     snoozed_by: conv.snoozed_by,
-                     instance_id: conv.instance_id || c.instance_id,
-                     ai_paused: conv.ai_paused,
-                     ai_paused_manually: conv.ai_paused_manually,
-                     lastMsgTimestamp: conv.last_message_at ? new Date(conv.last_message_at).getTime() : c.lastMsgTimestamp
-                  };
-               }
-               return c;
-            });
-            return { contacts: updatedContacts };
-         });
+            return c;
+          });
+          return { contacts: updatedContacts };
+        });
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'whatsapp_instances', filter: `tenant_id=eq.${tenantId}` }, async (payload) => {
-         const t = get().tenantInfo;
-         if (!t || !t.evolution_api_instance) return;
-         
-         if (payload.eventType === 'DELETE') {
-            const deletedInstId = payload.old.id;
-            if (deletedInstId === t.evolution_api_instance) {
-               if ((window as any)._disconnectTimer) {
-                  clearInterval((window as any)._disconnectTimer);
-                  (window as any)._disconnectTimer = null;
-               }
-               (window as any)._failCheckCount = 0;
-               set({ evolutionConnected: false, modalReason: 'A instância do WhatsApp foi excluída.' });
+        const t = get().tenantInfo;
+        if (!t || !t.evolution_api_instance) return;
+
+        if (payload.eventType === 'DELETE') {
+          const deletedInstId = payload.old.id;
+          if (deletedInstId === t.evolution_api_instance) {
+            if ((window as any)._disconnectTimer) {
+              clearInterval((window as any)._disconnectTimer);
+              (window as any)._disconnectTimer = null;
             }
-            return;
-         }
+            (window as any)._failCheckCount = 0;
+            set({ evolutionConnected: false, modalReason: 'A instância do WhatsApp foi excluída.' });
+          }
+          return;
+        }
 
-         const inst = payload.new as any;
-         if (inst.id) {
-            instanceCache.set(inst.id, inst.display_name || '', inst.api_key || '');
-         }
-         get().setInstanceStatus(inst.id, inst.status);
+        const inst = payload.new as any;
+        if (inst.id) {
+          instanceCache.set(inst.id, inst.display_name || '', inst.api_key || '');
+        }
+        get().setInstanceStatus(inst.id, inst.status);
 
-         // Sincroniza estado de conexao com o banco via Realtime
-         if (inst.id === t.evolution_api_instance) {
-            console.log('[Realtime] Instance Status Changed:', inst.status);
-            if (inst.status === 'connected') {
-               if ((window as any)._disconnectTimer) {
-                  clearInterval((window as any)._disconnectTimer);
-                  (window as any)._disconnectTimer = null;
-               }
-               (window as any)._failCheckCount = 0;
-               
-               if (!get().evolutionConnected) {
-                  set({ evolutionConnected: true, modalReason: null });
-                  get().fetchInitialData();
-               }
-            } else if (inst.status === 'offline' || inst.status === 'connecting') {
-               if (get().evolutionConnected) {
-                  if (!(window as any)._disconnectTimer) {
-                     (window as any)._failCheckCount = 0;
-                     (window as any)._disconnectTimer = setInterval(async () => {
-                        (window as any)._failCheckCount++;
-                        
-                        // Faz uma verificação de segurança no banco
-                        const { data, error } = await supabase.from('whatsapp_instances').select('status').eq('id', inst.id).single();
-                        
-                        if (error || !data) {
-                           clearInterval((window as any)._disconnectTimer);
-                           (window as any)._disconnectTimer = null;
-                           (window as any)._failCheckCount = 0;
-                           return;
-                        }
-                        
-                        if (data && data.status === 'connected') {
-                           clearInterval((window as any)._disconnectTimer);
-                           (window as any)._disconnectTimer = null;
-                           (window as any)._failCheckCount = 0;
-                        } else if ((window as any)._failCheckCount >= 2) {
-                           clearInterval((window as any)._disconnectTimer);
-                           (window as any)._disconnectTimer = null;
-                           (window as any)._failCheckCount = 0;
-                           
-                           // Check if the backend is actually down or if it's just WhatsApp disconnected
-                           try {
-                              const { fetchEngineStatus } = await import('../services/whatsappEngine');
-                              await fetchEngineStatus(t.id, inst.id, inst.api_key || '');
-                              set({ evolutionConnected: false, modalReason: 'A conexão com seu WhatsApp caiu. Escaneie o QR Code novamente para reconectar.' });
-                           } catch (err) {
-                              set({ evolutionConnected: false, modalReason: 'Servidor Node Offline - A API principal parou de responder. Tentando reconectar...' });
-                           }
-                        }
-                     }, 10000);
+        // Sincroniza estado de conexao com o banco via Realtime
+        if (inst.id === t.evolution_api_instance) {
+          console.log('[Realtime] Instance Status Changed:', inst.status);
+          if (inst.status === 'connected') {
+            if ((window as any)._disconnectTimer) {
+              clearInterval((window as any)._disconnectTimer);
+              (window as any)._disconnectTimer = null;
+            }
+            (window as any)._failCheckCount = 0;
+
+            if (!get().evolutionConnected) {
+              set({ evolutionConnected: true, modalReason: null });
+              get().fetchInitialData();
+            }
+          } else if (inst.status === 'offline' || inst.status === 'connecting') {
+            if (get().evolutionConnected) {
+              if (!(window as any)._disconnectTimer) {
+                (window as any)._failCheckCount = 0;
+                (window as any)._disconnectTimer = setInterval(async () => {
+                  (window as any)._failCheckCount++;
+
+                  // Faz uma verificação de segurança no banco
+                  const { data, error } = await supabase.from('whatsapp_instances').select('status').eq('id', inst.id).single();
+
+                  if (error || !data) {
+                    clearInterval((window as any)._disconnectTimer);
+                    (window as any)._disconnectTimer = null;
+                    (window as any)._failCheckCount = 0;
+                    return;
                   }
-               }
+
+                  if (data && data.status === 'connected') {
+                    clearInterval((window as any)._disconnectTimer);
+                    (window as any)._disconnectTimer = null;
+                    (window as any)._failCheckCount = 0;
+                  } else if ((window as any)._failCheckCount >= 2) {
+                    clearInterval((window as any)._disconnectTimer);
+                    (window as any)._disconnectTimer = null;
+                    (window as any)._failCheckCount = 0;
+
+                    // Check if the backend is actually down or if it's just WhatsApp disconnected
+                    try {
+                      const { fetchEngineStatus } = await import('../services/whatsappEngine');
+                      await fetchEngineStatus(t.id, inst.id, inst.api_key || '');
+                      set({ evolutionConnected: false, modalReason: 'A conexão com seu WhatsApp caiu. Escaneie o QR Code novamente para reconectar.' });
+                    } catch (err) {
+                      set({ evolutionConnected: false, modalReason: 'Servidor Node Offline - A API principal parou de responder. Tentando reconectar...' });
+                    }
+                  }
+                }, 10000);
+              }
             }
-         }
+          }
+        }
       })
       .subscribe((status, err) => {
-         if (err) {
-            console.error("[Realtime] Subscription critical error:", err);
-            set({ realtimeStatus: 'disconnected' });
-         } else {
-            console.log(`[Realtime status]: ${status}`);
-            if (status === 'SUBSCRIBED') {
-               const connectedOnce = get().hasRealtimeConnectedOnce;
-               set({ realtimeStatus: 'connected', hasRealtimeConnectedOnce: true });
-               if (connectedOnce) {
-                   console.log('[Realtime] Conexão WebSocket restabelecida. Sincronizando mensagens perdidas durante a desconexão...');
-                   get().syncMissedMessages().catch(e => console.error('[Realtime Sync] Falha no syncMissedMessages:', e));
-               }
-            } else if (status === 'CLOSED') {
-               set({ realtimeStatus: 'disconnected' });
-            } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-               set({ realtimeStatus: 'disconnected' });
-               // Rotina ativa de auto-reparo e reconexão silenciosa
-               setTimeout(() => {
-                  console.log("[Realtime] Rotina ativa de auto-reparo iniciada...");
-                  get().subscribeToNewMessages(true);
-               }, 5000);
+        if (err) {
+          console.error("[Realtime] Subscription critical error:", err);
+          set({ realtimeStatus: 'disconnected' });
+        } else {
+          console.log(`[Realtime status]: ${status}`);
+          if (status === 'SUBSCRIBED') {
+            const connectedOnce = get().hasRealtimeConnectedOnce;
+            set({ realtimeStatus: 'connected', hasRealtimeConnectedOnce: true });
+            if (connectedOnce) {
+              console.log('[Realtime] Conexão WebSocket restabelecida. Sincronizando mensagens perdidas durante a desconexão...');
+              get().syncMissedMessages().catch(e => console.error('[Realtime Sync] Falha no syncMissedMessages:', e));
             }
-         }
+          } else if (status === 'CLOSED') {
+            set({ realtimeStatus: 'disconnected' });
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            set({ realtimeStatus: 'disconnected' });
+            // Rotina ativa de auto-reparo e reconexão silenciosa
+            setTimeout(() => {
+              console.log("[Realtime] Rotina ativa de auto-reparo iniciada...");
+              get().subscribeToNewMessages(true);
+            }, 5000);
+          }
+        }
       });
   },
 
@@ -6261,8 +6262,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const currentUserEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
       let agentName = 'Agente';
       if (currentUserEmail) {
-          const agent = get().agents.find(a => a.email === currentUserEmail);
-          if (agent && agent.full_name) agentName = agent.full_name;
+        const agent = get().agents.find(a => a.email === currentUserEmail);
+        if (agent && agent.full_name) agentName = agent.full_name;
       }
 
       const rawContactId = getRealContactId(contactId);
@@ -6310,17 +6311,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set((s) => ({
         contacts: s.contacts.map(c => {
           if (c.id === contactId) {
-             const alreadyHas = c.messages.some(m => m.id === msgObj.id);
-             if (alreadyHas) return c;
-             const newMsgs = [...c.messages, msgObj].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-             return { ...c, messages: newMsgs };
+            const alreadyHas = c.messages.some(m => m.id === msgObj.id);
+            if (alreadyHas) return c;
+            const newMsgs = [...c.messages, msgObj].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+            return { ...c, messages: newMsgs };
           }
           return c;
         })
       }));
 
       if (typeof window !== 'undefined' && (window as any).refreshGlobalActiveTasks) {
-         (window as any).refreshGlobalActiveTasks();
+        (window as any).refreshGlobalActiveTasks();
       }
 
     } catch (e) {
@@ -6359,27 +6360,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
         contacts: s.contacts.map(c => {
           const hasNote = c.messages.some(m => m.id === noteId);
           if (hasNote) {
-             const newMsgs = c.messages.map(m => {
-                if (m.id === noteId) {
-                   return {
-                      ...m,
-                      text: dbNote.content || '',
-                      isTask: dbNote.is_task,
-                      assignedTo: dbNote.assigned_to,
-                      checklistItems: dbNote.checklist_items || [],
-                      taskCompleted: dbNote.task_completed
-                   };
-                }
-                return m;
-             });
-             return { ...c, messages: newMsgs };
+            const newMsgs = c.messages.map(m => {
+              if (m.id === noteId) {
+                return {
+                  ...m,
+                  text: dbNote.content || '',
+                  isTask: dbNote.is_task,
+                  assignedTo: dbNote.assigned_to,
+                  checklistItems: dbNote.checklist_items || [],
+                  taskCompleted: dbNote.task_completed
+                };
+              }
+              return m;
+            });
+            return { ...c, messages: newMsgs };
           }
           return c;
         })
       }));
 
       if (typeof window !== 'undefined' && (window as any).refreshGlobalActiveTasks) {
-         (window as any).refreshGlobalActiveTasks();
+        (window as any).refreshGlobalActiveTasks();
       }
 
     } catch (e) {
@@ -6398,71 +6399,71 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       const currentContacts = get().contacts;
       for (const c of currentContacts) {
-         const note = c.messages.find(m => m.id === noteId);
-         if (note) {
-            targetNote = note;
-            targetContactId = c.id;
-            break;
-         }
+        const note = c.messages.find(m => m.id === noteId);
+        if (note) {
+          targetNote = note;
+          targetContactId = c.id;
+          break;
+        }
       }
 
       if (!targetNote || !targetContactId) {
-         console.warn('[toggleChecklistItem] Nota não encontrada localmente.');
-         return;
+        console.warn('[toggleChecklistItem] Nota não encontrada localmente.');
+        return;
       }
 
       const updatedChecklist = (targetNote.checklistItems || []).map(item => {
-         if (item.id === itemId) {
-            const currentUserEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
-            let agentName = 'Agente';
-            if (currentUserEmail) {
-                const agent = get().agents.find(a => a.email === currentUserEmail);
-                if (agent && agent.full_name) agentName = agent.full_name;
-            }
-            return {
-               ...item,
-               completed,
-               completed_at: completed ? new Date().toISOString() : null,
-               completed_by: completed ? agentName : null
-            };
-         }
-         return item;
+        if (item.id === itemId) {
+          const currentUserEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
+          let agentName = 'Agente';
+          if (currentUserEmail) {
+            const agent = get().agents.find(a => a.email === currentUserEmail);
+            if (agent && agent.full_name) agentName = agent.full_name;
+          }
+          return {
+            ...item,
+            completed,
+            completed_at: completed ? new Date().toISOString() : null,
+            completed_by: completed ? agentName : null
+          };
+        }
+        return item;
       });
 
       const taskCompleted = updatedChecklist.length > 0 && updatedChecklist.every(i => i.completed);
 
       set((s) => ({
-         contacts: s.contacts.map(c => {
-            if (c.id === targetContactId) {
-               const newMsgs = c.messages.map(m => {
-                  if (m.id === noteId) {
-                     return {
-                        ...m,
-                        checklistItems: updatedChecklist,
-                        taskCompleted
-                     };
-                  }
-                  return m;
-               });
-               return { ...c, messages: newMsgs };
-            }
-            return c;
-         })
+        contacts: s.contacts.map(c => {
+          if (c.id === targetContactId) {
+            const newMsgs = c.messages.map(m => {
+              if (m.id === noteId) {
+                return {
+                  ...m,
+                  checklistItems: updatedChecklist,
+                  taskCompleted
+                };
+              }
+              return m;
+            });
+            return { ...c, messages: newMsgs };
+          }
+          return c;
+        })
       }));
 
       const { error } = await supabase
-         .from('contact_notes')
-         .update({
-            checklist_items: updatedChecklist,
-            task_completed: taskCompleted
-         })
-         .eq('id', noteId)
-         .eq('tenant_id', tenant.id);
+        .from('contact_notes')
+        .update({
+          checklist_items: updatedChecklist,
+          task_completed: taskCompleted
+        })
+        .eq('id', noteId)
+        .eq('tenant_id', tenant.id);
 
       if (error) throw error;
 
       if (typeof window !== 'undefined' && (window as any).refreshGlobalActiveTasks) {
-         (window as any).refreshGlobalActiveTasks();
+        (window as any).refreshGlobalActiveTasks();
       }
 
     } catch (e) {
@@ -6471,157 +6472,157 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-   deleteInternalNote: async (noteId, contactId) => {
-     const tenant = get().tenantInfo;
-     if (!tenant) return;
+  deleteInternalNote: async (noteId, contactId) => {
+    const tenant = get().tenantInfo;
+    if (!tenant) return;
 
-     try {
-       const currentUserEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
-       let agentName = 'Agente';
-       if (currentUserEmail) {
-           const agent = get().agents.find(a => a.email === currentUserEmail);
-           if (agent && agent.full_name) agentName = agent.full_name;
-       }
+    try {
+      const currentUserEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
+      let agentName = 'Agente';
+      if (currentUserEmail) {
+        const agent = get().agents.find(a => a.email === currentUserEmail);
+        if (agent && agent.full_name) agentName = agent.full_name;
+      }
 
-       const deletedMetadata = {
-         is_deleted: true,
-         deleted_by: agentName,
-         deleted_at: new Date().toISOString()
-       };
+      const deletedMetadata = {
+        is_deleted: true,
+        deleted_by: agentName,
+        deleted_at: new Date().toISOString()
+      };
 
-       const { data: dbNote, error } = await supabase
-         .from('contact_notes')
-         .update({
-           content: '',
-           media_url: null,
-           media_type: null,
-           is_task: false,
-           checklist_items: [],
-           task_completed: false,
-           media_metadata: deletedMetadata
-         })
-         .eq('id', noteId)
-         .eq('tenant_id', tenant.id)
-         .select()
-         .single();
+      const { data: dbNote, error } = await supabase
+        .from('contact_notes')
+        .update({
+          content: '',
+          media_url: null,
+          media_type: null,
+          is_task: false,
+          checklist_items: [],
+          task_completed: false,
+          media_metadata: deletedMetadata
+        })
+        .eq('id', noteId)
+        .eq('tenant_id', tenant.id)
+        .select()
+        .single();
 
-       if (error) throw error;
-       if (!dbNote) return;
+      if (error) throw error;
+      if (!dbNote) return;
 
-       set((s) => ({
-         contacts: s.contacts.map(c => {
-           if (c.id === contactId) {
-              const newMsgs = c.messages.map(m => {
-                 if (m.id === noteId) {
-                    return {
-                       ...m,
-                       text: '',
-                       mediaUrl: undefined,
-                       mediaType: undefined,
-                       isTask: false,
-                       checklistItems: [],
-                       taskCompleted: false,
-                       mediaMetadata: deletedMetadata
-                    };
-                 }
-                 return m;
-              });
-              return { ...c, messages: newMsgs };
-           }
-           return c;
-         })
-       }));
+      set((s) => ({
+        contacts: s.contacts.map(c => {
+          if (c.id === contactId) {
+            const newMsgs = c.messages.map(m => {
+              if (m.id === noteId) {
+                return {
+                  ...m,
+                  text: '',
+                  mediaUrl: undefined,
+                  mediaType: undefined,
+                  isTask: false,
+                  checklistItems: [],
+                  taskCompleted: false,
+                  mediaMetadata: deletedMetadata
+                };
+              }
+              return m;
+            });
+            return { ...c, messages: newMsgs };
+          }
+          return c;
+        })
+      }));
 
-        if (typeof window !== 'undefined' && (window as any).refreshGlobalActiveTasks) {
-           (window as any).refreshGlobalActiveTasks();
-        }
+      if (typeof window !== 'undefined' && (window as any).refreshGlobalActiveTasks) {
+        (window as any).refreshGlobalActiveTasks();
+      }
 
-     } catch (e) {
-       console.error('[deleteInternalNote] Erro ao excluir nota interna:', e);
-       window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Erro ao excluir a anotação interna no banco de dados.', type: 'error' } }));
-     }
-   },
+    } catch (e) {
+      console.error('[deleteInternalNote] Erro ao excluir nota interna:', e);
+      window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Erro ao excluir a anotação interna no banco de dados.', type: 'error' } }));
+    }
+  },
 
-   fetchAppointments: async () => {
-     const tenant = get().tenantInfo;
-     if (!tenant) return;
-     try {
-        const { data, error } = await supabase
-          .from('appointments')
-          .select('*')
-          .eq('tenant_id', tenant.id)
-          .order('start_time', { ascending: true });
-        if (error) throw error;
-        set({ appointments: data || [] });
-     } catch (e) {
-       console.error('[fetchAppointments] Erro:', e);
-     }
-   },
+  fetchAppointments: async () => {
+    const tenant = get().tenantInfo;
+    if (!tenant) return;
+    try {
+      const { data, error } = await supabase
+        .from('appointments')
+        .select('*')
+        .eq('tenant_id', tenant.id)
+        .order('start_time', { ascending: true });
+      if (error) throw error;
+      set({ appointments: data || [] });
+    } catch (e) {
+      console.error('[fetchAppointments] Erro:', e);
+    }
+  },
 
-   createAppointment: async (appointment) => {
-     const tenant = get().tenantInfo;
-     if (!tenant) return;
-     try {
-       const newAppointment = {
-         ...appointment,
-         tenant_id: tenant.id,
-         status: appointment.status || 'scheduled'
-       };
-       const { data, error } = await supabase
-         .from('appointments')
-         .insert(newAppointment)
-         .select()
-         .single();
-       if (error) throw error;
-       if (data) {
-         set((s) => ({ 
-           appointments: [...s.appointments, data].sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()) 
-         }));
-         await get().logOperation('INSERT', 'appointments', data.id, null, data);
-       }
-     } catch (e) {
-       console.error('[createAppointment] Erro:', e);
-       throw e;
-     }
-   },
+  createAppointment: async (appointment) => {
+    const tenant = get().tenantInfo;
+    if (!tenant) return;
+    try {
+      const newAppointment = {
+        ...appointment,
+        tenant_id: tenant.id,
+        status: appointment.status || 'scheduled'
+      };
+      const { data, error } = await supabase
+        .from('appointments')
+        .insert(newAppointment)
+        .select()
+        .single();
+      if (error) throw error;
+      if (data) {
+        set((s) => ({
+          appointments: [...s.appointments, data].sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
+        }));
+        await get().logOperation('INSERT', 'appointments', data.id, null, data);
+      }
+    } catch (e) {
+      console.error('[createAppointment] Erro:', e);
+      throw e;
+    }
+  },
 
-   updateAppointment: async (id, payload) => {
-     try {
-       const apptBefore = get().appointments.find(a => a.id === id);
-       const { data, error } = await supabase
-         .from('appointments')
-         .update(payload)
-         .eq('id', id)
-         .select()
-         .single();
-       if (error) throw error;
-       if (data) {
-         set((s) => ({
-           appointments: s.appointments.map(a => a.id === id ? data : a)
-         }));
-         await get().logOperation('UPDATE', 'appointments', id, apptBefore, data);
-       }
-     } catch (e) {
-       console.error('[updateAppointment] Erro:', e);
-       throw e;
-     }
-   },
+  updateAppointment: async (id, payload) => {
+    try {
+      const apptBefore = get().appointments.find(a => a.id === id);
+      const { data, error } = await supabase
+        .from('appointments')
+        .update(payload)
+        .eq('id', id)
+        .select()
+        .single();
+      if (error) throw error;
+      if (data) {
+        set((s) => ({
+          appointments: s.appointments.map(a => a.id === id ? data : a)
+        }));
+        await get().logOperation('UPDATE', 'appointments', id, apptBefore, data);
+      }
+    } catch (e) {
+      console.error('[updateAppointment] Erro:', e);
+      throw e;
+    }
+  },
 
-   deleteAppointment: async (id) => {
-     try {
-       const apptBefore = get().appointments.find(a => a.id === id);
-       const { error } = await supabase
-         .from('appointments')
-         .delete()
-         .eq('id', id);
-       if (error) throw error;
-       set((s) => ({
-         appointments: s.appointments.filter(a => a.id !== id)
-       }));
-       await get().logOperation('DELETE', 'appointments', id, apptBefore, null);
-     } catch (e) {
-       console.error('[deleteAppointment] Erro:', e);
-       throw e;
-     }
-   }
+  deleteAppointment: async (id) => {
+    try {
+      const apptBefore = get().appointments.find(a => a.id === id);
+      const { error } = await supabase
+        .from('appointments')
+        .delete()
+        .eq('id', id);
+      if (error) throw error;
+      set((s) => ({
+        appointments: s.appointments.filter(a => a.id !== id)
+      }));
+      await get().logOperation('DELETE', 'appointments', id, apptBefore, null);
+    } catch (e) {
+      console.error('[deleteAppointment] Erro:', e);
+      throw e;
+    }
+  }
 }));
