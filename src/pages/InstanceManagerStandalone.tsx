@@ -45,6 +45,7 @@ import {
 
 import { migrateInstanceHistory } from '../services/whatsappEngine';
 import { InstanceLogsModal } from '../components/InstanceLogsModal';
+import { supabase, masterSupabase } from '../services/supabase';
 
 const ENGINE_CANDIDATES = [
   import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim(),
@@ -465,7 +466,8 @@ export default function InstanceManagerStandalone() {
   const fetchInstances = async (isInitial = false) => {
     if (isInitial) setLoading(true);
     try {
-      const { data, error } = await supabase
+      const activeClient = masterSupabase || supabase;
+      const { data, error } = await activeClient
         .from('whatsapp_instances')
         .select('*')
         .order('created_at', { ascending: false });
