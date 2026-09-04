@@ -14,7 +14,51 @@ Com isso, você pode evoluir o **`ChatBoot-New`** com total segurança, sem risc
 
 ---
 
-## 🌐 2. Mapa Completo de Serviços e Endpoints HTTPS Oficiais
+## 🛡️ 2. Protocolo de Isolamento & Segurança (Blindagem da Produção Antiga)
+
+> [!CAUTION]
+> **PROIBIÇÃO ABSOLUTA DE USAR CONEXÕES ANTIGAS EM PRODUÇÃO NO CHATBOOT-NEW:**  
+> As conexões, credenciais e servidores antigos **NÃO devem ser utilizados em produção de maneira alguma** no novo projeto `ChatBoot-New`, evitando quebras, concorrência de portas ou corrupção de dados dos clientes ativos.
+> 
+> **RESTRIÇÃO OBRIGATÓRIA PARA A INTELIGÊNCIA ARTIFICIAL (AGENTE) E DESENVOLVEDORES:**  
+> *"Isso aqui é um projeto que está sendo descontinuado, então não posso ficar mexendo nele, a não ser que eu esteja fazendo um estudo de caso. Nesse caso exclusivo, posso acessar para ler, consultar e analisar."*
+
+---
+
+### 📌 Classificação e Separação Rigorosa dos Ambientes:
+
+#### 1. Conexões Legadas (Status: ISOLADAS — APENAS LEITURA & ESTUDO DE CASO 🔍)
+* **Por que NÃO remover as conexões legadas?**  
+  Conforme determinado pelo gestor, **NADA do legado deve ser removido do código**. Como a nova versão será recriada do zero, é fundamental que o agente e o desenvolvedor mantenham acesso a tudo que existe no projeto de produção atual para:
+  1. **Ler documentação e histórico de código**;
+  2. **Compreender a fundo como cada fluxo foi desenvolvido**;
+  3. **Executar testes comparativos controlados** para validar regras de negócio antes de reescrevê-las no novo padrão.
+* **Supabase Cloud (`yzbxsxabzncdzuxvlppt.supabase.co`)**:
+  - **Uso Autorizado**: **Apenas Leitura / Estudo de Caso**. Consultar schemas, checar tipos de colunas, verificar políticas RLS e auditar logs de conversas antigas.
+  - **Uso Proibido**: Qualquer operação de escrita (`INSERT`, `UPDATE`, `DELETE`), migrations ou criação de gatilhos Postgres a partir do `ChatBoot-New`.
+* **Coolify Antigo (`https://coolify.xpointsolucoes.com`) — Painel Legado**:
+  - **Identificação**: Notar que possuímos **dois Coolifys**. Este (`.com`) gerencia a infraestrutura antiga (Node.js + Baileys).
+  - **Uso Autorizado**: Apenas visualização e estudo da configuração dos containers anteriores.
+  - **Uso Proibido**: Qualquer deploy em produção, restart de containers ou disparo de webhooks a partir do novo projeto.
+* **Servidor Baileys Node.js antigo (`/server`)**:
+  - **Status**: Descontinuado para o `ChatBoot-New`. Permanece no repositório apenas como espelho de referência lógica.
+
+#### 2. Conexões Oficiais Next-Gen (Status: ALVO ATIVO DE PRODUÇÃO DO CHATBOOT-NEW 🚀)
+* **VPS Hostinger Dedicada (`179.199.142.157`)**
+* **Coolify Novo (`https://coolify.xpointsolucoes.com.br`) — Painel Oficial Next-Gen**:
+  - Plataforma oficial onde residem os novos containers, orquestrados via Docker Compose e certificados Let's Encrypt.
+* **Appwrite Self-Hosted (`chatboot_db` / `chatboot_media`)**:
+  - Banco de dados documental e Storage oficiais do `ChatBoot-New`.
+* **Whatsmeow Go Engine (`https://whatsmeow.179.199.142.157.sslip.io`)**:
+  - Motor de WhatsApp oficial em Go puro multidevice.
+* **AI Engine Vault (`https://ai.179.199.142.157.sslip.io`)**:
+  - Motor oficial de IA e transcrição.
+* **Core Business Engine (`https://api.179.199.142.157.sslip.io`)**:
+  - Motor oficial de regras de negócio e cache de 1h do Gastrofood ERP.
+
+---
+
+## 🌐 3. Mapa Completo de Serviços e Endpoints HTTPS Oficiais
 
 Todos os serviços estão operando na VPS Hostinger (`179.199.142.157`) com certificados SSL **Let's Encrypt** válidos (cadeado verde no navegador):
 
@@ -29,7 +73,7 @@ Todos os serviços estão operando na VPS Hostinger (`179.199.142.157`) com cert
 
 ---
 
-## 🔑 3. Inventário de Credenciais e Acessos
+## 🔑 4. Inventário de Credenciais e Acessos
 
 ### Acesso à VPS Hostinger
 * **IP da VPS**: `179.199.142.157`
@@ -41,7 +85,7 @@ Todos os serviços estão operando na VPS Hostinger (`179.199.142.157`) com cert
   ssh -o StrictHostKeyChecking=no root@179.199.142.157
   ```
 
-### Coolify PaaS
+### Coolify PaaS (Novo Oficial)
 * **URL**: `https://coolify.xpointsolucoes.com.br`
 * **Login**: `comercial.xpoint@gmail.com`
 * **Senha**: `Cc@xroxmaxi7`
@@ -62,7 +106,7 @@ Todos os serviços estão operando na VPS Hostinger (`179.199.142.157`) com cert
 
 ---
 
-## 🗄️ 4. Coleções Estruturadas no Appwrite (`chatboot_db`)
+## 🗄️ 5. Coleções Estruturadas no Appwrite (`chatboot_db`)
 
 Todas as coleções necessárias para o CRM, atendimento e regras operacionais já foram criadas com atributos tipados:
 
@@ -76,7 +120,7 @@ Todas as coleções necessárias para o CRM, atendimento e regras operacionais j
 
 ---
 
-## ⚙️ 5. Arquitetura dos Microserviços (`services/`)
+## ⚙️ 6. Arquitetura dos Microserviços (`services/`)
 
 A pasta `services/` contém a tríade de microserviços prontos para execução em container:
 
@@ -117,7 +161,7 @@ ChatBoot-New/
 
 ---
 
-## 🚀 6. Checklist de Inicialização no Novo Projeto `ChatBoot-New`
+## 🚀 7. Checklist de Inicialização no Novo Projeto `ChatBoot-New`
 
 Ao abrir a nova pasta **`ChatBoot-New`** no editor, execute estes passos:
 
@@ -182,7 +226,7 @@ Na tela de Conexões do WhatsApp, em vez de disparar chamadas para a porta legad
 
 ---
 
-## 🛠️ 7. Comandos de Manutenção e Diagnóstico Remoto na VPS
+## 🛠️ 8. Comandos de Manutenção e Diagnóstico Remoto na VPS
 
 Quando precisar monitorar a VPS pelo terminal da sua máquina, use os comandos abaixo:
 
@@ -205,6 +249,6 @@ ssh root@179.199.142.157 "cd /data/chatboot-stack && docker compose restart"
 
 ---
 
-## ✅ Resumo de Entrega
+## ✅ 9. Resumo de Entrega
 
 O ecossistema está **100% autônomo, configurado, protegido com SSL e ativo na nuvem**. Ao migrar o seu fluxo de desenvolvimento para o **`ChatBoot-New`**, basta seguir este manual para ligar o frontend aos novos endpoints e desfrutar de **10x mais velocidade, consumo mínimo de memória e custo zero com bancos externos**.

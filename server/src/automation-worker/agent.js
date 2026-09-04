@@ -145,12 +145,12 @@ function normalizeGastrofoodPayload(payload, defaultStoreId) {
         });
 
         return {
-            code: item.code || item.id || "",
-            name: item.name || "",
+            code: String(item.code || item.id || "").slice(0, 36),
+            name: String(item.name || "").slice(0, 100),
             amount: amount,
-            unitary: item.unitary || "UN",
+            unitary: String(item.unitary || "UN").slice(0, 10),
             price: price,
-            complement: item.complement || item.notes || "",
+            complement: String(item.complement || item.notes || "").slice(0, 255),
             itemsCuston: normalizedCustom
         };
     });
@@ -183,16 +183,16 @@ function normalizeGastrofoodPayload(payload, defaultStoreId) {
     };
 
     const normalizedAddress = {
-        Cep: address.Cep || address.cep || "",
-        Logradouro: address.Logradouro || address.logradouro || address.street || "",
-        Numero: String(address.Numero || address.numero || ""),
-        Bairro: address.Bairro || address.bairro || "",
-        Cidade: address.Cidade || address.cidade || "",
-        Complemento: address.Complemento || address.complemento || "",
-        Referencia: address.Referencia || address.referencia || "",
-        Uf: address.Uf || address.uf || "SP",
-        Bloco: address.Bloco || address.bloco || "",
-        Ap: address.Ap || address.ap || ""
+        Cep: String(address.Cep || address.cep || "").replace(/\D/g, '').slice(0, 9),
+        Logradouro: String(address.Logradouro || address.logradouro || address.street || "").slice(0, 100),
+        Numero: String(address.Numero || address.numero || "").slice(0, 20),
+        Bairro: String(address.Bairro || address.bairro || "").slice(0, 50),
+        Cidade: String(address.Cidade || address.cidade || "").slice(0, 50),
+        Complemento: String(address.Complemento || address.complemento || "").slice(0, 50),
+        Referencia: String(address.Referencia || address.referencia || "").slice(0, 50),
+        Uf: String(address.Uf || address.uf || "SP").trim().slice(0, 2).toUpperCase(),
+        Bloco: String(address.Bloco || address.bloco || "").slice(0, 20),
+        Ap: String(address.Ap || address.ap || "").slice(0, 20)
     };
 
     let idUsuario = customer.IdUsuario || customer.idUsuario || customer.id || "9EA3F679-5565-4DA0-930F-0971A8B8A3CD";
@@ -203,10 +203,18 @@ function normalizeGastrofoodPayload(payload, defaultStoreId) {
 
     const normalizedCustomer = {
         IdUsuario: idUsuario,
-        NomeRazao: customer.NomeRazao || customer.nomeRazao || customer.name || "Cliente",
-        Ddi: customer.Ddi || "+55",
-        Telefone: String(customer.Telefone || customer.telefone || "").replace(/\D/g, '')
+        NomeRazao: String(customer.NomeRazao || customer.nomeRazao || customer.name || "Cliente").trim().slice(0, 60),
+        Ddi: String(customer.Ddi || "+55").slice(0, 5),
+        Telefone: String(customer.Telefone || customer.telefone || "").replace(/\D/g, '').slice(0, 20)
     };
+
+    let rawPagto = String(jsOrder.pagto || jsOrder.paymentMethod || "Dinheiro").trim();
+    const lowerPagto = rawPagto.toLowerCase();
+    if (lowerPagto.includes('pix')) rawPagto = 'Pix';
+    else if (lowerPagto.includes('credito') || lowerPagto.includes('crédito')) rawPagto = 'Cartao Credito';
+    else if (lowerPagto.includes('debito') || lowerPagto.includes('débito')) rawPagto = 'Cartao Debito';
+    else if (lowerPagto.includes('dinheiro')) rawPagto = 'Dinheiro';
+    if (rawPagto.length > 20) rawPagto = rawPagto.slice(0, 20);
 
     return {
         jsOrder: {
@@ -217,13 +225,13 @@ function normalizeGastrofoodPayload(payload, defaultStoreId) {
             received: received,
             txDelivery: txDelivery,
             discount: discount,
-            cpf: jsOrder.cpf || "",
-            pagto: jsOrder.pagto || jsOrder.paymentMethod || "Dinheiro",
+            cpf: String(jsOrder.cpf || "").replace(/\D/g, '').slice(0, 14),
+            pagto: rawPagto,
             address: normalizedAddress,
             items: normalizedItems,
             customer: normalizedCustomer,
             origin: Number(jsOrder.origin !== undefined ? jsOrder.origin : 2),
-            estimatedDeliveryInMinutes: jsOrder.estimatedDeliveryInMinutes || "30 mins",
+            estimatedDeliveryInMinutes: String(jsOrder.estimatedDeliveryInMinutes || "30 mins").slice(0, 20),
             total: total
         }
     };
@@ -2236,6 +2244,7 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
             const MAX_LOOPS = 5;
 
             const toolExecutionHistory = [];
+            const executedToolSignatures = new Set();
 
             // Executa com Function Calling Loop
             while (keepLooping && loopCount < MAX_LOOPS) {
@@ -2247,7 +2256,8 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
 
                     if (calls && calls.length > 0) {
                         const call = calls[0];
-                        console.log(`[AutomationWorker] AI quer chamar a tool: ${call.name}`);
+                        const callSignature = `${call.name}:${JSON.stringify(call.args || {})}`;
+                        console.log(`[AutomationWorker] AI quer chamar a tool: ${call.name} (Loop ${loopCount}/${MAX_LOOPS})`);
                         toolExecutionHistory.push({
                             step: loopCount,
                             toolName: call.name,
@@ -2256,8 +2266,16 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                         
                         let functionResult = {};
 
-                        if (call.name === "Buscar_janelas_disponiveis") {
-                            // Simulação de janelas (Mock para o exemplo, poderia consultar o BD)
+                        if (executedToolSignatures.has(callSignature)) {
+                            console.warn(`[AutomationWorker] Prevenção de loop repetitivo na conversa ${conversationId}: tool "${call.name}" chamada com mesmos argumentos.`);
+                            functionResult = {
+                                aviso: `Você já executou a ferramenta ${call.name} com exatamente estes mesmos parâmetros nesta interação. Use as informações já obtidas no histórico desta conversa para responder diretamente ao cliente sem repetir chamadas de ferramentas.`
+                            };
+                        } else {
+                            executedToolSignatures.add(callSignature);
+
+                            if (call.name === "Buscar_janelas_disponiveis") {
+                                // Simulação de janelas (Mock para o exemplo, poderia consultar o BD)
                             functionResult = { disponiveis: ["09:00", "10:30", "14:00", "16:00"] };
                         } 
                         else if (call.name === "Criar_agendamento") {
@@ -3073,6 +3091,7 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                         functionResult = {
                                             sucesso: response.status === 200 || response.status === 201,
                                             status_http: response.status,
+                                            mensagem: "Cliente cadastrado com sucesso no Gastrofood! Cadastro ativo e apto para pedidos. Não execute Validar_cliente_cadastrado nem tente cadastrar novamente. Prossiga com o atendimento ou fechamento do pedido.",
                                             dados: resData.data || resData
                                         };
                                     } else {
@@ -3272,7 +3291,7 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                             functionResult = { 
                                                 produto_id: produto.id,
                                                 produto_nome: produto.name,
-                                                mensagem: "Este produto não possui adicionais ou opcionais cadastrados." 
+                                                mensagem: "Este produto não possui adicionais ou opcionais cadastrados no cardápio. Não consulte adicionais deste produto novamente nesta mensagem; responda ao cliente ou prossiga com o pedido." 
                                             };
                                         } else {
                                             functionResult = {
@@ -3291,6 +3310,7 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                         else {
                             functionResult = { erro: "Ferramenta desconhecida" };
                         }
+                    }
 
                         // Registra o resultado no histórico de execução de tools
                         if (toolExecutionHistory.length > 0) {
@@ -3547,15 +3567,20 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
                 }
                 
                 if (delaySec > 0) {
-                    try {
-                        await sock.sendPresenceUpdate('composing', jid);
-                    } catch (e) {
-                        console.error('[AutomationWorker] Falha ao enviar presença composing:', e);
+                    const isSocketReady = sock && sock.ws && (sock.ws.readyState === 1 || sock.ws.readyState === undefined) && sock.user;
+                    if (isSocketReady) {
+                        try {
+                            await sock.sendPresenceUpdate('composing', jid);
+                        } catch (e) {
+                            console.warn('[AutomationWorker] Falha não-bloqueante ao enviar presença composing:', e.message || e);
+                        }
                     }
                     await new Promise(resolve => setTimeout(resolve, delaySec * 1000));
-                    try {
-                        await sock.sendPresenceUpdate('paused', jid);
-                    } catch (e) {}
+                    if (isSocketReady) {
+                        try {
+                            await sock.sendPresenceUpdate('paused', jid);
+                        } catch (e) {}
+                    }
                 }
 
                 // DOUBLE CHECK 2: Validação no banco de dados APÓS a digitação e IMEDIATAMENTE ANTES do envio
@@ -3568,7 +3593,31 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
                     return;
                 }
 
-                const msgResult = await sock.sendMessage(jid, { text: finalResponseText });
+                // Garante socket ativo ou acorda conexão caso tenha oscilado durante o delay de digitação
+                let activeSock = sock;
+                if (!activeSock || (activeSock.ws && activeSock.ws.readyState !== 1)) {
+                    try {
+                        const { default: sManager } = await import('../session-manager/index.js');
+                        const freshSock = await sManager.getSocketOrWake(tenantId, instanceId, false);
+                        if (freshSock) activeSock = freshSock;
+                    } catch (wakeErr) {
+                        console.warn('[AutomationWorker] Não foi possível renovar socket fechado:', wakeErr.message);
+                    }
+                }
+
+                let msgResult = null;
+                if (!activeSock || (activeSock.ws && activeSock.ws.readyState !== 1)) {
+                    console.warn(`[AutomationWorker] Socket da instância ${instanceId} desconectado. Enfileirando resposta de IA no SessionManager...`);
+                    const { default: sManager } = await import('../session-manager/index.js');
+                    await sManager.enqueueMessage(instanceId, {
+                        targetJid: jid,
+                        type: 'text',
+                        content: { text: finalResponseText },
+                        options: {}
+                    });
+                } else {
+                    msgResult = await activeSock.sendMessage(jid, { text: finalResponseText });
+                }
                 try {
                     const { default: sManager } = await import('../session-manager/index.js');
                     sManager.logMonitoringEvent(instanceId, 'bot_message_sent', { 

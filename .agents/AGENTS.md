@@ -1,4 +1,30 @@
-# Customizações e Regras do Agente
+## Regra Obrigatória de Isolamento no ChatBoot-New (Read-Only no Legado & Alvo Exclusivo Next-Gen)
+
+Ao operar no projeto **`ChatBoot-New`**, o agente e os desenvolvedores devem seguir com rigor a seguinte diretriz de segurança:
+
+1. **PROIBIÇÃO TOTAL DE USAR CONEXÕES ANTIGAS EM PRODUÇÃO**:
+   - As conexões legadas (Supabase Cloud e o Coolify Antigo) **NÃO DEVEM ser usadas em produção de maneira alguma** no novo projeto, evitando conflitos de dados, falhas de autenticação ou interrupções operacionais nos clientes reais.
+
+2. **PRESERVAÇÃO INTEGRAL PARA TESTES E ESTUDOS DE CASO (NÃO REMOVER)**:
+   - Os arquivos, clientes e credenciais legadas **NÃO devem ser removidos do projeto**. Como tudo será recriado do zero, eles são cruciais para que o agente possa:
+     - **Acessar e ler documentações e códigos existentes**;
+     - **Compreender a fundo como cada fluxo foi arquitetado e desenvolvido**;
+     - **Executar testes e validações pontuais em caso de dúvidas sobre regras de negócio**.
+
+3. **DIRETRIZ DE AUTO-RESTRIÇÃO DO AGENTE**:
+   - O agente deve manter sempre ativa a seguinte premissa interna:
+     > *"Este projeto antigo está sendo descontinuado, portanto não posso ficar alterando nem mexendo nele, a não ser que eu esteja fazendo um estudo de caso e análise técnica. Nesse caso de estudo, tenho acesso para ler e entender."*
+
+4. **DISTINÇÃO CLARA ENTRE OS DOIS COOLIFYS**:
+   - **Coolify Antigo (`coolify.xpointsolucoes.com`)**: Painel de legado (Node.js/Baileys). Proibido de sofrer deploys ou modificações a partir do novo projeto.
+   - **Coolify Novo (`coolify.xpointsolucoes.com.br`)**: Painel oficial Next-Gen na VPS Hostinger (`179.199.142.157`), onde reside o novo ecossistema.
+
+5. **ALVO EXCLUSIVO DE PRODUÇÃO DO CHATBOOT-NEW**:
+   - Todas as novas lógicas, CRUDs, telas e integrações devem apontar exclusivamente para:
+     - **Appwrite Self-Hosted (`chatboot_db`)**
+     - **Whatsmeow Engine Go (`https://whatsmeow.179.199.142.157.sslip.io`)**
+     - **AI Engine (`https://ai.179.199.142.157.sslip.io`)**
+     - **Core Business Engine (`https://api.179.199.142.157.sslip.io`)**
 
 ## Arquitetura de Homologação (Staging) e Regras de Prevenção de Falhas em Produção
 

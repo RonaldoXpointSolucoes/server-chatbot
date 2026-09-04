@@ -3842,7 +3842,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         console.warn('[fetchInitialData] Fallback safety timeout reached. Clearing loading state.');
         set({ isChannelLoading: false });
       }
-    }, 5000);
+    }, 12000);
 
     try {
       // Disparar buscas auxiliares de forma concorrente e resiliente em background
@@ -4222,6 +4222,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     } catch (e) {
       console.error("Erro ao puxar initialDBContacts", e);
     } finally {
+      clearTimeout(safetyTimer);
       set({ isChannelLoading: false });
     }
   },

@@ -46,7 +46,7 @@ router.post(['/', '/send', '/messages/send', '/sendText', '/send-text'], require
             .maybeSingle();
 
         if (instCheck && ['offline', 'logged_out', 'blocked_12h', 'disconnected', 'paused'].includes(instCheck.status)) {
-            console.warn(`[API Gateway] [messages/send] ❌ Fast-Fail 400: Instância ${instanceId} está ${instCheck.status} no banco de dados (${instCheck.last_error || 'desconectada'})`);
+            console.log(`[API Gateway] [messages/send] Fast-Fail 400 (instância inativa/desconectada): Instância ${instanceId} está ${instCheck.status} no banco de dados (${instCheck.last_error || 'desconectada'})`);
             return res.status(400).json({
                 error: `Instância ${instanceId} está ${instCheck.status} no banco de dados (${instCheck.last_error || 'desconectada'})`,
                 code: 'INSTANCE_DISCONNECTED',

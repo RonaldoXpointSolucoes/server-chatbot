@@ -376,7 +376,7 @@ router.post(['/message/sendText', '/message/send-text', '/messages/sendText', '/
             sock = await getSocketWithRetry(tenant_id, id, 3);
         } catch (sockErr) {
             if (sockErr.isDefinitive) {
-                console.warn(`[API Gateway] [sendText] ❌ Fast-Fail 400: ${sockErr.message} | Instância: ${id} ("${display_name}")`);
+                console.log(`[API Gateway] [sendText] Fast-Fail 400 (instância inativa/desconectada): ${sockErr.message} | Instância: ${id} ("${display_name}")`);
                 return res.status(400).json({
                     error: sockErr.message,
                     code: 'INSTANCE_DISCONNECTED',
@@ -492,7 +492,7 @@ router.post('/message/sendMedia', requireApiKey, upload.single('file'), async (r
             sock = await getSocketWithRetry(tenant_id, id, 3);
         } catch (sockErr) {
             if (sockErr.isDefinitive) {
-                console.warn(`[API Gateway] [sendMedia] ❌ Fast-Fail 400: ${sockErr.message} | Instância: ${id} ("${display_name}")`);
+                console.log(`[API Gateway] [sendMedia] Fast-Fail 400 (instância inativa/desconectada): ${sockErr.message} | Instância: ${id} ("${display_name}")`);
                 return res.status(400).json({
                     error: sockErr.message,
                     code: 'INSTANCE_DISCONNECTED',
@@ -676,7 +676,7 @@ router.post('/message/sendLocation', requireApiKey, async (req, res) => {
             sock = await getSocketWithRetry(tenant_id, id, 3);
         } catch (sockErr) {
             if (sockErr.isDefinitive) {
-                console.warn(`[API Gateway] [sendLocation] ❌ Fast-Fail 400: ${sockErr.message} | Instância: ${id} ("${display_name}")`);
+                console.log(`[API Gateway] [sendLocation] Fast-Fail 400 (instância inativa/desconectada): ${sockErr.message} | Instância: ${id} ("${display_name}")`);
                 return res.status(400).json({
                     error: sockErr.message,
                     code: 'INSTANCE_DISCONNECTED',
@@ -763,7 +763,7 @@ router.post('/message/sendContact', requireApiKey, async (req, res) => {
             sock = await getSocketWithRetry(tenant_id, id, 3);
         } catch (sockErr) {
             if (sockErr.isDefinitive) {
-                console.warn(`[API Gateway] [sendContact] ❌ Fast-Fail 400: ${sockErr.message} | Instância: ${id} ("${display_name}")`);
+                console.log(`[API Gateway] [sendContact] Fast-Fail 400 (instância inativa/desconectada): ${sockErr.message} | Instância: ${id} ("${display_name}")`);
                 return res.status(400).json({
                     error: sockErr.message,
                     code: 'INSTANCE_DISCONNECTED',
@@ -864,7 +864,7 @@ router.post('/message/sendReaction', requireApiKey, async (req, res) => {
             sock = await getSocketWithRetry(tenant_id, id, 3);
         } catch (sockErr) {
             if (sockErr.isDefinitive) {
-                console.warn(`[API Gateway] [sendReaction] ❌ Fast-Fail 400: ${sockErr.message} | Instância: ${id} ("${display_name}")`);
+                console.log(`[API Gateway] [sendReaction] Fast-Fail 400 (instância inativa/desconectada): ${sockErr.message} | Instância: ${id} ("${display_name}")`);
                 return res.status(400).json({
                     error: sockErr.message,
                     code: 'INSTANCE_DISCONNECTED',
