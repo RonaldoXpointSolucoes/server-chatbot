@@ -33,15 +33,19 @@ export function useRealtimeConversations(
   const realtimeStatus = useChatStore((state) => state.realtimeStatus);
   const isChannelLoading = useChatStore((state) => state.isChannelLoading);
   const activeChannelFilter = useChatStore((state) => state.activeChannelFilter);
+  const tenantInfo = useChatStore((state) => state.tenantInfo);
   const subscribeToNewMessages = useChatStore((state) => state.subscribeToNewMessages);
   const setActiveChatId = useChatStore((state) => state.setActiveChatId);
   const markAsReadStore = useChatStore((state) => state.markAsRead);
   const fetchContacts = useChatStore((state) => state.fetchContacts);
 
-  // Inicializa a subscrição de Realtime
+  // Inicializa a subscrição de Realtime apenas quando o tenantId estiver presente
   useEffect(() => {
-    subscribeToNewMessages();
-  }, [subscribeToNewMessages]);
+    const tenantId = tenantInfo?.id || (typeof window !== 'undefined' ? (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')) : null);
+    if (tenantId && tenantId !== 'undefined' && tenantId !== 'null' && tenantId.trim()) {
+      subscribeToNewMessages();
+    }
+  }, [subscribeToNewMessages, tenantInfo?.id]);
 
   const effectiveInbox = inboxFilter !== undefined ? inboxFilter : activeChannelFilter;
 

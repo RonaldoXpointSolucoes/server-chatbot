@@ -29,3 +29,4 @@ chatboot-engine/.env
 
 .vercel
 server/data/
+scratch/

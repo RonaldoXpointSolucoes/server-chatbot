@@ -5645,11 +5645,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const state = get() as any;
     if (state.isSubscribed && !force) return; // React 18 protection
     let tenantId = state.tenantInfo?.id;
-    if (!tenantId) {
+    if (!tenantId && typeof window !== 'undefined') {
       tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
     }
-    if (!tenantId) {
-      console.error('[Realtime] Cannot subscribe without tenantId. Ensure user is logged in.');
+    if (!tenantId || tenantId === 'undefined' || tenantId === 'null' || !tenantId.trim()) {
+      // Tenant em resolução ou usuário em processo de boot/autenticação. Retorna silenciosamente.
       return;
     }
     set({ isSubscribed: true, realtimeStatus: 'connecting' } as any);
@@ -5659,8 +5659,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const win = window as any;
       if (!win._realtimeCheckInterval) {
         win._realtimeCheckInterval = setInterval(() => {
+          const currentTenantId = get().tenantInfo?.id || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+          if (!currentTenantId || currentTenantId === 'undefined' || currentTenantId === 'null' || !currentTenantId.trim()) {
+            return;
+          }
           const currentStatus = get().realtimeStatus;
-          console.log('[Realtime Monitor] Status atual:', currentStatus);
           if (currentStatus === 'disconnected') {
             console.log('[Realtime Monitor] Detectado canal desconectado. Forçando auto-reparo do realtime...');
             get().subscribeToNewMessages(true);
@@ -5672,6 +5675,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         win._hasRealtimeListeners = true;
 
         const triggerRepair = () => {
+          const currentTenantId = get().tenantInfo?.id || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+          if (!currentTenantId || currentTenantId === 'undefined' || currentTenantId === 'null' || !currentTenantId.trim()) {
+            return;
+          }
           const currentStatus = get().realtimeStatus;
           // Se estiver offline ou se não houver canais ativos no cliente Supabase
           if (currentStatus === 'disconnected' || supabase.getChannels().length === 0) {

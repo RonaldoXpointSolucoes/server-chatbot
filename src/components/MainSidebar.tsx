@@ -345,15 +345,21 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
     };
 
     const fetchAgentPermissionsAndData = async () => {
-       const { data: { session } } = await supabase.auth.getSession();
+       let { data: { session } } = await supabase.auth.getSession();
        if (!session) {
-         console.warn("[MainSidebar] No session found on mount. Redirecting to login...");
-         localStorage.removeItem('current_tenant_id');
-         sessionStorage.removeItem('current_tenant_id');
-         useChatStore.getState().clearStore();
-         await supabase.auth.signOut();
-         window.location.href = '/';
-         return;
+         try {
+           const { data: refreshData } = await supabase.auth.refreshSession();
+           session = refreshData?.session || null;
+         } catch (_) {}
+       }
+       if (!session) {
+         const storage = getActiveStorage();
+         const hasSavedUser = storage && Boolean(storage.getItem('current_user_email') || storage.getItem('current_tenant_id'));
+         if (!hasSavedUser) {
+           console.warn("[MainSidebar] No session found on mount. Redirecting to login...");
+           window.location.href = '/';
+           return;
+         }
        }
 
        const storage = getActiveStorage();
@@ -502,17 +508,12 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
           .maybeSingle();
           
         if (currentError || !currentCompany) {
-           console.error("[DEBUG] MainSidebar fetchCompanies falhou!", {
+           console.warn("[DEBUG] MainSidebar fetchCompanies não localizou empresa ou falhou temporariamente:", {
              tenantId,
              currentError,
              currentCompany
            });
-           console.warn("Empresa não encontrada ou RLS bloqueou o acesso. Deslogando...");
-           localStorage.removeItem('current_tenant_id');
-           sessionStorage.removeItem('current_tenant_id');
-           useChatStore.getState().clearStore();
-           await supabase.auth.signOut();
-           window.location.href = '/';
+           // Não executa signOut forçado por oscilações temporárias de rede ou RLS transiente
            return null;
         }
         

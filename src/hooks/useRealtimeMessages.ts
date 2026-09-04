@@ -28,6 +28,7 @@ export function useRealtimeMessages(options: UseRealtimeMessagesOptions = {}): U
   const contacts = useChatStore((state) => state.contacts);
   const realtimeStatus = useChatStore((state) => state.realtimeStatus);
   const isChannelLoading = useChatStore((state) => state.isChannelLoading);
+  const tenantInfo = useChatStore((state) => state.tenantInfo);
   const subscribeToNewMessages = useChatStore((state) => state.subscribeToNewMessages);
   const sendMessageStore = useChatStore((state) => state.sendMessage);
 
@@ -35,10 +36,13 @@ export function useRealtimeMessages(options: UseRealtimeMessagesOptions = {}): U
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
-  // Inicializa e mantém a subscrição de Realtime ativa
+  // Inicializa e mantém a subscrição de Realtime ativa com guarda defensiva de tenantId
   useEffect(() => {
-    subscribeToNewMessages();
-  }, [subscribeToNewMessages]);
+    const tenantId = tenantInfo?.id || (typeof window !== 'undefined' ? (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')) : null);
+    if (tenantId && tenantId !== 'undefined' && tenantId !== 'null' && tenantId.trim()) {
+      subscribeToNewMessages();
+    }
+  }, [subscribeToNewMessages, tenantInfo?.id]);
 
   // Localiza o contato ativo no estado global
   const activeContact = useMemo(() => {

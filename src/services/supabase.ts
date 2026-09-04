@@ -178,6 +178,7 @@ supabase.auth.onAuthStateChange((event, session) => {
 
   if (event === 'SIGNED_OUT') {
     const isExplicitLogout = typeof window !== 'undefined' && sessionStorage.getItem('user_explicit_logout') === 'true';
+    const isKeepLogged = typeof window !== 'undefined' && (localStorage.getItem('keep_logged') === 'true');
     const isOffline = typeof window !== 'undefined' && !window.navigator.onLine;
     const hasLocalUser = typeof window !== 'undefined' && Boolean(
       localStorage.getItem('current_user_email') || 
@@ -186,9 +187,14 @@ supabase.auth.onAuthStateChange((event, session) => {
       sessionStorage.getItem('current_tenant_id')
     );
 
-    // Se o evento SIGNED_OUT foi disparado por falha temporária de rede (Failed to fetch) ou sem um clique explícito em "Sair":
-    if (!isExplicitLogout && (isOffline || hasReportedServiceError || hasLocalUser)) {
-      console.warn("[Supabase Auth] SIGNED_OUT automático por oscilação de rede ignorado. Mantendo sessão local ativa.");
+    // Se o evento SIGNED_OUT foi disparado por falha temporária de rede (Failed to fetch), refresh assíncrono ou sem um clique explícito em "Sair":
+    if (!isExplicitLogout && (isOffline || hasReportedServiceError || hasLocalUser || isKeepLogged)) {
+      console.warn("[Supabase Auth] SIGNED_OUT automático por oscilação de rede ou refresh de token ignorado. Mantendo sessão local ativa.");
+      return;
+    }
+
+    // Se já não havia usuário logado na tela inicial, apenas retorna sem poluir logs
+    if (!hasLocalUser && !isExplicitLogout) {
       return;
     }
 

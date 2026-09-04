@@ -3595,19 +3595,36 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
 
                 // Garante socket ativo ou acorda conexão caso tenha oscilado durante o delay de digitação
                 let activeSock = sock;
-                if (!activeSock || (activeSock.ws && activeSock.ws.readyState !== 1)) {
+                const isSockReady = (s) => {
+                    if (!s) return false;
+                    if (s.ws?.isOpen === true) return true;
+                    if (s.ws?.socket?.readyState === 1) return true;
+                    if (s.ws?.readyState === 1) return true;
+                    const meId = s.user?.id || s.authState?.creds?.me?.id || s.authState?.creds?.me?.jid;
+                    if (meId && !s.ws?.isClosed && !s.ws?.isClosing && (!s.ws?.socket || s.ws?.socket?.readyState === 1)) return true;
+                    return false;
+                };
+
+                if (!isSockReady(activeSock)) {
                     try {
-                        const { default: sManager } = await import('../session-manager/index.js');
-                        const freshSock = await sManager.getSocketOrWake(tenantId, instanceId, false);
-                        if (freshSock) activeSock = freshSock;
+                        const { default: sManager, isSocketOpen: sManagerIsOpen } = await import('../session-manager/index.js');
+                        if (sManager) {
+                            const freshSock = await sManager.getSocketOrWake(tenantId, instanceId, false);
+                            if (freshSock && (isSockReady(freshSock) || (sManagerIsOpen && sManagerIsOpen(freshSock)))) {
+                                activeSock = freshSock;
+                            }
+                        }
                     } catch (wakeErr) {
                         console.warn('[AutomationWorker] Não foi possível renovar socket fechado:', wakeErr.message);
                     }
                 }
 
                 let msgResult = null;
-                if (!activeSock || (activeSock.ws && activeSock.ws.readyState !== 1)) {
-                    console.warn(`[AutomationWorker] Socket da instância ${instanceId} desconectado. Enfileirando resposta de IA com fallback resiliente...`);
+                const { isSocketOpen: sManagerIsOpen } = await import('../session-manager/index.js').catch(() => ({}));
+                const isReady = isSockReady(activeSock) || (sManagerIsOpen && sManagerIsOpen(activeSock));
+
+                if (!isReady) {
+                    console.warn(`[AutomationWorker] Socket da instância ${instanceId} desconectado ou em reconexão. Enfileirando resposta de IA com fallback resiliente...`);
                     try {
                         const { default: sManager } = await import('../session-manager/index.js');
                         if (sManager && typeof sManager.enqueueMessage === 'function') {
@@ -3631,6 +3648,46 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
                         }
                     } catch (enqErr) {
                         console.error('[AutomationWorker] Falha ao enfileirar mensagem de fallback:', enqErr.message);
+                    }
+
+                    // Registra mensagem pendente no banco para manter histórico e UI sincronizados
+                    try {
+                        const fallbackMsgId = `fallback_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+                        const { data: savedFallbackMsg } = await supabase.from('messages').insert({
+                            tenant_id: tenantId,
+                            instance_id: instanceId,
+                            conversation_id: conversationId,
+                            direction: 'outbound',
+                            message_type: 'text',
+                            status: 'pending',
+                            text_content: finalResponseText,
+                            whatsapp_message_id: fallbackMsgId,
+                            sender_type: 'bot',
+                            raw_payload: {
+                                fallback: true,
+                                bot_name: botSettings?.name || 'IA ChatBoot',
+                                bot_id: botSettings?.id
+                            }
+                        }).select('*').single();
+
+                        if (conversationId) {
+                            await supabase.from('conversations').update({
+                                updated_at: new Date().toISOString(),
+                                last_message_at: new Date().toISOString(),
+                                last_message_preview: finalResponseText.substring(0, 50)
+                            }).eq('id', conversationId);
+                        }
+
+                        if (savedFallbackMsg) {
+                            const { default: realtime } = await import('../realtime-publisher/index.js');
+                            await realtime.publishInboxEvent(tenantId, 'message.new', {
+                                message: savedFallbackMsg,
+                                contact_phone: jid.split('@')[0],
+                                conversation_id: conversationId
+                            });
+                        }
+                    } catch (saveErr) {
+                        console.warn('[AutomationWorker] Aviso ao registrar mensagem pendente de fallback no BD:', saveErr.message);
                     }
                 } else {
                     const sendFn = activeSock.originalSendMessage || activeSock.sendMessage;
