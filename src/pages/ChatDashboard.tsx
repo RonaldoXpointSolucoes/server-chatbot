@@ -1592,10 +1592,19 @@ export default function ChatDashboard() {
   useEffect(() => {
     if (ticketMode) {
       setMessageFilter('today');
+      // Requisito 5: Ao ativar o Modo Ticket, se a conversa selecionada não for um ticket aberto da caixa, seleciona o primeiro ticket aberto
+      const activeObj = contacts.find(c => c.id === activeChatId || c.conv_id === activeChatId);
+      const isCurrentOpenTicket = activeObj && isContactOpenTicket(activeObj);
+      if (!isCurrentOpenTicket) {
+        const firstTicket = contacts.find(c => isContactOpenTicket(c));
+        if (firstTicket) {
+          useChatStore.setState({ activeChatId: firstTicket.id });
+        }
+      }
     } else {
       setMessageFilter('all');
     }
-  }, [ticketMode]);
+  }, [ticketMode, contacts, activeChatId, isContactOpenTicket]);
 
   // Helper de validação de Ticket Aberto para a caixa atual
   const isContactOpenTicket = React.useCallback((c: any) => {
@@ -1806,8 +1815,8 @@ export default function ChatDashboard() {
         const isSnoozedActive = c.conv_status === 'snoozed' && c.snoozed_until && (new Date(c.snoozed_until).getTime() > Date.now());
 
         if (isExactActiveChat) {
-            // No Modo Ticket (ou filtros de tickets abertos), se o chat ativo foi RESOLVIDO/ENCERRADO, BLOQUEADO ou está ADIADO, não força visibilidade na lista de tickets abertos
-            if ((ticketMode || filterType === 'tickets' || filterType === 'open') && (isResolvedOrClosed || c.is_blocked || (isSnoozedActive && filterType !== 'snoozed' && filterType !== 'appointments'))) {
+            // No Modo Ticket (ou filtros de tickets abertos), se o chat ativo não for um ticket aberto válido da caixa, não força visibilidade
+            if ((ticketMode || filterType === 'tickets' || filterType === 'open') && !isContactOpenTicket(c)) {
                 return false;
             }
             if (!searchTerm) {
@@ -1862,21 +1871,14 @@ export default function ChatDashboard() {
 
         // REGRA DE OURO DO MODO TICKET:
         // - Modo Ticket ATIVO (ticketMode === true OU filterType === 'tickets' OU filterType === 'open'):
-        //   Mostra APENAS tickets abertos na lista lateral. Oculta conversas resolvidas, encerradas e adiadas ativas (mesmo durante busca).
+        //   Mostra EXCLUSIVAMENTE tickets abertos na lista lateral (validados rigorosamente por isContactOpenTicket).
         // - Modo Ticket DESATIVADO (ticketMode === false E filterType === 'all'):
         //   Mostra TODAS as conversas da caixa (abertas, resolvidas, encerradas, etc.).
         if (ticketMode || filterType === 'tickets' || filterType === 'open') {
-           if (c.conv_status === 'snoozed' && c.snoozed_until) {
-              const untilTimestamp = new Date(c.snoozed_until).getTime();
-              if (untilTimestamp > Date.now() && filterType !== 'snoozed' && filterType !== 'appointments') {
-                 return false;
-              }
-           }
-           if (isResolvedOrClosed) {
+           if (!isContactOpenTicket(c)) {
               return false;
            }
         }
-
 
         // 4) BUSCA EM TEXTO E METADADOS
         if (searchTerm) {
@@ -1900,8 +1902,8 @@ export default function ChatDashboard() {
             if (!hasActiveTask) return false;
         }
 
-        // Filtros de Pills - IGNORADOS DURANTE PESQUISA
-        if (!searchTerm) {
+        // Filtros de Pills - IGNORADOS DURANTE PESQUISA (exceto Modo Ticket que sempre filtra)
+        if (!searchTerm || ticketMode) {
             if (filterType === 'unread') {
                // Já tratado rigorosamente acima
             }
@@ -1922,6 +1924,11 @@ export default function ChatDashboard() {
 
        // Esconde contatos que são apenas resultados de busca global quando a pesquisa é limpa (a menos que seja o chat ativo)
        if (!searchTerm && c.isSearchResult && !isExactActiveChat) {
+          return false;
+       }
+
+       // No Modo Ticket, contatos de busca global ou contatos comuns que não sejam tickets abertos da caixa NUNCA passam
+       if (ticketMode && (!isContactOpenTicket(c) || c.isSearchResult)) {
           return false;
        }
 

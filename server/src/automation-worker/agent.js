@@ -3607,16 +3607,34 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
 
                 let msgResult = null;
                 if (!activeSock || (activeSock.ws && activeSock.ws.readyState !== 1)) {
-                    console.warn(`[AutomationWorker] Socket da instância ${instanceId} desconectado. Enfileirando resposta de IA no SessionManager...`);
-                    const { default: sManager } = await import('../session-manager/index.js');
-                    await sManager.enqueueMessage(instanceId, {
-                        targetJid: jid,
-                        type: 'text',
-                        content: { text: finalResponseText },
-                        options: {}
-                    });
+                    console.warn(`[AutomationWorker] Socket da instância ${instanceId} desconectado. Enfileirando resposta de IA com fallback resiliente...`);
+                    try {
+                        const { default: sManager } = await import('../session-manager/index.js');
+                        if (sManager && typeof sManager.enqueueMessage === 'function') {
+                            await sManager.enqueueMessage(instanceId, {
+                                targetJid: jid,
+                                type: 'text',
+                                content: { text: finalResponseText },
+                                options: { isAutomation: true }
+                            });
+                        } else {
+                            await supabase.from('wa_outgoing_messages').insert({
+                                tenant_id: tenantId,
+                                instance_id: instanceId,
+                                chat_jid: jid,
+                                recipient: jid,
+                                message_type: 'text',
+                                body: finalResponseText,
+                                status: 'pending',
+                                priority: 1
+                            });
+                        }
+                    } catch (enqErr) {
+                        console.error('[AutomationWorker] Falha ao enfileirar mensagem de fallback:', enqErr.message);
+                    }
                 } else {
-                    msgResult = await activeSock.sendMessage(jid, { text: finalResponseText });
+                    const sendFn = activeSock.originalSendMessage || activeSock.sendMessage;
+                    msgResult = await sendFn(jid, { text: finalResponseText }, { isAutomation: true });
                 }
                 try {
                     const { default: sManager } = await import('../session-manager/index.js');

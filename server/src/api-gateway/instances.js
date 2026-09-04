@@ -346,6 +346,30 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
         if (method === 'sendMessage') {
             const jid = args ? args[0] : null;
             const content = args ? args[1] : null;
+
+            // 1. Verificação prévia de status no banco de dados para evitar tentativas em instâncias desconectadas
+            const { data: instCheck } = await supabase
+                .from('whatsapp_instances')
+                .select('id, status, last_error, display_name, is_connected')
+                .eq('id', instanceId)
+                .maybeSingle();
+
+            const isDisconnected = !instCheck || 
+                instCheck.is_connected === false || 
+                ['offline', 'logged_out', 'blocked_12h', 'disconnected', 'paused'].includes(instCheck.status);
+
+            if (isDisconnected) {
+                console.log(`[API Gateway] [Invoke/sendMessage] Fast-Fail 400 (instância inativa/desconectada): Instância ${instanceId} ("${instCheck?.display_name || instanceId}") está desconectada no banco (status: ${instCheck?.status || 'desconhecido'}).`);
+                return res.status(400).json({
+                    ok: false,
+                    error: `Instância WhatsApp "${instCheck?.display_name || instanceId}" está desconectada (${instCheck?.last_error || 'requer nova conexão/pareamento'}). Por favor, reconecte-a para enviar mensagens.`,
+                    code: 'INSTANCE_DISCONNECTED',
+                    instance_id: instanceId,
+                    status: instCheck?.status || 'disconnected',
+                    is_connected: false,
+                    last_error: instCheck?.last_error || null
+                });
+            }
             
             // Se for uma edição de mensagem (contém 'edit') ou exclusão/revogação (contém 'delete'), necessita do socket ativo diretamente no Baileys
             if (content && (content.edit || content.delete)) {

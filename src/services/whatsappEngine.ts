@@ -46,6 +46,10 @@ export const sendNativeMessage = async (tenantId: string, instanceId: string, nu
   }
 
   if (!res.ok || resJson.ok === false) {
+     if (resJson.code === 'INSTANCE_DISCONNECTED') {
+        const msg = resJson.error || 'A instância do WhatsApp está desconectada. Clique em Conectar para gerar um novo QR Code.';
+        throw new Error(msg);
+     }
      let errorDetail = resJson.error || resJson.message || `Status: ${res.status}`;
      if (errorDetail && typeof errorDetail === 'object') {
         errorDetail = errorDetail.message || errorDetail.error || JSON.stringify(errorDetail);

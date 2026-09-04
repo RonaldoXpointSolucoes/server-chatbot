@@ -17,14 +17,18 @@ async function getSocketWithRetry(tenantId, instanceId, maxRetries = 3) {
     try {
         const { data: inst } = await supabase
             .from('whatsapp_instances')
-            .select('status, last_error')
+            .select('status, last_error, is_connected, display_name')
             .eq('id', instanceId)
             .maybeSingle();
 
-        if (inst && ['offline', 'logged_out', 'blocked_12h', 'disconnected', 'paused'].includes(inst.status)) {
-            const err = new Error(`Instância ${instanceId} está ${inst.status} no banco de dados (${inst.last_error || 'requer nova conexão/pareamento'})`);
+        const isDisconnected = !inst || 
+            inst.is_connected === false || 
+            ['offline', 'logged_out', 'blocked_12h', 'disconnected', 'paused'].includes(inst.status);
+
+        if (isDisconnected) {
+            const err = new Error(`Instância WhatsApp "${inst?.display_name || instanceId}" está desconectada (${inst?.last_error || 'requer nova conexão/pareamento'}).`);
             err.isDefinitive = true;
-            err.instanceStatus = inst.status;
+            err.instanceStatus = inst?.status || 'disconnected';
             throw err;
         }
     } catch (checkErr) {

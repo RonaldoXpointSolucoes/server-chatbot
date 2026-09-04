@@ -1853,6 +1853,67 @@ class SessionManager {
         return this.createSession(tenantId, instanceId, true);
     }
 
+    /**
+     * Enfileiramento resiliente de mensagens para envio via Baileys ou outbox table (wa_outgoing_messages)
+     */
+    async enqueueMessage(instanceId, { targetJid, type = 'text', content, options = {} }) {
+        console.log(`[SessionManager] enqueueMessage chamado para instância ${instanceId} ➔ destino ${targetJid}`);
+        try {
+            const { data: inst } = await retryWithBackoff(() =>
+                supabase.from('whatsapp_instances').select('tenant_id, status, last_error, is_connected').eq('id', instanceId).maybeSingle()
+            ).catch(() => ({ data: null }));
+
+            const tenantId = inst?.tenant_id;
+            const isDefinitiveOffline = inst && (inst.is_connected === false || ['offline', 'logged_out', 'blocked_12h', 'disconnected', 'paused'].includes(inst.status));
+
+            const bodyText = typeof content === 'string' ? content : (content?.text || '');
+
+            if (isDefinitiveOffline) {
+                console.warn(`[SessionManager] enqueueMessage: Instância ${instanceId} está ${inst?.status}. Gravando mensagem em wa_outgoing_messages...`);
+                const { data: savedMsg, error: saveErr } = await supabase.from('wa_outgoing_messages').insert({
+                    tenant_id: tenantId,
+                    instance_id: instanceId,
+                    chat_jid: targetJid,
+                    recipient: targetJid,
+                    message_type: type,
+                    body: bodyText,
+                    status: 'pending',
+                    priority: 1
+                }).select().maybeSingle();
+                if (saveErr) {
+                    console.error('[SessionManager] Erro ao gravar em wa_outgoing_messages:', saveErr.message);
+                }
+                return savedMsg;
+            }
+
+            // Tenta obter socket ativo ou acordar
+            const sock = await this.getSocketOrWake(tenantId, instanceId, false);
+            if (sock && isSocketOpen(sock)) {
+                const sendFn = sock.originalSendMessage || sock.sendMessage;
+                return await sendFn(targetJid, content, options);
+            } else {
+                console.warn(`[SessionManager] Socket indisponível no momento para ${instanceId}. Gravando em wa_outgoing_messages...`);
+                const { data: savedMsg, error: saveErr } = await supabase.from('wa_outgoing_messages').insert({
+                    tenant_id: tenantId,
+                    instance_id: instanceId,
+                    chat_jid: targetJid,
+                    recipient: targetJid,
+                    message_type: type,
+                    body: bodyText,
+                    status: 'pending',
+                    priority: 1
+                }).select().maybeSingle();
+                if (saveErr) {
+                    console.error('[SessionManager] Erro ao gravar em wa_outgoing_messages:', saveErr.message);
+                }
+                return savedMsg;
+            }
+        } catch (err) {
+            console.error(`[SessionManager] Erro em enqueueMessage para ${instanceId}:`, err.message);
+            throw err;
+        }
+    }
+
     async closeSession(instanceId) {
         this.closingSessions.add(instanceId);
         await this.destroyExistingSession(instanceId, 'closeSession');
