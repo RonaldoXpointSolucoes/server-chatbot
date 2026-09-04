@@ -4270,10 +4270,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
         // Pré-popular cache com todas as instâncias do tenant para máxima performance de mensagens
         try {
-          const { data: instances } = await supabase
+          let instQuery = supabase
             .from('whatsapp_instances')
-            .select('id, display_name, api_key, status, phone_number, settings')
-            .eq('tenant_id', currentTenantId);
+            .select('id, display_name, api_key, status, phone_number, settings, tenant_id');
+
+          if (tenantData.evolution_api_instance) {
+            instQuery = instQuery.or(`tenant_id.eq.${currentTenantId},id.eq.${tenantData.evolution_api_instance}`);
+          } else {
+            instQuery = instQuery.eq('tenant_id', currentTenantId);
+          }
+
+          const { data: instances } = await instQuery;
 
           if (instances) {
             const statusUpdates: Record<string, string> = {};

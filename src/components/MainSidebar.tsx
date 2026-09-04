@@ -387,31 +387,87 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
            }
        }
        
-       await fetchInstances();
-       await fetchCompanies();
+       const comp = await fetchCompanies();
+       await fetchInstances(comp);
     };
 
-    const fetchInstances = async () => {
+    const fetchInstances = async (compOverride?: any) => {
         try {
-          const { data, error } = await supabase.from('whatsapp_instances')
-            .select('id, display_name, status, color, phone_number, settings')
-            .eq('tenant_id', tenantId)
-            .order('created_at', { ascending: false });
+          const comp = compOverride || currentCompanyContext;
+          const companyInstId = comp?.evolution_api_instance || null;
+
+          let query = supabase.from('whatsapp_instances')
+            .select('id, display_name, status, color, phone_number, settings, tenant_id');
+
+          if (companyInstId) {
+            query = query.or(`tenant_id.eq.${tenantId},id.eq.${companyInstId}`);
+          } else {
+            query = query.eq('tenant_id', tenantId);
+          }
+            
+          let { data, error } = await query.order('created_at', { ascending: false });
             
           if (error) {
              console.error('Erro detalhado Supabase:', error);
              return;
           }
+
+          if (data && data.length > 0) {
+            data.forEach(inst => {
+              if (inst.tenant_id !== tenantId) {
+                supabase.from('whatsapp_instances').update({
+                  tenant_id: tenantId,
+                  settings: { ...(inst.settings || {}), chat_enabled: true, is_api_only: false }
+                }).eq('id', inst.id).then();
+              }
+            });
+          }
+
+          if ((!data || data.length === 0) && comp?.email) {
+            try {
+              const { data: siblingCompanies } = await supabase
+                .from('companies')
+                .select('id, evolution_api_instance')
+                .eq('email', comp.email)
+                .not('evolution_api_instance', 'is', null);
+
+              if (siblingCompanies && siblingCompanies.length > 0) {
+                const siblingInstIds = siblingCompanies.map(s => s.evolution_api_instance).filter(Boolean);
+                if (siblingInstIds.length > 0) {
+                  const { data: siblingInsts } = await supabase
+                    .from('whatsapp_instances')
+                    .select('id, display_name, status, color, phone_number, settings, tenant_id')
+                    .in('id', siblingInstIds);
+
+                  if (siblingInsts && siblingInsts.length > 0) {
+                    data = siblingInsts;
+                    siblingInsts.forEach(si => {
+                      supabase.from('whatsapp_instances').update({
+                        tenant_id: tenantId,
+                        settings: { ...(si.settings || {}), chat_enabled: true, is_api_only: false }
+                      }).eq('id', si.id).then();
+                      supabase.from('companies').update({
+                        evolution_api_instance: si.id
+                      }).eq('id', tenantId).then();
+                    });
+                  }
+                }
+              }
+            } catch (fErr) {
+              console.warn('[MainSidebar] Fallback sibling insts error:', fErr);
+            }
+          }
+
           if (data) {
              let finalData = data;
 
-             // Filtrar instâncias de API Gateway que não foram explicitamente habilitadas para o Chat
              finalData = finalData.filter(d => {
                const settings = d.settings || {};
                const isApiOnly = settings.is_api_only === true;
                const isChatEnabled = settings.chat_enabled === true;
                const isBaseInstance = d.id === connectedInstanceName || d.display_name === connectedInstanceName;
-               if (isApiOnly && !isChatEnabled && !isBaseInstance) {
+               const isCompanyBound = d.id === companyInstId || d.tenant_id === tenantId;
+               if (isApiOnly && !isChatEnabled && !isBaseInstance && !isCompanyBound) {
                  return false;
                }
                return true;
@@ -421,13 +477,11 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
 
              setInstances(finalData);
 
-             // Inicializa o status de cada instância no store para reatividade passando pelo debouncer
              const { setInstanceStatus } = useChatStore.getState();
              data.forEach(inst => {
                 setInstanceStatus(inst.id, inst.status);
              });
 
-             // Auto-seleciona a única caixa disponível
              const { activeChannelFilter, setActiveChannelFilter, fetchInitialData } = useChatStore.getState();
              if (!activeChannelFilter && finalData.length === 1) {
                  setActiveChannelFilter(finalData[0].id, finalData[0].display_name);
@@ -459,7 +513,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
            useChatStore.getState().clearStore();
            await supabase.auth.signOut();
            window.location.href = '/';
-           return;
+           return null;
         }
         
         setCurrentCompanyContext(currentCompany);
@@ -479,11 +533,10 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
 
         if (currentUserRole === 'agent' || currentUserRole === 'Agente') {
            if (allowedCompanies.length > 0 && !allowedCompanies.includes(tenantId)) {
-               // Security enforcement: Se a matriz não é permitida ou ficou sujeira no localstorage
                const newTenantId = allowedCompanies[0];
                if (storage) storage.setItem('current_tenant_id', newTenantId);
                window.location.reload();
-               return;
+               return null;
            }
         }
 
@@ -508,9 +561,11 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
         }
 
         setUserCompanies(companiesData);
+        return currentCompany;
 
       } catch (err) {
         console.error('Erro ao buscar empresas multi-tenant:', err);
+        return null;
       }
     };
 
@@ -522,7 +577,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
     }
 
     const channel = supabase.channel(sidebarChannelName)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'whatsapp_instances', filter: `tenant_id=eq.${tenantId}` }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'whatsapp_instances' }, () => {
          fetchInstances();
       })
       .subscribe();

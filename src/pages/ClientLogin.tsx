@@ -225,6 +225,26 @@ export default function ClientLogin() {
            tenantData = authResult.user;
            userName = authResult.user.name;
            userRole = 'admin';
+
+           // Defesa contra empresas órfãs/duplicadas sem instância vinculada
+           try {
+              if (!tenantData.evolution_api_instance && matchedEmail) {
+                 const { data: siblingCompanies } = await supabase
+                    .from('companies')
+                    .select('*')
+                    .eq('email', matchedEmail.trim().toLowerCase())
+                    .not('evolution_api_instance', 'is', null)
+                    .order('created_at', { ascending: false })
+                    .limit(1);
+
+                 if (siblingCompanies && siblingCompanies.length > 0) {
+                    tenantData = siblingCompanies[0];
+                    userName = siblingCompanies[0].name;
+                 }
+              }
+           } catch (siblingErr) {
+              console.warn("Erro ao verificar sibling companies no Face ID:", siblingErr);
+           }
            
            // Busca o nome real do administrador na tabela tenant_users
            try {
@@ -408,6 +428,26 @@ export default function ClientLogin() {
          userName = authResult.user.name;
          userRole = 'admin';
 
+         // Defesa contra empresas órfãs/duplicadas sem instância vinculada
+         try {
+            if (!tenantData.evolution_api_instance && faceLinkEmail) {
+               const { data: siblingCompanies } = await supabase
+                  .from('companies')
+                  .select('*')
+                  .eq('email', faceLinkEmail.trim().toLowerCase())
+                  .not('evolution_api_instance', 'is', null)
+                  .order('created_at', { ascending: false })
+                  .limit(1);
+
+               if (siblingCompanies && siblingCompanies.length > 0) {
+                  tenantData = siblingCompanies[0];
+                  userName = siblingCompanies[0].name;
+               }
+            }
+         } catch (siblingErr) {
+            console.warn("Erro ao verificar sibling companies no Link Face:", siblingErr);
+         }
+
          try {
             const { data: userProfile } = await supabase
               .from('tenant_users')
@@ -532,6 +572,27 @@ export default function ClientLogin() {
          tenantData = authResult.user;
          userName = authResult.user.name;
          userRole = 'admin';
+
+         // Defesa contra empresas órfãs/duplicadas sem instância vinculada
+         try {
+            if (!tenantData.evolution_api_instance && email) {
+               const { data: siblingCompanies } = await supabase
+                  .from('companies')
+                  .select('*')
+                  .eq('email', email.trim().toLowerCase())
+                  .not('evolution_api_instance', 'is', null)
+                  .order('created_at', { ascending: false })
+                  .limit(1);
+
+               if (siblingCompanies && siblingCompanies.length > 0) {
+                  addDevLog('AUTH_FALLBACK_SIBLING', `Adotando empresa legítima com instância vinculada: ${siblingCompanies[0].name} (${siblingCompanies[0].id})`, 'info');
+                  tenantData = siblingCompanies[0];
+                  userName = siblingCompanies[0].name;
+               }
+            }
+         } catch (siblingErr) {
+            console.warn("Erro ao verificar sibling companies:", siblingErr);
+         }
       } else if (authResult.type === 'agent') {
          if (!authResult.parent) {
             addDevLog('FETCH_PARENT_COMPANY_NOT_FOUND', 'Empresa matriz não encontrada para o agente.', 'error');

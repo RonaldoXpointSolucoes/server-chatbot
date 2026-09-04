@@ -95,6 +95,8 @@ interface WhatsAppInstance {
 interface Company {
   id: string;
   name: string;
+  email?: string | null;
+  evolution_api_instance?: string | null;
 }
 
 const LOCKED_EMAIL = 'xpointsolucoes@gmail.com';
@@ -381,7 +383,7 @@ export default function InstanceManagerStandalone() {
       // 1. Tentar buscar direto do Supabase Master Client (service_role)
       const { data: sbData, error: sbError } = await masterSupabase
         .from('companies')
-        .select('id, name, trade_name')
+        .select('id, name, trade_name, email, evolution_api_instance')
         .order('name', { ascending: true });
 
       if (!sbError && sbData && sbData.length > 0) {
@@ -390,7 +392,7 @@ export default function InstanceManagerStandalone() {
         // 2. Fallback para client local
         const { data: localData } = await supabase
           .from('companies')
-          .select('id, name, trade_name')
+          .select('id, name, trade_name, email, evolution_api_instance')
           .order('name', { ascending: true });
         if (localData) rawCompanies = localData;
       }
@@ -400,7 +402,9 @@ export default function InstanceManagerStandalone() {
           .filter(c => c.id !== STANDALONE_TENANT_ID)
           .map(c => ({
             id: c.id,
-            name: c.name || c.trade_name || 'Empresa Sem Nome'
+            name: c.name || c.trade_name || 'Empresa Sem Nome',
+            email: c.email || null,
+            evolution_api_instance: c.evolution_api_instance || null
           }));
 
         const uniqueCompanies = Array.from(
@@ -413,7 +417,7 @@ export default function InstanceManagerStandalone() {
     }
   };
 
-  // Re-vincular Empresa de Instância Existente
+  // Re-vincular Empresa de Instância Existente (Sincronização Bidirecional Robusta)
   const handleReassignCompany = async () => {
     if (!reassignTargetInstance) return;
     setReassigning(true);
@@ -428,9 +432,9 @@ export default function InstanceManagerStandalone() {
           setReassigning(false);
           return;
         }
-        const { data: newComp, error: compErr } = await supabase
+        const { data: newComp, error: compErr } = await masterSupabase
           .from('companies')
-          .insert([{ name: newCompanyName.trim() }])
+          .insert([{ name: newCompanyName.trim(), evolution_api_instance: reassignTargetInstance.id }])
           .select('id, name')
           .single();
 
@@ -441,21 +445,56 @@ export default function InstanceManagerStandalone() {
         await fetchCompanies();
       }
 
-      const { error } = await supabase
+      // 1. Atualizar a instância: vincular o tenant_id e habilitar chat e visibilidade obrigatória
+      const currentSettings = reassignTargetInstance.settings || {};
+      const isTargetStandalone = targetCompanyId === STANDALONE_TENANT_ID;
+      const updatedSettings = {
+        ...currentSettings,
+        chat_enabled: !isTargetStandalone,
+        is_api_only: isTargetStandalone
+      };
+
+      const { error: instError } = await supabase
         .from('whatsapp_instances')
-        .update({ tenant_id: targetCompanyId })
+        .update({
+          tenant_id: targetCompanyId,
+          settings: updatedSettings
+        })
         .eq('id', reassignTargetInstance.id);
 
-      if (error) throw error;
+      if (instError) throw instError;
+
+      // 2. Sincronização bidirecional na tabela companies
+      if (!isTargetStandalone) {
+        // Limpar qualquer outra empresa que estivesse com esta instância associada
+        await masterSupabase
+          .from('companies')
+          .update({ evolution_api_instance: null })
+          .eq('evolution_api_instance', reassignTargetInstance.id)
+          .neq('id', targetCompanyId);
+
+        // Associar oficialmente na empresa destino
+        await masterSupabase
+          .from('companies')
+          .update({ evolution_api_instance: reassignTargetInstance.id })
+          .eq('id', targetCompanyId);
+      } else {
+        // Desassociou: remove de qualquer empresa que aponte para esta caixa
+        await masterSupabase
+          .from('companies')
+          .update({ evolution_api_instance: null })
+          .eq('evolution_api_instance', reassignTargetInstance.id);
+      }
 
       alert(
-        targetCompanyId !== STANDALONE_TENANT_ID
-          ? `Caixa "${reassignTargetInstance.display_name}" vinculada com sucesso!`
+        !isTargetStandalone
+          ? `Caixa "${reassignTargetInstance.display_name}" vinculada e sincronizada com a empresa com sucesso!`
           : `Vínculo de empresa removido da caixa "${reassignTargetInstance.display_name}" com sucesso!`
       );
       setReassignTargetInstance(null);
       setIsCreatingNewCompany(false);
       setNewCompanyName('');
+      fetchCompanies();
       fetchInstances();
     } catch (err: any) {
       alert(`Erro ao vincular empresa: ${err.message || 'Falha na atualização'}`);
@@ -1633,11 +1672,15 @@ export default function InstanceManagerStandalone() {
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3.5 text-sm text-white focus:outline-none focus:border-cyan-500 transition shadow-inner"
                   >
                     <option value="none">🚫 Nenhuma (Remover Vínculo / Desassociar)</option>
-                    {companies.map((comp) => (
-                      <option key={comp.id} value={comp.id}>
-                        🏢 {comp.name}
-                      </option>
-                    ))}
+                    {companies.map((comp) => {
+                      const hasDuplicateName = companies.filter(c => c.name.toLowerCase().trim() === comp.name.toLowerCase().trim()).length > 1;
+                      const label = hasDuplicateName && comp.email ? `${comp.name} (${comp.email})` : comp.name;
+                      return (
+                        <option key={comp.id} value={comp.id}>
+                          🏢 {label}
+                        </option>
+                      );
+                    })}
                   </select>
                   <button
                     type="button"
