@@ -350,13 +350,12 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
             // 1. Verificação prévia de status no banco de dados para evitar tentativas em instâncias desconectadas
             const { data: instCheck } = await supabase
                 .from('whatsapp_instances')
-                .select('id, status, last_error, display_name, is_connected')
+                .select('id, status, last_error, display_name')
                 .eq('id', instanceId)
                 .maybeSingle();
 
-            const isDisconnected = !instCheck || 
-                instCheck.is_connected === false || 
-                ['offline', 'logged_out', 'blocked_12h', 'disconnected', 'paused'].includes(instCheck.status);
+            const isDisconnected = instCheck && 
+                ['offline', 'logged_out', 'blocked_12h', 'disconnected', 'paused', 'close', 'closed'].includes(instCheck.status);
 
             if (isDisconnected) {
                 console.log(`[API Gateway] [Invoke/sendMessage] Fast-Fail 400 (instância inativa/desconectada): Instância ${instanceId} ("${instCheck?.display_name || instanceId}") está desconectada no banco (status: ${instCheck?.status || 'desconhecido'}).`);
@@ -366,7 +365,6 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                     code: 'INSTANCE_DISCONNECTED',
                     instance_id: instanceId,
                     status: instCheck?.status || 'disconnected',
-                    is_connected: false,
                     last_error: instCheck?.last_error || null
                 });
             }

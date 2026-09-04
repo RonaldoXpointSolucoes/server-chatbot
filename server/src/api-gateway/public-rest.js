@@ -17,13 +17,12 @@ async function getSocketWithRetry(tenantId, instanceId, maxRetries = 3) {
     try {
         const { data: inst } = await supabase
             .from('whatsapp_instances')
-            .select('status, last_error, is_connected, display_name')
+            .select('status, last_error, display_name')
             .eq('id', instanceId)
             .maybeSingle();
 
-        const isDisconnected = !inst || 
-            inst.is_connected === false || 
-            ['offline', 'logged_out', 'blocked_12h', 'disconnected', 'paused'].includes(inst.status);
+        const isDisconnected = inst && 
+            ['offline', 'logged_out', 'blocked_12h', 'disconnected', 'paused', 'close', 'closed'].includes(inst.status);
 
         if (isDisconnected) {
             const err = new Error(`Instância WhatsApp "${inst?.display_name || instanceId}" está desconectada (${inst?.last_error || 'requer nova conexão/pareamento'}).`);

@@ -1860,11 +1860,11 @@ class SessionManager {
         console.log(`[SessionManager] enqueueMessage chamado para instância ${instanceId} ➔ destino ${targetJid}`);
         try {
             const { data: inst } = await retryWithBackoff(() =>
-                supabase.from('whatsapp_instances').select('tenant_id, status, last_error, is_connected').eq('id', instanceId).maybeSingle()
+                supabase.from('whatsapp_instances').select('tenant_id, status, last_error').eq('id', instanceId).maybeSingle()
             ).catch(() => ({ data: null }));
 
             const tenantId = inst?.tenant_id;
-            const isDefinitiveOffline = inst && (inst.is_connected === false || ['offline', 'logged_out', 'blocked_12h', 'disconnected', 'paused'].includes(inst.status));
+            const isDefinitiveOffline = inst && ['offline', 'logged_out', 'blocked_12h', 'disconnected', 'paused', 'close', 'closed'].includes(inst.status);
 
             const bodyText = typeof content === 'string' ? content : (content?.text || '');
 
