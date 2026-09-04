@@ -1588,24 +1588,6 @@ export default function ChatDashboard() {
   const undoTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [messageFilter, setMessageFilter] = useState<'today' | 'all'>(ticketMode ? 'today' : 'all');
 
-  // Sincroniza o filtro de mensagens sempre que o Modo Ticket for alternado
-  useEffect(() => {
-    if (ticketMode) {
-      setMessageFilter('today');
-      // Requisito 5: Ao ativar o Modo Ticket, se a conversa selecionada não for um ticket aberto da caixa, seleciona o primeiro ticket aberto
-      const activeObj = contacts.find(c => c.id === activeChatId || c.conv_id === activeChatId);
-      const isCurrentOpenTicket = activeObj && isContactOpenTicket(activeObj);
-      if (!isCurrentOpenTicket) {
-        const firstTicket = contacts.find(c => isContactOpenTicket(c));
-        if (firstTicket) {
-          useChatStore.setState({ activeChatId: firstTicket.id });
-        }
-      }
-    } else {
-      setMessageFilter('all');
-    }
-  }, [ticketMode, contacts, activeChatId, isContactOpenTicket]);
-
   // Helper de validação de Ticket Aberto para a caixa atual
   const isContactOpenTicket = React.useCallback((c: any) => {
     // 0) ISOLAMENTO ESTRITO POR EMPRESA / TENANT ATIVO
@@ -1687,6 +1669,24 @@ export default function ChatDashboard() {
 
     return true;
   }, [activeChannelFilter, activeChannelName, connectedInstanceName, tenantInfo]);
+
+  // Sincroniza o filtro de mensagens sempre que o Modo Ticket for alternado
+  useEffect(() => {
+    if (ticketMode) {
+      setMessageFilter('today');
+      // Requisito 5: Ao ativar o Modo Ticket, se a conversa selecionada não for um ticket aberto da caixa, seleciona o primeiro ticket aberto
+      const activeObj = contacts.find(c => c.id === activeChatId || c.conv_id === activeChatId);
+      const isCurrentOpenTicket = activeObj && isContactOpenTicket(activeObj);
+      if (!isCurrentOpenTicket) {
+        const firstTicket = contacts.find(c => isContactOpenTicket(c));
+        if (firstTicket) {
+          useChatStore.setState({ activeChatId: firstTicket.id });
+        }
+      }
+    } else {
+      setMessageFilter('all');
+    }
+  }, [ticketMode, contacts, activeChatId, isContactOpenTicket]);
 
   // Cálculo de Tickets Ativos Únicos da Caixa e Filtro Selecionados
   const activeTicketsCount = React.useMemo(() => {
