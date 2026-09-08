@@ -46,11 +46,12 @@ export const reportError = async (
       }
     });
 
-    // 2. Evita loops com o próprio Supabase
+    // 2. Evita loops com o próprio Supabase e ruídos de browser internos
     if (
       message.toLowerCase().includes('supabase') || 
       message.toLowerCase().includes('system_logs') || 
-      message.toLowerCase().includes('supabase.co')
+      message.toLowerCase().includes('supabase.co') ||
+      message.toLowerCase().includes('emptyranges')
     ) {
       return;
     }

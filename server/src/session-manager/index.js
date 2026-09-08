@@ -1077,11 +1077,12 @@ class SessionManager {
                         return;
                     }
 
-                    const loggedOut = status === DisconnectReason.loggedOut;
+                    const isAckOrTransient401 = status === 401 && (reason.toLowerCase().includes('ack') || reason.toLowerCase().includes('bad session') || reason.toLowerCase().includes('decrypt') || reason.toLowerCase().includes('closed session'));
+                    const loggedOut = status === DisconnectReason.loggedOut && !isAckOrTransient401;
                     const isConflict = status === 440 || status === DisconnectReason.connectionReplaced || status === 409 || reason.toLowerCase().includes('conflict') || reason.toLowerCase().includes('replaced');
                     const isBlocked12h = reason.toLowerCase().includes('blocked') || reason.toLowerCase().includes('12h') || status === 410 || status === 429;
                     const isForbidden = (status === 403 || reason.toLowerCase().includes('forbidden')) && status !== 503 && status !== 502 && status !== 504;
-                    const isBadSession = (status === 500 || reason.toLowerCase().includes('bad session')) && status !== 503 && status !== 502 && status !== 504 && !isConflict;
+                    const isBadSession = (status === 500 || reason.toLowerCase().includes('bad session') || isAckOrTransient401) && status !== 503 && status !== 502 && status !== 504 && !isConflict;
                     const isRestartRequired = !isConflict && (status === 515 || status === 428 || status === 1006 || status === DisconnectReason.restartRequired || reason.toLowerCase().includes('restart required') || reason.toLowerCase().includes('precondition required') || reason.toLowerCase().includes('connection closed') || (reason.toLowerCase().includes('stream errored') && !reason.toLowerCase().includes('conflict'))) && isFullyAuthenticated;
                     const isStreamOscillation = !isConflict && (
                         status === 503 || 
@@ -1874,7 +1875,6 @@ class SessionManager {
                     tenant_id: tenantId,
                     instance_id: instanceId,
                     chat_jid: targetJid,
-                    recipient: targetJid,
                     message_type: type,
                     body: bodyText,
                     status: 'pending',
@@ -1897,7 +1897,6 @@ class SessionManager {
                     tenant_id: tenantId,
                     instance_id: instanceId,
                     chat_jid: targetJid,
-                    recipient: targetJid,
                     message_type: type,
                     body: bodyText,
                     status: 'pending',

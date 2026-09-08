@@ -84,12 +84,14 @@ function formatAiMessageForWhatsApp(text) {
 
 function injectStoreId(payloadObj, storeId) {
     if (!payloadObj || typeof payloadObj !== 'object') return payloadObj;
-    const effectiveStoreId = storeId || payloadObj.AGuidEstab || payloadObj.AIdEstab || payloadObj.jsOrder?.fkStore || process.env.GASTROFOOD_GUID || process.env.GASTROFOOD_STORE_ID || "6D0187D9-E905-4479-AB15-B908F0222607";
+    const effectiveStoreId = storeId || payloadObj.AGuidEstab || payloadObj.AIdEstab || payloadObj.AIdStore || payloadObj.GuidEstab || payloadObj.jsOrder?.fkStore || process.env.GASTROFOOD_GUID || process.env.GASTROFOOD_STORE_ID || "6D0187D9-E905-4479-AB15-B908F0222607";
     const clone = Array.isArray(payloadObj) ? [...payloadObj] : { ...payloadObj };
     
     if (!Array.isArray(clone)) {
         clone.AGuidEstab = effectiveStoreId;
         clone.AIdEstab = effectiveStoreId;
+        clone.AIdStore = clone.AIdStore || effectiveStoreId;
+        clone.GuidEstab = clone.GuidEstab || effectiveStoreId;
         
         if (clone.jsOrder && typeof clone.jsOrder === 'object') {
             clone.jsOrder = { 
@@ -186,10 +188,10 @@ function normalizeGastrofoodPayload(payload, defaultStoreId) {
         Cep: String(address.Cep || address.cep || "").replace(/\D/g, '').slice(0, 9),
         Logradouro: String(address.Logradouro || address.logradouro || address.street || "").slice(0, 100),
         Numero: String(address.Numero || address.numero || "").slice(0, 20),
-        Bairro: String(address.Bairro || address.bairro || "").slice(0, 50),
-        Cidade: String(address.Cidade || address.cidade || "").slice(0, 50),
-        Complemento: String(address.Complemento || address.complemento || "").slice(0, 50),
-        Referencia: String(address.Referencia || address.referencia || "").slice(0, 50),
+        Bairro: String(address.Bairro || address.bairro || "").slice(0, 20),
+        Cidade: String(address.Cidade || address.cidade || "").slice(0, 30),
+        Complemento: String(address.Complemento || address.complemento || "").slice(0, 20),
+        Referencia: String(address.Referencia || address.referencia || "").slice(0, 20),
         Uf: String(address.Uf || address.uf || "SP").trim().slice(0, 2).toUpperCase(),
         Bloco: String(address.Bloco || address.bloco || "").slice(0, 20),
         Ap: String(address.Ap || address.ap || "").slice(0, 20)
@@ -1861,8 +1863,8 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                           `   - Você SÓ PODE sugerir, citar, recomendar ou adicionar ao pedido produtos que estejam retornados EXPLICITAMENTE pelas ferramentas "Consultar_produtos_cardapio" ou "Consultar_adicionais_produto" nesta conversa.\n` +
                           `   - NUNCA, sob nenhuma circunstância, alucine, invente ou sugira pratos, bebidas, sobremesas ou adicionais de sua própria imaginação ou baseados em conversas antigas que não constem no retorno direto das ferramentas do cardápio.\n` +
                           `   - OBRIGATORIEDADE DE CONSULTA: Você DEVE chamar a ferramenta "Consultar_produtos_cardapio" sempre que o cliente perguntar sobre opções de comida, marmitas, almoço, lanches, bebidas, sugestões de pratos, alternativas mais leves/pesadas, ou se ele citar qualquer item de alimentação. Nunca responda a perguntas sobre comida ou cardápio sem antes ter a resposta da ferramenta nesta mesma iteração de conversa.\n` +
-                          `   - ESTRATÉGIA DE BUSCA E TRUNCAMENTO: A ferramenta "Consultar_produtos_cardapio" retorna no máximo os primeiros 30 produtos por padrão se chamada sem argumentos. Se o cliente solicitar um item específico ou um tipo de item (ex: marmita, almoço, refeições, saladas, sucos, milk-shakes, doces, acompanhamentos) e este não aparecer nos primeiros 30 itens, você DEVE OBRIGATORIAMENTE realizar uma nova consulta na ferramenta passando um "termo_busca" correspondente (ex: termo_busca: "marmita", termo_busca: "refeições", termo_busca: "salada", termo_busca: "suco") para filtrar e validar a existência do produto antes de afirmar que o produto não existe.\n` +
-                          `   - Se o cliente solicitar algum item muito específico que não exista após a busca no cardápio retornar vazia, informe de forma extremamente educada e simpática que no momento não dispomos dessa opção específica, oferecendo e citando com carinho as opções reais disponíveis no nosso cardápio (hambúrgueres, refeições/marmitas, porções, bebidas e sobremesas da casa).\n` +
+                          `   - ESTRATÉGIA DE BUSCA E CARDÁPIO: A ferramenta "Consultar_produtos_cardapio" retorna os produtos disponíveis. Se o cliente solicitar um item específico ou categoria, consulte a ferramenta com o "termo_busca" correspondente (ex: termo_busca: "refeições", termo_busca: "coca").\n` +
+                          `   - REGRA ANTI-LOOP E ITEM NÃO ENCONTRADO (CRÍTICA E ESTRITA): Se a ferramenta "Consultar_produtos_cardapio" retornar "total_encontrados: 0" para sua busca, é EXPRESSAMENTE PROIBIDO chamar a ferramenta novamente para o mesmo item ou com pequenas variações/sinônimos nesta mesma mensagem. Responda imediatamente ao cliente informando com carinho e educação que no momento não dispomos dessa opção específica, oferecendo as opções disponíveis na casa ou enviando o link do cardápio digital.\n` +
                           `2. FLUXO DE MONTAGEM DO PEDIDO (ESTRITO):\n` +
                           `   - Quando o cliente demonstrar interesse em um produto, você deve consultar os opcionais/adicionais desse produto usando a ferramenta "Consultar_adicionais_produto".\n` +
                           `   - Identifique quais passos de adicionais são OBRIGATÓRIOS (onde qtd_minima > 0). Você DEVE perguntar ao cliente a preferência dele para cada passo obrigatório antes de prosseguir (ex: ponto da carne, acompanhamentos da marmita/refeição, etc.).\n` +
@@ -2242,6 +2244,7 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
             let currentMessageText = textMessage;
             let loopCount = 0;
             const MAX_LOOPS = 5;
+            let cardapioSearchCount = 0;
 
             const toolExecutionHistory = [];
             const executedToolSignatures = new Set();
@@ -2266,10 +2269,22 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                         
                         let functionResult = {};
 
+                        if (call.name === "Consultar_produtos_cardapio") {
+                            cardapioSearchCount++;
+                        }
+
                         if (executedToolSignatures.has(callSignature)) {
                             console.warn(`[AutomationWorker] Prevenção de loop repetitivo na conversa ${conversationId}: tool "${call.name}" chamada com mesmos argumentos.`);
                             functionResult = {
                                 aviso: `Você já executou a ferramenta ${call.name} com exatamente estes mesmos parâmetros nesta interação. Use as informações já obtidas no histórico desta conversa para responder diretamente ao cliente sem repetir chamadas de ferramentas.`
+                            };
+                        } else if (call.name === "Consultar_produtos_cardapio" && cardapioSearchCount > 2) {
+                            console.warn(`[AutomationWorker] Prevenção de loop de cardápio na conversa ${conversationId}: limite de 2 buscas por mensagem atingido.`);
+                            functionResult = {
+                                total_encontrados: 0,
+                                produtos: [],
+                                limite_atingido: true,
+                                orientacao: "Limite máximo de consultas de cardápio atingido para esta mensagem. NÃO chame mais nenhuma ferramenta de cardápio ou produto. Responda imediatamente ao cliente com as opções apuradas ou informe com gentileza a indisponibilidade do item."
                             };
                         } else {
                             executedToolSignatures.add(callSignature);
@@ -3140,15 +3155,17 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                     const searchNormalized = normalizeStr(termo);
 
                                     // Dicionário de Sinônimos de Gastronomia e Delivery
-                                    const isMarmitaSearch = ['marmita', 'marmitas', 'marmitex', 'quentinha', 'quentinhas', 'almoco', 'almocos', 'refeicao', 'refeicoes', 'prato feito', 'pratos feitos', 'pf', 'comida', 'comida caseira', 'executivo', 'prato executivo', 'pratos', 'almocar', 'almoco'].some(syn => searchNormalized.includes(syn) || syn.includes(searchNormalized));
+                                    const isMarmitaSearch = ['marmita', 'marmitas', 'marmitex', 'quentinha', 'quentinhas', 'almoco', 'almocos', 'refeicao', 'refeicoes', 'prato feito', 'pratos feitos', 'pf', 'comida', 'comida caseira', 'executivo', 'prato executivo', 'pratos', 'almocar'].some(syn => searchNormalized.includes(syn) || syn.includes(searchNormalized));
 
                                     const isBurgerSearch = ['hamburguer', 'hamburgueres', 'burger', 'burgers', 'lanche', 'lanches', 'sanduiche', 'sanduiches', 'artesanal', 'combo', 'combos'].some(syn => searchNormalized.includes(syn) || syn.includes(searchNormalized));
 
-                                    const isDrinkSearch = ['bebida', 'bebidas', 'refrigerante', 'refrigerantes', 'refri', 'suco', 'sucos', 'cerveja', 'cervejas', 'agua', 'aguas', 'drink', 'drinks', 'chopp'].some(syn => searchNormalized.includes(syn) || syn.includes(searchNormalized));
+                                    const isDrinkSearch = ['bebida', 'bebidas', 'refrigerante', 'refrigerantes', 'refri', 'suco', 'sucos', 'cerveja', 'cervejas', 'agua', 'aguas', 'drink', 'drinks', 'chopp', 'coca', 'coca-cola', 'coca zero', 'guarana', 'fanta', 'sprite', 'pepsi', 'lata', 'litro', 'zero'].some(syn => searchNormalized.includes(syn) || syn.includes(searchNormalized));
 
                                     const isDessertSearch = ['sobremesa', 'sobremesas', 'doce', 'doces', 'acai', 'acais', 'sorvete', 'sorvetes', 'milk-shake', 'milkshake', 'milkshakes'].some(syn => searchNormalized.includes(syn) || syn.includes(searchNormalized));
 
                                     const isPortionSearch = ['porcao', 'porcoes', 'petisco', 'petiscos', 'batata', 'fritas', 'mandioca', 'salame', 'frango a passarinho'].some(syn => searchNormalized.includes(syn) || syn.includes(searchNormalized));
+
+                                    const searchWords = searchNormalized.split(/\s+/).filter(w => w.length >= 2);
 
                                     filteredProducts = filteredProducts.filter(p => {
                                         const pName = normalizeStr(p.name);
@@ -3160,14 +3177,19 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                             return true;
                                         }
 
-                                        // 2. Match Semântico de Sinônimos
+                                        // 2. Match por todas as palavras do termo (ex: "coca" e "zero")
+                                        if (searchWords.length > 1 && searchWords.every(w => pName.includes(w) || pDesc.includes(w) || pGrupo.includes(w))) {
+                                            return true;
+                                        }
+
+                                        // 3. Match Semântico de Sinônimos
                                         if (isMarmitaSearch && (pGrupo.includes('refeic') || pGrupo.includes('almoc') || pGrupo.includes('prato') || pDesc.includes('refeicao') || pDesc.includes('refeicoes') || pName.includes('feijoada') || pName.includes('marmit'))) {
                                             return true;
                                         }
                                         if (isBurgerSearch && (pGrupo.includes('lanch') || pGrupo.includes('burg') || pGrupo.includes('combo'))) {
                                             return true;
                                         }
-                                        if (isDrinkSearch && (pGrupo.includes('bebid') || pGrupo.includes('suc') || pGrupo.includes('drink'))) {
+                                        if (isDrinkSearch && (pGrupo.includes('bebid') || pGrupo.includes('suc') || pGrupo.includes('drink') || pGrupo.includes('refrig') || pName.includes('coca') || pName.includes('refrigerante') || pName.includes('guarana') || pName.includes('suco') || pName.includes('bebida'))) {
                                             return true;
                                         }
                                         if (isDessertSearch && (pGrupo.includes('sobremes') || pGrupo.includes('acai') || pGrupo.includes('milk'))) {
@@ -3208,11 +3230,28 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                     link_produto: `${baseCardapioUrl}/produto/${p.id}`
                                 }));
 
-                                functionResult = { 
-                                    origem: cache.origem,
-                                    total_encontrados: filteredProducts.length,
-                                    produtos: formattedProducts 
-                                };
+                                if (productsList.length === 0) {
+                                    functionResult = { 
+                                        origem: cache.origem,
+                                        total_encontrados: 0,
+                                        produtos: [],
+                                        cardapio_em_atualizacao: true,
+                                        orientacao: "O cardápio digital está temporariamente sendo atualizado no sistema. NÃO realize novas chamadas de busca de ferramentas nesta mesma mensagem. Informe com gentileza ao cliente que o cardápio está em atualização e envie o link oficial do cardápio digital."
+                                    };
+                                } else if (formattedProducts.length === 0) {
+                                    functionResult = { 
+                                        origem: cache.origem,
+                                        total_encontrados: 0,
+                                        produtos: [],
+                                        orientacao: "Nenhum produto correspondente foi encontrado no cardápio para este termo. ATENÇÃO: NÃO realize novas chamadas de busca de ferramentas nesta mesma mensagem para tentar variações deste item. Responda imediatamente ao cliente informando com carinho e educação que não dispomos dessa opção específica no momento, pergunte se ele deseja outra opção ou apresente os produtos principais da casa."
+                                    };
+                                } else {
+                                    functionResult = { 
+                                        origem: cache.origem,
+                                        total_encontrados: filteredProducts.length,
+                                        produtos: formattedProducts 
+                                    };
+                                }
                             } catch (errCard) {
                                 console.error('[AutomationWorker - Cardápio] Erro na busca de produtos:', errCard);
                                 functionResult = { erro: `Erro ao processar cardápio: ${errCard.message}` };
@@ -3639,7 +3678,6 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
                                 tenant_id: tenantId,
                                 instance_id: instanceId,
                                 chat_jid: jid,
-                                recipient: jid,
                                 message_type: 'text',
                                 body: finalResponseText,
                                 status: 'pending',

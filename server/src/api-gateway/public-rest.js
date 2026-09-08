@@ -90,20 +90,22 @@ const requireApiKey = async (req, res, next) => {
         return next();
     }
 
-    // Nas rotas Evolution-like, a identificação é pelo {name} no caso de GET/DELETE /instance/{name}
-    // E no body (instance) para POST /message/sendText
-    const instanceName = req.params.name || req.body.instance;
+    // Nas rotas Evolution-like, a identificação é pelo :name ou :instance no path, ou "instance" no body
+    const instanceName = req.params.instance || req.params.name || req.body.instance;
     if (!instanceName) {
         console.warn(`[API Gateway] [Auth] ❌ Falha 400: Nome da instância ausente no path ou body ("instance") | Rota: ${req.method} ${req.originalUrl} | IP: ${originIp}`);
         return res.status(400).json({ error: 'Instance name is missing in URL path or body ("instance").' });
     }
 
-    // Valida no Banco pelo Nome da Instância
-    const { data, error } = await supabase
-        .from('whatsapp_instances')
-        .select('id, tenant_id, display_name, phone_number, status, api_key')
-        .eq('display_name', instanceName)
-        .single();
+    // Valida no Banco pelo Nome da Instância ou UUID
+    const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(instanceName);
+    let query = supabase.from('whatsapp_instances').select('id, tenant_id, display_name, phone_number, status, api_key');
+    if (isUuid) {
+        query = query.eq('id', instanceName);
+    } else {
+        query = query.eq('display_name', instanceName);
+    }
+    const { data, error } = await query.maybeSingle();
 
     if (error || !data) {
         console.warn(`[API Gateway] [Auth] ❌ Falha 404: Instância "${instanceName}" não encontrada no banco | Rota: ${req.method} ${req.originalUrl} | IP: ${originIp}`);
@@ -361,7 +363,24 @@ router.delete('/instance/:name', requireApiKey, async (req, res) => {
  *                 description: A mensagem de texto a ser enviada
  *                 example: "Olá! Esta é uma mensagem de teste enviada diretamente pelo Swagger UI da Antigravity 🚀"
  */
-router.post(['/message/sendText', '/message/send-text', '/messages/sendText', '/messages/send-text', '/message/send', '/messages/send', '/api/messages', '/api/message/sendText'], requireApiKey, async (req, res) => {
+router.post([
+    '/message/sendText', 
+    '/message/sendText/:instance', 
+    '/message/send-text', 
+    '/message/send-text/:instance', 
+    '/messages/sendText', 
+    '/messages/sendText/:instance', 
+    '/messages/send-text', 
+    '/messages/send-text/:instance', 
+    '/message/send', 
+    '/message/send/:instance', 
+    '/messages/send', 
+    '/messages/send/:instance', 
+    '/api/messages', 
+    '/api/messages/:instance',
+    '/api/message/sendText',
+    '/api/message/sendText/:instance'
+], requireApiKey, async (req, res) => {
     const { number, text } = req.body;
     const { id, tenant_id, display_name } = req.instanceData;
     const originIp = req.originIp || 'N/A';
@@ -391,7 +410,28 @@ router.post(['/message/sendText', '/message/send-text', '/messages/sendText', '/
         }
 
         if (!sock) {
-            console.warn(`[API Gateway] [sendText] ⚠️ Falha 503: Socket Offline ou não autenticado na RAM | Instância: ${id} ("${display_name}") | Destino: ${number}`);
+            console.warn(`[API Gateway] [sendText] ⚠️ Socket Offline na RAM para ${id} ("${display_name}"). Enfileirando no outbox resiliente (wa_outgoing_messages)...`);
+            try {
+                const { default: sessionManager } = await import('../session-manager/index.js');
+                const cleanPhone = String(number).replace(/\D/g, '');
+                const targetJid = cleanPhone.includes('@') ? cleanPhone : `${cleanPhone}@s.whatsapp.net`;
+                const queued = await sessionManager.enqueueMessage(id, {
+                    targetJid,
+                    type: 'text',
+                    content: { text },
+                    options: { isAutomation: false }
+                });
+                return res.status(202).json({
+                    message: "Mensagem enfileirada no outbox resiliente com sucesso (socket em reconexão).",
+                    code: 'MESSAGE_QUEUED',
+                    instance_id: id,
+                    status: 'PENDING',
+                    queue_id: queued?.id || null
+                });
+            } catch (qErr) {
+                console.error('[API Gateway] [sendText] Falha ao enfileirar no outbox:', qErr.message);
+            }
+
             return res.status(503).json({
                 error: 'WhatsApp socket offline or not authenticated for this instance.',
                 code: 'WHATSAPP_SOCKET_UNAVAILABLE',
@@ -421,6 +461,32 @@ router.post(['/message/sendText', '/message/send-text', '/messages/sendText', '/
         });
     } catch (e) {
         const isConnClosed = e.message?.includes('Connection Closed') || e.message?.includes('WebSocket não aberto') || e.message?.includes('desconectada') || e.message?.includes('offline');
+
+        // Se a conexão fechou durante o envio, garante entrega salvando no outbox resiliente
+        if (isConnClosed && id && number && text) {
+            try {
+                const { default: sessionManager } = await import('../session-manager/index.js');
+                const cleanPhone = String(number).replace(/\D/g, '');
+                const targetJid = cleanPhone.includes('@') ? cleanPhone : `${cleanPhone}@s.whatsapp.net`;
+                console.log(`[API Gateway] [sendText] 🔄 Enfileirando mensagem via outbox resiliente após falha de conexão (Instância: ${id}, Destino: ${targetJid})...`);
+                const queued = await sessionManager.enqueueMessage(id, {
+                    targetJid,
+                    type: 'text',
+                    content: { text },
+                    options: { isAutomation: false }
+                });
+                return res.status(202).json({
+                    message: "Conexão com WhatsApp oscilou durante o envio. A mensagem foi salva no outbox resiliente e será disparada automaticamente assim que a reconexão for restabelecida.",
+                    code: 'MESSAGE_QUEUED_RECONNECTING',
+                    instance_id: id,
+                    status: 'PENDING',
+                    queue_id: queued?.id || null
+                });
+            } catch (qErr) {
+                console.error('[API Gateway] [sendText] Falha no fallback para outbox:', qErr.message);
+            }
+        }
+
         const statusCode = isConnClosed ? 503 : 500;
         console.error(`[API Gateway] [sendText] ❌ Falha ${statusCode} ao Enviar Mensagem: ${e.message} | Instância: ${id} ("${display_name}") | Destino: ${number}`);
         res.status(statusCode).json({
@@ -476,8 +542,9 @@ router.post(['/message/sendText', '/message/send-text', '/messages/sendText', '/
  *       500:
  *         description: Erros de armazenamento ou ffmpeg.
  */
-router.post('/message/sendMedia', requireApiKey, upload.single('file'), async (req, res) => {
-    const { number, mediatype, instance } = req.body;
+router.post(['/message/sendMedia', '/message/sendMedia/:instance'], requireApiKey, upload.single('file'), async (req, res) => {
+    const { number, mediatype } = req.body;
+    const instance = req.params.instance || req.body.instance || req.instanceData?.display_name;
     const { id, tenant_id, display_name } = req.instanceData;
     const file = req.file;
     const originIp = req.originIp || 'N/A';

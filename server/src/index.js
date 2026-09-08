@@ -590,6 +590,7 @@ async function runMigrations() {
           ALTER TABLE quick_replies ADD COLUMN IF NOT EXISTS type text DEFAULT 'STANDARD';
           ALTER TABLE wa_outgoing_messages ADD COLUMN IF NOT EXISTS response_type text DEFAULT 'STANDARD';
           ALTER TABLE wa_outgoing_messages ADD COLUMN IF NOT EXISTS options jsonb DEFAULT '{}'::jsonb;
+          ALTER TABLE wa_outgoing_messages ADD COLUMN IF NOT EXISTS recipient text;
 
           -- Retrocompatibilidade e Segurança Supabase Advisor
           ALTER TABLE IF EXISTS wa_incoming_messages ADD COLUMN IF NOT EXISTS created_at timestamp with time zone DEFAULT now();
