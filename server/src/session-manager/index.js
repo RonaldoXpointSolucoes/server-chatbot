@@ -1520,7 +1520,7 @@ class SessionManager {
                     setTimeout(async () => {
                         try {
                             let attempts = 0;
-                            const maxAttempts = 2;
+                            const maxAttempts = 4;
                             let lastError;
                             
                             while (attempts < maxAttempts) {
@@ -1547,14 +1547,14 @@ class SessionManager {
                                             }
 
                                             if (!isSocketOpen(activeSock)) {
-                                                console.warn(`[SessionManager - Antiban] Sem sessão ativa saudável para ${instanceId}. Validando status e acordando conexão...`);
+                                                console.warn(`[SessionManager - Antiban] Sem sessão ativa saudável para ${instanceId} (tentativa ${attempts + 1}/${maxAttempts}). Validando status e acordando conexão...`);
                                                 
-                                                // Validação de fast-fail no banco de dados para não gastar retentativas desnecessárias se estiver offline
+                                                // Validação de fast-fail no banco de dados para não gastar retentativas desnecessárias se estiver offline definitivamente
                                                 const { data: instStatus } = await retryWithBackoff(() => 
                                                     supabase.from('whatsapp_instances').select('status, last_error').eq('id', instanceId).maybeSingle()
                                                 ).catch(() => ({ data: null }));
 
-                                                const isDefinitiveOffline = instStatus && ['offline', 'logged_out', 'blocked_12h', 'disconnected', 'paused'].includes(instStatus.status);
+                                                const isDefinitiveOffline = instStatus && ['offline', 'logged_out', 'blocked_12h', 'paused'].includes(instStatus.status);
                                                 if (isDefinitiveOffline) {
                                                     throw new Error(`Instância ${instanceId} está ${instStatus.status} no banco de dados (${instStatus.last_error || 'desconectada'})`);
                                                 }
@@ -1575,7 +1575,7 @@ class SessionManager {
                                     if (activeSock && (!activeSock.ws || activeSock.ws.isConnecting || !isSocketOpen(activeSock))) {
                                         console.log(`[SessionManager - Antiban] Socket de ${instanceId} está conectando. Aguardando abertura da conexão WebSocket...`);
                                         try {
-                                            await waitForSocketOpen(activeSock, 10000);
+                                            await waitForSocketOpen(activeSock, 12000);
                                         } catch (waitErr) {
                                             console.warn(`[SessionManager - Antiban] Aviso ao aguardar abertura do socket: ${waitErr.message}`);
                                         }
@@ -1642,24 +1642,13 @@ class SessionManager {
                                     const isPermanentlyClosed = 
                                         error.message?.includes('logged_out') ||
                                         error.message?.includes('blocked_12h') ||
-                                        error.message?.includes('disconnected') ||
                                         error.message?.includes('paused') ||
                                         error.message?.includes('está offline no banco') ||
                                         error.message?.includes('está logged_out no banco') ||
-                                        error.message?.includes('está disconnected no banco') ||
                                         error.message?.includes('está paused no banco');
 
                                     if (isPermanentlyClosed) {
                                         console.warn(`[SessionManager - Antiban] Abortando retentativas para ${jid} via instância ${instanceId} (motivo definitivo): ${error.message}`);
-                                        break;
-                                    }
-
-                                    if (error.message && error.message.includes('Connection Closed') && attempts >= 2) {
-                                        console.warn(`[SessionManager - Antiban] Abortando retentativas para ${jid} via instância ${instanceId}: socket permanece fechado após ${attempts} tentativas.`);
-                                        supabase.from('whatsapp_instances').update({
-                                            status: 'disconnected',
-                                            last_error: 'Conexão encerrada pelo WhatsApp. Clique em Conectar para parear novamente.'
-                                        }).eq('id', instanceId).then(() => {}).catch(() => {});
                                         break;
                                     }
 
@@ -1671,8 +1660,8 @@ class SessionManager {
                                     }
 
                                     if (attempts < maxAttempts) {
-                                        console.warn(`[SessionManager - Antiban] Tentativa ${attempts}/${maxAttempts} para ${jid} via instância ${instanceId}: ${error.message || error}. Aguardando restabelecimento do socket...`);
-                                        const retryDelay = Math.min(1500 * Math.pow(1.5, attempts), 8000) + Math.floor(Math.random() * 800);
+                                        const retryDelay = Math.min(1500 * Math.pow(1.6, attempts - 1), 7000) + Math.floor(Math.random() * 500);
+                                        console.warn(`[SessionManager - Antiban] Tentativa ${attempts}/${maxAttempts} para ${jid} via instância ${instanceId}: ${error.message || error}. Aguardando ${Math.round(retryDelay)}ms para restabelecimento do socket...`);
                                         await new Promise(r => setTimeout(r, retryDelay));
                                     } else {
                                         console.error(`[SessionManager - Antiban] Todas as ${maxAttempts} tentativas falharam para ${jid} via instância ${instanceId}:`, error.message || error);
@@ -1681,7 +1670,7 @@ class SessionManager {
                             }
                             
                             if (attempts >= maxAttempts) {
-                                console.error(`[SessionManager - Antiban] Todas as ${maxAttempts} tentativas falharam para ${jid} via instância ${instanceId}.`);
+                                console.error(`[SessionManager - Antiban] Todas as ${maxAttempts} tentativas falharam para ${jid} via instância ${instanceId}. Mensagem será preservada na fila.`);
                             }
                             reject(lastError);
                         } finally {

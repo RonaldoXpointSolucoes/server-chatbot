@@ -1671,16 +1671,23 @@ export default function ChatDashboard() {
   }, [activeChannelFilter, activeChannelName, connectedInstanceName, tenantInfo]);
 
   // Sincroniza o filtro de mensagens sempre que o Modo Ticket for alternado
+  const prevTicketModeRef = useRef(ticketMode);
   useEffect(() => {
+    const isActivatingTicketMode = !prevTicketModeRef.current && ticketMode;
+    prevTicketModeRef.current = ticketMode;
+
     if (ticketMode) {
       setMessageFilter('today');
       // Requisito 5: Ao ativar o Modo Ticket, se a conversa selecionada não for um ticket aberto da caixa, seleciona o primeiro ticket aberto
-      const activeObj = contacts.find(c => c.id === activeChatId || c.conv_id === activeChatId);
-      const isCurrentOpenTicket = activeObj && isContactOpenTicket(activeObj);
-      if (!isCurrentOpenTicket) {
-        const firstTicket = contacts.find(c => isContactOpenTicket(c));
-        if (firstTicket) {
-          useChatStore.setState({ activeChatId: firstTicket.id });
+      // IMPORTANTE: Só executa na transição de ativação do modo e se já houver um chat aberto, respeitando quando o usuário volta para a lista geral (activeChatId null)
+      if (isActivatingTicketMode && activeChatId) {
+        const activeObj = contacts.find(c => c.id === activeChatId || c.conv_id === activeChatId);
+        const isCurrentOpenTicket = activeObj && isContactOpenTicket(activeObj);
+        if (!isCurrentOpenTicket) {
+          const firstTicket = contacts.find(c => isContactOpenTicket(c));
+          if (firstTicket) {
+            useChatStore.setState({ activeChatId: firstTicket.id });
+          }
         }
       }
     } else {
@@ -7156,8 +7163,20 @@ export default function ChatDashboard() {
             <div className="relative h-16 shrink-0 bg-[#f0f2f5] dark:bg-[#202c33] flex items-center justify-between px-4 z-20 shadow-sm border-l border-white/5 select-none">
               <div className="flex items-center gap-3 relative min-w-0">
                 <button 
-                  onClick={() => setDraftNewChat(null)}
-                  className="sm:hidden p-2 -ml-2 mr-1 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#aebac1]"
+                  type="button"
+                  aria-label="Voltar para a lista de conversas"
+                  title="Voltar para todas as conversas"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    setDraftNewChat(null);
+                    setActiveChat(null);
+                    useChatStore.setState({ activeChatId: null, activeTicket: null });
+                    if (window.history.state?.chatOpen) {
+                      window.history.back();
+                    }
+                  }}
+                  className="md:hidden flex items-center justify-center p-2 -ml-2 mr-1 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#aebac1] transition-colors cursor-pointer shrink-0"
                 >
                   <ChevronLeft size={24} />
                 </button>
@@ -7187,10 +7206,22 @@ export default function ChatDashboard() {
           ) : (
             <div className="relative h-16 shrink-0 bg-[#f0f2f5] dark:bg-[#202c33] flex items-center justify-between px-4 z-20 shadow-sm border-l border-white/5">
             <div className="flex items-center gap-3 relative">
-              <button className="sm:hidden p-2 -ml-2 mr-1 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#aebac1]" onClick={() => {
-                setActiveChat(null);
-                if (window.history.state?.chatOpen) window.history.back();
-              }}>
+              <button 
+                type="button"
+                aria-label="Voltar para a lista de conversas"
+                title="Voltar para todas as conversas"
+                className="md:hidden flex items-center justify-center p-2 -ml-2 mr-1 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#aebac1] transition-colors cursor-pointer shrink-0" 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  setDraftNewChat(null);
+                  setActiveChat(null);
+                  useChatStore.setState({ activeChatId: null, activeTicket: null });
+                  if (window.history.state?.chatOpen) {
+                    window.history.back();
+                  }
+                }}
+              >
                 <ChevronLeft size={24} />
               </button>
               
@@ -10056,7 +10087,7 @@ export default function ChatDashboard() {
           </div>
         </div>
       ) : (
-        <div className="hidden sm:flex flex-1 flex-col items-center justify-center bg-[#f0f2f5] dark:bg-[#222d34] border-l border-white/5 relative z-10">
+        <div className="hidden md:flex flex-1 flex-col items-center justify-center bg-[#f0f2f5] dark:bg-[#222d34] border-l border-white/5 relative z-10">
           <Bot size={80} className="text-gray-300 dark:text-[#2a3942] mb-6" />
           <h1 className="text-3xl font-light text-[#54656f] dark:text-[#8696a0]">SaaS Multi-Agente Híbrido</h1>
           <div className="text-sm text-[#54656f] dark:text-[#8696a0] mt-2 flex items-center gap-2"><div className="w-2 h-2 bg-[#00a884] rounded-full animate-pulse"></div> Conectado com banco de dados</div>

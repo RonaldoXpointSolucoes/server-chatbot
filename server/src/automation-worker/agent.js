@@ -392,7 +392,7 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
                 }
 
                 let apiResponse = null;
-                const maxApiRetries = 2;
+                const maxApiRetries = 3;
 
                 for (let attempt = 1; attempt <= maxApiRetries; attempt++) {
                     try {
@@ -415,7 +415,7 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
                             const produtosCheck = parsed.produtos || parsed.data?.produtos || [];
                             const gruposCheck = parsed.grupos || parsed.data?.grupos || [];
 
-                            if (produtosCheck.length > 0 || attempt === maxApiRetries) {
+                            if (produtosCheck.length > 0) {
                                 apiResponse = parsed;
                                 logGastrofoodCall({
                                     direction: 'response',
@@ -425,17 +425,25 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
                                     status: res.status,
                                     response: parsed
                                 });
-                                if (produtosCheck.length > 0) {
-                                    break;
-                                } else {
-                                    console.log(`[Gastrofood API] Cardápio consultado: 0 produtos retornados (status 200).`);
-                                    break;
-                                }
+                                break;
                             }
 
-                            if (produtosCheck.length === 0 && attempt < maxApiRetries) {
-                                console.log(`[Gastrofood API] Cardápio retornou 0 produtos na 1ª tentativa. Revalidando em 1s...`);
-                                await new Promise(r => setTimeout(r, 1000));
+                            // Se a API retornou 200 OK mas com 0 produtos (inconsistência lógica/cache frio do ERP)
+                            console.warn(`[Gastrofood API] Cardápio retornou 0 produtos na tentativa ${attempt}/${maxApiRetries}. Revalidando com backoff...`);
+                            if (attempt < maxApiRetries) {
+                                const delay = attempt * 1200;
+                                await new Promise(r => setTimeout(r, delay));
+                            } else {
+                                apiResponse = parsed;
+                                logGastrofoodCall({
+                                    direction: 'response',
+                                    action: 'Consultar Cardápio (0 produtos)',
+                                    method: 'POST',
+                                    url: cardapioUrl,
+                                    status: res.status,
+                                    response: parsed
+                                });
+                                console.warn(`[Gastrofood API] Cardápio permaneceu com 0 produtos após ${maxApiRetries} tentativas. Ativando fallback resiliente do banco.`);
                             }
                         } else {
                             const errText = await res.text();
@@ -448,13 +456,13 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
                                 error: errText
                             });
                             if (attempt < maxApiRetries) {
-                                await new Promise(r => setTimeout(r, 1000));
+                                await new Promise(r => setTimeout(r, attempt * 1200));
                             }
                         }
                     } catch (fetchErr) {
                         console.warn(`[Gastrofood API] Aviso de rede na tentativa ${attempt}/${maxApiRetries}:`, fetchErr.message);
                         if (attempt < maxApiRetries) {
-                            await new Promise(r => setTimeout(r, 1000));
+                            await new Promise(r => setTimeout(r, attempt * 1200));
                         }
                     }
                 }
