@@ -52,9 +52,11 @@ export function clearInstanceMemoryCache(instanceId) {
 }
 
 export function clearRecipientSession(instanceId, jid) {
-    if (sessionCaches.has(instanceId) && jid) {
+    if (!jid) return;
+    const cleanJid = String(jid).replace('@s.whatsapp.net', '').replace('@lid', '').replace('@g.us', '').split(':')[0];
+    
+    if (sessionCaches.has(instanceId)) {
         const memCache = sessionCaches.get(instanceId);
-        const cleanJid = String(jid).replace('@s.whatsapp.net', '').replace('@lid', '').replace('@g.us', '');
         let count = 0;
         for (const key of Array.from(memCache.keys())) {
             if (key.includes(cleanJid)) {
@@ -66,6 +68,16 @@ export function clearRecipientSession(instanceId, jid) {
             console.log(`[SessionManager/Auth] Limpas ${count} chaves de sessão em RAM para o destinatário ${cleanJid} (instância ${instanceId}).`);
         }
     }
+
+    // Também limpa do Supabase em background para evitar ressuscitar chaves corrompidas de sessão
+    try {
+        supabase.from('wa_auth_keys')
+            .delete()
+            .eq('instance_id', instanceId)
+            .ilike('key_name', `%${cleanJid}%`)
+            .then(() => {})
+            .catch(() => {});
+    } catch (e) {}
 }
 
 export async function useSupabaseAuthState(tenantId, instanceId, forceCleanState = false) {

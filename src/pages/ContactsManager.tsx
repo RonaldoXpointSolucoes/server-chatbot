@@ -288,7 +288,8 @@ export default function ContactsManager() {
         
         const { data: duplicates } = await query;
         if (duplicates && duplicates.length > 0) {
-          alert(`Erro: O CNPJ ${payload.document_number} já está cadastrado no contato/empresa "${duplicates[0].name}". Não é permitido duplicar o CNPJ.`);
+          const dupeName = duplicates[0].name || 'Empresa existente';
+          alert(`CNPJ já cadastrado no contato/empresa "${dupeName}". Por favor, verifique o contato existente ou utilize um CNPJ diferente.`);
           return;
         }
       }

@@ -303,6 +303,78 @@ function logGastrofoodCall({ direction, action, method, url, payload, status, re
     }
 }
 
+/**
+ * Extração polimórfica e resiliente de grupos e produtos da API Gastrofood
+ * Suporta formatos PascalCase, camelCase, arrays diretos e produtos aninhados em grupos
+ */
+function extractGastrofoodProductsAndGroups(parsed) {
+    if (!parsed) return { produtos: [], grupos: [] };
+
+    let produtos = [];
+    let grupos = [];
+
+    // 1. Se parsed for um array direto de produtos
+    if (Array.isArray(parsed)) {
+        produtos = parsed;
+    } else if (Array.isArray(parsed.data)) {
+        produtos = parsed.data;
+    } else {
+        // 2. Grupos em múltiplas variações de nomenclatura
+        grupos = parsed.grupos || 
+                 parsed.Grupos || 
+                 parsed.groups || 
+                 parsed.Groups || 
+                 parsed.data?.grupos || 
+                 parsed.data?.Grupos || 
+                 parsed.data?.groups || 
+                 parsed.result?.grupos || 
+                 parsed.result?.Grupos || 
+                 [];
+
+        // 3. Produtos em múltiplas variações de nomenclatura
+        produtos = parsed.produtos || 
+                   parsed.Produtos || 
+                   parsed.itens || 
+                   parsed.Itens || 
+                   parsed.items || 
+                   parsed.Items || 
+                   parsed.data?.produtos || 
+                   parsed.data?.Produtos || 
+                   parsed.data?.itens || 
+                   parsed.data?.Itens || 
+                   parsed.data?.items || 
+                   parsed.data?.Items || 
+                   parsed.result?.produtos || 
+                   parsed.result?.Produtos || 
+                   parsed.cardapio?.produtos || 
+                   [];
+
+        // 4. Se produtos for vazio mas os grupos contiverem produtos aninhados
+        if ((!produtos || produtos.length === 0) && Array.isArray(grupos) && grupos.length > 0) {
+            const nested = [];
+            for (const g of grupos) {
+                const gProds = g.produtos || g.Produtos || g.itens || g.Itens || g.items || g.Items || [];
+                if (Array.isArray(gProds) && gProds.length > 0) {
+                    for (const p of gProds) {
+                        nested.push({
+                            ...p,
+                            groupId: p.groupId || p.grupo_id || p.GrupoId || g.id || g.code || g.Id || g.Code
+                        });
+                    }
+                }
+            }
+            if (nested.length > 0) {
+                produtos = nested;
+            }
+        }
+    }
+
+    if (!Array.isArray(produtos)) produtos = [];
+    if (!Array.isArray(grupos)) grupos = [];
+
+    return { produtos, grupos };
+}
+
 async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) {
     return tenantStorage.run(tenantId, async () => {
         const now = Date.now();
@@ -412,8 +484,7 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
 
                         if (res.ok) {
                             const parsed = await res.json();
-                            const produtosCheck = parsed.produtos || parsed.data?.produtos || [];
-                            const gruposCheck = parsed.grupos || parsed.data?.grupos || [];
+                            const { produtos: produtosCheck, grupos: gruposCheck } = extractGastrofoodProductsAndGroups(parsed);
 
                             if (produtosCheck.length > 0) {
                                 apiResponse = parsed;
@@ -429,7 +500,7 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
                             }
 
                             // Se a API retornou 200 OK mas com 0 produtos (inconsistência lógica/cache frio do ERP)
-                            console.warn(`[Gastrofood API] Cardápio retornou 0 produtos na tentativa ${attempt}/${maxApiRetries}. Revalidando com backoff...`);
+                            console.warn(`[Gastrofood API] Cardápio retornou 0 produtos na tentativa ${attempt}/${maxApiRetries}. Detalhe payload: ${JSON.stringify(parsed).slice(0, 200)}... Revalidando com backoff...`);
                             if (attempt < maxApiRetries) {
                                 const delay = attempt * 1200;
                                 await new Promise(r => setTimeout(r, delay));
@@ -468,27 +539,26 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
                 }
                 
                 if (apiResponse) {
-                    const apiProdutos = apiResponse.produtos || apiResponse.data?.produtos || [];
-                    const apiGrupos = apiResponse.grupos || apiResponse.data?.grupos || [];
+                    const { produtos: apiProdutos, grupos: apiGrupos } = extractGastrofoodProductsAndGroups(apiResponse);
                     
                     if (apiProdutos.length > 0) {
                         const mappedProdutos = apiProdutos.map(p => ({
-                            id: p.id || p.code || '',
+                            id: String(p.id || p.code || p.Id || p.Code || p.codigo || ''),
                             tenant_id: tenantId,
-                            grupo_id: p.groupId || p.grupo_id || null,
-                            name: p.name,
-                            description: p.description || null,
-                            price: Number(p.price || p.preco || 0),
-                            image: p.image || null,
-                            ativo: p.active !== false && p.ativo !== false
+                            grupo_id: p.groupId || p.grupo_id || p.GrupoId || p.grupoId || null,
+                            name: p.name || p.nome || p.Name || p.descricao || p.description || '',
+                            description: p.description || p.descricao || p.Description || null,
+                            price: Number(p.price || p.preco || p.Price || p.Preco || p.valor || 0),
+                            image: p.image || p.imagem || p.Image || null,
+                            ativo: p.active !== false && p.ativo !== false && p.Active !== false && p.Ativo !== false
                         }));
                         
                         const mappedGrupos = apiGrupos.map((g, idx) => ({
-                            id: g.id || g.code || '',
+                            id: String(g.id || g.code || g.Id || g.Code || idx),
                             tenant_id: tenantId,
-                            descricao: g.description || g.descricao || '',
+                            descricao: g.description || g.descricao || g.Description || g.Nome || g.nome || '',
                             ordem: idx,
-                            ativo: g.active !== false && g.ativo !== false
+                            ativo: g.active !== false && g.ativo !== false && g.Active !== false
                         }));
                         
                         cache = {

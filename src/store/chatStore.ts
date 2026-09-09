@@ -3078,8 +3078,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
           const { data: duplicates } = await query;
           if (duplicates && duplicates.length > 0) {
-            alert(`Erro: O CNPJ ${payload.document_number} já está cadastrado no contato/empresa "${duplicates[0].name}". Não é permitido duplicar o CNPJ.`);
-            throw new Error(`CNPJ já cadastrado no contato/empresa "${duplicates[0].name}"`);
+            const dupeName = duplicates[0].name || 'Empresa/Contato existente';
+            const msg = `CNPJ já cadastrado no contato/empresa "${dupeName}". Por favor, verifique o contato existente ou utilize um CNPJ diferente.`;
+            console.warn(`[FRONTEND] ${msg}`);
+            const err = new Error(msg);
+            (err as any).code = 'CNPJ_DUPLICATE';
+            (err as any).duplicateContactName = dupeName;
+            throw err;
           }
         }
       }

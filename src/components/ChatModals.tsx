@@ -402,7 +402,7 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
           const { supabase } = await import('../services/supabase');
           let query = supabase
             .from('contacts')
-            .select('id, document_number, phone')
+            .select('id, name, document_number, phone')
             .eq('tenant_id', tenantId)
             .or(`document_number.eq.${cleanDoc},document_number.eq."${formData.document_number}"`)
             .not('phone', 'like', 'NO_PHONE_%')
@@ -415,7 +415,8 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
           const { data, error } = await query.limit(1);
           
           if (!error && data && data.length > 0) {
-             setDocFeedback(`Atenção: Este ${formData.document_type.toUpperCase()} já está cadastrado em outro contato ativo.`);
+             const dupeName = data[0].name || 'Empresa existente';
+             setDocFeedback(`CNPJ já cadastrado no contato/empresa "${dupeName}". Por favor, verifique o contato existente ou utilize um CNPJ diferente.`);
              setIsSaving(false);
              return;
           }
@@ -456,8 +457,12 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
       };
       await onSave(finalPayload);
       onClose();
-    } catch (err) {
-      alert("Erro ao salvar contato.");
+    } catch (err: any) {
+      if (err?.code === 'CNPJ_DUPLICATE' || err?.message?.includes('CNPJ já cadastrado')) {
+        setDocFeedback(err.message);
+      } else {
+        setDocFeedback(err?.message || 'Erro ao salvar alterações do contato.');
+      }
     } finally {
       setIsSaving(false);
     }

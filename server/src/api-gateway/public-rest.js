@@ -57,6 +57,93 @@ async function getSocketWithRetry(tenantId, instanceId, maxRetries = 3) {
     return null;
 }
 
+// Cache em memória para instâncias resolvidas (TTL 60s)
+const instanceResolutionCache = new Map();
+const INSTANCE_CACHE_TTL_MS = 60000;
+
+function normalizeInstanceSlug(str) {
+    if (!str || typeof str !== 'string') return '';
+    return str
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '') // remove acentos
+        .replace(/[-_\s]+/g, '')          // remove hífens, underscores e espaços
+        .replace(/0+(\d+)/g, '$1')        // normaliza zeros à esquerda em números (ex: Comercial-02 -> comercial2)
+        .trim();
+}
+
+async function resolveInstanceSmart(instanceName) {
+    if (!instanceName || typeof instanceName !== 'string') return null;
+    const cleanParam = instanceName.trim();
+    const cacheKey = cleanParam.toLowerCase();
+    
+    // 1. Checa cache em memória
+    const cached = instanceResolutionCache.get(cacheKey);
+    if (cached && (Date.now() - cached.timestamp < INSTANCE_CACHE_TTL_MS)) {
+        return cached.data;
+    }
+
+    const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(cleanParam);
+    const selectFields = 'id, tenant_id, display_name, phone_number, status, api_key';
+
+    // 2. Se for UUID, busca direta por id
+    if (isUuid) {
+        const { data } = await supabase.from('whatsapp_instances').select(selectFields).eq('id', cleanParam).maybeSingle();
+        if (data) {
+            instanceResolutionCache.set(cacheKey, { data, timestamp: Date.now() });
+            return data;
+        }
+    }
+
+    // 3. Busca exata por display_name
+    let { data } = await supabase.from('whatsapp_instances').select(selectFields).eq('display_name', cleanParam).maybeSingle();
+    if (data) {
+        instanceResolutionCache.set(cacheKey, { data, timestamp: Date.now() });
+        return data;
+    }
+
+    // 4. Busca case-insensitive por display_name (ilike)
+    const { data: ilikeMatches } = await supabase.from('whatsapp_instances').select(selectFields).ilike('display_name', cleanParam).limit(1);
+    if (ilikeMatches && ilikeMatches.length > 0) {
+        data = ilikeMatches[0];
+        instanceResolutionCache.set(cacheKey, { data, timestamp: Date.now() });
+        return data;
+    }
+
+    // 5. Busca por telefone se cleanParam contiver dígitos de telefone
+    const digitsOnly = cleanParam.replace(/\D/g, '');
+    if (digitsOnly.length >= 8) {
+        const { data: phoneMatches } = await supabase.from('whatsapp_instances').select(selectFields)
+            .or(`phone_number.eq.${digitsOnly},phone_number.eq.55${digitsOnly}`)
+            .limit(1);
+        if (phoneMatches && phoneMatches.length > 0) {
+            data = phoneMatches[0];
+            instanceResolutionCache.set(cacheKey, { data, timestamp: Date.now() });
+            return data;
+        }
+    }
+
+    // 6. Resolução por Slug Inteligente (Fuzzy / Normalized Matching)
+    // Permite mapear "Comercial-02" -> "Comercial 2", "comercial_02" -> "Comercial 2", etc.
+    const targetSlug = normalizeInstanceSlug(cleanParam);
+    if (targetSlug) {
+        const { data: allInstances } = await supabase.from('whatsapp_instances').select(selectFields).limit(150);
+        if (allInstances && allInstances.length > 0) {
+            const matched = allInstances.find(inst => {
+                const instSlug = normalizeInstanceSlug(inst.display_name);
+                return instSlug === targetSlug;
+            });
+            if (matched) {
+                console.log(`[API Gateway] [Auth] 🎯 Instância resolvida via matching inteligente de slug: "${cleanParam}" ➔ "${matched.display_name}" (${matched.id})`);
+                instanceResolutionCache.set(cacheKey, { data: matched, timestamp: Date.now() });
+                return matched;
+            }
+        }
+    }
+
+    return null;
+}
+
 // Middleware de autenticação genérica para rotas de instância já existente
 const requireApiKey = async (req, res, next) => {
     const apiKey = req.headers['apikey'] || req.headers['globalapikey'];
@@ -97,19 +184,16 @@ const requireApiKey = async (req, res, next) => {
         return res.status(400).json({ error: 'Instance name is missing in URL path or body ("instance").' });
     }
 
-    // Valida no Banco pelo Nome da Instância ou UUID
-    const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(instanceName);
-    let query = supabase.from('whatsapp_instances').select('id, tenant_id, display_name, phone_number, status, api_key');
-    if (isUuid) {
-        query = query.eq('id', instanceName);
-    } else {
-        query = query.eq('display_name', instanceName);
-    }
-    const { data, error } = await query.maybeSingle();
+    // Validação resiliente no Banco com busca inteligente por Nome, Slug Normalizado, Telefone ou UUID
+    const data = await resolveInstanceSmart(instanceName);
 
-    if (error || !data) {
-        console.warn(`[API Gateway] [Auth] ❌ Falha 404: Instância "${instanceName}" não encontrada no banco | Rota: ${req.method} ${req.originalUrl} | IP: ${originIp}`);
-        return res.status(404).json({ error: 'Instance not found.' });
+    if (!data) {
+        const targetSlug = normalizeInstanceSlug(instanceName);
+        console.warn(`[API Gateway] [Auth] ❌ Falha 404: Instância "${instanceName}" (slug normalizado: "${targetSlug}") não encontrada no banco | Rota: ${req.method} ${req.originalUrl} | IP: ${originIp}`);
+        return res.status(404).json({ 
+            error: 'Instance not found.', 
+            message: `Instância "${instanceName}" não foi localizada no sistema. Verifique o identificador ou nome cadastrado.` 
+        });
     }
 
     // Busca a Global Api Key da empresa associada a esta instância específica

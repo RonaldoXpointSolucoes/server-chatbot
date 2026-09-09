@@ -1481,6 +1481,22 @@ class SessionManager {
             });
 
             sock.ev.on('messages.update', async (updates) => {
+                // Intercepta erros de entrega em ack (ex: 479, 475, erro de chave criptográfica ou WAMessageStatus.ERROR)
+                for (const item of (updates || [])) {
+                    const statusVal = item?.update?.status;
+                    const stubParams = item?.update?.messageStubParameters;
+                    const isStatusErr = statusVal === 0 || statusVal === 'ERROR';
+                    const isAckErr = Array.isArray(stubParams) && stubParams.some(p => p === '479' || p === '475' || String(p).startsWith('47'));
+                    
+                    if (isStatusErr || isAckErr) {
+                        const targetJid = item?.key?.remoteJid;
+                        if (targetJid) {
+                            const errCode = stubParams ? stubParams.join(',') : (statusVal || 'ERROR');
+                            console.warn(`[SessionManager] ⚠️ Erro de entrega/ack detectado (${errCode}) para ${targetJid} na instância ${instanceId}. Resetando chaves de sessão para forçar renegociação segura...`);
+                            clearRecipientSession(instanceId, targetJid);
+                        }
+                    }
+                }
                 await eventProcessor.handleMessagesUpdate(tenantId, instanceId, sock, updates);
             });
             // --- Proteção Antiban e Fila de Mensagens Sequencial ---
@@ -1652,8 +1668,15 @@ class SessionManager {
                                         break;
                                     }
 
-                                    if (error.message?.includes('No sessions') || error.message?.includes('SessionError')) {
-                                        console.warn(`[SessionManager - Antiban] SessionError (No sessions) detectado para ${jid} via instância ${instanceId}. Limpando chaves em RAM para forçar nova negociação de pre-keys...`);
+                                    const isCryptoOrSessionErr = 
+                                        error.message?.includes('No sessions') || 
+                                        error.message?.includes('SessionError') || 
+                                        error.message?.includes('479') || 
+                                        error.message?.includes('PreKey') || 
+                                        error.message?.includes('Bad MAC');
+
+                                    if (isCryptoOrSessionErr) {
+                                        console.warn(`[SessionManager - Antiban] Erro criptográfico de sessão/pre-key (${error.message}) detectado para ${jid} via instância ${instanceId}. Limpando chaves para forçar nova negociação de pre-keys...`);
                                         try {
                                             clearRecipientSession(instanceId, jid);
                                         } catch (e) {}
