@@ -1588,6 +1588,38 @@ export default function ChatDashboard() {
   const undoTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [messageFilter, setMessageFilter] = useState<'today' | 'all'>(ticketMode ? 'today' : 'all');
 
+  // Helper canônico de correspondência estrita de contato à caixa ativa selecionada
+  const isMatchingChannel = React.useCallback((c: any) => {
+    if (!c) return false;
+    if (!activeChannelFilter || activeChannelFilter === 'all') return true;
+
+    const instanceIdFromId = c.id && typeof c.id === 'string' && c.id.includes('_') ? c.id.split('_')[1] : null;
+    const targetInst = instanceIdFromId || c.instance_id || 'default';
+    const resolvedTargetUuid = instanceCache.getId(targetInst) || targetInst;
+    const resolvedFilterUuid = instanceCache.getId(activeChannelFilter) || activeChannelFilter;
+    const resolvedTargetName = instanceCache.getName(targetInst) || targetInst;
+
+    const matchesChannel = targetInst === activeChannelFilter ||
+                           targetInst === activeChannelName ||
+                           resolvedTargetUuid === resolvedFilterUuid ||
+                           resolvedTargetName === activeChannelName ||
+                           resolvedTargetName === activeChannelFilter;
+
+    if (!matchesChannel) return false;
+
+    // Self-chat check
+    const channelPhone = resolvedFilterUuid ? instanceCache.phoneNumbers[resolvedFilterUuid] : null;
+    if (channelPhone) {
+      const cleanChannelPhone = channelPhone.replace(/\D/g, '');
+      const cleanContactPhone = c.phone ? c.phone.replace(/\D/g, '') : '';
+      if (cleanChannelPhone && cleanContactPhone && cleanContactPhone === cleanChannelPhone) {
+        return false;
+      }
+    }
+
+    return true;
+  }, [activeChannelFilter, activeChannelName, instanceCache]);
+
   // Helper de validação de Ticket Aberto para a caixa atual
   const isContactOpenTicket = React.useCallback((c: any) => {
     // 0) ISOLAMENTO ESTRITO POR EMPRESA / TENANT ATIVO
@@ -1623,30 +1655,8 @@ export default function ChatDashboard() {
       }
     }
 
-    // 2) Filtro de Caixa Ativa (Verifica por ID, Nome e Cache de UUID)
-    if (activeChannelFilter && activeChannelFilter !== 'all') {
-      const targetInst = instanceIdFromId || c.instance_id || 'default';
-      const resolvedTargetUuid = instanceCache.getId(targetInst) || targetInst;
-      const resolvedFilterUuid = instanceCache.getId(activeChannelFilter) || activeChannelFilter;
-      const resolvedTargetName = instanceCache.getName(targetInst) || targetInst;
-
-      const matchesChannel = targetInst === activeChannelFilter ||
-                             targetInst === activeChannelName ||
-                             resolvedTargetUuid === resolvedFilterUuid ||
-                             resolvedTargetName === activeChannelName;
-
-      if (!matchesChannel) return false;
-
-      // Self-chat check
-      const channelPhone = resolvedFilterUuid ? instanceCache.phoneNumbers[resolvedFilterUuid] : null;
-      if (channelPhone) {
-        const cleanChannelPhone = channelPhone.replace(/\D/g, '');
-        const cleanContactPhone = c.phone ? c.phone.replace(/\D/g, '') : '';
-        if (cleanChannelPhone && cleanContactPhone && cleanContactPhone === cleanChannelPhone) {
-          return false;
-        }
-      }
-    }
+    // 2) Filtro de Caixa Ativa Estrito
+    if (!isMatchingChannel(c)) return false;
 
     // 3) Não estar bloqueado
     if (c.is_blocked) return false;
@@ -1668,7 +1678,7 @@ export default function ChatDashboard() {
     }
 
     return true;
-  }, [activeChannelFilter, activeChannelName, connectedInstanceName, tenantInfo]);
+  }, [tenantInfo, connectedInstanceName, isMatchingChannel]);
 
   // Sincroniza o filtro de mensagens sempre que o Modo Ticket for alternado
   const prevTicketModeRef = useRef(ticketMode);
@@ -1678,15 +1688,14 @@ export default function ChatDashboard() {
 
     if (ticketMode) {
       setMessageFilter('today');
-      // Requisito 5: Ao ativar o Modo Ticket, se a conversa selecionada não for um ticket aberto da caixa, seleciona o primeiro ticket aberto
-      // IMPORTANTE: Só executa na transição de ativação do modo e se já houver um chat aberto, respeitando quando o usuário volta para a lista geral (activeChatId null)
+      // Requisito 5: Ao ativar o Modo Ticket, se a conversa selecionada não for um ticket aberto da caixa, seleciona o primeiro ticket aberto da caixa ativa
       if (isActivatingTicketMode && activeChatId) {
-        const activeObj = contacts.find(c => c.id === activeChatId || c.conv_id === activeChatId);
+        const activeObj = contacts.find(c => (c.id === activeChatId || c.conv_id === activeChatId) && isMatchingChannel(c));
         const isCurrentOpenTicket = activeObj && isContactOpenTicket(activeObj);
         if (!isCurrentOpenTicket) {
-          const firstTicket = contacts.find(c => isContactOpenTicket(c));
+          const firstTicket = contacts.find(c => isMatchingChannel(c) && isContactOpenTicket(c));
           if (firstTicket) {
-            useChatStore.setState({ activeChatId: firstTicket.id });
+            setActiveChat(firstTicket.id);
           }
         }
       }
@@ -1786,32 +1795,7 @@ export default function ChatDashboard() {
         }
 
         // 2) FILTRO POR CAIXA ESPECÍFICA (Menu esquerdo)
-        if (activeChannelFilter && activeChannelFilter !== 'all') {
-            const instIdFromContactId = c.id.includes('_') ? c.id.split('_')[1] : null;
-            const dbInstId = c.instance_id;
-            const targetInst = instIdFromContactId || dbInstId || 'default';
-            const resolvedTargetUuid = instanceCache.getId(targetInst) || targetInst;
-            const resolvedFilterUuid = instanceCache.getId(activeChannelFilter) || activeChannelFilter;
-            const resolvedTargetName = instanceCache.getName(targetInst) || targetInst;
-
-            const matchesChannel = targetInst === activeChannelFilter ||
-                                   targetInst === activeChannelName ||
-                                   resolvedTargetUuid === resolvedFilterUuid ||
-                                   resolvedTargetName === activeChannelName;
-
-            if (!matchesChannel) return false;
-
-            // --- FILTRO DE AUTO-CONVERSA (SELF-CHAT DA PRÓPRIA INSTÂNCIA) ---
-            const filterInstUuid = activeChannelFilter ? (instanceCache.getId(activeChannelFilter) || activeChannelFilter) : null;
-            const channelPhone = filterInstUuid ? instanceCache.phoneNumbers[filterInstUuid] : null;
-            if (channelPhone) {
-                const cleanChannelPhone = channelPhone.replace(/\D/g, '');
-                const cleanContactPhone = c.phone ? c.phone.replace(/\D/g, '') : '';
-                if (cleanChannelPhone && cleanContactPhone && cleanContactPhone === cleanChannelPhone) {
-                    return false;
-                }
-            }
-        }
+        if (!isMatchingChannel(c)) return false;
 
         // 3) PROTEÇÃO RIGOROSA DE CHAT ATIVO:
         // Se ESTE CARD ESPECÍFICO for o chat ativo aberto no painel principal, ele permanece visível na sidebar enquanto o usuário estiver interagindo com ele (EXCETO se tiver sido resolvido/encerrado/adiado no Modo Ticket)
@@ -1972,23 +1956,10 @@ export default function ChatDashboard() {
          seenKeys.set(key, c);
        } else {
          const existing = seenKeys.get(key);
-         const existingInst = (existing.id.includes('_') ? existing.id.split('_')[1] : existing.instance_id) || 'default';
-         
-         const isBoxMatch = (inst: string | null | undefined) => {
-           if (!inst || !activeChannelFilter || activeChannelFilter === 'all') return false;
-           const resUuid = instanceCache.getId(inst) || inst;
-           const resFilterUuid = instanceCache.getId(activeChannelFilter) || activeChannelFilter;
-           const resName = instanceCache.getName(inst) || inst;
-           return inst === activeChannelFilter || 
-                  inst === activeChannelName || 
-                  resUuid === resFilterUuid || 
-                  resName === activeChannelName || 
-                  resName === activeChannelFilter;
-         };
 
          // Se a nova entrada for da caixa ativa atual (activeChannelFilter / activeChannelName), PREFERIR a nova entrada!
-         const isCurrentInActiveBox = isBoxMatch(targetInst);
-         const isExistingInActiveBox = isBoxMatch(existingInst);
+         const isCurrentInActiveBox = isMatchingChannel(c);
+         const isExistingInActiveBox = isMatchingChannel(existing);
 
          if (isCurrentInActiveBox && !isExistingInActiveBox) {
            seenKeys.set(key, c);
@@ -2005,7 +1976,7 @@ export default function ChatDashboard() {
        }
      }
      return Array.from(seenKeys.values());
-  }, [contacts, activeChannelFilter, searchTerm, filterType, selectedLabelId, activeChatId, ticketMode, agents, connectedInstanceName, activeChannelName]);
+  }, [contacts, activeChannelFilter, searchTerm, filterType, selectedLabelId, activeChatId, ticketMode, agents, connectedInstanceName, activeChannelName, isMatchingChannel]);
 
   const handleBatchResolveConfirm = async () => {
     setIsProcessingBatchResolve(true);
@@ -2546,11 +2517,14 @@ export default function ChatDashboard() {
     const currentScrollTop = contactListRef.current ? contactListRef.current.scrollTop : 0;
     
     // 1.2 Acha o próximo contato a ser selecionado ANTES de resolver a conversa
-    const currentIndex = filteredContacts.findIndex(c => c.id === contactId);
+    // 1.2 Acha o próximo contato a ser selecionado ANTES de resolver a conversa
+    const realTargetId = getRealContactId(contactId);
+    const currentIndex = filteredContacts.findIndex(c => c.id === contactId || getRealContactId(c.id) === realTargetId);
     let nextContactId: string | null = null;
     if (currentIndex !== -1) {
-      const nextContact = filteredContacts[currentIndex + 1] || filteredContacts[currentIndex - 1];
-      if (nextContact) {
+      const remainingList = filteredContacts.filter(c => c.id !== contactId && getRealContactId(c.id) !== realTargetId);
+      const nextContact = remainingList[currentIndex] || remainingList[currentIndex - 1] || remainingList[0];
+      if (nextContact && isMatchingChannel(nextContact)) {
         nextContactId = nextContact.id;
       }
     }
@@ -2559,11 +2533,12 @@ export default function ChatDashboard() {
       // 2. Dispara a ação de resolução
       await resolveConversation(contactId, reactivateAi);
       
-      // 2.2 Seleciona o próximo contato se houver, ou limpa caso a lista fique vazia
+      // 2.2 Seleciona o próximo contato da mesma caixa se houver, ou limpa caso a lista fique vazia
       if (nextContactId) {
-        useChatStore.setState({ activeChatId: nextContactId });
+        setActiveChat(nextContactId);
       } else {
-        useChatStore.setState({ activeChatId: null });
+        setActiveChat(null);
+        useChatStore.setState({ activeChatId: null, activeTicket: null });
       }
       
       // 3. Estabilização absoluta em cascata de tempo para anular saltos enquanto o Framer-motion anima a saída
@@ -3009,7 +2984,34 @@ export default function ChatDashboard() {
     return () => window.removeEventListener('click', closeCb);
   }, []);
 
-  const activeChat = contacts.find(c => c.id === activeChatId || (activeChatId && c.conv_id === activeChatId)) || contacts.find(c => activeChatId && getRealContactId(c.id) === getRealContactId(activeChatId));
+  // Seleção estrita de chat ativo garantindo isolamento absoluto por caixa comercial (activeChannelFilter)
+  const activeChat = useMemo(() => {
+    if (!activeChatId) return null;
+
+    // 1. Prioridade: correspondência exata de ID (composto ou simples) que satisfaça a caixa ativa selecionada
+    let found = contacts.find(c => (c.id === activeChatId || c.conv_id === activeChatId) && isMatchingChannel(c));
+
+    // 2. Fallback: correspondência por realContactId MAS ESTRITAMENTE DENTRO DA CAIXA ATIVA SELECIONADA
+    if (!found) {
+      const realId = getRealContactId(activeChatId);
+      found = contacts.find(c => getRealContactId(c.id) === realId && isMatchingChannel(c));
+    }
+
+    // 3. Somente se activeChannelFilter estiver em 'all' ou não configurado, aceita correspondência global
+    if (!found && (!activeChannelFilter || activeChannelFilter === 'all')) {
+      found = contacts.find(c => c.id === activeChatId || c.conv_id === activeChatId)
+        || contacts.find(c => getRealContactId(c.id) === getRealContactId(activeChatId));
+    }
+
+    return found || null;
+  }, [contacts, activeChatId, isMatchingChannel, activeChannelFilter]);
+
+  // Efeito protetor: se activeChatId foi definido mas não pertence à caixa atual, limpa a seleção para evitar resíduo fantasma
+  useEffect(() => {
+    if (activeChatId && !activeChat && !draftNewChat) {
+      useChatStore.setState({ activeChatId: null, activeTicket: null });
+    }
+  }, [activeChatId, activeChat, draftNewChat]);
 
   // Memoização de alta performance das mensagens do chat ativo (elimina lag de renderização e re-sorts desnecessários)
   const { sortedRawMsgs, dedupedMsgs } = useMemo(() => {
@@ -6637,8 +6639,7 @@ export default function ChatDashboard() {
                       // 1. Tenta encontrar se este contato já possui uma conversa na caixa ativa selecionada
                       const sameBoxContact = contacts.find(c => {
                         const cRealId = getRealContactId(c.id);
-                        const cInst = c.id.includes('_') ? c.id.split('_')[1] : c.instance_id;
-                        return cRealId === realId && (cInst === activeChannelFilter || cInst === activeChannelName);
+                        return cRealId === realId && isMatchingChannel(c);
                       });
 
                       if (sameBoxContact) {
