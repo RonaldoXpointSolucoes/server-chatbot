@@ -88,10 +88,18 @@ function injectStoreId(payloadObj, storeId) {
     const clone = Array.isArray(payloadObj) ? [...payloadObj] : { ...payloadObj };
     
     if (!Array.isArray(clone)) {
-        clone.AGuidEstab = effectiveStoreId;
-        clone.AIdEstab = effectiveStoreId;
-        clone.AIdStore = clone.AIdStore || effectiveStoreId;
-        clone.GuidEstab = clone.GuidEstab || effectiveStoreId;
+        const isGuid = typeof effectiveStoreId === 'string' && /^[0-9a-fA-F-]{32,38}$/.test(effectiveStoreId);
+        if (isGuid) {
+            clone.AGuidEstab = effectiveStoreId;
+            clone.GuidEstab = clone.GuidEstab || effectiveStoreId;
+            clone.AIdEstab = clone.AIdEstab || effectiveStoreId;
+            if (!clone.AIdStore) clone.AIdStore = effectiveStoreId;
+        } else {
+            clone.AIdStore = effectiveStoreId;
+            clone.AIdEstab = clone.AIdEstab || effectiveStoreId;
+            clone.AGuidEstab = clone.AGuidEstab || effectiveStoreId;
+            clone.GuidEstab = clone.GuidEstab || effectiveStoreId;
+        }
         
         if (clone.jsOrder && typeof clone.jsOrder === 'object') {
             clone.jsOrder = { 
@@ -378,13 +386,18 @@ function extractGastrofoodProductsAndGroups(parsed) {
 async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) {
     return tenantStorage.run(tenantId, async () => {
         const now = Date.now();
-    const cacheKey = tenantId + '_' + (botSettings?.id || 'default');
-    let cache = cardapioInMemoryCache.get(cacheKey);
-    
-    if (cache && (now - cache.timestamp < CACHE_TTL)) {
-        console.log(`[CardapioCache] Cache HIT para a chave ${cacheKey}`);
-        return cache;
-    }
+        const cacheKey = tenantId + '_' + (botSettings?.id || 'default');
+        let cache = cardapioInMemoryCache.get(cacheKey);
+        
+        const NEGATIVE_CACHE_TTL = 3 * 60 * 1000; // 3 minutos para cache de cardápio vazio
+        if (cache) {
+            const isNegative = cache.origem === 'vazio';
+            const effectiveTtl = isNegative ? NEGATIVE_CACHE_TTL : CACHE_TTL;
+            if (now - cache.timestamp < effectiveTtl) {
+                console.log(`[CardapioCache] Cache HIT para a chave ${cacheKey} (origem: ${cache.origem})`);
+                return cache;
+            }
+        }
     
     const cardapioOrigem = (botSettings && botSettings.cardapio_origem) || 'supabase';
     const cardapioUrl = (botSettings && botSettings.cardapio_json_url) || companySettings.cardapio_json_url || CARDAPIO_DEFAULT_URL;
@@ -464,7 +477,7 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
                 }
 
                 let apiResponse = null;
-                const maxApiRetries = 3;
+                const maxApiRetries = 2;
 
                 for (let attempt = 1; attempt <= maxApiRetries; attempt++) {
                     try {
@@ -484,7 +497,7 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
 
                         if (res.ok) {
                             const parsed = await res.json();
-                            const { produtos: produtosCheck, grupos: gruposCheck } = extractGastrofoodProductsAndGroups(parsed);
+                            const { produtos: produtosCheck } = extractGastrofoodProductsAndGroups(parsed);
 
                             if (produtosCheck.length > 0) {
                                 apiResponse = parsed;
@@ -499,23 +512,27 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
                                 break;
                             }
 
-                            // Se a API retornou 200 OK mas com 0 produtos (inconsistência lógica/cache frio do ERP)
-                            console.warn(`[Gastrofood API] Cardápio retornou 0 produtos na tentativa ${attempt}/${maxApiRetries}. Detalhe payload: ${JSON.stringify(parsed).slice(0, 200)}... Revalidando com backoff...`);
-                            if (attempt < maxApiRetries) {
-                                const delay = attempt * 1200;
-                                await new Promise(r => setTimeout(r, delay));
-                            } else {
-                                apiResponse = parsed;
-                                logGastrofoodCall({
-                                    direction: 'response',
-                                    action: 'Consultar Cardápio (0 produtos)',
-                                    method: 'POST',
-                                    url: cardapioUrl,
-                                    status: res.status,
-                                    response: parsed
-                                });
-                                console.warn(`[Gastrofood API] Cardápio permaneceu com 0 produtos após ${maxApiRetries} tentativas. Ativando fallback resiliente do banco.`);
+                            // API retornou 200 OK com payload vazio (0 produtos configurados no ERP)
+                            apiResponse = parsed;
+                            logGastrofoodCall({
+                                direction: 'response',
+                                action: 'Consultar Cardápio (0 produtos)',
+                                method: 'POST',
+                                url: cardapioUrl,
+                                status: res.status,
+                                response: parsed
+                            });
+
+                            // Se houver um identificador alternativo que não foi usado, tenta uma única vez com ele
+                            const altId = companySettings?.gfood_guid || companySettings?.gfood_store_id;
+                            if (attempt === 1 && altId && bodyObj.AGuidEstab !== altId && bodyObj.AIdStore !== altId) {
+                                bodyObj = injectStoreId(bodyObj, altId);
+                                console.log(`[Gastrofood API] Cardápio retornou 0 produtos. Re-tentando 1 vez com identificador alternativo (${altId})...`);
+                                continue;
                             }
+
+                            console.info(`[Gastrofood API] Cardápio permaneceu com 0 produtos no ERP nuvem para o tenant ${tenantId}. Ativando fallback resiliente do banco local.`);
+                            break;
                         } else {
                             const errText = await res.text();
                             logGastrofoodCall({
@@ -527,13 +544,13 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
                                 error: errText
                             });
                             if (attempt < maxApiRetries) {
-                                await new Promise(r => setTimeout(r, attempt * 1200));
+                                await new Promise(r => setTimeout(r, 1200));
                             }
                         }
                     } catch (fetchErr) {
                         console.warn(`[Gastrofood API] Aviso de rede na tentativa ${attempt}/${maxApiRetries}:`, fetchErr.message);
                         if (attempt < maxApiRetries) {
-                            await new Promise(r => setTimeout(r, attempt * 1200));
+                            await new Promise(r => setTimeout(r, 1200));
                         }
                     }
                 }
@@ -647,14 +664,16 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
         }
     }
     
-    // Se tudo falhar, retorna um cache vazio temporário
-    return {
+    // Se tudo falhar, armazena um cache vazio temporário (3 minutos) para proteger a API e evitar lentidão contínua
+    const emptyCache = {
         produtos: [],
         grupos: [],
         adicionais: new Map(),
         timestamp: now,
         origem: 'vazio'
     };
+    cardapioInMemoryCache.set(cacheKey, emptyCache);
+    return emptyCache;
     });
 }
 

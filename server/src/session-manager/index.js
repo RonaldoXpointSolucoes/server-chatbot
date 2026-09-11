@@ -40,7 +40,7 @@ export const isSocketOpen = (sock) => {
     return false;
 };
 
-const waitForSocketOpen = (sock, timeoutMs = 8000) => {
+const waitForSocketOpen = (sock, timeoutMs = 12000) => {
     return new Promise((resolve, reject) => {
         if (isSocketOpen(sock)) {
             return resolve(true);
@@ -71,18 +71,19 @@ const waitForSocketOpen = (sock, timeoutMs = 8000) => {
             if (isSocketOpen(sock)) {
                 resolve(true);
             } else {
-                reject(new Error('Timeout waiting for connection to open (WebSocket não respondeu a tempo)'));
+                reject(new Error(`Timeout waiting for connection to open after ${timeoutMs}ms (WebSocket não respondeu a tempo)`));
             }
         }, timeoutMs);
 
         const connectionListener = (update) => {
-            const { connection } = update;
+            const { connection, lastDisconnect } = update;
             if (connection === 'open' || isSocketOpen(sock)) {
                 cleanUp();
                 resolve(true);
             } else if (connection === 'close') {
                 cleanUp();
-                reject(new Error('Connection closed while waiting to open'));
+                const statusCode = lastDisconnect?.error?.output?.statusCode || lastDisconnect?.error?.message || 'closed';
+                reject(new Error(`Connection closed while waiting to open (${statusCode})`));
             }
         };
 
@@ -1551,6 +1552,15 @@ class SessionManager {
                                             activeSock = latestSession.sock;
                                             sendFn = activeSock.originalSendMessage || originalSendMessage;
                                         } else {
+                                            // Se houver reconexão agendada via timer (ex: pós 515 ou oscilação), antecipa a reconexão imediatamente
+                                            if (this.reconnectingTimers.has(instanceId)) {
+                                                const timer = this.reconnectingTimers.get(instanceId);
+                                                clearTimeout(timer);
+                                                this.reconnectingTimers.delete(instanceId);
+                                                console.log(`[SessionManager - Antiban] Antecipando reconexão agendada da instância ${instanceId}...`);
+                                                this.createSession(tenantId, instanceId, false).catch(() => {});
+                                            }
+
                                             // Se já houver reconexão em andamento, aguarda sua conclusão
                                             if (this.connectingState.has(instanceId)) {
                                                 try {
@@ -1575,8 +1585,8 @@ class SessionManager {
                                                     throw new Error(`Instância ${instanceId} está ${instStatus.status} no banco de dados (${instStatus.last_error || 'desconectada'})`);
                                                 }
 
-                                                const forceRestart = attempts >= 2;
-                                                const wakedSock = await this.getSocketOrWake(tenantId, instanceId, true, forceRestart);
+                                                // Nunca force o restart em retentativas regulares para não destruir conexões em handshake/reabertura
+                                                const wakedSock = await this.getSocketOrWake(tenantId, instanceId, true, false);
                                                 if (wakedSock && isSocketOpen(wakedSock)) {
                                                     activeSock = wakedSock;
                                                     sendFn = activeSock.originalSendMessage || originalSendMessage;
@@ -1683,7 +1693,7 @@ class SessionManager {
                                     }
 
                                     if (attempts < maxAttempts) {
-                                        const retryDelay = Math.min(1500 * Math.pow(1.6, attempts - 1), 7000) + Math.floor(Math.random() * 500);
+                                        const retryDelay = Math.min(2000 * Math.pow(1.5, attempts - 1), 7500) + Math.floor(Math.random() * 500);
                                         console.warn(`[SessionManager - Antiban] Tentativa ${attempts}/${maxAttempts} para ${jid} via instância ${instanceId}: ${error.message || error}. Aguardando ${Math.round(retryDelay)}ms para restabelecimento do socket...`);
                                         await new Promise(r => setTimeout(r, retryDelay));
                                     } else {
@@ -1760,6 +1770,17 @@ class SessionManager {
         let sock = this.getSocket(instanceId, requireAuthenticated);
         if (sock && !force) return sock;
 
+        // Se houver timer de reconexão agendado, antecipa a reconexão imediatamente para atender o chamador
+        if (this.reconnectingTimers.has(instanceId)) {
+            const timer = this.reconnectingTimers.get(instanceId);
+            clearTimeout(timer);
+            this.reconnectingTimers.delete(instanceId);
+            console.log(`[SessionManager] getSocketOrWake antecipando reconexão agendada para instância ${instanceId}...`);
+            this.createSession(tenantId, instanceId, false).catch(e => {
+                console.warn(`[SessionManager] Erro ao antecipar reconexão da instância ${instanceId}:`, e.message);
+            });
+        }
+
         // Se a sessão já existe na memória autenticada mas está em fase de conexão/handshake, aguarda abertura suave
         const rawSession = this.sessions.get(instanceId);
         if (rawSession && rawSession.sock) {
@@ -1767,7 +1788,7 @@ class SessionManager {
             const meId = rawSock.user?.id || rawSock.authState?.creds?.me?.id || rawSock.authState?.creds?.me?.jid;
             if (meId && (!isSocketOpen(rawSock) || rawSock.ws?.isConnecting || rawSock.ws?.socket?.readyState === 0)) {
                 try {
-                    await waitForSocketOpen(rawSock, 3500);
+                    await waitForSocketOpen(rawSock, 5000);
                     if (isSocketOpen(rawSock)) return rawSock;
                 } catch (e) {}
             }
@@ -1783,7 +1804,7 @@ class SessionManager {
                         if (meId) {
                             if (isSocketOpen(connectingSock)) return connectingSock;
                             try {
-                                await waitForSocketOpen(connectingSock, 3500);
+                                await waitForSocketOpen(connectingSock, 5000);
                                 if (isSocketOpen(connectingSock)) return connectingSock;
                             } catch (e) {}
                         }
@@ -1805,10 +1826,20 @@ class SessionManager {
             );
 
             const allowedStatuses = requireAuthenticated 
-                ? ['connected', 'connected_local', 'reconnecting', 'connecting'] 
-                : ['connected', 'connecting', 'qr_ready', 'connected_local', 'reconnecting'];
+                ? ['connected', 'connected_local', 'reconnecting', 'connecting', 'disconnected'] 
+                : ['connected', 'connecting', 'qr_ready', 'connected_local', 'reconnecting', 'disconnected'];
 
             if (data && allowedStatuses.includes(data.status)) {
+                // Se o status for disconnected, verifica se existem credenciais salvas antes de acordar
+                if (data.status === 'disconnected') {
+                    const { data: credsExist } = await retryWithBackoff(() =>
+                        supabase.from('wa_auth_credentials').select('instance_id').eq('instance_id', instanceId).maybeSingle()
+                    ).catch(() => ({ data: null }));
+                    if (!credsExist) {
+                        return null;
+                    }
+                }
+
                 const now = new Date();
                 const currentNodeId = String(NODE_ID).trim();
                 const assignedNodeId = data.assigned_node_id ? String(data.assigned_node_id).trim() : null;
@@ -1839,6 +1870,8 @@ class SessionManager {
                             try {
                                 await waitForSocketOpen(createdSock, 20000);
                             } catch (e) {
+                                const latest = this.sessions.get(instanceId)?.sock;
+                                if (latest && isSocketOpen(latest)) return latest;
                                 return null;
                             }
                         }

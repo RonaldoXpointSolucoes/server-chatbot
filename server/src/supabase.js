@@ -31,11 +31,62 @@ if (!supabaseUrl || !supabaseKey) {
   console.error("ERRO: SUPABASE_URL ou SUPABASE_SERVICE_ROLE_KEY não definidos no .env");
 }
 
+class NodeSupabaseCircuitBreaker {
+  constructor() {
+    this.state = 'CLOSED'; // 'CLOSED' | 'OPEN' | 'HALF_OPEN'
+    this.consecutiveFailures = 0;
+    this.lastStateChange = Date.now();
+    this.failureThreshold = 5;
+    this.cooldownMs = 10000;
+  }
+
+  canRequest() {
+    if (this.state === 'CLOSED') return true;
+    if (this.state === 'OPEN') {
+      if (Date.now() - this.lastStateChange > this.cooldownMs) {
+        this.state = 'HALF_OPEN';
+        this.lastStateChange = Date.now();
+        return true;
+      }
+      return false;
+    }
+    return true;
+  }
+
+  recordSuccess() {
+    if (this.state !== 'CLOSED') {
+      console.info('[Supabase Node CircuitBreaker] Conexão normalizada com sucesso. Circuito FECHADO.');
+    }
+    this.state = 'CLOSED';
+    this.consecutiveFailures = 0;
+    this.lastStateChange = Date.now();
+  }
+
+  recordFailure() {
+    this.consecutiveFailures++;
+    this.lastStateChange = Date.now();
+    if (this.consecutiveFailures >= this.failureThreshold && this.state !== 'OPEN') {
+      this.state = 'OPEN';
+      console.warn(`[Supabase Node CircuitBreaker] ⚡ Disjuntor ABERTO após ${this.consecutiveFailures} falhas consecutivas. Pausando retentativas ativas por ${this.cooldownMs / 1000}s para alívio do gateway.`);
+    }
+  }
+
+  isCircuitOpen() {
+    return this.state === 'OPEN' && (Date.now() - this.lastStateChange <= this.cooldownMs);
+  }
+}
+
+export const nodeSupabaseCircuitBreaker = new NodeSupabaseCircuitBreaker();
+
 /**
  * Fetch resiliente com retry, jitter exponencial e tratamento de falhas de conexão / 5xx
  * para comunicação transparente e ininterrupta do Node.js com a API Supabase Cloud.
  */
 async function resilientFetch(url, options = {}, retries = 4, delay = 800) {
+  if (nodeSupabaseCircuitBreaker.isCircuitOpen() && retries < 4) {
+    throw new Error('Supabase Node CircuitBreaker: Requisição pausada temporariamente para recuperação do gateway Supabase');
+  }
+
   try {
     const response = await fetch(url, options);
     
@@ -43,11 +94,19 @@ async function resilientFetch(url, options = {}, retries = 4, delay = 800) {
     if (response.status >= 500 && retries > 0) {
       const jitter = Math.floor(Math.random() * 300);
       const waitTime = delay + jitter;
-      console.info(`[Supabase/HTTP] Instabilidade HTTP ${response.status} na API Supabase. Retentando em ${waitTime}ms... (${retries} retentativas restantes)`);
+      if (retries <= 2) {
+        console.info(`[Supabase/HTTP] Instabilidade HTTP ${response.status} na API Supabase. Retentando em ${waitTime}ms... (${retries} retentativas restantes)`);
+      }
       await new Promise(resolve => setTimeout(resolve, waitTime));
-      return resilientFetch(url, options, retries - 1, Math.min(delay * 2, 6000));
+      return resilientFetch(url, options, retries - 1, Math.min(Math.round(delay * 1.5), 6000));
     }
     
+    if (response.ok) {
+      nodeSupabaseCircuitBreaker.recordSuccess();
+    } else if (response.status >= 500 && retries === 0) {
+      nodeSupabaseCircuitBreaker.recordFailure();
+    }
+
     return response;
   } catch (error) {
     const errorMsg = error?.message || String(error);
@@ -78,13 +137,14 @@ async function resilientFetch(url, options = {}, retries = 4, delay = 800) {
     if (isTransientNetworkError && retries > 0) {
       const jitter = Math.floor(Math.random() * 350);
       const waitTime = delay + jitter;
-      if (retries < 4) {
+      if (retries <= 2) {
         console.info(`[Supabase/Network] Auto-recuperando conexão (${errorMsg || errorCode}) em ${waitTime}ms... (${retries} retentativas restantes)`);
       }
       await new Promise(resolve => setTimeout(resolve, waitTime));
-      return resilientFetch(url, options, retries - 1, Math.min(delay * 2, 6000));
+      return resilientFetch(url, options, retries - 1, Math.min(Math.round(delay * 1.5), 6000));
     }
     
+    nodeSupabaseCircuitBreaker.recordFailure();
     throw error;
   }
 }
@@ -142,11 +202,11 @@ export async function retryWithBackoff(fn, retries = 4, delay = 800) {
     if (retries > 0 && isNetworkError) {
       const jitter = Math.floor(Math.random() * 300);
       const nextDelay = delay + jitter;
-      if (retries < 4) {
+      if (retries <= 2) {
         console.info(`[Supabase/Network] Recuperando oscilação temporária (${errorMsg || errorCode}) em ${nextDelay}ms... (${retries} retentativas restantes)`);
       }
       await new Promise(resolve => setTimeout(resolve, nextDelay));
-      return retryWithBackoff(fn, retries - 1, Math.min(delay * 2, 8000));
+      return retryWithBackoff(fn, retries - 1, Math.min(Math.round(delay * 1.5), 8000));
     }
     throw error;
   }

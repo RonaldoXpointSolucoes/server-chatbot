@@ -7,11 +7,61 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error("Credenciais do Supabase ausentes no .env");
 }
 
+class SupabaseCircuitBreaker {
+  private state: 'CLOSED' | 'OPEN' | 'HALF_OPEN' = 'CLOSED';
+  private consecutiveFailures = 0;
+  private lastStateChange = Date.now();
+  private readonly failureThreshold = 5;
+  private readonly cooldownMs = 10000;
+
+  public canRequest(): boolean {
+    if (this.state === 'CLOSED') return true;
+    if (this.state === 'OPEN') {
+      if (Date.now() - this.lastStateChange > this.cooldownMs) {
+        this.state = 'HALF_OPEN';
+        this.lastStateChange = Date.now();
+        console.info('[Supabase CircuitBreaker] Testando disponibilidade em HALF_OPEN...');
+        return true;
+      }
+      return false;
+    }
+    return true;
+  }
+
+  public recordSuccess(): void {
+    if (this.state !== 'CLOSED') {
+      console.info('[Supabase CircuitBreaker] Conexão normalizada com sucesso. Circuito FECHADO.');
+    }
+    this.state = 'CLOSED';
+    this.consecutiveFailures = 0;
+    this.lastStateChange = Date.now();
+  }
+
+  public recordFailure(): void {
+    this.consecutiveFailures++;
+    this.lastStateChange = Date.now();
+    if (this.consecutiveFailures >= this.failureThreshold && this.state !== 'OPEN') {
+      this.state = 'OPEN';
+      console.warn(`[Supabase CircuitBreaker] Disjuntor ABERTO após ${this.consecutiveFailures} falhas consecutivas. Pausando retentativas ativas por ${this.cooldownMs / 1000}s para alívio de carga.`);
+    }
+  }
+
+  public isCircuitOpen(): boolean {
+    return this.state === 'OPEN' && (Date.now() - this.lastStateChange <= this.cooldownMs);
+  }
+}
+
+const supabaseCircuitBreaker = new SupabaseCircuitBreaker();
 let hasReportedServiceError = false;
 
 const customFetch = async (input: RequestInfo | URL, init?: RequestInit, retries = 5, delay = 1000): Promise<Response> => {
   const urlStr = typeof input === 'string' ? input : input.toString();
   const isAuthRequest = urlStr.includes('/auth/v1/token') || urlStr.includes('grant_type=refresh_token');
+
+  // Proteção de Circuit Breaker para chamadas de banco de dados
+  if (!isAuthRequest && supabaseCircuitBreaker.isCircuitOpen() && retries < 5) {
+    throw new TypeError('Failed to fetch (Supabase CircuitBreaker: requisição abortada para alívio do gateway)');
+  }
 
   try {
     const response = await fetch(input, init);
@@ -19,12 +69,16 @@ const customFetch = async (input: RequestInfo | URL, init?: RequestInit, retries
     // Identificar erros HTTP 5xx de servidor/infraestrutura Supabase
     if (response.status >= 500) {
       if (retries > 0) {
-        const jitter = Math.floor(Math.random() * 250);
+        const jitter = Math.floor(Math.random() * 300);
         const waitTime = delay + jitter;
-        console.warn(`[Supabase Cloud] Erro HTTP ${response.status} no servidor Supabase. Retentando em ${waitTime}ms... (Tentativas restantes: ${retries})`);
+        if (retries <= 3) {
+          console.warn(`[Supabase Cloud] Instabilidade HTTP ${response.status} no servidor Supabase. Retentando em ${waitTime}ms... (Tentativas restantes: ${retries})`);
+        }
         await new Promise(resolve => setTimeout(resolve, waitTime));
-        return customFetch(input, init, retries - 1, Math.min(delay * 2, 5000));
+        return customFetch(input, init, retries - 1, Math.min(Math.round(delay * 1.5), 5000));
       }
+
+      supabaseCircuitBreaker.recordFailure();
 
       if (typeof window !== 'undefined') {
         hasReportedServiceError = true;
@@ -38,16 +92,19 @@ const customFetch = async (input: RequestInfo | URL, init?: RequestInit, retries
           }
         }));
       }
-    } else if (response.ok && hasReportedServiceError) {
-      hasReportedServiceError = false;
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('supabase-service-recovered', {
-          detail: {
-            service: 'Supabase Cloud (Banco de Dados)',
-            title: '🟢 Serviço Supabase Restabelecido',
-            message: 'A conexão com o banco de dados em nuvem Supabase foi restabelecida com sucesso.'
-          }
-        }));
+    } else if (response.ok) {
+      supabaseCircuitBreaker.recordSuccess();
+      if (hasReportedServiceError) {
+        hasReportedServiceError = false;
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('supabase-service-recovered', {
+            detail: {
+              service: 'Supabase Cloud (Banco de Dados)',
+              title: '🟢 Serviço Supabase Restabelecido',
+              message: 'A conexão com o banco de dados em nuvem Supabase foi restabelecida com sucesso.'
+            }
+          }));
+        }
       }
     }
 
@@ -57,14 +114,23 @@ const customFetch = async (input: RequestInfo | URL, init?: RequestInit, retries
       error.name === 'TypeError' && (error.message === 'Failed to fetch' || error.message.includes('fetch'));
       
     if (retries > 0 && isNetworkError) {
-      hasReportedServiceError = true;
-      console.warn(`[Supabase Cloud] Oscilação de rede no servidor Supabase${isAuthRequest ? ' (Auth Refresh)' : ''}. Retentando em ${delay}ms... (Tentativas restantes: ${retries})`, error);
-      await new Promise(resolve => setTimeout(resolve, delay));
-      return customFetch(input, init, retries - 1, Math.min(delay * 2, 5000));
+      const jitter = Math.floor(Math.random() * 350);
+      const waitTime = delay + jitter;
+      
+      // Só alerta nos logs quando já falhou pelo menos 2 vezes para evitar warnings espúrios em micro-oscilações transitórias
+      if (retries <= 3) {
+        console.warn(`[Supabase Cloud] Oscilação de rede no servidor Supabase${isAuthRequest ? ' (Auth Refresh)' : ''}. Auto-recuperando em ${waitTime}ms... (Tentativas restantes: ${retries})`);
+      }
+      if (retries <= 1) {
+        hasReportedServiceError = true;
+      }
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+      return customFetch(input, init, retries - 1, Math.min(Math.round(delay * 1.5), 5000));
     }
     
     if (isNetworkError) {
-      console.error('[Supabase Cloud Network] Falha de conexão com a API do Supabase.', error);
+      supabaseCircuitBreaker.recordFailure();
+      console.error('[Supabase Cloud Network] Falha persistente de conexão com a API do Supabase após retentativas com backoff.', error);
       if (typeof window !== 'undefined') {
         hasReportedServiceError = true;
         window.dispatchEvent(new CustomEvent('supabase-network-error', {
