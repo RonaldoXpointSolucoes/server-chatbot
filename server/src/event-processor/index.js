@@ -932,7 +932,7 @@ class EventProcessor {
                   let cid = contactIdMap.get(`${b.tenantId}_${b.phone}`);
                   if (!cid) {
                       const targetPhone = getCanonicalBrPhone(b.phone) || b.phone;
-                      const fallbackContact = safeContactsArray.find(sc => sc.tenant_id === b.tenantId && (sc.phone === targetPhone || sc.phone === b.phone));
+                      const fallbackContact = upsertedContacts.find(sc => sc.tenant_id === b.tenantId && (sc.phone === targetPhone || sc.phone === b.phone));
                       cid = fallbackContact?.id || crypto.randomUUID();
                       contactIdMap.set(`${b.tenantId}_${b.phone}`, cid);
                   }
@@ -1172,7 +1172,7 @@ class EventProcessor {
                  let cid = contactIdMap.get(`${b.tenantId}_${b.phone}`);
                  if (!cid) {
                      const targetPhone = getCanonicalBrPhone(b.phone) || b.phone;
-                     const fallbackContact = safeContactsArray.find(sc => sc.tenant_id === b.tenantId && (sc.phone === targetPhone || sc.phone === b.phone));
+                     const fallbackContact = upsertedContacts.find(sc => sc.tenant_id === b.tenantId && (sc.phone === targetPhone || sc.phone === b.phone));
                      cid = fallbackContact?.id || crypto.randomUUID();
                      contactIdMap.set(`${b.tenantId}_${b.phone}`, cid);
                  }

@@ -831,7 +831,10 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
         if (process.env.DISABLE_AUTO_START_SESSIONS === 'true') {
             console.log("[Worker Boot] Auto-start de instâncias desabilitado via configuração (DISABLE_AUTO_START_SESSIONS=true).");
         } else {
-             if (isAlphaWorker && process.env.AUTO_START_ALPHA_ALL !== 'true') {
+            const currentNodeId = process.env.WORKER_NODE_ID || 'standalone';
+            const isAlphaWorker = currentNodeId.includes('alpha') || (process.env.APP_ENV || '').toLowerCase() === 'alpha';
+
+            if (isAlphaWorker && process.env.AUTO_START_ALPHA_ALL !== 'true') {
                 console.log("[Worker Boot/Alpha] Nó de Homologação/Alpha detectado. Auto-start restrito exclusivamente a instâncias de teste homologadas (FoodNext / Ronaldo-Web)...");
                 const testInstanceIds = HOMOLOG_ALLOWED_INSTANCES;
                 const { data: testLeases } = await supabase

@@ -22,6 +22,30 @@ class LocalEmbeddingsPipeline {
 }
 
 // ==========================================
+// RESILIÊNCIA GEMINI API (RETRIES COM BACKOFF)
+// ==========================================
+async function callWithGeminiRetry(fn, operationName = 'Gemini Operation', maxRetries = 3) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      const errMsg = err?.message || String(err);
+      const isTransient = errMsg.includes('500') || errMsg.includes('503') || errMsg.includes('overloaded') || errMsg.includes('fetch failed') || errMsg.includes('ECONNRESET') || errMsg.includes('Internal error') || errMsg.includes('internal error') || errMsg.includes('An internal error has occurred');
+      if (isTransient && attempt < maxRetries) {
+        const backoffDelay = 1000 * Math.pow(1.5, attempt);
+        console.warn(`[AutomationWorker] Oscilação transitória na API Gemini em "${operationName}" (${errMsg.slice(0, 100)}). Tentativa ${attempt}/${maxRetries}. Aguardando ${backoffDelay}ms...`);
+        await new Promise(r => setTimeout(r, backoffDelay));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastError;
+}
+
+// ==========================================
 // CACHE EM MEMÓRIA & AUTO-HEALING DO CARDÁPIO
 // ==========================================
 const cardapioInMemoryCache = new Map();
@@ -1403,7 +1427,7 @@ Regras importantes de roteamento:
 
 Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem formatações adicionais, sem markdown, sem aspas. Exemplo de resposta: "53a2db6c-d9c2-4760-8cbd-454ceccd280c".`;
 
-            const result = await model.generateContent(prompt);
+            const result = await callWithGeminiRetry(() => model.generateContent(prompt), 'routeMessageToBot');
             const responseText = result.response.text().trim();
             
             const chosenBot = eligibleBots.find(b => responseText.includes(b.id) || b.id === responseText);
@@ -2370,7 +2394,10 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
             while (keepLooping && loopCount < MAX_LOOPS) {
                 loopCount++;
                 try {
-                    const result = await chat.sendMessage(currentMessageText);
+                    const result = await callWithGeminiRetry(
+                        () => chat.sendMessage(currentMessageText),
+                        `chat.sendMessage (Iteração ${loopCount})`
+                    );
                     const response = result.response;
                     const calls = response.functionCalls();
 
@@ -3576,7 +3603,10 @@ Estrutura JSON de exemplo:
 
 Preencha apenas os campos que você conseguir identificar na conversa. Mantenha os outros vazios ou com valores padrão de forma segura. Responda APENAS com o JSON puro, seguindo estritamente a estrutura exemplificada.`;
 
-                        const draftResult = await draftModel.generateContent(draftPrompt);
+                        const draftResult = await callWithGeminiRetry(
+                            () => draftModel.generateContent(draftPrompt),
+                            'draftOrder.generateContent'
+                        );
                         const draftText = draftResult.response.text().trim();
                         
                         try {

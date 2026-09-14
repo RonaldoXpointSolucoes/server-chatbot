@@ -2758,13 +2758,31 @@ export default function ChatDashboard() {
     const jid = `${cleanPhone}@s.whatsapp.net`;
     const properInstance = targetInstance || activeChannelFilter || connectedInstanceName;
 
-    // 1. Se o contato já existe na memória local, seleciona direto
-    const existingInStore = contacts.find(c => c.phone === cleanPhone || c.whatsapp_jid === jid || c.id === cleanPhone || c.id.startsWith(cleanPhone));
+    // 1. Se o contato já existe na memória local, prioriza a caixa ativa
+    const existingInStore = contacts.find(c => {
+      const isMatch = c.phone === cleanPhone || c.whatsapp_jid === jid || c.id === cleanPhone || c.id.startsWith(cleanPhone);
+      if (!isMatch) return false;
+      if (!properInstance || properInstance === 'all' || properInstance === 'default') return true;
+      const cInst = c.instance_id || (c.id && c.id.includes('_') ? c.id.split('_')[1] : null);
+      return cInst === properInstance;
+    }) || contacts.find(c => c.phone === cleanPhone || c.whatsapp_jid === jid || c.id === cleanPhone || c.id.startsWith(cleanPhone));
+
     if (existingInStore) {
-      setActiveChat(existingInStore.id);
-      const instToLoad = properInstance || getStrictInstance(existingInStore) || connectedInstanceName;
-      if (instToLoad) {
-        useChatStore.getState().loadHistoricalMessages(existingInStore.id, instToLoad);
+      const targetInst = properInstance || getStrictInstance(existingInStore) || connectedInstanceName || 'default';
+      const realId = getRealContactId(existingInStore.id);
+      const targetChatId = targetInst && targetInst !== 'all' && targetInst !== 'default' ? `${realId}_${targetInst}` : existingInStore.id;
+
+      if (!contacts.some(c => c.id === targetChatId)) {
+        useChatStore.getState().upsertContactLocally({
+          ...existingInStore,
+          id: targetChatId,
+          instance_id: targetInst
+        });
+      }
+
+      setActiveChat(targetChatId);
+      if (targetInst) {
+        useChatStore.getState().loadHistoricalMessages(targetChatId, targetInst);
       }
       setSearchTerm('');
       setDraftNewChat(null);
@@ -2813,11 +2831,18 @@ export default function ChatDashboard() {
       }
 
       if (contactToSelect) {
-        useChatStore.getState().upsertContactLocally(contactToSelect);
-        setActiveChat(contactToSelect.id);
-        const instToLoad = properInstance || contactToSelect.instance_id || connectedInstanceName;
-        if (instToLoad) {
-          useChatStore.getState().loadHistoricalMessages(contactToSelect.id, instToLoad);
+        const targetInst = properInstance || contactToSelect.instance_id || connectedInstanceName || 'default';
+        const realId = getRealContactId(contactToSelect.id);
+        const targetChatId = targetInst && targetInst !== 'all' && targetInst !== 'default' ? `${realId}_${targetInst}` : contactToSelect.id;
+
+        useChatStore.getState().upsertContactLocally({
+          ...contactToSelect,
+          id: targetChatId,
+          instance_id: targetInst
+        });
+        setActiveChat(targetChatId);
+        if (targetInst) {
+          useChatStore.getState().loadHistoricalMessages(targetChatId, targetInst);
         }
         setSearchTerm('');
         setDraftNewChat(null);
@@ -2901,13 +2926,18 @@ export default function ChatDashboard() {
         }
       }
 
-      // 2. Criar ou buscar conversa no Supabase SOMENTE NO MOMENTO DO ENVIO
-      let { data: existingConv } = await supabase
+      // 2. Criar ou buscar conversa no Supabase SOMENTE NO MOMENTO DO ENVIO (na caixa correta)
+      let convQuery = supabase
         .from('conversations')
         .select('*')
         .eq('tenant_id', tenantId)
-        .eq('contact_id', existingContact.id)
-        .maybeSingle();
+        .eq('contact_id', existingContact.id);
+
+      if (properInstance) {
+        convQuery = convQuery.eq('instance_id', properInstance);
+      }
+
+      let { data: existingConv } = await convQuery.maybeSingle();
 
       if (!existingConv) {
         const { data: newConv } = await supabase.from('conversations').insert({

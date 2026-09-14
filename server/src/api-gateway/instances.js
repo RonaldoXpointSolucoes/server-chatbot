@@ -477,11 +477,16 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                             priority: 1
                         }).then(() => {}).catch(() => {});
 
-                        // Sincroniza com o eventProcessor
+                        // Sincroniza com o eventProcessor registrando como mensagem humana
                         try {
-                            const { default: eventProcessor } = await import('../event-processor/index.js');
-                            if (eventProcessor && sentResult && sentResult.key) {
-                                eventProcessor.handleMessageUpsert(req.tenantId, instanceId, activeSock, {
+                            const { EventProcessor, default: eventProcessor } = await import('../event-processor/index.js');
+                            const ep = EventProcessor || eventProcessor;
+                            if (ep && sentResult && sentResult.key) {
+                                if (!ep.humanMessagesCache) ep.humanMessagesCache = new Map();
+                                ep.humanMessagesCache.set(`${instanceId}_${sentResult.key.id}`, true);
+                                setTimeout(() => ep.humanMessagesCache && ep.humanMessagesCache.delete(`${instanceId}_${sentResult.key.id}`), 60000);
+
+                                ep.handleMessageUpsert(req.tenantId, instanceId, activeSock, {
                                     messages: [sentResult],
                                     type: 'notify'
                                 }).catch(() => {});

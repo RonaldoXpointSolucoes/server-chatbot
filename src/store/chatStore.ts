@@ -3051,8 +3051,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
           id: compositeId,
           name: finalName,
           avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(finalName || contact.phone)}&background=random&color=fff`,
-          messages: [],
-          unread: 0,
+          messages: contact.messages || [],
+          unread: contact.unread || 0,
+          conv_id: contact.conv_id || undefined,
+          conv_status: contact.conv_status || 'open',
           instance_id: contact.instance_id || null,
           lastMsgTimestamp: new Date(contact.created_at || Date.now()).getTime(),
           conv_labels: conv_labels
@@ -4424,19 +4426,42 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const isUuid = (val: any) => typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
         const realContactId = getRealContactId(contactId);
 
+        // Determina a instância alvo antecipadamente (a partir do composite ID, parâmetro ou filtro)
+        const activeFilter = get().activeChannelFilter;
+        let targetInstanceId: string | null = (contactId && contactId.includes('_')) ? contactId.split('_')[1] : null;
+        if (!targetInstanceId && instanceName) {
+          targetInstanceId = instanceCache.getId(instanceName) || (await resolveInstanceUuid(tenant.id, instanceName)) || instanceName;
+        }
+        if (!targetInstanceId && activeFilter && activeFilter !== 'all' && activeFilter !== 'default') {
+          targetInstanceId = instanceCache.getId(activeFilter) || (await resolveInstanceUuid(tenant.id, activeFilter)) || activeFilter;
+        }
+
         const activeContactObj = get().contacts.find(c =>
           c.id === contactId ||
           (c.conv_id && c.conv_id === contactId) ||
-          (c.id && getRealContactId(c.id) === realContactId)
-        );
-        const knownConvId = activeContactObj?.conv_id;
+          (c.id && getRealContactId(c.id) === realContactId && (!targetInstanceId || targetInstanceId === 'default' || c.instance_id === targetInstanceId))
+        ) || get().contacts.find(c => c.id === contactId || (c.conv_id && c.conv_id === contactId));
+
+        if (!targetInstanceId && activeContactObj?.instance_id) {
+          targetInstanceId = activeContactObj.instance_id;
+        }
+        const hasValidInstanceId = targetInstanceId && isUuid(targetInstanceId);
+
+        // Se knownConvId pertence a outra instância que não a alvo, ignora-o
+        const isConvSameInstance = !hasValidInstanceId || !activeContactObj?.instance_id || activeContactObj.instance_id === targetInstanceId;
+        const knownConvId = isConvSameInstance ? activeContactObj?.conv_id : null;
 
         // Hidratação imediata da RAM (0ms) se houver mensagens em cache e o contato estiver sem mensagens
-        const memoryCached = messagesMemoryCache.get(contactId) || (realContactId ? messagesMemoryCache.get(realContactId) : null);
+        const memoryCacheKey = (targetInstanceId && targetInstanceId !== 'default') ? `${realContactId || contactId}_${targetInstanceId}` : (contactId || realContactId);
+        const memoryCached = (memoryCacheKey ? messagesMemoryCache.get(memoryCacheKey) : null) || messagesMemoryCache.get(contactId);
         if (memoryCached && memoryCached.length > 0 && (!activeContactObj?.messages || activeContactObj.messages.length === 0)) {
           set((s) => {
             const updated = [...s.contacts];
-            const idx = updated.findIndex(c => c.id === contactId || (c.conv_id && c.conv_id === contactId) || (c.id && getRealContactId(c.id) === realContactId));
+            const idx = updated.findIndex(c =>
+              c.id === contactId ||
+              (c.conv_id && c.conv_id === contactId) ||
+              (c.id && getRealContactId(c.id) === realContactId && (!hasValidInstanceId || c.instance_id === targetInstanceId))
+            );
             if (idx !== -1) {
               updated[idx] = { ...updated[idx], messages: memoryCached };
             }
@@ -4475,17 +4500,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
         }
 
-        // Determina o instance_id alvo estrito
-        const activeFilter = get().activeChannelFilter;
-        let targetInstanceId: string | null = activeContactObj?.instance_id || null;
-        if (!targetInstanceId && instanceName) {
-          targetInstanceId = instanceCache.getId(instanceName) || (await resolveInstanceUuid(tenant.id, instanceName)) || instanceName;
-        }
-        if (!targetInstanceId && activeFilter && activeFilter !== 'all' && activeFilter !== 'default') {
-          targetInstanceId = instanceCache.getId(activeFilter) || (await resolveInstanceUuid(tenant.id, activeFilter)) || activeFilter;
-        }
-        const hasValidInstanceId = targetInstanceId && isUuid(targetInstanceId);
-
         // 2. Montar queries paralelizadas
         let convsQuery = supabase.from('conversations')
           .select('id, status, last_message_at, updated_at, instance_id')
@@ -4508,7 +4522,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             .order('created_at', { ascending: true })
           : Promise.resolve({ data: [] });
 
-        // Query direta e antecipada de mensagens se knownConvId já for conhecido
+        // Query direta e antecipada de mensagens se knownConvId já for conhecido e da mesma instância
         const directMsgPromise = (knownConvId && isUuid(knownConvId))
           ? supabase.from('messages')
             .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
@@ -4585,13 +4599,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
             uniqueMsgs.push(m);
           }
 
-          // Grava no cache em memória
+          // Grava no cache em memória isolado por instância
           messagesMemoryCache.set(contactId, uniqueMsgs);
-          if (realContactId) messagesMemoryCache.set(realContactId, uniqueMsgs);
+          if (targetInstanceId && targetInstanceId !== 'default' && realContactId) {
+            messagesMemoryCache.set(`${realContactId}_${targetInstanceId}`, uniqueMsgs);
+          } else if (realContactId) {
+            messagesMemoryCache.set(realContactId, uniqueMsgs);
+          }
 
           set((s) => {
             const updated = [...s.contacts];
-            const idx = updated.findIndex(c => c.id === contactId || (c.conv_id && c.conv_id === contactId) || (c.id && getRealContactId(c.id) === realContactId));
+            const idx = updated.findIndex(c =>
+              c.id === contactId ||
+              (c.conv_id && c.conv_id === contactId) ||
+              (c.id && getRealContactId(c.id) === realContactId && (!hasValidInstanceId || c.instance_id === targetInstanceId))
+            );
             if (idx !== -1) {
               const currentMsgs = updated[idx].messages || [];
               const optimisticMsgs = currentMsgs.filter(m => String(m.id).startsWith('optimistic-'));
@@ -5795,12 +5817,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
           return;
         }
 
-        // Resolução antecipada do contato local por realContactId e instância
+        // Resolução antecipada do contato local por realContactId e instância estrita
         if (!targetContactLocally && targetContactId) {
           targetContactLocally = currentState.contacts.find((c: any) =>
             getRealContactId(c.id) === targetContactId &&
             (!convInstanceId || convInstanceId === 'default' || c.instance_id === convInstanceId)
-          ) || currentState.contacts.find((c: any) => getRealContactId(c.id) === targetContactId);
+          );
 
           if (targetContactLocally && !targetContactLocally.conv_id && m.conversation_id) {
             targetContactLocally.conv_id = m.conversation_id;
@@ -5858,10 +5880,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
 
         if (!targetContactLocally) {
+          cData.conv_id = m.conversation_id;
+          cData.conv_status = 'open';
           get().upsertContactLocally(cData as any);
         }
 
-        const cid = targetContactLocally ? targetContactLocally.id : expectedCompositeId;
+        const cid = targetContactLocally ? targetContactLocally.id : expectedCompositeIdRefined;
 
         const isBlocked = cData.is_blocked || (targetContactLocally && targetContactLocally.is_blocked);
         if (isBlocked) {
@@ -5932,7 +5956,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // Reordena o card pra cima e joga notificação +1 Unread caso a aba não seja ele
         set((s) => {
           const u = [...s.contacts];
-          const i = u.findIndex(c => c.id === cid || (c.conv_id && m.conversation_id && c.conv_id === m.conversation_id) || (targetContactId && getRealContactId(c.id) === targetContactId));
+          const i = u.findIndex(c =>
+            c.id === cid ||
+            (c.conv_id && m.conversation_id && c.conv_id === m.conversation_id) ||
+            (targetContactId && getRealContactId(c.id) === targetContactId && (!effectiveInstanceId || effectiveInstanceId === 'default' || c.instance_id === effectiveInstanceId))
+          );
           if (i !== -1) {
             const updatedContact = { ...u[i] };
 
@@ -5948,6 +5976,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
               if (msgTimestamp > currentLastMsgTs) {
                 updatedContact.lastMsgTimestamp = msgTimestamp;
+                updatedContact.last_message_preview = advanced.text || m.text_content || updatedContact.last_message_preview;
+                updatedContact.last_message_at = m.timestamp;
+                updatedContact.last_message_sender_type = m.sender_type;
+              }
+              if (m.conversation_id && !updatedContact.conv_id) {
+                updatedContact.conv_id = m.conversation_id;
               }
 
               const isOutbound = m.from_me === true || m.sender_type === 'agent' || m.sender_type === 'bot' || m.sender_type === 'system' || m.sender_type === 'automation';

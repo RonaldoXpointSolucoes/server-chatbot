@@ -322,13 +322,19 @@ class QueueProcessor {
 
                 // 6. Sincroniza a mensagem enviada com a tabela clássica de mensagens para o Frontend refletir
                 try {
-                    const { default: eventProcessor } = await import('../event-processor/index.js');
-                    if (eventProcessor && result && result.key) {
+                    const { EventProcessor, default: eventProcessor } = await import('../event-processor/index.js');
+                    const ep = EventProcessor || eventProcessor;
+                    if (ep && result && result.key) {
+                        if (msg.priority < 5 || isOperator) {
+                            if (!ep.humanMessagesCache) ep.humanMessagesCache = new Map();
+                            ep.humanMessagesCache.set(`${instanceId}_${result.key.id}`, true);
+                            setTimeout(() => ep.humanMessagesCache && ep.humanMessagesCache.delete(`${instanceId}_${result.key.id}`), 60000);
+                        }
                         const mockUpsert = {
                             messages: [result],
                             type: 'notify'
                         };
-                        await eventProcessor.handleMessageUpsert(tenantId, instanceId, sock, mockUpsert);
+                        await ep.handleMessageUpsert(tenantId, instanceId, sock, mockUpsert);
                     }
                 } catch (compatErr) {
                     console.error(`[QueueProcessor/Compatibility] Erro ao sincronizar mensagem enviada com as tabelas legadas:`, compatErr.message);

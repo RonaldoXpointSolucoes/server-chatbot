@@ -1506,10 +1506,12 @@ export function NewChatModal({ isOpen, onClose, contacts, instances = [], defaul
              <div 
                key={c.id} 
                onClick={() => { 
-                  if (!selectedInstance) return;
-                  onStartChat(c.id, selectedInstance); 
-                  onClose(); 
-               }}
+                   if (!selectedInstance) return;
+                   const realId = c.id && typeof c.id === 'string' && c.id.includes('_') ? c.id.split('_')[0] : c.id;
+                   const targetCompositeId = selectedInstance ? `${realId}_${selectedInstance}` : c.id;
+                   onStartChat(targetCompositeId, selectedInstance); 
+                   onClose(); 
+                }}
                className={`flex items-center gap-3 p-3 rounded-xl transition-colors ${!selectedInstance ? 'opacity-50 cursor-not-allowed' : 'hover:bg-[#f0f2f5] dark:hover:bg-[#111b21] cursor-pointer'}`}
              >
                <img src={c.avatar} alt={c.name} className="w-12 h-12 rounded-full object-cover shadow-sm bg-gray-200" />

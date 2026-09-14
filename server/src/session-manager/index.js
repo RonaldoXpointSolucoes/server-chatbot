@@ -1523,7 +1523,7 @@ class SessionManager {
                     
                     if (isStatusErr || isAckErr) {
                         const targetJid = item?.key?.remoteJid;
-                        if (targetJid) {
+                        if (targetJid && !targetJid.endsWith('@newsletter') && targetJid !== 'status@broadcast') {
                             const errCode = stubParams ? stubParams.join(',') : (statusVal || 'ERROR');
                             console.warn(`[SessionManager] ⚠️ Erro de entrega/ack detectado (${errCode}) para ${targetJid} na instância ${instanceId}. Resetando chaves de sessão para forçar renegociação segura...`);
                             clearRecipientSession(instanceId, targetJid);
@@ -1715,7 +1715,8 @@ class SessionManager {
                                         error.message?.includes('SessionError') || 
                                         error.message?.includes('479') || 
                                         error.message?.includes('PreKey') || 
-                                        error.message?.includes('Bad MAC');
+                                        error.message?.includes('Bad MAC') ||
+                                        (error.message?.includes('401') && !jid.endsWith('@newsletter'));
 
                                     if (isCryptoOrSessionErr) {
                                         console.warn(`[SessionManager - Antiban] Erro criptográfico de sessão/pre-key (${error.message}) detectado para ${jid} via instância ${instanceId}. Limpando chaves para forçar nova negociação de pre-keys...`);
@@ -1725,7 +1726,9 @@ class SessionManager {
                                     }
 
                                     if (attempts < maxAttempts) {
-                                        const retryDelay = Math.min(2000 * Math.pow(1.5, attempts - 1), 7500) + Math.floor(Math.random() * 500);
+                                        const isConnectionClosed = error.message?.includes('Connection Closed') || error.message?.includes('reconectando');
+                                        const baseDelay = isConnectionClosed ? 3500 : 2000;
+                                        const retryDelay = Math.min(baseDelay * Math.pow(1.5, attempts - 1), 8500) + Math.floor(Math.random() * 500);
                                         console.warn(`[SessionManager - Antiban] Tentativa ${attempts}/${maxAttempts} para ${jid} via instância ${instanceId}: ${error.message || error}. Aguardando ${Math.round(retryDelay)}ms para restabelecimento do socket...`);
                                         await new Promise(r => setTimeout(r, retryDelay));
                                     } else {
