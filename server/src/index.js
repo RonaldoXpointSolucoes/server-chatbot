@@ -7,6 +7,11 @@ try {
   dns.setDefaultResultOrder('ipv4first');
 } catch (e) {}
 
+import { EventEmitter } from 'events';
+try {
+  EventEmitter.defaultMaxListeners = 100;
+} catch (e) {}
+
 const __dirname_env = path.dirname(fileURLToPath(import.meta.url));
 config({ path: path.resolve(__dirname_env, '../../.env') });
 

@@ -137,15 +137,41 @@ class QueueProcessor {
                         await new Promise((res) => {
                             if (!sock.ws) return res(true);
                             if (sock.ws.isOpen || sock.ws.readyState === 1) return res(true);
-                            const t = setTimeout(() => res(false), 2500);
+                            
+                            let isDone = false;
+                            let timer = null;
+                            const cleanup = () => {
+                                if (isDone) return;
+                                isDone = true;
+                                if (timer) clearTimeout(timer);
+                                try {
+                                    if (sock.ev && typeof sock.ev.off === 'function') {
+                                        sock.ev.off('connection.update', onUpdate);
+                                    }
+                                } catch (e) {}
+                            };
+
                             const onUpdate = (u) => {
                                 if (u.connection === 'open') {
-                                    clearTimeout(t);
-                                    sock.ev?.off('connection.update', onUpdate);
+                                    cleanup();
                                     res(true);
+                                } else if (u.connection === 'close') {
+                                    cleanup();
+                                    res(false);
                                 }
                             };
-                            sock.ev?.on('connection.update', onUpdate);
+
+                            timer = setTimeout(() => {
+                                cleanup();
+                                res(false);
+                            }, 2500);
+
+                            if (sock.ev && typeof sock.ev.on === 'function') {
+                                sock.ev.on('connection.update', onUpdate);
+                            } else {
+                                cleanup();
+                                res(false);
+                            }
                         });
                         isSocketReady = sock && (!sock.ws || sock.ws.readyState === 1 || sock.ws.isOpen);
                         meId = sock?.user?.id || sock?.authState?.creds?.me?.id;

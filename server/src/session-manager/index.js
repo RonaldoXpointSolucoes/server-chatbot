@@ -1,3 +1,8 @@
+import { EventEmitter } from 'events';
+try {
+    EventEmitter.defaultMaxListeners = 100;
+} catch (e) {}
+
 import { makeWASocket, DisconnectReason, fetchLatestBaileysVersion, Browsers } from '@whiskeysockets/baileys';
 import { useSupabaseAuthState, flushPendingWrites, sessionCaches, clearInstanceMemoryCache, clearRecipientSession } from './auth.js';
 import eventProcessor from '../event-processor/index.js';
@@ -40,17 +45,25 @@ export const isSocketOpen = (sock) => {
     return false;
 };
 
-const waitForSocketOpen = (sock, timeoutMs = 12000) => {
-    return new Promise((resolve, reject) => {
-        if (isSocketOpen(sock)) {
-            return resolve(true);
-        }
-        const ws = sock?.ws;
-        const rawState = ws?.socket?.readyState;
-        if (!sock || (ws && (ws.isClosing || ws.isClosed || rawState === 2 || rawState === 3))) {
-            return reject(new Error('WebSocket is closed or closing'));
-        }
+// Mapa para compartilhar e deduplicar chamadas concorrentes de espera por socket
+const socketWaitPromises = new WeakMap();
 
+export const waitForSocketOpen = (sock, timeoutMs = 12000) => {
+    if (!sock) return Promise.reject(new Error('No socket provided'));
+    if (isSocketOpen(sock)) return Promise.resolve(true);
+
+    const ws = sock?.ws;
+    const rawState = ws?.socket?.readyState;
+    if (ws && (ws.isClosing || ws.isClosed || rawState === 2 || rawState === 3)) {
+        return Promise.reject(new Error('WebSocket is closed or closing'));
+    }
+
+    // Se já existe uma espera ativa para este socket, reutiliza a Promise para NÃO registrar listeners duplicados
+    if (socketWaitPromises.has(sock)) {
+        return socketWaitPromises.get(sock);
+    }
+
+    const waitPromise = new Promise((resolve, reject) => {
         let isClean = false;
         let pollTimer = null;
         const cleanUp = () => {
@@ -58,6 +71,7 @@ const waitForSocketOpen = (sock, timeoutMs = 12000) => {
             isClean = true;
             clearTimeout(timer);
             if (pollTimer) clearInterval(pollTimer);
+            socketWaitPromises.delete(sock);
             try {
                 if (sock.ev && typeof sock.ev.off === 'function') {
                     sock.ev.off('connection.update', connectionListener);
@@ -99,6 +113,9 @@ const waitForSocketOpen = (sock, timeoutMs = 12000) => {
             }
         }, 150);
     });
+
+    socketWaitPromises.set(sock, waitPromise);
+    return waitPromise;
 };
 
 let cachedBaileysVersion = null;
@@ -660,6 +677,12 @@ class SessionManager {
             throw new Error(`Instância ${instanceId} pertence à produção e não é permitida no nó Alpha.`);
         }
 
+        // 1. Se já há uma Promise de inicialização em andamento para esta instância, reutiliza diretamente
+        if (!force && this.connectingState.has(instanceId)) {
+            console.log(`[SessionManager] Sessão ${instanceId} já está em processo de conexão ativo. Reutilizando Promise em andamento.`);
+            return this.connectingState.get(instanceId);
+        }
+
         return this.runWithInstanceMutex(instanceId, async () => {
             if (this.reconnectingTimers.has(instanceId)) {
                 const timer = this.reconnectingTimers.get(instanceId);
@@ -669,10 +692,26 @@ class SessionManager {
             }
 
             if (this.sessions.has(instanceId) && !force) {
-                const existingSock = this.sessions.get(instanceId)?.sock;
+                const existingSession = this.sessions.get(instanceId);
+                const existingSock = existingSession?.sock;
                 if (existingSock && isSocketOpen(existingSock)) {
                     console.log(`[SessionManager] Sessão ${instanceId} já estava saudável em memória.`);
                     return existingSock;
+                }
+
+                // Se o socket existe, foi criado recentemente (< 25s) e o WebSocket está em processo de conexão/handshake,
+                // NÃO destruímos nem recriamos para evitar loop de socket thrashing
+                const ageMs = Date.now() - (existingSession?.createdAt || 0);
+                const ws = existingSock?.ws;
+                const isStillConnecting = ws && !ws.isClosed && !ws.isClosing && (ws.isConnecting || ws.socket?.readyState === 0 || ws.socket?.readyState === 1);
+                if (ageMs < 25000 && isStillConnecting) {
+                    console.log(`[SessionManager] Sessão ${instanceId} está em processo ativo de conexão/handshake (${ageMs}ms). Aguardando estabilização sem recriar socket.`);
+                    try {
+                        await waitForSocketOpen(existingSock, 15000);
+                        if (isSocketOpen(existingSock)) return existingSock;
+                    } catch (e) {
+                        console.warn(`[SessionManager] Timeout ou oscilação ao aguardar socket em handshake para ${instanceId}:`, e.message);
+                    }
                 }
             }
 
@@ -1558,14 +1597,14 @@ class SessionManager {
                                                 clearTimeout(timer);
                                                 this.reconnectingTimers.delete(instanceId);
                                                 console.log(`[SessionManager - Antiban] Antecipando reconexão agendada da instância ${instanceId}...`);
-                                                this.createSession(tenantId, instanceId, false).catch(() => {});
+                                                await this.createSession(tenantId, instanceId, false).catch(() => {});
                                             }
 
                                             // Se já houver reconexão em andamento, aguarda sua conclusão
                                             if (this.connectingState.has(instanceId)) {
                                                 try {
                                                     const connectingSock = await this.connectingState.get(instanceId);
-                                                    if (connectingSock && isSocketOpen(connectingSock)) {
+                                                    if (connectingSock) {
                                                         activeSock = connectingSock;
                                                         sendFn = activeSock.originalSendMessage || originalSendMessage;
                                                     }
@@ -1585,9 +1624,9 @@ class SessionManager {
                                                     throw new Error(`Instância ${instanceId} está ${instStatus.status} no banco de dados (${instStatus.last_error || 'desconectada'})`);
                                                 }
 
-                                                // Nunca force o restart em retentativas regulares para não destruir conexões em handshake/reabertura
+                                                // Desperta a sessão sem forçar restart destrutivo
                                                 const wakedSock = await this.getSocketOrWake(tenantId, instanceId, true, false);
-                                                if (wakedSock && isSocketOpen(wakedSock)) {
+                                                if (wakedSock) {
                                                     activeSock = wakedSock;
                                                     sendFn = activeSock.originalSendMessage || originalSendMessage;
                                                 } else {
@@ -1601,7 +1640,7 @@ class SessionManager {
                                     if (activeSock && (!activeSock.ws || activeSock.ws.isConnecting || !isSocketOpen(activeSock))) {
                                         console.log(`[SessionManager - Antiban] Socket de ${instanceId} está conectando. Aguardando abertura da conexão WebSocket...`);
                                         try {
-                                            await waitForSocketOpen(activeSock, 12000);
+                                            await waitForSocketOpen(activeSock, 15000);
                                         } catch (waitErr) {
                                             console.warn(`[SessionManager - Antiban] Aviso ao aguardar abertura do socket: ${waitErr.message}`);
                                         }

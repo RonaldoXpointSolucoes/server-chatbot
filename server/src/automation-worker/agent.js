@@ -144,23 +144,23 @@ function normalizeGastrofoodPayload(payload, defaultStoreId) {
             const cleanFkPasso = rawFkPasso.includes('_') ? rawFkPasso.split('_')[0] : rawFkPasso;
 
             return {
-                code: cleanCode,
-                name: c.name || "",
+                code: String(cleanCode).slice(0, 20),
+                name: String(c.name || "").slice(0, 60),
                 amount: Number(c.amount || c.quantity || 1),
                 price: Number(c.price || 0),
                 typeCalc: c.typeCalc !== undefined ? c.typeCalc : 0,
-                fkPasso: cleanFkPasso,
+                fkPasso: String(cleanFkPasso).slice(0, 20),
                 numberPasso: c.numberPasso !== undefined ? c.numberPasso : 1
             };
         });
 
         return {
-            code: String(item.code || item.id || "").slice(0, 36),
+            code: String(item.code || item.id || "").slice(0, 20),
             name: String(item.name || "").slice(0, 100),
             amount: amount,
             unitary: String(item.unitary || "UN").slice(0, 10),
             price: price,
-            complement: String(item.complement || item.notes || "").slice(0, 255),
+            complement: String(item.complement || item.notes || "").slice(0, 200),
             itemsCuston: normalizedCustom
         };
     });
@@ -197,7 +197,7 @@ function normalizeGastrofoodPayload(payload, defaultStoreId) {
         Logradouro: String(address.Logradouro || address.logradouro || address.street || "").slice(0, 100),
         Numero: String(address.Numero || address.numero || "").slice(0, 20),
         Bairro: String(address.Bairro || address.bairro || "").slice(0, 20),
-        Cidade: String(address.Cidade || address.cidade || "").slice(0, 30),
+        Cidade: String(address.Cidade || address.cidade || "").slice(0, 20),
         Complemento: String(address.Complemento || address.complemento || "").slice(0, 20),
         Referencia: String(address.Referencia || address.referencia || "").slice(0, 20),
         Uf: String(address.Uf || address.uf || "SP").trim().slice(0, 2).toUpperCase(),
@@ -657,6 +657,8 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
                     origem: 'supabase_fallback'
                 };
                 cardapioInMemoryCache.set(cacheKey, cache);
+                gastrofoodCache.markCardapioSynced(tenantId);
+                console.log(`[CardapioCache - Fallback Resiliência] Cardápio local do Supabase carregado com sucesso (${dbProdutos.length} produtos). Proteção de cache ativada para mitigar intermitência da API Gastrofood.`);
                 return cache;
             }
         } catch (dbErr) {
