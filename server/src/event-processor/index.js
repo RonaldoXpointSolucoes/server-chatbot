@@ -2179,11 +2179,25 @@ class EventProcessor {
     }
 }
 
-export { EventProcessor };
+const defaultEventProcessor = new EventProcessor();
+
+// Pontes estáticas na classe EventProcessor para garantir compatibilidade polimórfica total
+// (evita quebra se módulos importarem EventProcessor como classe ou default como instância)
+EventProcessor.instance = defaultEventProcessor;
+EventProcessor.getInstance = () => defaultEventProcessor;
+EventProcessor.handleMessageUpsert = (...args) => defaultEventProcessor.handleMessageUpsert(...args);
+EventProcessor.handleMessagesUpdate = (...args) => defaultEventProcessor.handleMessagesUpdate(...args);
+EventProcessor.handleMessageReceiptUpdate = (...args) => defaultEventProcessor.handleMessageReceiptUpdate(...args);
+EventProcessor.handleChatsUpsert = (...args) => defaultEventProcessor.handleChatsUpsert(...args);
+EventProcessor.handleChatsUpdate = (...args) => defaultEventProcessor.handleChatsUpdate(...args);
+EventProcessor.handleConnectionUpdate = (...args) => defaultEventProcessor.handleConnectionUpdate(...args);
+
 EventProcessor.pendingMediaCache = new Map();
 EventProcessor.humanMessagesCache = new Map();
 EventProcessor.automationMessagesCache = new Map();
-export default new EventProcessor();
+
+export { EventProcessor };
+export default defaultEventProcessor;
 
 export async function dispatchWebhookTriggers(tenantId, eventType, data) {
     try {

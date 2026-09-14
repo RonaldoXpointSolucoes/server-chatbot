@@ -453,7 +453,7 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
                 .from('cardapio_produtos')
                 .select('*')
                 .eq('tenant_id', tenantId)
-                .eq('ativo', true);
+                .or('ativo.eq.true,ativo.is.null');
                 
             if (errProd) throw errProd;
             
@@ -462,7 +462,7 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
                     .from('cardapio_grupos')
                     .select('*')
                     .eq('tenant_id', tenantId)
-                    .eq('ativo', true);
+                    .or('ativo.eq.true,ativo.is.null');
                     
                 cache = {
                     produtos: dbProdutos,
@@ -664,14 +664,14 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
                 .from('cardapio_produtos')
                 .select('*')
                 .eq('tenant_id', tenantId)
-                .eq('ativo', true);
+                .or('ativo.eq.true,ativo.is.null');
                 
             if (dbProdutos && dbProdutos.length > 0) {
                 const { data: dbGrupos } = await supabase
                     .from('cardapio_grupos')
                     .select('*')
                     .eq('tenant_id', tenantId)
-                    .eq('ativo', true);
+                    .or('ativo.eq.true,ativo.is.null');
                     
                 cache = {
                     produtos: dbProdutos,
@@ -3383,11 +3383,17 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                         orientacao: "O cardápio digital está temporariamente sendo atualizado no sistema. NÃO realize novas chamadas de busca de ferramentas nesta mesma mensagem. Informe com gentileza ao cliente que o cardápio está em atualização e envie o link oficial do cardápio digital."
                                     };
                                 } else if (formattedProducts.length === 0) {
+                                    const destaques = productsList.slice(0, 5).map(p => ({
+                                        nome: p.name,
+                                        preco: p.price,
+                                        categoria: gruposMap[p.grupo_id] || 'Geral'
+                                    }));
                                     functionResult = { 
                                         origem: cache.origem,
                                         total_encontrados: 0,
                                         produtos: [],
-                                        orientacao: "Nenhum produto correspondente foi encontrado no cardápio para este termo. ATENÇÃO: NÃO realize novas chamadas de busca de ferramentas nesta mesma mensagem para tentar variações deste item. Responda imediatamente ao cliente informando com carinho e educação que não dispomos dessa opção específica no momento, pergunte se ele deseja outra opção ou apresente os produtos principais da casa."
+                                        produtos_destaque: destaques,
+                                        orientacao: "Nenhum produto correspondente foi encontrado no cardápio para este termo. ATENÇÃO: NÃO realize novas chamadas de busca de ferramentas nesta mesma mensagem para tentar variações deste item. Responda imediatamente ao cliente informando com carinho e educação que não dispomos dessa opção específica no momento, pergunte se ele deseja outra opção ou apresente os produtos principais/destaques da casa."
                                     };
                                 } else {
                                     functionResult = { 

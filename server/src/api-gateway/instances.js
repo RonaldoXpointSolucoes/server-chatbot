@@ -480,16 +480,22 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                         // Sincroniza com o eventProcessor registrando como mensagem humana
                         try {
                             const { EventProcessor, default: eventProcessor } = await import('../event-processor/index.js');
-                            const ep = EventProcessor || eventProcessor;
-                            if (ep && sentResult && sentResult.key) {
-                                if (!ep.humanMessagesCache) ep.humanMessagesCache = new Map();
-                                ep.humanMessagesCache.set(`${instanceId}_${sentResult.key.id}`, true);
-                                setTimeout(() => ep.humanMessagesCache && ep.humanMessagesCache.delete(`${instanceId}_${sentResult.key.id}`), 60000);
+                            const processor = eventProcessor || (EventProcessor?.instance) || (typeof EventProcessor === 'function' ? new EventProcessor() : EventProcessor);
+                            const epClass = EventProcessor || processor?.constructor;
 
-                                ep.handleMessageUpsert(req.tenantId, instanceId, activeSock, {
-                                    messages: [sentResult],
-                                    type: 'notify'
-                                }).catch(() => {});
+                            if (processor && sentResult && sentResult.key) {
+                                if (epClass && !epClass.humanMessagesCache) epClass.humanMessagesCache = new Map();
+                                if (epClass && epClass.humanMessagesCache) {
+                                    epClass.humanMessagesCache.set(`${instanceId}_${sentResult.key.id}`, true);
+                                    setTimeout(() => epClass.humanMessagesCache && epClass.humanMessagesCache.delete(`${instanceId}_${sentResult.key.id}`), 60000);
+                                }
+
+                                if (typeof processor.handleMessageUpsert === 'function') {
+                                    processor.handleMessageUpsert(req.tenantId, instanceId, activeSock, {
+                                        messages: [sentResult],
+                                        type: 'notify'
+                                    }).catch(() => {});
+                                }
                             }
                         } catch (e) {}
 

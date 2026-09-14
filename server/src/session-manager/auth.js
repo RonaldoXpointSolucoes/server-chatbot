@@ -51,9 +51,33 @@ export function clearInstanceMemoryCache(instanceId) {
     }
 }
 
+// Controle de taxa para reset de chaves de sessão por destinatário (evita tempestade de wipes em acks repetidos)
+const recipientResetCooldowns = new Map();
+const RECIPIENT_RESET_COOLDOWN_MS = 30000; // 30 segundos de intervalo mínimo por destinatário
+
 export function clearRecipientSession(instanceId, jid) {
     if (!jid) return;
-    const cleanJid = String(jid).replace('@s.whatsapp.net', '').replace('@lid', '').replace('@g.us', '').split(':')[0];
+    const cleanJid = String(jid).replace('@s.whatsapp.net', '').replace('@lid', '').replace('@g.us', '').split(':')[0].trim();
+    if (!cleanJid || cleanJid.length < 5) return;
+    
+    const cooldownKey = `${instanceId}_${cleanJid}`;
+    const now = Date.now();
+    const lastReset = recipientResetCooldowns.get(cooldownKey);
+
+    // Se já foi resetado nos últimos 30 segundos, ignora para permitir que a nova negociação de prekeys termine
+    if (lastReset && (now - lastReset < RECIPIENT_RESET_COOLDOWN_MS)) {
+        return;
+    }
+    recipientResetCooldowns.set(cooldownKey, now);
+
+    // Limpeza periódica do mapa de cooldown
+    if (recipientResetCooldowns.size > 2000) {
+        for (const [k, t] of recipientResetCooldowns.entries()) {
+            if (now - t > RECIPIENT_RESET_COOLDOWN_MS * 2) {
+                recipientResetCooldowns.delete(k);
+            }
+        }
+    }
     
     if (sessionCaches.has(instanceId)) {
         const memCache = sessionCaches.get(instanceId);

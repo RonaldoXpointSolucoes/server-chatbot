@@ -1,5 +1,6 @@
 import { supabase, NODE_ID, retryWithBackoff, resolveTargetJid } from '../supabase.js';
 import { buildWhatsAppMessage } from './message-builder.js';
+import { runOutgoingReconciliation } from './reconciler.js';
 
 class QueueProcessor {
     constructor() {
@@ -16,6 +17,13 @@ class QueueProcessor {
         
         // Inicia o loop de processamento
         this.loop();
+
+        // Reconciliação preventiva periódica a cada 60 segundos
+        setInterval(() => {
+            if (this.running) {
+                runOutgoingReconciliation().catch(() => {});
+            }
+        }, 60000);
     }
 
     stop() {
@@ -323,18 +331,24 @@ class QueueProcessor {
                 // 6. Sincroniza a mensagem enviada com a tabela clássica de mensagens para o Frontend refletir
                 try {
                     const { EventProcessor, default: eventProcessor } = await import('../event-processor/index.js');
-                    const ep = EventProcessor || eventProcessor;
-                    if (ep && result && result.key) {
+                    const processor = eventProcessor || (EventProcessor?.instance) || (typeof EventProcessor === 'function' ? new EventProcessor() : EventProcessor);
+                    const epClass = EventProcessor || processor?.constructor;
+
+                    if (processor && result && result.key) {
                         if (msg.priority < 5 || isOperator) {
-                            if (!ep.humanMessagesCache) ep.humanMessagesCache = new Map();
-                            ep.humanMessagesCache.set(`${instanceId}_${result.key.id}`, true);
-                            setTimeout(() => ep.humanMessagesCache && ep.humanMessagesCache.delete(`${instanceId}_${result.key.id}`), 60000);
+                            if (epClass && !epClass.humanMessagesCache) epClass.humanMessagesCache = new Map();
+                            if (epClass && epClass.humanMessagesCache) {
+                                epClass.humanMessagesCache.set(`${instanceId}_${result.key.id}`, true);
+                                setTimeout(() => epClass.humanMessagesCache && epClass.humanMessagesCache.delete(`${instanceId}_${result.key.id}`), 60000);
+                            }
                         }
                         const mockUpsert = {
                             messages: [result],
                             type: 'notify'
                         };
-                        await ep.handleMessageUpsert(tenantId, instanceId, sock, mockUpsert);
+                        if (typeof processor.handleMessageUpsert === 'function') {
+                            await processor.handleMessageUpsert(tenantId, instanceId, sock, mockUpsert);
+                        }
                     }
                 } catch (compatErr) {
                     console.error(`[QueueProcessor/Compatibility] Erro ao sincronizar mensagem enviada com as tabelas legadas:`, compatErr.message);
