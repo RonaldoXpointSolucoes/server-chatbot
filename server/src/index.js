@@ -831,20 +831,26 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
         if (process.env.DISABLE_AUTO_START_SESSIONS === 'true') {
             console.log("[Worker Boot] Auto-start de instâncias desabilitado via configuração (DISABLE_AUTO_START_SESSIONS=true).");
         } else {
-            const isAlphaWorker = APP_ENV === 'alpha' || NODE_ID.includes('alpha');
-            
-            if (isAlphaWorker && process.env.AUTO_START_ALPHA_ALL !== 'true') {
+             if (isAlphaWorker && process.env.AUTO_START_ALPHA_ALL !== 'true') {
                 console.log("[Worker Boot/Alpha] Nó de Homologação/Alpha detectado. Auto-start restrito exclusivamente a instâncias de teste homologadas (FoodNext / Ronaldo-Web)...");
                 const testInstanceIds = HOMOLOG_ALLOWED_INSTANCES;
                 const { data: testLeases } = await supabase
                     .from('whatsapp_instances')
-                    .select('id, tenant_id')
+                    .select('id, tenant_id, assigned_node_id, updated_at')
                     .in('id', testInstanceIds)
                     .in('status', ['connected', 'connecting', 'qr_ready', 'reconnecting', 'reconnecting_local']);
 
                 if (testLeases && testLeases.length > 0) {
-                    console.log(`[Worker Boot/Alpha] Retomando ${testLeases.length} sockets de teste homologados...`);
                     for (const instance of testLeases) {
+                        const isProdActive = instance.assigned_node_id && 
+                            (instance.assigned_node_id === 'production-worker' || instance.assigned_node_id.includes('prod')) &&
+                            instance.updated_at && (Date.now() - new Date(instance.updated_at).getTime() < 30000);
+
+                        if (isProdActive) {
+                            console.log(`[Worker Boot/Alpha] Instância ${instance.id} já está ativa sob o nó de Produção (${instance.assigned_node_id}). Preservando produção.`);
+                            continue;
+                        }
+
                         sessionManager.createSession(instance.tenant_id, instance.id, false).catch(e => {
                             console.warn(`[Worker Boot/Alpha] Aviso ao iniciar socket de teste ${instance.id}: ${e.message}`);
                         });
@@ -861,9 +867,8 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
                 if (activeLeases && activeLeases.length > 0) {
                     console.log(`[Worker Boot/Produção] Retomando ${activeLeases.length} sockets em produção...`);
                     for (const instance of activeLeases) {
-                        const isHomologInst = HOMOLOG_ALLOWED_INSTANCES.includes(instance.id);
                         const startSessionWithRetry = (attempt = 1) => {
-                            const forceTakeover = attempt >= 2 && !isHomologInst;
+                            const forceTakeover = attempt >= 2;
                             sessionManager.createSession(instance.tenant_id, instance.id, forceTakeover).catch(e => {
                                  const isLockError = e.message && (e.message.includes('lock ativo') || e.message.includes('Lock negado') || e.message.includes('Conexão negada'));
                                  if (isLockError && attempt < 3) {
@@ -877,7 +882,6 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
                             });
                         };
                         startSessionWithRetry();
-                        await new Promise(r => setTimeout(r, 1200));
                     }
                 }
             }

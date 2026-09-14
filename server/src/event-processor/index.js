@@ -1305,11 +1305,12 @@ class EventProcessor {
                  };
              }).filter(m => m.conversation_id);
 
-             // 4.1 Deduplicação em memória dentro do próprio lote (evita colisão intra-lote de unique_whatsapp_message_id)
+             // 4.1 Deduplicação em memória dentro do próprio lote (evita colisão intra-lote de unique_whatsapp_message_id: tenant_id + instance_id + whatsapp_message_id)
              const seenInBatch = new Set();
              const messagesToInsert = [];
              for (const m of mappedMessages) {
-                 const dedupeKey = `${m.tenant_id}_${m.whatsapp_message_id}`;
+                 const safeInstanceId = m.instance_id || 'null_instance';
+                 const dedupeKey = `${m.tenant_id}_${safeInstanceId}_${m.whatsapp_message_id}`;
                  if (m.whatsapp_message_id) {
                      if (!seenInBatch.has(dedupeKey)) {
                          seenInBatch.add(dedupeKey);
@@ -1329,10 +1330,13 @@ class EventProcessor {
                   if (wIds.length > 0) {
                       try {
                           const { data: existingRows } = await supabase.from('messages')
-                              .select('whatsapp_message_id, tenant_id')
+                              .select('whatsapp_message_id, tenant_id, instance_id')
                               .in('whatsapp_message_id', wIds);
                           if (existingRows) {
-                              existingRows.forEach(r => existingSet.add(`${r.tenant_id}_${r.whatsapp_message_id}`));
+                              existingRows.forEach(r => {
+                                  const safeInst = r.instance_id || 'null_instance';
+                                  existingSet.add(`${r.tenant_id}_${safeInst}_${r.whatsapp_message_id}`);
+                              });
                           }
                       } catch (checkErr) {
                           // Falha silenciosa de checagem
@@ -1340,7 +1344,10 @@ class EventProcessor {
                   }
 
                   // 4.3 Filtra somente as mensagens genuinamente inéditas
-                  const trulyNewMessages = messagesToInsert.filter(m => !existingSet.has(`${m.tenant_id}_${m.whatsapp_message_id}`));
+                  const trulyNewMessages = messagesToInsert.filter(m => {
+                      const safeInst = m.instance_id || 'null_instance';
+                      return !existingSet.has(`${m.tenant_id}_${safeInst}_${m.whatsapp_message_id}`);
+                  });
 
                   if (trulyNewMessages.length > 0) {
                       let { data: insertedMessages, error: msgErr } = await supabase.from('messages')

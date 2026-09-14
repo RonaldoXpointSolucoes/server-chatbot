@@ -2860,9 +2860,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (options?.isIgnored) msg.isIgnored = true;
     if (options?.isIgnoredSilent) msg.isIgnoredSilent = true;
 
+    const rawTargetId = contactId ? getRealContactId(contactId) : null;
+    const targetInstance = contactId && contactId.includes('_') ? contactId.split('_')[1] : null;
+
     // 1. Avalia se precisa acordar (Wake Up) a conversa antes do set
     const currentState = get();
-    const targetContact = currentState.contacts.find(c => c.id === contactId);
+    const targetContact = currentState.contacts.find(c => 
+      c.id === contactId ||
+      (c.conv_id && msg.conversation_id && c.conv_id === msg.conversation_id) ||
+      (rawTargetId && getRealContactId(c.id) === rawTargetId && (!targetInstance || targetInstance === 'default' || c.instance_id === targetInstance))
+    );
     let shouldWakeUp = false;
 
     const isAiPaused = targetContact ? (targetContact.ai_paused === true || targetContact.bot_status === 'paused') : false;
@@ -2880,7 +2887,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // 3. Executa a atualização de estado puramente síncrona
     set((state) => ({
       contacts: state.contacts.map((c) => {
-        if (c.id === contactId) {
+        const isMatch = c.id === contactId ||
+          Boolean(c.conv_id && msg.conversation_id && c.conv_id === msg.conversation_id) ||
+          Boolean(rawTargetId && getRealContactId(c.id) === rawTargetId && (!targetInstance || targetInstance === 'default' || c.instance_id === targetInstance));
+
+        if (isMatch) {
           let updatedStatus = c.conv_status;
           let updatedSnooze = c.snoozed_until;
           if (shouldWakeUp) {
@@ -2909,7 +2920,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
               let updatedMsgs = [...c.messages];
               updatedMsgs[optIndex] = { ...msg, sender: 'human' }; // substitui pelo registro do Realtime com UUID real mantendo verde na UI
               updatedMsgs = sortMessagesChronologically(updatedMsgs);
-              return { ...c, messages: updatedMsgs, conv_status: updatedStatus, snoozed_until: updatedSnooze };
+              return { 
+                ...c, 
+                conv_id: c.conv_id || msg.conversation_id,
+                messages: updatedMsgs, 
+                conv_status: updatedStatus, 
+                snoozed_until: updatedSnooze 
+              };
             }
           }
 
@@ -2922,7 +2939,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
 
           const newMessages = sortMessagesChronologically([...c.messages, msg]);
-          const isChatCurrentlyFocused = state.activeChatId === contactId && (typeof document !== 'undefined' ? document.hasFocus() : true);
+          const isChatCurrentlyFocused = (state.activeChatId === c.id || state.activeChatId === contactId || (c.conv_id && state.activeChatId === c.conv_id)) && (typeof document !== 'undefined' ? document.hasFocus() : true);
 
           let newUnread = c.unread || 0;
           if (msg.sender === 'client' && !isChatCurrentlyFocused) {
@@ -2934,6 +2951,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
           return {
             ...c,
+            conv_id: c.conv_id || msg.conversation_id,
             messages: newMessages,
             conv_status: updatedStatus,
             snoozed_until: updatedSnooze,
@@ -5753,9 +5771,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
         }
 
-        // 3. Concorrência: se ainda não achou a conversa, aguarda 600ms e tenta novamente
+        // 3. Concorrência: se ainda não achou a conversa, aguarda 500ms e tenta novamente
         if (!targetContactId && m.conversation_id) {
-          await new Promise(resolve => setTimeout(resolve, 600));
+          await new Promise(resolve => setTimeout(resolve, 500));
           try {
             const { data: conv } = await supabase
               .from('conversations')
@@ -5775,6 +5793,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (!targetContactId) {
           console.warn('[Realtime] Ignorando msg INSERT por falta de contact_id mapeado:', m);
           return;
+        }
+
+        // Resolução antecipada do contato local por realContactId e instância
+        if (!targetContactLocally && targetContactId) {
+          targetContactLocally = currentState.contacts.find((c: any) =>
+            getRealContactId(c.id) === targetContactId &&
+            (!convInstanceId || convInstanceId === 'default' || c.instance_id === convInstanceId)
+          ) || currentState.contacts.find((c: any) => getRealContactId(c.id) === targetContactId);
+
+          if (targetContactLocally && !targetContactLocally.conv_id && m.conversation_id) {
+            targetContactLocally.conv_id = m.conversation_id;
+          }
         }
 
         const expectedCompositeId = targetContactId + '_' + (convInstanceId || 'default');
@@ -5805,17 +5835,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
         }
 
-        // --- BARREIRA DE SEGURANÇA CONTRA MENSAGENS CRUZADAS ---
-        // Se o contato pertence originalmente ao Ronaldo-Web, ignoramos injeções em tempo real
-        // em qualquer outra conversa que não seja do próprio Ronaldo-Web.
-        const isRonaldoContact = cData.instance_id === '5c78d358-d449-41c4-b396-a04ab20a39e4';
-        if (isRonaldoContact && convInstanceId !== '5c78d358-d449-41c4-b396-a04ab20a39e4') {
-          console.log(`[Realtime Barreira] Ignorando msg INSERT da conversa ${m.conversation_id} porque o contato pertence ao Ronaldo-Web`);
-          return;
-        }
-
-        // CRITICAL FIX: O contato local deve assumir a instância da conversa ativa para não sumir da caixa correta
-        const effectiveInstanceId = convInstanceId || cData.instance_id;
+        // Determina a instância efetiva da mensagem
+        const effectiveInstanceId = convInstanceId || m.instance_id || cData.instance_id;
         cData.instance_id = effectiveInstanceId;
 
         // RBAC RIGOROSO: Verifica se a caixa (effectiveInstanceId) é permitida para o usuário logado
@@ -5892,6 +5913,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         get().addMessageLocally(cid, {
           id: m.id,
           whatsapp_id: m.whatsapp_message_id,
+          conversation_id: m.conversation_id,
           text: advanced.text || m.text_content,
           sender: m.sender_type || 'client',
           mediaUrl: m.media_url,
@@ -5910,7 +5932,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // Reordena o card pra cima e joga notificação +1 Unread caso a aba não seja ele
         set((s) => {
           const u = [...s.contacts];
-          const i = u.findIndex(c => c.id === cid);
+          const i = u.findIndex(c => c.id === cid || (c.conv_id && m.conversation_id && c.conv_id === m.conversation_id) || (targetContactId && getRealContactId(c.id) === targetContactId));
           if (i !== -1) {
             const updatedContact = { ...u[i] };
 
