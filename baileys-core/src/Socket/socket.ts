@@ -700,7 +700,7 @@ export const makeSocket = (config: SocketConfig) => {
 					},
 					content: [{ tag: 'ping', attrs: {} }]
 				}).catch(err => {
-					logger.error({ trace: err.stack }, 'error in sending keep alive')
+					logger.debug({ trace: err?.stack }, 'error in sending keep alive')
 				})
 			} else {
 				logger.warn('keep alive called when WS not open')

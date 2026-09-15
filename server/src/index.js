@@ -131,6 +131,17 @@ app.get('/health', (req, res) => {
     });
 });
 
+// Endpoint padrão robots.txt para evitar erros 404 com bots e crawlers
+app.get('/robots.txt', (req, res) => {
+    res.type('text/plain');
+    res.send('User-agent: *\nDisallow: /\n');
+});
+
+// Endpoint favicon.ico
+app.get('/favicon.ico', (req, res) => {
+    res.status(204).end();
+});
+
 // Endpoint de Prontidão (/ready) - Usado pelo Coolify Health Check
 app.get('/ready', async (req, res) => {
     try {
@@ -349,6 +360,8 @@ app.use((req, res, next) => {
     
     // Filtro de varreduras automatizadas conhecidas (bots / scanners WordPress, PHP, .env, etc.)
     const isBotScannerProbe = 
+        reqPath.includes('robots.txt') ||
+        reqPath.includes('favicon.ico') ||
         reqPath.includes('wp-json') ||
         reqPath.includes('rest_route') ||
         reqPath.includes('wp-admin') ||

@@ -110,7 +110,7 @@ function interceptConsole() {
         return;
     }
 
-    // Silencia erros rotineiros de reconexão / descriptografia do protocolo Signal (Baileys Bad MAC) do DevLogger UI
+    // Silencia erros rotineiros de reconexão / descriptografia do protocolo Signal (Baileys Bad MAC) e oscilações keep-alive do DevLogger UI
     const isBaileysDecryptError = text.includes('Bad MAC') ||
                                   text.includes('Failed to decrypt message with any known session') ||
                                   text.includes('Session error:Error: Bad MAC') ||
@@ -123,6 +123,8 @@ function interceptConsole() {
                                   text.includes('Connection Terminated') ||
                                   text.includes('status 428') ||
                                   text.includes('[QueueProcessor]') ||
+                                  text.includes('error in sending keep alive') ||
+                                  text.includes('keep alive called when WS not open') ||
                                   (text.includes('[Baileys]') && text.includes('connection errored')) ||
                                   (text.includes('libsignal') && text.includes('session_cipher'));
     if (isBaileysDecryptError) {

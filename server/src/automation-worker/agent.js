@@ -412,8 +412,9 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
         const now = Date.now();
         const cacheKey = tenantId + '_' + (botSettings?.id || 'default');
         let cache = cardapioInMemoryCache.get(cacheKey);
+        const previousValidCache = (cache && cache.produtos && cache.produtos.length > 0) ? cache : null;
         
-        const NEGATIVE_CACHE_TTL = 3 * 60 * 1000; // 3 minutos para cache de cardápio vazio
+        const NEGATIVE_CACHE_TTL = 15 * 60 * 1000; // 15 minutos para cache de cardápio vazio (evita sobrecarga repetitiva da Gastrofood)
         if (cache) {
             const isNegative = cache.origem === 'vazio';
             const effectiveTtl = isNegative ? NEGATIVE_CACHE_TTL : CACHE_TTL;
@@ -547,15 +548,16 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
                                 response: parsed
                             });
 
-                            // Se houver um identificador alternativo que não foi usado, tenta uma única vez com ele
+                            // Se houver um identificador alternativo que não foi usado, tenta mais 1 vez com ele após 2s de delay
                             const altId = companySettings?.gfood_guid || companySettings?.gfood_store_id;
                             if (attempt === 1 && altId && bodyObj.AGuidEstab !== altId && bodyObj.AIdStore !== altId) {
                                 bodyObj = injectStoreId(bodyObj, altId);
-                                console.log(`[Gastrofood API] Cardápio retornou 0 produtos. Re-tentando 1 vez com identificador alternativo (${altId})...`);
+                                console.log(`[CardapioCache - Gastrofood] Cardápio retornou 0 produtos. Re-tentando 1 vez em 2s com identificador alternativo (${altId})...`);
+                                await new Promise(r => setTimeout(r, 2000));
                                 continue;
                             }
 
-                            console.info(`[Gastrofood API] Cardápio permaneceu com 0 produtos no ERP nuvem para o tenant ${tenantId}. Ativando fallback resiliente do banco local.`);
+                            console.log(`[CardapioCache - Gastrofood] Cardápio retornou 0 produtos no ERP nuvem para tenant ${tenantId}. Ativando proteção e fallback resiliente.`);
                             break;
                         } else {
                             const errText = await res.text();
@@ -656,8 +658,18 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
         }
     }
 
-    // Fallback de Resiliência: se a API foi consultada mas falhou ou retornou 0 produtos, tenta carregar do Supabase local para não deixar o cliente sem atendimento.
+    // Fallback de Resiliência: se a API foi consultada mas falhou ou retornou 0 produtos:
     if (apiAttempted && !cache) {
+        // 1. STALE-WHILE-REVALIDATE: Se já tínhamos um cardápio válido em cache antes, mantemos ele ativo!
+        if (previousValidCache) {
+            previousValidCache.timestamp = now;
+            previousValidCache.origem = 'stale_while_revalidate';
+            cardapioInMemoryCache.set(cacheKey, previousValidCache);
+            console.log(`[CardapioCache - Resiliência Stale] API Gastrofood retornou 0 produtos temporariamente. Preservando último cardápio válido em cache (${previousValidCache.produtos.length} produtos) para não interromper atendimento.`);
+            return previousValidCache;
+        }
+
+        // 2. Fallback para o Supabase local
         try {
             console.log(`[CardapioCache - Fallback Resiliência] API não retornou produtos válidos. Tentando resgatar cardápio do Supabase local...`);
             const { data: dbProdutos } = await supabase
@@ -690,7 +702,7 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
         }
     }
     
-    // Se tudo falhar, armazena um cache vazio temporário (3 minutos) para proteger a API e evitar lentidão contínua
+    // Se tudo falhar, armazena um cache vazio temporário (15 minutos) para proteger a API e evitar repetições contínuas
     const emptyCache = {
         produtos: [],
         grupos: [],

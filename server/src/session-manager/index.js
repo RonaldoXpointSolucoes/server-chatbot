@@ -781,7 +781,7 @@ class SessionManager {
                 markOnlineOnConnect: true,
                 emitOwnEvents: true,
                 connectTimeoutMs: 90000,
-                keepAliveIntervalMs: 15000,
+                keepAliveIntervalMs: 25000,
                 defaultQueryTimeoutMs: 90000,
                 retryRequestDelayMs: 3000,
                 maxMsgRetryCount: 5, // Ativado (5 retentativas) com busca no DB e controle de cache para garantir 100% das entregas
@@ -847,6 +847,7 @@ class SessionManager {
                                         fullErrStr.includes('epipe') || 
                                         fullErrStr.includes('etimedout') || 
                                         fullErrStr.includes('closed') || 
+                                        fullErrStr.includes('keep alive') || 
                                         fullErrStr.includes('eai_again') || 
                                         fullErrStr.includes('enotfound');
 
@@ -1130,11 +1131,14 @@ class SessionManager {
                         status === 504 || 
                         status === 408 || 
                         status === 405 || 
+                        status === DisconnectReason.timedOut ||
+                        status === DisconnectReason.connectionLost ||
                         reason.toLowerCase().includes('timed out') ||
                         reason.toLowerCase().includes('timeout') ||
                         reason.toLowerCase().includes('connection terminated') || 
                         reason.toLowerCase().includes('connection lost') ||
                         reason.toLowerCase().includes('econnreset') ||
+                        reason.toLowerCase().includes('stream erased') ||
                         reason.toLowerCase().includes('socket offline')
                     );
 
