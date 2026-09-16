@@ -1336,6 +1336,113 @@ class AutomationWorker {
         }
     }
 
+    // Tracker para garantir disparo ÚNICO de aviso de impressão por conversa (evita repetições e loops)
+    static avisoImpressaoSentTracker = new Map();
+
+    async triggerAvisoImpressaoSeAtivo({ tenantId, conversationId, contactInfo, jid, companySettings, motivo, textMessage }) {
+        try {
+            const estab = (companySettings?.aviso_impressao_estabelecimento || '').trim();
+            const impressora = (companySettings?.aviso_impressao_impressora || '').trim();
+
+            // 1. REGRA DE NEGÓCIO ESTRITA: Automação só é ativa se AMBOS os campos 1 e 2 estiverem preenchidos
+            if (!estab || !impressora) {
+                return false;
+            }
+
+            // 2. REGRA ANTI-LOOP: Disparar uma ÚNICA vez por ciclo de atendimento (Janela de 30 minutos)
+            const trackerKeys = [];
+            if (conversationId) trackerKeys.push(`conv_${conversationId}`);
+            if (jid) trackerKeys.push(`jid_${jid}`);
+            const rawDigitsPhone = (contactInfo?.phone || jid || '').replace(/\D/g, '').slice(-11);
+            if (rawDigitsPhone) trackerKeys.push(`phone_${rawDigitsPhone}`);
+
+            const now = Date.now();
+            for (const key of trackerKeys) {
+                const lastSent = AutomationWorker.avisoImpressaoSentTracker.get(key);
+                if (lastSent && (now - lastSent < 30 * 60 * 1000)) {
+                    console.log(`[AvisoImpressao] Impressão já disparada recentemente para ${key} (há ${Math.round((now - lastSent)/1000)}s). Anti-loop ativo (disparo único).`);
+                    return false;
+                }
+            }
+
+            // Registra todas as chaves no tracker para proteção anti-loop completa
+            for (const key of trackerKeys) {
+                AutomationWorker.avisoImpressaoSentTracker.set(key, now);
+            }
+
+            // 3. Montar mensagem simples e ultra encurtada (bobina térmica física de 40 colunas)
+            // Formato solicitado: 'O cliente Carlos, do WhatsApp tal, quer tirar dúvida X'
+            const rawName = (contactInfo?.name && contactInfo.name !== 'Cliente' && contactInfo.name !== 'Cliente Simulador')
+                ? contactInfo.name.trim().split(' ')[0]
+                : '';
+            const nomeStr = rawName ? `Carlos` : 'o cliente';
+
+            let phoneFormatted = rawDigitsPhone;
+            if (rawDigitsPhone.length === 11) {
+                phoneFormatted = `(${rawDigitsPhone.substring(0, 2)}) ${rawDigitsPhone.substring(2, 7)}-${rawDigitsPhone.substring(7)}`;
+            } else if (rawDigitsPhone.length === 10) {
+                phoneFormatted = `(${rawDigitsPhone.substring(0, 2)}) ${rawDigitsPhone.substring(2, 6)}-${rawDigitsPhone.substring(6)}`;
+            }
+
+            // Resumo do motivo ou dúvida (encurtado ao máximo para caber em 40 colunas)
+            let duvidaResumida = '';
+            if (motivo && typeof motivo === 'string' && motivo.trim()) {
+                duvidaResumida = motivo.trim();
+            } else if (textMessage && typeof textMessage === 'string' && textMessage.trim()) {
+                duvidaResumida = textMessage.trim();
+            }
+
+            // Limpa quebras de linha e normaliza espaços
+            duvidaResumida = duvidaResumida.replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+            // Remove comandos ou saudações genéricas do início para deixar apenas a dúvida real
+            duvidaResumida = duvidaResumida
+                .replace(/^(ol[áa]|oi|bom dia|boa tarde|boa noite|por favor|quero falar com atendente|falar com atendente|atendente|humano|atendimento humano|suporte)\b[,\.\s]*/i, '')
+                .trim();
+
+            if (duvidaResumida.length > 25) {
+                duvidaResumida = duvidaResumida.substring(0, 22) + '...';
+            }
+
+            let msgTexto = '';
+            const clientePrefix = rawName ? `O cliente ${rawName}` : 'O cliente';
+            if (duvidaResumida) {
+                msgTexto = `${clientePrefix}, do WhatsApp ${phoneFormatted}, quer tirar duvida: ${duvidaResumida}`;
+            } else {
+                msgTexto = `${clientePrefix}, do WhatsApp ${phoneFormatted}, quer atendimento`;
+            }
+
+            // Limite de segurança para 40 colunas (no máximo 75 caracteres para 2 linhas na bobina)
+            if (msgTexto.length > 75) {
+                msgTexto = msgTexto.substring(0, 72) + '...';
+            }
+
+            const baseUrl = companySettings.aviso_impressao_url || 'https://service.xpointsolucoes.com.br:8443/v6/server/nuvem/GestorPedidosService/EnviarMensagemAtendente';
+            const cleanBaseUrl = baseUrl.split('?')[0];
+            const fullUrl = `${cleanBaseUrl}?e=${encodeURIComponent(estab)}&d=${encodeURIComponent(impressora)}&m=${encodeURIComponent(msgTexto)}`;
+
+            console.log(`[AvisoImpressao] Disparando aviso de impressão para PDV (impressora "${impressora}", loja "${estab}"): ${fullUrl}`);
+
+            // Disparo assíncrono não-bloqueante
+            fetch(fullUrl, {
+                method: 'GET',
+                headers: { 'Accept': 'application/json, text/plain, */*' },
+                signal: AbortSignal.timeout(7000)
+            })
+            .then((res) => {
+                console.log(`[AvisoImpressao] Sucesso ao disparar para impressora "${impressora}" da loja "${estab}". Status HTTP: ${res.status}`);
+            })
+            .catch((err) => {
+                console.warn(`[AvisoImpressao] Falha ao disparar para impressora "${impressora}" (PDV offline?):`, err.message);
+            });
+
+            return true;
+        } catch (err) {
+            console.error(`[AvisoImpressao] Erro inesperado ao disparar aviso de impressão:`, err.message);
+            return false;
+        }
+    }
+
     startCardapioBackgroundSync() {
         console.log("[CardapioSync] Inicializando Agendador de Sincronização do Cardápio (a cada 60m)...");
         
@@ -2129,6 +2236,15 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                 basePrompt += `\n\n### INSTRUÇÕES DE COMPORTAMENTO PERSONALIZADAS ###\nImportante: Siga estritamente as diretrizes e regras de personalidade a seguir em todas as interações:\n${botInstructions}\n`;
             }
 
+            // Diretrizes Oficiais de Atendimento Humano e Aviso de Impressão
+            basePrompt += `\n\n### DIRETRIZES DE TRANSFERÊNCIA PARA ATENDENTE HUMANO ###\n` +
+                          `1. Quando o cliente solicitar falar com uma pessoa, atendente humano, funcionário da loja, ou apresentar uma dúvida ou pedido de suporte que necessite de atendimento humano:\n` +
+                          `   - Chame imediatamente a ferramenta "Escalar_humano", preenchendo no parâmetro "motivo" um resumo ultra encurtado da dúvida/assunto (ex: "entrega no bairro", "pagamento cartão", "falar com atendente").\n` +
+                          `   - Na sua resposta ao cliente no WhatsApp, avise-o cordialmente com brevidade:\n` +
+                          `     "Vou chamar uma pessoa responsável para te atender e tirar sua dúvida! Um momento, por favor. 😊"\n` +
+                          `   - Não prolongue o assunto nem faça perguntas adicionais após informar que chamará o atendente humano.\n`;
+
+
             // Diretrizes de Horário de Funcionamento
             let storeStatusText = `\n\n### STATUS E HORÁRIO DE ATENDIMENTO ###\n` +
                                   `- Status Atual da Loja: ${isClosed ? 'FECHADA' : 'ABERTA'}\n` +
@@ -2562,7 +2678,16 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                             if (conversationId) {
                                 await supabase.from('conversations').update({ status: 'open', ai_paused: true }).eq('id', conversationId);
                             }
-                            functionResult = { status: "Atendimento transferido. Encerre sua participação." };
+                            this.triggerAvisoImpressaoSeAtivo({
+                                tenantId,
+                                conversationId,
+                                contactInfo,
+                                jid,
+                                companySettings,
+                                motivo: call.args?.motivo,
+                                textMessage
+                            });
+                            functionResult = { status: "Atendimento transferido para a equipe humana. Encerre sua participação informando cordial e brevemente ao cliente que uma pessoa responsável foi chamada para atendê-lo." };
                         }
                         else if (call.name === "Atualizar_nome_contato") {
                             if (contactId) {
@@ -3781,6 +3906,32 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
                     response_preview: finalResponseText ? finalResponseText.substring(0, 150) : ''
                 }).catch(()=>{});
             } catch (logErr) {}
+
+            // 4. Detecção e Acionamento de Aviso de Impressão quando a IA transferir/chamar humano no texto
+            if (finalResponseText && typeof finalResponseText === 'string') {
+                const isHandoffResponse = /(chamar|transferir|encaminhar|passar|acionar)\s+(um|uma|o|a)?\s*(atendente|humano|pessoa|equipe|respons[áa]vel|operador)/i.test(finalResponseText) ||
+                                          /vou\s+chamar\s+(uma\s+pessoa|algu[ée]m|um\s+atendente)/i.test(finalResponseText) ||
+                                          /atendente\s+humano/i.test(finalResponseText) ||
+                                          /transferindo\s+(voc[êe]|o\s+atendimento)/i.test(finalResponseText);
+
+                if (isHandoffResponse) {
+                    console.log(`[AutomationWorker] Detecção de transferência humana no texto da resposta: "${finalResponseText.substring(0, 80)}..."`);
+                    if (conversationId) {
+                        supabase.from('conversations').update({ status: 'open', ai_paused: true }).eq('id', conversationId).catch((err)=>{
+                            console.warn('[AutomationWorker] Falha ao pausar IA na conversa:', err.message);
+                        });
+                    }
+                    this.triggerAvisoImpressaoSeAtivo({
+                        tenantId,
+                        conversationId,
+                        contactInfo,
+                        jid,
+                        companySettings,
+                        motivo: textMessage,
+                        textMessage
+                    });
+                }
+            }
 
             finalResponseText = formatAiMessageForWhatsApp(finalResponseText);
             return finalResponseText;

@@ -703,15 +703,12 @@ export default function AccountSettings() {
 
   // Estados para Aviso de Impressão (Impressora do Estabelecimento)
   const [avisoImpressaoEstabelecimento, setAvisoImpressaoEstabelecimento] = useState('');
-  const [avisoImpressaoImpressora, setAvisoImpressaoImpressora] = useState('CAIXA');
-  const [avisoImpressaoMensagem, setAvisoImpressaoMensagem] = useState('Mensagem do Cliente');
+  const [avisoImpressaoImpressora, setAvisoImpressaoImpressora] = useState('');
+  const [avisoImpressaoMensagem, setAvisoImpressaoMensagem] = useState('Teste Recado Impressora');
   const [isAvisoImpressaoExpanded, setIsAvisoImpressaoExpanded] = useState(false);
   const [avisoImpressaoLoading, setAvisoImpressaoLoading] = useState(false);
   const [avisoImpressaoResult, setAvisoImpressaoResult] = useState<any>(null);
   const [avisoImpressaoError, setAvisoImpressaoError] = useState('');
-  const [copiedAvisoLink, setCopiedAvisoLink] = useState(false);
-  const [rawPastedAvisoLink, setRawPastedAvisoLink] = useState('');
-  const [isPastingAvisoLink, setIsPastingAvisoLink] = useState(false);
 
   const getAvisoImpressaoFullUrl = (estab = avisoImpressaoEstabelecimento, imp = avisoImpressaoImpressora, msg = avisoImpressaoMensagem) => {
     const params = new URLSearchParams();
@@ -720,48 +717,6 @@ export default function AccountSettings() {
     if (msg) params.set('m', msg);
     const qs = params.toString();
     return `${AVISO_IMPRESSAO_DEFAULT_URL}${qs ? `?${qs}` : ''}`;
-  };
-
-  const handleParseAvisoImpressaoLink = (rawUrl: string) => {
-    try {
-      if (!rawUrl || !rawUrl.trim()) return;
-      const urlStr = rawUrl.trim();
-      let searchParams: URLSearchParams | null = null;
-      if (urlStr.includes('?')) {
-        searchParams = new URLSearchParams(urlStr.split('?')[1]);
-      } else {
-        searchParams = new URLSearchParams(urlStr);
-      }
-
-      if (searchParams) {
-        const eVal = searchParams.get('e');
-        const dVal = searchParams.get('d');
-        const mVal = searchParams.get('m');
-
-        if (eVal) setAvisoImpressaoEstabelecimento(eVal);
-        if (dVal) setAvisoImpressaoImpressora(dVal);
-        if (mVal) setAvisoImpressaoMensagem(mVal);
-
-        setRawPastedAvisoLink('');
-        setIsPastingAvisoLink(false);
-
-        window.dispatchEvent(new CustomEvent('toast', {
-          detail: {
-            message: 'Variáveis do Aviso de Impressão extraídas com sucesso!',
-            type: 'success'
-          }
-        }));
-      }
-    } catch (err: any) {
-      console.error('Erro ao interpretar link de aviso de impressão:', err);
-    }
-  };
-
-  const handleCopyAvisoImpressaoLink = () => {
-    const fullUrl = getAvisoImpressaoFullUrl();
-    navigator.clipboard.writeText(fullUrl);
-    setCopiedAvisoLink(true);
-    setTimeout(() => setCopiedAvisoLink(false), 2000);
   };
 
   const handleTestAvisoImpressao = async () => {
@@ -1408,8 +1363,8 @@ export default function AccountSettings() {
       setGeolocJsonPayload(settings.geoloc_json_payload || DEFAULT_GEOLOC_PAYLOAD);
 
       setAvisoImpressaoEstabelecimento(settings.aviso_impressao_estabelecimento || '');
-      setAvisoImpressaoImpressora(settings.aviso_impressao_impressora || 'CAIXA');
-      setAvisoImpressaoMensagem(settings.aviso_impressao_mensagem || 'Mensagem do Cliente');
+      setAvisoImpressaoImpressora(settings.aviso_impressao_impressora || '');
+      setAvisoImpressaoMensagem(settings.aviso_impressao_mensagem || 'Teste Recado Impressora');
       
       if (settings.endpoint_instructions) {
         setEndpointInstructions(settings.endpoint_instructions);
@@ -3656,98 +3611,34 @@ export default function AccountSettings() {
               </div>
             </div>
 
-            {/* Link Principal Travado (Read-Only) com Opção de Copiar */}
-            <div className="bg-white/60 dark:bg-[#182229] border border-gray-200/80 dark:border-[#2a3942] rounded-2xl p-4 sm:p-5 space-y-3 shadow-sm">
-              <div className="flex items-center justify-between gap-2">
-                <label className="text-xs font-bold text-gray-700 dark:text-gray-200 flex items-center gap-2">
-                  <LinkIcon size={14} className="text-amber-500" />
-                  Link do Endpoint de Impressão (Gerado Automaticamente)
-                </label>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] bg-amber-500/10 text-amber-600 dark:text-amber-400 font-bold px-2 py-0.5 rounded-full border border-amber-500/20">
-                    Travado (Somente Leitura)
-                  </span>
+            {/* Banner de Status da Regra de Negócio: Ativo vs Inativo */}
+            {avisoImpressaoEstabelecimento.trim() && avisoImpressaoImpressora.trim() ? (
+              <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/25 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs text-emerald-800 dark:text-emerald-300 animate-in fade-in duration-200 shadow-sm">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
+                  <span className="font-bold">Status da Automação: ATIVA & FUNCIONAL</span>
                 </div>
+                <span className="text-[11px] text-emerald-700 dark:text-emerald-400">
+                  A IA imprimirá o recado na impressora <strong>{avisoImpressaoImpressora}</strong> quando transferir para humano.
+                </span>
               </div>
-
-              {/* Caixa da URL Travada com Botão Copiar */}
-              <div className="relative flex items-center">
-                <input
-                  type="text"
-                  readOnly
-                  value={getAvisoImpressaoFullUrl()}
-                  placeholder="https://service.xpointsolucoes.com.br:8443/v6/server/nuvem/GestorPedidosService/EnviarMensagemAtendente?e=burguerplus&d=CAIXA&m=Mensagem do Cliente"
-                  className="w-full bg-[#f0f2f5] dark:bg-[#111b21] border border-gray-200 dark:border-[#304046] rounded-xl pl-3.5 pr-28 py-2.5 text-xs font-mono text-amber-700 dark:text-amber-300 outline-none select-all cursor-default shadow-inner"
-                />
-                <button
-                  type="button"
-                  onClick={handleCopyAvisoImpressaoLink}
-                  className="absolute right-1.5 px-3 py-1.5 bg-white dark:bg-[#202c33] hover:bg-amber-50 dark:hover:bg-amber-950/30 text-gray-700 dark:text-gray-200 hover:text-amber-600 dark:hover:text-amber-400 border border-gray-200 dark:border-[#304046] rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm active:scale-95"
-                  title="Copiar URL completa de impressão"
-                >
-                  {copiedAvisoLink ? (
-                    <>
-                      <Check size={13} className="text-emerald-500" />
-                      <span className="text-emerald-500 font-bold text-[11px]">Copiado!</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy size={13} />
-                      <span className="text-[11px]">Copiar</span>
-                    </>
-                  )}
-                </button>
+            ) : (
+              <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/25 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs text-amber-800 dark:text-amber-300 animate-in fade-in duration-200 shadow-sm">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-400 shrink-0"></span>
+                  <span className="font-bold">Status da Automação: INATIVA</span>
+                </div>
+                <span className="text-[11px] text-amber-700 dark:text-amber-400">
+                  Preencha o <strong>Estabelecimento (1)</strong> e a <strong>Impressora (2)</strong> para ativar a automação.
+                </span>
               </div>
-
-              {/* Opção Inteligente de Colar Link Completo para Extração Automática */}
-              <div className="pt-1">
-                {!isPastingAvisoLink ? (
-                  <button
-                    type="button"
-                    onClick={() => setIsPastingAvisoLink(true)}
-                    className="text-[11px] font-semibold text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 flex items-center gap-1.5 transition-colors"
-                  >
-                    <Sparkles size={12} />
-                    Colar link pronto para preencher os 3 campos automaticamente
-                  </button>
-                ) : (
-                  <div className="bg-amber-500/5 dark:bg-black/20 border border-amber-500/20 rounded-xl p-3 space-y-2 animate-in fade-in duration-200">
-                    <span className="text-[11px] font-bold text-gray-700 dark:text-gray-300 block">
-                      Cole a URL completa abaixo:
-                    </span>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={rawPastedAvisoLink}
-                        onChange={(e) => setRawPastedAvisoLink(e.target.value)}
-                        placeholder="Ex: https://service.xpointsolucoes.com.br:8443/.../EnviarMensagemAtendente?e=burguerplus&d=CAIXA&m=Mensagem"
-                        className="flex-1 bg-white dark:bg-[#202c33] border border-gray-200 dark:border-[#304046] rounded-lg px-3 py-1.5 text-xs text-gray-800 dark:text-gray-200 outline-none font-mono"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleParseAvisoImpressaoLink(rawPastedAvisoLink)}
-                        className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white font-semibold rounded-lg text-xs transition-all shrink-0 active:scale-95"
-                      >
-                        Extrair
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => { setIsPastingAvisoLink(false); setRawPastedAvisoLink(''); }}
-                        className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-white/5"
-                      >
-                        <X size={15} />
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
+            )}
 
             {/* As 3 Caixas para Preenchimento Manual */}
             <div className="space-y-4">
               <div className="flex items-center gap-2">
                 <span className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                  Variáveis de Configuração Manual
+                  Variáveis de Configuração
                 </span>
                 <div className="flex-1 h-px bg-gray-200 dark:bg-white/10" />
               </div>
@@ -3821,21 +3712,21 @@ export default function AccountSettings() {
                 </div>
               </div>
 
-              {/* Variável 3: Texto da Mensagem (m) */}
+              {/* Variável 3: Mensagem de Teste (m) */}
               <div className="space-y-1.5">
                 <label className="text-xs font-bold text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
                   <FileText size={14} className="text-amber-500" />
-                  3. Texto da Mensagem / Recado (m)
+                  3. Mensagem de Teste (m) - Utilizada para testar o envio nesta tela
                 </label>
                 <textarea
                   value={avisoImpressaoMensagem}
                   onChange={(e) => setAvisoImpressaoMensagem(e.target.value)}
-                  placeholder="Ex: Mensagem do Cliente"
+                  placeholder="Ex: Teste Recado Impressora CAIXA"
                   rows={2}
                   className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-3.5 py-2.5 text-xs text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-amber-500/50 transition-all placeholder:text-gray-400 resize-y"
                 />
                 <p className="text-[11px] text-gray-500 dark:text-[#8696a0]">
-                  Texto impresso na folha física. Em fluxos automáticos da Luna IA, este campo é substituído pela mensagem dinâmica.
+                  Campo exclusivo para teste pontual. Em atendimentos reais, a IA gera automaticamente um recado resumido (40 colunas) avisando que o cliente aguarda atendimento e dispara o link uma única vez.
                 </p>
               </div>
             </div>
