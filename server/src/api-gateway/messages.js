@@ -168,8 +168,9 @@ router.post(['/', '/send', '/messages/send', '/sendText', '/send-text'], require
 
         res.json({ ok: true, messageId: savedMsg.id });
     } catch (e) {
-        console.error("Erro disparando msg", e);
-        res.status(500).json({ error: e.message });
+        const errMessage = e?.message || (typeof e === 'string' ? e : (e ? JSON.stringify(e) : 'Erro interno desconhecido ao processar envio'));
+        console.error("[API Gateway] [messages/send] Erro disparando msg:", errMessage);
+        res.status(500).json({ error: errMessage });
     }
 });
 

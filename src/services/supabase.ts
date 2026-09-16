@@ -242,6 +242,15 @@ supabase.auth.onAuthStateChange((event, session) => {
     }
   }
 
+  if (event === 'TOKEN_REFRESHED' && session?.access_token) {
+    try {
+      supabase.realtime.setAuth(session.access_token);
+      console.log('[Supabase Realtime] Token JWT renovado automaticamente via TOKEN_REFRESHED.');
+    } catch (realtimeErr) {
+      console.warn('[Supabase Realtime] Falha ao sincronizar novo token JWT:', realtimeErr);
+    }
+  }
+
   if (event === 'SIGNED_OUT') {
     const isExplicitLogout = typeof window !== 'undefined' && sessionStorage.getItem('user_explicit_logout') === 'true';
     const isKeepLogged = typeof window !== 'undefined' && (localStorage.getItem('keep_logged') === 'true');

@@ -61,6 +61,14 @@ class QueueProcessor {
                     // Se a instância está sob lease ativo de outro worker, este nó não deve processá-la
                     if (isLockedByOther) continue;
 
+                    // Isolamento de concorrência: só processa se a instância estiver vinculada a este nó ou se houver sessão ativa na RAM local
+                    const { default: sessionManager } = await import('./index.js');
+                    const isOwnedByMe = assignedNodeId === currentNodeId;
+                    const hasLocalSession = sessionManager.sessions.has(instanceId);
+                    if (!isOwnedByMe && !hasLocalSession) {
+                        continue;
+                    }
+
                     // Se já houver um processador rodando para esta instância, pula para não enviar em paralelo
                     if (this.activeProcessors.has(instanceId)) continue;
 

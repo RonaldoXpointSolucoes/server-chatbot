@@ -544,7 +544,8 @@ router.post([
             status: "PENDING"
         });
     } catch (e) {
-        const isConnClosed = e.message?.includes('Connection Closed') || e.message?.includes('WebSocket não aberto') || e.message?.includes('desconectada') || e.message?.includes('offline');
+        const errMessage = e?.message || (typeof e === 'string' ? e : (e ? JSON.stringify(e) : 'Erro interno desconhecido ao processar envio'));
+        const isConnClosed = errMessage.includes('Connection Closed') || errMessage.includes('WebSocket não aberto') || errMessage.includes('desconectada') || errMessage.includes('offline') || errMessage.includes('socket indisponível');
 
         // Se a conexão fechou durante o envio, garante entrega salvando no outbox resiliente
         if (isConnClosed && id && number && text) {
@@ -567,14 +568,14 @@ router.post([
                     queue_id: queued?.id || null
                 });
             } catch (qErr) {
-                console.error('[API Gateway] [sendText] Falha no fallback para outbox:', qErr.message);
+                console.error('[API Gateway] [sendText] Falha no fallback para outbox:', qErr?.message || qErr);
             }
         }
 
         const statusCode = isConnClosed ? 503 : 500;
-        console.error(`[API Gateway] [sendText] ❌ Falha ${statusCode} ao Enviar Mensagem: ${e.message} | Instância: ${id} ("${display_name}") | Destino: ${number}`);
+        console.error(`[API Gateway] [sendText] ❌ Falha ${statusCode} ao Enviar Mensagem: ${errMessage} | Instância: ${id} ("${display_name}") | Destino: ${number}`);
         res.status(statusCode).json({
-            error: e.message,
+            error: errMessage,
             code: isConnClosed ? 'WHATSAPP_SOCKET_UNAVAILABLE' : 'INTERNAL_SERVER_ERROR',
             instance_id: id,
             status: isConnClosed ? 'offline_or_reconnecting' : 'error'

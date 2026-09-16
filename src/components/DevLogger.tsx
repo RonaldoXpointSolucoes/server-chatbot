@@ -863,16 +863,24 @@ export default function DevLogger() {
         
         if (!isSpammyUrl && !isAstsTest) {
           const isAbort = err.name === 'AbortError';
+          const isAvatarFetch = urlStr.includes('/invoke') && typeof requestOptions?.body === 'string' && requestOptions.body.includes('profilePictureUrl');
+          if (isAbort && isAvatarFetch) {
+            // Silencia requisições normais de avatar canceladas por timeout ou ausência de foto
+            throw err;
+          }
+
           const isNetworkError = err.message === 'Failed to fetch' || (typeof navigator !== 'undefined' && !navigator.onLine);
           
           // Desduplicação de erros críticos do Supabase ou falhas normais de rede
           let skipLog = false;
           if (urlStr.includes('supabase.co') || isNetworkError) {
             const now = Date.now();
-            if (now - lastSupabaseErrorTime < 8000) {
+            const minInterval = urlStr.includes('/status') ? 30000 : 8000;
+            if (now - lastSupabaseErrorTime < minInterval) {
               skipLog = true;
+            } else {
+              lastSupabaseErrorTime = now;
             }
-            lastSupabaseErrorTime = now;
           }
 
           if (!skipLog) {

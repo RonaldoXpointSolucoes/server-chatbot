@@ -2780,7 +2780,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 3500);
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
 
       const res = await fetch(`${API_URL}/api/v1/instances/${resolvedInstanceId}/invoke`, {
         method: 'POST',
@@ -2823,9 +2823,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     } catch (err: any) {
       if (err.name === 'AbortError') {
-        console.warn("[fetchContactPicture] Requisição cancelada por timeout de 3.5s (possível atraso na resposta ou contato sem avatar).");
+        console.debug("[fetchContactPicture] Requisição cancelada por timeout de 8s (contato sem avatar público ou latência externa).");
       } else {
-        console.error("[fetchContactPicture] Erro:", err);
+        console.warn("[fetchContactPicture] Erro ao obter imagem de contato:", err?.message || err);
       }
     }
   },
@@ -6306,10 +6306,38 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
         }
       })
-      .subscribe((status, err) => {
+      .subscribe(async (status, err) => {
         if (err) {
+          const errMsg = typeof err === 'string' ? err : ((err as any)?.message || JSON.stringify(err));
+          const isJwtExpired = errMsg.includes('InvalidJWTToken') || errMsg.includes('Token has expired') || errMsg.includes('expired') || errMsg.includes('JWT');
+
+          if (isJwtExpired) {
+            console.warn("[Realtime] Token JWT expirado detectado na subscrição Realtime. Solicitando renovação da sessão...");
+            set({ realtimeStatus: 'connecting' });
+            try {
+              const { data: refreshData, error: refreshErr } = await supabase.auth.refreshSession();
+              if (!refreshErr && refreshData?.session?.access_token) {
+                console.log("[Realtime] Sessão Supabase renovada com sucesso! Atualizando setAuth no Realtime...");
+                await supabase.realtime.setAuth(refreshData.session.access_token);
+                setTimeout(() => {
+                  get().subscribeToNewMessages(true);
+                }, 1000);
+                return;
+              } else {
+                console.warn("[Realtime] Falha ao renovar sessão:", refreshErr);
+              }
+            } catch (authErr) {
+              console.error("[Realtime] Erro ao revalidar credenciais JWT:", authErr);
+            }
+          }
+
           console.error("[Realtime] Subscription critical error:", err);
           set({ realtimeStatus: 'disconnected' });
+          // Rotina ativa de auto-reparo e reconexão silenciosa
+          setTimeout(() => {
+            console.log("[Realtime] Tentativa de auto-reparo após erro de subscrição...");
+            get().subscribeToNewMessages(true);
+          }, 5000);
         } else {
           console.log(`[Realtime status]: ${status}`);
           if (status === 'SUBSCRIBED') {

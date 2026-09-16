@@ -601,7 +601,7 @@ class SessionManager {
                 const isAlreadyActive = inst.status === 'connected' || inst.status === 'connected_local';
                 const nextStatus = isAlreadyActive ? inst.status : 'connecting';
 
-                const updateQuery = supabase
+                let updateQuery = supabase
                     .from('whatsapp_instances')
                     .update({
                         assigned_node_id: currentNodeId,
@@ -611,16 +611,25 @@ class SessionManager {
                     })
                     .eq('id', instanceId);
 
+                // Atomicidade compare-and-swap: se não for force nem takeover de produção,
+                // assegura que o registro ainda tem a posse esperada (nó nulo ou nó que lemos)
+                if (!force && !isMasterTakeover) {
+                    if (assignedNodeId) {
+                        updateQuery = updateQuery.eq('assigned_node_id', assignedNodeId);
+                    } else {
+                        updateQuery = updateQuery.is('assigned_node_id', null);
+                    }
+                }
+
                 const { data: updatedInst, error: updateErr } = await retryWithBackoff(() => updateQuery.select().maybeSingle());
 
                 if (updateErr) {
                     console.warn(`[SessionManager/Lock] Erro ao gravar lock para ${instanceId}:`, updateErr.message);
-                } else if (updatedInst) {
+                } else if (updatedInst && updatedInst.assigned_node_id === currentNodeId) {
                     console.log(`[SessionManager/Lock] ✅ Lock adquirido com sucesso para instância ${instanceId} no nó ${currentNodeId} (lease até ${leaseUntil}).`);
                     return updatedInst;
                 } else {
-                    console.log(`[SessionManager/Lock] ✅ Lock atualizado com sucesso (fallback) para instância ${instanceId} no nó ${currentNodeId}.`);
-                    return { ...inst, assigned_node_id: currentNodeId, lease_until: leaseUntil, status: nextStatus, updated_at: updatedAt };
+                    console.warn(`[SessionManager/Lock] ⚠️ Disputa de lock detectada para instância ${instanceId}. Outro nó assumiu a posse concorrentemente. Recuando.`);
                 }
             }
 
