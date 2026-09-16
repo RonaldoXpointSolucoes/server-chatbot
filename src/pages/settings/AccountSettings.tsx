@@ -39,7 +39,7 @@ export const DEFAULT_ENDPOINT_INSTRUCTIONS: Record<SectionId, string> = {
 - Serviço: GestorPedidosService / EnviarMensagemAtendente
 - Uso: Dispara a impressão de avisos e recados operacionais diretamente na impressora física do estabelecimento (ex: CAIXA, COZINHA, BALCÃO).
 - Variáveis do Link:
-  • e: Nome do Estabelecimento (ex: burguerplus)
+  • e: Nome do Estabelecimento (ex: nomedaloja)
   • d: Nome da Impressora / Destino (ex: CAIXA)
   • m: Texto da Mensagem impressa (ex: Mensagem do Cliente)
 - Integração: O link gerado pode ser acionado por fluxos, webhook ou pela Luna IA.`,
@@ -703,7 +703,7 @@ export default function AccountSettings() {
 
   // Estados para Aviso de Impressão (Impressora do Estabelecimento)
   const [avisoImpressaoEstabelecimento, setAvisoImpressaoEstabelecimento] = useState('');
-  const [avisoImpressaoImpressora, setAvisoImpressaoImpressora] = useState('');
+  const [avisoImpressaoImpressora, setAvisoImpressaoImpressora] = useState('CAIXA');
   const [avisoImpressaoMensagem, setAvisoImpressaoMensagem] = useState('Teste Recado Impressora');
   const [isAvisoImpressaoExpanded, setIsAvisoImpressaoExpanded] = useState(false);
   const [avisoImpressaoLoading, setAvisoImpressaoLoading] = useState(false);
@@ -1363,7 +1363,7 @@ export default function AccountSettings() {
       setGeolocJsonPayload(settings.geoloc_json_payload || DEFAULT_GEOLOC_PAYLOAD);
 
       setAvisoImpressaoEstabelecimento(settings.aviso_impressao_estabelecimento || '');
-      setAvisoImpressaoImpressora(settings.aviso_impressao_impressora || '');
+      setAvisoImpressaoImpressora(settings.aviso_impressao_impressora || 'CAIXA');
       setAvisoImpressaoMensagem(settings.aviso_impressao_mensagem || 'Teste Recado Impressora');
       
       if (settings.endpoint_instructions) {
@@ -3651,26 +3651,16 @@ export default function AccountSettings() {
                       <Store size={14} className="text-amber-500" />
                       1. Nome do Estabelecimento (e)
                     </label>
-                    {nomeIa && (
-                      <button
-                        type="button"
-                        onClick={() => setAvisoImpressaoEstabelecimento(nomeIa.toLowerCase().replace(/[^a-z0-9]/g, ''))}
-                        className="text-[10px] font-semibold text-indigo-500 dark:text-indigo-400 hover:underline"
-                        title="Usar nome da empresa formatado"
-                      >
-                        Puxar Nome da Empresa
-                      </button>
-                    )}
                   </div>
                   <input
                     type="text"
                     value={avisoImpressaoEstabelecimento}
                     onChange={(e) => setAvisoImpressaoEstabelecimento(e.target.value)}
-                    placeholder="Ex: burguerplus"
+                    placeholder="Ex: nome da loja"
                     className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-3.5 py-2.5 text-xs text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-amber-500/50 transition-all placeholder:text-gray-400"
                   />
                   <p className="text-[11px] text-gray-500 dark:text-[#8696a0]">
-                    Identificador da loja no Gestor de Pedidos (ex: <code className="font-mono text-amber-600 dark:text-amber-400 font-bold">burguerplus</code>).
+                    Identificador da loja no Gestor de Pedidos (ex: <code className="font-mono text-amber-600 dark:text-amber-400 font-bold">nome da loja</code>).
                   </p>
                 </div>
 

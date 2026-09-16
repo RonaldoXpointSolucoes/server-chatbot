@@ -2155,14 +2155,9 @@ class SessionManager {
                     return;
                 }
 
-                // Se o WebSocket estiver aberto ou a sessão estiver autenticada e operacional, está saudável
+                // Se o WebSocket estiver aberto ou a sessão estiver autenticada e operacional, está perfeitamente saudável.
+                // O keep-alive oficial do WhatsApp é gerenciado nativamente pela Baileys via Noise Protocol (keepAliveIntervalMs).
                 if (ws.isOpen || isSocketOpen(activeSock)) {
-                    // Keep-alive heartbeat proativo a cada ciclo do watchdog para manter a conexão WebSocket viva no WhatsApp e evitar Connection Closed
-                    try {
-                        if (rawSocket && typeof rawSocket.ping === 'function' && rawState === 1) {
-                            rawSocket.ping();
-                        }
-                    } catch (pingErr) {}
                     return;
                 }
 

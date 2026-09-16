@@ -683,10 +683,11 @@ export const makeSocket = (config: SocketConfig) => {
 
 			const diff = Date.now() - lastDateRecv.getTime()
 			/*
-				Tolerância resiliente para oscilações temporárias de ping internacional (75s).
+				Tolerância resiliente para oscilações temporárias de ping internacional e carga em multi-tenant.
 				Evita falso-positivo de perda de conexão em pequenos atrasos de resposta do WhatsApp.
+				Permite pelo menos 4 ciclos de keep-alive ou 120s de tolerância antes de derrubar o socket.
 			*/
-			const maxSilenceAllowed = Math.max(keepAliveIntervalMs * 2 + 15000, 75000)
+			const maxSilenceAllowed = Math.max(keepAliveIntervalMs * 4 + 15000, 120000)
 			if (diff > maxSilenceAllowed) {
 				void end(new Boom('Connection was lost', { statusCode: DisconnectReason.connectionLost }))
 			} else if (ws.isOpen) {
@@ -700,6 +701,8 @@ export const makeSocket = (config: SocketConfig) => {
 						xmlns: 'w:p'
 					},
 					content: [{ tag: 'ping', attrs: {} }]
+				}).then(() => {
+					lastDateRecv = new Date()
 				}).catch(err => {
 					logger.debug({ trace: err?.stack }, 'error in sending keep alive')
 				})

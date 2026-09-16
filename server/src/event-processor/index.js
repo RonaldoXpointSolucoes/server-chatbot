@@ -27,8 +27,10 @@ class EventProcessor {
     constructor() {
         this.messageQueue = [];
         this.isFlushing = false;
+        this.flushPending = false;
+        this.tenantInstancesCache = new Map();
         
-        // Loop de processamento em lote a cada 500ms.
+        // Loop de processamento em lote de segurança a cada 500ms
         setInterval(() => this.flushQueue(), 500);
         
         this.tenantConfigs = new Map();
@@ -518,13 +520,14 @@ class EventProcessor {
                     tsDate = new Date(timestampSecs.low * 1000);
                 }
 
-                // Garantir ordem estrita cronológica global para envios/recebimentos massivos no mesmo segundo
-                let tsMs = tsDate.getTime();
-                if (tsMs <= this.lastGlobalMessageTimestamp) {
-                    tsMs = this.lastGlobalMessageTimestamp + 1;
+                // Preserva a fidelidade do horário real de envio da mensagem no WhatsApp
+                const nowMs = Date.now();
+                const originalMs = tsDate.getTime();
+                if (originalMs > 0 && originalMs <= nowMs + 60000 && (nowMs - originalMs < 30 * 86400000)) {
+                    tsDate = new Date(originalMs);
+                } else {
+                    tsDate = new Date(nowMs);
                 }
-                this.lastGlobalMessageTimestamp = tsMs;
-                tsDate = new Date(tsMs);
 
 
                 const textMessage = this.extractTextFromMessage(msg);
@@ -638,7 +641,11 @@ class EventProcessor {
                 console.log(`[EventProcessor] [MSG_TRACE:INBOUND_ENQUEUED] Instância: ${instanceId} | MsgId: ${msg.key?.id} | De: ${phone} | Direção: ${direction} | Live: ${isLiveRealtime}`);
 
                 if (senderType === 'human' || isLiveRealtime) {
-                    setTimeout(() => this.flushQueue(), 10);
+                    if (this.isFlushing) {
+                        this.flushPending = true;
+                    } else {
+                        setImmediate(() => this.flushQueue());
+                    }
                 }
 
             } catch (e) {
@@ -706,15 +713,30 @@ class EventProcessor {
         };
 
         // DUAL-ROUTING MULTI-INSTÂNCIA INTERNA
-        // Se a mensagem for outbound e o destinatário b.phone corresponder a uma outra instância ativa do mesmo tenant,
-        // gera a mensagem espelhada de inbound para a instância destinatária caso ela não conste no lote.
-        try {
-            const tenantIds = Array.from(new Set(batch.map(b => b.tenantId).filter(Boolean)));
-            if (tenantIds.length > 0) {
-                const { data: allTenantInstances } = await supabase
-                    .from('whatsapp_instances')
-                    .select('id, tenant_id, phone_number, display_name')
-                    .in('tenant_id', tenantIds);
+        // Só executa se houver ao menos uma mensagem outbound no lote
+        const hasOutbound = batch.some(b => b.direction === 'outbound');
+        if (hasOutbound) {
+            try {
+                const tenantIds = Array.from(new Set(batch.map(b => b.tenantId).filter(Boolean)));
+                if (tenantIds.length > 0) {
+                    const now = Date.now();
+                    let allTenantInstances = [];
+                    const cacheKey = tenantIds.sort().join('_');
+                    const cached = this.tenantInstancesCache?.get(cacheKey);
+
+                    if (cached && (now - cached.timestamp < 60000)) {
+                        allTenantInstances = cached.instances;
+                    } else {
+                        const { data: fetchedInstances } = await supabase
+                            .from('whatsapp_instances')
+                            .select('id, tenant_id, phone_number, display_name')
+                            .in('tenant_id', tenantIds);
+
+                        allTenantInstances = fetchedInstances || [];
+                        if (this.tenantInstancesCache) {
+                            this.tenantInstancesCache.set(cacheKey, { instances: allTenantInstances, timestamp: now });
+                        }
+                    }
 
                 if (allTenantInstances && allTenantInstances.length > 1) {
                     const instByPhone = new Map();
@@ -757,6 +779,7 @@ class EventProcessor {
             }
         } catch (dualErr) {
             console.warn('[BatchProcessor] Aviso no Dual-Routing de instâncias internas:', dualErr.message);
+        }
         }
         
         try {
@@ -1252,67 +1275,93 @@ class EventProcessor {
                  if (!b.mediaUrl && ['image', 'video', 'audio', 'document'].includes(b.msgType)) {
                      try {
                          const mediaMeta = this.extractMediaMeta(b.rawMsg, b.msgType) || {};
-                         const stream = await downloadContentFromMessage(mediaMeta, b.msgType.replace('Message', ''));
                          
-                         const mimeType = mediaMeta.mimetype || 'application/octet-stream';
-                         const fileName = mediaMeta.fileName || 'media_' + Date.now();
-                         const safeName = fileName.replace(/[^a-zA-Z0-9.\-]/g, '_');
-                         const storagePath = `tenant_${b.tenantId}/instance_${b.instanceId}/${b.conversationId}/${Date.now()}_${safeName}`;
-                         
-                         const tmpFilePath = path.join(os.tmpdir(), `${Date.now()}_${safeName}`);
-                         const writeStream = fs.createWriteStream(tmpFilePath);
-                         
-                         for await(const chunk of stream) {
-                             writeStream.write(chunk);
-                         }
-                         writeStream.end();
-                         await new Promise((resolve) => writeStream.on('finish', resolve));
+                         const doUpload = async () => {
+                             const stream = await downloadContentFromMessage(mediaMeta, b.msgType.replace('Message', ''));
+                             const mimeType = mediaMeta.mimetype || 'application/octet-stream';
+                             const fileName = mediaMeta.fileName || 'media_' + Date.now();
+                             const safeName = fileName.replace(/[^a-zA-Z0-9.\-]/g, '_');
+                             const storagePath = `tenant_${b.tenantId}/instance_${b.instanceId}/${b.conversationId}/${Date.now()}_${safeName}`;
+                             
+                             const tmpFilePath = path.join(os.tmpdir(), `${Date.now()}_${safeName}`);
+                             const writeStream = fs.createWriteStream(tmpFilePath);
+                             for await(const chunk of stream) {
+                                 writeStream.write(chunk);
+                             }
+                             writeStream.end();
+                             await new Promise((resolve) => writeStream.on('finish', resolve));
 
-                         const stats = fs.statSync(tmpFilePath);
-                         const fileSize = stats.size;
+                             const stats = fs.statSync(tmpFilePath);
+                             const fileSize = stats.size;
+                             const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
+                             const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-                         const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
-                         const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-                         await new Promise((resolve, reject) => {
-                             const fileStream = fs.createReadStream(tmpFilePath);
-                             const upload = new tus.Upload(fileStream, {
-                                 endpoint: `${supabaseUrl}/storage/v1/upload/resumable`,
-                                 retryDelays: [0, 3000, 5000, 10000, 20000],
-                                 headers: {
-                                     Authorization: `Bearer ${supabaseKey}`,
-                                     'x-upsert': 'true'
-                                 },
-                                 uploadDataDuringCreation: true,
-                                 metadata: {
-                                     bucketName: 'chat_media',
-                                     objectName: storagePath,
-                                     contentType: mimeType
-                                 },
-                                 chunkSize: 6 * 1024 * 1024,
-                                 uploadSize: fileSize,
-                                 onError: function (error) {
-                                     console.error('[TUS-BACKEND] Upload falhou:', error);
-                                     reject(error);
-                                 },
-                                 onSuccess: function () {
-                                     const { data: publicUrlData } = supabase.storage.from('chat_media').getPublicUrl(storagePath);
-                                     b.mediaUrl = publicUrlData.publicUrl;
-                                     resolve();
-                                 }
+                             await new Promise((resolve, reject) => {
+                                 const fileStream = fs.createReadStream(tmpFilePath);
+                                 const upload = new tus.Upload(fileStream, {
+                                     endpoint: `${supabaseUrl}/storage/v1/upload/resumable`,
+                                     retryDelays: [0, 1000, 3000],
+                                     headers: {
+                                         Authorization: `Bearer ${supabaseKey}`,
+                                         'x-upsert': 'true'
+                                     },
+                                     uploadDataDuringCreation: true,
+                                     metadata: {
+                                         bucketName: 'chat_media',
+                                         objectName: storagePath,
+                                         contentType: mimeType
+                                     },
+                                     chunkSize: 6 * 1024 * 1024,
+                                     uploadSize: fileSize,
+                                     onError: (error) => reject(error),
+                                     onSuccess: () => resolve()
+                                 });
+                                 upload.start();
                              });
-                             upload.start();
-                         });
 
-                         // Limpeza e Setagem
-                         fs.unlinkSync(tmpFilePath);
-                         
-                         b.mediaMetadata = {
-                             mime_type: mimeType, file_name: fileName,
-                         file_size: fileSize,
-                             duration: mediaMeta.seconds, width: mediaMeta.width, height: mediaMeta.height,
-                             page_count: mediaMeta.pageCount, is_voice_note: mediaMeta.ptt || false
+                             try { fs.unlinkSync(tmpFilePath); } catch(e){}
+
+                             const { data: publicUrlData } = supabase.storage.from('chat_media').getPublicUrl(storagePath);
+                             const mediaUrl = publicUrlData.publicUrl;
+                             const metadata = {
+                                 mime_type: mimeType, file_name: fileName,
+                                 file_size: fileSize,
+                                 duration: mediaMeta.seconds, width: mediaMeta.width, height: mediaMeta.height,
+                                 page_count: mediaMeta.pageCount, is_voice_note: mediaMeta.ptt || false
+                             };
+                             return { mediaUrl, metadata };
                          };
+
+                         // Tenta upload rápido (<3.5s) para não atrasar mensagens de texto
+                         const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('MEDIA_BACKGROUND_DEFER')), 3500));
+                         try {
+                             const res = await Promise.race([doUpload(), timeoutPromise]);
+                             b.mediaUrl = res.mediaUrl;
+                             b.mediaMetadata = res.metadata;
+                         } catch (raceErr) {
+                             if (raceErr.message === 'MEDIA_BACKGROUND_DEFER') {
+                                 console.log(`[BatchProcessor] Upload de mídia diferido para background para não bloquear entrega imediata da mensagem. MsgId: ${b.rawMsg?.key?.id}`);
+                                 // Conclui em background assíncrono sem bloquear o batch
+                                 doUpload().then(async (bgRes) => {
+                                     if (bgRes?.mediaUrl) {
+                                         const msgId = b.rawMsg?.key?.id;
+                                         if (msgId) {
+                                             await supabase.from('messages')
+                                                 .update({ media_url: bgRes.mediaUrl, media_metadata: bgRes.metadata })
+                                                 .eq('whatsapp_message_id', msgId);
+
+                                             realtime.publishInboxEvent(b.tenantId, 'message.update', {
+                                                 whatsapp_message_id: msgId,
+                                                 media_url: bgRes.mediaUrl,
+                                                 media_metadata: bgRes.metadata
+                                             }).catch(() => {});
+                                         }
+                                     }
+                                 }).catch(bgErr => console.warn('[BatchProcessor] Aviso no upload background de mídia:', bgErr.message));
+                             } else {
+                                 console.log(`[BatchProcessor] Aviso: Falha ao baixar mídia (${b.jid}): ${raceErr.message}`);
+                             }
+                         }
                      } catch(err) {
                          console.log(`[BatchProcessor] Aviso: Mídia expirada/inacessível para JID ${b.jid}. (Normal em History Sync) -> ${err.message}`);
                      }
@@ -1685,6 +1734,10 @@ class EventProcessor {
              }
         } finally {
              this.isFlushing = false;
+             if (this.flushPending || this.messageQueue.length > 0) {
+                 this.flushPending = false;
+                 setImmediate(() => this.flushQueue());
+             }
         }
     }
 
