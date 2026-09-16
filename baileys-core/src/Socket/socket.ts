@@ -683,10 +683,11 @@ export const makeSocket = (config: SocketConfig) => {
 
 			const diff = Date.now() - lastDateRecv.getTime()
 			/*
-				check if it's been a suspicious amount of time since the server responded with our last seen
-				it could be that the network is down
+				Tolerância resiliente para oscilações temporárias de ping internacional (75s).
+				Evita falso-positivo de perda de conexão em pequenos atrasos de resposta do WhatsApp.
 			*/
-			if (diff > keepAliveIntervalMs + 5000) {
+			const maxSilenceAllowed = Math.max(keepAliveIntervalMs * 2 + 15000, 75000)
+			if (diff > maxSilenceAllowed) {
 				void end(new Boom('Connection was lost', { statusCode: DisconnectReason.connectionLost }))
 			} else if (ws.isOpen) {
 				// if its all good, send a keep alive request

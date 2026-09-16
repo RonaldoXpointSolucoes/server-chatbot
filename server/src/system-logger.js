@@ -108,6 +108,8 @@ function interceptConsole() {
         text.includes('pending PNs') ||
         text.includes('Erro de entrega/ack detectado') ||
         text.includes('Resetando chaves de sessão') ||
+        text.includes('Fast-Path') ||
+        text.includes('SessionManager - Antiban') ||
         (text.includes('[WaCalls Listener]') && (text.includes('Contato não encontrado') || text.includes('mapeamento LID')))
     )) {
         originalFn.apply(console, args);
@@ -127,6 +129,8 @@ function interceptConsole() {
                                   text.includes('Own LID session created successfully') ||
                                   text.includes('sent retry receipt') ||
                                   text.includes('Connection Terminated') ||
+                                  text.includes('Connection Closed') ||
+                                  text.includes('Connection was lost') ||
                                   text.includes('status 428') ||
                                   text.includes('[QueueProcessor]') ||
                                   text.includes('error in sending keep alive') ||

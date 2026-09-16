@@ -455,6 +455,8 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                     targetJid = await resolveTargetJid(null, jid, req.tenantId);
                 }
 
+                console.log(`[API Gateway] [MSG_TRACE:GATEWAY_RECEIVE] Instância: ${instanceId} | JID: ${targetJid} | Tipo: ${messageType} | Chars: ${body?.length || 0}`);
+
                 // FAST-PATH: Se o socket da instância já estiver na memória e conectado, envia IMEDIATAMENTE (< 300ms)
                 const activeSock = sessionManager.sessions.get(instanceId)?.sock;
                 const isSockConnected = activeSock && (!activeSock.ws || activeSock.ws.isOpen || activeSock.ws.readyState === 1) && (activeSock.user?.id || activeSock.authState?.creds?.me?.id);
@@ -464,6 +466,8 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                         const sendFn = activeSock.originalSendMessage || activeSock.sendMessage;
                         const sentResult = await sendFn(targetJid, content);
                         
+                        console.log(`[API Gateway] [MSG_TRACE:FASTPATH_SENT] Instância: ${instanceId} | WhatsAppMsgId: ${sentResult?.key?.id} | JID: ${targetJid}`);
+
                         // Grava no outbox já como 'sent' para histórico e auditoria
                         supabase.from('wa_outgoing_messages').insert({
                             instance_id: instanceId,
@@ -505,7 +509,7 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                             key: sentResult?.key 
                         });
                     } catch (fastErr) {
-                        console.warn(`[Invoke/FastPath] Falha ao enviar via Fast-Path, delegando para outbox queue:`, fastErr.message);
+                        console.log(`[Invoke/FastPath] Socket transitório indisponível, delegando para outbox queue resiliente:`, fastErr.message);
                     }
                 }
 
@@ -527,11 +531,13 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
 
                 if (outboxErr) throw outboxErr;
 
+                const mockId = `EDGE_${newOutbox.id.replace(/-/g, '')}`;
+                console.log(`[API Gateway] [MSG_TRACE:OUTBOX_ENQUEUED] Instância: ${instanceId} | OutboxId: ${newOutbox.id} | MockId: ${mockId} | JID: ${targetJid}`);
+
                 // Tenta acordar o socket em segundo plano e engatilha o QueueProcessor de imediato
                 sessionManager.getSocketOrWake(req.tenantId, instanceId).catch(() => {});
                 queueProcessor.trigger(req.tenantId, instanceId);
 
-                const mockId = `EDGE_${newOutbox.id.replace(/-/g, '')}`;
                 return res.json({ 
                     ok: true, 
                     result: {

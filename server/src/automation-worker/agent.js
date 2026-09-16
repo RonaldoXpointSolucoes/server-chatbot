@@ -3922,8 +3922,8 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
                 const { isSocketOpen: sManagerIsOpen } = await import('../session-manager/index.js').catch(() => ({}));
                 const isReady = isSockReady(activeSock) || (sManagerIsOpen && sManagerIsOpen(activeSock));
 
-                if (!isReady) {
-                    console.warn(`[AutomationWorker] Socket da instância ${instanceId} desconectado ou em reconexão. Enfileirando resposta de IA com fallback resiliente...`);
+                const deliverViaFallback = async (reason = 'Socket desconectado ou em reconexão') => {
+                    console.log(`[AutomationWorker] ${reason}. Enfileirando resposta de IA com fallback resiliente para ${jid}...`);
                     try {
                         const { default: sManager } = await import('../session-manager/index.js');
                         if (sManager && typeof sManager.enqueueMessage === 'function') {
@@ -3987,9 +3987,27 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
                     } catch (saveErr) {
                         console.warn('[AutomationWorker] Aviso ao registrar mensagem pendente de fallback no BD:', saveErr.message);
                     }
+                };
+
+                if (!isReady) {
+                    await deliverViaFallback(`Socket da instância ${instanceId} desconectado ou em reconexão`);
                 } else {
-                    const sendFn = activeSock.originalSendMessage || activeSock.sendMessage;
-                    msgResult = await sendFn(jid, { text: finalResponseText }, { isAutomation: true });
+                    try {
+                        const sendFn = activeSock.sendMessage || activeSock.originalSendMessage;
+                        msgResult = await sendFn(jid, { text: finalResponseText }, { isAutomation: true });
+                    } catch (directErr) {
+                        const isConnClosed = directErr.message && (
+                            directErr.message.includes('Connection Closed') ||
+                            directErr.message.includes('Connection was lost') ||
+                            directErr.message.includes('not open') ||
+                            directErr.message.includes('closed')
+                        );
+                        if (isConnClosed) {
+                            await deliverViaFallback(`Socket oscilou durante envio direto (${directErr.message})`);
+                        } else {
+                            throw directErr;
+                        }
+                    }
                 }
                 try {
                     const { default: sManager } = await import('../session-manager/index.js');

@@ -1834,7 +1834,7 @@ class SessionManager {
                                         const isConnectionClosed = error.message?.includes('Connection Closed') || error.message?.includes('reconectando');
                                         const baseDelay = isConnectionClosed ? 3500 : 2000;
                                         const retryDelay = Math.min(baseDelay * Math.pow(1.5, attempts - 1), 8500) + Math.floor(Math.random() * 500);
-                                        console.warn(`[SessionManager - Antiban] Tentativa ${attempts}/${maxAttempts} para ${jid} via instância ${instanceId}: ${error.message || error}. Aguardando ${Math.round(retryDelay)}ms para restabelecimento do socket...`);
+                                        console.log(`[SessionManager - Antiban] Tentativa transitória ${attempts}/${maxAttempts} para ${jid} via instância ${instanceId}: ${error.message || error}. Aguardando ${Math.round(retryDelay)}ms para restabelecimento do socket...`);
                                         await new Promise(r => setTimeout(r, retryDelay));
                                     } else {
                                         console.error(`[SessionManager - Antiban] Todas as ${maxAttempts} tentativas falharam para ${jid} via instância ${instanceId}:`, error.message || error);

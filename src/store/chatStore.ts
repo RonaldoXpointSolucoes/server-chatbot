@@ -2102,11 +2102,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
     } catch (err: any) {
       console.error(err);
 
-      // Reverter mensagem otimista e alertar o usuario
+      // Preserva a mensagem otimista com status de erro sem deletar o texto digitado da tela
       set((s) => ({
         contacts: s.contacts.map(c => {
           if (c.id === contactId) {
-            return { ...c, messages: c.messages.filter(m => m.id !== pseudoId) };
+            return {
+              ...c,
+              messages: c.messages.map(m => m.id === pseudoId ? {
+                ...m,
+                status: 'error',
+                errorMessage: err.message || 'Falha ao enviar mensagem'
+              } : m)
+            };
           }
           return c;
         })
@@ -2543,9 +2550,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     } catch (err: any) {
       console.error('[uploadAndSendMedia] Falha crítica:', err);
+      set((s) => ({
+        contacts: s.contacts.map(c => c.id === contactId ? {
+          ...c,
+          messages: c.messages.map(m => m.id === pseudoId ? { ...m, status: 'error', errorMessage: err.message } : m)
+        } : c)
+      }));
       window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Falha ao enviar arquivo para o WhatsApp: ' + (err.message || err), type: 'error' } }));
-      // Se der erro, pelo menos mostramos no componente que a media deu erro
-      // Não removemos para o dev ver onde falhou
     }
   },
 

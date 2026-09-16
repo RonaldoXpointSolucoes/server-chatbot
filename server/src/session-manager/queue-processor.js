@@ -15,15 +15,54 @@ class QueueProcessor {
         this.running = true;
         console.log(`[QueueProcessor] Iniciado processador de filas de outbox para o NODE_ID: ${NODE_ID}`);
         
+        // Auto-recuperação inicial de mensagens presas
+        this.reconcileStuckProcessingMessages().catch(() => {});
+
         // Inicia o loop de processamento
         this.loop();
 
-        // Reconciliação preventiva periódica a cada 60 segundos
+        // Reconciliação preventiva periódica e auto-recuperação de mensagens presas a cada 45 segundos
         setInterval(() => {
             if (this.running) {
+                this.reconcileStuckProcessingMessages().catch(() => {});
                 runOutgoingReconciliation().catch(() => {});
             }
-        }, 60000);
+        }, 45000);
+    }
+
+    /**
+     * Auto-cura para mensagens que ficaram presas em status 'processing'
+     * (ex: após reboot do servidor ou falha silenciosa de processo anterior)
+     */
+    async reconcileStuckProcessingMessages() {
+        try {
+            const threeMinutesAgo = new Date(Date.now() - 3 * 60 * 1000).toISOString();
+            const { data: stuckMsgs, error } = await supabase
+                .from('wa_outgoing_messages')
+                .select('id, attempts, last_error, created_at')
+                .eq('status', 'processing')
+                .lte('created_at', threeMinutesAgo)
+                .limit(50);
+
+            if (error || !stuckMsgs || stuckMsgs.length === 0) return;
+
+            console.log(`[QueueProcessor/SelfHealing] 🩹 Auto-recuperando ${stuckMsgs.length} mensagens presas em status 'processing'...`);
+            for (const s of stuckMsgs) {
+                const currentAttempts = s.attempts || 0;
+                const newStatus = currentAttempts >= 6 ? 'failed' : 'pending';
+                await supabase
+                    .from('wa_outgoing_messages')
+                    .update({
+                        status: newStatus,
+                        scheduled_at: new Date().toISOString(),
+                        last_error: currentAttempts >= 6 ? (s.last_error || 'Limite de tentativas atingido (Presa em processing)') : 'Recuperado de processamento órfão por auto-cura'
+                    })
+                    .eq('id', s.id)
+                    .eq('status', 'processing');
+            }
+        } catch (e) {
+            console.warn(`[QueueProcessor/SelfHealing] Aviso na recuperação de mensagens presas:`, e.message);
+        }
     }
 
     stop() {
@@ -195,16 +234,32 @@ class QueueProcessor {
                 }
 
                 if (!sock || !isSocketReady || !meId) {
-                    const retryDelayMs = isOperator ? 1500 : 8000;
-                    console.log(`[QueueProcessor] Socket/Autenticação da instância ${instanceId} está indisponível/reconectando. Reagendando mensagem ${msg.id} em ${retryDelayMs / 1000}s...`);
+                    const currentAttempts = (msg.attempts || 0);
+                    const maxSocketWaitAttempts = 6;
+                    
+                    if (currentAttempts >= maxSocketWaitAttempts) {
+                        console.warn(`[QueueProcessor] [MSG_TRACE:OUTBOX_FAIL] Mensagem ${msg.id} atingiu limite de ${maxSocketWaitAttempts} tentativas com socket offline da instância ${instanceId}. Marcando como failed.`);
+                        await supabase
+                            .from('wa_outgoing_messages')
+                            .update({ 
+                                status: 'failed',
+                                last_error: 'Instância do WhatsApp desconectada ou indisponível após 6 tentativas de envio.'
+                            })
+                            .eq('id', msg.id);
+                        break; // Sai do processamento desta instância no momento para não travar outras instâncias
+                    }
+
+                    const retryDelayMs = isOperator ? Math.min(2000 * Math.pow(1.5, currentAttempts), 15000) : Math.min(8000 * Math.pow(1.5, currentAttempts), 60000);
+                    console.log(`[QueueProcessor] [MSG_TRACE:OUTBOX_RETRY] Socket da instância ${instanceId} indisponível/reconectando (tentativa ${currentAttempts}/${maxSocketWaitAttempts}). Reagendando mensagem ${msg.id} em ${Math.round(retryDelayMs / 1000)}s...`);
                     await supabase
                         .from('wa_outgoing_messages')
                         .update({ 
                             status: 'pending',
-                            scheduled_at: new Date(Date.now() + retryDelayMs).toISOString()
+                            scheduled_at: new Date(Date.now() + retryDelayMs).toISOString(),
+                            last_error: 'Socket em reconexão ou temporariamente indisponível'
                         })
                         .eq('id', msg.id);
-                    continue;
+                    break; // Não tenta enviar outras mensagens desta mesma instância enquanto o socket estiver offline
                 }
 
                 // 3. Rate Limit / Delay Humano Inteligente:
@@ -362,7 +417,7 @@ class QueueProcessor {
                     console.error(`[QueueProcessor/Compatibility] Erro ao sincronizar mensagem enviada com as tabelas legadas:`, compatErr.message);
                 }
 
-                console.log(`[QueueProcessor] Mensagem ${msg.id} enviada com sucesso.`);
+                console.log(`[QueueProcessor] [MSG_TRACE:OUTBOX_SENT] Mensagem ${msg.id} enviada com sucesso para ${msg.chat_jid}. WhatsAppMsgId: ${result?.key?.id}`);
                 sessionManager.logMonitoringEvent(instanceId, 'message_sent_success', { 
                     msg_id: msg.id, 
                     chat_jid: msg.chat_jid,
@@ -374,9 +429,9 @@ class QueueProcessor {
                     const isTransient = errMsg.includes('Connection Closed') || errMsg.includes('WebSocket') || errMsg.includes('restartRequired');
                     
                     if (isTransient) {
-                        console.warn(`[QueueProcessor] Oscilação temporária ao enviar mensagem ${msg.id}: ${errMsg}. Reagendando em 15s...`);
+                        console.warn(`[QueueProcessor] [MSG_TRACE:OUTBOX_TRANSIENT] Oscilação temporária ao enviar mensagem ${msg.id}: ${errMsg}. Reagendando...`);
                     } else {
-                        console.error(`[QueueProcessor] Falha ao enviar mensagem ${msg.id}:`, errMsg);
+                        console.error(`[QueueProcessor] [MSG_TRACE:OUTBOX_ERROR] Falha ao enviar mensagem ${msg.id}:`, errMsg);
                     }
 
                     const newAttempts = (msg.attempts || 0) + 1;

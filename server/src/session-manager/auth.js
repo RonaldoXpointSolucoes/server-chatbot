@@ -4,6 +4,59 @@ import { initAuthCreds, BufferJSON } from '@whiskeysockets/baileys';
 export const sessionCaches = new Map();
 export const pendingWrites = new Map(); // Mantido por retrocompatibilidade
 
+/**
+ * Cache bounded com estratégia LRU para chaves Signal.
+ * Limita a memória a no máximo maxSize chaves por instância, evitando estouro de heap.
+ */
+class BoundedKeyCache {
+    constructor(maxSize = 1500) {
+        this.maxSize = maxSize;
+        this.cache = new Map();
+    }
+    get(key) {
+        if (!this.cache.has(key)) return undefined;
+        const val = this.cache.get(key);
+        // Atualiza posição no LRU
+        this.cache.delete(key);
+        this.cache.set(key, val);
+        return val;
+    }
+    set(key, val) {
+        if (this.cache.has(key)) {
+            this.cache.delete(key);
+        } else if (this.cache.size >= this.maxSize) {
+            // Remove o mais antigo do cache
+            const oldestKey = this.cache.keys().next().value;
+            if (oldestKey !== undefined) {
+                this.cache.delete(oldestKey);
+            }
+        }
+        this.cache.set(key, val);
+        return this;
+    }
+    has(key) {
+        return this.cache.has(key);
+    }
+    delete(key) {
+        return this.cache.delete(key);
+    }
+    clear() {
+        this.cache.clear();
+    }
+    get size() {
+        return this.cache.size;
+    }
+    keys() {
+        return this.cache.keys();
+    }
+    entries() {
+        return this.cache.entries();
+    }
+    values() {
+        return this.cache.values();
+    }
+}
+
 const writeQueues = new Map();
 
 function enqueueWrite(instanceId, writeFn) {
@@ -111,7 +164,7 @@ export async function useSupabaseAuthState(tenantId, instanceId, forceCleanState
         sessionCaches.get(instanceId).clear();
     }
     if (!sessionCaches.has(instanceId)) {
-        sessionCaches.set(instanceId, new Map());
+        sessionCaches.set(instanceId, new BoundedKeyCache(1500));
     }
     const memCache = sessionCaches.get(instanceId);
 
@@ -161,31 +214,29 @@ export async function useSupabaseAuthState(tenantId, instanceId, forceCleanState
         );
     }
 
-    // Pre-load absoluto de todas as chaves para a RAM (Evita congestionar a rede e previne o Timeout 408)
+    // Warm-up leve e bounded: Pre-carrega apenas chaves críticas de handshake (app-state-sync-key)
+    // e no máximo 300 chaves recentes. Evita carregar 200.000 chaves na RAM e previne OOM / travamento de GC.
     if (memCache.size === 0) {
-        let hasMore = true;
-        let page = 0;
-        while (hasMore) {
-            const { data: allKeys, error } = await retryWithBackoff(() =>
+        try {
+            const { data: criticalKeys, error: cErr } = await retryWithBackoff(() =>
                 supabase
                     .from('wa_auth_keys')
                     .select('key_name, key_data')
                     .eq('instance_id', instanceId)
-                    .range(page * 1000, (page + 1) * 1000 - 1)
+                    .or('key_name.ilike.app-state-sync-key%,key_name.ilike.pre-key%')
+                    .limit(300)
             );
             
-            if (error || !allKeys || allKeys.length === 0) {
-                hasMore = false;
-            } else {
-                for (const dbKey of allKeys) {
+            if (!cErr && criticalKeys) {
+                for (const dbKey of criticalKeys) {
                     const parsed = JSON.parse(JSON.stringify(dbKey.key_data), BufferJSON.reviver);
                     memCache.set(dbKey.key_name, parsed);
                 }
-                if (allKeys.length < 1000) hasMore = false;
-                page++;
             }
+            console.log(`[SessionManager] Warm-up leve concluído: ${memCache.size} chaves ativas em RAM para a instância ${instanceId} (LRU Bounded: max 1500 chaves)`);
+        } catch (warmErr) {
+            console.warn(`[SessionManager] Aviso no warm-up de chaves para ${instanceId}:`, warmErr.message);
         }
-        console.log(`[SessionManager] Carregadas ${memCache.size} chaves em RAM para a instância ${instanceId}`);
     }
 
     const authState = {

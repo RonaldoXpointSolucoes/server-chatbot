@@ -601,6 +601,8 @@ class EventProcessor {
                 // Otimização de Baixa Latência (<1s): Força flush imediato da fila para mensagens em tempo real
                 // (tanto mensagens do cliente no WhatsApp quanto do atendente no CRM)
                 const isLiveRealtime = !Boolean(m.type === 'append' || m.type === 'reconcile' || (tsDate && (Date.now() - tsDate.getTime() > 60000)));
+                console.log(`[EventProcessor] [MSG_TRACE:INBOUND_ENQUEUED] Instância: ${instanceId} | MsgId: ${msg.key?.id} | De: ${phone} | Direção: ${direction} | Live: ${isLiveRealtime}`);
+
                 if (senderType === 'human' || isLiveRealtime) {
                     setTimeout(() => this.flushQueue(), 10);
                 }
@@ -1356,7 +1358,7 @@ class EventProcessor {
                          
                       if (!msgErr && insertedMessages) {
                           realInserted = insertedMessages;
-                          console.log(`[BatchProcessor] ${realInserted.length} mensagens processadas no lote com SUCESSO!`);
+                          console.log(`[BatchProcessor] [MSG_TRACE:DB_SAVED] ${realInserted.length} mensagens salvas com sucesso no Supabase!`);
                       } else if (msgErr) {
                           // Fallback resiliente 1 a 1 sem poluir console se for apenas duplicata residual
                           for (const m of trulyNewMessages) {
@@ -1369,7 +1371,7 @@ class EventProcessor {
                                   console.error(`[BatchProcessor] Erro na inserção individual para ID ${m.whatsapp_message_id}:`, sErr.message || sErr);
                               }
                           }
-                          console.log(`[BatchProcessor] Resolução resiliente concluída. ${realInserted.length} novas mensagens salvas de ${trulyNewMessages.length} inéditas.`);
+                          console.log(`[BatchProcessor] [MSG_TRACE:DB_SAVED] Resolução individual concluída. ${realInserted.length} mensagens salvas no Supabase.`);
                       }
                   } else {
                       console.log(`[BatchProcessor] Lote idempotente: todas as ${messagesToInsert.length} mensagens já existiam no banco.`);

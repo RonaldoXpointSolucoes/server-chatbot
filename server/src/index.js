@@ -334,9 +334,58 @@ app.get('/debug/metrics', async (req, res) => {
             status: 'ok',
             cpuPercent: stats.cpu,
             memoryMB: memObj.rss / 1024 / 1024,
+            rssMB: Math.round((memObj.rss / 1024 / 1024) * 100) / 100,
+            heapUsedMB: Math.round((memObj.heapUsed / 1024 / 1024) * 100) / 100,
+            heapTotalMB: Math.round((memObj.heapTotal / 1024 / 1024) * 100) / 100,
+            externalMB: Math.round((memObj.external / 1024 / 1024) * 100) / 100,
+            activeSessions: sessionManager?.sessions?.size || 0,
             uptime: process.uptime()
         });
     } catch(err) {
+        return res.status(500).json({ status: 'error', detail: err.message });
+    }
+});
+
+// Endpoint de Auditoria e Rastreamento de Mensagens (/debug/messages-health)
+app.get('/debug/messages-health', async (req, res) => {
+    try {
+        const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+        const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+
+        // 1. Contagem no Outbox
+        const [pRes, procRes, fRes, sRes, stuckRes] = await Promise.all([
+            supabase.from('wa_outgoing_messages').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+            supabase.from('wa_outgoing_messages').select('*', { count: 'exact', head: true }).eq('status', 'processing'),
+            supabase.from('wa_outgoing_messages').select('*', { count: 'exact', head: true }).eq('status', 'failed'),
+            supabase.from('wa_outgoing_messages').select('*', { count: 'exact', head: true }).eq('status', 'sent').gte('created_at', oneHourAgo),
+            supabase.from('wa_outgoing_messages').select('id, instance_id, chat_jid, attempts, created_at').eq('status', 'processing').lte('created_at', fiveMinutesAgo).limit(10)
+        ]);
+
+        // 2. Inbound recente
+        const { count: inboundCount } = await supabase
+            .from('messages')
+            .select('*', { count: 'exact', head: true })
+            .eq('direction', 'inbound')
+            .gte('timestamp', oneHourAgo);
+
+        const stuckCount = stuckRes.data?.length || 0;
+
+        return res.json({
+            status: stuckCount > 0 ? 'warning' : 'healthy',
+            outbox: {
+                pending: pRes.count || 0,
+                processing: procRes.count || 0,
+                failed: fRes.count || 0,
+                sentLastHour: sRes.count || 0,
+                stuckInProcessing: stuckCount,
+                stuckSamples: stuckRes.data || []
+            },
+            inboundLastHour: inboundCount || 0,
+            activeSessions: sessionManager?.sessions?.size || 0,
+            serverUptimeSecs: Math.round(process.uptime()),
+            timestamp: new Date().toISOString()
+        });
+    } catch (err) {
         return res.status(500).json({ status: 'error', detail: err.message });
     }
 });

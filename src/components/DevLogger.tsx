@@ -1118,7 +1118,11 @@ export default function DevLogger() {
                     msg.includes('Gastrofood') ||
                     msg.includes('socket zumbi') ||
                     msg.includes('Connection Terminated') ||
+                    msg.includes('Connection Closed') ||
+                    msg.includes('Connection was lost') ||
                     msg.includes('connection errored') ||
+                    msg.includes('Fast-Path') ||
+                    msg.includes('SessionManager - Antiban') ||
                     msg.includes('não retornou novas mensagens') ||
                     msg.includes('[History Sync]') ||
                     msg.includes('History sync is disabled') ||
