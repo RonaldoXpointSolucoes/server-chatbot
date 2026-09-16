@@ -42,10 +42,14 @@ router.get('/v1/utils/link-preview', async (req, res) => {
     }
 });
 
-// Proxy para testar a requisição de Cardápio JSON Online sem bloqueios de CORS
+// Cache inteligente em memória para consultas de cardápio da API Gastrofood
+const gastrofoodApiCache = new Map();
+const GASTROFOOD_CACHE_TTL_MS = (parseInt(process.env.GASTROFOOD_CACHE_TTL_SECONDS || '300', 10)) * 1000;
+
+// Proxy para testar a requisição de Cardápio JSON Online sem bloqueios de CORS e com cache inteligente
 router.post('/v1/utils/test-cardapio', async (req, res) => {
     let action = 'Teste de API';
-    let { url, token, payload, method = 'POST' } = req.body;
+    let { url, token, payload, method = 'POST', forceFresh = false } = req.body;
     let bodyObj = null;
 
     try {
@@ -66,6 +70,25 @@ router.post('/v1/utils/test-cardapio', async (req, res) => {
                 bodyObj = typeof payload === 'string' ? JSON.parse(payload) : payload;
             } catch (e) {
                 return res.status(400).json({ error: 'O payload enviado não é um JSON válido.' });
+            }
+        }
+
+        // Cache Inteligente para consultas do GetCardapioCompleto da Gastrofood
+        const isCardapioReq = url.includes('GetCardapioCompleto');
+        const storeId = bodyObj?.AGuidEstab || bodyObj?.AIdStore || bodyObj?.GuidEstab || 'default';
+        const cacheKey = `gastrofood_cardapio_${storeId}`;
+
+        if (isCardapioReq && !forceFresh && gastrofoodApiCache.has(cacheKey)) {
+            const cached = gastrofoodApiCache.get(cacheKey);
+            const isExpired = (Date.now() - cached.timestamp) > GASTROFOOD_CACHE_TTL_MS;
+            if (!isExpired) {
+                console.log(`[GASTROFOOD_API] Cardápio recuperado do cache inteligente (${cacheKey}).`);
+                return res.json({
+                    status: cached.status || 200,
+                    data: cached.data,
+                    cached: true,
+                    cachedAt: new Date(cached.timestamp).toISOString()
+                });
             }
         }
 
@@ -140,12 +163,37 @@ router.post('/v1/utils/test-cardapio', async (req, res) => {
 
         logTestCall('response', status, data);
 
+        // Se consulta bem-sucedida de cardápio, armazena no cache inteligente
+        if (isCardapioReq && status === 200 && data) {
+            gastrofoodApiCache.set(cacheKey, {
+                status,
+                data,
+                timestamp: Date.now()
+            });
+        }
+
         return res.json({
             status,
             data
         });
     } catch (e) {
         console.error('[test-cardapio] Erro ao testar requisição:', e.message);
+
+        // Stale-While-Revalidate Fallback se a API externa oscilar ou falhar
+        const isCardapioReq = url && url.includes('GetCardapioCompleto');
+        const storeId = bodyObj?.AGuidEstab || bodyObj?.AIdStore || bodyObj?.GuidEstab || 'default';
+        const cacheKey = `gastrofood_cardapio_${storeId}`;
+        if (isCardapioReq && gastrofoodApiCache.has(cacheKey)) {
+            const stale = gastrofoodApiCache.get(cacheKey);
+            console.warn(`[GASTROFOOD_API] Erro de rede ao consultar API externa (${e.message}). Retornando cache stale-while-revalidate.`);
+            return res.json({
+                status: 200,
+                data: stale.data,
+                cached: true,
+                stale: true,
+                warning: 'API externa temporariamente indisponível. Servindo último cardápio válido em cache.'
+            });
+        }
         
         try {
             const entry = {
@@ -170,6 +218,7 @@ router.post('/v1/utils/clear-cardapio-cache', async (req, res) => {
     try {
         const { tenantId } = req.body;
         AutomationWorker.clearCardapioCache(tenantId);
+        gastrofoodApiCache.clear();
         
         // Se for um tenant específico, remove a data de sincronização no banco de dados
         // para que a próxima verificação force uma requisição limpa para a API externa.

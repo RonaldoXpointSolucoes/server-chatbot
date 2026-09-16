@@ -120,6 +120,18 @@ const APP_NODE = process.env.APP_NODE || (APP_ENV === 'alpha' ? 'ALFA-A' : 'PROD
 const APP_VERSION = process.env.APP_VERSION || ENGINE_VERSION;
 const GIT_COMMIT_SHA = process.env.GIT_COMMIT_SHA || process.env.VITE_PACKAGE_BUILD_DATE || 'dev-head';
 
+// Endpoint da Rota Raiz (GET /) - Retorna status online do servidor
+app.get('/', (req, res) => {
+    res.status(200).json({
+        status: 'online',
+        service: 'ChatBoot Server Engine (Baileys + AI)',
+        version: APP_VERSION,
+        environment: APP_ENV,
+        node: APP_NODE,
+        time: new Date().toISOString()
+    });
+});
+
 // Endpoint de Saúde do Servidor (/health)
 app.get('/health', (req, res) => {
     res.json({ 
@@ -358,8 +370,10 @@ app.use((req, res, next) => {
     const originIp = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || req.ip || 'N/A';
     const reqPath = (req.originalUrl || req.path || '').toLowerCase();
     
-    // Filtro de varreduras automatizadas conhecidas (bots / scanners WordPress, PHP, .env, etc.)
+    // Filtro de varreduras automatizadas conhecidas ou rotas vazias/raiz residuais
     const isBotScannerProbe = 
+        reqPath === '/' ||
+        reqPath === '' ||
         reqPath.includes('robots.txt') ||
         reqPath.includes('favicon.ico') ||
         reqPath.includes('wp-json') ||

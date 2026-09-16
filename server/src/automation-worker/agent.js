@@ -22,26 +22,97 @@ class LocalEmbeddingsPipeline {
 }
 
 // ==========================================
-// RESILIÊNCIA GEMINI API (RETRIES COM BACKOFF)
+// CIRCUIT BREAKER & RESILIÊNCIA GEMINI API
 // ==========================================
-async function callWithGeminiRetry(fn, operationName = 'Gemini Operation', maxRetries = 3) {
+class GeminiCircuitBreakerManager {
+  constructor() {
+    this.failureCount = 0;
+    this.lastFailureTime = 0;
+    this.state = 'CLOSED'; // 'CLOSED', 'OPEN', 'HALF_OPEN'
+    this.failureThreshold = 3; // 3 falhas consecutivas críticas acionam abertura
+    this.cooldownPeriod = 25000; // 25s de cooldown em estado OPEN
+    this.windowTime = 60000; // janela de 60s
+  }
+
+  isOpen() {
+    const now = Date.now();
+    if (this.state === 'OPEN') {
+      if (now - this.lastFailureTime >= this.cooldownPeriod) {
+        this.state = 'HALF_OPEN';
+        console.log('[GeminiCircuitBreaker] Estado transicionado de OPEN para HALF_OPEN. Testando requisição piloto...');
+        return false;
+      }
+      return true;
+    }
+    return false;
+  }
+
+  recordSuccess() {
+    if (this.state === 'HALF_OPEN') {
+      console.log('[GeminiCircuitBreaker] Requisição piloto bem-sucedida. Estado restaurado para CLOSED.');
+    }
+    this.failureCount = 0;
+    this.state = 'CLOSED';
+  }
+
+  recordFailure(errMsg) {
+    const now = Date.now();
+    if (now - this.lastFailureTime > this.windowTime) {
+      this.failureCount = 0;
+    }
+    this.failureCount++;
+    this.lastFailureTime = now;
+
+    if (this.failureCount >= this.failureThreshold || this.state === 'HALF_OPEN') {
+      this.state = 'OPEN';
+      console.warn(`[GeminiCircuitBreaker] ⚠️ Limiar de falhas críticas atingido (${this.failureCount} falhas). Circuito ABERTO por ${this.cooldownPeriod / 1000}s para proteger o worker. Motivo: ${errMsg?.slice(0, 120)}`);
+    }
+  }
+}
+
+const geminiCircuitBreaker = new GeminiCircuitBreakerManager();
+
+async function callWithGeminiRetry(fn, operationName = 'Gemini Operation', maxRetries = 4) {
+  if (geminiCircuitBreaker.isOpen()) {
+    throw new Error(`[CircuitBreaker:OPEN] A API Gemini está em cooldown de proteção após falhas consecutivas de servidor 500.`);
+  }
+
   let lastError = null;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      return await fn();
+      const res = await fn();
+      geminiCircuitBreaker.recordSuccess();
+      return res;
     } catch (err) {
       lastError = err;
       const errMsg = err?.message || String(err);
-      const isTransient = errMsg.includes('500') || errMsg.includes('503') || errMsg.includes('overloaded') || errMsg.includes('fetch failed') || errMsg.includes('ECONNRESET') || errMsg.includes('Internal error') || errMsg.includes('internal error') || errMsg.includes('An internal error has occurred');
+      const isTransient = errMsg.includes('500') || 
+                          errMsg.includes('502') || 
+                          errMsg.includes('503') || 
+                          errMsg.includes('504') || 
+                          errMsg.includes('overloaded') || 
+                          errMsg.includes('fetch failed') || 
+                          errMsg.includes('ECONNRESET') || 
+                          errMsg.includes('ETIMEDOUT') || 
+                          errMsg.includes('Internal error') || 
+                          errMsg.includes('internal error') || 
+                          errMsg.includes('An internal error has occurred') || 
+                          errMsg.includes('RESOURCE_EXHAUSTED');
+
       if (isTransient && attempt < maxRetries) {
-        const backoffDelay = 1000 * Math.pow(1.5, attempt);
+        // Backoff exponencial com jitter randômico para evitar thundering herd
+        const jitter = Math.floor(Math.random() * 500);
+        const backoffDelay = Math.min(1000 * Math.pow(1.8, attempt - 1) + jitter, 7000);
         console.warn(`[AutomationWorker] Oscilação transitória na API Gemini em "${operationName}" (${errMsg.slice(0, 100)}). Tentativa ${attempt}/${maxRetries}. Aguardando ${backoffDelay}ms...`);
         await new Promise(r => setTimeout(r, backoffDelay));
         continue;
       }
+      
+      geminiCircuitBreaker.recordFailure(errMsg);
       throw err;
     }
   }
+  geminiCircuitBreaker.recordFailure(lastError?.message || String(lastError));
   throw lastError;
 }
 
@@ -49,7 +120,8 @@ async function callWithGeminiRetry(fn, operationName = 'Gemini Operation', maxRe
 // CACHE EM MEMÓRIA & AUTO-HEALING DO CARDÁPIO
 // ==========================================
 const cardapioInMemoryCache = new Map();
-const CACHE_TTL = 10 * 60 * 1000; // 10 minutos
+const GASTROFOOD_CACHE_TTL_SECONDS = parseInt(process.env.GASTROFOOD_CACHE_TTL_SECONDS || '300', 10);
+const CACHE_TTL = (Number.isFinite(GASTROFOOD_CACHE_TTL_SECONDS) && GASTROFOOD_CACHE_TTL_SECONDS > 0 ? GASTROFOOD_CACHE_TTL_SECONDS : 300) * 1000;
 
 const GASTROFOOD_BASE_URL = 'https://service.xpointsolucoes.com.br:8443';
 const CARDAPIO_DEFAULT_URL = `${GASTROFOOD_BASE_URL}/v6/server/nuvem/ProdutoPdvService/GetCardapioCompleto`;
@@ -2406,8 +2478,22 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
             while (keepLooping && loopCount < MAX_LOOPS) {
                 loopCount++;
                 try {
+                    // Sanitização e validação de payload antes do envio para mitigar erros 500 do Gemini
+                    let safePayload = currentMessageText;
+                    if (safePayload === undefined || safePayload === null) {
+                        safePayload = "Olá";
+                    } else if (typeof safePayload !== 'string') {
+                        try {
+                            safePayload = JSON.stringify(safePayload);
+                        } catch (e) {
+                            safePayload = String(safePayload);
+                        }
+                    } else if (safePayload.trim() === '') {
+                        safePayload = "Olá";
+                    }
+
                     const result = await callWithGeminiRetry(
-                        () => chat.sendMessage(currentMessageText),
+                        () => chat.sendMessage(safePayload),
                         `chat.sendMessage (Iteração ${loopCount})`
                     );
                     const response = result.response;
@@ -3538,15 +3624,24 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                     if (errMsg.includes('PROHIBITED_CONTENT')) {
                         console.warn(`[AutomationWorker] O processamento da conversa ${conversationId} foi bloqueado pela API do Gemini devido a conteúdo proibido (PROHIBITED_CONTENT). Mensagem do cliente: "${textMessage}"`);
                         finalResponseText = "Desculpe, não posso responder a essa pergunta devido às diretrizes de segurança de conteúdo do sistema.";
+                    } else if (errMsg.includes('500') || errMsg.includes('Internal error') || errMsg.includes('CircuitBreaker:OPEN') || errMsg.includes('An internal error has occurred')) {
+                        console.warn(`[AutomationWorker] Oscilação de servidor 500 na API Gemini na conversa ${conversationId} (Iteração ${loopCount}): ${errMsg.slice(0, 150)}. Aplicando resposta de contingência amigável.`);
+                        
+                        const hadCardapio = toolExecutionHistory.some(t => t.toolName === 'Consultar_produtos_cardapio');
+                        if (hadCardapio) {
+                            finalResponseText = "Consultei as opções do nosso cardápio para você! Me diga, qual item você gostaria de pedir?";
+                        } else {
+                            finalResponseText = "Estou consultando nosso sistema para te atender da melhor forma. Como posso te ajudar agora?";
+                        }
                     } else {
-                        const errorDetail = `[AutomationWorker] Erro crítico no loop de função (Iteração ${loopCount}) para conversa ${conversationId}:\n` +
+                        const errorDetail = `[AutomationWorker] Erro no loop de função (Iteração ${loopCount}) para conversa ${conversationId}:\n` +
                             `Mensagem de gatilho do cliente: "${textMessage}"\n` +
                             `Erro: ${errName} - ${errMsg} (Status: ${errStatus})\n` +
                             `Histórico de chamadas de tools executadas até a falha:\n` +
                             JSON.stringify(toolExecutionHistory, null, 2);
 
                         console.error(errorDetail);
-                        finalResponseText = "Desculpe, ocorreu um pequeno erro interno ao processar sua requisição. Pode tentar novamente?";
+                        finalResponseText = "Desculpe, ocorreu uma pequena instabilidade técnica no momento. Pode tentar novamente em instantes?";
                     }
                     keepLooping = false;
                 }
