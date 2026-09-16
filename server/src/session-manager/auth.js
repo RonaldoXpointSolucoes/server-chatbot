@@ -56,9 +56,9 @@ const recipientResetCooldowns = new Map();
 const RECIPIENT_RESET_COOLDOWN_MS = 30000; // 30 segundos de intervalo mínimo por destinatário
 
 export function clearRecipientSession(instanceId, jid) {
-    if (!jid) return;
+    if (!jid) return false;
     const cleanJid = String(jid).replace('@s.whatsapp.net', '').replace('@lid', '').replace('@g.us', '').split(':')[0].trim();
-    if (!cleanJid || cleanJid.length < 5) return;
+    if (!cleanJid || cleanJid.length < 5) return false;
     
     const cooldownKey = `${instanceId}_${cleanJid}`;
     const now = Date.now();
@@ -66,7 +66,7 @@ export function clearRecipientSession(instanceId, jid) {
 
     // Se já foi resetado nos últimos 30 segundos, ignora para permitir que a nova negociação de prekeys termine
     if (lastReset && (now - lastReset < RECIPIENT_RESET_COOLDOWN_MS)) {
-        return;
+        return false;
     }
     recipientResetCooldowns.set(cooldownKey, now);
 
@@ -102,6 +102,8 @@ export function clearRecipientSession(instanceId, jid) {
             .then(() => {})
             .catch(() => {});
     } catch (e) {}
+
+    return true;
 }
 
 export async function useSupabaseAuthState(tenantId, instanceId, forceCleanState = false) {

@@ -18,10 +18,20 @@ export const HOMOLOG_ALLOWED_INSTANCES = [
 export const isInstanceAllowedForNode = (instanceId, tenantId = null) => {
     const currentNodeId = String(NODE_ID).trim();
     const isAlphaWorker = currentNodeId.includes('alpha') || (process.env.APP_ENV || '').toLowerCase() === 'alpha';
-    if (!isAlphaWorker) return true;
-    if (process.env.AUTO_START_ALPHA_ALL === 'true') return true;
-    // O nó Alpha de Homologação é restrito EXCLUSIVAMENTE às instâncias oficiais de teste homologadas
-    return HOMOLOG_ALLOWED_INSTANCES.includes(instanceId);
+    const isHomologInstance = HOMOLOG_ALLOWED_INSTANCES.includes(instanceId);
+
+    // Se for o nó de Homologação (Alpha):
+    if (isAlphaWorker) {
+        if (process.env.AUTO_START_ALPHA_ALL === 'true') return true;
+        return isHomologInstance;
+    }
+
+    // Se for nó de Produção ou outros workers: nunca assumir instâncias exclusivas de teste/homologação
+    if (isHomologInstance) {
+        return false;
+    }
+
+    return true;
 };
 
 export const isSocketOpen = (sock) => {
@@ -390,7 +400,7 @@ class SessionManager {
                         assignedNodeId.includes('local') ||
                         assignedNodeId.startsWith('worker-local')
                     );
-                    const isMasterTakeover = isProductionMaster && isNonProductionRemote && (!isHomologInstance || isLeaseExpired);
+                    const isMasterTakeover = isProductionMaster && isNonProductionRemote && !isHomologInstance;
 
                     // Se a instância pertence ativamente a outro nó com lease válido (e não é Master Takeover), não concorre
                     if (assignedNodeId && !isAssignedToThisNode && !isLeaseExpired && !isMasterTakeover) {
@@ -532,8 +542,10 @@ class SessionManager {
 
     async acquireSessionLock(instanceId, force = false) {
         if (!isInstanceAllowedForNode(instanceId)) {
-            console.log(`[SessionManager/Lock/Alpha] Nó Alpha recusou adquirir lock da instância de produção ${instanceId}.`);
-            throw new Error(`Instância ${instanceId} pertence à produção e não é permitida no nó Alpha.`);
+            const currentNodeId = String(NODE_ID).trim();
+            const msg = `Instância ${instanceId} não pertence ao escopo deste nó (${currentNodeId}). Preservando isolamento.`;
+            console.log(`[SessionManager/Lock] ${msg}`);
+            throw new Error(msg);
         }
 
         const maxLockAttempts = 4;
@@ -690,8 +702,8 @@ class SessionManager {
 
     async createSession(tenantId, instanceId, force = false) {
         if (!isInstanceAllowedForNode(instanceId, tenantId)) {
-            console.log(`[SessionManager/Create/Alpha] Nó Alpha recusou criar sessão da instância de produção ${instanceId}.`);
-            throw new Error(`Instância ${instanceId} pertence à produção e não é permitida no nó Alpha.`);
+            console.log(`[SessionManager] Instância ${instanceId} não pertence ao escopo deste nó (${NODE_ID}). Inicialização ignorada pacificamente.`);
+            return null;
         }
 
         // 1. Se já há uma Promise de inicialização em andamento para esta instância, reutiliza diretamente
@@ -1610,8 +1622,16 @@ class SessionManager {
                         const targetJid = item?.key?.remoteJid;
                         if (targetJid && !targetJid.endsWith('@newsletter') && targetJid !== 'status@broadcast') {
                             const errCode = stubParams ? stubParams.join(',') : (statusVal || 'ERROR');
-                            console.warn(`[SessionManager] ⚠️ Erro de entrega/ack detectado (${errCode}) para ${targetJid} na instância ${instanceId}. Resetando chaves de sessão para forçar renegociação segura...`);
-                            clearRecipientSession(instanceId, targetJid);
+                            const isLidSubdevice = targetJid.includes(':') && targetJid.includes('@lid');
+                            
+                            const didReset = clearRecipientSession(instanceId, targetJid);
+                            if (didReset) {
+                                if (isLidSubdevice) {
+                                    console.log(`[SessionManager] Subdispositivo LID com ack (${errCode}) em ${targetJid} na instância ${instanceId}. Chaves Signal recicladas para renegociação.`);
+                                } else {
+                                    console.log(`[SessionManager] Ack (${errCode}) para ${targetJid} na instância ${instanceId}. Resetando chaves de sessão para renegociação...`);
+                                }
+                            }
                         }
                     }
                 }
@@ -1850,10 +1870,13 @@ class SessionManager {
                 error.message.includes('lock ativo') || 
                 error.message.includes('pertence ao nó de produção') ||
                 error.message.includes('possui lock') ||
-                error.message.includes('Lock negado')
+                error.message.includes('Lock negado') ||
+                error.message.includes('ambiente de testes') ||
+                error.message.includes('não pertence ao escopo') ||
+                error.message.includes('não é permitida')
             );
             if (isLockProtection) {
-                console.log(`[SessionManager/Lock] Instância ${instanceId} preservada sob lock exclusivo de outro nó: ${error.message}`);
+                console.log(`[SessionManager/Lock] Instância ${instanceId} preservada sob isolamento/lock exclusivo de outro nó: ${error.message}`);
             } else {
                 console.error(`[SessionManager] Falha ao inciar sessão ${instanceId}`, error);
             }

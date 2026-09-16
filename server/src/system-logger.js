@@ -104,6 +104,10 @@ function interceptConsole() {
         text.includes('[History Sync] O WhatsApp não retornou') ||
         text.includes('[QueueProcessor] Falha de rede temporária ao carregar fila de mensagens') ||
         text.includes('[SnoozeManager] Conexão com o Supabase indisponível temporariamente') ||
+        text.includes('USync fetch yielded no results') ||
+        text.includes('pending PNs') ||
+        text.includes('Erro de entrega/ack detectado') ||
+        text.includes('Resetando chaves de sessão') ||
         (text.includes('[WaCalls Listener]') && (text.includes('Contato não encontrado') || text.includes('mapeamento LID')))
     )) {
         originalFn.apply(console, args);
@@ -117,7 +121,9 @@ function interceptConsole() {
                                   text.includes('verifyMAC') ||
                                   text.includes('Decrypted message with closed session') ||
                                   text.includes('received error in ack') ||
-                                  text.includes('error":"479"') ||
+                                  text.includes('479') ||
+                                  text.includes('475') ||
+                                  text.includes('USync fetch yielded no results') ||
                                   text.includes('Own LID session created successfully') ||
                                   text.includes('sent retry receipt') ||
                                   text.includes('Connection Terminated') ||

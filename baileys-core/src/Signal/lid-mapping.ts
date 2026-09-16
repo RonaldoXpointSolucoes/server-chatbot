@@ -233,7 +233,7 @@ export class LIDMappingStore {
 					}
 				}
 			} else {
-				this.logger.warn('USync fetch yielded no results for pending PNs')
+				this.logger.debug('USync fetch yielded no results for pending PNs')
 			}
 		}
 

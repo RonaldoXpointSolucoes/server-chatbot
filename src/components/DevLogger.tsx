@@ -1124,6 +1124,12 @@ export default function DevLogger() {
                     msg.includes('History sync is disabled') ||
                     msg.includes('identity changed') ||
                     msg.includes('GetCardapioCompleto') ||
+                    msg.includes('USync fetch yielded no results') ||
+                    msg.includes('pending PNs') ||
+                    msg.includes('Erro de entrega/ack detectado') ||
+                    msg.includes('Resetando chaves de sessão') ||
+                    msg.includes('pertence ao ambiente de testes') ||
+                    msg.includes('não pertence ao escopo deste nó') ||
                     (msg.includes('[WaCalls Listener]') && (msg.includes('Contato não encontrado') || msg.includes('mapeamento LID')));
                  
                  if (isRoutineNoise || err.level === 'info') {
