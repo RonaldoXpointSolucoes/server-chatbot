@@ -878,6 +878,7 @@ export function BotModal({ isOpen, onClose, onSave, botToEdit, availableBots = [
                           <code className="bg-black/30 px-1 py-0.5 rounded text-indigo-200 font-mono text-[10px]">[LINK_GOOGLE_MAPS]</code>
                           <code className="bg-black/30 px-1 py-0.5 rounded text-indigo-200 font-mono text-[10px]">[LINK_YOUTUBE]</code>
                           <code className="bg-black/30 px-1 py-0.5 rounded text-indigo-200 font-mono text-[10px]">[LINK_TIKTOK]</code>
+                          <code className="bg-black/30 px-1 py-0.5 rounded text-amber-200 font-mono text-[10px]">[AVISO_IMPRESSAO_URL]</code>
                         </div>
                         <span className="block mt-2 text-[10px] text-indigo-400/80">Esses tokens serão substituídos pelos respectivos links e dados configurados na sua Conta.</span>
                       </div>
