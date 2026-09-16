@@ -116,6 +116,7 @@ export function UpdatePrompt() {
       const currentStored = localStorage.getItem('chatboot_installed_version') || installedVersion;
       const delta = getDeltaReleaseNotes(currentStored, resolvedTarget);
 
+      setInstalledVersion(delta.fromVersion);
       setTargetVersion(delta.targetVersion);
       setDeltaSummary(delta.summary);
       setReleaseNotes(delta.notes);

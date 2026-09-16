@@ -3,6 +3,44 @@ import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 import packageJson from './package.json';
 import basicSsl from '@vitejs/plugin-basic-ssl';
+import fs from 'fs';
+import path from 'path';
+
+function generateVersionFilePlugin() {
+  return {
+    name: 'generate-version-file',
+    buildStart() {
+      try {
+        const publicDir = path.resolve(__dirname, 'public');
+        if (!fs.existsSync(publicDir)) {
+          fs.mkdirSync(publicDir, { recursive: true });
+        }
+        const versionJsonPath = path.resolve(publicDir, 'version.json');
+        
+        let summary = 'Atualizações e melhorias contínuas do ChatBoot';
+        try {
+          const notesPath = path.resolve(__dirname, 'src/data/releaseNotes.ts');
+          if (fs.existsSync(notesPath)) {
+            const notesContent = fs.readFileSync(notesPath, 'utf-8');
+            const matchSummary = notesContent.match(/summary:\s*['"`]([^'"`]+)['"`]/);
+            if (matchSummary && matchSummary[1]) {
+              summary = matchSummary[1];
+            }
+          }
+        } catch (_) {}
+
+        const payload = {
+          version: packageJson.version,
+          buildDate: new Date().toISOString(),
+          summary
+        };
+        fs.writeFileSync(versionJsonPath, JSON.stringify(payload, null, 2) + '\n');
+      } catch (err) {
+        console.warn('[Vite] Erro ao sincronizar version.json:', err);
+      }
+    }
+  };
+}
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -11,6 +49,7 @@ export default defineConfig({
     'import.meta.env.PACKAGE_BUILD_DATE': JSON.stringify(new Date().toISOString())
   },
   plugins: [
+    generateVersionFilePlugin(),
     react(),
     basicSsl(),
     VitePWA({

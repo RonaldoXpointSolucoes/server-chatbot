@@ -20,6 +20,60 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.4.8',
+    date: '2026-09-16',
+    summary: 'Automação física de Aviso de Impressão PDV (40 colunas) e blindagem anti-loop',
+    notes: [
+      {
+        id: '7.4.8-1',
+        category: 'features',
+        title: 'Aviso de Impressão Física Remota no PDV (40 Colunas)',
+        description: 'Disparo automático de recado físico para a impressora de produção (Caixa, Cozinha, Balcão) via GestorPedidosService quando a IA transferir o cliente para atendimento humano.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.4.8-2',
+        category: 'improvements',
+        title: 'Blindagem Anti-Loop e Disparo Único',
+        description: 'Tracker inteligente com janela de 30 minutos indexado por conversa, JID e telefone para assegurar disparo estritamente único por atendimento humano, evitando loops e gasto de bobina.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      },
+      {
+        id: '7.4.8-3',
+        category: 'improvements',
+        title: 'Configuração Simplificada e Status em Tempo Real',
+        description: 'Campos 1 (Estabelecimento) e 2 (Impressora) iniciam em branco por padrão com banner de ativação em tempo real e remoção do endpoint estático travado do layout.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
+      }
+    ]
+  },
+  {
+    version: '7.4.7',
+    date: '2026-09-16',
+    summary: 'Estruturação inicial de endpoints de impressão remota e testes operacionais',
+    notes: [
+      {
+        id: '7.4.7-1',
+        category: 'features',
+        title: 'Módulo de Integração de Impressão Remota',
+        description: 'Implementação da seção de impressão física remota em Configurações de Conta com parametrização manual de estabelecimento, impressora e mensagem de teste.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.4.7-2',
+        category: 'improvements',
+        title: 'Validação de Comunicação com GestorPedidosService',
+        description: 'Painel interativo de testes manuais com feedback instantâneo de conexão HTTP e diagnóstico de status do PDV.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      }
+    ]
+  },
+  {
     version: '7.4.6',
     date: '2026-09-16',
     summary: 'Prevenção de perda de mensagens no chat e telemetria ponta a ponta',
@@ -170,10 +224,22 @@ export function getDeltaReleaseNotes(
 
   const fromVersion = fromVersionRaw.replace(/^v/, '');
 
+  // Proteção contra inversão de versões (ex: se o client storage tiver versão maior ou igual à target)
+  if (compareSemver(fromVersion, targetRelease.version) >= 0) {
+    const prevRelease = APP_RELEASES.find(r => compareSemver(targetRelease.version, r.version) > 0);
+    const safeFrom = prevRelease ? prevRelease.version : targetRelease.version;
+    return {
+      notes: targetRelease.notes,
+      summary: targetRelease.summary,
+      fromVersion: safeFrom,
+      targetVersion: targetRelease.version
+    };
+  }
+
   // Filtra apenas as versões estritamente maiores que a anterior e menores/iguais à alvo
   const applicableReleases = APP_RELEASES.filter(release => {
     const isAfterFrom = compareSemver(release.version, fromVersion) > 0;
-    const isUpToTarget = compareSemver(release.version, targetVersion) <= 0;
+    const isUpToTarget = compareSemver(release.version, targetRelease.version) <= 0;
     return isAfterFrom && isUpToTarget;
   });
 
@@ -200,3 +266,4 @@ export function getDeltaReleaseNotes(
     targetVersion: applicableReleases[0].version
   };
 }
+

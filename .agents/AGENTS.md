@@ -62,8 +62,14 @@ O deploy NUNCA deve ser executado de forma automática após alterações de có
    - **Alvo**: Frontend na **Vercel** (`chat-boot-theta.vercel.app`).
    - Incrementa a versão no `package.json` da raiz seguindo a regra de dígito único `X.Y.Z` (0 a 9 em cada componente, ex: de `4.9.4` para `4.9.5`). O valor máximo de cada componente é `9`.
    - Atualiza a variável `VITE_PACKAGE_BUILD_DATE` no `.env` para a data/hora atual.
+   - **OBRIGATÓRIO - Atualização do Catálogo de Releases (`src/data/releaseNotes.ts`)**:
+     - A IA deve obrigatoriamente adicionar no topo de `APP_RELEASES` a nova entrada contendo a mesma versão do `package.json`, data atual, sumário executivo e a lista categorizada de notas reais (`notes`) da entrega:
+       - `features` (Novidades com tag `NOVIDADE`);
+       - `improvements` (Melhorias com tag `MELHORIA`);
+       - `fixes` (Correções com tag `CORREÇÃO`).
+     - Isso alimenta o modal de atualização do aplicativo (`UpdatePrompt.tsx`) e o arquivo `version.json`, garantindo que os usuários vejam exatamente o que mudou e onde a funcionalidade entrou.
    - Executa o commit/push do frontend e a publicação na Vercel (`npm run deploy`).
-   - Relata a versão gerada e o status da publicação no chat.
+   - Relata a versão gerada, as novidades catalogadas e o status da publicação no chat.
 
 3. **Se o usuário digitar `Deploy Server` (Pipeline Único com Homologação Obrigatória & Testes E2E)**:
    - **Alvo**: Backend Node no **Coolify** (`ServerChatBaileys-Alpha` ➔ `ServerChatBaileys-Produção`).

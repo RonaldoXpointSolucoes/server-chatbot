@@ -1,5 +1,5 @@
 {
-  "version": "7.4.6",
-  "buildDate": "2026-09-16T16:15:00.000Z",
-  "summary": "Prevenção de perda de mensagens no chat e telemetria ponta a ponta"
+  "version": "7.4.8",
+  "buildDate": "2026-09-16T20:38:51.384Z",
+  "summary": "Automação física de Aviso de Impressão PDV (40 colunas) e blindagem anti-loop"
 }
