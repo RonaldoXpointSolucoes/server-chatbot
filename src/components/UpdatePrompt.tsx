@@ -8,75 +8,34 @@ import {
   Zap, 
   Rocket, 
   Wrench, 
-  CheckCircle2, 
   ChevronDown, 
   ChevronUp, 
   Clock, 
-  Tag, 
   ArrowRight,
-  ShieldCheck,
   Flame
 } from 'lucide-react';
-
-interface ReleaseNoteItem {
-  id: string;
-  category: 'features' | 'fixes' | 'improvements';
-  title: string;
-  description: string;
-  tag: string;
-  badgeColor: string;
-}
-
-// Conjunto curado das novidades, correções e melhorias recentes do ChatBoot
-const DEFAULT_RELEASE_NOTES: ReleaseNoteItem[] = [
-  {
-    id: 'note-1',
-    category: 'fixes',
-    title: 'Estabilidade Crítica de Conexões Baileys',
-    description: 'Eliminação de vazamentos de memória (MaxListenersExceeded), limpeza automática de listeners residuais e estabilização do handshake de sockets.',
-    tag: 'CORREÇÃO',
-    badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
-  },
-  {
-    id: 'note-2',
-    category: 'fixes',
-    title: 'Resiliência na Integração Gastrofood',
-    description: 'Tratamento de limite de caracteres (varchar 20) no envio de pedidos, mitigando erros 500 do FireDAC e garantindo fallback de cardápio local.',
-    tag: 'CORREÇÃO',
-    badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
-  },
-  {
-    id: 'note-3',
-    category: 'features',
-    title: 'Central de Atualizações PWA & Notificações',
-    description: 'Novo cockpit visual detalhado de novidades com carregamento inteligente de Service Worker e recarregamento sem atrito.',
-    tag: 'NOVIDADE',
-    badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
-  },
-  {
-    id: 'note-4',
-    category: 'improvements',
-    title: 'Performance do CRM Kanban & Cache Instantâneo',
-    description: 'Agilização na renderização dos quadros de desenvolvimento, otimização de pré-cache de scripts e menor consumo de dados móveis.',
-    tag: 'PERFORMANCE',
-    badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
-  },
-  {
-    id: 'note-5',
-    category: 'improvements',
-    title: 'Design System & Responsividade Fluida',
-    description: 'Microinterações táteis para dispositivos móveis, glassmorphism refinado e contraste visual aprimorado em modo escuro.',
-    tag: 'INTERFACE',
-    badgeColor: 'bg-purple-500/20 text-purple-300 border-purple-500/30'
-  }
-];
+import { 
+  getDeltaReleaseNotes, 
+  APP_RELEASES, 
+  type ReleaseNoteItem 
+} from '../data/releaseNotes';
 
 export function UpdatePrompt() {
   const [isUpdating, setIsUpdating] = useState(false);
   const [updatePhase, setUpdatePhase] = useState<'idle' | 'updating' | 'reloading'>('idle');
   const [isExpanded, setIsExpanded] = useState(true);
   const [activeTab, setActiveTab] = useState<'all' | 'features' | 'fixes' | 'improvements'>('all');
-  const [releaseNotes, setReleaseNotes] = useState<ReleaseNoteItem[]>(DEFAULT_RELEASE_NOTES);
+
+  const currentRunningVersion = import.meta.env.PACKAGE_VERSION || '7.4.6';
+  const rawBuildDate = import.meta.env.PACKAGE_BUILD_DATE || import.meta.env.VITE_PACKAGE_BUILD_DATE;
+
+  // Versão instalada em cache no cliente e versão alvo da nova atualização
+  const [targetVersion, setTargetVersion] = useState<string>(APP_RELEASES[0]?.version || currentRunningVersion);
+  const [installedVersion, setInstalledVersion] = useState<string>(() => {
+    return localStorage.getItem('chatboot_installed_version') || currentRunningVersion;
+  });
+  const [deltaSummary, setDeltaSummary] = useState<string>(APP_RELEASES[0]?.summary || 'Atualizações e melhorias no sistema');
+  const [releaseNotes, setReleaseNotes] = useState<ReleaseNoteItem[]>([]);
 
   const {
     needRefresh: [needRefresh, setNeedRefresh],
@@ -108,9 +67,21 @@ export function UpdatePrompt() {
     },
   });
 
+  // Mantém a versão instalada sincronizada quando o app estiver executando normalmente
+  useEffect(() => {
+    if (!needRefresh) {
+      localStorage.setItem('chatboot_installed_version', currentRunningVersion);
+      setInstalledVersion(currentRunningVersion);
+    }
+  }, [needRefresh, currentRunningVersion]);
+
   // Habilitar simulação visual em desenvolvimento ou testes manuais
   useEffect(() => {
-    (window as any).__triggerUpdatePrompt = (force: boolean = true) => {
+    (window as any).__triggerUpdatePrompt = (force: boolean = true, mockFromVersion?: string) => {
+      if (mockFromVersion) {
+        setInstalledVersion(mockFromVersion);
+        localStorage.setItem('chatboot_installed_version', mockFromVersion);
+      }
       setNeedRefresh(force);
     };
     return () => {
@@ -118,54 +89,44 @@ export function UpdatePrompt() {
     };
   }, [setNeedRefresh]);
 
-  // Tentar enriquecer notas dinamicamente a partir da API do servidor se estiver disponível
+  // Carrega estritamente o delta de notas da versão anterior para a versão atual
   useEffect(() => {
     if (!needRefresh) return;
 
-    const fetchServerNotes = async () => {
+    let isMounted = true;
+
+    const resolveDelta = async () => {
+      let resolvedTarget = APP_RELEASES[0]?.version || currentRunningVersion;
+
       try {
-        const engineUrl = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
-        const res = await fetch(`${engineUrl}/debug/healthz`, {
-          headers: { 'x-asts-test': 'true' }
-        });
+        // Tenta identificar se o servidor ou o novo build já publicou um version.json atualizado
+        const res = await fetch(`/version.json?t=${Date.now()}`, { cache: 'no-store' });
         if (res.ok) {
           const data = await res.json();
-          if (data && Array.isArray(data.changelog) && data.changelog.length > 0) {
-            const parsedNotes: ReleaseNoteItem[] = data.changelog.map((item: string, idx: number) => {
-              const isFix = item.toLowerCase().includes('correc') || item.toLowerCase().includes('fix') || item.toLowerCase().includes('resili');
-              const isFeature = item.toLowerCase().includes('nov') || item.toLowerCase().includes('ui') || item.toLowerCase().includes('endpoint');
-              return {
-                id: `srv-note-${idx}`,
-                category: isFix ? 'fixes' : isFeature ? 'features' : 'improvements',
-                title: item.replace(/^[^\w\s]+/, '').trim(),
-                description: 'Implementado e publicado na versão recente do ecossistema ChatBoot.',
-                tag: isFix ? 'CORREÇÃO' : isFeature ? 'NOVIDADE' : 'MELHORIA',
-                badgeColor: isFix 
-                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
-                  : isFeature 
-                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
-                  : 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
-              };
-            });
-            // Mesclar evitando duplicados
-            setReleaseNotes(prev => {
-              const combined = [...prev];
-              parsedNotes.forEach(pn => {
-                if (!combined.some(c => c.title.toLowerCase() === pn.title.toLowerCase())) {
-                  combined.unshift(pn);
-                }
-              });
-              return combined;
-            });
+          if (data && data.version) {
+            resolvedTarget = data.version;
           }
         }
       } catch {
-        // Mantém as notas padrão curadas em caso de falha de conexão
+        // Usa o mais recente do catálogo local em caso de erro de rede
       }
+
+      if (!isMounted) return;
+
+      const currentStored = localStorage.getItem('chatboot_installed_version') || installedVersion;
+      const delta = getDeltaReleaseNotes(currentStored, resolvedTarget);
+
+      setTargetVersion(delta.targetVersion);
+      setDeltaSummary(delta.summary);
+      setReleaseNotes(delta.notes);
     };
 
-    fetchServerNotes();
-  }, [needRefresh]);
+    resolveDelta();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [needRefresh, installedVersion, currentRunningVersion]);
 
   const close = () => {
     if (isUpdating) return;
@@ -179,6 +140,9 @@ export function UpdatePrompt() {
     if (isUpdating) return;
     setIsUpdating(true);
     setUpdatePhase('updating');
+
+    // Registra no storage a nova versão aplicada antes do reload
+    localStorage.setItem('chatboot_installed_version', targetVersion);
 
     let reloaded = false;
     const performReload = () => {
@@ -251,9 +215,6 @@ export function UpdatePrompt() {
     };
   }, [releaseNotes]);
 
-  // Metadados de versão
-  const currentVersion = import.meta.env.PACKAGE_VERSION || '7.4.4';
-  const rawBuildDate = import.meta.env.PACKAGE_BUILD_DATE || import.meta.env.VITE_PACKAGE_BUILD_DATE;
   const buildDateStr = useMemo(() => {
     if (!rawBuildDate) return 'Recém-compilada';
     return rawBuildDate;
@@ -305,12 +266,23 @@ export function UpdatePrompt() {
                   </h3>
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-indigo-500/25 border border-indigo-500/40 text-indigo-300 font-mono">
                     <Zap size={10} className="text-indigo-400" />
-                    v{currentVersion}
+                    v{targetVersion}
                   </span>
                 </div>
                 <p className="text-[11px] text-[#8696a0] flex items-center gap-1.5 mt-0.5">
                   <Clock size={11} className="text-slate-400" />
-                  <span>Pronta para aplicar • {buildDateStr}</span>
+                  <span>
+                    {installedVersion !== targetVersion ? (
+                      <span className="inline-flex items-center gap-1">
+                        <span>v{installedVersion}</span>
+                        <ArrowRight size={10} className="text-indigo-400" />
+                        <span className="font-semibold text-slate-200">v{targetVersion}</span>
+                        <span>• {buildDateStr}</span>
+                      </span>
+                    ) : (
+                      <span>Pronta para aplicar • {buildDateStr}</span>
+                    )}
+                  </span>
                 </p>
               </div>
             </div>
@@ -328,12 +300,12 @@ export function UpdatePrompt() {
             )}
           </div>
 
-          {/* Chamada Principal Curta */}
+          {/* Chamada Principal Curta Dinâmica */}
           <div className="bg-white/5 border border-white/10 rounded-2xl p-2.5 px-3 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 text-xs text-slate-200">
+            <div className="flex items-center gap-2 text-xs text-slate-200 min-w-0">
               <Flame size={15} className="text-amber-400 shrink-0 animate-pulse" />
-              <span className="font-medium text-[12px] leading-tight">
-                Nova compilação com correções no Baileys e Gastrofood
+              <span className="font-medium text-[12px] leading-tight truncate">
+                {deltaSummary}
               </span>
             </div>
             <button
@@ -487,4 +459,3 @@ export function UpdatePrompt() {
     </div>
   );
 }
-

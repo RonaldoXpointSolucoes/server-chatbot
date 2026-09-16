@@ -329,6 +329,32 @@ class EventProcessor {
         } catch (e) {
             // Silenciado
         }
+
+        // 5. Try historical messages where raw_payload contains remoteJid = jid and has remoteJidAlt
+        try {
+            const { data: dbMsg } = await supabase
+                .from('messages')
+                .select('raw_payload')
+                .filter('raw_payload->key->>remoteJid', 'eq', jid)
+                .not('raw_payload->key->>remoteJidAlt', 'is', null)
+                .limit(1);
+            if (dbMsg && dbMsg.length > 0 && dbMsg[0].raw_payload?.key?.remoteJidAlt) {
+                const foundPn = dbMsg[0].raw_payload.key.remoteJidAlt;
+                if (foundPn && foundPn.includes('@s.whatsapp.net')) {
+                    try {
+                        const cleanPhone = foundPn.split('@')[0];
+                        await supabase.from('wa_auth_keys').upsert({
+                            instance_id: instanceId,
+                            key_name: `lid-mapping-${cleanLid}_reverse`,
+                            key_data: cleanPhone
+                        }, { onConflict: 'instance_id, key_name' });
+                    } catch (_) {}
+                    return foundPn;
+                }
+            }
+        } catch (e) {
+            // Silenciado
+        }
         
         return null;
     }
@@ -348,11 +374,19 @@ class EventProcessor {
                 const isDecryptionFailureStub = msg.messageStubType && !msg.message;
                 const isHistorySync = m.type === 'append' || m.type === 'reconcile';
 
+                // Calcula a idade da mensagem para NUNCA descartar mensagens recentes (minutos/poucas horas atrás).
+                // O Baileys usa m.type = 'append' para mensagens enviadas pelo próprio celular (fromMe) e mensagens entregues pós-reconexão!
+                const rawTimestamp = typeof msg.messageTimestamp === 'number'
+                    ? msg.messageTimestamp
+                    : (msg.messageTimestamp?.low || Math.floor(Date.now() / 1000));
+                const msgAgeSecs = Math.floor(Date.now() / 1000) - rawTimestamp;
+                const isAncientHistory = msgAgeSecs > 4 * 3600; // Mais de 4 horas
+
                 const instanceConfig = await this.getInstanceConfig(instanceId);
 
-                // Se a instância tiver sync_history === false ou is_api_only === true, ignora cargas de histórico antigo
-                if ((instanceConfig.sync_history === false || instanceConfig.is_api_only === true) && isHistorySync) {
-                    console.log(`[EventProcessor] Ignorando payload de histórico antigo/legado para instância API Gateway (${instanceId}).`);
+                // Apenas ignora se for histórico verdadeiramente antigo (> 4h) E sync_history for false E não for fromMe recente
+                if ((instanceConfig.sync_history === false || instanceConfig.is_api_only === true) && isHistorySync && isAncientHistory && !msg.key?.fromMe) {
+                    console.log(`[EventProcessor] Ignorando payload de histórico antigo/legado (${Math.round(msgAgeSecs / 3600)}h atrás) para instância ${instanceId}. ID: ${msgId}`);
                     continue;
                 }
                 

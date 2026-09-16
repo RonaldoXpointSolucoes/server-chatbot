@@ -1,9 +1,9 @@
 {
-  "version": "1.0.26",
+  "version": "7.3.1",
   "changelog": [
-    "✅ UI Premium no Card de Novidades (Glassmorphism & Animação)",
-    "✅ Integração nativa de Release Notes via /debug/healthz",
-    "✅ Novo Endpoint de Registro de Server Releases com leitura estática",
-    "✅ Melhoria sistêmica da barra lateral e versões sincronizadas"
+    "✅ Prevenção de perda de mensagens: preservação na interface e opção de reenvio",
+    "✅ Rastreabilidade e telemetria E2E (Front <-> Node Server <-> Baileys)",
+    "✅ Otimização de memória: Cache LRU de chaves Signal (-93% de heap)",
+    "✅ Saneamento automático e eliminação de loops na fila Outbox"
   ]
 }

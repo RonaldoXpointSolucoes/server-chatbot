@@ -11,8 +11,7 @@ import pino from 'pino';
 import { supabase, NODE_ID, retryWithBackoff, resolveTargetJid } from '../supabase.js';
 
 export const HOMOLOG_ALLOWED_INSTANCES = [
-    'cc4efe36-f391-4b3d-a24c-ddcd8a293cf6', // FoodNext (11 94775-8860)
-    '5c78d358-d449-41c4-b396-a04ab20a39e4'  // Ronaldo-Web (11 97596-0999)
+    'cc4efe36-f391-4b3d-a24c-ddcd8a293cf6' // FoodNext (11 94775-8860) - Caixa exclusiva de homologação/testes
 ];
 
 export const isInstanceAllowedForNode = (instanceId, tenantId = null) => {
