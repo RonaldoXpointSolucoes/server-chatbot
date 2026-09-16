@@ -4,6 +4,7 @@ import messageRoutes from './messages.js';
 import knowledgeRoutes from './knowledge.js';
 import wacallsRoutes from './wacalls.js';
 import voucherRoutes from './vouchers.js';
+import diagnosticsRoutes from './diagnostics.js';
 import { supabase } from '../supabase.js';
 import { getUrlInfo } from '@whiskeysockets/baileys';
 import { GoogleGenerativeAI } from '@google/generative-ai';
@@ -19,6 +20,7 @@ router.use('/', messageRoutes);
 router.use('/v1/knowledge', knowledgeRoutes);
 router.use('/v1', wacallsRoutes);
 router.use('/v1/vouchers', voucherRoutes);
+router.use('/v1', diagnosticsRoutes);
 
 // Rota de link preview para contornar CORS no frontend e expor o resolvedor do Baileys
 router.get('/v1/utils/link-preview', async (req, res) => {

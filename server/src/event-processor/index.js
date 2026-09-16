@@ -11,6 +11,7 @@ import AutomationWorker from '../automation-worker/agent.js';
 import PushService from '../push-service/index.js';
 import crypto from 'crypto';
 import { logAndNotifyConnectionEvent } from './connection-notifier.js';
+import { recordStructuredEvent } from '../diagnostics/telemetry.js';
 import {
     isBroadcast,
     isGroup,
@@ -401,6 +402,22 @@ class EventProcessor {
             try {
                 fs.appendFileSync('event_debug.log', new Date().toISOString() + ' QUEUED RAW PAYLOAD: ' + JSON.stringify(msg) + '\n');
             } catch(e){}
+
+            // Rastreabilidade E2E com Trace ID
+            const msgText = extractTextFromMessage(msg.message);
+            const traceMatch = (msgText || '').match(/E2E-[A-Za-z0-9-_]+/);
+            const traceId = traceMatch ? traceMatch[0] : null;
+
+            if (traceId) {
+                recordStructuredEvent({
+                    event: 'BAILEYS_MESSAGES_UPSERT',
+                    traceId,
+                    instanceId,
+                    direction: msg.key?.fromMe ? 'outbound' : 'inbound',
+                    whatsappMessageId: msgId,
+                    details: { remoteJid: msg.key?.remoteJid, fromMe: msg.key?.fromMe, type: m.type }
+                });
+            }
 
             let jid = msg.key.remoteJid;
 
@@ -1455,6 +1472,21 @@ class EventProcessor {
                               }
                           }
                           console.log(`[BatchProcessor] [MSG_TRACE:DB_SAVED] Resolução individual concluída. ${realInserted.length} mensagens salvas no Supabase.`);
+                      }
+
+                      // Registra telemetria de inserção no Supabase para mensagens E2E
+                      for (const ins of realInserted) {
+                          const insText = ins.text || ins.body || '';
+                          const insTraceMatch = insText.match(/E2E-[A-Za-z0-9-_]+/);
+                          if (insTraceMatch) {
+                              recordStructuredEvent({
+                                  event: 'SUPABASE_INSERT_SUCCESS',
+                                  traceId: insTraceMatch[0],
+                                  instanceId: ins.instance_id,
+                                  whatsappMessageId: ins.whatsapp_message_id,
+                                  direction: ins.sender_type === 'client' ? 'inbound' : 'outbound'
+                              });
+                          }
                       }
                   } else {
                       console.log(`[BatchProcessor] Lote idempotente: todas as ${messagesToInsert.length} mensagens já existiam no banco.`);

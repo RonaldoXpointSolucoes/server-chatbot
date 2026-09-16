@@ -3,6 +3,7 @@ import sessionManager from '../session-manager/index.js';
 import queueProcessor from '../session-manager/queue-processor.js';
 import { supabase, NODE_ID, resolveTargetJid } from '../supabase.js';
 import { activePairingAttempts } from '../event-processor/connection-notifier.js';
+import { recordStructuredEvent } from '../diagnostics/telemetry.js';
 import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
@@ -455,7 +456,19 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                     targetJid = await resolveTargetJid(null, jid, req.tenantId);
                 }
 
-                console.log(`[API Gateway] [MSG_TRACE:GATEWAY_RECEIVE] Instância: ${instanceId} | JID: ${targetJid} | Tipo: ${messageType} | Chars: ${body?.length || 0}`);
+                // Extração do traceId do cabeçalho ou corpo para telemetria E2E
+                const traceMatch = (body || '').match(/E2E-[A-Za-z0-9-_]+/);
+                const traceId = req.headers['x-trace-id'] || req.body?.traceId || (traceMatch ? traceMatch[0] : null);
+
+                recordStructuredEvent({
+                    event: 'MESSAGE_SEND_REQUEST',
+                    traceId,
+                    instanceId,
+                    direction: 'outbound',
+                    details: { targetJid, messageType, length: body?.length || 0 }
+                });
+
+                console.log(`[API Gateway] [MSG_TRACE:GATEWAY_RECEIVE] Instância: ${instanceId} | JID: ${targetJid} | Tipo: ${messageType} | TraceId: ${traceId || 'N/A'}`);
 
                 // FAST-PATH: Se o socket da instância já estiver na memória e conectado, envia IMEDIATAMENTE (< 300ms)
                 const activeSock = sessionManager.sessions.get(instanceId)?.sock;
@@ -463,8 +476,21 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
 
                 if (isSockConnected && messageType === 'text') {
                     try {
+                        const tSendStart = Date.now();
+                        recordStructuredEvent({ event: 'BAILEYS_SEND_START', traceId, instanceId, direction: 'outbound' });
+
                         const sendFn = activeSock.originalSendMessage || activeSock.sendMessage;
                         const sentResult = await sendFn(targetJid, content);
+                        const sendDuration = Date.now() - tSendStart;
+
+                        recordStructuredEvent({
+                            event: 'BAILEYS_SEND_SUCCESS',
+                            traceId,
+                            instanceId,
+                            whatsappMessageId: sentResult?.key?.id,
+                            durationMs: sendDuration,
+                            direction: 'outbound'
+                        });
                         
                         console.log(`[API Gateway] [MSG_TRACE:FASTPATH_SENT] Instância: ${instanceId} | WhatsAppMsgId: ${sentResult?.key?.id} | JID: ${targetJid}`);
 
