@@ -898,10 +898,11 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
                     console.log(`[Worker Boot/Produção] Retomando ${activeLeases.length} sockets em produção...`);
                     for (const instance of activeLeases) {
                         const startSessionWithRetry = (attempt = 1) => {
-                            const forceTakeover = attempt >= 2;
+                            const isHomolog = HOMOLOG_ALLOWED_INSTANCES.includes(instance.id);
+                            const forceTakeover = attempt >= 2 && !isHomolog;
                             sessionManager.createSession(instance.tenant_id, instance.id, forceTakeover).catch(e => {
-                                 const isLockError = e.message && (e.message.includes('lock ativo') || e.message.includes('Lock negado') || e.message.includes('Conexão negada'));
-                                 if (isLockError && attempt < 3) {
+                                 const isLockError = e.message && (e.message.includes('lock ativo') || e.message.includes('Lock negado') || e.message.includes('Conexão negada') || e.message.includes('ambiente de testes'));
+                                 if (isLockError && attempt < 3 && !isHomolog) {
                                      console.log(`[Worker Boot] Instância ${instance.id} sob lease de outro nó. Agendando retentativa com takeover (${attempt}/3) em 35s...`);
                                      setTimeout(() => startSessionWithRetry(attempt + 1), 35000);
                                  } else if (isLockError) {

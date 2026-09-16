@@ -408,7 +408,7 @@ export const getCallStatusFromNode = ({ tag, attrs }: BinaryNode) => {
 const UNEXPECTED_SERVER_CODE_TEXT = 'Unexpected server response: '
 
 export const getCodeFromWSError = (error: Error) => {
-	let statusCode = 500
+	let statusCode = DisconnectReason.connectionClosed // 428 default instead of 500 for generic transport errors
 	if (error?.message?.includes(UNEXPECTED_SERVER_CODE_TEXT)) {
 		const code = +error?.message.slice(UNEXPECTED_SERVER_CODE_TEXT.length)
 		if (!Number.isNaN(code) && code >= 400) {
@@ -417,10 +417,15 @@ export const getCodeFromWSError = (error: Error) => {
 	} else if (
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		(error as any)?.code?.startsWith('E') ||
-		error?.message?.includes('timed out')
+		(error as any)?.code === 1006 ||
+		error?.message?.includes('timed out') ||
+		error?.message?.includes('timeout') ||
+		error?.message?.includes('reset') ||
+		error?.message?.includes('closed') ||
+		error?.message?.includes('connection')
 	) {
-		// handle ETIMEOUT, ENOTFOUND etc
-		statusCode = 408
+		// handle ETIMEOUT, ENOTFOUND, ECONNRESET, code 1006 abnormal closure etc
+		statusCode = DisconnectReason.connectionLost // 408
 	}
 
 	return statusCode

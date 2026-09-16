@@ -298,11 +298,12 @@ class SessionManager {
                                 .update({
                                     status: activeStatus,
                                     last_error: null,
+                                    assigned_node_id: NODE_ID,
                                     lease_until: new Date(Date.now() + 45000).toISOString(),
                                     updated_at: new Date().toISOString()
                                 })
                                 .in('id', authenticatedIds)
-                                .eq('assigned_node_id', NODE_ID)
+                                .or(`assigned_node_id.eq.${NODE_ID},assigned_node_id.is.null`)
                         );
                     }
 
@@ -311,11 +312,12 @@ class SessionManager {
                         await retryWithBackoff(() =>
                             supabase.from('whatsapp_instances')
                                 .update({
+                                    assigned_node_id: NODE_ID,
                                     lease_until: new Date(Date.now() + 45000).toISOString(),
                                     updated_at: new Date().toISOString()
                                 })
                                 .in('id', unauthenticatedIds)
-                                .eq('assigned_node_id', NODE_ID)
+                                .or(`assigned_node_id.eq.${NODE_ID},assigned_node_id.is.null`)
                         );
                     }
                 } catch (e) {
@@ -381,13 +383,14 @@ class SessionManager {
                     const isAssignedToThisNode = inst.assigned_node_id === currentNodeId;
                     const assignedNodeId = inst.assigned_node_id ? String(inst.assigned_node_id).trim() : null;
 
+                    const isHomologInstance = HOMOLOG_ALLOWED_INSTANCES.includes(inst.id);
                     const isNonProductionRemote = assignedNodeId && (
                         assignedNodeId.includes('alpha') ||
                         assignedNodeId.includes('staging') ||
                         assignedNodeId.includes('local') ||
                         assignedNodeId.startsWith('worker-local')
                     );
-                    const isMasterTakeover = isProductionMaster && isNonProductionRemote;
+                    const isMasterTakeover = isProductionMaster && isNonProductionRemote && (!isHomologInstance || isLeaseExpired);
 
                     // Se a instância pertence ativamente a outro nó com lease válido (e não é Master Takeover), não concorre
                     if (assignedNodeId && !isAssignedToThisNode && !isLeaseExpired && !isMasterTakeover) {
@@ -562,6 +565,7 @@ class SessionManager {
             // Precedência de Produção: Se o nó atual for Produção (production-worker ou APP_ENV=production)
             // e o nó detentor do lock for homologação/staging/alpha ou worker local,
             // o nó de produção DEVE assumir o lock IMEDIATAMENTE (Master Takeover)!
+            const isHomologInstance = HOMOLOG_ALLOWED_INSTANCES.includes(instanceId);
             const isNonProductionOwner = assignedNodeId && (
                 assignedNodeId.includes('alpha') ||
                 assignedNodeId.includes('staging') ||
@@ -569,7 +573,7 @@ class SessionManager {
                 assignedNodeId.startsWith('worker-local')
             );
             const isProductionMaster = currentNodeId === 'production-worker' || (process.env.APP_ENV || '').toLowerCase() === 'production';
-            const isMasterTakeover = isProductionMaster && isNonProductionOwner;
+            const isMasterTakeover = isProductionMaster && isNonProductionOwner && (!isHomologInstance || !isLeaseActive);
 
             const isAlphaWorker = currentNodeId.includes('alpha') || (process.env.APP_ENV || '').toLowerCase() === 'alpha';
             const isProductionOwner = assignedNodeId && (assignedNodeId === 'production-worker' || assignedNodeId.includes('prod'));
@@ -639,6 +643,10 @@ class SessionManager {
                     if (isAlphaWorker && isProductionOwner) {
                         console.log(`[SessionManager/Lock/Alpha] Instância ${instanceId} pertence ao nó de produção ${assignedNodeId}. O nó Alpha não interferirá.`);
                         throw new Error(`Instância ${instanceId} pertence ao nó de produção ${assignedNodeId}`);
+                    }
+                    if (isProductionMaster && isHomologInstance && isNonProductionOwner) {
+                        console.log(`[SessionManager/Lock/Produção] Instância de homologação ${instanceId} está sob controle ativo do nó de testes ${assignedNodeId}. Preservando.`);
+                        throw new Error(`Instância ${instanceId} pertence ao ambiente de testes (${assignedNodeId})`);
                     }
                     console.log(`[SessionManager/Lock] Instância ${instanceId} está ativamente conectada no nó ${assignedNodeId} (heartbeat há ${Math.round(timeSinceLastUpdate / 1000)}s). Preservando propriedade exclusiva para evitar conflito.`);
                     throw new Error(`Instância ${instanceId} possui lock ativo e saudável no nó ${assignedNodeId}`);
@@ -1065,6 +1073,11 @@ class SessionManager {
                         }
                     }
 
+                    // Limpa contadores de erros críticos transitórios imediatamente com a abertura saudável do socket
+                    this.consecutiveForbiddenAttempts.delete(instanceId);
+                    this.consecutiveBadSessionAttempts.delete(instanceId);
+                    this.oscillationAttempts.delete(instanceId);
+
                     // Defer clearing reconnectAttempts until connection is stable for 3 minutes
                     if (this.reconnectTimeouts.has(instanceId)) {
                         clearTimeout(this.reconnectTimeouts.get(instanceId));
@@ -1072,6 +1085,9 @@ class SessionManager {
                     const recTimeout = setTimeout(() => {
                         this.reconnectAttempts.delete(instanceId);
                         this.reconnectTimeouts.delete(instanceId);
+                        this.consecutiveForbiddenAttempts.delete(instanceId);
+                        this.consecutiveBadSessionAttempts.delete(instanceId);
+                        this.oscillationAttempts.delete(instanceId);
                         supabase.from('whatsapp_instances').update({ reconnect_attempts: 0 }).eq('id', instanceId).then(() => {});
                         console.log(`[SessionManager] Conexão estável de rede estabelecida na instância ${instanceId}. Histórico de reconexões limpo.`);
                     }, 180000); // 3 minutos
@@ -1127,14 +1143,49 @@ class SessionManager {
                         return;
                     }
 
-                    const isAckOrTransient401 = status === 401 && (reason.toLowerCase().includes('ack') || reason.toLowerCase().includes('bad session') || reason.toLowerCase().includes('decrypt') || reason.toLowerCase().includes('closed session'));
+                    const reasonLower = (reason || '').toLowerCase();
+                    const isAckOrTransient401 = status === 401 && (reasonLower.includes('ack') || reasonLower.includes('bad session') || reasonLower.includes('decrypt') || reasonLower.includes('closed session'));
                     const loggedOut = status === DisconnectReason.loggedOut && !isAckOrTransient401;
-                    const isConflict = status === 440 || status === DisconnectReason.connectionReplaced || status === 409 || reason.toLowerCase().includes('conflict') || reason.toLowerCase().includes('replaced');
-                    const isBlocked12h = reason.toLowerCase().includes('blocked') || reason.toLowerCase().includes('12h') || status === 410 || status === 429;
-                    const isForbidden = (status === 403 || reason.toLowerCase().includes('forbidden')) && status !== 503 && status !== 502 && status !== 504;
-                    const isBadSession = (status === 500 || reason.toLowerCase().includes('bad session') || isAckOrTransient401) && status !== 503 && status !== 502 && status !== 504 && !isConflict;
-                    const isRestartRequired = !isConflict && (status === 515 || status === 428 || status === 1006 || status === DisconnectReason.restartRequired || reason.toLowerCase().includes('restart required') || reason.toLowerCase().includes('precondition required') || reason.toLowerCase().includes('connection closed') || (reason.toLowerCase().includes('stream errored') && !reason.toLowerCase().includes('conflict'))) && isFullyAuthenticated;
-                    const isStreamOscillation = !isConflict && (
+                    const isConflict = status === 440 || status === DisconnectReason.connectionReplaced || status === 409 || reasonLower.includes('conflict') || reasonLower.includes('replaced');
+                    const isBlocked12h = reasonLower.includes('blocked') || reasonLower.includes('12h') || status === 410 || status === 429;
+                    const isForbidden = (status === 403 || reasonLower.includes('forbidden')) && status !== 503 && status !== 502 && status !== 504;
+
+                    const isTransportOrWsError = 
+                        status === 1006 ||
+                        status === 428 ||
+                        status === 408 ||
+                        status === DisconnectReason.connectionClosed ||
+                        status === DisconnectReason.connectionLost ||
+                        status === DisconnectReason.timedOut ||
+                        reasonLower.includes('websocket error') ||
+                        reasonLower.includes('connection closed') ||
+                        reasonLower.includes('connection lost') ||
+                        reasonLower.includes('connection terminated') ||
+                        reasonLower.includes('socket') ||
+                        reasonLower.includes('timed out') ||
+                        reasonLower.includes('timeout') ||
+                        reasonLower.includes('econnreset') ||
+                        reasonLower.includes('stream erased') ||
+                        reasonLower.includes('stream errored');
+
+                    const isBadSession = !isTransportOrWsError && !isConflict && (
+                        reasonLower.includes('bad session') || 
+                        reasonLower.includes('bad-session') || 
+                        isAckOrTransient401
+                    );
+
+                    const isRestartRequired = !isConflict && !isBadSession && (
+                        status === 515 || 
+                        status === 428 || 
+                        status === 1006 || 
+                        status === DisconnectReason.restartRequired || 
+                        reasonLower.includes('restart required') || 
+                        reasonLower.includes('precondition required') || 
+                        reasonLower.includes('connection closed') || 
+                        (reasonLower.includes('stream errored') && !reasonLower.includes('conflict'))
+                    ) && isFullyAuthenticated;
+
+                    const isStreamOscillation = !isConflict && !isBadSession && (
                         status === 503 || 
                         status === 502 || 
                         status === 504 || 
@@ -1142,13 +1193,14 @@ class SessionManager {
                         status === 405 || 
                         status === DisconnectReason.timedOut ||
                         status === DisconnectReason.connectionLost ||
-                        reason.toLowerCase().includes('timed out') ||
-                        reason.toLowerCase().includes('timeout') ||
-                        reason.toLowerCase().includes('connection terminated') || 
-                        reason.toLowerCase().includes('connection lost') ||
-                        reason.toLowerCase().includes('econnreset') ||
-                        reason.toLowerCase().includes('stream erased') ||
-                        reason.toLowerCase().includes('socket offline')
+                        reasonLower.includes('websocket error') ||
+                        reasonLower.includes('timed out') ||
+                        reasonLower.includes('timeout') ||
+                        reasonLower.includes('connection terminated') || 
+                        reasonLower.includes('connection lost') ||
+                        reasonLower.includes('econnreset') ||
+                        reasonLower.includes('stream erased') ||
+                        reasonLower.includes('socket offline')
                     );
 
                     // Clear stable connection timeouts if it disconnected early
@@ -1214,6 +1266,115 @@ class SessionManager {
                             connection: 'close', 
                             lastDisconnect: { error: { output: { statusCode: 410 } } } 
                         });
+                    } else if (isConflict) {
+                        const isLocal = process.env.DISABLE_AUTO_START_SESSIONS === 'true' || process.env.IS_LOCAL_DEV === 'true';
+                        const currentNodeId = String(NODE_ID).trim();
+                        const isAlphaWorker = currentNodeId.includes('alpha') || (process.env.APP_ENV || '').toLowerCase() === 'alpha';
+
+                        // Se o nó atual for Alpha e houver concorrência com a Produção, Nó Alpha cede pacificamente
+                        if (isAlphaWorker) {
+                            const { data: dbInst } = await retryWithBackoff(() =>
+                                supabase.from('whatsapp_instances')
+                                    .select('assigned_node_id, lease_until, updated_at')
+                                    .eq('id', instanceId)
+                                    .maybeSingle()
+                            );
+                            const remoteNode = dbInst?.assigned_node_id ? String(dbInst.assigned_node_id).trim() : '';
+                            const isProductionRemote = remoteNode === 'production-worker' || remoteNode.includes('prod');
+                            if (isProductionRemote || !HOMOLOG_ALLOWED_INSTANCES.includes(instanceId)) {
+                                console.warn(`[SessionManager] Conflito de sessão na instância ${instanceId}: Nó Alpha cedendo controle local para o nó de produção imediatamente.`);
+                                await this.destroyExistingSession(instanceId, 'conflict_alpha_yield');
+                                this.conflictAttempts.delete(instanceId);
+                                return;
+                            }
+                        }
+
+                        const cAttempts = (this.conflictAttempts.get(instanceId) || 0) + 1;
+                        this.conflictAttempts.set(instanceId, cAttempts);
+                        this.reconnectAttempts.delete(instanceId);
+
+                        // Destrói o socket local completamente (desvincula eventos e fecha WS)
+                        await this.destroyExistingSession(instanceId, `conflict_${status || reason}`);
+
+                        // Verifica no banco de dados se outro nó assumiu a posse da sessão
+                        const { data: dbInst } = await retryWithBackoff(() =>
+                            supabase.from('whatsapp_instances')
+                                .select('assigned_node_id, lease_until, updated_at, status')
+                                .eq('id', instanceId)
+                                .maybeSingle()
+                        );
+
+                        const remoteNodeId = dbInst?.assigned_node_id ? String(dbInst.assigned_node_id).trim() : null;
+                        const isOwnedByOther = remoteNodeId && remoteNodeId !== currentNodeId;
+                        const lastUp = dbInst?.updated_at ? new Date(dbInst.updated_at).getTime() : 0;
+                        const isOtherActive = isOwnedByOther && (Date.now() - lastUp < 35000);
+
+                        const isProductionMaster = currentNodeId === 'production-worker' || (process.env.APP_ENV || '').toLowerCase() === 'production';
+                        const isNonProductionRemote = remoteNodeId && (remoteNodeId.includes('alpha') || remoteNodeId.includes('staging') || remoteNodeId.includes('local') || remoteNodeId.startsWith('worker-local'));
+                        const isHomologInst = HOMOLOG_ALLOWED_INSTANCES.includes(instanceId);
+
+                        // Se for instância homologada e o nó de testes estiver ativo, produção cede pacificamente
+                        if (isHomologInst && isOtherActive && isNonProductionRemote) {
+                            console.warn(`[SessionManager] Conflito de sessão na instância de testes ${instanceId}: Nó remoto '${remoteNodeId}' detém a posse ativa. Cedendo controle local.`);
+                            this.conflictAttempts.delete(instanceId);
+                            return;
+                        }
+
+                        const isMasterTakeoverRemote = isProductionMaster && isNonProductionRemote && !isHomologInst;
+
+                        if (isOtherActive && !isMasterTakeoverRemote) {
+                            console.warn(`[SessionManager] ⚠️ Conflito de sessão na instância ${instanceId}: O nó remoto '${remoteNodeId}' assumiu a posse ativa. Cedendo controle local para evitar colisões.`);
+                            this.conflictAttempts.delete(instanceId);
+                            return;
+                        }
+
+                        if (cAttempts >= 3 || isLocal) {
+                            console.error(`[SessionManager] ${isLocal ? 'Ambiente local detectado. Cancelando reconexão de conflito imediatamente para não concorrer com a produção.' : `Limite de conflitos de sessão atingido na instância ${instanceId} (tentativa ${cAttempts}/3). Interrompendo reconexão automática para evitar concorrência/banimento.`}`);
+                            
+                            if (!isLocal) {
+                                await this.releaseSessionLock(
+                                    instanceId, 
+                                    true, 
+                                    'Desconectado por conflito de sessão (Stream Errored / status 440). Outro dispositivo ou worker assumiu este número no WhatsApp. Reconexão suspensa para evitar sobrecarga. Clique em Reconectar no painel quando desejar.'
+                                );
+                            }
+                            
+                            await this.logConnectionEvent(tenantId, instanceId, 'conflict_440', 'close', reason, null, null);
+
+                            // Publica evento de status offline para o frontend
+                            await eventProcessor.handleConnectionUpdate(tenantId, instanceId, { 
+                                connection: 'close', 
+                                lastDisconnect: { error: { output: { statusCode: 440 } } } 
+                            });
+                        } else {
+                            const delays = [20000, 45000, 90000];
+                            const delay = delays[Math.min(cAttempts - 1, delays.length - 1)];
+
+                            // Mantém o lease com buffer durante o backoff para evitar roubo indevido por nós concorrentes
+                            await retryWithBackoff(() =>
+                                supabase.from('whatsapp_instances')
+                                    .update({
+                                        lease_until: new Date(Date.now() + delay + 15000).toISOString(),
+                                        last_disconnected_at: new Date().toISOString(),
+                                        last_disconnect_reason: `conflict_backoff_${status || reason}`,
+                                        updated_at: new Date().toISOString()
+                                    })
+                                    .eq('id', instanceId)
+                                    .eq('assigned_node_id', currentNodeId)
+                            ).catch(() => {});
+
+                            console.warn(`[SessionManager] ⚠️ CONFLITO de sessão detectado na instância ${instanceId} (${reason || status}, tentativa ${cAttempts}/3). Aguardando ${delay / 1000}s de backoff antes de revalidar posse...`);
+                            const timer = setTimeout(async () => {
+                                this.reconnectingTimers.delete(instanceId);
+                                if (!this.sessions.has(instanceId)) {
+                                    // Passa force = false para respeitar lease ativo se outro worker assumiu legitimamente
+                                    this.createSession(tenantId, instanceId, false).catch(err => {
+                                        console.error(`[SessionManager] Erro na retentativa pós-conflito para ${instanceId}:`, err.message);
+                                    });
+                                }
+                            }, delay);
+                            this.reconnectingTimers.set(instanceId, timer);
+                        }
                     } else if ((isForbidden || isBadSession) && isFullyAuthenticated) {
                         let consecutiveCount = 0;
                         if (isForbidden) {
@@ -1268,95 +1429,6 @@ class SessionManager {
                             connection: 'close', 
                             lastDisconnect: { error: { output: { statusCode: status } } } 
                         });
-                    } else if (isConflict) {
-                        const isLocal = process.env.DISABLE_AUTO_START_SESSIONS === 'true' || process.env.IS_LOCAL_DEV === 'true';
-                        const currentNodeId = String(NODE_ID).trim();
-                        const isAlphaWorker = currentNodeId.includes('alpha') || (process.env.APP_ENV || '').toLowerCase() === 'alpha';
-
-                        // Se o nó atual for Alpha e houver concorrência com a Produção, Nó Alpha cede pacificamente
-                        if (isAlphaWorker) {
-                            const { data: dbInst } = await retryWithBackoff(() =>
-                                supabase.from('whatsapp_instances')
-                                    .select('assigned_node_id, lease_until, updated_at')
-                                    .eq('id', instanceId)
-                                    .maybeSingle()
-                            );
-                            const remoteNode = dbInst?.assigned_node_id ? String(dbInst.assigned_node_id).trim() : '';
-                            const isProductionRemote = remoteNode === 'production-worker' || remoteNode.includes('prod');
-                            if (isProductionRemote || !HOMOLOG_ALLOWED_INSTANCES.includes(instanceId)) {
-                                console.warn(`[SessionManager] Conflito de sessão na instância ${instanceId}: Nó Alpha cedendo controle local para o nó de produção imediatamente.`);
-                                await this.destroyExistingSession(instanceId, 'conflict_alpha_yield');
-                                this.conflictAttempts.delete(instanceId);
-                                return;
-                            }
-                        }
-
-                        const cAttempts = (this.conflictAttempts.get(instanceId) || 0) + 1;
-                        this.conflictAttempts.set(instanceId, cAttempts);
-                        this.reconnectAttempts.delete(instanceId);
-
-                        // Destrói o socket local completamente (desvincula eventos e fecha WS)
-                        await this.destroyExistingSession(instanceId, `conflict_${status || reason}`);
-
-                        // Verifica no banco de dados se outro nó assumiu a posse da sessão
-                        const { data: dbInst } = await retryWithBackoff(() =>
-                            supabase.from('whatsapp_instances')
-                                .select('assigned_node_id, lease_until, updated_at, status')
-                                .eq('id', instanceId)
-                                .maybeSingle()
-                        );
-
-                        const remoteNodeId = dbInst?.assigned_node_id ? String(dbInst.assigned_node_id).trim() : null;
-                        const isOwnedByOther = remoteNodeId && remoteNodeId !== currentNodeId;
-                        const lastUp = dbInst?.updated_at ? new Date(dbInst.updated_at).getTime() : 0;
-                        const isOtherActive = isOwnedByOther && (Date.now() - lastUp < 35000);
-
-                        const isProductionMaster = currentNodeId === 'production-worker' || (process.env.APP_ENV || '').toLowerCase() === 'production';
-                        const isNonProductionRemote = remoteNodeId && (remoteNodeId.includes('alpha') || remoteNodeId.includes('staging') || remoteNodeId.includes('local') || remoteNodeId.startsWith('worker-local'));
-                        const isMasterTakeoverRemote = isProductionMaster && isNonProductionRemote;
-
-                        if (isOtherActive && !isMasterTakeoverRemote) {
-                            console.warn(`[SessionManager] ⚠️ Conflito de sessão na instância ${instanceId}: O nó remoto '${remoteNodeId}' assumiu a posse ativa. Cedendo controle local para evitar colisões.`);
-                            this.conflictAttempts.delete(instanceId);
-                            return;
-                        }
-
-                        if (cAttempts >= 3 || isLocal) {
-                            console.error(`[SessionManager] ${isLocal ? 'Ambiente local detectado. Cancelando reconexão de conflito imediatamente para não concorrer com a produção.' : `Limite de conflitos de sessão atingido na instância ${instanceId} (tentativa ${cAttempts}/3). Interrompendo reconexão automática para evitar concorrência/banimento.`}`);
-                            
-                            if (!isLocal) {
-                                await this.releaseSessionLock(
-                                    instanceId, 
-                                    true, 
-                                    'Desconectado por conflito de sessão (Stream Errored / status 440). Outro dispositivo ou worker assumiu este número no WhatsApp. Reconexão suspensa para evitar sobrecarga. Clique em Reconectar no painel quando desejar.'
-                                );
-                            }
-                            
-                            await this.logConnectionEvent(tenantId, instanceId, 'conflict_440', 'close', reason, null, null);
-
-                            // Publica evento de status offline para o frontend
-                            await eventProcessor.handleConnectionUpdate(tenantId, instanceId, { 
-                                connection: 'close', 
-                                lastDisconnect: { error: { output: { statusCode: 440 } } } 
-                            });
-                        } else {
-                            // Libera temporariamente o lock no banco durante o backoff para permitir revalidação limpa
-                            await this.releaseSessionLock(instanceId, false, null);
-
-                            const delays = [20000, 45000, 90000];
-                            const delay = delays[Math.min(cAttempts - 1, delays.length - 1)];
-                            console.warn(`[SessionManager] ⚠️ CONFLITO de sessão detectado na instância ${instanceId} (${reason || status}, tentativa ${cAttempts}/3). Aguardando ${delay / 1000}s de backoff antes de revalidar posse...`);
-                            const timer = setTimeout(async () => {
-                                this.reconnectingTimers.delete(instanceId);
-                                if (!this.sessions.has(instanceId)) {
-                                    // Passa force = false para respeitar lease ativo se outro worker assumiu legitimamente
-                                    this.createSession(tenantId, instanceId, false).catch(err => {
-                                        console.error(`[SessionManager] Erro na retentativa pós-conflito para ${instanceId}:`, err.message);
-                                    });
-                                }
-                            }, delay);
-                            this.reconnectingTimers.set(instanceId, timer);
-                        }
                     } else if (isRestartRequired) {
                         console.log(`[SessionManager] WhatsApp solicitou reinicialização/estabilização de socket (status ${status} / ${reason}) para a instância ${instanceId}. Reciclando chaves em RAM e reconectando em 1.5s com jitter...`);
                         await this.destroyExistingSession(instanceId, 'restart_required');
@@ -1894,9 +1966,10 @@ class SessionManager {
 
                 // Se a instância já possui um lock ativo por outro worker com lease válido e não é force
                 if (assignedNodeId && assignedNodeId !== currentNodeId && data.lease_until && new Date(data.lease_until) > now && !force) {
+                    const isHomologInstance = HOMOLOG_ALLOWED_INSTANCES.includes(instanceId);
                     const isProductionMaster = currentNodeId === 'production-worker' || (process.env.APP_ENV || '').toLowerCase() === 'production';
                     const isNonProductionOwner = assignedNodeId.includes('alpha') || assignedNodeId.includes('staging') || assignedNodeId.includes('local') || assignedNodeId.startsWith('worker-local');
-                    const isMasterTakeover = isProductionMaster && isNonProductionOwner;
+                    const isMasterTakeover = isProductionMaster && isNonProductionOwner && (!isHomologInstance || (data.lease_until && new Date(data.lease_until) <= now));
 
                     // Se não for o Production Master reassumindo controle de um worker não-produção:
                     if (!isMasterTakeover) {

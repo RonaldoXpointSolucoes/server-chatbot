@@ -1144,6 +1144,9 @@ export const makeSocket = (config: SocketConfig) => {
  * */
 function mapWebSocketError(handler: (err: Error) => void) {
 	return (error: Error) => {
-		handler(new Boom(`WebSocket Error (${error?.message})`, { statusCode: getCodeFromWSError(error), data: error }))
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const anyErr = error as any
+		const msg = error?.message || anyErr?.code || (anyErr?.target?.readyState !== undefined ? 'Connection closed abnormally (code 1006)' : 'Network transport error')
+		handler(new Boom(`WebSocket Error (${msg})`, { statusCode: getCodeFromWSError(error), data: error }))
 	}
 }
