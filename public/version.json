@@ -1,5 +1,5 @@
 {
-  "version": "7.5.0",
-  "buildDate": "2026-09-17T23:30:23.117Z",
-  "summary": "Análise Visual UI/UX via IA Gemini Vision, Estabilização de Concorrência Baileys e Gestão da Fila Dev"
+  "version": "7.5.1",
+  "buildDate": "2026-09-17T23:56:04.050Z",
+  "summary": "Resiliência de Áudio e Mídia Multi-Worker, Indicadores Visuais de Status de Mensagens e Blindagem Postgres UUID"
 }

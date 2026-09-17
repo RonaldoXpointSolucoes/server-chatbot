@@ -20,6 +20,37 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.5.1',
+    date: '2026-09-17',
+    summary: 'Resiliência de Áudio e Mídia Multi-Worker, Indicadores Visuais de Status de Mensagens e Blindagem Postgres UUID',
+    notes: [
+      {
+        id: '7.5.1-1',
+        category: 'features',
+        title: 'Indicadores Visuais de Falha e Status no Chat',
+        description: 'Exibição de ícone vermelho de alerta com tooltip detalhado para mensagens não entregues e animação pulsante para mensagens pendentes na bolha do chat.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.5.1-2',
+        category: 'improvements',
+        title: 'Despacho Resiliente de Áudios Gravados (PTT)',
+        description: 'Transição transparente de áudios e mídias para a fila de saída outbox com conversão FFmpeg (ogg opus), garantindo entrega mesmo em clusters com sockets distribuídos.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      },
+      {
+        id: '7.5.1-3',
+        category: 'fixes',
+        title: 'Blindagem de Sintaxe Postgres UUID no Dashboard',
+        description: 'Guarda estrita em getOperatorStatsForTicket impedindo consultas com conversation_id vazio no Supabase e eliminando o erro Postgres 22P02.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      }
+    ]
+  },
+  {
     version: '7.5.0',
     date: '2026-09-16',
     summary: 'Análise Visual UI/UX via IA Gemini Vision, Estabilização de Concorrência Baileys e Gestão da Fila Dev',
