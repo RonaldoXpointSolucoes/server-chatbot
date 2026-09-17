@@ -101,3 +101,24 @@ node .agents/skills/fila-dev/scripts/get_dev_queue.cjs list
 ```bash
 node .agents/skills/fila-dev/scripts/get_dev_queue.cjs move <ID_DO_CARD> testing '{"summary":"Descrição detalhada das funções criadas/refatoradas e correções aplicadas","files":["src/...","server/..."]}'
 ```
+
+### 3. Adicionar Novo Item / Demanda na Fila Dev:
+```bash
+node .agents/skills/fila-dev/scripts/get_dev_queue.cjs add "Título da Demanda" "Notas técnicas detalhadas" [prioridade 1-3] [status_inicial] '["TAG1", "TAG2"]'
+```
+
+### 4. Adicionar Comentário / Update em um Card:
+```bash
+node .agents/skills/fila-dev/scripts/get_dev_queue.cjs comment <ID_DO_CARD> "Texto do comentário técnico" "Nome do Autor"
+```
+
+### 5. Atribuir Desenvolvedor Responsável:
+```bash
+node .agents/skills/fila-dev/scripts/get_dev_queue.cjs assign <ID_DO_CARD> "Nome do Desenvolvedor"
+```
+
+### 6. Fechar Demanda com Resolução Oficial:
+```bash
+node .agents/skills/fila-dev/scripts/get_dev_queue.cjs close <ID_DO_CARD> done '{"summary":"Resolução validada e aprovada"}'
+```
+

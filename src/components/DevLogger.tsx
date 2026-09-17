@@ -751,23 +751,30 @@ export default function DevLogger() {
   });
   const [e2eOverallResult, setE2EOverallResult] = useState<{ healthScore: number; durationTotalMs: number; summary: string } | null>(null);
 
-  // Coleta em tempo real da telemetria do backend
+  // Coleta em tempo real da telemetria do backend com timeout e tratamento resiliente
+  const telemetryErrorCountRef = useRef(0);
   const fetchServerTelemetry = async () => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3500);
+
     try {
       setIsFetchingTelemetry(true);
       const res = await fetch(`${engineUrl}/api/v1/diagnostics/telemetry`, {
-        headers: { 'x-e2e-source': 'DevLogger' }
+        headers: { 'x-e2e-source': 'DevLogger' },
+        signal: controller.signal
       });
       if (res.ok) {
         const data = await res.json();
         if (data.ok && data.telemetry) {
           setServerTelemetry(data.telemetry);
+          telemetryErrorCountRef.current = 0;
         }
       }
 
       // Buscar histórico de snapshots de diagnóstico
       const snapRes = await fetch(`${engineUrl}/api/v1/diagnostics/snapshots`, {
-        headers: { 'x-e2e-source': 'DevLogger' }
+        headers: { 'x-e2e-source': 'DevLogger' },
+        signal: controller.signal
       });
       if (snapRes.ok) {
         const snapData = await snapRes.json();
@@ -778,7 +785,8 @@ export default function DevLogger() {
 
       // Buscar eventos recentes de telemetria
       const evRes = await fetch(`${engineUrl}/api/v1/diagnostics/events?limit=30`, {
-        headers: { 'x-e2e-source': 'DevLogger' }
+        headers: { 'x-e2e-source': 'DevLogger' },
+        signal: controller.signal
       });
       if (evRes.ok) {
         const evData = await evRes.json();
@@ -787,8 +795,15 @@ export default function DevLogger() {
         }
       }
     } catch (err: any) {
-      console.warn('[DevLogger] Erro ao buscar telemetria:', err);
+      if (err.name !== 'AbortError') {
+        telemetryErrorCountRef.current += 1;
+        // Evita poluir o console com 20+ avisos repetidos durante reinicializações ou oscilações de rede
+        if (telemetryErrorCountRef.current <= 1) {
+          console.warn('[DevLogger] Telemetria temporariamente indisponível no servidor:', err.message || err);
+        }
+      }
     } finally {
+      clearTimeout(timeoutId);
       setIsFetchingTelemetry(false);
     }
   };

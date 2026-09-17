@@ -115,6 +115,222 @@ async function getDevQueue(action = 'list', cardIdToMove = null, targetStatus = 
       return;
     }
 
+    // 2.1 Ação: Adicionar novo item/card na Fila Dev
+    if (action === 'add' || action === 'adicionar') {
+      const title = args[1];
+      const notes = args[2] || '';
+      const priority = parseInt(args[3] || '2', 10);
+      const initialStatus = args[4] || 'development';
+      const rawTags = args[5] || '["FILA-DEV", "TAREFA"]';
+      let tags = ['FILA-DEV'];
+      try {
+        tags = typeof rawTags === 'string' && rawTags.startsWith('[') ? JSON.parse(rawTags) : rawTags.split(',').map(t => t.trim());
+      } catch (e) {
+        tags = ['FILA-DEV'];
+      }
+
+      if (!title) {
+        console.error(JSON.stringify({ success: false, message: 'Título é obrigatório para adicionar item na fila.' }));
+        return;
+      }
+
+      const { data: newCard, error: addErr } = await supabase
+        .from('crm_leads')
+        .insert({
+          board_id: board.id,
+          title: title,
+          notes: notes,
+          priority: isNaN(priority) ? 2 : priority,
+          status: initialStatus,
+          tags: tags,
+          position: 0,
+          history: [{
+            at: new Date().toISOString(),
+            by: 'Antigravity AI (Fila Dev)',
+            to: initialStatus,
+            from: null,
+            action: 'created'
+          }]
+        })
+        .select()
+        .maybeSingle();
+
+      if (addErr) {
+        console.error(JSON.stringify({ success: false, error: addErr.message }));
+        return;
+      }
+
+      console.log(JSON.stringify({
+        success: true,
+        action: 'added',
+        card: newCard
+      }, null, 2));
+      return;
+    }
+
+    // 2.2 Ação: Comentar em um item da fila
+    if ((action === 'comment' || action === 'comentar') && cardIdToMove) {
+      const commentText = args[2];
+      const author = args[3] || 'Antigravity AI (Fila Dev)';
+
+      if (!commentText) {
+        console.error(JSON.stringify({ success: false, message: 'Texto do comentário é obrigatório.' }));
+        return;
+      }
+
+      const { data: existingCard } = await supabase
+        .from('crm_leads')
+        .select('*')
+        .eq('id', cardIdToMove)
+        .maybeSingle();
+
+      if (!existingCard) {
+        console.error(JSON.stringify({ success: false, message: 'Card não encontrado.' }));
+        return;
+      }
+
+      const prevHistory = existingCard.history || [];
+      const newCommentEntry = {
+        at: new Date().toISOString(),
+        by: author,
+        type: 'comment',
+        comment: commentText
+      };
+
+      const existingNotes = existingCard.notes || '';
+      const commentNote = `\n\n💬 **Comentário (${author} - ${new Date().toLocaleString('pt-BR')}):**\n${commentText}`;
+
+      const { data: updatedCard, error: commErr } = await supabase
+        .from('crm_leads')
+        .update({
+          history: [...prevHistory, newCommentEntry],
+          notes: existingNotes + commentNote
+        })
+        .eq('id', cardIdToMove)
+        .select()
+        .maybeSingle();
+
+      if (commErr) {
+        console.error(JSON.stringify({ success: false, error: commErr.message }));
+        return;
+      }
+
+      console.log(JSON.stringify({
+        success: true,
+        action: 'commented',
+        card: updatedCard
+      }, null, 2));
+      return;
+    }
+
+    // 2.3 Ação: Atribuir responsável ao card
+    if ((action === 'assign' || action === 'pegar') && cardIdToMove) {
+      const assignee = args[2] || 'Antigravity AI (Fila Dev)';
+
+      const { data: existingCard } = await supabase
+        .from('crm_leads')
+        .select('*')
+        .eq('id', cardIdToMove)
+        .maybeSingle();
+
+      if (!existingCard) {
+        console.error(JSON.stringify({ success: false, message: 'Card não encontrado.' }));
+        return;
+      }
+
+      const prevHistory = existingCard.history || [];
+      const assignEntry = {
+        at: new Date().toISOString(),
+        by: 'Antigravity AI (Fila Dev)',
+        action: 'assigned',
+        assignee: assignee
+      };
+
+      const { data: updatedCard, error: assignErr } = await supabase
+        .from('crm_leads')
+        .update({
+          history: [...prevHistory, assignEntry]
+        })
+        .eq('id', cardIdToMove)
+        .select()
+        .maybeSingle();
+
+      if (assignErr) {
+        console.error(JSON.stringify({ success: false, error: assignErr.message }));
+        return;
+      }
+
+      console.log(JSON.stringify({
+        success: true,
+        action: 'assigned',
+        card: updatedCard,
+        assignee: assignee
+      }, null, 2));
+      return;
+    }
+
+    // 2.4 Ação: Fechar card com status final e resolução
+    if ((action === 'close' || action === 'fechar') && cardIdToMove) {
+      const finalStatus = args[2] || 'done';
+      const solutionReport = args[3] || 'Demanda concluída e validada.';
+
+      let reportObj = null;
+      try {
+        reportObj = typeof solutionReport === 'string' && (solutionReport.startsWith('{') || solutionReport.startsWith('['))
+          ? JSON.parse(solutionReport)
+          : { summary: solutionReport };
+      } catch (e) {
+        reportObj = { summary: solutionReport };
+      }
+
+      const { data: existingCard } = await supabase
+        .from('crm_leads')
+        .select('*')
+        .eq('id', cardIdToMove)
+        .maybeSingle();
+
+      if (!existingCard) {
+        console.error(JSON.stringify({ success: false, message: 'Card não encontrado.' }));
+        return;
+      }
+
+      const prevHistory = existingCard.history || [];
+      const closeEntry = {
+        at: new Date().toISOString(),
+        by: 'Antigravity AI (Fila Dev)',
+        to: finalStatus,
+        from: existingCard.status || 'testing',
+        resolution_report: reportObj
+      };
+
+      const existingNotes = existingCard.notes || '';
+      const closeSection = `\n\n---\n### 🏁 Fechamento & Resolução de Demanda\n**Data/Hora:** ${new Date().toLocaleString('pt-BR')}\n**Status Final:** ${finalStatus}\n**Resolução:** ${reportObj.summary || solutionReport}`;
+
+      const { data: updatedCard, error: closeErr } = await supabase
+        .from('crm_leads')
+        .update({
+          status: finalStatus,
+          history: [...prevHistory, closeEntry],
+          notes: existingNotes.includes('### 🏁 Fechamento') ? existingNotes : existingNotes + closeSection
+        })
+        .eq('id', cardIdToMove)
+        .select()
+        .maybeSingle();
+
+      if (closeErr) {
+        console.error(JSON.stringify({ success: false, error: closeErr.message }));
+        return;
+      }
+
+      console.log(JSON.stringify({
+        success: true,
+        action: 'closed',
+        card: updatedCard,
+        finalStatus: finalStatus
+      }, null, 2));
+      return;
+    }
+
     // 3. Buscar todos os cards do quadro
     const { data: leads, error: leadsErr } = await supabase
       .from('crm_leads')

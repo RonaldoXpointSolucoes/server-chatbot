@@ -951,11 +951,12 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
                             continue;
                         }
                         const startSessionWithRetry = (attempt = 1) => {
-                            const forceTakeover = attempt >= 2;
+                            // Nunca forçar takeover arbitrário se outro nó tiver heartbeat ativo (< 30s)
+                            const forceTakeover = false;
                             sessionManager.createSession(instance.tenant_id, instance.id, forceTakeover).catch(e => {
                                  const isLockError = e.message && (e.message.includes('lock ativo') || e.message.includes('Lock negado') || e.message.includes('Conexão negada') || e.message.includes('ambiente de testes'));
                                  if (isLockError && attempt < 3 && !isHomolog) {
-                                     console.log(`[Worker Boot] Instância ${instance.id} sob lease de outro nó. Agendando retentativa com takeover (${attempt}/3) em 35s...`);
+                                     console.log(`[Worker Boot] Instância ${instance.id} sob lease de outro nó ativo. Agendando verificação pacífica (${attempt}/3) em 35s...`);
                                      setTimeout(() => startSessionWithRetry(attempt + 1), 35000);
                                  } else if (isLockError) {
                                      console.log(`[Worker Boot] Instância ${instance.id} permanece sob responsabilidade de outro nó ativo.`);
