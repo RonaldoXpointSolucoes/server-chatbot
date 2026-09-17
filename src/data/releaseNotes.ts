@@ -20,6 +20,37 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.4.9',
+    date: '2026-09-16',
+    summary: 'Sistema Diagnóstico E2E de Alto Nível, Telemetria em Tempo Real e Blindagem Anti-Loop',
+    notes: [
+      {
+        id: '7.4.9-1',
+        category: 'features',
+        title: 'Sistema de Telemetria e Diagnóstico E2E em Tempo Real',
+        description: 'Implementação de observabilidade profunda com rastreamento de 9 estágios de mensagens via Trace ID único, monitoramento de Event Loop Lag via perf_hooks, heap/RSS e auditoria contínua de listeners Baileys.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.4.9-2',
+        category: 'improvements',
+        title: 'Estabilização de Sockets e Blindagem Anti-Queda no Baileys',
+        description: 'Aumento da tolerância de keepalive para 120s com renovação imediata no ping IQ e remoção de frames crus de ping, eliminando quedas em cascata (Connection was lost) com dezenas de instâncias simultâneas.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      },
+      {
+        id: '7.4.9-3',
+        category: 'fixes',
+        title: 'Drenagem Instantânea de Mensagens (< 1s)',
+        description: 'Desacoplamento não-bloqueante de uploads de mídia e drenagem de lotes via setImmediate no EventProcessor, garantindo entrega imediata de mensagens de texto na tela do CRM.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      }
+    ]
+  },
+  {
     version: '7.4.8',
     date: '2026-09-16',
     summary: 'Automação física de Aviso de Impressão PDV (40 colunas) e blindagem anti-loop',
