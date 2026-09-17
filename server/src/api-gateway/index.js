@@ -886,5 +886,218 @@ router.post('/v1/crm/cards/create-ai-card', async (req, res) => {
     }
 });
 
+/**
+ * POST /chat/analyze-screen e POST /v1/chat/analyze-screen
+ * Análise visual de UI/UX baseada em Screenshots via IA Multimodal (Gemini Vision)
+ * Gera a Análise Prática de 10 Pontos de UI/UX, Recomendações Mobile-First e Tailwind CSS
+ * Opcionalmente cria o card estruturado no CRM Kanban (coluna 'Em Análise')
+ */
+const handleAnalyzeScreen = async (req, res) => {
+    try {
+        const apiKey = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
+        if (!apiKey) {
+            return res.status(500).json({ ok: false, error: 'GEMINI_API_KEY não configurada no servidor.' });
+        }
+
+        const {
+            screenshotBase64,
+            screenshotUrl,
+            command = 'melhore esta tela',
+            userNotes = '',
+            contextInfo = {},
+            createCrmCard = false,
+            boardName = 'Desenvolvimento & Roadmap'
+        } = req.body;
+
+        if (!screenshotBase64 && !screenshotUrl) {
+            return res.status(400).json({ ok: false, error: 'screenshotBase64 ou screenshotUrl é obrigatório para análise visual.' });
+        }
+
+        const genAI = new GoogleGenerativeAI(apiKey);
+        const model = genAI.getGenerativeModel({
+            model: 'gemini-2.5-flash',
+            generationConfig: {
+                responseMimeType: 'application/json',
+                responseSchema: {
+                    type: 'object',
+                    properties: {
+                        screenTitle: {
+                            type: 'string',
+                            description: 'Título representativo da tela analisada (ex: Painel de Atendimento ao Vivo, CRM Kanban, Configurações de Conta)'
+                        },
+                        generalAnalysis: {
+                            type: 'string',
+                            description: 'Diagnóstico geral da interface e primeiras impressões visuais'
+                        },
+                        tenPointsAnalysis: {
+                            type: 'array',
+                            description: 'Lista obrigatória e completa dos 10 Pontos de UI/UX estruturados',
+                            items: {
+                                type: 'object',
+                                properties: {
+                                    pointNumber: { type: 'integer' },
+                                    title: { type: 'string' },
+                                    diagnosis: { type: 'string' },
+                                    recommendation: { type: 'string' },
+                                    priority: { type: 'string', enum: ['alta', 'media', 'baixa'] }
+                                },
+                                required: ['pointNumber', 'title', 'diagnosis', 'recommendation', 'priority']
+                            }
+                        },
+                        mobileFirstRecommendations: {
+                            type: 'array',
+                            description: 'Recomendações específicas para dispositivos móveis (alvo 48px, zero overflow-x, bottom sheets, toque háptico)',
+                            items: { type: 'string' }
+                        },
+                        tailwindClassesRecommended: {
+                            type: 'array',
+                            description: 'Classes Tailwind CSS sugeridas para aplicação imediata nos elementos',
+                            items: { type: 'string' }
+                        },
+                        markdownReport: {
+                            type: 'string',
+                            description: 'Relatório executivo completo em Markdown formatado para exibição direta em chats ou cartões do CRM'
+                        }
+                    },
+                    required: ['screenTitle', 'generalAnalysis', 'tenPointsAnalysis', 'mobileFirstRecommendations', 'tailwindClassesRecommended', 'markdownReport']
+                }
+            }
+        });
+
+        const promptText = `Você é um Especialista Sênior em UI/UX, Design System SaaS Premium e Mobile-First com 25+ anos de experiência em interfaces React e Tailwind CSS.
+
+O usuário enviou uma captura de tela (screenshot) com a solicitação: "${command}".
+${userNotes ? `Contexto adicional do usuário: "${userNotes}"` : ''}
+${contextInfo?.currentRoute ? `Rota da tela: "${contextInfo.currentRoute}"` : ''}
+
+SUA MISSÃO:
+Analise a imagem da interface em detalhes e produza a Análise Prática de 10 Pontos de UI/UX de acordo com as seguintes diretrizes estritas:
+
+1. Melhorias Gerais na Tela: Avaliação do visual geral, harmonia e primeiro impacto.
+2. Principais Problemas de UI/UX Identificados: Falhas de alinhamento, sobreposição, contraste ou poluição visual.
+3. Melhorias Recomendadas Preservando a Lógica: Sugestões que mantêm 100% das regras de negócio e botões funcionais.
+4. Ajustes Específicos para Mobile (Celular): Área de toque mínima de 48x48px, eliminação total de rolagem horizontal (overflow-x-hidden), bottom sheets para modais e active:scale-95.
+5. Ajustes Específicos para Tablet: Disposição em 2 colunas e navegação híbrida.
+6. Ajustes Específicos para Desktop & Notebook: Layout amplo (3+ colunas), menus estendidos, tooltips e espaçamento harmonioso.
+7. Refinamento Visual (Cores, Tipografia & Gradientes): Glassmorphism (bg-white/80 dark:bg-[#111b21]/80 backdrop-blur-md), paleta equilibrada e hierarquia tipográfica.
+8. Melhoria nos Componentes Existentes: Refinamento de inputs, cartões, botões e tabelas/kanban.
+9. Cuidados de Usabilidade & Fluxo: Estados de loading (skeletons), empty states informativos e feedback em tempo real.
+10. Resultado Esperado: O ganho real de conversão, engajamento e satisfação do usuário.
+
+REQUISITO:
+Gere todas as propriedades em Português do Brasil (pt-BR). No "markdownReport", formate com títulos, ícones e bullet points elegantes prontos para leitura.`;
+
+        const promptParts = [promptText];
+
+        let imageBase64Payload = screenshotBase64;
+        if (!imageBase64Payload && screenshotUrl) {
+            try {
+                const imgRes = await fetch(screenshotUrl);
+                if (imgRes.ok) {
+                    const buf = await imgRes.arrayBuffer();
+                    imageBase64Payload = Buffer.from(buf).toString('base64');
+                }
+            } catch (fetchErr) {
+                console.warn('[AnalyzeScreen] Erro ao baixar screenshotUrl:', fetchErr.message);
+            }
+        }
+
+        if (imageBase64Payload) {
+            promptParts.push({
+                inlineData: {
+                    mimeType: 'image/jpeg',
+                    data: imageBase64Payload.replace(/^data:image\/[a-z]+;base64,/, '')
+                }
+            });
+        }
+
+        const result = await model.generateContent(promptParts);
+        const responseText = result.response.text();
+        const parsedReport = JSON.parse(responseText);
+
+        let crmCardCreated = null;
+
+        // Se solicitado, criar o card automaticamente no CRM Kanban
+        if (createCrmCard) {
+            try {
+                let { data: targetBoard } = await supabase
+                    .from('crm_boards')
+                    .select('*')
+                    .ilike('name', `%${boardName}%`)
+                    .maybeSingle();
+
+                if (!targetBoard) {
+                    const { data: bAny } = await supabase.from('crm_boards').select('*').limit(1).maybeSingle();
+                    targetBoard = bAny;
+                }
+
+                if (targetBoard) {
+                    let targetStageId = 'analysis';
+                    if (targetBoard.config?.stages && Array.isArray(targetBoard.config.stages)) {
+                        const foundStage = targetBoard.config.stages.find(s =>
+                            s.id === 'analysis' || s.label?.toLowerCase().includes('análise') || s.label?.toLowerCase().includes('analise')
+                        );
+                        if (foundStage) targetStageId = foundStage.id;
+                    }
+
+                    let storedImageUrl = screenshotUrl || null;
+                    if (!storedImageUrl && imageBase64Payload) {
+                        try {
+                            const buffer = Buffer.from(imageBase64Payload.replace(/^data:image\/[a-z]+;base64,/, ''), 'base64');
+                            const fileName = `crm_cards/ui_analysis_${Date.now()}.jpg`;
+                            const { error: upErr } = await supabase.storage.from('chat_media').upload(fileName, buffer, { contentType: 'image/jpeg' });
+                            if (!upErr) {
+                                const { data: pubData } = supabase.storage.from('chat_media').getPublicUrl(fileName);
+                                storedImageUrl = pubData?.publicUrl || null;
+                            }
+                        } catch (sErr) {}
+                    }
+
+                    const notesContent = `![📸 Screenshot Analisada](${storedImageUrl || 'N/A'})\n\n${parsedReport.markdownReport}`;
+
+                    const { data: newCard } = await supabase
+                        .from('crm_leads')
+                        .insert({
+                            board_id: targetBoard.id,
+                            tenant_id: targetBoard.tenant_id,
+                            title: `[UI/UX] Otimização: ${parsedReport.screenTitle}`,
+                            notes: notesContent,
+                            priority: 2,
+                            status: targetStageId,
+                            tags: ['UI/UX', 'MOBILE-FIRST', 'DESIGN-SYSTEM', 'IA-ANÁLISE', 'TAILWIND'],
+                            position: 0,
+                            history: [{
+                                at: new Date().toISOString(),
+                                by: 'Antigravity AI (UI/UX Engine)',
+                                to: targetStageId,
+                                from: null,
+                                action: 'created_via_ui_analysis'
+                            }]
+                        })
+                        .select()
+                        .maybeSingle();
+
+                    crmCardCreated = newCard;
+                }
+            } catch (cardErr) {
+                console.warn('[AnalyzeScreen] Aviso ao criar card no CRM:', cardErr.message);
+            }
+        }
+
+        return res.json({
+            ok: true,
+            analysis: parsedReport,
+            crmCard: crmCardCreated
+        });
+
+    } catch (err) {
+        console.error('[AnalyzeScreen] Erro na análise de UI/UX:', err);
+        return res.status(500).json({ ok: false, error: err.message || 'Erro ao processar análise visual de tela.' });
+    }
+};
+
+router.post('/chat/analyze-screen', handleAnalyzeScreen);
+router.post('/v1/chat/analyze-screen', handleAnalyzeScreen);
+
 export default router;
 

@@ -20,6 +20,45 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.5.0',
+    date: '2026-09-16',
+    summary: 'Análise Visual UI/UX via IA Gemini Vision, Estabilização de Concorrência Baileys e Gestão da Fila Dev',
+    notes: [
+      {
+        id: '7.5.0-1',
+        category: 'features',
+        title: 'Análise Visual de UI/UX com IA Multimodal (Gemini Vision)',
+        description: 'Nova engine que analisa screenshots de telas e gera a Análise Prática de 10 Pontos de UI/UX com diretrizes Mobile-First (alvo 48px, zero rolagem lateral, bottom sheets), sugestões de classes Tailwind CSS e criação automática de cards no CRM.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.5.0-2',
+        category: 'features',
+        title: 'Gestão Completa de Requisições na Esteira Fila Dev',
+        description: 'Expansão da automação da Fila Dev com os comandos add (criação de cards), comment (comentários com histórico), assign (atribuição de desenvolvedor) e close (fechamento oficial com relatório).',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.5.0-3',
+        category: 'improvements',
+        title: 'Resiliência de Telemetria e Polling Silencioso',
+        description: 'Adicionado AbortController com timeout de 3500ms e tratamento com debounce no DevLogger, silenciando tempestades de avisos no console durante reboots ou oscilações de rede.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      },
+      {
+        id: '7.5.0-4',
+        category: 'fixes',
+        title: 'Eliminação de Conflitos de Sessão Baileys no Boot',
+        description: 'Remoção de forceTakeover prematuro na inicialização do servidor e destruição limpa de sockets zumbis na memória ao ceder posse de lease, prevenindo erros de Stream Errored (conflict).',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      }
+    ]
+  },
+  {
     version: '7.4.9',
     date: '2026-09-16',
     summary: 'Sistema Diagnóstico E2E de Alto Nível, Telemetria em Tempo Real e Blindagem Anti-Loop',
