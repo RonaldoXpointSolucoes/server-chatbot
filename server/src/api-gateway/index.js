@@ -312,9 +312,11 @@ router.put('/v1/admin/companies/:id', async (req, res) => {
 
             const instUuid = instData?.id || selectedInst;
 
-            await supabase.from('whatsapp_instances').update({ tenant_id: companyId }).eq('id', instUuid).catch(() => null);
-            await supabase.from('conversations').update({ tenant_id: companyId }).eq('instance_id', instUuid).catch(() => null);
-            await supabase.from('messages').update({ tenant_id: companyId }).eq('instance_id', instUuid).catch(() => null);
+            try {
+                await supabase.from('whatsapp_instances').update({ tenant_id: companyId }).eq('id', instUuid);
+                await supabase.from('conversations').update({ tenant_id: companyId }).eq('instance_id', instUuid);
+                await supabase.from('messages').update({ tenant_id: companyId }).eq('instance_id', instUuid);
+            } catch (ignoreErr) {}
         }
 
         res.json(data);

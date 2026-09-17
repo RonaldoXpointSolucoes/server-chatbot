@@ -1329,6 +1329,7 @@ class SessionManager {
                         if (isHomologInst && isOtherActive && isNonProductionRemote) {
                             console.warn(`[SessionManager] Conflito de sessão na instância de testes ${instanceId}: Nó remoto '${remoteNodeId}' detém a posse ativa. Cedendo controle local.`);
                             this.conflictAttempts.delete(instanceId);
+                            await this.destroyExistingSession(instanceId, 'conflict_yield_homolog');
                             return;
                         }
 
@@ -1337,11 +1338,13 @@ class SessionManager {
                         if (isOtherActive && !isMasterTakeoverRemote) {
                             console.warn(`[SessionManager] ⚠️ Conflito de sessão na instância ${instanceId}: O nó remoto '${remoteNodeId}' assumiu a posse ativa. Cedendo controle local para evitar colisões.`);
                             this.conflictAttempts.delete(instanceId);
+                            await this.destroyExistingSession(instanceId, 'conflict_yield_remote');
                             return;
                         }
 
                         if (cAttempts >= 3 || isLocal) {
                             console.error(`[SessionManager] ${isLocal ? 'Ambiente local detectado. Cancelando reconexão de conflito imediatamente para não concorrer com a produção.' : `Limite de conflitos de sessão atingido na instância ${instanceId} (tentativa ${cAttempts}/3). Interrompendo reconexão automática para evitar concorrência/banimento.`}`);
+                            await this.destroyExistingSession(instanceId, 'conflict_limit_reached');
                             
                             if (!isLocal) {
                                 await this.releaseSessionLock(

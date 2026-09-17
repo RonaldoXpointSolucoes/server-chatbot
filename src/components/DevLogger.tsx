@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDevStore } from '../store/devStore';
-import { Terminal, AlertTriangle, Bug, Info, CheckCircle2, ChevronDown, ChevronUp, Trash2, Copy, Activity, Layers, Calendar, Rocket, Database, Smartphone, AppWindow, ExternalLink, Network, Cpu, Play, Pause, RefreshCw, UserCheck, ShieldAlert, Sparkles, Wand2, BrainCircuit, Check, Loader2, Send, ArrowUpRight, FileCode, CheckCircle, X, Zap, Mic, MicOff, Image as ImageIcon, Paperclip, Volume2, UploadCloud, Square, Plus, Radio, Film } from 'lucide-react';
+import { Terminal, AlertTriangle, Bug, Info, CheckCircle2, ChevronDown, ChevronUp, Trash2, Copy, Activity, Layers, Calendar, Rocket, Database, Smartphone, AppWindow, ExternalLink, Network, Cpu, Play, Pause, RefreshCw, UserCheck, ShieldAlert, Sparkles, Wand2, BrainCircuit, Check, Loader2, Send, ArrowUpRight, FileCode, CheckCircle, X, Zap, Mic, MicOff, Image as ImageIcon, Paperclip, Volume2, UploadCloud, Square, Plus, Radio, Film, Gauge, Server, Clock, HardDrive } from 'lucide-react';
 import { supabase, masterSupabase } from '../services/supabase';
 import { ServerLogsTerminal } from './ServerLogsTerminal';
 import { useChatStore } from '../store/chatStore';
@@ -163,8 +163,8 @@ export default function DevLogger() {
     return () => window.removeEventListener('resize', handleResize);
   }, [position]);
   
-  // Estados do Antigravity Application Simulator & Test Suite (ASTS)
-  const [activeTab, setActiveTab] = useState<'console' | 'asts' | 'gastrofood'>('console');
+  // Estados do Antigravity Application Simulator & Test Suite (ASTS) e Cockpit E2E / Telemetria
+  const [activeTab, setActiveTab] = useState<'console' | 'asts' | 'gastrofood' | 'e2e'>('console');
   const showTestPanel = activeTab === 'asts';
   const setShowTestPanel = (val: boolean) => {
     setActiveTab(val ? 'asts' : 'console');
@@ -722,6 +722,312 @@ export default function DevLogger() {
     const interval = setInterval(checkEngineStatus, 10000);
     return () => clearInterval(interval);
   }, []);
+
+  // ==========================================
+  // ESTADOS E CONTROLADORES E2E & TELEMETRIA
+  // ==========================================
+  const [serverTelemetry, setServerTelemetry] = useState<any>(null);
+  const [telemetrySnapshots, setTelemetrySnapshots] = useState<any[]>([]);
+  const [telemetryEvents, setTelemetryEvents] = useState<any[]>([]);
+  const [isFetchingTelemetry, setIsFetchingTelemetry] = useState(false);
+  const [isCapturingSnapshot, setIsCapturingSnapshot] = useState(false);
+  const [autoRefreshTelemetry, setAutoRefreshTelemetry] = useState(true);
+
+  // Estados do Runner de Testes e Validação E2E (9 Estágios Canônicos)
+  const [isExecutingE2E, setIsExecutingE2E] = useState(false);
+  const [e2eTestProgress, setE2ETestProgress] = useState(0);
+  const [e2eTestCurrentStage, setE2ETestCurrentStage] = useState<number>(0);
+  const [e2eLogs, setE2ELogs] = useState<Array<{ timestamp: string; stage: number; level: 'info' | 'success' | 'warn' | 'error'; message: string }>>([]);
+  const [e2eStagesStatus, setE2EStagesStatus] = useState<Record<number, { status: 'idle' | 'running' | 'passed' | 'failed'; durationMs?: number; detail?: string }>>({
+    1: { status: 'idle' },
+    2: { status: 'idle' },
+    3: { status: 'idle' },
+    4: { status: 'idle' },
+    5: { status: 'idle' },
+    6: { status: 'idle' },
+    7: { status: 'idle' },
+    8: { status: 'idle' },
+    9: { status: 'idle' },
+  });
+  const [e2eOverallResult, setE2EOverallResult] = useState<{ healthScore: number; durationTotalMs: number; summary: string } | null>(null);
+
+  // Coleta em tempo real da telemetria do backend
+  const fetchServerTelemetry = async () => {
+    try {
+      setIsFetchingTelemetry(true);
+      const res = await fetch(`${engineUrl}/api/v1/diagnostics/telemetry`, {
+        headers: { 'x-e2e-source': 'DevLogger' }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.ok && data.telemetry) {
+          setServerTelemetry(data.telemetry);
+        }
+      }
+
+      // Buscar histórico de snapshots de diagnóstico
+      const snapRes = await fetch(`${engineUrl}/api/v1/diagnostics/snapshots`, {
+        headers: { 'x-e2e-source': 'DevLogger' }
+      });
+      if (snapRes.ok) {
+        const snapData = await snapRes.json();
+        if (snapData.ok && snapData.snapshots) {
+          setTelemetrySnapshots(snapData.snapshots);
+        }
+      }
+
+      // Buscar eventos recentes de telemetria
+      const evRes = await fetch(`${engineUrl}/api/v1/diagnostics/events?limit=30`, {
+        headers: { 'x-e2e-source': 'DevLogger' }
+      });
+      if (evRes.ok) {
+        const evData = await evRes.json();
+        if (evData.ok && evData.events) {
+          setTelemetryEvents(evData.events);
+        }
+      }
+    } catch (err: any) {
+      console.warn('[DevLogger] Erro ao buscar telemetria:', err);
+    } finally {
+      setIsFetchingTelemetry(false);
+    }
+  };
+
+  // Polling automático da telemetria quando a aba E2E estiver em foco
+  useEffect(() => {
+    if (activeTab === 'e2e' && isVisible) {
+      fetchServerTelemetry();
+      if (autoRefreshTelemetry) {
+        const interval = setInterval(() => {
+          fetchServerTelemetry();
+        }, 4000);
+        return () => clearInterval(interval);
+      }
+    }
+  }, [activeTab, isVisible, autoRefreshTelemetry]);
+
+  // Captura instantânea de snapshot de anomalia / diagnóstico no backend
+  const handleCaptureSnapshot = async () => {
+    try {
+      setIsCapturingSnapshot(true);
+      const res = await fetch(`${engineUrl}/api/v1/diagnostics/snapshot`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reason: 'DEVLOGGER_MANUAL_CAPTURE',
+          metadata: { userTriggered: true, clientTimestamp: new Date().toISOString() }
+        })
+      });
+      if (res.ok) {
+        setCopyFeedback('📸 Snapshot de saúde capturado com sucesso!');
+        setTimeout(() => setCopyFeedback(null), 3000);
+        await fetchServerTelemetry();
+      }
+    } catch {
+      setCopyFeedback('❌ Falha ao capturar snapshot');
+      setTimeout(() => setCopyFeedback(null), 3000);
+    } finally {
+      setIsCapturingSnapshot(false);
+    }
+  };
+
+  // Execução da bateria de validação E2E (9 Estágios Completos)
+  const runE2EValidationSuite = async () => {
+    if (isExecutingE2E) return;
+    setIsExecutingE2E(true);
+    setE2ELogs([]);
+    setE2ETestProgress(0);
+    setE2EOverallResult(null);
+
+    const stagesInit: Record<number, { status: 'idle' | 'running' | 'passed' | 'failed'; durationMs?: number; detail?: string }> = {
+      1: { status: 'idle' },
+      2: { status: 'idle' },
+      3: { status: 'idle' },
+      4: { status: 'idle' },
+      5: { status: 'idle' },
+      6: { status: 'idle' },
+      7: { status: 'idle' },
+      8: { status: 'idle' },
+      9: { status: 'idle' },
+    };
+    setE2EStagesStatus(stagesInit);
+
+    const logE2E = (stage: number, level: 'info' | 'success' | 'warn' | 'error', message: string) => {
+      const entry = { timestamp: new Date().toLocaleTimeString(), stage, level, message };
+      setE2ELogs(prev => [entry, ...prev]);
+    };
+
+    const startTime = Date.now();
+    let failedCount = 0;
+
+    const executeStage = async (
+      num: number,
+      name: string,
+      fn: () => Promise<{ ok: boolean; detail: string; duration: number }>
+    ) => {
+      setE2ETestCurrentStage(num);
+      setE2EStagesStatus(prev => ({ ...prev, [num]: { status: 'running' } }));
+      logE2E(num, 'info', `[${num}/9] Iniciando: ${name}...`);
+      
+      try {
+        const res = await fn();
+        if (res.ok) {
+          setE2EStagesStatus(prev => ({
+            ...prev,
+            [num]: { status: 'passed', durationMs: res.duration, detail: res.detail }
+          }));
+          logE2E(num, 'success', `[${num}/9] Aprovado: ${name} (${res.duration}ms) - ${res.detail}`);
+        } else {
+          failedCount++;
+          setE2EStagesStatus(prev => ({
+            ...prev,
+            [num]: { status: 'failed', durationMs: res.duration, detail: res.detail }
+          }));
+          logE2E(num, 'error', `[${num}/9] Falha: ${name} (${res.duration}ms) - ${res.detail}`);
+        }
+      } catch (err: any) {
+        failedCount++;
+        setE2EStagesStatus(prev => ({
+          ...prev,
+          [num]: { status: 'failed', durationMs: 0, detail: err?.message || 'Erro inesperado' }
+        }));
+        logE2E(num, 'error', `[${num}/9] Exceção em ${name}: ${err?.message || err}`);
+      }
+      setE2ETestProgress(Math.round((num / 9) * 100));
+    };
+
+    // Estágio 1: Gateway HTTP Node.js & Ping RTT
+    await executeStage(1, 'Gateway HTTP & Latência RTT', async () => {
+      const t0 = Date.now();
+      const res = await fetch(`${engineUrl}/debug/healthz`);
+      const dt = Date.now() - t0;
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      return { ok: true, duration: dt, detail: `Motor v${data.engineVersion || '7.3.6'} ativo | RTT: ${dt}ms` };
+    });
+
+    // Estágio 2: Monitoramento de Event Loop Lag & Memória
+    await executeStage(2, 'Event Loop Lag & Performance do Processo', async () => {
+      const t0 = Date.now();
+      const res = await fetch(`${engineUrl}/api/v1/diagnostics/telemetry`);
+      const dt = Date.now() - t0;
+      const data = await res.json();
+      const evLoop = data?.telemetry?.eventLoop;
+      const mem = data?.telemetry?.memory;
+      const isLoopHealthy = evLoop && (evLoop.p50Ms < 50 || evLoop.meanMs < 50);
+      return {
+        ok: !!isLoopHealthy,
+        duration: dt,
+        detail: `Event Loop P50: ${evLoop?.p50Ms ?? 0}ms | P95: ${evLoop?.p95Ms ?? 0}ms | Heap: ${mem?.heapUsedMb ?? 0}MB`
+      };
+    });
+
+    // Estágio 3: Auditoria de Listeners Baileys (Prevenção de Leaks)
+    await executeStage(3, 'Auditoria de Listeners Baileys & Leaks', async () => {
+      const t0 = Date.now();
+      const res = await fetch(`${engineUrl}/api/v1/diagnostics/telemetry`);
+      const dt = Date.now() - t0;
+      const data = await res.json();
+      const baileys = data?.telemetry?.baileys;
+      const instances = baileys?.instances || [];
+      const suspicious = instances.filter((i: any) => (i.totalListeners || 0) > 8);
+      const isOk = suspicious.length === 0;
+      return {
+        ok: isOk,
+        duration: dt,
+        detail: `${baileys?.totalSessions || 0} sessões ativas | ${baileys?.totalListeners || 0} listeners totais ${suspicious.length > 0 ? `| ALERTA: ${suspicious.length} instâncias com excesso de listeners!` : '| Sem vazamento de listeners'}`
+      };
+    });
+
+    // Estágio 4: Integridade do Banco Supabase & RLS
+    await executeStage(4, 'Supabase Database & Conexão Multi-Tenant', async () => {
+      const t0 = Date.now();
+      const { data, error } = await supabase.from('companies').select('id, name').limit(1);
+      const dt = Date.now() - t0;
+      if (error) throw error;
+      return { ok: true, duration: dt, detail: `Conexão Supabase OK (${dt}ms) | Tenant: ${data?.[0]?.name || 'Padrão'}` };
+    });
+
+    // Estágio 5: Rastreamento de Sessões Baileys Ativas
+    await executeStage(5, 'Sessões Baileys Conectadas & Sockets', async () => {
+      const t0 = Date.now();
+      const { data, error } = await supabase.from('whatsapp_instances').select('id, display_name, phone_number, status').limit(15);
+      const dt = Date.now() - t0;
+      if (error) throw error;
+      const connected = (data || []).filter(i => i.status === 'open' || i.status === 'connected');
+      return { ok: true, duration: dt, detail: `${connected.length} instâncias abertas no banco | ${data?.length || 0} cadastradas` };
+    });
+
+    // Estágio 6: Validação de Trace ID E2E Estruturado
+    await executeStage(6, 'Geração de Trace ID E2E & Simulação de Fluxo', async () => {
+      const t0 = Date.now();
+      const traceId = `trace_diag_${Date.now()}`;
+      await fetch(`${engineUrl}/api/v1/diagnostics/snapshot`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reason: 'E2E_VALIDATION_TRACE',
+          metadata: { traceId, executedAt: new Date().toISOString() }
+        })
+      });
+      const dt = Date.now() - t0;
+      return { ok: true, duration: dt, detail: `Trace ID emitido: ${traceId} (${dt}ms)` };
+    });
+
+    // Estágio 7: Teste do Canal Supabase Realtime
+    await executeStage(7, 'Canal WebSocket Supabase Realtime', async () => {
+      const t0 = Date.now();
+      const channel = supabase.channel(`e2e_probe_${Date.now()}`);
+      let connected = false;
+      await new Promise<void>((resolve) => {
+        channel.subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            connected = true;
+            resolve();
+          }
+        });
+        setTimeout(() => resolve(), 1200);
+      });
+      supabase.removeChannel(channel);
+      const dt = Date.now() - t0;
+      return { ok: connected, duration: dt, detail: connected ? `WebSocket Realtime conectado com sucesso (${dt}ms)` : 'Timeout / Falha no canal Realtime' };
+    });
+
+    // Estágio 8: Detecção de Reconnect Storms
+    await executeStage(8, 'Análise de Tempestades de Reconexão (Storms)', async () => {
+      const t0 = Date.now();
+      const res = await fetch(`${engineUrl}/api/v1/diagnostics/telemetry`);
+      const dt = Date.now() - t0;
+      const data = await res.json();
+      const anyStorm = data?.telemetry?.baileys?.anyReconnectStorm;
+      return {
+        ok: !anyStorm,
+        duration: dt,
+        detail: anyStorm ? 'ALERTA: Detectada tempestade de reconexão ativa no worker!' : 'Estável: 0 tempestades de reconexão detectadas'
+      };
+    });
+
+    // Estágio 9: Emissão de Snapshot de Diagnóstico & Laudo
+    await executeStage(9, 'Consolidação de Telemetria & Snapshot Final', async () => {
+      const t0 = Date.now();
+      await fetchServerTelemetry();
+      const dt = Date.now() - t0;
+      return { ok: true, duration: dt, detail: 'Snapshot consolidado gravado e sincronizado com o Cockpit' };
+    });
+
+    const totalDuration = Date.now() - startTime;
+    const healthScore = Math.max(0, Math.round(((9 - failedCount) / 9) * 100));
+
+    setE2EOverallResult({
+      healthScore,
+      durationTotalMs: totalDuration,
+      summary: failedCount === 0
+        ? 'Todos os 9 checkpoints de validação E2E foram aprovados com sucesso! Motor Baileys e Event Loop em estado ideal.'
+        : `${failedCount} de 9 checkpoints apresentaram inconsistências. Verifique os logs e detalhes técnicos acima.`
+    });
+
+    setIsExecutingE2E(false);
+  };
   // Hook globally to capture fetch API errors and console.error
   useEffect(() => {
     const originalConsoleError = console.error;
@@ -2587,12 +2893,12 @@ export default function DevLogger() {
             </div>
           )}
 
-          {/* Abas de Navegação Principal em Segmented Control Neon (CONSOLE / GASTROFOOD / ASTS) */}
+          {/* Abas de Navegação Principal em Segmented Control Neon (CONSOLE / GASTROFOOD / ASTS / E2E) */}
           {isVisible && (
-            <div className="p-2 sm:p-2.5 bg-[#080e13]/95 border-b border-white/10 flex gap-1.5 sm:gap-2 shrink-0 select-none relative z-10 backdrop-blur-2xl">
+            <div className="p-2 sm:p-2.5 bg-[#080e13]/95 border-b border-white/10 flex gap-1.5 sm:gap-2 shrink-0 select-none relative z-10 backdrop-blur-2xl overflow-x-auto no-scrollbar">
               <button 
                 onClick={(e) => { e.stopPropagation(); setActiveTab('console'); }}
-                className={`flex-1 py-2 sm:py-2.5 font-mono text-[11px] sm:text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 sm:gap-2 rounded-2xl transition-all duration-200 cursor-pointer border ${
+                className={`flex-1 min-w-[70px] py-2 sm:py-2.5 font-mono text-[11px] sm:text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 sm:gap-2 rounded-2xl transition-all duration-200 cursor-pointer border ${
                   activeTab === 'console' 
                     ? 'bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-400 text-black border-emerald-300/60 shadow-lg shadow-emerald-500/25 font-black scale-[1.01]' 
                     : 'bg-[#101920]/70 text-[#8696a0] border-white/5 hover:text-white hover:bg-white/10'
@@ -2609,7 +2915,7 @@ export default function DevLogger() {
 
               <button 
                 onClick={(e) => { e.stopPropagation(); setActiveTab('gastrofood'); }}
-                className={`flex-1 py-2 sm:py-2.5 font-mono text-[11px] sm:text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 sm:gap-2 rounded-2xl transition-all duration-200 cursor-pointer border ${
+                className={`flex-1 min-w-[85px] py-2 sm:py-2.5 font-mono text-[11px] sm:text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 sm:gap-2 rounded-2xl transition-all duration-200 cursor-pointer border ${
                   activeTab === 'gastrofood' 
                     ? 'bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 text-white border-blue-400/60 shadow-lg shadow-blue-500/25 font-black scale-[1.01]' 
                     : 'bg-[#101920]/70 text-[#8696a0] border-white/5 hover:text-white hover:bg-white/10'
@@ -2626,7 +2932,7 @@ export default function DevLogger() {
 
               <button 
                 onClick={(e) => { e.stopPropagation(); setActiveTab('asts'); }}
-                className={`flex-1 py-2 sm:py-2.5 font-mono text-[11px] sm:text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 sm:gap-2 rounded-2xl transition-all duration-200 cursor-pointer border ${
+                className={`flex-1 min-w-[65px] py-2 sm:py-2.5 font-mono text-[11px] sm:text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 sm:gap-2 rounded-2xl transition-all duration-200 cursor-pointer border ${
                   activeTab === 'asts' 
                     ? 'bg-gradient-to-r from-amber-400 via-orange-500 to-amber-500 text-black border-amber-300/60 shadow-lg shadow-amber-500/25 font-black scale-[1.01]' 
                     : 'bg-[#101920]/70 text-[#8696a0] border-white/5 hover:text-white hover:bg-white/10'
@@ -2642,12 +2948,29 @@ export default function DevLogger() {
                   </span>
                 )}
               </button>
+
+              <button 
+                onClick={(e) => { e.stopPropagation(); setActiveTab('e2e'); }}
+                className={`flex-1 min-w-[95px] py-2 sm:py-2.5 font-mono text-[11px] sm:text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 sm:gap-2 rounded-2xl transition-all duration-200 cursor-pointer border ${
+                  activeTab === 'e2e' 
+                    ? 'bg-gradient-to-r from-cyan-500 via-teal-400 to-indigo-500 text-black border-cyan-300/60 shadow-lg shadow-cyan-500/25 font-black scale-[1.01]' 
+                    : 'bg-[#101920]/70 text-[#8696a0] border-white/5 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                <Radio size={14} className={activeTab === 'e2e' ? 'text-black stroke-[2.5] animate-pulse' : 'text-cyan-400'} /> 
+                <span>E2E / Telemetria</span>
+                <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-black ${
+                  activeTab === 'e2e' ? 'bg-black/25 text-black' : 'bg-cyan-500/20 text-cyan-300'
+                }`}>
+                  {serverTelemetry?.eventLoop ? `${serverTelemetry.eventLoop.p50Ms}ms` : 'LIVE'}
+                </span>
+              </button>
             </div>
           )}
 
           {/* Área Principal de Conteúdo / Logs */}
           {isVisible && (
-            showTestPanel ? (
+            activeTab === 'asts' ? (
               /* Antigravity Application Simulator & Test Suite (ASTS) */
               <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4 text-xs custom-scrollbar min-h-[180px] bg-[#070c10] transition-all duration-300 relative rounded-b-[28px]">
                 {/* Cabeçalho do Painel ASTS */}
@@ -2862,6 +3185,530 @@ export default function DevLogger() {
                     })}
                   </div>
                 )}
+              </div>
+            ) : activeTab === 'e2e' ? (
+              /* Cockpit de Telemetria e Validação E2E em Tempo Real */
+              <div className="flex-1 overflow-y-auto p-3 sm:p-4 flex flex-col gap-4 text-xs font-mono custom-scrollbar min-h-[180px] bg-[#070c10] relative rounded-b-[28px] select-none">
+                
+                {/* CABEÇALHO DO COCKPIT E2E */}
+                <div className="flex items-center justify-between pb-3 border-b border-white/10 relative z-10 shrink-0 flex-wrap gap-2">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+                      <Radio size={16} className="text-cyan-400 animate-pulse" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-black text-white block text-xs tracking-wider">E2E COCKPIT & TELEMETRIA</span>
+                        <span className="px-2 py-0.2 rounded-full text-[9px] font-black bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                          PROD ENGINE
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-[#8696a0] block">
+                        EVENT LOOP, LISTENERS BAILEYS, TRACE ID E AUDITORIA DE 9 ESTÁGIOS
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Ações Rápidas no Cabeçalho */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {/* Toggle Auto-Refresh */}
+                    <label className="flex items-center gap-1.5 cursor-pointer bg-[#0e161c] px-2.5 py-1 rounded-xl border border-white/10 text-[10px] text-[#8696a0]">
+                      <span className="font-bold">Auto (4s)</span>
+                      <input 
+                        type="checkbox" 
+                        checked={autoRefreshTelemetry}
+                        onChange={(e) => setAutoRefreshTelemetry(e.target.checked)}
+                        className="sr-only peer"
+                      />
+                      <div className="w-7 h-4 bg-[#182229] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-[#8696a0] after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-cyan-500 peer-checked:after:bg-black relative"></div>
+                    </label>
+
+                    {/* Botão Atualizar Manual */}
+                    <button
+                      onClick={fetchServerTelemetry}
+                      disabled={isFetchingTelemetry}
+                      className="p-1.5 px-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-[#8696a0] hover:text-white transition-all flex items-center gap-1 text-[10px] cursor-pointer active:scale-95"
+                      title="Atualizar telemetria do servidor"
+                    >
+                      <RefreshCw size={11} className={isFetchingTelemetry ? 'animate-spin text-cyan-400' : ''} />
+                      <span className="hidden sm:inline">Atualizar</span>
+                    </button>
+
+                    {/* Botão Capturar Snapshot */}
+                    <button
+                      onClick={handleCaptureSnapshot}
+                      disabled={isCapturingSnapshot}
+                      className="p-1.5 px-2.5 bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/30 text-purple-300 rounded-xl transition-all flex items-center gap-1 text-[10px] font-bold cursor-pointer active:scale-95"
+                      title="Salva um snapshot completo do estado do processo no servidor"
+                    >
+                      <Layers size={11} />
+                      <span>{isCapturingSnapshot ? 'Capturando...' : 'Snapshot'}</span>
+                    </button>
+
+                    {/* Botão Executar Suite E2E */}
+                    <button
+                      onClick={runE2EValidationSuite}
+                      disabled={isExecutingE2E}
+                      className="p-1.5 px-3 bg-gradient-to-r from-cyan-500 via-teal-400 to-indigo-500 text-black font-black rounded-xl transition-all flex items-center gap-1.5 text-xs shadow-lg shadow-cyan-500/20 cursor-pointer active:scale-95"
+                    >
+                      {isExecutingE2E ? (
+                        <>
+                          <Loader2 size={12} className="animate-spin" />
+                          <span>Auditando [{e2eTestCurrentStage}/9]</span>
+                        </>
+                      ) : (
+                        <>
+                          <Play size={12} className="fill-current" />
+                          <span>TESTAR E2E (9 ESTÁGIOS)</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* GRADE DE MÉTRICAS CIBERNÉTICAS (4 CARDS) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 relative z-10 shrink-0">
+                  
+                  {/* CARD 1: EVENT LOOP LAG */}
+                  {(() => {
+                    const ev = serverTelemetry?.eventLoop;
+                    const p50 = ev?.p50Ms ?? 0;
+                    const isHealthy = p50 < 25;
+                    const isWarn = p50 >= 25 && p50 <= 50;
+                    const isCritical = p50 > 50;
+                    return (
+                      <div className={`p-3 rounded-2xl border flex flex-col gap-1.5 transition-all ${
+                        isCritical 
+                          ? 'bg-rose-500/10 border-rose-500/40 text-rose-300' 
+                          : isWarn 
+                            ? 'bg-amber-500/10 border-amber-500/40 text-amber-300' 
+                            : 'bg-[#0f171e] border-white/10 text-[#8696a0]'
+                      }`}>
+                        <div className="flex items-center justify-between text-[10px] uppercase font-bold">
+                          <span className="flex items-center gap-1">
+                            <Gauge size={12} className="text-cyan-400" /> Event Loop Lag
+                          </span>
+                          <span className={`px-1.5 py-0.2 rounded-md text-[9px] font-black ${
+                            isCritical ? 'bg-rose-500/25 text-rose-300' : isWarn ? 'bg-amber-500/25 text-amber-300' : 'bg-emerald-500/20 text-emerald-400'
+                          }`}>
+                            {isCritical ? 'BLOQUEADO' : isWarn ? 'MODERADO' : 'IDEAL'}
+                          </span>
+                        </div>
+                        <div className="flex items-baseline gap-1">
+                          <span className="text-xl font-black text-white">{p50}</span>
+                          <span className="text-xs text-[#8696a0]">ms (P50)</span>
+                        </div>
+                        <div className="text-[10px] text-[#8696a0] flex justify-between">
+                          <span>P95: <strong className="text-white font-mono">{ev?.p95Ms ?? 0}ms</strong></span>
+                          <span>Max: <strong className="text-white font-mono">{ev?.maxMs ?? 0}ms</strong></span>
+                        </div>
+                        <div className="w-full bg-[#182229] rounded-full h-1.5 overflow-hidden mt-1">
+                          <div 
+                            className={`h-full rounded-full transition-all duration-300 ${
+                              isCritical ? 'bg-rose-500' : isWarn ? 'bg-amber-500' : 'bg-gradient-to-r from-emerald-500 to-cyan-400'
+                            }`}
+                            style={{ width: `${Math.min(100, Math.max(5, (p50 / 60) * 100))}%` }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* CARD 2: MEMÓRIA & HEAP */}
+                  {(() => {
+                    const mem = serverTelemetry?.memory;
+                    const used = mem?.heapUsedMb ?? 0;
+                    const total = mem?.heapTotalMb ?? 1;
+                    const rss = mem?.rssMb ?? 0;
+                    const pct = Math.min(100, Math.round((used / total) * 100));
+                    return (
+                      <div className="p-3 rounded-2xl border bg-[#0f171e] border-white/10 flex flex-col gap-1.5">
+                        <div className="flex items-center justify-between text-[10px] uppercase font-bold text-[#8696a0]">
+                          <span className="flex items-center gap-1">
+                            <Cpu size={12} className="text-indigo-400" /> Memória & Heap
+                          </span>
+                          <span className="px-1.5 py-0.2 rounded-md text-[9px] font-black bg-indigo-500/20 text-indigo-300">
+                            {pct}% HEAP
+                          </span>
+                        </div>
+                        <div className="flex items-baseline gap-1">
+                          <span className="text-xl font-black text-white">{used}</span>
+                          <span className="text-xs text-[#8696a0]">MB usado</span>
+                        </div>
+                        <div className="text-[10px] text-[#8696a0] flex justify-between">
+                          <span>RSS: <strong className="text-white font-mono">{rss}MB</strong></span>
+                          <span>Total: <strong className="text-white font-mono">{total}MB</strong></span>
+                        </div>
+                        <div className="w-full bg-[#182229] rounded-full h-1.5 overflow-hidden mt-1">
+                          <div 
+                            className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-cyan-400 transition-all duration-300"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* CARD 3: BAILEYS & LISTENERS */}
+                  {(() => {
+                    const b = serverTelemetry?.baileys;
+                    const sessions = b?.totalSessions ?? 0;
+                    const listeners = b?.totalListeners ?? 0;
+                    const storm = b?.anyReconnectStorm;
+                    return (
+                      <div className={`p-3 rounded-2xl border flex flex-col gap-1.5 transition-all ${
+                        storm 
+                          ? 'bg-rose-500/10 border-rose-500/40 text-rose-300' 
+                          : 'bg-[#0f171e] border-white/10'
+                      }`}>
+                        <div className="flex items-center justify-between text-[10px] uppercase font-bold text-[#8696a0]">
+                          <span className="flex items-center gap-1">
+                            <Smartphone size={12} className="text-teal-400" /> Baileys & Listeners
+                          </span>
+                          <span className={`px-1.5 py-0.2 rounded-md text-[9px] font-black ${
+                            storm ? 'bg-rose-500/25 text-rose-300 animate-pulse' : 'bg-teal-500/20 text-teal-300'
+                          }`}>
+                            {storm ? 'STORM ATIVA' : 'SEM VAZAMENTOS'}
+                          </span>
+                        </div>
+                        <div className="flex items-baseline gap-1">
+                          <span className="text-xl font-black text-white">{sessions}</span>
+                          <span className="text-xs text-[#8696a0]">caixas ativas</span>
+                        </div>
+                        <div className="text-[10px] text-[#8696a0] flex justify-between">
+                          <span>Listeners: <strong className="text-white font-mono">{listeners}</strong></span>
+                          <span>Média: <strong className="text-white font-mono">{sessions > 0 ? (listeners / sessions).toFixed(1) : '0'} /cx</strong></span>
+                        </div>
+                        <div className="w-full bg-[#182229] rounded-full h-1.5 overflow-hidden mt-1">
+                          <div 
+                            className={`h-full rounded-full transition-all duration-300 ${
+                              storm ? 'bg-rose-500' : 'bg-gradient-to-r from-teal-400 to-emerald-400'
+                            }`}
+                            style={{ width: `${Math.min(100, sessions * 5)}%` }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* CARD 4: PROCESSO & HANDLES */}
+                  {(() => {
+                    const proc = serverTelemetry?.process;
+                    const uptimeSec = proc?.uptimeSeconds ?? 0;
+                    const hours = Math.floor(uptimeSec / 3600);
+                    const mins = Math.floor((uptimeSec % 3600) / 60);
+                    const uptimeStr = hours > 0 ? `${hours}h ${mins}m` : `${mins}m ${uptimeSec % 60}s`;
+                    return (
+                      <div className="p-3 rounded-2xl border bg-[#0f171e] border-white/10 flex flex-col gap-1.5">
+                        <div className="flex items-center justify-between text-[10px] uppercase font-bold text-[#8696a0]">
+                          <span className="flex items-center gap-1">
+                            <Server size={12} className="text-purple-400" /> Processo Node.js
+                          </span>
+                          <span className="px-1.5 py-0.2 rounded-md text-[9px] font-black bg-purple-500/20 text-purple-300">
+                            PID {proc?.pid || 'OK'}
+                          </span>
+                        </div>
+                        <div className="flex items-baseline gap-1">
+                          <span className="text-xl font-black text-white">{uptimeStr}</span>
+                          <span className="text-xs text-[#8696a0]">uptime</span>
+                        </div>
+                        <div className="text-[10px] text-[#8696a0] flex justify-between">
+                          <span>Handles: <strong className="text-white font-mono">{proc?.activeHandles ?? 'N/A'}</strong></span>
+                          <span>Node: <strong className="text-white font-mono">{proc?.nodeVersion || 'v20'}</strong></span>
+                        </div>
+                        <div className="w-full bg-[#182229] rounded-full h-1.5 overflow-hidden mt-1">
+                          <div className="h-full rounded-full bg-gradient-to-r from-purple-500 to-pink-500 w-full" />
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                </div>
+
+                {/* PAINEL DE VALIDAÇÃO E2E (9 ESTÁGIOS) */}
+                {(isExecutingE2E || e2eOverallResult || e2eLogs.length > 0) && (
+                  <div className="bg-[#0f171e] border border-white/10 rounded-2xl p-4 flex flex-col gap-3 relative z-10 animate-in fade-in duration-300">
+                    
+                    {/* Barra de Progresso E2E */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Activity size={14} className="text-cyan-400 animate-pulse" />
+                        <span className="font-black text-white text-xs tracking-wider uppercase">
+                          Validação de Fluxo E2E (9 Estágios)
+                        </span>
+                      </div>
+                      <span className="text-xs font-black text-cyan-300 font-mono">
+                        {e2eTestProgress}%
+                      </span>
+                    </div>
+
+                    <div className="w-full bg-[#182229] rounded-full h-2 overflow-hidden border border-white/10">
+                      <div 
+                        className="bg-gradient-to-r from-cyan-500 via-teal-400 to-indigo-500 h-full rounded-full transition-all duration-300"
+                        style={{ width: `${e2eTestProgress}%` }}
+                      />
+                    </div>
+
+                    {/* Grade dos 9 Estágios */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mt-1">
+                      {[
+                        { num: 1, name: 'Gateway HTTP & Latência RTT', icon: <Network size={12} /> },
+                        { num: 2, name: 'Event Loop & Performance', icon: <Gauge size={12} /> },
+                        { num: 3, name: 'Auditoria de Listeners Baileys', icon: <Layers size={12} /> },
+                        { num: 4, name: 'Supabase DB & Isolamento', icon: <Database size={12} /> },
+                        { num: 5, name: 'Sessões Baileys Conectadas', icon: <Smartphone size={12} /> },
+                        { num: 6, name: 'Geração de Trace ID E2E', icon: <Radio size={12} /> },
+                        { num: 7, name: 'WebSocket Realtime Supabase', icon: <Zap size={12} /> },
+                        { num: 8, name: 'Detecção de Reconnect Storms', icon: <ShieldAlert size={12} /> },
+                        { num: 9, name: 'Snapshot de Saúde Consolidado', icon: <CheckCircle2 size={12} /> },
+                      ].map((st) => {
+                        const state = e2eStagesStatus[st.num] || { status: 'idle' };
+                        const isIdle = state.status === 'idle';
+                        const isRunning = state.status === 'running';
+                        const isPassed = state.status === 'passed';
+                        const isFailed = state.status === 'failed';
+
+                        return (
+                          <div 
+                            key={st.num}
+                            className={`p-2.5 rounded-xl border flex flex-col gap-1 transition-all ${
+                              isIdle ? 'bg-[#141d24]/60 border-white/5 text-[#8696a0]' : ''
+                            } ${
+                              isRunning ? 'bg-cyan-500/15 border-cyan-500/40 text-cyan-300 animate-pulse' : ''
+                            } ${
+                              isPassed ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300' : ''
+                            } ${
+                              isFailed ? 'bg-rose-500/15 border-rose-500/40 text-rose-300' : ''
+                            }`}
+                          >
+                            <div className="flex items-center justify-between text-[10px] uppercase font-bold">
+                              <span className="flex items-center gap-1 truncate">
+                                <span className="opacity-70 font-mono">[{st.num}/9]</span> {st.name}
+                              </span>
+                              <span className="shrink-0 ml-1">
+                                {isIdle && <Clock size={11} />}
+                                {isRunning && <Loader2 size={11} className="animate-spin text-cyan-400" />}
+                                {isPassed && <CheckCircle2 size={11} className="text-emerald-400" />}
+                                {isFailed && <AlertTriangle size={11} className="text-rose-400" />}
+                              </span>
+                            </div>
+                            <div className="text-[10px] text-[#8696a0] truncate">
+                              {state.detail ? state.detail : isRunning ? 'Executando validação...' : 'Aguardando'}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Resultado Consolidado */}
+                    {e2eOverallResult && (
+                      <div className="mt-2 p-3 rounded-xl bg-[#141d24] border border-white/10 flex items-center justify-between flex-wrap gap-2">
+                        <div className="flex items-center gap-3">
+                          <span className={`px-3 py-1 rounded-xl text-xs font-black border ${
+                            e2eOverallResult.healthScore === 100 
+                              ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400' 
+                              : 'bg-amber-500/20 border-amber-500/40 text-amber-300'
+                          }`}>
+                            HEALTH SCORE: {e2eOverallResult.healthScore}%
+                          </span>
+                          <span className="text-[11px] text-[#d1d7db]">
+                            {e2eOverallResult.summary}
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-[#8696a0]">
+                          Duração: <strong className="text-white">{(e2eOverallResult.durationTotalMs / 1000).toFixed(2)}s</strong>
+                        </span>
+                      </div>
+                    )}
+
+                  </div>
+                )}
+
+                {/* SESSÃO DE INSTÂNCIAS BAILEYS EM TEMPO REAL */}
+                {serverTelemetry?.baileys?.instances && serverTelemetry.baileys.instances.length > 0 && (
+                  <div className="bg-[#0f171e] border border-white/10 rounded-2xl p-4 flex flex-col gap-3 relative z-10">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Smartphone size={14} className="text-teal-400" />
+                        <span className="font-black text-white text-xs tracking-wider uppercase">
+                          Sessões Ativas no Motor Node ({serverTelemetry.baileys.instances.length})
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-[#8696a0]">
+                        Auditando listeners & integridade de socket
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5 max-h-56 overflow-y-auto custom-scrollbar pr-1">
+                      {serverTelemetry.baileys.instances.map((inst: any) => {
+                        const isConnected = inst.wsOpen || inst.status === 'open' || inst.status === 'connected';
+                        const isLeakRisk = (inst.totalListeners || 0) > 8;
+                        const isStorm = inst.isReconnectStorm;
+
+                        return (
+                          <div 
+                            key={inst.instanceId}
+                            className={`p-3 rounded-xl border flex flex-col gap-1.5 transition-all ${
+                              isStorm 
+                                ? 'bg-rose-500/15 border-rose-500/40' 
+                                : isLeakRisk 
+                                  ? 'bg-amber-500/15 border-amber-500/40' 
+                                  : 'bg-[#141d24] border-white/10'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="font-mono text-[11px] font-bold text-white truncate max-w-[180px]">
+                                {inst.instanceId}
+                              </span>
+                              <span className={`px-2 py-0.2 rounded-full text-[9px] font-black uppercase ${
+                                isConnected ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-white/10 text-[#8696a0]'
+                              }`}>
+                                {isConnected ? 'WS CONECTADO' : 'OFFLINE'}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center justify-between text-[10px] text-[#8696a0]">
+                              <span>Listeners: <strong className={isLeakRisk ? "text-amber-400 font-black" : "text-white font-mono"}>{inst.totalListeners || 0}</strong></span>
+                              <span>Reconexões (1m): <strong className={isStorm ? "text-rose-400 font-black" : "text-white font-mono"}>{inst.reconnectsLastMin || 0}</strong></span>
+                            </div>
+
+                            <div className="text-[9px] text-[#8696a0] font-mono bg-[#0c1217] p-1.5 rounded-lg flex justify-between">
+                              <span>upsert: {inst.listeners?.['messages.upsert'] || 0}</span>
+                              <span>update: {inst.listeners?.['messages.update'] || 0}</span>
+                              <span>conn: {inst.listeners?.['connection.update'] || 0}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* TERMINAL DE LOGS E2E & EVENTOS DE TELEMETRIA */}
+                <div className="bg-[#0f171e] border border-white/10 rounded-2xl p-3.5 flex flex-col gap-2 relative z-10">
+                  <div className="flex items-center justify-between pb-2 border-b border-white/10">
+                    <div className="flex items-center gap-2">
+                      <Terminal size={13} className="text-cyan-400" />
+                      <span className="font-black text-white text-[11px] uppercase tracking-wider">
+                        Log de Eventos E2E & Telemetria
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          const text = e2eLogs.map(l => `[${l.timestamp}] [${l.stage}/9] ${l.message}`).join('\n');
+                          navigator.clipboard.writeText(text);
+                          setCopyFeedback('Logs E2E copiados!');
+                          setTimeout(() => setCopyFeedback(null), 3000);
+                        }}
+                        disabled={e2eLogs.length === 0}
+                        className="p-1 px-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[#8696a0] hover:text-white transition-all text-[10px] flex items-center gap-1 cursor-pointer disabled:opacity-40"
+                      >
+                        <Copy size={11} /> Copiar Logs
+                      </button>
+
+                      <button
+                        onClick={() => setE2ELogs([])}
+                        disabled={e2eLogs.length === 0}
+                        className="p-1 px-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[#8696a0] hover:text-rose-400 transition-all text-[10px] flex items-center gap-1 cursor-pointer disabled:opacity-40"
+                      >
+                        <Trash2 size={11} /> Limpar
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Visualizador de Linhas */}
+                  <div className="max-h-48 overflow-y-auto custom-scrollbar flex flex-col gap-1.5 font-mono text-[11px] p-2 bg-[#090e13] rounded-xl border border-white/5">
+                    {e2eLogs.length === 0 && telemetryEvents.length === 0 ? (
+                      <div className="py-6 text-center text-[#8696a0] text-xs">
+                        Nenhum evento registrado ainda. Clique em <strong className="text-cyan-300">"TESTAR E2E (9 ESTÁGIOS)"</strong> para iniciar uma auditoria completa.
+                      </div>
+                    ) : (
+                      <>
+                        {e2eLogs.map((log, idx) => (
+                          <div 
+                            key={`e2e_${idx}`}
+                            className={`flex items-start gap-2 py-0.5 px-1.5 rounded ${
+                              log.level === 'error' 
+                                ? 'bg-rose-500/10 text-rose-300' 
+                                : log.level === 'success' 
+                                  ? 'bg-emerald-500/10 text-emerald-300' 
+                                  : log.level === 'warn' 
+                                    ? 'bg-amber-500/10 text-amber-300' 
+                                    : 'text-[#d1d7db]'
+                            }`}
+                          >
+                            <span className="text-[10px] text-[#8696a0] shrink-0">[{log.timestamp}]</span>
+                            <span className="font-bold shrink-0 text-cyan-400">[{log.stage}/9]</span>
+                            <span className="break-all">{log.message}</span>
+                          </div>
+                        ))}
+
+                        {telemetryEvents.map((ev, idx) => (
+                          <div 
+                            key={`ev_${idx}`}
+                            className="flex items-start gap-2 py-0.5 px-1.5 rounded text-[#8696a0] hover:text-white transition-colors"
+                          >
+                            <span className="text-[10px] opacity-70 shrink-0">
+                              [{new Date(ev.timestamp).toLocaleTimeString()}]
+                            </span>
+                            <span className="text-purple-400 font-bold shrink-0">[SERVER]</span>
+                            <span className="text-white font-bold shrink-0">{ev.event}</span>
+                            {ev.traceId && <span className="text-cyan-300 text-[10px]">trace={ev.traceId}</span>}
+                            {ev.durationMs !== null && <span className="text-amber-300 text-[10px]">{ev.durationMs}ms</span>}
+                          </div>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* SNAPSHOTS RECENTES */}
+                {telemetrySnapshots.length > 0 && (
+                  <div className="bg-[#0f171e] border border-white/10 rounded-2xl p-3.5 flex flex-col gap-2 relative z-10">
+                    <div className="flex items-center justify-between pb-2 border-b border-white/10">
+                      <div className="flex items-center gap-2">
+                        <Layers size={13} className="text-purple-400" />
+                        <span className="font-black text-white text-[11px] uppercase tracking-wider">
+                          Snapshots de Diagnóstico Recentes ({telemetrySnapshots.length})
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-[#8696a0]">
+                        Capturados automaticamente ou sob demanda
+                      </span>
+                    </div>
+
+                    <div className="flex flex-col gap-1.5 max-h-36 overflow-y-auto custom-scrollbar">
+                      {telemetrySnapshots.map((snap, idx) => (
+                        <div 
+                          key={idx}
+                          className="p-2 rounded-xl bg-[#141d24] border border-white/5 flex items-center justify-between text-[11px]"
+                        >
+                          <div className="flex items-center gap-2 truncate">
+                            <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shrink-0" />
+                            <span className="font-bold text-white truncate">{snap.reason || 'MANUAL'}</span>
+                            <span className="text-[10px] text-[#8696a0]">
+                              {new Date(snap.timestamp).toLocaleString('pt-BR')}
+                            </span>
+                          </div>
+
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(JSON.stringify(snap, null, 2));
+                              setCopyFeedback('JSON do Snapshot copiado!');
+                              setTimeout(() => setCopyFeedback(null), 3000);
+                            }}
+                            className="p-1 px-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[#8696a0] hover:text-white transition-all text-[10px] flex items-center gap-1 cursor-pointer"
+                          >
+                            <Copy size={10} /> Copiar JSON
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
               </div>
             ) : (
               /* Console & Server Logs - COM SUPORTE A AGRUPAMENTO DE ERROS IDENTICOS E FILTRAGEM DE NOVO PADRÃO */

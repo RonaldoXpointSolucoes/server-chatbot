@@ -475,23 +475,47 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                 const isSockConnected = activeSock && (!activeSock.ws || activeSock.ws.isOpen || activeSock.ws.readyState === 1) && (activeSock.user?.id || activeSock.authState?.creds?.me?.id);
 
                 if (isSockConnected && messageType === 'text') {
-                    try {
-                        const tSendStart = Date.now();
-                        recordStructuredEvent({ event: 'BAILEYS_SEND_START', traceId, instanceId, direction: 'outbound' });
+                    let sentResult = null;
+                    let lastFastErr = null;
+                    const sendFn = activeSock.originalSendMessage || activeSock.sendMessage;
 
-                        const sendFn = activeSock.originalSendMessage || activeSock.sendMessage;
-                        const sentResult = await sendFn(targetJid, content);
-                        const sendDuration = Date.now() - tSendStart;
+                    for (let attempt = 1; attempt <= 2; attempt++) {
+                        try {
+                            const tSendStart = Date.now();
+                            recordStructuredEvent({ event: 'BAILEYS_SEND_START', traceId, instanceId, direction: 'outbound', attempt });
+                            sentResult = await sendFn(targetJid, content);
+                            const sendDuration = Date.now() - tSendStart;
 
-                        recordStructuredEvent({
-                            event: 'BAILEYS_SEND_SUCCESS',
-                            traceId,
-                            instanceId,
-                            whatsappMessageId: sentResult?.key?.id,
-                            durationMs: sendDuration,
-                            direction: 'outbound'
-                        });
-                        
+                            recordStructuredEvent({
+                                event: 'BAILEYS_SEND_SUCCESS',
+                                traceId,
+                                instanceId,
+                                whatsappMessageId: sentResult?.key?.id,
+                                durationMs: sendDuration,
+                                direction: 'outbound',
+                                attempt
+                            });
+                            break;
+                        } catch (attemptErr) {
+                            lastFastErr = attemptErr;
+                            const isConnClosed = attemptErr?.message && (
+                                attemptErr.message.includes('Connection Closed') ||
+                                attemptErr.message.includes('Connection was lost') ||
+                                attemptErr.message.includes('output buffer') ||
+                                attemptErr.message.includes('not open')
+                            );
+                            if (attempt === 1 && isConnClosed) {
+                                await new Promise(resolve => setTimeout(resolve, 150));
+                                const freshSock = sessionManager.sessions.get(instanceId)?.sock;
+                                if (freshSock && (!freshSock.ws || freshSock.ws.isOpen || freshSock.ws.readyState === 1)) {
+                                    continue;
+                                }
+                            }
+                            break;
+                        }
+                    }
+
+                    if (sentResult) {
                         console.log(`[API Gateway] [MSG_TRACE:FASTPATH_SENT] Instância: ${instanceId} | WhatsAppMsgId: ${sentResult?.key?.id} | JID: ${targetJid}`);
 
                         // Grava no outbox já como 'sent' para histórico e auditoria
@@ -534,8 +558,8 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                             result: sentResult,
                             key: sentResult?.key 
                         });
-                    } catch (fastErr) {
-                        console.log(`[Invoke/FastPath] Socket transitório indisponível, delegando para outbox queue resiliente:`, fastErr.message);
+                    } else if (lastFastErr) {
+                        console.log(`[Invoke/FastPath] Socket transitório indisponível (${lastFastErr.message}), delegando para outbox queue resiliente`);
                     }
                 }
 

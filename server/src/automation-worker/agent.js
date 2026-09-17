@@ -1436,6 +1436,23 @@ class AutomationWorker {
                 console.warn(`[AvisoImpressao] Falha ao disparar para impressora "${impressora}" (PDV offline?):`, err.message);
             });
 
+            // Regra de Negócio: Pausar automaticamente a IA da conversa por 1 hora (60 minutos) após o disparo de impressão
+            if (conversationId) {
+                const pauseUntil = new Date(now + 60 * 60 * 1000).toISOString();
+                console.log(`[AvisoImpressao] Pausando IA automaticamente por 60 minutos para a conversa ${conversationId} (até ${pauseUntil}) pós-disparo de impressão.`);
+                supabase.from('conversations').update({
+                    status: 'open',
+                    ai_paused: true,
+                    ai_paused_manually: false,
+                    bot_paused_until: pauseUntil,
+                    ai_paused_until: pauseUntil
+                }).eq('id', conversationId).then(() => {
+                    console.log(`[AvisoImpressao] Conversa ${conversationId} marcada como pausada até ${pauseUntil} no banco.`);
+                }).catch(err => {
+                    console.warn('[AvisoImpressao] Erro ao salvar pausa de 60 minutos no banco:', err.message);
+                });
+            }
+
             return true;
         } catch (err) {
             console.error(`[AvisoImpressao] Erro inesperado ao disparar aviso de impressão:`, err.message);
@@ -3917,9 +3934,11 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
                 if (isHandoffResponse) {
                     console.log(`[AutomationWorker] Detecção de transferência humana no texto da resposta: "${finalResponseText.substring(0, 80)}..."`);
                     if (conversationId) {
-                        supabase.from('conversations').update({ status: 'open', ai_paused: true }).eq('id', conversationId).catch((err)=>{
-                            console.warn('[AutomationWorker] Falha ao pausar IA na conversa:', err.message);
-                        });
+                        supabase.from('conversations').update({ status: 'open', ai_paused: true }).eq('id', conversationId)
+                            .then(() => {})
+                            .catch((err) => {
+                                console.warn('[AutomationWorker] Falha ao pausar IA na conversa:', err?.message || err);
+                            });
                     }
                     this.triggerAvisoImpressaoSeAtivo({
                         tenantId,
@@ -3955,21 +3974,42 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
             if (conversationId) {
                 const { data: currentConv } = await supabase
                     .from('conversations')
-                    .select('id, status, ai_paused, snoozed_until, bot_paused_until')
+                    .select('id, status, ai_paused, ai_paused_manually, snoozed_until, bot_paused_until, ai_paused_until')
                     .eq('id', conversationId)
                     .maybeSingle();
 
                 if (currentConv) {
                     const nowIso = new Date().toISOString();
+                    const pauseExpiry = currentConv.bot_paused_until || currentConv.ai_paused_until;
+
+                    // Se a pausa temporária (ex: 60 minutos pós-impressão) expirou e não foi pausada manualmente pelo operador, reativa a IA automaticamente
+                    if (pauseExpiry && pauseExpiry <= nowIso && currentConv.ai_paused && !currentConv.ai_paused_manually) {
+                        console.log(`[AutomationWorker] Período de pausa temporária (${pauseExpiry}) expirou para a conversa ${conversationId}. Reativando IA automaticamente.`);
+                        supabase.from('conversations').update({
+                            ai_paused: false,
+                            bot_paused_until: null,
+                            ai_paused_until: null,
+                            status: 'bot'
+                        }).eq('id', conversationId)
+                        .then(() => {})
+                        .catch((err) => {
+                            console.warn('[AutomationWorker] Falha ao auto-reativar IA pós-pausa temporária:', err?.message || err);
+                        });
+                        currentConv.ai_paused = false;
+                        currentConv.bot_paused_until = null;
+                        currentConv.ai_paused_until = null;
+                        currentConv.status = 'bot';
+                    }
+
                     const isPaused = currentConv.ai_paused === true;
-                    const isHumanHandled = currentConv.status === 'open';
+                    const isHumanHandled = currentConv.status === 'open' && !currentConv.ai_paused;
                     const isSnoozed = currentConv.status === 'snoozed' || (currentConv.snoozed_until && currentConv.snoozed_until > nowIso);
-                    const isTempPaused = currentConv.bot_paused_until && currentConv.bot_paused_until > nowIso;
+                    const isTempPaused = pauseExpiry && pauseExpiry > nowIso;
 
                     if (isPaused || isHumanHandled || isSnoozed || isTempPaused) {
                         return { 
                             allowed: false, 
-                            reason: `Conversa em estado restritivo (status: ${currentConv.status}, ai_paused: ${isPaused}, tempPaused: ${isTempPaused}, snoozed: ${isSnoozed})` 
+                            reason: `Conversa em estado restritivo (status: ${currentConv.status}, ai_paused: ${isPaused}, tempPaused: ${isTempPaused ? 'Até ' + pauseExpiry : false}, snoozed: ${isSnoozed})` 
                         };
                     }
                 }
@@ -4154,7 +4194,25 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
                             directErr.message.includes('closed')
                         );
                         if (isConnClosed) {
-                            await deliverViaFallback(`Socket oscilou durante envio direto (${directErr.message})`);
+                            // Tenta 1 reenvio rápido de 200ms com socket atualizado antes de desistir para o fallback
+                            await new Promise(r => setTimeout(r, 200));
+                            let freshSent = false;
+                            try {
+                                const { default: sMgr } = await import('../session-manager/index.js');
+                                const freshSock = sMgr?.sessions?.get(instanceId)?.sock;
+                                const isFreshReady = freshSock && (!freshSock.ws || freshSock.ws.isOpen || freshSock.ws.readyState === 1);
+                                if (isFreshReady) {
+                                    const retrySendFn = freshSock.sendMessage || freshSock.originalSendMessage;
+                                    msgResult = await retrySendFn(jid, { text: finalResponseText }, { isAutomation: true });
+                                    freshSent = true;
+                                }
+                            } catch (freshErr) {
+                                // Falha no retry rápido, prossegue para fallback
+                            }
+
+                            if (!freshSent) {
+                                await deliverViaFallback(`Socket oscilou durante envio direto (${directErr.message})`);
+                            }
                         } else {
                             throw directErr;
                         }
