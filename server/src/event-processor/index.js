@@ -1290,6 +1290,11 @@ class EventProcessor {
                  }
                  
                  if (!b.mediaUrl && ['image', 'video', 'audio', 'document'].includes(b.msgType)) {
+                     // Pula canais de transmissão / newsletters do WhatsApp (não possuem chaves E2E padrão)
+                     if (b.jid && (b.jid.endsWith('@newsletter') || b.jid.includes('newsletter'))) {
+                         return;
+                     }
+
                      try {
                          const mediaMeta = this.extractMediaMeta(b.rawMsg, b.msgType) || {};
                          

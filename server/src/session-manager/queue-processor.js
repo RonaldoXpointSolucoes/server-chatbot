@@ -130,6 +130,29 @@ class QueueProcessor {
     }
 
     async processInstanceQueue(tenantId, instanceId) {
+        const { default: sessionManager } = await import('./index.js');
+        const currentNodeId = String(NODE_ID).trim();
+        const hasLocalSession = sessionManager.sessions.has(instanceId);
+
+        // Se este nó não possui a sessão em RAM local, verifica no banco se ela pertence a outro nó ativo
+        if (!hasLocalSession) {
+            const { data: instCheck } = await supabase
+                .from('whatsapp_instances')
+                .select('assigned_node_id, lease_until, status')
+                .eq('id', instanceId)
+                .maybeSingle();
+
+            const assignedNodeId = instCheck?.assigned_node_id ? String(instCheck.assigned_node_id).trim() : null;
+            const now = new Date();
+            const isLockedByOther = assignedNodeId && assignedNodeId !== currentNodeId && instCheck?.lease_until && new Date(instCheck.lease_until) > now;
+
+            // Se outro nó ativo detém a posse da instância com lease válido, não interceptar a fila neste nó
+            if (isLockedByOther) {
+                console.log(`[QueueProcessor] Instância ${instanceId} está sob lock ativo do nó '${assignedNodeId}'. O envio do outbox será realizado pelo nó proprietário.`);
+                return;
+            }
+        }
+
         while (this.running) {
             let msg = null;
             try {

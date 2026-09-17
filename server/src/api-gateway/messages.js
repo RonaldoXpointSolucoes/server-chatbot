@@ -72,8 +72,38 @@ router.post(['/', '/send', '/messages/send', '/sendText', '/send-text'], require
             }
 
             if (!sock) {
-                if (isAuto) console.error(`[API Gateway] [messages/send] ❌ Falha 400: Socket Offline na RAM | Instância: ${instanceId} | Destino: ${contactPhone}`);
-                return res.status(400).json({ error: 'WhatsApp socket offline ou não autenticado para esta instância.' });
+                const { data: instCheck } = await supabase
+                    .from('whatsapp_instances')
+                    .select('id, status, last_error, display_name')
+                    .eq('id', instanceId)
+                    .maybeSingle();
+
+                const isDisconnected = !instCheck || 
+                    ['offline', 'logged_out', 'blocked_12h', 'disconnected', 'paused', 'close', 'closed'].includes(instCheck.status);
+
+                if (isDisconnected) {
+                    if (isAuto) console.error(`[API Gateway] [messages/send] ❌ Falha 400: Instância ${instanceId} desconectada | Destino: ${contactPhone}`);
+                    return res.status(400).json({ error: `Instância WhatsApp "${instCheck?.display_name || instanceId}" está desconectada. Por favor, reconecte-a para enviar mensagens.` });
+                }
+
+                // Enfileira no outbox resiliente (wa_outgoing_messages) para envio assíncrono pelo nó responsável
+                const cleanPhone = String(contactPhone).replace(/\D/g, '');
+                const targetJid = cleanPhone.includes('@') ? cleanPhone : `${cleanPhone}@s.whatsapp.net`;
+                const queued = await sessionManager.enqueueMessage(instanceId, {
+                    targetJid,
+                    type: 'text',
+                    content: { text },
+                    options: { isAutomation: isAuto }
+                });
+
+                return res.json({
+                    ok: true,
+                    data: {
+                        key: { remoteJid: targetJid, fromMe: true, id: `EDGE_${queued?.id?.replace(/-/g, '') || Date.now()}` },
+                        messageTimestamp: Math.floor(Date.now() / 1000)
+                    },
+                    status: 'PENDING'
+                });
             }
         }
         

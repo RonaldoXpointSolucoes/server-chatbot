@@ -658,7 +658,7 @@ export default function ChatDashboard() {
     if (!activeTicket) return {};
 
     const contact = contacts.find(c => c.id === contactId);
-    if (!contact) return {};
+    if (!contact || !contact.conv_id) return {};
     
     try {
       const { data: msgs } = await supabase

@@ -672,8 +672,32 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
 router.post('/instances/:instanceId/send-media-url', requireTenant, express.json(), async (req, res) => {
     try {
         const { instanceId } = req.params;
-        const sock = await sessionManager.getSocketOrWake(req.tenantId, instanceId);
-        if (!sock) return res.status(400).json({ error: 'Socket offline' });
+        
+        // 1. Verificação prévia de integridade no banco / memória para suportar cluster multi-nó
+        const localSock = sessionManager.getSocket(instanceId);
+        if (!localSock) {
+            const { data: instCheck } = await supabase
+                .from('whatsapp_instances')
+                .select('id, status, last_error, display_name')
+                .eq('id', instanceId)
+                .maybeSingle();
+
+            const isDisconnected = !instCheck || 
+                ['offline', 'logged_out', 'blocked_12h', 'disconnected', 'paused', 'close', 'closed'].includes(instCheck.status);
+
+            if (isDisconnected) {
+                console.log(`[API Gateway] [send-media-url] Fast-Fail 400: Instância ${instanceId} desconectada (status: ${instCheck?.status || 'desconhecido'}).`);
+                return res.status(400).json({ 
+                    ok: false,
+                    error: `Instância WhatsApp "${instCheck?.display_name || instanceId}" está desconectada (${instCheck?.last_error || 'requer reconexão'}). Por favor, reconecte-a para enviar arquivos.`,
+                    code: 'INSTANCE_DISCONNECTED',
+                    instance_id: instanceId,
+                    status: instCheck?.status || 'disconnected'
+                });
+            }
+
+            sessionManager.getSocketOrWake(req.tenantId, instanceId).catch(() => {});
+        }
 
         const { mediaUrl, mimetype, fileName, jid, caption, messageType, ptt, responseType } = req.body;
 
@@ -734,8 +758,32 @@ router.post('/instances/:instanceId/send-media-url', requireTenant, express.json
 router.post('/instances/:instanceId/send-media', requireTenant, upload.single('media'), async (req, res) => {
     try {
         const { instanceId } = req.params;
-        const sock = await sessionManager.getSocketOrWake(req.tenantId, instanceId);
-        if (!sock) return res.status(400).json({ error: 'Socket offline' });
+
+        // 1. Verificação prévia de integridade no banco / memória para suportar cluster multi-nó
+        const localSock = sessionManager.getSocket(instanceId);
+        if (!localSock) {
+            const { data: instCheck } = await supabase
+                .from('whatsapp_instances')
+                .select('id, status, last_error, display_name')
+                .eq('id', instanceId)
+                .maybeSingle();
+
+            const isDisconnected = !instCheck || 
+                ['offline', 'logged_out', 'blocked_12h', 'disconnected', 'paused', 'close', 'closed'].includes(instCheck.status);
+
+            if (isDisconnected) {
+                console.log(`[API Gateway] [send-media] Fast-Fail 400: Instância ${instanceId} desconectada (status: ${instCheck?.status || 'desconhecido'}).`);
+                return res.status(400).json({ 
+                    ok: false,
+                    error: `Instância WhatsApp "${instCheck?.display_name || instanceId}" está desconectada (${instCheck?.last_error || 'requer reconexão'}). Por favor, reconecte-a para enviar arquivos.`,
+                    code: 'INSTANCE_DISCONNECTED',
+                    instance_id: instanceId,
+                    status: instCheck?.status || 'disconnected'
+                });
+            }
+
+            sessionManager.getSocketOrWake(req.tenantId, instanceId).catch(() => {});
+        }
 
         const tenantId = req.tenantId;
         const file = req.file;
@@ -824,6 +872,7 @@ router.post('/instances/:instanceId/send-media', requireTenant, upload.single('m
         }
 
         // Em vez de enviar diretamente via sock.sendMessage, enfileira na fila do Edge BR
+        const isPttAudio = Boolean(req.body.ptt === 'true' || req.body.ptt === true || messageType === 'audio');
         const { data: newOutbox, error: outboxErr } = await supabase
             .from('wa_outgoing_messages')
             .insert({
@@ -833,6 +882,13 @@ router.post('/instances/:instanceId/send-media', requireTenant, upload.single('m
                 message_type: 'media',
                 body: caption || '',
                 media_url: mediaUrl,
+                options: {
+                    mimetype: file.mimetype,
+                    fileName: file.originalname,
+                    messageType: messageType,
+                    ptt: isPttAudio,
+                    responseType: 'STANDARD'
+                },
                 status: 'pending',
                 priority: 1
             })

@@ -431,6 +431,7 @@ app.use((req, res, next) => {
         reqPath.includes('wordpress') ||
         reqPath.includes('wp-') ||
         reqPath.includes('wp_') ||
+        reqPath.includes('wp') ||
         reqPath.includes('rest_route') ||
         reqPath.includes('phpmyadmin') ||
         reqPath.includes('blog') ||
@@ -446,24 +447,13 @@ app.use((req, res, next) => {
         reqPath.includes('boaform') ||
         reqPath.includes('shell') ||
         reqPath.includes('cgi-bin') ||
+        reqPath.includes('sitemap') ||
+        reqPath.includes('.well-known') ||
+        reqPath.includes('vendor') ||
         /^\/(20\d\d)\//.test(reqPath);
 
     if (!isBotScannerProbe) {
-        console.warn(`[HTTP 404 Not Found] Rota inexistente solicitada: ${req.method} ${req.originalUrl || req.path} | IP: ${originIp} | User-Agent: ${req.headers['user-agent'] || 'N/A'}`);
-        
-        if (typeof persistSystemLog === 'function') {
-            persistSystemLog({
-                type: 'HTTP 404 Not Found',
-                message: `Rota inexistente: ${req.method} ${req.originalUrl || req.path}`,
-                level: 'warn',
-                payload: {
-                    method: req.method,
-                    path: req.originalUrl || req.path,
-                    ip: originIp,
-                    userAgent: req.headers['user-agent'] || 'N/A'
-                }
-            });
-        }
+        console.log(`[HTTP 404] Rota inexistente: ${req.method} ${req.originalUrl || req.path} | IP: ${originIp}`);
     }
 
     res.status(404).json({

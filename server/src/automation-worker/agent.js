@@ -1807,7 +1807,7 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                 console.error('[AutomationWorker] Erro ao obter histórico do banco de dados no triggerGeneration:', histErr);
             }
 
-            const responseText = await this.generateResponse({
+            let responseText = await this.generateResponse({
                 ...job.params,
                 textMessage: combinedText,
                 history: dbHistory
