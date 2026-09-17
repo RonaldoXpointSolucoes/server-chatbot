@@ -1293,6 +1293,20 @@ class EventProcessor {
                      try {
                          const mediaMeta = this.extractMediaMeta(b.rawMsg, b.msgType) || {};
                          
+                         // Validação preventiva de integridade da chave de mídia (evita "Cannot derive from empty media key")
+                         const rawMediaKey = mediaMeta.mediaKey;
+                         const hasValidMediaKey = rawMediaKey && (
+                             (Buffer.isBuffer(rawMediaKey) && rawMediaKey.length > 0) ||
+                             (typeof rawMediaKey === 'string' && rawMediaKey.trim() !== '') ||
+                             (Array.isArray(rawMediaKey) && rawMediaKey.length > 0) ||
+                             (rawMediaKey instanceof Uint8Array && rawMediaKey.byteLength > 0)
+                         );
+
+                         if (!hasValidMediaKey) {
+                             // Mídias sem chave criptográfica válida (ex: WhatsApp Newsletters/Canais ou mídias revogadas)
+                             return;
+                         }
+                         
                          const doUpload = async () => {
                              const stream = await downloadContentFromMessage(mediaMeta, b.msgType.replace('Message', ''));
                              const mimeType = mediaMeta.mimetype || 'application/octet-stream';
@@ -1376,7 +1390,12 @@ class EventProcessor {
                                      }
                                  }).catch(bgErr => console.warn('[BatchProcessor] Aviso no upload background de mídia:', bgErr.message));
                              } else {
-                                 console.log(`[BatchProcessor] Aviso: Falha ao baixar mídia (${b.jid}): ${raceErr.message}`);
+                                 const isMutedMediaErr = raceErr.message?.includes('empty media key') || raceErr.message?.includes('Bad MAC');
+                                 if (isMutedMediaErr) {
+                                     console.log(`[BatchProcessor] Aviso: Mídia ignorada sem chave de descriptografia para ${b.jid} (${raceErr.message}).`);
+                                 } else {
+                                     console.log(`[BatchProcessor] Aviso: Falha ao baixar mídia (${b.jid}): ${raceErr.message}`);
+                                 }
                              }
                          }
                      } catch(err) {

@@ -165,13 +165,34 @@ router.post('/v1/utils/test-cardapio', async (req, res) => {
 
         logTestCall('response', status, data);
 
-        // Se consulta bem-sucedida de cardápio, armazena no cache inteligente
+        // Se consulta bem-sucedida de cardápio, armazena no cache inteligente com proteção contra retornos vazios
         if (isCardapioReq && status === 200 && data) {
-            gastrofoodApiCache.set(cacheKey, {
-                status,
-                data,
-                timestamp: Date.now()
-            });
+            const hasProducts = Array.isArray(data?.produtos) && data.produtos.length > 0;
+            const hasGroups = Array.isArray(data?.grupos) && data.grupos.length > 0;
+
+            if (hasProducts || hasGroups) {
+                gastrofoodApiCache.set(cacheKey, {
+                    status,
+                    data,
+                    timestamp: Date.now()
+                });
+            } else {
+                // API retornou 200 com payload vazio (0 produtos/grupos)
+                if (gastrofoodApiCache.has(cacheKey)) {
+                    const validCache = gastrofoodApiCache.get(cacheKey);
+                    console.warn(`[GASTROFOOD_API] ⚠️ Cardápio retornou vazio (0 produtos/grupos) da API externa. Servindo última versão válida do cache (${cacheKey}) para resiliência.`);
+                    return res.json({
+                        status: 200,
+                        data: validCache.data,
+                        cached: true,
+                        stale: true,
+                        warning: 'A API externa retornou 0 produtos. Servindo último cardápio válido em cache para proteger a experiência do usuário.',
+                        cachedAt: new Date(validCache.timestamp).toISOString()
+                    });
+                } else {
+                    console.warn(`[GASTROFOOD_API] ⚠️ Cardápio retornou vazio (0 produtos) e não há cache anterior válido para ${cacheKey}.`);
+                }
+            }
         }
 
         return res.json({

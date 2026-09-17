@@ -6323,7 +6323,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           const isJwtExpired = errMsg.includes('InvalidJWTToken') || errMsg.includes('Token has expired') || errMsg.includes('expired') || errMsg.includes('JWT');
 
           if (isJwtExpired) {
-            console.warn("[Realtime] Token JWT expirado detectado na subscrição Realtime. Solicitando renovação da sessão...");
+            console.log("[Realtime] Renovando sessão JWT na subscrição Realtime...");
             set({ realtimeStatus: 'connecting' });
             try {
               const { data: refreshData, error: refreshErr } = await supabase.auth.refreshSession();

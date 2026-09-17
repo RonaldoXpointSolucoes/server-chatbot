@@ -419,23 +419,34 @@ app.use((req, res, next) => {
     const originIp = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || req.ip || 'N/A';
     const reqPath = (req.originalUrl || req.path || '').toLowerCase();
     
-    // Filtro de varreduras automatizadas conhecidas ou rotas vazias/raiz residuais
+    // Filtro abrangente de varreduras automatizadas conhecidas ou rotas vazias/raiz residuais
     const isBotScannerProbe = 
         reqPath === '/' ||
         reqPath === '' ||
         reqPath.includes('robots.txt') ||
         reqPath.includes('favicon.ico') ||
-        reqPath.includes('wp-json') ||
-        reqPath.includes('rest_route') ||
-        reqPath.includes('wp-admin') ||
-        reqPath.includes('wp-login') ||
+        reqPath.includes('feed') ||
+        reqPath.includes('wlwmanifest') ||
         reqPath.includes('xmlrpc') ||
+        reqPath.includes('wordpress') ||
+        reqPath.includes('wp-') ||
+        reqPath.includes('wp_') ||
+        reqPath.includes('rest_route') ||
         reqPath.includes('phpmyadmin') ||
+        reqPath.includes('blog') ||
         reqPath.includes('.env') ||
         reqPath.includes('.git') ||
         reqPath.includes('.php') ||
         reqPath.includes('actuator') ||
-        reqPath.includes('solr');
+        reqPath.includes('solr') ||
+        reqPath.includes('autodiscover') ||
+        reqPath.includes('aws') ||
+        reqPath.includes('config') ||
+        reqPath.includes('setup') ||
+        reqPath.includes('boaform') ||
+        reqPath.includes('shell') ||
+        reqPath.includes('cgi-bin') ||
+        /^\/(20\d\d)\//.test(reqPath);
 
     if (!isBotScannerProbe) {
         console.warn(`[HTTP 404 Not Found] Rota inexistente solicitada: ${req.method} ${req.originalUrl || req.path} | IP: ${originIp} | User-Agent: ${req.headers['user-agent'] || 'N/A'}`);

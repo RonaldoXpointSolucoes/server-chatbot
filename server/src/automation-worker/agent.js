@@ -1819,11 +1819,9 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                 return;
             }
 
-            if (!responseText) {
-                console.warn(`[AutomationWorker] Resposta da IA vazia ou nula para a conversa ${key}. Silenciando bot.`);
-                job.generating = false;
-                this.pendingJobs.delete(key);
-                return;
+            if (!responseText || typeof responseText !== 'string' || responseText.trim() === '') {
+                console.warn(`[AutomationWorker] ⚠️ Resposta da IA vazia ou nula para a conversa ${key}. Aplicando resposta amigável de contingência em vez de silenciar.`);
+                responseText = "Estou consultando nosso sistema para te atender da melhor forma. Como posso te ajudar agora?";
             }
 
             // Se novas mensagens chegaram durante a geração, descarta e agenda nova geração com todo o texto acumulado
@@ -3952,6 +3950,10 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
                 }
             }
 
+            if (!finalResponseText || typeof finalResponseText !== 'string' || finalResponseText.trim() === '') {
+                finalResponseText = "Estou consultando nosso sistema para te atender da melhor forma. Como posso te ajudar agora?";
+            }
+
             finalResponseText = formatAiMessageForWhatsApp(finalResponseText);
             return finalResponseText;
 
@@ -3964,7 +3966,7 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
                     error: error.message
                 }).catch(()=>{});
             } catch (logErr) {}
-            return null;
+            return "Desculpe, tive uma pequena oscilação técnica momentânea. Como posso te ajudar?";
         }
         });
     }

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDevStore } from '../store/devStore';
-import { Terminal, AlertTriangle, Bug, Info, CheckCircle2, ChevronDown, ChevronUp, Trash2, Copy, Activity, Layers, Calendar, Rocket, Database, Smartphone, AppWindow, ExternalLink, Network, Cpu, Play, Pause, RefreshCw, UserCheck, ShieldAlert, Sparkles, Wand2, BrainCircuit, Check, Loader2, Send, ArrowUpRight, FileCode, CheckCircle, X, Zap, Mic, MicOff, Image as ImageIcon, Paperclip, Volume2, UploadCloud, Square, Plus, Radio, Film, Gauge, Server, Clock, HardDrive } from 'lucide-react';
+import { Terminal, AlertTriangle, Bug, Info, CheckCircle2, ChevronDown, ChevronUp, Trash2, Copy, Activity, Layers, Calendar, Rocket, Database, Smartphone, AppWindow, ExternalLink, Network, Cpu, Play, Pause, RefreshCw, UserCheck, ShieldAlert, Sparkles, Wand2, BrainCircuit, Check, Loader2, Send, ArrowUpRight, FileCode, CheckCircle, X, Zap, Mic, MicOff, Image as ImageIcon, Paperclip, Volume2, UploadCloud, Square, Plus, Radio, Film, Gauge, Server, Clock, HardDrive, Search } from 'lucide-react';
 import { supabase, masterSupabase } from '../services/supabase';
 import { ServerLogsTerminal } from './ServerLogsTerminal';
 import { useChatStore } from '../store/chatStore';
@@ -173,9 +173,11 @@ export default function DevLogger() {
   const [companies, setCompanies] = useState<any[]>([]);
   const [expandedLogs, setExpandedLogs] = useState<Record<string, boolean>>({});
   
-  // Estados para agrupamento de erros e filtragem
+  // Estados para agrupamento de erros e filtragem avançada
   const [viewMode, setViewMode] = useState<'grouped' | 'timeline'>('grouped');
   const [logFilter, setLogFilter] = useState<'all' | 'node' | 'error' | 'warn'>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [timeFilter, setTimeFilter] = useState<'all' | '15m' | '1h' | 'today'>('all');
 
   useEffect(() => {
     supabase.from('companies').select('id, name').then(({ data }) => {
@@ -183,20 +185,46 @@ export default function DevLogger() {
     });
   }, []);
 
-  // Agrupamento Inteligente de Erros e Logs
+  // Agrupamento Inteligente de Erros e Logs com Suporte a Múltiplos Filtros
   const groupedAndFilteredLogs = useMemo(() => {
     let filtered = logs;
     
+    // 1. Filtro de Origem / Nível
     if (logFilter === 'node') {
-      filtered = logs.filter(l => 
+      filtered = filtered.filter(l => 
         l.source.toLowerCase().includes('server') || 
         l.source.toLowerCase().includes('node') ||
         l.source.toLowerCase().includes('backend')
       );
     } else if (logFilter === 'error') {
-      filtered = logs.filter(l => l.type === 'error');
+      filtered = filtered.filter(l => l.type === 'error');
     } else if (logFilter === 'warn') {
-      filtered = logs.filter(l => l.type === 'warn');
+      filtered = filtered.filter(l => l.type === 'warn');
+    }
+
+    // 2. Filtro Temporal
+    if (timeFilter !== 'all') {
+      const now = Date.now();
+      filtered = filtered.filter(l => {
+        const logTime = new Date(l.timestamp).getTime();
+        if (timeFilter === '15m') return now - logTime <= 15 * 60 * 1000;
+        if (timeFilter === '1h') return now - logTime <= 60 * 60 * 1000;
+        if (timeFilter === 'today') {
+          return new Date(l.timestamp).toDateString() === new Date().toDateString();
+        }
+        return true;
+      });
+    }
+
+    // 3. Busca Textual Livre
+    if (searchQuery.trim() !== '') {
+      const q = searchQuery.toLowerCase().trim();
+      filtered = filtered.filter(l => {
+        const msgMatch = (l.message || '').toLowerCase().includes(q);
+        const srcMatch = (l.source || '').toLowerCase().includes(q);
+        const detailsMatch = l.details ? JSON.stringify(l.details).toLowerCase().includes(q) : false;
+        return msgMatch || srcMatch || detailsMatch;
+      });
     }
 
     if (viewMode === 'timeline') {
@@ -240,7 +268,7 @@ export default function DevLogger() {
     });
 
     return Array.from(groupsMap.values());
-  }, [logs, viewMode, logFilter]);
+  }, [logs, viewMode, logFilter, searchQuery, timeFilter]);
 
   const nodeLogsCount = useMemo(() => {
     return logs.filter(l => 
@@ -1180,7 +1208,9 @@ export default function DevLogger() {
         const urlStr = typeof urlObj === 'string' ? urlObj : 'unknown';
         
         const isLocalFrontend = urlStr.includes(window.location.host) || (!urlStr.startsWith('http://') && !urlStr.startsWith('https://'));
-        const isSpammyUrl = urlStr.includes('/debug/healthz') || urlStr.includes('/debug/metrics') || urlStr.includes('/debug/recent-errors') || urlStr.includes('/realtime/') || urlStr.includes('system_logs') || urlStr.includes('/wacalls/') || isLocalFrontend;
+        const isInternalDevLogger = urlStr.includes('/diagnostics/') || 
+          (requestOptions?.headers && ((requestOptions.headers as any)['x-e2e-source'] === 'DevLogger' || (typeof (requestOptions.headers as any).get === 'function' && (requestOptions.headers as any).get('x-e2e-source') === 'DevLogger')));
+        const isSpammyUrl = urlStr.includes('/debug/healthz') || urlStr.includes('/debug/metrics') || urlStr.includes('/debug/recent-errors') || urlStr.includes('/realtime/') || urlStr.includes('system_logs') || urlStr.includes('/wacalls/') || isLocalFrontend || isInternalDevLogger;
         
         if (!isSpammyUrl && !isAstsTest) {
           const isAbort = err.name === 'AbortError';
@@ -3787,6 +3817,50 @@ export default function DevLogger() {
                         </button>
                       ))}
                     </div>
+
+                    {/* Input de Busca Textual */}
+                    <div className="relative flex items-center min-w-[140px] sm:min-w-[170px]">
+                      <Search size={11} className="absolute left-2.5 text-[#8696a0] pointer-events-none" />
+                      <input
+                        type="text"
+                        placeholder="Buscar logs..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="w-full pl-7 pr-6 py-1 bg-[#0e161c] border border-white/10 rounded-xl text-[10px] text-white placeholder-[#8696a0] focus:outline-none focus:border-indigo-500/50 transition-all font-mono"
+                      />
+                      {searchQuery && (
+                        <button
+                          onClick={() => setSearchQuery('')}
+                          className="absolute right-2 text-[#8696a0] hover:text-white transition-colors cursor-pointer border-0 bg-transparent p-0"
+                          title="Limpar busca"
+                        >
+                          <X size={10} />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Filtro por Faixa Temporal */}
+                    <div className="flex items-center gap-0.5 bg-[#0e161c] p-0.5 rounded-xl border border-white/10">
+                      {[
+                        { id: 'all', label: 'Tudo' },
+                        { id: '15m', label: '15m' },
+                        { id: '1h', label: '1h' },
+                        { id: 'today', label: 'Hoje' },
+                      ].map((tf) => (
+                        <button
+                          key={tf.id}
+                          onClick={() => setTimeFilter(tf.id as any)}
+                          className={`px-2 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer border-0 ${
+                            timeFilter === tf.id
+                              ? 'bg-indigo-500 text-white shadow-sm font-black'
+                              : 'text-[#8696a0] hover:text-white hover:bg-white/5'
+                          }`}
+                          title={`Filtrar logs: ${tf.label}`}
+                        >
+                          {tf.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
                   {/* Lado Direito: Ações */}
@@ -3865,14 +3939,33 @@ export default function DevLogger() {
 
                       <div className="space-y-1.5 z-10 max-w-md">
                         <h4 className="text-base sm:text-lg font-black text-white tracking-tight font-mono bg-gradient-to-r from-white via-emerald-100 to-teal-200 bg-clip-text text-transparent">
-                          {logFilter === 'node' ? 'Nenhum erro do Servidor Node capturado' : 'Nenhum log detectado'}
+                          {searchQuery || timeFilter !== 'all'
+                            ? 'Nenhum log corresponde aos filtros'
+                            : logFilter === 'node' 
+                              ? 'Nenhum erro do Servidor Node capturado' 
+                              : 'Nenhum log detectado'}
                         </h4>
                         <p className="text-xs text-[#8696a0] max-w-sm leading-relaxed font-mono">
-                          {logFilter === 'node' 
-                            ? 'O servidor Node.js está operando normalmente sem erros de lógica ou loops.' 
-                            : 'Erros do Servidor Node, requisições HTTP e exceções de lógica serão capturados e agrupados aqui.'}
+                          {searchQuery || timeFilter !== 'all'
+                            ? `Nenhum registro encontrado com os filtros atuais${searchQuery ? ` ("${searchQuery}")` : ''}. Tente ajustar a busca ou o intervalo temporal.`
+                            : logFilter === 'node' 
+                              ? 'O servidor Node.js está operando normalmente sem erros de lógica ou loops.' 
+                              : 'Erros do Servidor Node, requisições HTTP e exceções de lógica serão capturados e agrupados aqui.'}
                         </p>
                       </div>
+
+                      {(searchQuery || timeFilter !== 'all' || logFilter !== 'all') && (
+                        <button
+                          onClick={() => {
+                            setSearchQuery('');
+                            setTimeFilter('all');
+                            setLogFilter('all');
+                          }}
+                          className="px-3 py-1 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer font-mono"
+                        >
+                          Limpar Todos os Filtros
+                        </button>
+                      )}
 
                       <div className="flex items-center gap-3 pt-2 z-10 flex-wrap justify-center">
                         <button
