@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDevStore } from '../store/devStore';
-import { Terminal, AlertTriangle, Bug, Info, CheckCircle2, ChevronDown, ChevronUp, Trash2, Copy, Activity, Layers, Calendar, Rocket, Database, Smartphone, AppWindow, ExternalLink, Network, Cpu, Play, Pause, RefreshCw, UserCheck, ShieldAlert, Sparkles, Wand2, BrainCircuit, Check, Loader2, Send, ArrowUpRight, FileCode, CheckCircle, X, Zap, Mic, MicOff, Image as ImageIcon, Paperclip, Volume2, UploadCloud, Square, Plus, Radio, Film, Gauge, Server, Clock, HardDrive, Search } from 'lucide-react';
+import { Terminal, AlertTriangle, Bug, Info, CheckCircle2, ChevronDown, ChevronUp, Trash2, Copy, Activity, Layers, Calendar, Rocket, Database, Smartphone, AppWindow, ExternalLink, Network, Cpu, Play, Pause, RefreshCw, UserCheck, ShieldAlert, Sparkles, Wand2, BrainCircuit, Check, Loader2, Send, ArrowUpRight, FileCode, CheckCircle, X, Zap, Mic, MicOff, Image as ImageIcon, Paperclip, Volume2, UploadCloud, Square, Plus, Radio, Film, Gauge, Server, Clock, HardDrive, Search, SlidersHorizontal, ChevronRight } from 'lucide-react';
 import { supabase, masterSupabase } from '../services/supabase';
 import { ServerLogsTerminal } from './ServerLogsTerminal';
 import { useChatStore } from '../store/chatStore';
@@ -22,6 +22,7 @@ export default function DevLogger() {
   const [showEndpoints, setShowEndpoints] = useState(false);
   const [telemetry, setTelemetry] = useState<{ cpu: number, memory: number, uptime: number } | null>(null);
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
+  const [showSimulationModal, setShowSimulationModal] = useState(false);
   
   // Draggable Floating Button logic
   const [position, setPosition] = useState<{ x: number; y: number }>(() => {
@@ -2940,10 +2941,10 @@ export default function DevLogger() {
 
           {/* Abas de Navegação Principal em Segmented Control Neon (CONSOLE / GASTROFOOD / ASTS / E2E) */}
           {isVisible && (
-            <div className="p-2 sm:p-2.5 bg-[#080e13]/95 border-b border-white/10 flex gap-1.5 sm:gap-2 shrink-0 select-none relative z-10 backdrop-blur-2xl overflow-x-auto no-scrollbar">
+            <div className="p-2 sm:p-2.5 bg-[#080e13]/95 border-b border-white/10 flex items-center gap-2 shrink-0 select-none relative z-10 backdrop-blur-2xl overflow-x-auto no-scrollbar scroll-smooth">
               <button 
                 onClick={(e) => { e.stopPropagation(); setActiveTab('console'); }}
-                className={`flex-1 min-w-[70px] py-2 sm:py-2.5 font-mono text-[11px] sm:text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 sm:gap-2 rounded-2xl transition-all duration-200 cursor-pointer border ${
+                className={`shrink-0 whitespace-nowrap px-3.5 sm:px-4 py-2 sm:py-2.5 min-h-[44px] font-mono text-[11px] sm:text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 sm:gap-2 rounded-2xl transition-all duration-200 cursor-pointer border ${
                   activeTab === 'console' 
                     ? 'bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-400 text-black border-emerald-300/60 shadow-lg shadow-emerald-500/25 font-black scale-[1.01]' 
                     : 'bg-[#101920]/70 text-[#8696a0] border-white/5 hover:text-white hover:bg-white/10'
@@ -2960,7 +2961,7 @@ export default function DevLogger() {
 
               <button 
                 onClick={(e) => { e.stopPropagation(); setActiveTab('gastrofood'); }}
-                className={`flex-1 min-w-[85px] py-2 sm:py-2.5 font-mono text-[11px] sm:text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 sm:gap-2 rounded-2xl transition-all duration-200 cursor-pointer border ${
+                className={`shrink-0 whitespace-nowrap px-3.5 sm:px-4 py-2 sm:py-2.5 min-h-[44px] font-mono text-[11px] sm:text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 sm:gap-2 rounded-2xl transition-all duration-200 cursor-pointer border ${
                   activeTab === 'gastrofood' 
                     ? 'bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 text-white border-blue-400/60 shadow-lg shadow-blue-500/25 font-black scale-[1.01]' 
                     : 'bg-[#101920]/70 text-[#8696a0] border-white/5 hover:text-white hover:bg-white/10'
@@ -2977,7 +2978,7 @@ export default function DevLogger() {
 
               <button 
                 onClick={(e) => { e.stopPropagation(); setActiveTab('asts'); }}
-                className={`flex-1 min-w-[65px] py-2 sm:py-2.5 font-mono text-[11px] sm:text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 sm:gap-2 rounded-2xl transition-all duration-200 cursor-pointer border ${
+                className={`shrink-0 whitespace-nowrap px-3.5 sm:px-4 py-2 sm:py-2.5 min-h-[44px] font-mono text-[11px] sm:text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 sm:gap-2 rounded-2xl transition-all duration-200 cursor-pointer border ${
                   activeTab === 'asts' 
                     ? 'bg-gradient-to-r from-amber-400 via-orange-500 to-amber-500 text-black border-amber-300/60 shadow-lg shadow-amber-500/25 font-black scale-[1.01]' 
                     : 'bg-[#101920]/70 text-[#8696a0] border-white/5 hover:text-white hover:bg-white/10'
@@ -2996,7 +2997,7 @@ export default function DevLogger() {
 
               <button 
                 onClick={(e) => { e.stopPropagation(); setActiveTab('e2e'); }}
-                className={`flex-1 min-w-[95px] py-2 sm:py-2.5 font-mono text-[11px] sm:text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 sm:gap-2 rounded-2xl transition-all duration-200 cursor-pointer border ${
+                className={`shrink-0 whitespace-nowrap px-3.5 sm:px-4 py-2 sm:py-2.5 min-h-[44px] font-mono text-[11px] sm:text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 sm:gap-2 rounded-2xl transition-all duration-200 cursor-pointer border ${
                   activeTab === 'e2e' 
                     ? 'bg-gradient-to-r from-cyan-500 via-teal-400 to-indigo-500 text-black border-cyan-300/60 shadow-lg shadow-cyan-500/25 font-black scale-[1.01]' 
                     : 'bg-[#101920]/70 text-[#8696a0] border-white/5 hover:text-white hover:bg-white/10'
@@ -3759,16 +3760,16 @@ export default function DevLogger() {
               /* Console & Server Logs - COM SUPORTE A AGRUPAMENTO DE ERROS IDENTICOS E FILTRAGEM DE NOVO PADRÃO */
               <div className="flex-1 overflow-y-auto flex flex-col font-mono text-xs custom-scrollbar min-h-[180px] bg-[#070c10] rounded-b-[28px]">
                 
-                {/* Sub-Barra de Controles: Agrupamento, Filtros de Origem e Disparo de Testes */}
-                <div className="p-2.5 sm:p-3 px-3 sm:px-4 bg-[#080e13]/95 border-b border-white/10 text-xs font-mono select-none flex items-center justify-between gap-2 flex-wrap sticky top-0 z-20 backdrop-blur-2xl">
+                {/* Sub-Barra de Controles: Responsiva, Compacta e Mobile-First */}
+                <div className="p-2 sm:p-2.5 px-3 sm:px-4 bg-[#080e13]/95 border-b border-white/10 text-xs font-mono select-none flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 sticky top-0 z-20 backdrop-blur-2xl">
                   
-                  {/* Lado Esquerdo: Toggle de Modo & Chips de Filtro */}
-                  <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                  {/* Linha 1 no Mobile / Lado Esquerdo no Desktop: Toggle de Modo + Dropdown Tipo de Log */}
+                  <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap sm:flex-nowrap justify-between sm:justify-start">
                     {/* Seletor de Modo: Agrupado vs Linha do Tempo */}
-                    <div className="flex items-center gap-0.5 bg-[#0e161c] p-0.5 rounded-xl border border-white/10">
+                    <div className="flex items-center gap-0.5 bg-[#0e161c] p-0.5 rounded-xl border border-white/10 shrink-0">
                       <button
                         onClick={() => setViewMode('grouped')}
-                        className={`px-2.5 sm:px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer border-0 flex items-center gap-1.5 ${
+                        className={`px-2.5 sm:px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer border-0 flex items-center gap-1.5 ${
                           viewMode === 'grouped'
                             ? 'bg-gradient-to-r from-emerald-500 to-teal-400 text-black shadow-md shadow-emerald-500/20 font-black'
                             : 'text-[#8696a0] hover:text-white hover:bg-white/5'
@@ -3782,7 +3783,7 @@ export default function DevLogger() {
                       </button>
                       <button
                         onClick={() => setViewMode('timeline')}
-                        className={`px-2.5 sm:px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer border-0 flex items-center gap-1.5 ${
+                        className={`px-2.5 sm:px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer border-0 flex items-center gap-1.5 ${
                           viewMode === 'timeline'
                             ? 'bg-gradient-to-r from-emerald-500 to-teal-400 text-black shadow-md shadow-emerald-500/20 font-black'
                             : 'text-[#8696a0] hover:text-white hover:bg-white/5'
@@ -3793,40 +3794,39 @@ export default function DevLogger() {
                       </button>
                     </div>
 
-                    {/* Chips de Filtro */}
-                    <div className="flex items-center gap-1 flex-wrap">
-                      {[
-                        { id: 'all', label: 'Todos', count: logs.length, color: 'text-slate-300 border-slate-500/30' },
-                        { id: 'node', label: '🖥️ Servidor Node', count: nodeLogsCount, color: 'text-purple-300 border-purple-500/40' },
-                        { id: 'error', label: '🔴 Erros', count: errorLogsCount, color: 'text-rose-300 border-rose-500/40' },
-                        { id: 'warn', label: '🟡 Alertas', count: warnLogsCount, color: 'text-amber-300 border-amber-500/40' },
-                      ].map((f) => (
-                        <button
-                          key={f.id}
-                          onClick={() => setLogFilter(f.id as any)}
-                          className={`px-2 sm:px-2.5 py-1 rounded-xl text-[10px] font-black uppercase transition-all cursor-pointer border flex items-center gap-1 active:scale-95 ${
-                            logFilter === f.id
-                              ? `bg-indigo-500/20 border-indigo-500/50 text-indigo-200 shadow-sm shadow-indigo-500/20 ${f.color}`
-                              : 'bg-[#0e161c] border-white/10 text-[#8696a0] hover:text-white hover:bg-white/5'
-                          }`}
-                        >
-                          <span>{f.label}</span>
-                          <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-bold ${logFilter === f.id ? 'bg-indigo-400/20 text-white' : 'bg-white/5 text-[#8696a0]'}`}>
-                            {f.count}
-                          </span>
-                        </button>
-                      ))}
+                    {/* Dropdown Unificado: Tipo de Log (Consolidação de Todos, Node, Erros, Alertas) */}
+                    <div className="relative shrink-0">
+                      <select
+                        value={logFilter}
+                        onChange={(e) => setLogFilter(e.target.value as any)}
+                        className={`appearance-none bg-[#0e161c] border border-white/10 rounded-xl pl-2.5 pr-7 py-1.5 text-[10px] font-mono font-black uppercase tracking-wider cursor-pointer transition-all focus:outline-none focus:border-indigo-500/60 ${
+                          logFilter === 'error' ? 'text-rose-300 border-rose-500/40 bg-rose-950/20' :
+                          logFilter === 'warn' ? 'text-amber-300 border-amber-500/40 bg-amber-950/20' :
+                          logFilter === 'node' ? 'text-purple-300 border-purple-500/40 bg-purple-950/20' :
+                          'text-[#d1d7db] hover:text-white'
+                        }`}
+                        title="Filtrar por tipo de log"
+                      >
+                        <option value="all" className="bg-[#0e161c] text-white">📋 Todos ({logs.length})</option>
+                        <option value="node" className="bg-[#0e161c] text-purple-300">🖥️ Servidor Node ({nodeLogsCount})</option>
+                        <option value="error" className="bg-[#0e161c] text-rose-300">🔴 Erros ({errorLogsCount})</option>
+                        <option value="warn" className="bg-[#0e161c] text-amber-300">🟡 Alertas ({warnLogsCount})</option>
+                      </select>
+                      <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-[#8696a0] pointer-events-none" />
                     </div>
+                  </div>
 
+                  {/* Linha 2 no Mobile / Lado Central & Direito no Desktop: Busca + Tempo + Ações */}
+                  <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap sm:flex-nowrap">
                     {/* Input de Busca Textual */}
-                    <div className="relative flex items-center min-w-[140px] sm:min-w-[170px]">
+                    <div className="relative flex items-center flex-1 min-w-[120px] sm:min-w-[150px]">
                       <Search size={11} className="absolute left-2.5 text-[#8696a0] pointer-events-none" />
                       <input
                         type="text"
                         placeholder="Buscar logs..."
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        className="w-full pl-7 pr-6 py-1 bg-[#0e161c] border border-white/10 rounded-xl text-[10px] text-white placeholder-[#8696a0] focus:outline-none focus:border-indigo-500/50 transition-all font-mono"
+                        className="w-full pl-7 pr-6 py-1.5 bg-[#0e161c] border border-white/10 rounded-xl text-[10px] text-white placeholder-[#8696a0] focus:outline-none focus:border-indigo-500/50 transition-all font-mono"
                       />
                       {searchQuery && (
                         <button
@@ -3840,7 +3840,7 @@ export default function DevLogger() {
                     </div>
 
                     {/* Filtro por Faixa Temporal */}
-                    <div className="flex items-center gap-0.5 bg-[#0e161c] p-0.5 rounded-xl border border-white/10">
+                    <div className="flex items-center gap-0.5 bg-[#0e161c] p-0.5 rounded-xl border border-white/10 shrink-0">
                       {[
                         { id: 'all', label: 'Tudo' },
                         { id: '15m', label: '15m' },
@@ -3850,7 +3850,7 @@ export default function DevLogger() {
                         <button
                           key={tf.id}
                           onClick={() => setTimeFilter(tf.id as any)}
-                          className={`px-2 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer border-0 ${
+                          className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer border-0 ${
                             timeFilter === tf.id
                               ? 'bg-indigo-500 text-white shadow-sm font-black'
                               : 'text-[#8696a0] hover:text-white hover:bg-white/5'
@@ -3861,37 +3861,41 @@ export default function DevLogger() {
                         </button>
                       ))}
                     </div>
-                  </div>
 
-                  {/* Lado Direito: Ações */}
-                  <div className="flex items-center gap-1.5">
-                    {/* Botão de Análise de Logs com IA e Criação de Card no CRM Kanban */}
-                    <button
-                      onClick={() => setShowAiMediaPromptModal(true)}
-                      disabled={isAnalyzingAiLogs}
-                      className={`px-3 py-1.5 rounded-xl text-[10px] font-black transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 shadow-sm border ${
-                        isAnalyzingAiLogs
-                          ? 'bg-purple-500/20 text-purple-300 border-purple-500/50 animate-pulse'
-                          : 'bg-gradient-to-r from-purple-500/25 via-indigo-500/25 to-pink-500/25 hover:from-purple-500/35 hover:to-pink-500/35 text-purple-200 hover:text-white border-purple-500/40 hover:border-purple-400 shadow-lg shadow-purple-500/10'
-                      }`}
-                      title="Analisar logs atuais do DevLogger e Servidor Node com Gemini IA e criar card de correção no CRM Kanban"
-                    >
-                      {isAnalyzingAiLogs ? (
-                        <Loader2 size={12} className="animate-spin text-purple-300" />
-                      ) : (
-                        <Sparkles size={12} className="text-purple-300 animate-pulse" />
+                    {/* Ações: Analisar c/ IA & Ações de Teste */}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {/* Botão de Análise de Logs com IA (Visível apenas se houver logs) */}
+                      {logs.length > 0 && (
+                        <button
+                          onClick={() => setShowAiMediaPromptModal(true)}
+                          disabled={isAnalyzingAiLogs}
+                          className={`px-2.5 sm:px-3 py-1.5 rounded-xl text-[10px] font-black transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 shadow-sm border ${
+                            isAnalyzingAiLogs
+                              ? 'bg-purple-500/20 text-purple-300 border-purple-500/50 animate-pulse'
+                              : 'bg-gradient-to-r from-purple-500/25 via-indigo-500/25 to-pink-500/25 hover:from-purple-500/35 hover:to-pink-500/35 text-purple-200 hover:text-white border-purple-500/40 hover:border-purple-400 shadow-lg shadow-purple-500/10'
+                          }`}
+                          title="Analisar logs atuais com Gemini IA e criar card no CRM Kanban"
+                        >
+                          {isAnalyzingAiLogs ? (
+                            <Loader2 size={12} className="animate-spin text-purple-300" />
+                          ) : (
+                            <Sparkles size={12} className="text-purple-300 animate-pulse" />
+                          )}
+                          <span className="hidden sm:inline">{isAnalyzingAiLogs ? 'Analisando...' : '✨ Analisar c/ IA'}</span>
+                          <span className="sm:hidden">{isAnalyzingAiLogs ? '...' : '✨ IA'}</span>
+                        </button>
                       )}
-                      <span>{isAnalyzingAiLogs ? 'Analisando...' : '✨ Analisar c/ IA & Criar Card CRM'}</span>
-                    </button>
 
-                    {/* Simulação de Erro do Servidor Node */}
-                    <button
-                      onClick={handleSimulateNodeError}
-                      className="bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 px-2.5 sm:px-3 py-1.5 rounded-xl text-[10px] font-black transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 shadow-sm"
-                      title="Simular disparo de erro no servidor Node.js para testar o agrupamento"
-                    >
-                      <Bug size={12} className="text-rose-400 animate-pulse" /> + Erro Node
-                    </button>
+                      {/* Botão Unificado: Ações de Teste e Simulação */}
+                      <button
+                        onClick={() => setShowSimulationModal(true)}
+                        className="bg-gradient-to-r from-amber-500/20 to-rose-500/20 hover:from-amber-500/30 hover:to-rose-500/30 text-amber-200 border border-amber-500/30 hover:border-amber-400 px-2.5 sm:px-3 py-1.5 rounded-xl text-[10px] font-black transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 shadow-sm min-h-[34px]"
+                        title="Abrir opções de teste rápido e simulação de erros"
+                      >
+                        <Zap size={12} className="text-amber-400" />
+                        <span>Ações de Teste</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -3969,16 +3973,10 @@ export default function DevLogger() {
 
                       <div className="flex items-center gap-3 pt-2 z-10 flex-wrap justify-center">
                         <button
-                          onClick={() => handleTestApp()}
-                          className="bg-gradient-to-r from-emerald-500/20 via-teal-500/20 to-indigo-500/20 hover:from-emerald-500/30 hover:to-indigo-500/30 text-emerald-200 border border-emerald-500/40 text-xs font-black px-4 py-2.5 rounded-2xl transition-all cursor-pointer shadow-lg shadow-emerald-500/10 active:scale-95 flex items-center gap-2 font-mono"
+                          onClick={() => setShowSimulationModal(true)}
+                          className="bg-gradient-to-r from-indigo-500/20 via-purple-500/20 to-emerald-500/20 hover:from-indigo-500/30 hover:to-emerald-500/30 text-indigo-200 border border-indigo-500/30 text-xs font-bold px-4 py-2.5 rounded-2xl transition-all cursor-pointer shadow-lg shadow-indigo-500/10 active:scale-95 flex items-center gap-2 font-mono"
                         >
-                          <Activity size={14} className="text-teal-400" /> Teste Rápido
-                        </button>
-                        <button
-                          onClick={handleSimulateNodeError}
-                          className="bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/40 text-xs font-black px-4 py-2.5 rounded-2xl transition-all cursor-pointer shadow-lg shadow-rose-500/20 active:scale-95 flex items-center gap-2 font-mono"
-                        >
-                          <Bug size={14} className="text-rose-400 animate-pulse" /> Simular Erro Node
+                          <SlidersHorizontal size={14} className="text-indigo-400" /> Ações de Teste e Simulação
                         </button>
                       </div>
                     </div>
@@ -4597,6 +4595,95 @@ export default function DevLogger() {
               </div>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Simulações e Testes Unificado (Reduz poluição visual no mobile) */}
+      {showSimulationModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+          <div className="bg-[#0b1015] border border-white/10 rounded-2xl max-w-md w-full p-5 shadow-2xl flex flex-col gap-4 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between pb-3 border-b border-white/10">
+              <div className="flex items-center gap-2">
+                <SlidersHorizontal size={18} className="text-indigo-400" />
+                <h3 className="font-bold text-white text-sm">Ações de Teste & Simulação</h3>
+              </div>
+              <button
+                onClick={() => setShowSimulationModal(false)}
+                className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-white/5 transition-all cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <p className="text-xs text-gray-400">
+              Execute testes automatizados no sistema ou simule condições de erro para validar a telemetria e o DevLogger.
+            </p>
+
+            <div className="flex flex-col gap-2.5">
+              <button
+                onClick={() => {
+                  setShowSimulationModal(false);
+                  handleTestApp();
+                }}
+                className="w-full flex items-center justify-between p-3.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 font-semibold text-xs transition-all text-left group cursor-pointer"
+              >
+                <div className="flex items-center gap-3">
+                  <Activity size={18} className="text-emerald-400 group-hover:scale-110 transition-transform" />
+                  <div>
+                    <div className="font-bold text-white">Executar Teste Rápido (ASTS)</div>
+                    <div className="text-[11px] text-emerald-400/80 font-normal">Testa conexões Supabase, LocalStorage e integridade</div>
+                  </div>
+                </div>
+                <ChevronRight size={16} className="text-emerald-400/60" />
+              </button>
+
+              <button
+                onClick={() => {
+                  setShowSimulationModal(false);
+                  handleSimulateNodeError();
+                }}
+                className="w-full flex items-center justify-between p-3.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-300 font-semibold text-xs transition-all text-left group cursor-pointer"
+              >
+                <div className="flex items-center gap-3">
+                  <Bug size={18} className="text-rose-400 group-hover:scale-110 transition-transform" />
+                  <div>
+                    <div className="font-bold text-white">Simular Erro do Servidor Node</div>
+                    <div className="text-[11px] text-rose-400/80 font-normal">Gera evento 500 no log do servidor para testes de captura</div>
+                  </div>
+                </div>
+                <ChevronRight size={16} className="text-rose-400/60" />
+              </button>
+
+              <button
+                onClick={() => {
+                  setShowSimulationModal(false);
+                  clearLogs();
+                  setTestErrors([]);
+                  setTestLogs([]);
+                  setTestSummary(null);
+                }}
+                className="w-full flex items-center justify-between p-3.5 rounded-xl bg-gray-800/40 hover:bg-gray-800/80 border border-white/10 text-gray-300 font-semibold text-xs transition-all text-left group cursor-pointer"
+              >
+                <div className="flex items-center gap-3">
+                  <Trash2 size={18} className="text-gray-400 group-hover:scale-110 transition-transform" />
+                  <div>
+                    <div className="font-bold text-white">Limpar Todos os Logs & Testes</div>
+                    <div className="text-[11px] text-gray-400 font-normal">Reseta contadores de telemetria da sessão</div>
+                  </div>
+                </div>
+                <ChevronRight size={16} className="text-gray-400/60" />
+              </button>
+            </div>
+
+            <div className="pt-2 flex justify-end">
+              <button
+                onClick={() => setShowSimulationModal(false)}
+                className="px-4 py-2 bg-white/10 hover:bg-white/15 text-white rounded-xl text-xs font-semibold transition-all cursor-pointer"
+              >
+                Fechar
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -221,7 +221,8 @@ function normalizeGastrofoodPayload(payload, defaultStoreId) {
         jsOrder = { ...jsOrder };
     }
 
-    const storeId = jsOrder.fkStore || defaultStoreId || "6A728D2A-8612-4DC1-8676-0B10E4D38AD5";
+    const rawStoreId = jsOrder.fkStore || defaultStoreId || "6A728D2A-8612-4DC1-8676-0B10E4D38AD5";
+    const storeId = String(rawStoreId).trim().toUpperCase();
     
     let calculatedSubTotal = 0;
     const rawItems = jsOrder.items || [];
@@ -241,17 +242,19 @@ function normalizeGastrofoodPayload(payload, defaultStoreId) {
 
             return {
                 code: String(cleanCode).slice(0, 20),
+                codePdv: String(c.codePdv || cleanCode || "C").slice(0, 20),
                 name: String(c.name || "").slice(0, 60),
                 amount: Number(c.amount || c.quantity || 1),
                 price: Number(c.price || 0),
-                typeCalc: c.typeCalc !== undefined ? c.typeCalc : 0,
-                fkPasso: String(cleanFkPasso).slice(0, 20),
-                numberPasso: c.numberPasso !== undefined ? c.numberPasso : 1
+                typeCalc: c.typeCalc !== undefined ? Number(c.typeCalc) : 0,
+                fkPasso: String(cleanFkPasso).slice(0, 40),
+                numberPasso: c.numberPasso !== undefined ? Number(c.numberPasso) : 1
             };
         });
 
         return {
-            code: String(item.code || item.id || "").slice(0, 20),
+            code: String(item.code || item.id || "1").slice(0, 20),
+            codePdv: String(item.codePdv || item.code || item.id || "001489").slice(0, 20),
             name: String(item.name || "").slice(0, 100),
             amount: amount,
             unitary: String(item.unitary || "UN").slice(0, 10),
@@ -298,7 +301,11 @@ function normalizeGastrofoodPayload(payload, defaultStoreId) {
         Referencia: String(address.Referencia || address.referencia || "").slice(0, 20),
         Uf: String(address.Uf || address.uf || "SP").trim().slice(0, 2).toUpperCase(),
         Bloco: String(address.Bloco || address.bloco || "").slice(0, 20),
-        Ap: String(address.Ap || address.ap || "").slice(0, 20)
+        Ap: String(address.Ap || address.ap || "").slice(0, 20),
+        Latitude: String(address.Latitude || address.lat || "-23.604002").slice(0, 20),
+        Longitude: String(address.Longitude || address.lng || "-46.763923").slice(0, 20),
+        Distancia: String(address.Distancia || address.distancia || "0").slice(0, 20),
+        Tempo: String(address.Tempo || address.tempo || "30 mins").slice(0, 20)
     };
 
     let idUsuario = customer.IdUsuario || customer.idUsuario || customer.id || "9EA3F679-5565-4DA0-930F-0971A8B8A3CD";
@@ -306,6 +313,7 @@ function normalizeGastrofoodPayload(payload, defaultStoreId) {
     if (!uuidRegex.test(String(idUsuario).trim())) {
         idUsuario = "9EA3F679-5565-4DA0-930F-0971A8B8A3CD";
     }
+    idUsuario = String(idUsuario).trim().toUpperCase();
 
     const normalizedCustomer = {
         IdUsuario: idUsuario,
@@ -317,12 +325,15 @@ function normalizeGastrofoodPayload(payload, defaultStoreId) {
     let rawPagto = String(jsOrder.pagto || jsOrder.paymentMethod || "Dinheiro").trim();
     const lowerPagto = rawPagto.toLowerCase();
     if (lowerPagto.includes('pix')) rawPagto = 'Pix';
+    else if (lowerPagto.includes('debito') || lowerPagto.includes('débito')) rawPagto = 'Debito com Maquininha';
     else if (lowerPagto.includes('credito') || lowerPagto.includes('crédito')) rawPagto = 'Cartao Credito';
-    else if (lowerPagto.includes('debito') || lowerPagto.includes('débito')) rawPagto = 'Cartao Debito';
     else if (lowerPagto.includes('dinheiro')) rawPagto = 'Dinheiro';
-    if (rawPagto.length > 20) rawPagto = rawPagto.slice(0, 20);
+    else if (!rawPagto) rawPagto = 'Dinheiro';
+    if (rawPagto.length > 30) rawPagto = rawPagto.slice(0, 30);
 
     return {
+        AGuidEstab: storeId,
+        AIdEstab: storeId,
         jsOrder: {
             module: Number(jsOrder.module !== undefined ? jsOrder.module : 1),
             fkCustomer: normalizedCustomer.IdUsuario,
@@ -336,6 +347,7 @@ function normalizeGastrofoodPayload(payload, defaultStoreId) {
             address: normalizedAddress,
             items: normalizedItems,
             customer: normalizedCustomer,
+            custumer: normalizedCustomer,
             origin: Number(jsOrder.origin !== undefined ? jsOrder.origin : 2),
             estimatedDeliveryInMinutes: String(jsOrder.estimatedDeliveryInMinutes || "30 mins").slice(0, 20),
             total: total
@@ -3156,8 +3168,8 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                                             const aRetorno = resData?.ARetorno || '';
                                             let mensagemErro = "O sistema Gastrofood rejeitou a criação do pedido.";
                                             
-                                            if (aRetorno.includes('value too long') || aRetorno.includes('FireDAC') || aRetorno.includes('ERROR:')) {
-                                                mensagemErro = `Falha técnica definitiva no banco de dados do Gastrofood: ${aRetorno}. NÃO TENTE ENVIAR NOVAMENTE. O pedido não pode ser processado de forma automática devido a essa incompatibilidade de campos. Peça desculpas ao cliente informando que ocorreu uma falha no sistema do restaurante e informe que o atendimento foi transferido para um atendente humano.`;
+                                            if (aRetorno.includes('value too long') || aRetorno.includes('FireDAC') || aRetorno.includes('ERROR:') || aRetorno.includes('Cadeia de caracteres de classe')) {
+                                                mensagemErro = `Falha técnica no sistema do restaurante (Gastrofood: ${aRetorno}). NÃO TENTE ENVIAR NOVAMENTE. O pedido não pode ser processado de forma automática devido a essa incompatibilidade de campos. Peça desculpas ao cliente de forma muito atenciosa informando que o pedido já foi anotado e transferido com prioridade para a nossa equipe humana finalizar.`;
                                             } else if (aRetorno) {
                                                 mensagemErro = `Erro retornado pelo Gastrofood: ${aRetorno}. Não tente re-enviar sem corrigir o problema reportado.`;
                                             }

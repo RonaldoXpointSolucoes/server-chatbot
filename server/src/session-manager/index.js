@@ -1146,12 +1146,16 @@ class SessionManager {
                             supabase.from('whatsapp_instances')
                                 .update({ 
                                     status: 'disconnected', 
+                                    qr_code: null,
+                                    pairing_code: null,
                                     assigned_node_id: null,
                                     lease_until: null,
                                     last_error: 'QR Code ou código de pareamento expirou por falta de leitura. Clique em Conectar para gerar um novo.' 
                                 })
                                 .eq('id', instanceId)
                         );
+                        this.connectionLocks.delete(instanceId);
+                        this.connectingSessions.delete(instanceId);
                         return;
                     }
 
