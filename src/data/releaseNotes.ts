@@ -20,6 +20,37 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.5.2',
+    date: '2026-09-17',
+    summary: 'Refatoração UI/UX Mobile-First do DevLogger, Compatibilidade RTTI Delphi Gastrofood e Estabilização SessionManager Baileys',
+    notes: [
+      {
+        id: '7.5.2-1',
+        category: 'features',
+        title: 'Modal Unificado de Testes e Simulações no DevLogger',
+        description: 'Agrupamento de testes de integridade ASTS, simulação de exceções Node.js e limpeza de telemetria em modal popover moderno, liberando espaço de leitura em telas móveis.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.5.2-2',
+        category: 'improvements',
+        title: 'Abas Responsivas sem Quebra de Linha e Seletor Compacto',
+        description: 'Navegação por abas com scroll horizontal fluido nativo (whitespace-nowrap), min-height de 44px e seletor dropdown compacto para filtros de tipo de log.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      },
+      {
+        id: '7.5.2-3',
+        category: 'fixes',
+        title: 'Resolução do Erro Gastrofood Delphi e Limpeza de QR Timeout',
+        description: 'Normalização bilateral de pedidos (customer/custumer) compatível com o backend Delphi e eliminação de travas órfãs em timeouts de leitura de QR Code no Baileys.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      }
+    ]
+  },
+  {
     version: '7.5.1',
     date: '2026-09-17',
     summary: 'Resiliência de Áudio e Mídia Multi-Worker, Indicadores Visuais de Status de Mensagens e Blindagem Postgres UUID',
