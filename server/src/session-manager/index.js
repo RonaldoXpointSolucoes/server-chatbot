@@ -1,7 +1,10 @@
 import { EventEmitter } from 'events';
+import { AsyncLocalStorage } from 'async_hooks';
 try {
     EventEmitter.defaultMaxListeners = 100;
 } catch (e) {}
+
+const instanceMutexStorage = new AsyncLocalStorage();
 
 import { makeWASocket, DisconnectReason, fetchLatestBaileysVersion, Browsers } from '@whiskeysockets/baileys';
 import { useSupabaseAuthState, flushPendingWrites, sessionCaches, clearInstanceMemoryCache, clearRecipientSession } from './auth.js';
@@ -176,6 +179,8 @@ class SessionManager {
         this.instanceMutexes = new Map();
         this.autoHealingCooldowns = new Map();
         this.reconnectingCoolingDown = new Map();
+        this.connectionLocks = new Set();
+        this.connectingSessions = new Set();
 
         // Pino stream configurado para enviar logs para nosso SSE e para o stdout
         const pinoStream = {
@@ -362,7 +367,7 @@ class SessionManager {
 
                     const lastHeal = this.autoHealingCooldowns.get(inst.id) || 0;
                     const lastCooldown = this.reconnectingCoolingDown.get(inst.id) || 0;
-                    if (now - lastHeal < 45000 || now - lastCooldown < 35000) {
+                    if (now - lastHeal < 60000 || now - lastCooldown < 45000) {
                         continue;
                     }
 
@@ -410,17 +415,20 @@ class SessionManager {
                     // Se a instância está na RAM deste nó mas WS está fechado, valida se não é apenas uma oscilação recente
                     if (hasSessionInRam && !isWsOpen) {
                         const lastDisconn = sessionData?.lastDisconnectedAt ? new Date(sessionData.lastDisconnectedAt).getTime() : 0;
-                        if (now - lastDisconn < 30000 && (hasActiveTimer || isConnecting)) {
+                        if ((now - lastDisconn < 45000) || hasActiveTimer || isConnecting) {
                             continue;
                         }
+                        // Sessão zumbi na RAM (sem timers ativos e sem WS aberto há mais de 45s)
+                        console.log(`[SessionManager/AutoHealing] 🧹 Reciclando sessão zumbi na RAM para ${inst.id} antes de restaurar conexão...`);
+                        await this.destroyExistingSession(inst.id, 'auto_healing_stale_ws');
                     }
 
                     // Se a instância não está ativa na RAM deste nó e (está atribuída a este nó OU o lease expirou OU é Master Takeover)
                     if (isAssignedToThisNode || isLeaseExpired || isMasterTakeover) {
                         this.autoHealingCooldowns.set(inst.id, now);
                         this.reconnectingCoolingDown.set(inst.id, now);
-                        console.log(`[SessionManager/AutoHealing] 🩺 Detectada instância ${inst.id} desincronizada no nó ${currentNodeId} (RAM: ${hasSessionInRam ? 'Presente (WS fechado)' : 'Ausente'}, Lease Expirado: ${isLeaseExpired}). Revivendo conexão...`);
-                        this.createSession(inst.tenant_id, inst.id, true).catch(err => {
+                        console.log(`[SessionManager/AutoHealing] 🩺 Detectada instância ${inst.id} desincronizada no nó ${currentNodeId} (RAM: ${hasSessionInRam ? 'Reciclada' : 'Ausente'}, Lease Expirado: ${isLeaseExpired}). Revivendo conexão pacífica...`);
+                        this.createSession(inst.tenant_id, inst.id, false).catch(err => {
                             console.error(`[SessionManager/AutoHealing] Falha ao reviver instância ${inst.id}:`, err.message);
                         });
                     }
@@ -450,6 +458,13 @@ class SessionManager {
 
     async runWithInstanceMutex(instanceId, action) {
         if (!instanceId) return action();
+
+        // Verificação de reentrância: se o contexto assíncrono atual já detém o mutex desta instância, executa direto
+        const activeLocks = instanceMutexStorage.getStore();
+        if (activeLocks && activeLocks.has(instanceId)) {
+            return action();
+        }
+
         if (!this.instanceMutexes.has(instanceId)) {
             this.instanceMutexes.set(instanceId, Promise.resolve());
         }
@@ -462,8 +477,11 @@ class SessionManager {
             await currentPromise;
         } catch (e) {}
 
+        const nextStore = new Set(activeLocks || []);
+        nextStore.add(instanceId);
+
         try {
-            return await action();
+            return await instanceMutexStorage.run(nextStore, () => action());
         } finally {
             release();
             if (this.instanceMutexes.get(instanceId) === nextPromise) {
@@ -1154,8 +1172,10 @@ class SessionManager {
                                 })
                                 .eq('id', instanceId)
                         );
-                        this.connectionLocks.delete(instanceId);
-                        this.connectingSessions.delete(instanceId);
+                        this.connectionLocks?.delete?.(instanceId);
+                        this.connectingSessions?.delete?.(instanceId);
+                        this.inProgressLocks?.delete?.(instanceId);
+                        this.connectingState?.delete?.(instanceId);
                         return;
                     }
 

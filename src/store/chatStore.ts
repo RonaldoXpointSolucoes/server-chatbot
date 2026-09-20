@@ -2783,61 +2783,99 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return; // Previne requisições 400 previsiveis caso o socket esteja offline
     }
 
-    // Atualiza o lock IMEDIATAMENTE (mesmo se falhar depois)
+    // Atualiza o lock provisoriamente
     set((s) => ({ pictureFetchLocks: { ...s.pictureFetchLocks, [contactId]: now } }));
 
-    try {
-      const apiKey = await getOrFetchApiKey(resolvedInstanceId);
-      const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+    const maxRetries = 3;
+    let success = false;
+    let isNetworkError = false;
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000);
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      let timeoutId: any = null;
+      try {
+        const apiKey = await getOrFetchApiKey(resolvedInstanceId);
+        const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
 
-      const res = await fetch(`${API_URL}/api/v1/instances/${resolvedInstanceId}/invoke`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-tenant-id': state.tenantInfo.id, 'apikey': apiKey },
-        body: JSON.stringify({ method: 'profilePictureUrl', args: [jid, 'image'] }),
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
-      const data = await res.json();
-      if (res.ok && data.ok && data.result) {
-        const baileysUrl = data.result;
-        let finalUrl = baileysUrl;
+        const controller = new AbortController();
+        timeoutId = setTimeout(() => controller.abort(), 8000);
 
-        try {
-          // Tenta baixar a imagem diretamente para contornar expirações futuras (WhatsApp CDN expiry)
-          const imgRes = await fetch(baileysUrl);
-          if (imgRes.ok) {
-            const blob = await imgRes.blob();
-            const fileName = `avatars/${state.tenantInfo.id}/${contactId}-${Date.now()}.jpg`;
+        const res = await fetch(`${API_URL}/api/v1/instances/${resolvedInstanceId}/invoke`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-tenant-id': state.tenantInfo.id, 'apikey': apiKey },
+          body: JSON.stringify({ method: 'profilePictureUrl', args: [jid, 'image'] }),
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
 
-            const { data: uploadData, error: uploadError } = await supabase.storage
-              .from('chat_media')
-              .upload(fileName, blob, { upsert: true, contentType: blob.type || 'image/jpeg' });
-
-            if (!uploadError && uploadData) {
-              const { data: publicUrlData } = supabase.storage.from('chat_media').getPublicUrl(fileName);
-              finalUrl = publicUrlData.publicUrl;
-            } else {
-              console.warn("[fetchContactPicture] Erro no upload para o Supabase Storage:", uploadError);
-            }
-          }
-        } catch (dlErr) {
-          console.warn("[fetchContactPicture] Falha ao baixar a imagem (possível CORS ou erro de rede). Usando URL original.", dlErr);
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}: ${res.statusText}`);
         }
 
-        await supabase.from('contacts').update({ profile_picture_url: finalUrl }).eq('id', getRealContactId(contactId));
-        set((s) => ({
-          contacts: s.contacts.map(c => c.id === contactId ? { ...c, avatar: finalUrl } : c)
-        }));
+        const data = await res.json();
+        if (data.ok && data.result) {
+          const baileysUrl = data.result;
+          let finalUrl = baileysUrl;
+
+          try {
+            // Tenta baixar a imagem diretamente para contornar expirações futuras (WhatsApp CDN expiry)
+            const imgRes = await fetch(baileysUrl);
+            if (imgRes.ok) {
+              const blob = await imgRes.blob();
+              const fileName = `avatars/${state.tenantInfo.id}/${contactId}-${Date.now()}.jpg`;
+
+              const { data: uploadData, error: uploadError } = await supabase.storage
+                .from('chat_media')
+                .upload(fileName, blob, { upsert: true, contentType: blob.type || 'image/jpeg' });
+
+              if (!uploadError && uploadData) {
+                const { data: publicUrlData } = supabase.storage.from('chat_media').getPublicUrl(fileName);
+                finalUrl = publicUrlData.publicUrl;
+              } else {
+                console.warn("[fetchContactPicture] Erro no upload para o Supabase Storage:", uploadError);
+              }
+            }
+          } catch (dlErr) {
+            console.debug("[fetchContactPicture] Falha ao baixar a imagem CDN (possível CORS ou expiração). Usando URL original Baileys.", dlErr);
+          }
+
+          await supabase.from('contacts').update({ profile_picture_url: finalUrl }).eq('id', getRealContactId(contactId));
+          set((s) => ({
+            contacts: s.contacts.map(c => c.id === contactId ? { ...c, avatar: finalUrl } : c)
+          }));
+        }
+        success = true;
+        break; // Sucesso na requisição à engine
+      } catch (err: any) {
+        if (timeoutId) clearTimeout(timeoutId);
+        const isAbort = err?.name === 'AbortError';
+        const isFetchFail = err?.name === 'TypeError' || (err?.message && err.message.includes('Failed to fetch'));
+        isNetworkError = isAbort || isFetchFail;
+
+        if (attempt < maxRetries - 1 && isNetworkError) {
+          const backoffDelay = 800 * Math.pow(2, attempt);
+          console.debug(`[fetchContactPicture] Instabilidade de rede ao obter avatar de ${jid} (tentativa ${attempt + 1}/${maxRetries}). Retentando em ${backoffDelay}ms...`);
+          await new Promise(r => setTimeout(r, backoffDelay));
+        } else {
+          if (isAbort) {
+            console.debug(`[fetchContactPicture] Requisição para ${jid} cancelada por timeout de 8s (contato sem avatar ou rede lenta).`);
+          } else if (isFetchFail) {
+            console.info(`[fetchContactPicture] Servidor temporariamente inacessível para avatar de ${jid} após ${attempt + 1} tentativas (rede instável). Fallback ativo.`);
+          } else {
+            console.debug(`[fetchContactPicture] Retorno sem avatar para ${jid}:`, err?.message || err);
+          }
+        }
       }
-    } catch (err: any) {
-      if (err.name === 'AbortError') {
-        console.debug("[fetchContactPicture] Requisição cancelada por timeout de 8s (contato sem avatar público ou latência externa).");
-      } else {
-        console.warn("[fetchContactPicture] Erro ao obter imagem de contato:", err?.message || err);
-      }
+    }
+
+    // Se falhou por erro de rede transitória, reduz o lock para 3 minutos em vez de 60 minutos
+    if (!success && isNetworkError) {
+      set((s) => ({
+        pictureFetchLocks: {
+          ...s.pictureFetchLocks,
+          // Permite tentar novamente após 3 minutos (3600000 - 180000 = 3420000)
+          [contactId]: now - 3420000
+        }
+      }));
     }
   },
 

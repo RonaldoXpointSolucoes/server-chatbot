@@ -90,8 +90,11 @@ async function callWithGeminiRetry(fn, operationName = 'Gemini Operation', maxRe
                           errMsg.includes('502') || 
                           errMsg.includes('503') || 
                           errMsg.includes('504') || 
+                          errMsg.includes('429') || 
                           errMsg.includes('overloaded') || 
                           errMsg.includes('fetch failed') || 
+                          errMsg.includes('Error fetching from') || 
+                          errMsg.includes('fetching from') || 
                           errMsg.includes('ECONNRESET') || 
                           errMsg.includes('ETIMEDOUT') || 
                           errMsg.includes('Internal error') || 
@@ -103,7 +106,11 @@ async function callWithGeminiRetry(fn, operationName = 'Gemini Operation', maxRe
         // Backoff exponencial com jitter randômico para evitar thundering herd
         const jitter = Math.floor(Math.random() * 500);
         const backoffDelay = Math.min(1000 * Math.pow(1.8, attempt - 1) + jitter, 7000);
-        console.warn(`[AutomationWorker] Oscilação transitória na API Gemini em "${operationName}" (${errMsg.slice(0, 100)}). Tentativa ${attempt}/${maxRetries}. Aguardando ${backoffDelay}ms...`);
+        if (attempt <= 2) {
+          console.info(`[AutomationWorker] Oscilação transitória na API Gemini em "${operationName}" (tentativa ${attempt}/${maxRetries}). Retentando em ${backoffDelay}ms...`);
+        } else {
+          console.warn(`[AutomationWorker] Oscilação persistente na API Gemini em "${operationName}" (${errMsg.slice(0, 100)}). Tentativa ${attempt}/${maxRetries}. Aguardando ${backoffDelay}ms...`);
+        }
         await new Promise(r => setTimeout(r, backoffDelay));
         continue;
       }
