@@ -1630,7 +1630,7 @@ class AutomationWorker {
                 return eligibleBots[0];
             }
 
-            const model = this.genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+            const model = this.genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
             let historyText = '';
             if (tenantId && conversationId) {
@@ -2395,13 +2395,13 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                 history.pop();
             }
 
-            let modelName = botSettings.model || 'gemini-2.5-flash';
-            if (modelName === 'gemini-1.5-pro' || modelName === 'gemini-1.5-flash') {
-                modelName = 'gemini-2.5-flash';
+            let modelName = botSettings.model || 'gemini-2.0-flash';
+            if (modelName === 'gemini-2.5-flash') {
+                modelName = 'gemini-2.0-flash';
             }
             // Força o fallback caso o modelo não seja do ecossistema Gemini (ex: gpt-4o, claude-3)
             if (!modelName.toLowerCase().startsWith('gemini')) {
-                modelName = 'gemini-2.5-flash';
+                modelName = 'gemini-2.0-flash';
             }
             // Filtra declarações de funções com base nos endpoints habilitados no robô
             const endpointToolsMap = {
@@ -3826,7 +3826,7 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                         const formattedHist = historyForDraft.map(h => `${h.role === 'model' ? 'Bot' : 'Cliente'}: ${h.parts[0].text}`).join('\n') + `\nCliente: ${textMessage}\nBot: ${finalResponseText}`;
 
                         const draftModel = this.genAI.getGenerativeModel({ 
-                            model: 'gemini-2.5-flash',
+                            model: 'gemini-2.0-flash',
                             generationConfig: { responseMimeType: "application/json" }
                         });
 

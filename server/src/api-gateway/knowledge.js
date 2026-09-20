@@ -783,7 +783,7 @@ router.post('/corrections/helper', async (req, res) => {
         }
 
         const genAI = new GoogleGenerativeAI(apiKey);
-        const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+        const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
         let prompt = '';
         if (action === 'summarize-context') {
@@ -957,7 +957,7 @@ router.post('/train-multimodal/analyze', async (req, res) => {
         // 2. Inicializa o Gemini
         const genAI = new GoogleGenerativeAI(apiKey);
         const model = genAI.getGenerativeModel({ 
-            model: 'gemini-2.5-flash',
+            model: 'gemini-2.0-flash',
             generationConfig: { responseMimeType: 'application/json' }
         });
 

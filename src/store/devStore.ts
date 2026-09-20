@@ -33,8 +33,33 @@ export const useDevStore = create<DevStore>()(
       isVisible: false,
       isEnabled: false,
       addLog: (log) => {
+        // Sanitizar details para evitar sobrecarga de memória com imagens base64 ou payloads gigantes
+        let sanitizedDetails = log.details;
+        if (sanitizedDetails) {
+          try {
+            if (typeof sanitizedDetails === 'string') {
+              if (sanitizedDetails.includes('data:image') || sanitizedDetails.length > 1500) {
+                sanitizedDetails = sanitizedDetails.substring(0, 500) + '... [Truncado para performance]';
+              }
+            } else if (typeof sanitizedDetails === 'object') {
+              const copy: Record<string, any> = Array.isArray(sanitizedDetails) ? [] : {};
+              for (const [k, v] of Object.entries(sanitizedDetails)) {
+                if (typeof v === 'string' && (v.includes('data:image') || v.length > 1500)) {
+                  copy[k] = v.substring(0, 200) + '... [Imagem/Texto Extenso Omitido]';
+                } else {
+                  copy[k] = v;
+                }
+              }
+              sanitizedDetails = copy;
+            }
+          } catch {
+            sanitizedDetails = '[Dados omitidos]';
+          }
+        }
+
         const newLog: LogEntry = {
           ...log,
+          details: sanitizedDetails,
           id: uuidv4(),
           timestamp: new Date().toISOString()
         };
@@ -43,19 +68,28 @@ export const useDevStore = create<DevStore>()(
         if (state.isEnabled) {
             const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')) || localStorage.getItem('tenantId');
             
-            // Evitar loops recursivos: não envia ao banco erros gerados pelo próprio Supabase ou falhas de rede com o banco
-            const isSupabaseCall = 
-              (log.source && log.source.toLowerCase().includes('supabase')) ||
-              (log.message && log.message.toLowerCase().includes('supabase.co')) ||
-              (log.details && JSON.stringify(log.details).toLowerCase().includes('supabase.co'));
+            // Evitar loops recursivos: não envia ao banco erros gerados pelo próprio Supabase, DevLogger ou rotas de diagnóstico
+            const isExcludedCall = 
+              (log.source && (log.source.toLowerCase().includes('supabase') || log.source.toLowerCase().includes('devlogger'))) ||
+              (log.message && (log.message.toLowerCase().includes('supabase.co') || log.message.toLowerCase().includes('analyze-logs')));
 
-            if (!isSupabaseCall) {
-              // Background async save to db
+            if (!isExcludedCall) {
+              // Background async save to db com payload seguro
+              let safePayload: string | null = null;
+              if (sanitizedDetails) {
+                try {
+                  const serialized = JSON.stringify(sanitizedDetails);
+                  safePayload = serialized.length > 2000 ? serialized.substring(0, 2000) + '...' : serialized;
+                } catch {
+                  safePayload = null;
+                }
+              }
+
               supabase.from('system_logs').insert([{
                  type: log.source || 'Frontend',
-                 message: log.message,
+                 message: (log.message || '').substring(0, 1000),
                  level: log.type,
-                 payload: log.details ? JSON.stringify(log.details) : null,
+                 payload: safePayload,
                  company_id: tenantId || null,
               }]).then(({ error }) => {
                  if (error && log.source !== 'Fetch API: undefined') {

@@ -1165,7 +1165,7 @@ export default function DevLogger() {
           const isLocalFrontend = url.includes(window.location.host) || (!url.startsWith('http://') && !url.startsWith('https://'));
           const isStatus404 = url.includes('/status') && response.status === 404;
           
-          if (!response.ok && !url.includes('/debug/healthz') && !url.includes('/debug/metrics') && !url.includes('/debug/recent-errors') && !url.includes('/realtime/') && !url.includes('/wacalls/') && !isExpectedOfflineError && !isAstsTest && !isLocalFrontend && !isStatus404) {
+          if (!response.ok && !url.includes('/debug/healthz') && !url.includes('/debug/metrics') && !url.includes('/debug/recent-errors') && !url.includes('/realtime/') && !url.includes('/wacalls/') && !url.includes('/ai/analyze-logs') && !url.includes('system_logs') && !isExpectedOfflineError && !isAstsTest && !isLocalFrontend && !isStatus404) {
              
              // Desduplicação de erros do Supabase
              if (url.includes('supabase.co')) {
@@ -1179,7 +1179,8 @@ export default function DevLogger() {
 
              let detailsStr = '';
              try {
-               detailsStr = await response.clone().text();
+               const rawText = await response.clone().text();
+               detailsStr = rawText.length > 500 ? rawText.substring(0, 500) + '... [Truncado]' : rawText;
              } catch {
                detailsStr = 'no body';
              }
@@ -1194,11 +1195,20 @@ export default function DevLogger() {
              else if (url.includes('whatsapp.net')) sourcePrefix = 'Fetch (WhatsApp Media)';
              else if (url.includes(import.meta.env.VITE_WHATSAPP_ENGINE_URL || 'localhost:9000')) sourcePrefix = 'Fetch (Node Server)';
 
+             let safePayload: any = undefined;
+             if (requestOptions?.body) {
+               if (typeof requestOptions.body === 'string') {
+                 safePayload = (requestOptions.body.includes('data:image') || requestOptions.body.length > 300)
+                   ? '[Payload extenso omitido para performance]'
+                   : requestOptions.body;
+               }
+             }
+
              addLog({
                type: 'error',
                message: `HTTP Error ${response.status} em ${method}`,
                source: sourcePrefix,
-               details: { url, payload: requestOptions?.body, response: detailsStr }
+               details: { url, payload: safePayload, response: detailsStr }
              });
           }
         }
@@ -1398,10 +1408,10 @@ export default function DevLogger() {
   }, [isVisible, engineUrl]);
 
   useEffect(() => {
-    if (isVisible && isEnabled && bottomRef.current) {
+    if (isVisible && isEnabled && bottomRef.current && !isAnalyzingAiLogs) {
       bottomRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [logs, isVisible, isEnabled]);
+  }, [logs, isVisible, isEnabled, isAnalyzingAiLogs]);
 
   useEffect(() => {
     if (!isVisible || !isEnabled) return;
@@ -1646,32 +1656,37 @@ export default function DevLogger() {
 
       if (devLoggerModalRef.current) {
         try {
-          const canvas = await html2canvas(devLoggerModalRef.current, {
+          const capturePromise = html2canvas(devLoggerModalRef.current, {
             backgroundColor: '#070c10',
-            scale: 1.5,
+            scale: 1.0,
             logging: false,
             useCORS: true,
             allowTaint: true
           });
-          const base64Full = canvas.toDataURL('image/jpeg', 0.85);
-          screenshotBase64 = base64Full.replace(/^data:image\/jpeg;base64,/, '');
+          const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500));
+          const canvas: any = await Promise.race([capturePromise, timeoutPromise]);
 
-          // Converter para Blob para upload no Supabase Storage
-          const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/jpeg', 0.85));
-          if (blob) {
-            const fileName = `devlogger_capture_${Date.now()}.jpg`;
-            const filePath = `crm_cards/${fileName}`;
-            const { error: upErr } = await supabase.storage
-              .from('chat_media')
-              .upload(filePath, blob, { contentType: 'image/jpeg', upsert: true });
+          if (canvas && typeof canvas.toDataURL === 'function') {
+            const base64Full = canvas.toDataURL('image/jpeg', 0.70);
+            screenshotBase64 = base64Full.replace(/^data:image\/jpeg;base64,/, '');
 
-            if (!upErr) {
-              const { data: { publicUrl } } = supabase.storage.from('chat_media').getPublicUrl(filePath);
-              uploadedScreenshotUrl = publicUrl;
+            // Converter para Blob para upload no Supabase Storage
+            const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/jpeg', 0.70));
+            if (blob) {
+              const fileName = `devlogger_capture_${Date.now()}.jpg`;
+              const filePath = `crm_cards/${fileName}`;
+              const { error: upErr } = await supabase.storage
+                .from('chat_media')
+                .upload(filePath, blob, { contentType: 'image/jpeg', upsert: true });
+
+              if (!upErr) {
+                const { data: { publicUrl } } = supabase.storage.from('chat_media').getPublicUrl(filePath);
+                uploadedScreenshotUrl = publicUrl;
+              }
             }
           }
         } catch (captureErr) {
-          console.warn('[DevLogger] Falha ao capturar screenshot visual do DevLogger:', captureErr);
+          console.warn('[DevLogger] Captura visual ignorada graciosamente para priorizar agilidade:', captureErr);
         }
       }
 
@@ -4427,7 +4442,7 @@ export default function DevLogger() {
                   <div className="flex items-center gap-2">
                     <h3 className="text-sm sm:text-base font-black text-white tracking-tight">Card de Correção Criado no CRM</h3>
                     <span className="text-[9px] bg-purple-500/20 text-purple-300 border border-purple-500/40 px-2 py-0.5 rounded-full font-bold uppercase">
-                      Gemini 2.5 Flash
+                      Gemini 2.0 Flash
                     </span>
                   </div>
                   <p className="text-[11px] text-purple-300/80 font-medium">

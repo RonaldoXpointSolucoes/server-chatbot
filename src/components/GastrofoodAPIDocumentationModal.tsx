@@ -275,7 +275,7 @@ ${ragContext}`;
         try {
           const genAI = new GoogleGenerativeAI(rawApiKey);
           const model = genAI.getGenerativeModel({ 
-            model: "gemini-2.5-flash",
+            model: "gemini-2.0-flash",
             systemInstruction: {
               role: "system",
               parts: [{ text: systemPrompt }]
