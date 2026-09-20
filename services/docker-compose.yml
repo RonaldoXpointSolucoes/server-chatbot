@@ -41,7 +41,7 @@ services:
       - "8082:8082"
     environment:
       - PORT=8082
-      - GEMINI_API_KEY=AIzaSyDcuvXqNj2j16iZ55f2S5lMdcB1unwYwts
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
       - REDIS_URL=redis://appwrite-redis:6379
     networks:
       - coolify

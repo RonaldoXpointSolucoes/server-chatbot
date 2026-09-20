@@ -1,5 +1,5 @@
 {
-  "version": "7.5.2",
-  "buildDate": "2026-09-18T00:50:00.000Z",
-  "summary": "Refatoração UI/UX Mobile-First do DevLogger, Compatibilidade RTTI Delphi Gastrofood e Estabilização SessionManager Baileys"
+  "version": "7.5.3",
+  "buildDate": "2026-09-20T04:45:00.000Z",
+  "summary": "Blindagem de Segurança e Desacoplamento da Gemini API, Proteção de Custos e Eliminação de Chaves no Frontend"
 }

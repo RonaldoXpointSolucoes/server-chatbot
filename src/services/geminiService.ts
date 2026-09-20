@@ -20,14 +20,10 @@ const formatValueToString = (val: any): string => {
 
 class GeminiService {
   getApiKey(): string {
-    const LEAKED_KEYS = [
-      "AIzaSyBS_DkByF6W2bCSue7RJbW4l43E7jqTozc"
-    ];
-
     const isValidKey = (key: string | null | undefined): boolean => {
-      if (!key || key.length < 5) return false;
+      if (!key || key.length < 15) return false;
       const clean = key.replace(/^['"]|['"]$/g, '').trim();
-      return !LEAKED_KEYS.includes(clean);
+      return clean.length >= 20;
     };
 
     // 1. Check local override

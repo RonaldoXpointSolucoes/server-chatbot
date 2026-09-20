@@ -20,6 +20,37 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.5.3',
+    date: '2026-09-20',
+    summary: 'Blindagem de Segurança e Desacoplamento da Gemini API, Proteção de Custos e Eliminação de Chaves no Frontend',
+    notes: [
+      {
+        id: '7.5.3-1',
+        category: 'features',
+        title: 'Blindagem de Segurança da IA e Restrição Estrita por IP',
+        description: 'Migração completa de todas as chaves sensíveis de IA exclusivamente para o backend protegido no Coolify, com restrição estrita de IP dos servidores no Google Cloud.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.5.3-2',
+        category: 'improvements',
+        title: 'Desacoplamento e Sanitização de Credenciais no Bundle Frontend',
+        description: 'Eliminação de variáveis de chave com prefixo VITE_ e higienização do JavaScript compilado para garantir total imunidade a robôs e scrapers externos.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      },
+      {
+        id: '7.5.3-3',
+        category: 'fixes',
+        title: 'Estancamento Imediato de Anomalia de Cobrança e Bloqueio 403',
+        description: 'Revogação e exclusão das chaves legadas expostas no Google Cloud, estancando requisições abusivas externas e blindando o orçamento da conta.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      }
+    ]
+  },
+  {
     version: '7.5.2',
     date: '2026-09-17',
     summary: 'Refatoração UI/UX Mobile-First do DevLogger, Compatibilidade RTTI Delphi Gastrofood e Estabilização SessionManager Baileys',
