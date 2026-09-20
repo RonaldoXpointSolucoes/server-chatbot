@@ -430,18 +430,24 @@ router.delete('/v1/admin/economic-groups/:id', async (req, res) => {
 
 // Helper de orquestração na simulação
 async function orchestrateSimulate(eligibleBots, textMessage) {
-    const rawKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
-    const apiKey = rawKey ? rawKey.replace(/^['"]|['"]$/g, '') : '';
-    if (!apiKey) {
-        throw new Error("Chave do Gemini (GEMINI_API_KEY) não configurada no servidor backend.");
-    }
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({
-        model: 'gemini-2.0-flash',
-        generationConfig: { responseMimeType: 'application/json' }
-    });
+    try {
+        const rawKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+        const apiKey = rawKey ? rawKey.replace(/^['"]|['"]$/g, '').trim() : '';
+        if (!apiKey || apiKey.startsWith('AQ.') || apiKey.length < 20) {
+            console.warn("[SimulateOrchestrator] Chave Gemini ausente ou incompatível. Usando fallback do primeiro robô.");
+            return {
+                intent: 'fallback',
+                agentId: eligibleBots[0]?.id,
+                reasoning: 'Roteamento padrão aplicado devido a ausência ou formato incompatível da chave Gemini.'
+            };
+        }
+        const genAI = new GoogleGenerativeAI(apiKey);
+        const model = genAI.getGenerativeModel({
+            model: 'gemini-2.0-flash',
+            generationConfig: { responseMimeType: 'application/json' }
+        });
 
-    const prompt = `Você é um orquestrador de atendimento inteligente. Analise a mensagem do cliente e decida qual dos robôs (bots) ativos disponíveis é o mais adequado para responder ao cliente.
+        const prompt = `Você é um orquestrador de atendimento inteligente. Analise a mensagem do cliente e decida qual dos robôs (bots) ativos disponíveis é o mais adequado para responder ao cliente.
 Você deve classificar a intenção e escolher o ID do robô adequado.
 
 Robôs disponíveis:
@@ -459,20 +465,28 @@ Responda ESTRITAMENTE em formato JSON com a seguinte estrutura:
 
 Não inclua formatação de Markdown, blocos de código markdown ou aspas adicionais.`;
 
-    const result = await model.generateContent(prompt);
-    const responseText = result.response.text().trim();
-    
-    try {
-        return JSON.parse(responseText);
-    } catch (e) {
-        console.warn("[SimulateOrchestrator] Falha ao parsear JSON retornado, aplicando higienização:", responseText);
-        let cleanText = responseText;
-        if (cleanText.includes('```json')) {
-            cleanText = cleanText.split('```json')[1].split('```')[0].trim();
-        } else if (cleanText.includes('```')) {
-            cleanText = cleanText.split('```')[1].split('```')[0].trim();
+        const result = await model.generateContent(prompt);
+        const responseText = result.response.text().trim();
+        
+        try {
+            return JSON.parse(responseText);
+        } catch (e) {
+            console.warn("[SimulateOrchestrator] Falha ao parsear JSON retornado, aplicando higienização:", responseText);
+            let cleanText = responseText;
+            if (cleanText.includes('```json')) {
+                cleanText = cleanText.split('```json')[1].split('```')[0].trim();
+            } else if (cleanText.includes('```')) {
+                cleanText = cleanText.split('```')[1].split('```')[0].trim();
+            }
+            return JSON.parse(cleanText);
         }
-        return JSON.parse(cleanText);
+    } catch (err) {
+        console.warn("[SimulateOrchestrator] Falha na chamada da API Gemini:", err?.message);
+        return {
+            intent: 'fallback',
+            agentId: eligibleBots[0]?.id,
+            reasoning: `Roteamento padrão aplicado após erro na IA: ${err?.message || 'Falha de comunicação'}`
+        };
     }
 }
 
@@ -617,23 +631,69 @@ router.get('/v1/utils/my-ip', async (req, res) => {
 
 // Endpoint oficial de análise de logs com IA & Multimodalidade para DevLogger & CRM
 router.post('/v1/ai/analyze-logs', async (req, res) => {
-    try {
-        const rawKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
-        const apiKey = rawKey ? rawKey.replace(/^['"]|['"]$/g, '') : '';
-        if (!apiKey) {
-            return res.status(500).json({ error: 'Chave do Gemini (GEMINI_API_KEY) não configurada no servidor backend.' });
-        }
+    // 1. Desestruturação no escopo principal do handler para garantir acesso absoluto no catch
+    const {
+        consoleLogs = [],
+        serverErrors = [],
+        gastrofoodLogs = [],
+        astsErrors = [],
+        screenshotBase64,
+        userNotes,
+        attachedImages = [],
+        boardName = 'Desenvolvimento & Roadmap',
+        geminiApiKey
+    } = req.body || {};
 
-        const {
-            consoleLogs = [],
-            serverErrors = [],
-            gastrofoodLogs = [],
-            astsErrors = [],
-            screenshotBase64,
-            userNotes,
-            attachedImages = [],
-            boardName = 'Desenvolvimento & Roadmap'
-        } = req.body;
+    const totalCount = (consoleLogs?.length || 0) + (serverErrors?.length || 0);
+
+    const buildHeuristicPlan = (warnMessage) => ({
+        title: '[Diagnóstico de Sistema] Estabilização e Correção de Erros Operacionais',
+        category: 'Correção',
+        priority: 3,
+        tags: ['SISTEMA', 'DIAGNOSTICO', 'DEVLOGGER', 'DIAGNOSTICO-HEURISTICO'],
+        summary: `Diagnóstico técnico consolidado a partir de ${totalCount} evento(s) capturado(s). ${warnMessage || 'Plano de contingência SRE aplicado com sucesso.'}`,
+        suggested_stage_label: 'Em Análise',
+        technical_plan: `### 🚨 Diagnóstico & Causa Raiz dos Erros Identificados
+Diagnóstico técnico formulado em contingência pelo backend a partir de ${totalCount} erro(s) e eventos capturados no DevLogger.
+> [!WARNING]
+> **Status da IA**: ${warnMessage || 'API Gemini externa em contingência. O card técnico foi gerado com sucesso para manter a esteira de desenvolvimento ativa no Kanban.'}
+
+### 🎯 Objetivo da Correção
+- Estabilizar os serviços afetados e eliminar os erros reincidentes registrados no Antigravity DevLogger.
+- Validar ou atualizar a chave do Gemini no ambiente (Google AI Studio: chave iniciada por AIzaSy...).
+
+### 🛠️ Arquivos & Modificações Recomendadas
+- \`server/src/api-gateway/index.js\`
+- \`server/src/automation-worker/agent.js\`
+- \`src/services/geminiService.ts\`
+
+### 🧪 Critérios de Aceite & Validação
+1. Ausência de logs repetitivos de erro.
+2. Criação fluida de cards no CRM Kanban sem travamento.`,
+        analyzed_count: {
+            console: consoleLogs?.length || 0,
+            server: serverErrors?.length || 0,
+            gastrofood: gastrofoodLogs?.length || 0,
+            asts: astsErrors?.length || 0
+        }
+    });
+
+    try {
+        // Resolução flexível da chave Gemini: corpo > cabeçalho > env backend
+        const rawKey = geminiApiKey || req.headers['x-gemini-api-key'] || process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+        const apiKey = rawKey ? String(rawKey).replace(/^['"]|['"]$/g, '').trim() : '';
+        
+        // Validação de formato: chaves inválidas (como tokens OAuth iniciados com AQ. ou chave vazia)
+        const isInvalidFormat = !apiKey || apiKey.startsWith('AQ.') || apiKey.length < 20;
+        if (isInvalidFormat) {
+            console.warn('[API Gateway] Chave Gemini ausente ou com formato incompatível (iniciada por AQ). Utilizando síntese heurística direta.');
+            return res.json({
+                success: true,
+                isHeuristicFallback: true,
+                warning: 'Chave do Gemini ausente ou incompatível. Foi aplicado o diagnóstico heurístico resiliente.',
+                plan: buildHeuristicPlan('A chave configurada é incompatível com o Google AI Studio (requer prefixo AIzaSy...). O card foi formulado com base nos logs reais capturados.')
+            });
+        }
 
         const genAI = new GoogleGenerativeAI(apiKey);
         const model = genAI.getGenerativeModel({
@@ -772,7 +832,7 @@ DIRETRIZES TÉCNICAS:
         const cleaned = responseText.replace(/```json/gi, '').replace(/```/g, '').trim();
         const parsedPlan = JSON.parse(cleaned);
 
-        res.json({
+        return res.json({
             success: true,
             plan: {
                 ...parsedPlan,
@@ -786,43 +846,12 @@ DIRETRIZES TÉCNICAS:
             }
         });
     } catch (err) {
-        console.error('[API Gateway] Erro na análise de logs com IA:', err);
+        console.error('[API Gateway] Erro na análise de logs com IA:', err?.message || err);
         // Fallback Heurístico SRE no Backend caso a API externa do Gemini oscile ou rejeite credencial
-        const totalCount = (consoleLogs?.length || 0) + (serverErrors?.length || 0);
-        res.json({
+        return res.json({
             success: true,
             isHeuristicFallback: true,
-            plan: {
-                title: '[Diagnóstico de Sistema] Estabilização e Correção de Erros Operacionais',
-                category: 'Correção',
-                priority: 3,
-                tags: ['SISTEMA', 'DIAGNOSTICO', 'DEVLOGGER', 'DIAGNOSTICO-HEURISTICO'],
-                summary: `Diagnóstico técnico consolidado a partir de ${totalCount} evento(s) capturado(s). Falha externa na API Gemini tratada com resiliência para não interromper a esteira.`,
-                suggested_stage_label: 'Em Análise',
-                technical_plan: `### 🚨 Diagnóstico & Causa Raiz dos Erros Identificados
-Diagnóstico técnico formulado em contingência pelo backend.
-> [!WARNING]
-> **Aviso de Credenciais**: A API do Google Gemini retornou falha (${err.message || 'Erro de autenticação'}). O card foi gerado e registrado com sucesso para manter a rastreabilidade da falha no Kanban.
-
-### 🎯 Objetivo da Correção
-- Estabilizar os serviços afetados e eliminar os erros reincidentes registrados no Antigravity DevLogger.
-- Validar ou atualizar a chave do Gemini no ambiente.
-
-### 🛠️ Arquivos & Modificações Recomendadas
-- \`server/src/api-gateway/index.js\`
-- \`server/src/automation-worker/agent.js\`
-- \`src/services/geminiService.ts\`
-
-### 🧪 Critérios de Aceite & Validação
-1. Ausência de logs repetitivos de erro.
-2. Criação fluida de cards no CRM Kanban sem travamento.`,
-                analyzed_count: {
-                    console: consoleLogs?.length || 0,
-                    server: serverErrors?.length || 0,
-                    gastrofood: gastrofoodLogs?.length || 0,
-                    asts: astsErrors?.length || 0
-                }
-            }
+            plan: buildHeuristicPlan(`A API do Google Gemini retornou erro (${err?.message || 'Falha de comunicação'}). Card gerado com segurança.`)
         });
     }
 });
@@ -951,9 +980,10 @@ router.post('/v1/crm/cards/create-ai-card', async (req, res) => {
  */
 const handleAnalyzeScreen = async (req, res) => {
     try {
-        const apiKey = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
-        if (!apiKey) {
-            return res.status(500).json({ ok: false, error: 'GEMINI_API_KEY não configurada no servidor.' });
+        const rawKey = req.body?.geminiApiKey || req.headers['x-gemini-api-key'] || process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
+        const apiKey = rawKey ? String(rawKey).replace(/^['"]|['"]$/g, '').trim() : '';
+        if (!apiKey || apiKey.startsWith('AQ.') || apiKey.length < 20) {
+            return res.status(400).json({ ok: false, error: 'GEMINI_API_KEY ausente ou no formato incorreto (deve iniciar com AIzaSy do Google AI Studio).' });
         }
 
         const {

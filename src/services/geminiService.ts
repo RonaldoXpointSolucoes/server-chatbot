@@ -23,6 +23,8 @@ class GeminiService {
     const isValidKey = (key: string | null | undefined): boolean => {
       if (!key || key.length < 15) return false;
       const clean = key.replace(/^['"]|['"]$/g, '').trim();
+      // Tokens de acesso OAuth (ex: iniciados com AQ.) não são API Keys válidas do Google Gemini
+      if (clean.startsWith('AQ.')) return false;
       return clean.length >= 20;
     };
 
@@ -1166,7 +1168,8 @@ DIRETRIZES TÉCNICAS OBRIGATÓRIAS:
           screenshotBase64: params.screenshotBase64,
           userNotes: params.userNotes,
           attachedImages: params.attachedImages || [],
-          boardName: params.boardName || 'Desenvolvimento & Roadmap'
+          boardName: params.boardName || 'Desenvolvimento & Roadmap',
+          geminiApiKey: this.getApiKey() || undefined
         })
       });
 

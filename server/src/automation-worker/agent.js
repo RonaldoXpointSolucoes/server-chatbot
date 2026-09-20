@@ -86,21 +86,39 @@ async function callWithGeminiRetry(fn, operationName = 'Gemini Operation', maxRe
     } catch (err) {
       lastError = err;
       const errMsg = err?.message || String(err);
+
+      // 1. Identificar falhas não-transitórias (credenciais, autenticação, conteúdo proibido)
+      const isAuthOrFatal = errMsg.includes('401') || 
+                            errMsg.includes('Unauthorized') || 
+                            errMsg.includes('ACCESS_TOKEN_TYPE_UNSUPPORTED') || 
+                            errMsg.includes('API_KEY_INVALID') || 
+                            errMsg.includes('API key not valid') || 
+                            errMsg.includes('403') || 
+                            errMsg.includes('PERMISSION_DENIED') ||
+                            errMsg.includes('PROHIBITED_CONTENT') ||
+                            errMsg.includes('INVALID_ARGUMENT') ||
+                            errMsg.includes('NOT_FOUND');
+
+      if (isAuthOrFatal) {
+        // Falha fatal de credencial/segurança: abortar imediatamente sem retry inútil e sem derrubar o circuit breaker
+        console.warn(`[AutomationWorker] Falha de autenticação/permissão na API Gemini em "${operationName}": ${errMsg.slice(0, 160)}`);
+        throw err;
+      }
+
+      // 2. Erros genuinamente transitórios de servidor ou rede
       const isTransient = errMsg.includes('500') || 
                           errMsg.includes('502') || 
                           errMsg.includes('503') || 
                           errMsg.includes('504') || 
                           errMsg.includes('429') || 
                           errMsg.includes('overloaded') || 
-                          errMsg.includes('fetch failed') || 
-                          errMsg.includes('Error fetching from') || 
-                          errMsg.includes('fetching from') || 
+                          errMsg.includes('RESOURCE_EXHAUSTED') ||
                           errMsg.includes('ECONNRESET') || 
                           errMsg.includes('ETIMEDOUT') || 
                           errMsg.includes('Internal error') || 
                           errMsg.includes('internal error') || 
-                          errMsg.includes('An internal error has occurred') || 
-                          errMsg.includes('RESOURCE_EXHAUSTED');
+                          errMsg.includes('An internal error has occurred') ||
+                          (errMsg.includes('fetch failed') && !errMsg.includes('401') && !errMsg.includes('403'));
 
       if (isTransient && attempt < maxRetries) {
         // Backoff exponencial com jitter randômico para evitar thundering herd
@@ -1329,16 +1347,48 @@ async function getCoordsFromAddress(cep, street, number, city, state) {
 
 class AutomationWorker {
     constructor() {
-        // As chaves são carregadas no ambiente via dotenv
         this.genAI = null;
+        this.genAICache = new Map();
+    }
+
+    getGenAI(customKey = null) {
+        let keyToUse = '';
+        if (customKey && typeof customKey === 'string') {
+            const clean = customKey.replace(/^['"]|['"]$/g, '').trim();
+            if (clean.length >= 20 && !clean.startsWith('AQ.')) {
+                keyToUse = clean;
+            }
+        }
+        if (!keyToUse) {
+            const rawKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+            const clean = rawKey ? rawKey.replace(/^['"]|['"]$/g, '').trim() : '';
+            if (clean.length >= 20 && !clean.startsWith('AQ.')) {
+                keyToUse = clean;
+            }
+        }
+
+        if (!keyToUse) {
+            return null;
+        }
+
+        if (!this.genAICache) {
+            this.genAICache = new Map();
+        }
+
+        if (!this.genAICache.has(keyToUse)) {
+            try {
+                this.genAICache.set(keyToUse, new GoogleGenerativeAI(keyToUse));
+            } catch (err) {
+                console.error('[AutomationWorker] Falha ao instanciar GoogleGenerativeAI com a chave fornecida:', err.message);
+                return null;
+            }
+        }
+
+        return this.genAICache.get(keyToUse);
     }
 
     init() {
-        const rawKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
-        const apiKey = rawKey ? rawKey.replace(/^['"]|['"]$/g, '') : '';
-        if (apiKey && !this.genAI) {
-            this.genAI = new GoogleGenerativeAI(apiKey);
-        }
+        this.genAI = this.getGenAI();
     }
 
     clearCardapioCache(tenantId) {
@@ -1624,13 +1674,13 @@ class AutomationWorker {
         if (eligibleBots.length === 1) return eligibleBots[0];
 
         try {
-            this.init();
-            if (!this.genAI) {
-                console.warn('[AutomationWorker] Gemini não inicializado no roteamento de bots. Usando fallback do primeiro bot.');
+            const activeGenAI = this.getGenAI() || this.genAI;
+            if (!activeGenAI) {
+                console.warn('[AutomationWorker] Gemini não inicializado no roteamento de bots (chave ausente ou inválida). Usando fallback do primeiro bot.');
                 return eligibleBots[0];
             }
 
-            const model = this.genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+            const model = activeGenAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
             let historyText = '';
             if (tenantId && conversationId) {
@@ -2605,7 +2655,14 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                 modelConfig.tools = [{ functionDeclarations }];
             }
 
-            const model = this.genAI.getGenerativeModel(modelConfig);
+            const tenantApiKey = companySettings?.gemini_api_key;
+            const activeGenAI = this.getGenAI(tenantApiKey) || this.genAI;
+            if (!activeGenAI) {
+                console.error(`[AutomationWorker] Chave do Gemini não configurada ou inválida para o tenant ${tenantId}.`);
+                return "Olá! Nosso assistente inteligente está temporariamente em manutenção técnica. Como posso te ajudar?";
+            }
+
+            const model = activeGenAI.getGenerativeModel(modelConfig);
 
             const chat = model.startChat({
                 history: history,
@@ -3783,6 +3840,9 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                     if (errMsg.includes('PROHIBITED_CONTENT')) {
                         console.warn(`[AutomationWorker] O processamento da conversa ${conversationId} foi bloqueado pela API do Gemini devido a conteúdo proibido (PROHIBITED_CONTENT). Mensagem do cliente: "${textMessage}"`);
                         finalResponseText = "Desculpe, não posso responder a essa pergunta devido às diretrizes de segurança de conteúdo do sistema.";
+                    } else if (errMsg.includes('401') || errMsg.includes('Unauthorized') || errMsg.includes('ACCESS_TOKEN_TYPE_UNSUPPORTED') || errMsg.includes('API_KEY_INVALID') || errMsg.includes('API key not valid')) {
+                        console.error(`[AutomationWorker] ⚠️ Erro de Autenticação/Chave Inválida na API Gemini para o tenant ${tenantId}: ${errMsg.slice(0, 160)}. Verifique a chave nas Configurações > Integrações ou no ambiente.`);
+                        finalResponseText = "Olá! Nosso assistente inteligente está em manutenção rápida no momento. Como posso te ajudar?";
                     } else if (errMsg.includes('500') || errMsg.includes('Internal error') || errMsg.includes('CircuitBreaker:OPEN') || errMsg.includes('An internal error has occurred')) {
                         console.warn(`[AutomationWorker] Oscilação de servidor 500 na API Gemini na conversa ${conversationId} (Iteração ${loopCount}): ${errMsg.slice(0, 150)}. Aplicando resposta de contingência amigável.`);
                         
@@ -3825,7 +3885,10 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                         const historyForDraft = passedHistory || [];
                         const formattedHist = historyForDraft.map(h => `${h.role === 'model' ? 'Bot' : 'Cliente'}: ${h.parts[0].text}`).join('\n') + `\nCliente: ${textMessage}\nBot: ${finalResponseText}`;
 
-                        const draftModel = this.genAI.getGenerativeModel({ 
+                        const draftGenAI = this.getGenAI(companySettings?.gemini_api_key) || this.genAI;
+                        if (!draftGenAI) return;
+
+                        const draftModel = draftGenAI.getGenerativeModel({ 
                             model: 'gemini-2.0-flash',
                             generationConfig: { responseMimeType: "application/json" }
                         });

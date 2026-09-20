@@ -1784,16 +1784,46 @@ export default function DevLogger() {
       setAiAnalysisStep('3/5 🧠 Processando diagnóstico profundo e causa raiz com Gemini...');
 
       // 5. Invocar a IA para diagnosticar e criar o plano com análise multimodal (texto + print + mídia do usuário)
-      const aiPlan = await geminiService.analyzeLogsAndGenerateFixPlan({
-        consoleLogs: activeLogsToAnalyze,
-        serverErrors: combinedServerErrors,
-        gastrofoodLogs: gastrofoodLogs,
-        astsErrors: testErrors,
-        screenshotBase64: screenshotBase64,
-        userNotes: options?.userNotes,
-        attachedImages: userImagesBase64,
-        boardName: 'Desenvolvimento & Roadmap'
-      });
+      let aiPlan: any = null;
+      try {
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('TIMEOUT_AI_ANALYSIS')), 12000)
+        );
+        aiPlan = await Promise.race([
+          geminiService.analyzeLogsAndGenerateFixPlan({
+            consoleLogs: activeLogsToAnalyze,
+            serverErrors: combinedServerErrors,
+            gastrofoodLogs: gastrofoodLogs,
+            astsErrors: testErrors,
+            screenshotBase64: screenshotBase64,
+            userNotes: options?.userNotes,
+            attachedImages: userImagesBase64,
+            boardName: 'Desenvolvimento & Roadmap'
+          }),
+          timeoutPromise
+        ]);
+      } catch (aiErr: any) {
+        console.warn('[DevLogger] Chamada de IA expirou ou falhou. Ativando síntese heurística resiliente:', aiErr?.message);
+        aiPlan = geminiService.synthesizeHeuristicDiagnosticPlan({
+          consoleLogs: activeLogsToAnalyze,
+          serverErrors: combinedServerErrors,
+          gastrofoodLogs: gastrofoodLogs,
+          astsErrors: testErrors,
+          userNotes: options?.userNotes,
+          boardName: 'Desenvolvimento & Roadmap'
+        });
+      }
+
+      if (!aiPlan) {
+        aiPlan = geminiService.synthesizeHeuristicDiagnosticPlan({
+          consoleLogs: activeLogsToAnalyze,
+          serverErrors: combinedServerErrors,
+          gastrofoodLogs: gastrofoodLogs,
+          astsErrors: testErrors,
+          userNotes: options?.userNotes,
+          boardName: 'Desenvolvimento & Roadmap'
+        });
+      }
 
       setAiAnalysisStep('4/5 🔍 Localizando quadro ChatBot CRM na X-Point Soluções...');
 
