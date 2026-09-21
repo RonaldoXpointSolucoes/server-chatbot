@@ -1411,6 +1411,10 @@ class AutomationWorker {
     // Tracker anti-repetição para contingência inteligente quando a IA estiver offline
     static contingencyTracker = new Map();
 
+    // Tracker anti-spam de aviso de chave Gemini ausente (rate-limit de 1h por tenant)
+    static noGeminiWarnTracker = new Map();
+    static routingFallbackWarnTracker = 0;
+
     async generateContingencyResponse({
         textMessage = '',
         companySettings = {},
@@ -1802,7 +1806,11 @@ class AutomationWorker {
         try {
             const activeGenAI = this.getGenAI() || this.genAI;
             if (!activeGenAI) {
-                console.warn('[AutomationWorker] Gemini não inicializado no roteamento de bots (chave ausente ou inválida). Usando fallback do primeiro bot.');
+                const now = Date.now();
+                if (now - AutomationAgent.routingFallbackWarnTracker > 60 * 60 * 1000) {
+                    AutomationAgent.routingFallbackWarnTracker = now;
+                    console.info('[AutomationWorker] Gemini não configurado no roteamento de bots (modo contingência ativo). Usando fallback do primeiro bot.');
+                }
                 return eligibleBots[0];
             }
 
@@ -2219,7 +2227,12 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
             const tenantApiKey = companySettings?.gemini_api_key;
             const activeGenAI = this.getGenAI(tenantApiKey) || this.genAI;
             if (!activeGenAI) {
-                console.warn(`[AutomationWorker] Chave Gemini não configurada ou inválida para o tenant ${tenantId}. Acionando contingência inteligente de atendimento.`);
+                const now = Date.now();
+                const lastWarn = AutomationAgent.noGeminiWarnTracker.get(tenantId) || 0;
+                if (now - lastWarn > 60 * 60 * 1000) {
+                    AutomationAgent.noGeminiWarnTracker.set(tenantId, now);
+                    console.info(`[AutomationWorker] Chave Gemini não configurada para o tenant ${tenantId}. Acionando contingência inteligente de atendimento.`);
+                }
                 return await this.generateContingencyResponse({
                     textMessage,
                     companySettings,

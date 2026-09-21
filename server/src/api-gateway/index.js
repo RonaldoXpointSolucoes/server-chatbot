@@ -646,37 +646,91 @@ router.post('/v1/ai/analyze-logs', async (req, res) => {
 
     const totalCount = (consoleLogs?.length || 0) + (serverErrors?.length || 0);
 
-    const buildHeuristicPlan = (warnMessage) => ({
-        title: '[Diagnóstico de Sistema] Estabilização e Correção de Erros Operacionais',
-        category: 'Correção',
-        priority: 3,
-        tags: ['SISTEMA', 'DIAGNOSTICO', 'DEVLOGGER', 'DIAGNOSTICO-HEURISTICO'],
-        summary: `Diagnóstico técnico consolidado a partir de ${totalCount} evento(s) capturado(s). ${warnMessage || 'Plano de contingência SRE aplicado com sucesso.'}`,
-        suggested_stage_label: 'Em Análise',
-        technical_plan: `### 🚨 Diagnóstico & Causa Raiz dos Erros Identificados
-Diagnóstico técnico formulado em contingência pelo backend a partir de ${totalCount} erro(s) e eventos capturados no DevLogger.
-> [!WARNING]
-> **Status da IA**: ${warnMessage || 'API Gemini externa em contingência. O card técnico foi gerado com sucesso para manter a esteira de desenvolvimento ativa no Kanban.'}
+    const buildHeuristicPlan = (warnMessage) => {
+        const allErrors = [
+            ...serverErrors.map(e => ({ msg: typeof e === 'object' ? (e.message || JSON.stringify(e)) : String(e), src: e.source || 'Servidor Node.js' })),
+            ...consoleLogs.map(l => ({ msg: typeof l === 'object' ? (l.message || JSON.stringify(l)) : String(l), src: l.source || 'Console Frontend' })),
+            ...(gastrofoodLogs || []).map(g => ({ msg: typeof g === 'object' ? (g.error || g.action || JSON.stringify(g)) : String(g), src: 'Gastrofood API' })),
+            ...(astsErrors || []).map(a => ({ msg: typeof a === 'object' ? (a.message || JSON.stringify(a)) : String(a), src: 'Auditoria ASTS' }))
+        ];
+
+        const hasBaileysError = allErrors.some(e => /baileys|socket|disconnect|qr|session|connection lost|restart required/i.test(e.msg));
+        const hasGeminiError = allErrors.some(e => /gemini|google|generativelanguage|circuitbreaker|401 unauthorized|api_key_invalid/i.test(e.msg));
+        const hasGastrofoodError = (gastrofoodLogs && gastrofoodLogs.length > 0) || allErrors.some(e => /gastrofood|cardapio|pedido|produtopdv/i.test(e.msg));
+        const hasDbError = allErrors.some(e => /supabase|postgres|pgrst|database|foreign key|null value/i.test(e.msg));
+        const hasNetworkError = allErrors.some(e => /failed to fetch|econnreset|etimedout|networkerror/i.test(e.msg));
+
+        let category = 'Correção';
+        let priority = 2;
+        let title = '[Diagnóstico de Sistema] Estabilização e Resiliência Operacional';
+        const tags = ['SISTEMA', 'DEVLOGGER', 'DIAGNOSTICO-HEURISTICO', 'IA-PLANO'];
+
+        if (hasBaileysError) {
+            title = '[WhatsApp Engine] Estabilização de Conexão Baileys e Gestão de Sockets';
+            tags.push('BAILEYS', 'WHATSAPP', 'SOCKET');
+            category = 'Chat';
+            priority = 3;
+        } else if (hasGastrofoodError) {
+            title = '[Integração Gastrofood] Tratamento de Falhas e Resiliência em Chamadas de API';
+            tags.push('GASTROFOOD', 'INTEGRACAO', 'RESILIENCIA');
+            category = 'Integração';
+            priority = 2;
+        } else if (hasDbError) {
+            title = '[Banco de Dados] Resolução de Erros de Consulta e Sincronização Supabase';
+            tags.push('SUPABASE', 'POSTGRES', 'DATABASE');
+            category = 'Backend / API';
+            priority = 3;
+        } else if (hasGeminiError) {
+            title = '[IA / Automação] Resolução de Credenciais Gemini e Proteção contra CircuitBreaker';
+            tags.push('GEMINI-AI', 'CREDENCIAIS', 'CIRCUIT-BREAKER');
+            category = 'Backend / API';
+            priority = 2;
+        } else if (hasNetworkError) {
+            title = '[Infraestrutura / Rede] Tratamento de Oscilação de Rede e Resiliência de Conexão';
+            tags.push('REDE', 'RESILIENCIA', 'INFRA');
+            category = 'Sistema / SaaS';
+            priority = 1;
+        }
+
+        const sampleErrors = allErrors.slice(0, 8).map(e => `- \`[${e.src}]\` ${e.msg.substring(0, 180)}`).join('\n') || '- Nenhum erro crítico isolado capturado; eventos de rotina arquivados.';
+        const summaryText = `Diagnóstico técnico consolidado a partir de ${allErrors.length} evento(s) capturado(s). ${warnMessage || 'Plano de contingência SRE formulado com base nas assinaturas de log identificadas.'}`;
+
+        return {
+            title,
+            category,
+            priority,
+            tags,
+            summary: summaryText,
+            suggested_stage_label: 'Em Análise',
+            technical_plan: `### 🚨 Diagnóstico & Causa Raiz dos Erros Identificados
+${summaryText}
+${warnMessage ? `\n> [!NOTE]\n> **Status da Integração IA**: ${warnMessage}` : ''}
 
 ### 🎯 Objetivo da Correção
-- Estabilizar os serviços afetados e eliminar os erros reincidentes registrados no Antigravity DevLogger.
-- Validar ou atualizar a chave do Gemini no ambiente (Google AI Studio: chave iniciada por AIzaSy...).
+- Estabilizar os serviços operacionais e eliminar ruídos repetitivos no Antigravity DevLogger.
+- Garantir a tolerância a falhas com fallbacks graciosos e preservação dos canais de atendimento.
+${userNotes ? `\n### 📝 Observações Adicionais do Desenvolvedor\n${userNotes}` : ''}
 
 ### 🛠️ Arquivos & Modificações Recomendadas
-- \`server/src/api-gateway/index.js\`
-- \`server/src/automation-worker/agent.js\`
-- \`src/services/geminiService.ts\`
+- \`server/src/api-gateway/index.js\` - Resiliência de rotas, tokens e tratamento defensivo.
+- \`server/src/automation-worker/agent.js\` - Proteção contra retries em cascata e rate-limit de alertas.
+- \`src/services/geminiService.ts\` - Gestão do modelo e contingência de atendimento.
 
 ### 🧪 Critérios de Aceite & Validação
-1. Ausência de logs repetitivos de erro.
-2. Criação fluida de cards no CRM Kanban sem travamento.`,
-        analyzed_count: {
-            console: consoleLogs?.length || 0,
-            server: serverErrors?.length || 0,
-            gastrofood: gastrofoodLogs?.length || 0,
-            asts: astsErrors?.length || 0
-        }
-    });
+1. Ausência de logs repetitivos com nível error ou warn no DevLogger.
+2. Tratamento defensivo em todas as requisições assíncronas e fallbacks graciosos.
+3. Criação fluida de cards no CRM Kanban com categorização fiel aos logs.
+
+### 📜 Extrato Relevante dos Logs Analisados
+${sampleErrors}`,
+            analyzed_count: {
+                console: consoleLogs?.length || 0,
+                server: serverErrors?.length || 0,
+                gastrofood: gastrofoodLogs?.length || 0,
+                asts: astsErrors?.length || 0
+            }
+        };
+    };
 
     try {
         // Resolução flexível da chave Gemini: corpo > cabeçalho > env backend
@@ -686,12 +740,12 @@ Diagnóstico técnico formulado em contingência pelo backend a partir de ${tota
         // Validação de formato: chaves inválidas (como tokens OAuth iniciados com AQ. ou chave vazia)
         const isInvalidFormat = !apiKey || apiKey.startsWith('AQ.') || apiKey.length < 20;
         if (isInvalidFormat) {
-            console.warn('[API Gateway] Chave Gemini ausente ou com formato incompatível (iniciada por AQ). Utilizando síntese heurística direta.');
+            console.info('[API Gateway] Chave Gemini ausente ou incompatível (iniciada por AQ). Utilizando síntese heurística especializada.');
             return res.json({
                 success: true,
                 isHeuristicFallback: true,
-                warning: 'Chave do Gemini ausente ou incompatível. Foi aplicado o diagnóstico heurístico resiliente.',
-                plan: buildHeuristicPlan('A chave configurada é incompatível com o Google AI Studio (requer prefixo AIzaSy...). O card foi formulado com base nos logs reais capturados.')
+                warning: 'Chave do Gemini ausente ou incompatível com o Google AI Studio. Foi aplicado o diagnóstico heurístico resiliente.',
+                plan: buildHeuristicPlan('Para síntese neural completa, configure uma chave oficial no Google AI Studio (iniciada por AIzaSy...). O card foi formulado com base nos logs reais capturados.')
             });
         }
 

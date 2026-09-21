@@ -826,9 +826,9 @@ export default function DevLogger() {
     } catch (err: any) {
       if (err.name !== 'AbortError') {
         telemetryErrorCountRef.current += 1;
-        // Evita poluir o console com 20+ avisos repetidos durante reinicializações ou oscilações de rede
-        if (telemetryErrorCountRef.current <= 1) {
-          console.warn('[DevLogger] Telemetria temporariamente indisponível no servidor:', err.message || err);
+        // Evita poluir o console com avisos repetidos durante oscilações de rede ou reinicializações do servidor
+        if (telemetryErrorCountRef.current <= 1 && typeof originalConsoleWarn === 'function') {
+          originalConsoleWarn.apply(console, ['[DevLogger] Telemetria em espera de sincronização com o servidor:', err.message || err]);
         }
       }
     } finally {
@@ -1111,6 +1111,8 @@ export default function DevLogger() {
       if (typeof args[0] === 'string' && (args[0].includes('@supabase/gotrue-js') || args[0].includes('auth-token') || args[0].includes('orphaned lock') || args[0].includes('lock:sb-'))) return;
       // Evitar ruídos operacionais rotineiros que não indicam bugs
       if (typeof args[0] === 'string' && (args[0].includes('[History Sync]') || args[0].includes('socket zumbi'))) return;
+      // Evitar que o próprio DevLogger capture avisos internos de polling de telemetria
+      if (typeof args[0] === 'string' && (args[0].includes('[DevLogger]') || args[0].includes('Telemetria temporariamente') || args[0].includes('Telemetria em espera'))) return;
       
       addLog({
         type: 'warn',
