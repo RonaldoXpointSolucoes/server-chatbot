@@ -433,7 +433,7 @@ async function orchestrateSimulate(eligibleBots, textMessage) {
     try {
         const rawKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
         const apiKey = rawKey ? rawKey.replace(/^['"]|['"]$/g, '').trim() : '';
-        if (!apiKey || apiKey.startsWith('AQ.') || apiKey.length < 20) {
+        if (!apiKey || apiKey.length < 20) {
             console.warn("[SimulateOrchestrator] Chave Gemini ausente ou incompatível. Usando fallback do primeiro robô.");
             return {
                 intent: 'fallback',
@@ -737,15 +737,15 @@ ${sampleErrors}`,
         const rawKey = geminiApiKey || req.headers['x-gemini-api-key'] || process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
         const apiKey = rawKey ? String(rawKey).replace(/^['"]|['"]$/g, '').trim() : '';
         
-        // Validação de formato: chaves inválidas (como tokens OAuth iniciados com AQ. ou chave vazia)
-        const isInvalidFormat = !apiKey || apiKey.startsWith('AQ.') || apiKey.length < 20;
+        // Validação de formato: chaves vazias ou muito curtas
+        const isInvalidFormat = !apiKey || apiKey.length < 20;
         if (isInvalidFormat) {
-            console.info('[API Gateway] Chave Gemini ausente ou incompatível (iniciada por AQ). Utilizando síntese heurística especializada.');
+            console.info('[API Gateway] Chave Gemini ausente ou muito curta. Utilizando síntese heurística especializada.');
             return res.json({
                 success: true,
                 isHeuristicFallback: true,
-                warning: 'Chave do Gemini ausente ou incompatível com o Google AI Studio. Foi aplicado o diagnóstico heurístico resiliente.',
-                plan: buildHeuristicPlan('Para síntese neural completa, configure uma chave oficial no Google AI Studio (iniciada por AIzaSy...). O card foi formulado com base nos logs reais capturados.')
+                warning: 'Chave do Gemini ausente ou não configurada. Foi aplicado o diagnóstico heurístico resiliente.',
+                plan: buildHeuristicPlan('Para síntese neural completa, configure uma chave oficial no Google AI Studio (iniciada por AQ.... ou AIzaSy...). O card foi formulado com base nos logs reais capturados.')
             });
         }
 
@@ -1036,8 +1036,8 @@ const handleAnalyzeScreen = async (req, res) => {
     try {
         const rawKey = req.body?.geminiApiKey || req.headers['x-gemini-api-key'] || process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
         const apiKey = rawKey ? String(rawKey).replace(/^['"]|['"]$/g, '').trim() : '';
-        if (!apiKey || apiKey.startsWith('AQ.') || apiKey.length < 20) {
-            return res.status(400).json({ ok: false, error: 'GEMINI_API_KEY ausente ou no formato incorreto (deve iniciar com AIzaSy do Google AI Studio).' });
+        if (!apiKey || apiKey.length < 20) {
+            return res.status(400).json({ ok: false, error: 'GEMINI_API_KEY ausente ou no formato incorreto (deve ser uma chave válida do Google AI Studio iniciando com AQ.... ou AIzaSy...).' });
         }
 
         const {

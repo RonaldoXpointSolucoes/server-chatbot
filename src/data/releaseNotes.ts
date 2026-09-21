@@ -20,6 +20,37 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.5.4',
+    date: '2026-09-21',
+    summary: 'Suporte Oficial às Chaves de Autenticação AQ. do Google AI Studio, Correção Ortográfica e Resiliência da Magia da IA',
+    notes: [
+      {
+        id: '7.5.4-1',
+        category: 'features',
+        title: 'Suporte ao Novo Padrão de Chaves AQ. do Google AI Studio',
+        description: 'Compatibilidade completa e nativa com as novas chaves de autenticação de alta segurança do Google AI Studio (prefixo AQ.), enviando cabeçalhos oficiais x-goog-api-key.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.5.4-2',
+        category: 'improvements',
+        title: 'Validação Fluida de Chave Gemini nas Configurações',
+        description: 'Eliminação de bloqueios indevidos no salvamento de chaves nas Configurações da Empresa, com mensagens visuais orientativas e suporte simultâneo aos formatos AQ. e AIzaSy.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      },
+      {
+        id: '7.5.4-3',
+        category: 'fixes',
+        title: 'Desbloqueio dos Recursos de Magia da IA e Correção Ortográfica',
+        description: 'Correção no fluxo de carregamento da API Key que impedia a utilização de "Corrigir Gramática & Ortografia", "Focar em Vendas" e demais ações inteligentes no chat.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      }
+    ]
+  },
+  {
     version: '7.5.3',
     date: '2026-09-20',
     summary: 'Blindagem de Segurança e Desacoplamento da Gemini API, Proteção de Custos e Eliminação de Chaves no Frontend',

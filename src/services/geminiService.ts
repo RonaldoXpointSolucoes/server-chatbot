@@ -23,8 +23,6 @@ class GeminiService {
     const isValidKey = (key: string | null | undefined): boolean => {
       if (!key || key.length < 15) return false;
       const clean = key.replace(/^['"]|['"]$/g, '').trim();
-      // Tokens de acesso OAuth (ex: iniciados com AQ.) não são API Keys válidas do Google Gemini
-      if (clean.startsWith('AQ.')) return false;
       return clean.length >= 20;
     };
 
@@ -221,10 +219,14 @@ Nunca esqueça dessa formatação JSON quando for a hora da entrega. Até lá, a
         ]
       };
 
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${this.getApiKey()}`;
+      const apiKey = this.getApiKey();
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
       const response = await fetch(endpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey
+        },
         body: JSON.stringify(payload)
       });
 

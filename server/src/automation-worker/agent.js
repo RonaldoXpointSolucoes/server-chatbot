@@ -626,7 +626,8 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
                         const res = await fetch(cardapioUrl, {
                             method: 'POST',
                             headers,
-                            body: JSON.stringify(bodyObj)
+                            body: JSON.stringify(bodyObj),
+                            signal: AbortSignal.timeout(20000)
                         });
 
                         if (res.ok) {
@@ -962,7 +963,8 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
                             'Content-Type': 'application/json',
                             'Authorization': cardapioToken.startsWith('Bearer ') ? cardapioToken : `Bearer ${cardapioToken}`
                         },
-                        body: JSON.stringify(stepsPayload)
+                        body: JSON.stringify(stepsPayload),
+                        signal: AbortSignal.timeout(20000)
                     });
                     
                     if (resSteps.ok) {
@@ -1355,14 +1357,14 @@ class AutomationWorker {
         let keyToUse = '';
         if (customKey && typeof customKey === 'string') {
             const clean = customKey.replace(/^['"]|['"]$/g, '').trim();
-            if (clean.length >= 20 && !clean.startsWith('AQ.')) {
+            if (clean.length >= 20) {
                 keyToUse = clean;
             }
         }
         if (!keyToUse) {
             const rawKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
             const clean = rawKey ? rawKey.replace(/^['"]|['"]$/g, '').trim() : '';
-            if (clean.length >= 20 && !clean.startsWith('AQ.')) {
+            if (clean.length >= 20) {
                 keyToUse = clean;
             }
         }
@@ -1807,8 +1809,8 @@ class AutomationWorker {
             const activeGenAI = this.getGenAI() || this.genAI;
             if (!activeGenAI) {
                 const now = Date.now();
-                if (now - AutomationAgent.routingFallbackWarnTracker > 60 * 60 * 1000) {
-                    AutomationAgent.routingFallbackWarnTracker = now;
+                if (now - AutomationWorker.routingFallbackWarnTracker > 60 * 60 * 1000) {
+                    AutomationWorker.routingFallbackWarnTracker = now;
                     console.info('[AutomationWorker] Gemini não configurado no roteamento de bots (modo contingência ativo). Usando fallback do primeiro bot.');
                 }
                 return eligibleBots[0];
@@ -2073,10 +2075,15 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
 
     async generateResponse({ tenantId, instanceId, conversationId, contactId, jid, textMessage, botId, botSettings, sock, botDelay, botInstructions, history: passedHistory }) {
         return tenantStorage.run(tenantId, async () => {
+        let companyName = '';
+        let companySettings = {};
+        let contactInfo = null;
+        let vars = null;
+        let isClosed = false;
         try {
             this.init();
 
-            console.log(`[AutomationWorker] Gerando resposta para o bot: ${botSettings.name} | Tenant: ${tenantId}`);
+            console.log(`[AutomationWorker] Gerando resposta para o bot: ${botSettings?.name || 'Padrão'} | Tenant: ${tenantId}`);
             try {
                 const { default: sManager } = await import('../session-manager/index.js');
                 sManager.logMonitoringEvent(instanceId, 'bot_generation_start', { 
@@ -2087,8 +2094,8 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
             } catch (logErr) {}
 
             // Carrega as variáveis globais da empresa
-            let companyName = '';
-            let companySettings = {};
+            companyName = '';
+            companySettings = {};
             try {
                 const { data: companyData } = await supabase
                     .from('companies')
@@ -2111,7 +2118,7 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
             }
 
             // Carrega os dados do contato se houver
-            let contactInfo = null;
+            contactInfo = null;
             if (contactId) {
                 try {
                     const { data: contactData } = await supabase
@@ -2145,7 +2152,7 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                 }
             }
 
-            const vars = {
+            vars = {
                 nomeIa: companySettings.nome_ia || companyName || 'Luna',
                 endereco: companySettings.endereco || '',
                 horarioFuncionamento: companySettings.horario_funcionamento || '',
@@ -2157,7 +2164,7 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
             };
 
             // Determinar se a empresa está fechada no momento
-            let isClosed = false;
+            isClosed = false;
             let nomeDiaAtual = 'Segunda-feira';
             let currentTimeStr = '00:00';
             
@@ -2228,9 +2235,9 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
             const activeGenAI = this.getGenAI(tenantApiKey) || this.genAI;
             if (!activeGenAI) {
                 const now = Date.now();
-                const lastWarn = AutomationAgent.noGeminiWarnTracker.get(tenantId) || 0;
+                const lastWarn = AutomationWorker.noGeminiWarnTracker.get(tenantId) || 0;
                 if (now - lastWarn > 60 * 60 * 1000) {
-                    AutomationAgent.noGeminiWarnTracker.set(tenantId, now);
+                    AutomationWorker.noGeminiWarnTracker.set(tenantId, now);
                     console.info(`[AutomationWorker] Chave Gemini não configurada para o tenant ${tenantId}. Acionando contingência inteligente de atendimento.`);
                 }
                 return await this.generateContingencyResponse({
@@ -4198,10 +4205,19 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
                 const { default: sManager } = await import('../session-manager/index.js');
                 sManager.logMonitoringEvent(instanceId, 'bot_generation_failed', { 
                     jid, 
-                    error: error.message
+                    error: error?.message || String(error)
                 }).catch(()=>{});
             } catch (logErr) {}
-            return await this.generateContingencyResponse({ textMessage, companySettings, companyName, conversationId, contactInfo, tenantId, isClosed, vars });
+            return await this.generateContingencyResponse({ 
+                textMessage: textMessage || '', 
+                companySettings: companySettings || {}, 
+                companyName: companyName || '', 
+                conversationId: conversationId || null, 
+                contactInfo: contactInfo || null, 
+                tenantId: tenantId || null, 
+                isClosed: !!isClosed, 
+                vars: vars || null 
+            });
         }
         });
     }
@@ -4505,4 +4521,6 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
     }
 }
 
+export const AutomationAgent = AutomationWorker;
+export { AutomationWorker };
 export default new AutomationWorker();
