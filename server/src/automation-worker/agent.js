@@ -1408,6 +1408,132 @@ class AutomationWorker {
     // Tracker para garantir disparo ÚNICO de aviso de impressão por conversa (evita repetições e loops)
     static avisoImpressaoSentTracker = new Map();
 
+    // Tracker anti-repetição para contingência inteligente quando a IA estiver offline
+    static contingencyTracker = new Map();
+
+    async generateContingencyResponse({
+        textMessage = '',
+        companySettings = {},
+        companyName = '',
+        conversationId = null,
+        contactInfo = null,
+        tenantId = null,
+        isClosed = false,
+        vars = null
+    }) {
+        try {
+            // Se companySettings ou companyName não foram passados, carrega do Supabase
+            if (!companySettings || Object.keys(companySettings).length === 0) {
+                if (tenantId) {
+                    try {
+                        const { data: comp } = await supabase
+                            .from('companies')
+                            .select('name, settings')
+                            .eq('id', tenantId)
+                            .maybeSingle();
+                        if (comp) {
+                            companyName = comp.name || companyName || '';
+                            companySettings = comp.settings || {};
+                        }
+                    } catch (e) {}
+                }
+            }
+
+            const businessName = companySettings?.nome_ia || companyName || 'nosso estabelecimento';
+            const linkCardapio = (companySettings?.link_cardapio || vars?.linkCardapio || '').replace(/\/+$/, '').trim();
+            const rawMsg = (textMessage || '').trim();
+            const normalized = rawMsg
+                .toLowerCase()
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .trim();
+
+            // Mecanismo Anti-Looping / Anti-Repetição (janela de 3 minutos)
+            const now = Date.now();
+            let tracker = conversationId ? AutomationWorker.contingencyTracker.get(conversationId) : null;
+            if (tracker && (now - tracker.lastTime < 180000)) {
+                tracker.count += 1;
+                tracker.lastTime = now;
+            } else if (conversationId) {
+                tracker = { count: 1, lastTime: now };
+                AutomationWorker.contingencyTracker.set(conversationId, tracker);
+            }
+
+            // Se o cliente já recebeu 3 respostas de contingência consecutivas sem IA,
+            // transfere suavemente para atendente humano e pausa a IA para evitar atrito
+            if (tracker && tracker.count >= 3 && conversationId) {
+                console.log(`[AutomationWorker - Contingência] Limite de contingência atingido para conversa ${conversationId}. Pausando IA e transferindo para humano.`);
+                supabase.from('conversations')
+                    .update({ status: 'open', ai_paused: true })
+                    .eq('id', conversationId)
+                    .catch(err => console.warn('[Contingency] Erro ao pausar IA após repetições:', err?.message));
+
+                return `Notei suas mensagens! Para te dar um atendimento ágil e personalizado, já transferi a conversa para nossa equipe e um atendente continuará por aqui em instantes. ⏳`;
+            }
+
+            // 1. INTENÇÃO DE ATENDIMENTO HUMANO / SUPORTE
+            const isHumanIntent = /\b(atendimento|atendente|humano|falar com (alguem|atendente|pessoa|humano|suporte|operador)|chamar atendente|preciso de ajuda|suporte)\b/i.test(normalized);
+            if (isHumanIntent) {
+                if (conversationId) {
+                    supabase.from('conversations')
+                        .update({ status: 'open', ai_paused: true })
+                        .eq('id', conversationId)
+                        .catch(err => console.warn('[Contingency] Erro ao pausar IA para atendimento humano:', err?.message));
+                }
+                return `Com certeza! Já transferi seu atendimento para nossa equipe humana. Em instantes um de nossos atendentes irá continuar sua conversa por aqui! ⏳`;
+            }
+
+            // 2. INTENÇÃO DE CARDÁPIO / PRODUTOS / PREÇOS
+            const isCardapioIntent = /\b(cardapio|cardap|menu|catalogo|precos?|produtos?|lanches?|pizzas?|opcoes|sabores|o que tem|o que voces tem|manda o cardapio|ver o cardapio|enviar o cardapio|me manda o cardapio|pode me mandar o cardapio|poderia me enviar o cardapio)\b/i.test(normalized);
+            if (isCardapioIntent) {
+                if (linkCardapio) {
+                    return `Olá! 👋 Segue o nosso cardápio digital completo para você conferir nossos produtos e promoções:\n\n👉 ${linkCardapio}\n\nFique à vontade para escolher seus favoritos! Se precisar de ajuda para fechar o pedido ou tiver alguma dúvida, é só me avisar por aqui. 😊`;
+                }
+                return `Olá! Nosso cardápio está disponível e ficaremos felizes em te atender. Em que posso te ajudar com o seu pedido agora?`;
+            }
+
+            // 3. INTENÇÃO DE FAZER PEDIDO / COMPRAR
+            const isOrderIntent = /\b(fazer pedido|fazer um pedido|fazer meu pedido|quero pedir|como faco pedido|quero comprar|pedir agora|fechar pedido|finalizar pedido|realizar pedido)\b/i.test(normalized);
+            if (isOrderIntent) {
+                if (linkCardapio) {
+                    return `Para fazer seu pedido de forma rápida e prática, basta acessar nosso link oficial:\n\n👉 ${linkCardapio}\n\nLá você escolhe os itens, informa o endereço e a forma de pagamento em poucos segundos! Se preferir, pode digitar seus itens por aqui também. 🍔🍕`;
+                }
+                return `Perfeito! Você pode me informar por aqui os itens que gostaria de pedir, com quantidade e eventuais adicionais, por favor?`;
+            }
+
+            // 4. INTENÇÃO DE HORÁRIO DE FUNCIONAMENTO
+            const isHorarioIntent = /\b(horario|horarios|que horas|abre|aberto|abrem|fechado|fecham|funcionamento|estao abertos|hora de abrir)\b/i.test(normalized);
+            if (isHorarioIntent) {
+                const horarioStr = companySettings?.horario_funcionamento || vars?.horarioFuncionamento;
+                if (horarioStr) {
+                    return `Nosso horário de funcionamento é:\n\n⏰ ${horarioStr}\n\nPosso te ajudar com um pedido ou alguma dúvida?`;
+                }
+                return `Estamos à disposição para te atender! Em que posso te ajudar hoje?`;
+            }
+
+            // 5. INTENÇÃO DE ENDEREÇO / LOCALIZAÇÃO
+            const isEnderecoIntent = /\b(endereco|onde fica|onde estao|localizacao|onde e|qual o endereco|qual endereco|ponto de referencia)\b/i.test(normalized);
+            if (isEnderecoIntent) {
+                const enderecoStr = companySettings?.endereco || vars?.endereco;
+                const mapsStr = companySettings?.google_maps || vars?.googleMaps;
+                if (enderecoStr) {
+                    return `Nosso endereço é:\n\n📍 ${enderecoStr}${mapsStr ? `\n🗺️ Veja no mapa: ${mapsStr}` : ''}\n\nFique à vontade para nos visitar ou pedir para entrega!`;
+                }
+            }
+
+            // 6. SAUDAÇÃO OU DEFAULT COM OPÇÕES
+            if (linkCardapio) {
+                return `Olá! Seja muito bem-vindo(a) à ${businessName}! 👋\n\nComo posso te ajudar hoje?\n1️⃣ Ver nosso cardápio: ${linkCardapio}\n2️⃣ Fazer um pedido\n3️⃣ Falar com um atendente humano\n\nÉ só me responder por aqui!`;
+            }
+
+            return `Olá! Seja muito bem-vindo(a) à ${businessName}! 👋\n\nComo posso te ajudar agora? Você pode nos pedir o cardápio, fazer um pedido ou solicitar atendimento com a nossa equipe.`;
+
+        } catch (e) {
+            console.error('[AutomationWorker] Erro ao gerar resposta de contingência:', e);
+            return `Olá! Como posso te ajudar hoje? Digite sua dúvida ou peça para falar com um atendente!`;
+        }
+    }
+
     async triggerAvisoImpressaoSeAtivo({ tenantId, conversationId, contactInfo, jid, companySettings, motivo, textMessage }) {
         try {
             const estab = (companySettings?.aviso_impressao_estabelecimento || '').trim();
@@ -1889,8 +2015,14 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
             }
 
             if (!responseText || typeof responseText !== 'string' || responseText.trim() === '') {
-                console.warn(`[AutomationWorker] ⚠️ Resposta da IA vazia ou nula para a conversa ${key}. Aplicando resposta amigável de contingência em vez de silenciar.`);
-                responseText = "Estou consultando nosso sistema para te atender da melhor forma. Como posso te ajudar agora?";
+                console.warn(`[AutomationWorker] ⚠️ Resposta da IA vazia ou nula para a conversa ${key}. Aplicando resposta amigável de contingência inteligente.`);
+                responseText = await this.generateContingencyResponse({
+                    textMessage: combinedText,
+                    tenantId: job.params.tenantId,
+                    conversationId: job.params.conversationId,
+                    contactId: job.params.contactId,
+                    jid: job.params.jid
+                });
             }
 
             // Se novas mensagens chegaram durante a geração, descarta e agenda nova geração com todo o texto acumulado
@@ -1935,10 +2067,6 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
         return tenantStorage.run(tenantId, async () => {
         try {
             this.init();
-             if (!this.genAI) {
-                 console.error("[AutomationWorker] GEMINI_API_KEY não configurada ou vazia. Não é possível gerar resposta da IA.");
-                 return null;
-             }
 
             console.log(`[AutomationWorker] Gerando resposta para o bot: ${botSettings.name} | Tenant: ${tenantId}`);
             try {
@@ -2086,6 +2214,23 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                     .replace(/\[LINK_YOUTUBE\]/g, vars.youtube)
                     .replace(/\[LINK_TIKTOK\]/g, vars.tiktok);
             };
+ 
+            // Valida se há instância ativa do Google Generative AI (chave personalizada da empresa ou chave global do servidor)
+            const tenantApiKey = companySettings?.gemini_api_key;
+            const activeGenAI = this.getGenAI(tenantApiKey) || this.genAI;
+            if (!activeGenAI) {
+                console.warn(`[AutomationWorker] Chave Gemini não configurada ou inválida para o tenant ${tenantId}. Acionando contingência inteligente de atendimento.`);
+                return await this.generateContingencyResponse({
+                    textMessage,
+                    companySettings,
+                    companyName,
+                    conversationId,
+                    contactInfo,
+                    tenantId,
+                    isClosed,
+                    vars
+                });
+            }
 
             // Query Expansion para buscas RAG
             let expandedQueryText = textMessage;
@@ -2655,12 +2800,7 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                 modelConfig.tools = [{ functionDeclarations }];
             }
 
-            const tenantApiKey = companySettings?.gemini_api_key;
-            const activeGenAI = this.getGenAI(tenantApiKey) || this.genAI;
-            if (!activeGenAI) {
-                console.error(`[AutomationWorker] Chave do Gemini não configurada ou inválida para o tenant ${tenantId}.`);
-                return "Olá! Nosso assistente inteligente está temporariamente em manutenção técnica. Como posso te ajudar?";
-            }
+
 
             const model = activeGenAI.getGenerativeModel(modelConfig);
 
@@ -3840,17 +3980,17 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                     if (errMsg.includes('PROHIBITED_CONTENT')) {
                         console.warn(`[AutomationWorker] O processamento da conversa ${conversationId} foi bloqueado pela API do Gemini devido a conteúdo proibido (PROHIBITED_CONTENT). Mensagem do cliente: "${textMessage}"`);
                         finalResponseText = "Desculpe, não posso responder a essa pergunta devido às diretrizes de segurança de conteúdo do sistema.";
-                    } else if (errMsg.includes('401') || errMsg.includes('Unauthorized') || errMsg.includes('ACCESS_TOKEN_TYPE_UNSUPPORTED') || errMsg.includes('API_KEY_INVALID') || errMsg.includes('API key not valid')) {
-                        console.error(`[AutomationWorker] ⚠️ Erro de Autenticação/Chave Inválida na API Gemini para o tenant ${tenantId}: ${errMsg.slice(0, 160)}. Verifique a chave nas Configurações > Integrações ou no ambiente.`);
-                        finalResponseText = "Olá! Nosso assistente inteligente está em manutenção rápida no momento. Como posso te ajudar?";
+                    } else if (errMsg.includes('401') || errMsg.includes('Unauthorized') || errMsg.includes('ACCESS_TOKEN_TYPE_UNSUPPORTED') || errMsg.includes('API_KEY_INVALID') || errMsg.includes('API key not valid') || errMsg.includes('403') || errMsg.includes('PERMISSION_DENIED') || errMsg.includes('leaked')) {
+                        console.error(`[AutomationWorker] ⚠️ Erro de Autenticação/Chave Inválida na API Gemini para o tenant ${tenantId}: ${errMsg.slice(0, 160)}. Executando contingência inteligente.`);
+                        finalResponseText = await this.generateContingencyResponse({ textMessage, companySettings, companyName, conversationId, contactInfo, tenantId, isClosed, vars });
                     } else if (errMsg.includes('500') || errMsg.includes('Internal error') || errMsg.includes('CircuitBreaker:OPEN') || errMsg.includes('An internal error has occurred')) {
                         console.warn(`[AutomationWorker] Oscilação de servidor 500 na API Gemini na conversa ${conversationId} (Iteração ${loopCount}): ${errMsg.slice(0, 150)}. Aplicando resposta de contingência amigável.`);
                         
                         const hadCardapio = toolExecutionHistory.some(t => t.toolName === 'Consultar_produtos_cardapio');
-                        if (hadCardapio) {
-                            finalResponseText = "Consultei as opções do nosso cardápio para você! Me diga, qual item você gostaria de pedir?";
+                        if (hadCardapio && vars?.linkCardapio) {
+                            finalResponseText = `Consultei as opções do nosso cardápio para você! Você também pode conferir tudo pelo link: ${vars.linkCardapio}\nQual item você gostaria de pedir?`;
                         } else {
-                            finalResponseText = "Estou consultando nosso sistema para te atender da melhor forma. Como posso te ajudar agora?";
+                            finalResponseText = await this.generateContingencyResponse({ textMessage, companySettings, companyName, conversationId, contactInfo, tenantId, isClosed, vars });
                         }
                     } else {
                         const errorDetail = `[AutomationWorker] Erro no loop de função (Iteração ${loopCount}) para conversa ${conversationId}:\n` +
@@ -3860,7 +4000,7 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                             JSON.stringify(toolExecutionHistory, null, 2);
 
                         console.error(errorDetail);
-                        finalResponseText = "Desculpe, ocorreu uma pequena instabilidade técnica no momento. Pode tentar novamente em instantes?";
+                        finalResponseText = await this.generateContingencyResponse({ textMessage, companySettings, companyName, conversationId, contactInfo, tenantId, isClosed, vars });
                     }
                     keepLooping = false;
                 }
@@ -4033,7 +4173,7 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
             }
 
             if (!finalResponseText || typeof finalResponseText !== 'string' || finalResponseText.trim() === '') {
-                finalResponseText = "Estou consultando nosso sistema para te atender da melhor forma. Como posso te ajudar agora?";
+                finalResponseText = await this.generateContingencyResponse({ textMessage, companySettings, companyName, conversationId, contactInfo, tenantId, isClosed, vars });
             }
 
             finalResponseText = formatAiMessageForWhatsApp(finalResponseText);
@@ -4048,7 +4188,7 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
                     error: error.message
                 }).catch(()=>{});
             } catch (logErr) {}
-            return "Desculpe, tive uma pequena oscilação técnica momentânea. Como posso te ajudar?";
+            return await this.generateContingencyResponse({ textMessage, companySettings, companyName, conversationId, contactInfo, tenantId, isClosed, vars });
         }
         });
     }

@@ -80,9 +80,19 @@ export default function Integrations() {
   }, [geminiApiKeyFromSettings]);
 
   const handleSaveGeminiKey = async () => {
+    const trimmedKey = geminiKeyInput.trim();
+    if (trimmedKey && trimmedKey.startsWith('AQ.')) {
+      alert('Atenção: A chave inserida começa com "AQ.", que é um token de sessão interno incompatível com a API do Google Gemini. Por favor, gere uma chave de API oficial no Google AI Studio (iniciando por "AIzaSy...").');
+      return;
+    }
+    if (trimmedKey && (!trimmedKey.startsWith('AIzaSy') || trimmedKey.length < 25)) {
+      if (!confirm('A chave informada não parece seguir o padrão oficial do Google AI Studio (prefixo "AIzaSy..."). Deseja salvar mesmo assim?')) {
+        return;
+      }
+    }
     setIsSavingGeminiKey(true);
     try {
-      await updateTenantSettings({ gemini_api_key: geminiKeyInput.trim() });
+      await updateTenantSettings({ gemini_api_key: trimmedKey });
       alert('Chave do Gemini atualizada com sucesso!');
     } catch (e) {
       alert('Erro ao atualizar a chave do Gemini.');
@@ -786,15 +796,15 @@ fetch("${ENGINE_URL}/message/sendMedia", requestOptions)
                   <Sparkles size={18} />
                 </div>
                 <div>
-                  <h3 className="font-semibold text-white tracking-tight">Chave de API do Gemini (I.A.)</h3>
-                  <p className="text-xs text-slate-400">Configure sua chave individual para o recurso de Magia da IA</p>
+                  <h3 className="font-semibold text-white tracking-tight">Chave de API do Google Gemini (I.A.)</h3>
+                  <p className="text-xs text-slate-400">Alimenta o Robô de Atendimento no WhatsApp e os recursos de Magia da I.A.</p>
                 </div>
               </div>
 
               <div className="space-y-4 mt-5">
                 <p className="text-xs text-slate-400 leading-relaxed">
-                  Para utilizar a Magia da IA no painel de atendimento (melhorar respostas, analisar conversações, etc.), você precisa de uma chave de API do Gemini. 
-                  Você pode obter uma chave gratuita ou de uso pago em <a href="https://aistudio.google.com/" target="_blank" rel="noopener noreferrer" className="text-[#00a884] hover:underline font-semibold inline-flex items-center gap-0.5">Google AI Studio <ExternalLink size={10} className="inline" /></a>.
+                  Para que a I.A responda às conversas dos clientes no WhatsApp de forma personalizada e utilize as ferramentas inteligentes, você pode configurar uma chave individual de API do Gemini. 
+                  Gere sua chave gratuitamente no <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-[#00a884] hover:underline font-semibold inline-flex items-center gap-0.5">Google AI Studio <ExternalLink size={10} className="inline" /></a> (a chave oficial sempre inicia com <code className="text-emerald-300 font-mono text-[11px] bg-emerald-950/40 px-1 py-0.5 rounded">AIzaSy...</code>).
                 </p>
 
                 <div className="flex items-center gap-2">
@@ -824,15 +834,20 @@ fetch("${ENGINE_URL}/message/sendMedia", requestOptions)
                   </button>
                 </div>
 
-                {geminiKeyInput.trim() ? (
+                {geminiKeyInput.trim().startsWith('AQ.') ? (
+                  <div className="flex items-center gap-2 text-xs text-red-400 bg-red-500/10 border border-red-500/20 px-3 py-2.5 rounded-xl leading-relaxed">
+                    <AlertTriangle size={14} className="shrink-0 text-red-400" />
+                    <span>Atenção: A chave atual inicia com &quot;AQ.&quot; (token interno inválido). As chaves da API do Gemini devem ser geradas no Google AI Studio e começam com &quot;AIzaSy...&quot;.</span>
+                  </div>
+                ) : geminiKeyInput.trim() ? (
                   <div className="flex items-center gap-2 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-2.5 rounded-xl leading-relaxed">
                     <Check size={14} className="shrink-0" />
-                    <span>Sua chave de API personalizada está ativa e sendo usada com prioridade sobre a chave padrão.</span>
+                    <span>Sua chave de API personalizada está configurada e sendo usada com prioridade máxima para esta empresa.</span>
                   </div>
                 ) : (
                   <div className="flex items-center gap-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 px-3 py-2.5 rounded-xl leading-relaxed">
                     <AlertTriangle size={14} className="shrink-0" />
-                    <span>Nenhuma chave personalizada configurada. A aplicação está usando a chave padrão do sistema (definida no servidor).</span>
+                    <span>Nenhuma chave personalizada configurada. A aplicação está usando a chave padrão do sistema (ou contingência inteligente de cardápio e atendimento).</span>
                   </div>
                 )}
               </div>
