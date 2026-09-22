@@ -27,7 +27,7 @@ export function BotModal({ isOpen, onClose, onSave, botToEdit, availableBots = [
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [systemPrompt, setSystemPrompt] = useState('Você acha que é um assistente...');
-  const [model, setModel] = useState('gemini-1.5-pro');
+  const [model, setModel] = useState('gemini-2.0-flash');
   const [temperature, setTemperature] = useState(0.7);
   const [isActive, setIsActive] = useState(true);
   
@@ -411,7 +411,7 @@ export function BotModal({ isOpen, onClose, onSave, botToEdit, availableBots = [
         setName(botToEdit.name || '');
         setDescription(botToEdit.description || '');
         setSystemPrompt(botToEdit.systemPrompt || 'Você é um agente prestativo...');
-        setModel(botToEdit.model || 'gemini-1.5-pro');
+        setModel(botToEdit.model || 'gemini-2.0-flash');
         setTemperature(botToEdit.temperature || 0.7);
         setIsActive(botToEdit.status === 'active');
         setTestMode(botToEdit.test_mode || false);
@@ -454,7 +454,7 @@ export function BotModal({ isOpen, onClose, onSave, botToEdit, availableBots = [
         setName(initialTemplate.name || '');
         setDescription(initialTemplate.description || '');
         setSystemPrompt(initialTemplate.systemPrompt || '');
-        setModel(initialTemplate.model || 'gemini-1.5-pro');
+        setModel(initialTemplate.model || 'gemini-2.0-flash');
         setTemperature(initialTemplate.temperature || 0.7);
         setIsActive(true);
         setTestMode(false);
@@ -480,7 +480,7 @@ export function BotModal({ isOpen, onClose, onSave, botToEdit, availableBots = [
         setName('');
         setDescription('');
         setSystemPrompt('Você é um assistente AI focado em vendas e suporte humanizado. Você deve ser sempre prestativo, claro e objetivo.');
-        setModel('gemini-1.5-pro');
+        setModel('gemini-2.0-flash');
         setTemperature(0.7);
         setIsActive(true);
         setTestMode(false);
@@ -826,8 +826,9 @@ export function BotModal({ isOpen, onClose, onSave, botToEdit, availableBots = [
                           onChange={(e) => setModel(e.target.value)}
                           className="w-full bg-[#18181b]/80 border border-white/10 rounded-2xl pl-11 pr-4 py-3.5 text-sm font-medium text-white appearance-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50 transition-all shadow-[inset_0_1px_2px_rgba(0,0,0,0.3)] backdrop-blur-sm"
                         >
-                          <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+                          <option value="gemini-2.0-flash">Gemini 2.0 Flash (Recomendado & Rápido)</option>
                           <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
+                          <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
                           <option value="gpt-4o">GPT-4 Omni</option>
                           <option value="gpt-4o-mini">GPT-4 Omni Mini</option>
                           <option value="claude-3-5-sonnet">Claude 3.5 Sonnet</option>

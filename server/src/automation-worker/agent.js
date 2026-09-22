@@ -72,6 +72,11 @@ class GeminiCircuitBreakerManager {
 
 const geminiCircuitBreaker = new GeminiCircuitBreakerManager();
 
+// Blacklist temporária em memória para chaves que retornaram 401/403 (evita bombardeio de requisições falhas)
+const invalidGeminiKeysBlacklist = new Set();
+const geminiAuthWarnTracker = new Map();
+const botRouterWarnTracker = new Map();
+
 async function callWithGeminiRetry(fn, operationName = 'Gemini Operation', maxRetries = 4) {
   if (geminiCircuitBreaker.isOpen()) {
     throw new Error(`[CircuitBreaker:OPEN] A API Gemini está em cooldown de proteção após falhas consecutivas de servidor 500.`);
@@ -92,16 +97,23 @@ async function callWithGeminiRetry(fn, operationName = 'Gemini Operation', maxRe
                             errMsg.includes('Unauthorized') || 
                             errMsg.includes('ACCESS_TOKEN_TYPE_UNSUPPORTED') || 
                             errMsg.includes('API_KEY_INVALID') || 
+                            errMsg.includes('API_KEY_SERVICE_BLOCKED') ||
                             errMsg.includes('API key not valid') || 
                             errMsg.includes('403') || 
                             errMsg.includes('PERMISSION_DENIED') ||
                             errMsg.includes('PROHIBITED_CONTENT') ||
                             errMsg.includes('INVALID_ARGUMENT') ||
-                            errMsg.includes('NOT_FOUND');
+                            errMsg.includes('NOT_FOUND') ||
+                            errMsg.includes('is not found');
 
       if (isAuthOrFatal) {
         // Falha fatal de credencial/segurança: abortar imediatamente sem retry inútil e sem derrubar o circuit breaker
-        console.warn(`[AutomationWorker] Falha de autenticação/permissão na API Gemini em "${operationName}": ${errMsg.slice(0, 160)}`);
+        const now = Date.now();
+        const lastWarn = geminiAuthWarnTracker.get(operationName) || 0;
+        if (now - lastWarn > 60 * 60 * 1000) {
+          geminiAuthWarnTracker.set(operationName, now);
+          console.warn(`[AutomationWorker] Falha de autenticação/permissão/modelo na API Gemini em "${operationName}": ${errMsg.slice(0, 160)}`);
+        }
         throw err;
       }
 
@@ -1357,14 +1369,26 @@ class AutomationWorker {
         let keyToUse = '';
         if (customKey && typeof customKey === 'string') {
             const clean = customKey.replace(/^['"]|['"]$/g, '').trim();
-            if (clean.length >= 20) {
+            // Apenas chaves com o prefixo oficial AIza do Google AI Studio são aceitas
+            if (clean.length >= 20 && clean.startsWith('AIza') && !invalidGeminiKeysBlacklist.has(clean)) {
                 keyToUse = clean;
+            } else if (clean.length > 0 && (!clean.startsWith('AIza') || invalidGeminiKeysBlacklist.has(clean))) {
+                const now = Date.now();
+                const lastWarn = geminiAuthWarnTracker.get(`custom_key_${clean.slice(0, 8)}`) || 0;
+                if (now - lastWarn > 60 * 60 * 1000) {
+                    geminiAuthWarnTracker.set(`custom_key_${clean.slice(0, 8)}`, now);
+                    if (!clean.startsWith('AIza')) {
+                        console.warn(`[AutomationWorker] Chave de API Gemini personalizada ignorada por formato incompatível (inicia com "${clean.slice(0, 6)}..."). O Google AI Studio exige prefixo "AIza".`);
+                    } else {
+                        console.warn(`[AutomationWorker] Chave de API Gemini personalizada suspensa temporariamente por falha 401/403.`);
+                    }
+                }
             }
         }
         if (!keyToUse) {
             const rawKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
             const clean = rawKey ? rawKey.replace(/^['"]|['"]$/g, '').trim() : '';
-            if (clean.length >= 20) {
+            if (clean.length >= 20 && clean.startsWith('AIza') && !invalidGeminiKeysBlacklist.has(clean)) {
                 keyToUse = clean;
             }
         }
@@ -1806,11 +1830,20 @@ class AutomationWorker {
         if (eligibleBots.length === 1) return eligibleBots[0];
 
         try {
-            const activeGenAI = this.getGenAI() || this.genAI;
+            let tenantApiKey = null;
+            if (tenantId) {
+                try {
+                    const { data: comp } = await supabase.from('companies').select('settings').eq('id', tenantId).maybeSingle();
+                    tenantApiKey = comp?.settings?.gemini_api_key;
+                } catch (eComp) {}
+            }
+
+            const activeGenAI = this.getGenAI(tenantApiKey) || this.genAI;
             if (!activeGenAI) {
                 const now = Date.now();
-                if (now - AutomationWorker.routingFallbackWarnTracker > 60 * 60 * 1000) {
-                    AutomationWorker.routingFallbackWarnTracker = now;
+                const lastWarn = botRouterWarnTracker.get(`no_gemini_${tenantId || 'global'}`) || 0;
+                if (now - lastWarn > 60 * 60 * 1000) {
+                    botRouterWarnTracker.set(`no_gemini_${tenantId || 'global'}`, now);
                     console.info('[AutomationWorker] Gemini não configurado no roteamento de bots (modo contingência ativo). Usando fallback do primeiro bot.');
                 }
                 return eligibleBots[0];
@@ -1856,7 +1889,12 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
             if (errMsg.includes('PROHIBITED_CONTENT')) {
                 console.warn(`[BotRouter] Roteamento inteligente bloqueado pela API do Gemini devido a conteúdo proibido (PROHIBITED_CONTENT). Mensagem do cliente: "${textMessage}". Usando fallback do primeiro bot.`);
             } else {
-                console.error('[BotRouter] Erro ao rotear mensagem inteligente:', err);
+                const now = Date.now();
+                const lastLog = botRouterWarnTracker.get(`err_${tenantId || 'global'}`) || 0;
+                if (now - lastLog > 60 * 60 * 1000) {
+                    botRouterWarnTracker.set(`err_${tenantId || 'global'}`, now);
+                    console.warn(`[BotRouter] Roteamento inteligente em contingência para o tenant ${tenantId || 'global'}: ${errMsg.slice(0, 140)}. Utilizando bot padrão.`);
+                }
             }
             return eligibleBots[0];
         }
@@ -2611,11 +2649,14 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
             }
 
             let modelName = botSettings.model || 'gemini-2.0-flash';
-            if (modelName === 'gemini-2.5-flash') {
-                modelName = 'gemini-2.0-flash';
-            }
-            // Força o fallback caso o modelo não seja do ecossistema Gemini (ex: gpt-4o, claude-3)
-            if (!modelName.toLowerCase().startsWith('gemini')) {
+            // Normalização de modelos legados ou não suportados na API v1beta
+            if (
+                modelName === 'gemini-2.5-flash' || 
+                modelName === 'gemini-1.5-pro' || 
+                modelName === 'gemini-pro' || 
+                modelName === 'gemini-1.0-pro' ||
+                !modelName.toLowerCase().startsWith('gemini')
+            ) {
                 modelName = 'gemini-2.0-flash';
             }
             // Filtra declarações de funções com base nos endpoints habilitados no robô
@@ -4000,8 +4041,24 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                     if (errMsg.includes('PROHIBITED_CONTENT')) {
                         console.warn(`[AutomationWorker] O processamento da conversa ${conversationId} foi bloqueado pela API do Gemini devido a conteúdo proibido (PROHIBITED_CONTENT). Mensagem do cliente: "${textMessage}"`);
                         finalResponseText = "Desculpe, não posso responder a essa pergunta devido às diretrizes de segurança de conteúdo do sistema.";
-                    } else if (errMsg.includes('401') || errMsg.includes('Unauthorized') || errMsg.includes('ACCESS_TOKEN_TYPE_UNSUPPORTED') || errMsg.includes('API_KEY_INVALID') || errMsg.includes('API key not valid') || errMsg.includes('403') || errMsg.includes('PERMISSION_DENIED') || errMsg.includes('leaked')) {
-                        console.error(`[AutomationWorker] ⚠️ Erro de Autenticação/Chave Inválida na API Gemini para o tenant ${tenantId}: ${errMsg.slice(0, 160)}. Executando contingência inteligente.`);
+                    } else if (errMsg.includes('401') || errMsg.includes('Unauthorized') || errMsg.includes('ACCESS_TOKEN_TYPE_UNSUPPORTED') || errMsg.includes('API_KEY_INVALID') || errMsg.includes('API_KEY_SERVICE_BLOCKED') || errMsg.includes('API key not valid') || errMsg.includes('403') || errMsg.includes('PERMISSION_DENIED') || errMsg.includes('leaked')) {
+                        if (tenantApiKey) {
+                            invalidGeminiKeysBlacklist.add(tenantApiKey);
+                        }
+                        const now = Date.now();
+                        const lastWarn = geminiAuthWarnTracker.get(`auth_${tenantId}`) || 0;
+                        if (now - lastWarn > 60 * 60 * 1000) {
+                            geminiAuthWarnTracker.set(`auth_${tenantId}`, now);
+                            console.warn(`[AutomationWorker] ⚠️ Alerta de Autenticação/Chave Gemini para o tenant ${tenantId}: ${errMsg.slice(0, 140)}. Acionando contingência inteligente.`);
+                        }
+                        finalResponseText = await this.generateContingencyResponse({ textMessage, companySettings, companyName, conversationId, contactInfo, tenantId, isClosed, vars });
+                    } else if (errMsg.includes('404') || errMsg.includes('NOT_FOUND') || errMsg.includes('is not found')) {
+                        const now = Date.now();
+                        const lastWarn = geminiAuthWarnTracker.get(`404_${modelName}`) || 0;
+                        if (now - lastWarn > 60 * 60 * 1000) {
+                            geminiAuthWarnTracker.set(`404_${modelName}`, now);
+                            console.warn(`[AutomationWorker] ⚠️ Modelo de IA "${modelName}" não encontrado ou descontinuado na API do Gemini. Acionando contingência inteligente.`);
+                        }
                         finalResponseText = await this.generateContingencyResponse({ textMessage, companySettings, companyName, conversationId, contactInfo, tenantId, isClosed, vars });
                     } else if (errMsg.includes('500') || errMsg.includes('Internal error') || errMsg.includes('CircuitBreaker:OPEN') || errMsg.includes('An internal error has occurred')) {
                         console.warn(`[AutomationWorker] Oscilação de servidor 500 na API Gemini na conversa ${conversationId} (Iteração ${loopCount}): ${errMsg.slice(0, 150)}. Aplicando resposta de contingência amigável.`);
@@ -4128,7 +4185,10 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
                             console.warn("[AutomationWorker - Draft] Falha ao parsear ou normalizar o JSON de rascunho gerado:", e.message);
                         }
                     } catch (draftErr) {
-                        console.error("[AutomationWorker - Draft] Erro ao extrair rascunho do pedido em tempo real:", draftErr);
+                        const errMsg = draftErr?.message || String(draftErr);
+                        if (!errMsg.includes('401') && !errMsg.includes('403') && !errMsg.includes('ACCESS_TOKEN_TYPE_UNSUPPORTED')) {
+                            console.warn("[AutomationWorker - Draft] Erro ao extrair rascunho do pedido em tempo real:", errMsg.slice(0, 120));
+                        }
                     }
                 })();
             }

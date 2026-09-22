@@ -2649,19 +2649,23 @@ export default function ChatDashboard() {
                         if (m.transcription) {
                           text = `🎵 Áudio (Transcrito): "${m.transcription}"`;
                         } else if (m.media_url) {
-                          try {
-                            const transcribedText = await geminiService.transcribeAudio(m.media_url);
-                            // Salvar no Supabase
-                            await supabase
-                              .from('messages')
-                              .update({ transcription: transcribedText })
-                              .eq('id', m.id);
+                          if (geminiService.isConfigured()) {
+                            try {
+                              const transcribedText = await geminiService.transcribeAudio(m.media_url);
+                              // Salvar no Supabase
+                              await supabase
+                                .from('messages')
+                                .update({ transcription: transcribedText })
+                                .eq('id', m.id);
 
-                            text = `🎵 Áudio (Transcrito): "${transcribedText}"`;
-                            m.transcription = transcribedText;
-                          } catch (audioErr) {
-                            console.error("Erro ao transcrever áudio na análise silenciosa:", audioErr);
-                            text = `🎵 Áudio (Falha ao transcrever)`;
+                              text = `🎵 Áudio (Transcrito): "${transcribedText}"`;
+                              m.transcription = transcribedText;
+                            } catch (audioErr: any) {
+                              console.warn("Falha transitória ao transcrever áudio na análise silenciosa:", audioErr?.message || audioErr);
+                              text = `🎵 Áudio (Transcrição indisponível)`;
+                            }
+                          } else {
+                            text = `🎵 Áudio (Transcrição pausada - IA não configurada)`;
                           }
                         } else {
                           text = `🎵 Áudio (Mídia indisponível)`;
@@ -2709,7 +2713,7 @@ export default function ChatDashboard() {
                         if (result.resolution_summary) resolution = result.resolution_summary;
                         if (result.error_log) errorLog = result.error_log;
                       } catch (geminiErr: any) {
-                        console.error('Erro na análise silenciosa do Gemini:', geminiErr);
+                        console.warn('Falha transitória na análise silenciosa do Gemini:', geminiErr?.message || geminiErr);
                         errorLog = geminiErr?.message || String(geminiErr);
                       }
                     } else {

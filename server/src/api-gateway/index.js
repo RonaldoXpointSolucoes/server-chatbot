@@ -1036,8 +1036,8 @@ const handleAnalyzeScreen = async (req, res) => {
     try {
         const rawKey = req.body?.geminiApiKey || req.headers['x-gemini-api-key'] || process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
         const apiKey = rawKey ? String(rawKey).replace(/^['"]|['"]$/g, '').trim() : '';
-        if (!apiKey || apiKey.length < 20) {
-            return res.status(400).json({ ok: false, error: 'GEMINI_API_KEY ausente ou no formato incorreto (deve ser uma chave válida do Google AI Studio iniciando com AQ.... ou AIzaSy...).' });
+        if (!apiKey || apiKey.length < 20 || !apiKey.startsWith('AIza')) {
+            return res.status(400).json({ ok: false, error: 'GEMINI_API_KEY ausente ou no formato incorreto (deve ser uma chave válida do Google AI Studio iniciando com AIza...).' });
         }
 
         const {

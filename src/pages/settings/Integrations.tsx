@@ -26,10 +26,16 @@ import {
   Sparkles,
   Info,
   Sliders,
-  X
+  X,
+  ShieldCheck,
+  Activity,
+  Lock,
+  Unlock,
+  CheckCircle2
 } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 import { useChatStore } from '../../store/chatStore';
+import { geminiService } from '../../services/geminiService';
 
 const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
 
@@ -64,41 +70,124 @@ export default function Integrations() {
   const [instances, setInstances] = useState<Instance[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Gemini API Key states
-  const [geminiKeyInput, setGeminiKeyInput] = useState('');
-  const [showGeminiKey, setShowGeminiKey] = useState(false);
+  // Gemini API Key states & Proteção Anti-Fraude
+  const [isEditingGemini, setIsEditingGemini] = useState(false);
+  const [newGeminiKeyInput, setNewGeminiKeyInput] = useState('');
   const [isSavingGeminiKey, setIsSavingGeminiKey] = useState(false);
+  const [isTestingGemini, setIsTestingGemini] = useState(false);
+  const [geminiTestStatus, setGeminiTestStatus] = useState<{
+    tested: boolean;
+    ok: boolean;
+    message: string;
+    latencyMs?: number;
+    testedAt?: string;
+  } | null>(null);
+  const [showEndsAudit, setShowEndsAudit] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  const geminiApiKeyFromSettings = tenantInfo?.settings?.gemini_api_key;
+  const geminiApiKeyFromSettings = (tenantInfo?.settings?.gemini_api_key || '').trim();
+  const hasSavedGeminiKey = geminiApiKeyFromSettings.length >= 20;
 
-  useEffect(() => {
-    if (geminiApiKeyFromSettings) {
-      setGeminiKeyInput(geminiApiKeyFromSettings);
-    } else {
-      setGeminiKeyInput('');
-    }
-  }, [geminiApiKeyFromSettings]);
+  // Extração segura das extremidades da chave (Início e Fim) para auditoria sem expor o meio
+  const getMaskedKeyInfo = (key: string) => {
+    if (!key || key.length < 10) return null;
+    const clean = key.replace(/^['"]|['"]$/g, '').trim();
+    const start = clean.slice(0, 8); // ex: AIzaSyDc
+    const end = clean.slice(-5);     // ex: Ywts
+    const hiddenCount = clean.length - (start.length + end.length);
+    return {
+      start,
+      end,
+      totalLength: clean.length,
+      hiddenCount: Math.max(hiddenCount, 0),
+      isOfficialFormat: clean.startsWith('AIza')
+    };
+  };
+
+  const maskedInfo = getMaskedKeyInfo(geminiApiKeyFromSettings);
 
   const handleSaveGeminiKey = async () => {
-    const trimmedKey = geminiKeyInput.trim();
-    if (trimmedKey && trimmedKey.length < 20) {
+    const trimmedKey = newGeminiKeyInput.trim();
+    if (!trimmedKey) {
+      alert('Por favor, informe a chave da API do Gemini.');
+      return;
+    }
+    if (trimmedKey.length < 20) {
       alert('Atenção: A chave informada é muito curta para ser uma chave de API válida do Google Gemini (mínimo de 20 caracteres).');
       return;
     }
-    const isStandardFormat = trimmedKey.startsWith('AQ.') || trimmedKey.startsWith('AIzaSy') || trimmedKey.startsWith('AIza');
-    if (trimmedKey && !isStandardFormat) {
-      if (!confirm('A chave informada não parece seguir o padrão do Google AI Studio (iniciando por "AQ." ou "AIza..."). Deseja salvar mesmo assim?')) {
+    const isStandardFormat = trimmedKey.startsWith('AIzaSy') || trimmedKey.startsWith('AIza');
+    if (!isStandardFormat) {
+      if (!confirm('Atenção: As chaves oficiais do Google AI Studio iniciam obrigatoriamente com o prefixo "AIza". Deseja salvar mesmo assim?')) {
         return;
       }
     }
     setIsSavingGeminiKey(true);
     try {
       await updateTenantSettings({ gemini_api_key: trimmedKey });
-      alert('Chave do Gemini atualizada com sucesso!');
-    } catch (e) {
-      alert('Erro ao atualizar a chave do Gemini.');
+      setNewGeminiKeyInput('');
+      setIsEditingGemini(false);
+      setShowDeleteConfirm(false);
+
+      // Auto-teste imediato de conexão para feedback em tempo real
+      setIsTestingGemini(true);
+      const testRes = await geminiService.testConnection(trimmedKey);
+      setGeminiTestStatus({
+        tested: true,
+        ok: testRes.ok,
+        message: testRes.message,
+        latencyMs: testRes.latencyMs,
+        testedAt: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      });
+    } catch (e: any) {
+      alert('Erro ao atualizar a chave do Gemini: ' + (e?.message || e));
     } finally {
       setIsSavingGeminiKey(false);
+      setIsTestingGemini(false);
+    }
+  };
+
+  const handleRemoveGeminiKey = async () => {
+    setIsSavingGeminiKey(true);
+    try {
+      await updateTenantSettings({ gemini_api_key: '' });
+      setNewGeminiKeyInput('');
+      setIsEditingGemini(false);
+      setShowDeleteConfirm(false);
+      setGeminiTestStatus(null);
+    } catch (e: any) {
+      alert('Erro ao remover a chave: ' + (e?.message || e));
+    } finally {
+      setIsSavingGeminiKey(false);
+    }
+  };
+
+  const handleRunTestConnection = async () => {
+    const keyToTest = geminiApiKeyFromSettings || newGeminiKeyInput;
+    if (!keyToTest) {
+      alert('Nenhuma chave disponível para teste.');
+      return;
+    }
+
+    setIsTestingGemini(true);
+    try {
+      const res = await geminiService.testConnection(keyToTest);
+      setGeminiTestStatus({
+        tested: true,
+        ok: res.ok,
+        message: res.message,
+        latencyMs: res.latencyMs,
+        testedAt: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      });
+    } catch (err: any) {
+      setGeminiTestStatus({
+        tested: true,
+        ok: false,
+        message: 'Erro inesperado no teste: ' + (err?.message || err),
+        testedAt: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      });
+    } finally {
+      setIsTestingGemini(false);
     }
   };
   
@@ -788,62 +877,284 @@ fetch("${ENGINE_URL}/message/sendMedia", requestOptions)
               </div>
             </section>
 
-            {/* Card 3: Gemini API Key */}
-            <section className="relative overflow-hidden backdrop-blur-xl bg-[#1e1e24]/60 border border-[#2a2a2f]/80 rounded-[24px] p-6 shadow-2xl transition-all duration-300 hover:border-[#3a3a45]">
-              <div className="absolute top-0 right-0 w-48 h-48 bg-[#00a884]/5 rounded-full blur-3xl pointer-events-none" />
+            {/* Card 3: Gemini API Key com Proteção Anti-Fraude e Auditoria de Extremidades */}
+            <section className="relative overflow-hidden backdrop-blur-xl bg-[#1e1e24]/70 border border-[#2a2a2f]/90 rounded-[24px] p-6 shadow-2xl transition-all duration-300 hover:border-[#3a3a45]">
+              <div className="absolute top-0 right-0 w-56 h-56 bg-[#00a884]/5 rounded-full blur-3xl pointer-events-none" />
               
-              <div className="flex items-center gap-2.5 mb-4">
-                <div className="p-2 bg-[#00a884]/10 border border-[#00a884]/20 rounded-xl text-[#00a884]">
-                  <Sparkles size={18} />
+              <div className="flex items-start justify-between gap-3 mb-5">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-[#00a884]/10 border border-[#00a884]/20 rounded-xl text-[#00a884]">
+                    <Sparkles size={20} />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="font-semibold text-white tracking-tight">Chave de API do Google Gemini (I.A.)</h3>
+                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold tracking-wider uppercase px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                        <ShieldCheck size={11} />
+                        Blindagem Anti-Fraude
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-400 mt-0.5">Alimenta os Robôs de Atendimento, Transcrição de Áudios e Recursos Inteligentes.</p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="font-semibold text-white tracking-tight">Chave de API do Google Gemini (I.A.)</h3>
-                  <p className="text-xs text-slate-400">Alimenta o Robô de Atendimento no WhatsApp e os recursos de Magia da I.A.</p>
-                </div>
+
+                {hasSavedGeminiKey && !isEditingGemini && (
+                  <span className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 shrink-0">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    Chave Ativa
+                  </span>
+                )}
               </div>
 
-              <div className="space-y-4 mt-5">
+              <div className="space-y-4">
                 <p className="text-xs text-slate-400 leading-relaxed">
                   Para que a I.A responda às conversas dos clientes no WhatsApp de forma personalizada e utilize as ferramentas inteligentes, você pode configurar uma chave individual de API do Gemini. 
-                  Gere sua chave gratuitamente no <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-[#00a884] hover:underline font-semibold inline-flex items-center gap-0.5">Google AI Studio <ExternalLink size={10} className="inline" /></a> (as chaves oficiais iniciam com <code className="text-emerald-300 font-mono text-[11px] bg-emerald-950/40 px-1 py-0.5 rounded">AQ....</code> ou <code className="text-emerald-300 font-mono text-[11px] bg-emerald-950/40 px-1 py-0.5 rounded">AIzaSy...</code>).
+                  Gere sua chave gratuitamente no <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-[#00a884] hover:underline font-semibold inline-flex items-center gap-0.5">Google AI Studio <ExternalLink size={10} className="inline" /></a> (as chaves oficiais iniciam com <code className="text-emerald-300 font-mono text-[11px] bg-emerald-950/50 px-1.5 py-0.5 rounded border border-emerald-500/20">AIzaSy...</code>).
                 </p>
 
-                <div className="flex items-center gap-2">
-                  <div className="relative flex-1">
-                    <input
-                      type={showGeminiKey ? 'text' : 'password'}
-                      value={geminiKeyInput}
-                      onChange={(e) => setGeminiKeyInput(e.target.value)}
-                      placeholder="AQ.... ou AIzaSy..."
-                      className="w-full bg-[#141416]/95 border border-[#2a2a2f] rounded-xl px-4 py-3 text-sm font-mono text-emerald-300 focus:outline-none focus:border-[#00a884]/50 transition-colors pr-10"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowGeminiKey(!showGeminiKey)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white transition-colors"
+                {/* MODO PROTEGIDO (Chave salva e mascarada, impossível de ver o miolo ou copiar) */}
+                {hasSavedGeminiKey && !isEditingGemini && maskedInfo && (
+                  <div className="space-y-3.5">
+                    {/* Banner de Proteção contra Fraudes */}
+                    <div className="flex items-center justify-between text-xs text-emerald-300/90 bg-emerald-950/20 border border-emerald-500/20 px-3.5 py-2 rounded-xl">
+                      <div className="flex items-center gap-2">
+                        <Lock size={13} className="text-emerald-400 shrink-0" />
+                        <span>Segredo protegido contra cópia e visualização patrimonial indevida.</span>
+                      </div>
+                      <span className="text-[10px] font-mono text-emerald-400/80">{maskedInfo.totalLength} caracteres</span>
+                    </div>
+
+                    {/* Exibição Mascarada com Início e Fim visíveis */}
+                    <div 
+                      className="bg-[#141416]/95 border border-[#2a2a2f] rounded-2xl p-4 select-none relative group transition-all duration-200 hover:border-emerald-500/30"
+                      onCopy={(e) => {
+                        e.preventDefault();
+                        alert('Ação bloqueada por segurança: Para evitar fraudes e vazamentos, a cópia da chave foi desabilitada.');
+                      }}
+                      onContextMenu={(e) => e.preventDefault()}
                     >
-                      {showGeminiKey ? <EyeOff size={16} /> : <Eye size={16} />}
-                    </button>
-                  </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2.5 font-mono text-sm overflow-x-auto py-1">
+                          {/* Início Visível */}
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-sans uppercase font-bold text-slate-500 tracking-wider">Início:</span>
+                            <span className="text-emerald-300 font-bold bg-emerald-950/70 border border-emerald-500/30 px-2 py-0.5 rounded-md">
+                              {maskedInfo.start}
+                            </span>
+                          </div>
 
-                  <button
-                    onClick={handleSaveGeminiKey}
-                    disabled={isSavingGeminiKey}
-                    className="px-5 py-3 bg-[#00a884] hover:bg-[#00c298] text-[#111b21] rounded-xl font-semibold text-sm transition-all active:scale-95 disabled:opacity-50 flex items-center gap-1.5 shadow-[0_4px_14px_0_rgba(0,168,132,0.2)]"
-                  >
-                    {isSavingGeminiKey ? 'Salvando...' : 'Salvar'}
-                  </button>
-                </div>
+                          {/* Meio Oculto Blindado */}
+                          <div className="flex items-center text-slate-500 tracking-[5px] select-none text-base">
+                            ••••••••••••••••
+                          </div>
 
-                {geminiKeyInput.trim() ? (
-                  <div className="flex items-center gap-2 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-2.5 rounded-xl leading-relaxed">
-                    <Check size={14} className="shrink-0" />
-                    <span>Sua chave de API personalizada ({geminiKeyInput.trim().startsWith('AQ.') ? 'Padrão Novo AQ.' : 'Padrão AIza...'}) está configurada e sendo usada com prioridade máxima para esta empresa.</span>
+                          {/* Fim Visível */}
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-sans uppercase font-bold text-slate-500 tracking-wider">Fim:</span>
+                            <span className="text-emerald-300 font-bold bg-emerald-950/70 border border-emerald-500/30 px-2 py-0.5 rounded-md">
+                              {maskedInfo.end}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Botão para alternar auditoria das extremidades */}
+                        <button
+                          type="button"
+                          onClick={() => setShowEndsAudit(!showEndsAudit)}
+                          title="Analisar extremidades da chave"
+                          className="px-2.5 py-1.5 text-xs text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg transition-colors shrink-0 flex items-center gap-1"
+                        >
+                          <Info size={13} />
+                          <span className="hidden sm:inline">{showEndsAudit ? 'Ocultar Detalhes' : 'Detalhes'}</span>
+                        </button>
+                      </div>
+
+                      {/* Caixa expansível de auditoria de extremidades */}
+                      {showEndsAudit && (
+                        <div className="mt-3.5 pt-3.5 border-t border-white/10 text-xs space-y-2 text-slate-300 animate-fadeIn">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <div className="bg-[#18181b] p-2.5 rounded-xl border border-white/5">
+                              <span className="text-slate-500 text-[10px] block uppercase font-bold">Prefixo de Autenticação:</span>
+                              <code className="text-emerald-300 font-mono text-xs">{maskedInfo.start}...</code>
+                              <span className="text-[10px] text-slate-400 block mt-0.5">
+                                {maskedInfo.isOfficialFormat ? '✓ Padrão oficial AIza (Google AI Studio)' : '⚠️ Prefixo fora do padrão AIza'}
+                              </span>
+                            </div>
+                            <div className="bg-[#18181b] p-2.5 rounded-xl border border-white/5">
+                              <span className="text-slate-500 text-[10px] block uppercase font-bold">Assinatura Final:</span>
+                              <code className="text-emerald-300 font-mono text-xs">...{maskedInfo.end}</code>
+                              <span className="text-[10px] text-slate-400 block mt-0.5">
+                                Sufixo íntegro • {maskedInfo.totalLength} caracteres no total
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Status de Teste de Conexão em Tempo Real */}
+                    {geminiTestStatus && (
+                      <div className={`flex items-start gap-2.5 text-xs p-3 rounded-xl border ${
+                        geminiTestStatus.ok 
+                          ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300' 
+                          : 'bg-rose-500/10 border-rose-500/25 text-rose-300'
+                      }`}>
+                        {geminiTestStatus.ok ? (
+                          <CheckCircle2 size={16} className="text-emerald-400 shrink-0 mt-0.5" />
+                        ) : (
+                          <AlertTriangle size={16} className="text-rose-400 shrink-0 mt-0.5" />
+                        )}
+                        <div className="flex-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-semibold">
+                              {geminiTestStatus.ok ? 'Conexão Ativa & Validada com Sucesso' : 'Falha na Validação da Chave'}
+                            </span>
+                            {geminiTestStatus.latencyMs !== undefined && (
+                              <span className="font-mono text-[11px] text-emerald-400/90 bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                                ⚡ {geminiTestStatus.latencyMs}ms
+                              </span>
+                            )}
+                          </div>
+                          <p className="mt-0.5 text-[11px] opacity-90 leading-relaxed">{geminiTestStatus.message}</p>
+                          {geminiTestStatus.testedAt && (
+                            <span className="text-[10px] opacity-60 block mt-1">Última checagem: {geminiTestStatus.testedAt}</span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Barra de Ações Rápidas */}
+                    <div className="flex flex-wrap items-center justify-between gap-2.5 pt-1">
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleRunTestConnection}
+                          disabled={isTestingGemini}
+                          className="px-3.5 py-2 bg-[#1f2c34] hover:bg-[#2a3942] border border-white/10 text-white rounded-xl text-xs font-medium transition-all flex items-center gap-1.5 active:scale-95 disabled:opacity-50"
+                        >
+                          <Activity size={14} className={`text-emerald-400 ${isTestingGemini ? 'animate-spin' : ''}`} />
+                          {isTestingGemini ? 'Testando Conexão...' : 'Testar Conexão'}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsEditingGemini(true);
+                            setNewGeminiKeyInput('');
+                            setShowDeleteConfirm(false);
+                          }}
+                          className="px-3.5 py-2 bg-white/5 hover:bg-white/10 border border-white/10 text-slate-200 hover:text-white rounded-xl text-xs font-medium transition-all flex items-center gap-1.5 active:scale-95"
+                        >
+                          <RefreshCw size={13} />
+                          Substituir Chave
+                        </button>
+                      </div>
+
+                      <div>
+                        {showDeleteConfirm ? (
+                          <div className="flex items-center gap-1.5 bg-rose-950/40 border border-rose-500/30 p-1.5 rounded-xl">
+                            <span className="text-[11px] text-rose-300 font-medium px-2">Remover chave?</span>
+                            <button
+                              type="button"
+                              onClick={handleRemoveGeminiKey}
+                              disabled={isSavingGeminiKey}
+                              className="px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-bold transition-all disabled:opacity-50"
+                            >
+                              {isSavingGeminiKey ? '...' : 'Sim, Remover'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setShowDeleteConfirm(false)}
+                              className="px-2 py-1 text-slate-400 hover:text-white text-xs transition-colors"
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setShowDeleteConfirm(true)}
+                            className="px-3 py-2 text-rose-400/80 hover:text-rose-300 hover:bg-rose-500/10 rounded-xl text-xs transition-colors flex items-center gap-1"
+                          >
+                            <Trash2 size={13} />
+                            Remover
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                ) : (
-                  <div className="flex items-center gap-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 px-3 py-2.5 rounded-xl leading-relaxed">
-                    <AlertTriangle size={14} className="shrink-0" />
-                    <span>Nenhuma chave personalizada configurada. A aplicação está usando a chave padrão do sistema (ou contingência inteligente de cardápio e atendimento).</span>
+                )}
+
+                {/* MODO DE INSERÇÃO / REDEFINIÇÃO (Input seguro protegido) */}
+                {(!hasSavedGeminiKey || isEditingGemini) && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between text-xs text-slate-400">
+                      <label className="font-semibold text-slate-300">
+                        {hasSavedGeminiKey ? 'Nova Chave de API do Gemini:' : 'Inserir Chave do Google Gemini:'}
+                      </label>
+                      <span className="text-[11px] text-slate-500">Mínimo 20 caracteres • Prefixo AIza...</span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <div className="relative flex-1">
+                        <input
+                          type="password"
+                          autoComplete="new-password"
+                          spellCheck="false"
+                          value={newGeminiKeyInput}
+                          onChange={(e) => setNewGeminiKeyInput(e.target.value)}
+                          onCopy={(e) => e.preventDefault()}
+                          placeholder="Cole sua nova chave (ex: AIzaSy...)"
+                          className="w-full bg-[#141416]/95 border border-[#2a2a2f] rounded-xl px-4 py-3 text-sm font-mono text-emerald-300 focus:outline-none focus:border-[#00a884]/60 transition-colors"
+                        />
+                      </div>
+
+                      <button
+                        onClick={handleSaveGeminiKey}
+                        disabled={isSavingGeminiKey || !newGeminiKeyInput.trim()}
+                        className="px-5 py-3 bg-[#00a884] hover:bg-[#00c298] text-[#111b21] rounded-xl font-semibold text-sm transition-all active:scale-95 disabled:opacity-40 flex items-center gap-1.5 shadow-[0_4px_14px_0_rgba(0,168,132,0.2)]"
+                      >
+                        <Check size={16} />
+                        {isSavingGeminiKey ? 'Validando...' : 'Salvar Chave'}
+                      </button>
+
+                      {hasSavedGeminiKey && isEditingGemini && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsEditingGemini(false);
+                            setNewGeminiKeyInput('');
+                          }}
+                          className="px-3.5 py-3 text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-sm transition-all"
+                        >
+                          Cancelar
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Feedback instantâneo do formato digitado */}
+                    {newGeminiKeyInput.trim().length > 0 && (
+                      <div className="text-xs">
+                        {newGeminiKeyInput.trim().startsWith('AIza') ? (
+                          <div className="flex items-center gap-1.5 text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-2 rounded-xl">
+                            <CheckCircle2 size={14} className="shrink-0" />
+                            <span>Prefixo oficial Google AI Studio reconhecido ({newGeminiKeyInput.trim().length} caracteres digitados).</span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1.5 text-amber-400 bg-amber-500/10 border border-amber-500/20 px-3 py-2 rounded-xl">
+                            <AlertTriangle size={14} className="shrink-0" />
+                            <span>Atenção: Chaves válidas do Google AI Studio iniciam com "AIza...". Certifique-se de copiar a chave completa.</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {!hasSavedGeminiKey && (
+                      <div className="flex items-center gap-2 text-xs text-amber-400/90 bg-amber-500/10 border border-amber-500/20 px-3 py-2.5 rounded-xl leading-relaxed">
+                        <AlertTriangle size={14} className="shrink-0" />
+                        <span>Nenhuma chave individual configurada. O sistema opera com as chaves globais da plataforma ou plano de contingência inteligente.</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

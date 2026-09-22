@@ -23,7 +23,7 @@ class GeminiService {
     const isValidKey = (key: string | null | undefined): boolean => {
       if (!key || key.length < 15) return false;
       const clean = key.replace(/^['"]|['"]$/g, '').trim();
-      return clean.length >= 20;
+      return clean.length >= 20 && clean.startsWith('AIza');
     };
 
     // 1. Check local override
@@ -63,7 +63,48 @@ class GeminiService {
 
   isConfigured(): boolean {
     const key = this.getApiKey();
-    return key.length > 5;
+    return key.length >= 20 && key.startsWith('AIza');
+  }
+
+  async testConnection(customKey?: string): Promise<{ ok: boolean; message: string; model?: string; latencyMs?: number }> {
+    const key = (customKey || this.getApiKey() || '').trim();
+    if (!key) {
+      return { ok: false, message: 'Nenhuma chave de API configurada.' };
+    }
+    if (!key.startsWith('AIza') || key.length < 20) {
+      return { ok: false, message: 'Formato inválido. Chaves oficiais do Google AI Studio iniciam com "AIza" e possuem no mínimo 20 caracteres.' };
+    }
+
+    const startTime = Date.now();
+    try {
+      const client = new GoogleGenerativeAI(key);
+      const model = client.getGenerativeModel({ model: 'gemini-2.0-flash' });
+      const result = await model.generateContent({
+        contents: [{ role: 'user', parts: [{ text: 'ping' }] }],
+        generationConfig: { maxOutputTokens: 5, temperature: 0.1 }
+      });
+      const latencyMs = Date.now() - startTime;
+      await result.response;
+      return { 
+        ok: true, 
+        message: 'Conexão ativa e validada com sucesso com a Google Generative AI!', 
+        model: 'gemini-2.0-flash', 
+        latencyMs 
+      };
+    } catch (err: any) {
+      const latencyMs = Date.now() - startTime;
+      const errMsg = err?.message || String(err);
+      if (errMsg.includes('401') || errMsg.includes('Unauthorized') || errMsg.includes('ACCESS_TOKEN_TYPE_UNSUPPORTED')) {
+        return { ok: false, message: 'Falha de Autenticação (401): A chave informada foi rejeitada pelo Google. Verifique se copiou a chave correta no Google AI Studio.', latencyMs };
+      }
+      if (errMsg.includes('403') || errMsg.includes('PERMISSION_DENIED') || errMsg.includes('API_KEY_SERVICE_BLOCKED')) {
+        return { ok: false, message: 'Permissão Bloqueada (403): A chave está bloqueada para a API Generative Language no console do Google Cloud.', latencyMs };
+      }
+      if (errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED')) {
+        return { ok: false, message: 'Limite de Cota Atingido (429): Cota de requisições esgotada ou em rate-limit.', latencyMs };
+      }
+      return { ok: false, message: `Erro de conexão: ${errMsg.slice(0, 140)}`, latencyMs };
+    }
   }
 
   async enhanceMessage(draft: string, intent: 'grammar' | 'sales' | 'enchant' | 'support' | 'analyze', contextHistory: {role: string, text: string}[]): Promise<string> {
