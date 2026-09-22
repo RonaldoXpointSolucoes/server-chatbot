@@ -18,6 +18,9 @@ const isSpamLog = (msg: string) => {
   if (!msg) return false;
   if (msg.includes('Mídia expirada/inacessível para JID') && msg.includes('Normal em History Sync')) return true;
   if (msg.includes('stream errored out') && msg.includes('"reasonNode":{"tag":"conflict","attrs":{"type":"replaced"}}')) return true;
+  if (msg.includes('received error in ack') && (msg.includes('479') || msg.includes('475'))) return true;
+  if (msg.includes('Closing session:') || msg.includes('Closing session in favor of')) return true;
+  if (msg.includes('QR Code ou pareamento expirou por falta de leitura')) return true;
   return false;
 };
 

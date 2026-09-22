@@ -217,11 +217,30 @@ class SessionManager {
                         'failed to find key',
                         'critical_unblock',
                         'Closing session:',
-                        'url generation failed'
+                        'Closing session in favor of incoming prekey bundle',
+                        'url generation failed',
+                        'received error in ack',
+                        'error in ack',
+                        'device could not display the message',
+                        'USync fetch yielded no results',
+                        'Own LID session created successfully',
+                        'sent retry receipt',
+                        'Decrypted message with closed session',
+                        'Bad MAC',
+                        'verifyMAC',
+                        'Session error:Error: Bad MAC',
+                        'Failed to decrypt message with any known session'
                     ];
                     
                     if (parsed.msg && ignoredLogs.some(text => parsed.msg.includes(text))) {
                         return; // Ignora silenciosamente
+                    }
+
+                    // Ignora erros de ACK de dispositivos secundários (479, 475)
+                    if (parsed.attrs && (parsed.attrs.error === '479' || parsed.attrs.error === '475' || parsed.attrs.class === 'message')) {
+                        if (parsed.msg && (parsed.msg.includes('ack') || parsed.msg.includes('error'))) {
+                            return;
+                        }
                     }
 
                     if (parsed.reasonNode && parsed.reasonNode.tag === 'conflict') {

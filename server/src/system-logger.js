@@ -227,12 +227,36 @@ function interceptConsole() {
 }
 
 export function addLog(level, message) {
+  const msgStr = typeof message === 'string' ? message : JSON.stringify(message);
+
+  // Filtra ruídos inofensivos do protocolo Baileys / Signal para evitar alarmes falsos no DevLogger
+  const isRoutineNoise = 
+    msgStr.includes('received error in ack') ||
+    msgStr.includes('error in ack') ||
+    msgStr.includes('479') ||
+    msgStr.includes('475') ||
+    msgStr.includes('Bad MAC') ||
+    msgStr.includes('Closing session:') ||
+    msgStr.includes('Closing session in favor of incoming prekey bundle') ||
+    msgStr.includes('Decrypted message with closed session') ||
+    msgStr.includes('USync fetch yielded no results') ||
+    msgStr.includes('Own LID session created successfully') ||
+    msgStr.includes('sent retry receipt') ||
+    msgStr.includes('PreKeyError') ||
+    msgStr.includes('SessionError') ||
+    msgStr.includes('verifyMAC');
+
+  let sanitizedLevel = level;
+  if (isRoutineNoise && (sanitizedLevel === 'warn' || sanitizedLevel === 'error')) {
+    sanitizedLevel = 'info';
+  }
+
   const logEntry = {
     type: 'log',
     id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
     timestamp: new Date().toISOString(),
-    level,
-    message: typeof message === 'string' ? message : JSON.stringify(message)
+    level: sanitizedLevel,
+    message: msgStr
   };
   logBuffer.push(logEntry);
   if (logBuffer.length > MAX_LOGS) logBuffer.shift();

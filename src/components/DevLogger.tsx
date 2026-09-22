@@ -1336,6 +1336,37 @@ export default function DevLogger() {
       return null;
     };
 
+    const isRoutineServerNoise = (msg?: string) => {
+      if (!msg) return true;
+      return (
+        msg.includes('Connection Terminated') ||
+        msg.includes('connection errored') ||
+        msg.includes('Connection was lost') ||
+        msg.includes('socket zumbi') ||
+        msg.includes('[History Sync]') ||
+        msg.includes('gastrofood') ||
+        msg.includes('Gastrofood') ||
+        msg.includes('GetCardapioCompleto') ||
+        msg.includes('Sem sessão ativa saudável') ||
+        msg.includes('Aguardando restabelecimento do socket') ||
+        msg.includes('Tentativa 1/') ||
+        msg.includes('Tentativa 2/') ||
+        msg.includes('received error in ack') ||
+        msg.includes('error in ack') ||
+        msg.includes('479') ||
+        msg.includes('475') ||
+        msg.includes('Bad MAC') ||
+        msg.includes('Closing session') ||
+        msg.includes('Decrypted message with closed session') ||
+        msg.includes('PreKey') ||
+        msg.includes('SessionError') ||
+        msg.includes('USync fetch yielded no results') ||
+        msg.includes('QR Code ou pareamento expirou') ||
+        msg.includes('Interrompendo loop de reconexão') ||
+        msg.includes('interrompendo loop de reconexão')
+      );
+    };
+
     sse.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
@@ -1345,7 +1376,7 @@ export default function DevLogger() {
             const parsed = parseGastrofoodMsg(log.message, log.timestamp);
             if (parsed) {
               initLogs.push(parsed);
-            } else if (log.level === 'error' || log.level === 'warn') {
+            } else if ((log.level === 'error' || log.level === 'warn') && !isRoutineServerNoise(log.message)) {
               addLog({
                 type: log.level === 'warn' ? 'warn' : 'error',
                 message: log.message || 'Erro/Warning no Servidor Node.js',
@@ -1376,20 +1407,7 @@ export default function DevLogger() {
               });
             }
           } else {
-            const isRoutineNoise = 
-              data.message?.includes('Connection Terminated') ||
-              data.message?.includes('connection errored') ||
-              data.message?.includes('socket zumbi') ||
-              data.message?.includes('[History Sync]') ||
-              data.message?.includes('gastrofood') ||
-              data.message?.includes('Gastrofood') ||
-              data.message?.includes('GetCardapioCompleto') ||
-              data.message?.includes('Sem sessão ativa saudável') ||
-              data.message?.includes('Aguardando restabelecimento do socket') ||
-              data.message?.includes('Tentativa 1/') ||
-              data.message?.includes('Tentativa 2/');
-
-            if (!isRoutineNoise && (data.level === 'error' || data.level === 'warn' || (data.level !== 'info' && data.message && (data.message.toLowerCase().includes('error') || data.message.toLowerCase().includes('falha') || data.message.toLowerCase().includes('loop'))))) {
+            if (!isRoutineServerNoise(data.message) && (data.level === 'error' || data.level === 'warn' || (data.level !== 'info' && data.message && (data.message.toLowerCase().includes('error') || data.message.toLowerCase().includes('falha') || data.message.toLowerCase().includes('loop'))))) {
               addLog({
                 type: data.level === 'warn' ? 'warn' : 'error',
                 message: data.message || 'Exceção/Falha no Servidor Node.js',

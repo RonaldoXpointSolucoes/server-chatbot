@@ -68,10 +68,19 @@ export const useDevStore = create<DevStore>()(
         if (state.isEnabled) {
             const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')) || localStorage.getItem('tenantId');
             
-            // Evitar loops recursivos: não envia ao banco erros gerados pelo próprio Supabase, DevLogger ou rotas de diagnóstico
+            // Evitar loops recursivos e duplicação: não envia ao banco erros gerados pelo próprio Supabase, DevLogger ou rotas de diagnóstico
             const isExcludedCall = 
-              (log.source && (log.source.toLowerCase().includes('supabase') || log.source.toLowerCase().includes('devlogger'))) ||
-              (log.message && (log.message.toLowerCase().includes('supabase.co') || log.message.toLowerCase().includes('analyze-logs')));
+              (log.source && (
+                log.source.toLowerCase().includes('supabase') || 
+                log.source.toLowerCase().includes('devlogger') ||
+                log.source.toLowerCase().includes('servidor node.js')
+              )) ||
+              (log.message && (
+                log.message.toLowerCase().includes('supabase.co') || 
+                log.message.toLowerCase().includes('analyze-logs') ||
+                log.message.includes('received error in ack') ||
+                log.message.includes('Closing session')
+              ));
 
             if (!isExcludedCall) {
               // Background async save to db com payload seguro
