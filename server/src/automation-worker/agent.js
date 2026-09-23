@@ -1366,29 +1366,31 @@ class AutomationWorker {
     }
 
     getGenAI(customKey = null) {
+        const isKeyValid = (k) => {
+            if (!k || typeof k !== 'string') return false;
+            const clean = k.replace(/^['"]|['"]$/g, '').trim();
+            // Aceita formatos oficiais da Google: AIza (Google AI Studio) e AQ. (Google Cloud / Vertex AI)
+            return clean.length >= 20 && (clean.startsWith('AIza') || clean.startsWith('AQ.')) && !invalidGeminiKeysBlacklist.has(clean);
+        };
+
         let keyToUse = '';
         if (customKey && typeof customKey === 'string') {
             const clean = customKey.replace(/^['"]|['"]$/g, '').trim();
-            // Apenas chaves com o prefixo oficial AIza do Google AI Studio são aceitas
-            if (clean.length >= 20 && clean.startsWith('AIza') && !invalidGeminiKeysBlacklist.has(clean)) {
+            if (isKeyValid(clean)) {
                 keyToUse = clean;
-            } else if (clean.length > 0 && (!clean.startsWith('AIza') || invalidGeminiKeysBlacklist.has(clean))) {
+            } else if (clean.length > 0 && invalidGeminiKeysBlacklist.has(clean)) {
                 const now = Date.now();
                 const lastWarn = geminiAuthWarnTracker.get(`custom_key_${clean.slice(0, 8)}`) || 0;
                 if (now - lastWarn > 60 * 60 * 1000) {
                     geminiAuthWarnTracker.set(`custom_key_${clean.slice(0, 8)}`, now);
-                    if (!clean.startsWith('AIza')) {
-                        console.info(`[AutomationWorker] Chave de API Gemini personalizada ignorada por formato incompatível (inicia com "${clean.slice(0, 6)}..."). Operando com chave global ou contingência.`);
-                    } else {
-                        console.info(`[AutomationWorker] Chave de API Gemini personalizada suspensa temporariamente por falha 401/403.`);
-                    }
+                    console.info(`[AutomationWorker] Chave de API Gemini personalizada suspensa temporariamente por falha 401/403. Operando com chave global ou contingência.`);
                 }
             }
         }
         if (!keyToUse) {
             const rawKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
             const clean = rawKey ? rawKey.replace(/^['"]|['"]$/g, '').trim() : '';
-            if (clean.length >= 20 && clean.startsWith('AIza') && !invalidGeminiKeysBlacklist.has(clean)) {
+            if (isKeyValid(clean)) {
                 keyToUse = clean;
             }
         }
@@ -1855,7 +1857,7 @@ class AutomationWorker {
                 return eligibleBots[0];
             }
 
-            const model = activeGenAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+            const model = activeGenAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
             let historyText = '';
             if (tenantId && conversationId) {
@@ -2654,16 +2656,17 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                 history.pop();
             }
 
-            let modelName = botSettings.model || 'gemini-2.0-flash';
-            // Normalização de modelos legados ou não suportados na API v1beta
+            let modelName = botSettings.model || 'gemini-2.5-flash';
+            // Normalização de modelos legados ou descontinuados pela Google (1.5 e 2.0 retornam 404)
             if (
-                modelName === 'gemini-2.5-flash' || 
-                modelName === 'gemini-1.5-pro' || 
-                modelName === 'gemini-pro' || 
-                modelName === 'gemini-1.0-pro' ||
+                !modelName ||
+                modelName.includes('2.0') ||
+                modelName.includes('1.5') ||
+                modelName.includes('1.0') ||
+                modelName === 'gemini-pro' ||
                 !modelName.toLowerCase().startsWith('gemini')
             ) {
-                modelName = 'gemini-2.0-flash';
+                modelName = 'gemini-2.5-flash';
             }
             // Filtra declarações de funções com base nos endpoints habilitados no robô
             const endpointToolsMap = {
@@ -4112,7 +4115,7 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                         if (!draftGenAI) return;
 
                         const draftModel = draftGenAI.getGenerativeModel({ 
-                            model: 'gemini-2.0-flash',
+                            model: 'gemini-2.5-flash',
                             generationConfig: { responseMimeType: "application/json" }
                         });
 

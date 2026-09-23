@@ -23,7 +23,7 @@ class GeminiService {
     const isValidKey = (key: string | null | undefined): boolean => {
       if (!key || key.length < 15) return false;
       const clean = key.replace(/^['"]|['"]$/g, '').trim();
-      return clean.length >= 20 && clean.startsWith('AIza');
+      return clean.length >= 20 && (clean.startsWith('AIza') || clean.startsWith('AQ.'));
     };
 
     // 1. Check local override
@@ -45,10 +45,10 @@ class GeminiService {
       return fallbackApiKey.replace(/^['"]|['"]$/g, '').trim();
     }
 
-    // 4. Fallback to Google Cloud API key if it starts with AIza (only if Gemini key is not set)
+    // 4. Fallback to Google Cloud API key if it starts with AIza or AQ (only if Gemini key is not set)
     if (isValidKey(fallbackGcpKey)) {
       const cleanGcp = fallbackGcpKey.replace(/^['"]|['"]$/g, '').trim();
-      if (cleanGcp.startsWith('AIza')) {
+      if (cleanGcp.startsWith('AIza') || cleanGcp.startsWith('AQ.')) {
         return cleanGcp;
       }
     }
@@ -63,7 +63,7 @@ class GeminiService {
 
   isConfigured(): boolean {
     const key = this.getApiKey();
-    return key.length >= 20 && key.startsWith('AIza');
+    return key.length >= 20 && (key.startsWith('AIza') || key.startsWith('AQ.'));
   }
 
   async testConnection(customKey?: string): Promise<{ ok: boolean; message: string; model?: string; latencyMs?: number }> {
@@ -71,14 +71,14 @@ class GeminiService {
     if (!key) {
       return { ok: false, message: 'Nenhuma chave de API configurada.' };
     }
-    if (!key.startsWith('AIza') || key.length < 20) {
-      return { ok: false, message: 'Formato inválido. Chaves oficiais do Google AI Studio iniciam com "AIza" e possuem no mínimo 20 caracteres.' };
+    if ((!key.startsWith('AIza') && !key.startsWith('AQ.')) || key.length < 20) {
+      return { ok: false, message: 'Formato inválido. Chaves oficiais do Google iniciam com "AIza" ou "AQ." e possuem no mínimo 20 caracteres.' };
     }
 
     const startTime = Date.now();
     try {
       const client = new GoogleGenerativeAI(key);
-      const model = client.getGenerativeModel({ model: 'gemini-2.0-flash' });
+      const model = client.getGenerativeModel({ model: 'gemini-2.5-flash' });
       const result = await model.generateContent({
         contents: [{ role: 'user', parts: [{ text: 'ping' }] }],
         generationConfig: { maxOutputTokens: 5, temperature: 0.1 }
@@ -88,7 +88,7 @@ class GeminiService {
       return { 
         ok: true, 
         message: 'Conexão ativa e validada com sucesso com a Google Generative AI!', 
-        model: 'gemini-2.0-flash', 
+        model: 'gemini-2.5-flash', 
         latencyMs 
       };
     } catch (err: any) {
@@ -111,7 +111,7 @@ class GeminiService {
     if (!this.isConfigured()) {
       throw new Error('VITE_GEMINI_API_KEY não configurada. Configure a sua chave de API nas Configurações do sistema.');
     }
-    const model = this.getGenAI().getGenerativeModel({ model: "gemini-2.0-flash" });
+    const model = this.getGenAI().getGenerativeModel({ model: "gemini-2.5-flash" });
 
     const historyText = contextHistory.slice(-15).map(m => `${m.role}: ${m.text}`).join('\n');
 
@@ -159,7 +159,7 @@ ATENÇÃO E REGRAS DE FORMATO:
     if (!this.isConfigured()) {
       throw new Error('Chave de API do Gemini não configurada. Configure a sua chave de API nas Configurações.');
     }
-    const model = this.getGenAI().getGenerativeModel({ model: "gemini-2.0-flash" });
+    const model = this.getGenAI().getGenerativeModel({ model: "gemini-2.5-flash" });
 
     // Build standard multi-turn format for Gemini
     const contents = history.map(msg => ({
@@ -261,7 +261,7 @@ Nunca esqueça dessa formatação JSON quando for a hora da entrega. Até lá, a
       };
 
       const apiKey = this.getApiKey();
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { 
@@ -288,7 +288,7 @@ Nunca esqueça dessa formatação JSON quando for a hora da entrega. Até lá, a
     if (!this.isConfigured()) {
       throw new Error('Chave de API do Gemini não configurada. Configure a sua chave de API nas Configurações.');
     }
-    const model = this.getGenAI().getGenerativeModel({ model: "gemini-2.0-flash" });
+    const model = this.getGenAI().getGenerativeModel({ model: "gemini-2.5-flash" });
 
     // Format the context
     const historyText = contextHistory.map(m => `${m.role === 'user' ? 'Cliente' : 'Atendente (VOCÊ)'}: ${m.text}`).join('\n');
@@ -338,7 +338,7 @@ ATENÇÃO E REGRAS DE FORMATO CRÍTICAS:
     if (!this.isConfigured()) {
       throw new Error('Chave de API do Gemini não configurada. Configure a sua chave de API nas Configurações.');
     }
-    const model = this.getGenAI().getGenerativeModel({ model: "gemini-2.0-flash" });
+    const model = this.getGenAI().getGenerativeModel({ model: "gemini-2.5-flash" });
 
     let toneInstruction = "Mantenha um tom profissional, polido, formal e extremamente educado.";
     switch (tone) {
@@ -412,7 +412,7 @@ REGRAS DE RETORNO CRÍTICAS:
     }
 
     try {
-      const model = this.getGenAI().getGenerativeModel({ model: "gemini-2.0-flash" });
+      const model = this.getGenAI().getGenerativeModel({ model: "gemini-2.5-flash" });
 
       const prompt = `Você é um sistema biométrico de reconhecimento facial de alta segurança e precisão cirúrgica.
 Sua tarefa é comparar as duas imagens fornecidas e determinar se pertencem à mesma pessoa física.
@@ -472,7 +472,7 @@ Retorne APENAS o JSON cru, sem marcações markdown ou blocos de código.`;
       throw new Error('Chave de API do Gemini não configurada. Configure a sua chave de API nas Configurações.');
     }
     const model = this.getGenAI().getGenerativeModel({
-      model: "gemini-2.0-flash",
+      model: "gemini-2.5-flash",
       generationConfig: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -569,7 +569,7 @@ Regras importantes de retorno:
       throw new Error('Chave de API do Gemini não configurada. Configure a sua chave de API nas Configurações.');
     }
     const model = this.getGenAI().getGenerativeModel({
-      model: "gemini-2.0-flash",
+      model: "gemini-2.5-flash",
       generationConfig: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -624,7 +624,7 @@ ${historyText}`;
       throw new Error('Chave de API do Gemini não configurada. Configure a sua chave de API nas Configurações.');
     }
     const model = this.getGenAI().getGenerativeModel({ 
-      model: "gemini-2.0-flash",
+      model: "gemini-2.5-flash",
       generationConfig: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -714,7 +714,7 @@ Gere o JSON contendo exatamente as informações solicitadas no schema.`;
       throw new Error('Chave de API do Gemini não configurada. Configure a sua chave de API nas Configurações.');
     }
     const model = this.getGenAI().getGenerativeModel({ 
-      model: "gemini-2.0-flash",
+      model: "gemini-2.5-flash",
       generationConfig: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -831,7 +831,7 @@ Seja extremamente prático, direto, profissional e com foco em código limpo, se
       throw new Error('Chave de API do Gemini não configurada. Configure a sua chave de API nas Configurações.');
     }
     const model = this.getGenAI().getGenerativeModel({ 
-      model: "gemini-2.0-flash",
+      model: "gemini-2.5-flash",
       generationConfig: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -907,7 +907,7 @@ Gere o JSON contendo exatamente as informações solicitadas no schema.`;
       throw new Error('Chave de API do Gemini não configurada. Configure a sua chave de API nas Configurações.');
     }
     const model = this.getGenAI().getGenerativeModel({ 
-      model: "gemini-2.0-flash",
+      model: "gemini-2.5-flash",
       generationConfig: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -1048,7 +1048,7 @@ Gere o JSON contendo exatamente as informações solicitadas no schema.`;
     if (this.isConfigured()) {
       try {
         const model = this.getGenAI().getGenerativeModel({
-          model: "gemini-2.0-flash",
+          model: "gemini-2.5-flash",
           generationConfig: {
             responseMimeType: "application/json",
             responseSchema: {
@@ -1331,7 +1331,7 @@ ${errorSample}
     }
 
     const model = this.getGenAI().getGenerativeModel({
-      model: "gemini-2.0-flash",
+      model: "gemini-2.5-flash",
       generationConfig: {
         temperature: 0.3
       }
@@ -1446,7 +1446,7 @@ Responda ESTRITAMENTE em formato JSON:
       throw new Error('Chave de API do Gemini não configurada. Configure sua chave em Configurações.');
     }
 
-    const model = this.getGenAI().getGenerativeModel({ model: "gemini-2.0-flash" });
+    const model = this.getGenAI().getGenerativeModel({ model: "gemini-2.5-flash" });
 
     const systemPrompt = `Você é um Engenheiro de Processos Operacionais e Especialista em Qualidade e Segurança Alimentar para Restaurantes, Franquias, Lanchonetes e Operações Gastronômicas.
 Sua missão é analisar os insumos fornecidos (áudio falado, imagem de prancheta/ficha de inspeção, documento PDF de Procedimento Operacional Padrão - POP, planilha Excel ou prompt de texto) e estruturar um Checklist Operacional de Alto Nível.

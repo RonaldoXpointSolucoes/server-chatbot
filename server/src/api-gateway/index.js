@@ -443,7 +443,7 @@ async function orchestrateSimulate(eligibleBots, textMessage) {
         }
         const genAI = new GoogleGenerativeAI(apiKey);
         const model = genAI.getGenerativeModel({
-            model: 'gemini-2.0-flash',
+            model: 'gemini-2.5-flash',
             generationConfig: { responseMimeType: 'application/json' }
         });
 
@@ -751,7 +751,7 @@ ${sampleErrors}`,
 
         const genAI = new GoogleGenerativeAI(apiKey);
         const model = genAI.getGenerativeModel({
-            model: 'gemini-2.0-flash',
+            model: 'gemini-2.5-flash',
             generationConfig: {
                 responseMimeType: 'application/json',
                 responseSchema: {
@@ -1036,8 +1036,8 @@ const handleAnalyzeScreen = async (req, res) => {
     try {
         const rawKey = req.body?.geminiApiKey || req.headers['x-gemini-api-key'] || process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
         const apiKey = rawKey ? String(rawKey).replace(/^['"]|['"]$/g, '').trim() : '';
-        if (!apiKey || apiKey.length < 20 || !apiKey.startsWith('AIza')) {
-            return res.status(400).json({ ok: false, error: 'GEMINI_API_KEY ausente ou no formato incorreto (deve ser uma chave válida do Google AI Studio iniciando com AIza...).' });
+        if (!apiKey || apiKey.length < 20 || (!apiKey.startsWith('AIza') && !apiKey.startsWith('AQ.'))) {
+            return res.status(400).json({ ok: false, error: 'GEMINI_API_KEY ausente ou no formato incorreto (deve ser uma chave válida do Google iniciando com AIza... ou AQ....).' });
         }
 
         const {
@@ -1056,7 +1056,7 @@ const handleAnalyzeScreen = async (req, res) => {
 
         const genAI = new GoogleGenerativeAI(apiKey);
         const model = genAI.getGenerativeModel({
-            model: 'gemini-2.0-flash',
+            model: 'gemini-2.5-flash',
             generationConfig: {
                 responseMimeType: 'application/json',
                 responseSchema: {

@@ -91,7 +91,7 @@ REGRAS DE EXTRAÇÃO:
 
 Retorne os fatos extraídos um por linha, iniciando diretamente pelo fato sem numeração, sem marcadores de tópicos (- ou *) e sem nenhuma introdução ou explicação adicional.`;
 
-            const modelName = 'gemini-2.0-flash';
+            const modelName = 'gemini-2.5-flash';
             const model = this.genAI.getGenerativeModel({ model: modelName });
             
             const result = await model.generateContent([

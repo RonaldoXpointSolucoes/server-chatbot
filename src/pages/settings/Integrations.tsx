@@ -100,7 +100,7 @@ export default function Integrations() {
       end,
       totalLength: clean.length,
       hiddenCount: Math.max(hiddenCount, 0),
-      isOfficialFormat: clean.startsWith('AIza')
+      isOfficialFormat: clean.startsWith('AIza') || clean.startsWith('AQ.')
     };
   };
 
@@ -116,9 +116,9 @@ export default function Integrations() {
       alert('Atenção: A chave informada é muito curta para ser uma chave de API válida do Google Gemini (mínimo de 20 caracteres).');
       return;
     }
-    const isStandardFormat = trimmedKey.startsWith('AIzaSy') || trimmedKey.startsWith('AIza');
+    const isStandardFormat = trimmedKey.startsWith('AIza') || trimmedKey.startsWith('AQ.');
     if (!isStandardFormat) {
-      if (!confirm('Atenção: As chaves oficiais do Google AI Studio iniciam obrigatoriamente com o prefixo "AIza". Deseja salvar mesmo assim?')) {
+      if (!confirm('Atenção: As chaves oficiais do Google iniciam com o prefixo "AIza" ou "AQ.". Deseja salvar mesmo assim?')) {
         return;
       }
     }
@@ -977,7 +977,7 @@ fetch("${ENGINE_URL}/message/sendMedia", requestOptions)
                               <span className="text-slate-500 text-[10px] block uppercase font-bold">Prefixo de Autenticação:</span>
                               <code className="text-emerald-300 font-mono text-xs">{maskedInfo.start}...</code>
                               <span className="text-[10px] text-slate-400 block mt-0.5">
-                                {maskedInfo.isOfficialFormat ? '✓ Padrão oficial AIza (Google AI Studio)' : '⚠️ Prefixo fora do padrão AIza'}
+                                {maskedInfo.isOfficialFormat ? '✓ Padrão oficial Google (AIza / AQ.)' : '⚠️ Prefixo fora do padrão Google'}
                               </span>
                             </div>
                             <div className="bg-[#18181b] p-2.5 rounded-xl border border-white/5">
@@ -1187,15 +1187,15 @@ fetch("${ENGINE_URL}/message/sendMedia", requestOptions)
                     {/* Feedback instantâneo do formato digitado */}
                     {newGeminiKeyInput.trim().length > 0 && (
                       <div className="text-xs">
-                        {newGeminiKeyInput.trim().startsWith('AIza') ? (
+                        {newGeminiKeyInput.trim().startsWith('AIza') || newGeminiKeyInput.trim().startsWith('AQ.') ? (
                           <div className="flex items-center gap-1.5 text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-2 rounded-xl">
                             <CheckCircle2 size={14} className="shrink-0" />
-                            <span>Prefixo oficial Google AI Studio reconhecido ({newGeminiKeyInput.trim().length} caracteres digitados).</span>
+                            <span>Prefixo oficial Google reconhecido ({newGeminiKeyInput.trim().startsWith('AQ.') ? 'Padrão Cloud/Vertex AQ.' : 'Padrão AI Studio AIza'}, {newGeminiKeyInput.trim().length} caracteres).</span>
                           </div>
                         ) : (
                           <div className="flex items-center gap-1.5 text-amber-400 bg-amber-500/10 border border-amber-500/20 px-3 py-2 rounded-xl">
                             <AlertTriangle size={14} className="shrink-0" />
-                            <span>Atenção: Chaves válidas do Google AI Studio iniciam com "AIza...". Certifique-se de copiar a chave completa.</span>
+                            <span>Atenção: Chaves válidas do Google iniciam com "AIza..." ou "AQ....". Certifique-se de copiar a chave completa.</span>
                           </div>
                         )}
                       </div>
