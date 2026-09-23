@@ -110,6 +110,9 @@ function interceptConsole() {
         text.includes('Resetando chaves de sessão') ||
         text.includes('Fast-Path') ||
         text.includes('SessionManager - Antiban') ||
+        text.includes('Caixa FoodNext não está conectada') ||
+        text.includes('Falha 404: Instância') ||
+        text.includes('Chave de API Gemini personalizada ignorada') ||
         (text.includes('[WaCalls Listener]') && (text.includes('Contato não encontrado') || text.includes('mapeamento LID')))
     )) {
         originalFn.apply(console, args);
@@ -244,7 +247,10 @@ export function addLog(level, message) {
     msgStr.includes('sent retry receipt') ||
     msgStr.includes('PreKeyError') ||
     msgStr.includes('SessionError') ||
-    msgStr.includes('verifyMAC');
+    msgStr.includes('verifyMAC') ||
+    msgStr.includes('Caixa FoodNext não está conectada') ||
+    msgStr.includes('Falha 404: Instância') ||
+    msgStr.includes('Chave de API Gemini personalizada ignorada');
 
   let sanitizedLevel = level;
   if (isRoutineNoise && (sanitizedLevel === 'warn' || sanitizedLevel === 'error')) {

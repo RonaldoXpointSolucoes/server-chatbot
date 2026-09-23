@@ -180,7 +180,7 @@ const requireApiKey = async (req, res, next) => {
     // Nas rotas Evolution-like, a identificação é pelo :name ou :instance no path, ou "instance" no body
     const instanceName = req.params.instance || req.params.name || req.body.instance;
     if (!instanceName) {
-        console.warn(`[API Gateway] [Auth] ❌ Falha 400: Nome da instância ausente no path ou body ("instance") | Rota: ${req.method} ${req.originalUrl} | IP: ${originIp}`);
+        console.info(`[API Gateway] [Auth] Falha 400: Nome da instância ausente no path ou body ("instance") | Rota: ${req.method} ${req.originalUrl} | IP: ${originIp}`);
         return res.status(400).json({ error: 'Instance name is missing in URL path or body ("instance").' });
     }
 
@@ -189,7 +189,7 @@ const requireApiKey = async (req, res, next) => {
 
     if (!data) {
         const targetSlug = normalizeInstanceSlug(instanceName);
-        console.warn(`[API Gateway] [Auth] ❌ Falha 404: Instância "${instanceName}" (slug normalizado: "${targetSlug}") não encontrada no banco | Rota: ${req.method} ${req.originalUrl} | IP: ${originIp}`);
+        console.info(`[API Gateway] [Auth] Falha 404: Instância "${instanceName}" (slug normalizado: "${targetSlug}") não encontrada no banco | Rota: ${req.method} ${req.originalUrl} | IP: ${originIp}`);
         return res.status(404).json({ 
             error: 'Instance not found.', 
             message: `Instância "${instanceName}" não foi localizada no sistema. Verifique o identificador ou nome cadastrado.` 

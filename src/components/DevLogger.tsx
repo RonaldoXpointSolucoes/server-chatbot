@@ -1363,7 +1363,10 @@ export default function DevLogger() {
         msg.includes('USync fetch yielded no results') ||
         msg.includes('QR Code ou pareamento expirou') ||
         msg.includes('Interrompendo loop de reconexão') ||
-        msg.includes('interrompendo loop de reconexão')
+        msg.includes('interrompendo loop de reconexão') ||
+        msg.includes('Caixa FoodNext não está conectada') ||
+        msg.includes('Falha 404: Instância') ||
+        msg.includes('Chave de API Gemini personalizada ignorada')
       );
     };
 

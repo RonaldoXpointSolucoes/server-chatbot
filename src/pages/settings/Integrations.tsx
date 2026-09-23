@@ -1071,14 +1071,25 @@ fetch("${ENGINE_URL}/message/sendMedia", requestOptions)
                             </button>
                           </div>
                         ) : (
-                          <button
-                            type="button"
-                            onClick={() => setShowDeleteConfirm(true)}
-                            className="px-3 py-2 text-rose-400/80 hover:text-rose-300 hover:bg-rose-500/10 rounded-xl text-xs transition-colors flex items-center gap-1"
-                          >
-                            <Trash2 size={13} />
-                            Remover
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <a
+                              href="https://aistudio.google.com/app/apikey"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-3 py-2 text-slate-400 hover:text-emerald-300 hover:bg-emerald-500/10 border border-white/5 rounded-xl text-xs transition-colors flex items-center gap-1.5"
+                            >
+                              <ExternalLink size={12} />
+                              <span>Google AI Studio</span>
+                            </a>
+                            <button
+                              type="button"
+                              onClick={() => setShowDeleteConfirm(true)}
+                              className="px-3 py-2 text-rose-400/80 hover:text-rose-300 hover:bg-rose-500/10 rounded-xl text-xs transition-colors flex items-center gap-1"
+                            >
+                              <Trash2 size={13} />
+                              Remover
+                            </button>
+                          </div>
                         )}
                       </div>
                     </div>
@@ -1087,12 +1098,53 @@ fetch("${ENGINE_URL}/message/sendMedia", requestOptions)
 
                 {/* MODO DE INSERÇÃO / REDEFINIÇÃO (Input seguro protegido) */}
                 {(!hasSavedGeminiKey || isEditingGemini) && (
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between text-xs text-slate-400">
-                      <label className="font-semibold text-slate-300">
-                        {hasSavedGeminiKey ? 'Nova Chave de API do Gemini:' : 'Inserir Chave do Google Gemini:'}
+                  <div className="space-y-3.5">
+                    {/* Banner de Ação Rápida: Link direto para a tela exata de geração de chaves */}
+                    <div className="p-4 bg-gradient-to-r from-emerald-950/40 via-[#162723]/60 to-[#141416]/90 border border-emerald-500/30 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+                          <Key size={20} />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-xs font-bold text-white tracking-tight">Onde gerar sua chave de API?</h4>
+                            <span className="text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">Oficial</span>
+                          </div>
+                          <p className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
+                            Acesse a tela oficial do <strong>Google AI Studio</strong> para criar sua chave gratuita em poucos segundos.
+                          </p>
+                        </div>
+                      </div>
+                      <a
+                        href="https://aistudio.google.com/app/apikey"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-[#00a884] to-[#00c298] hover:from-[#00c298] hover:to-[#00d8aa] text-[#111b21] font-bold text-xs transition-all shadow-[0_4px_16px_rgba(0,168,132,0.3)] hover:scale-[1.02] active:scale-95 shrink-0"
+                      >
+                        <Sparkles size={14} className="animate-pulse" />
+                        <span>Gerar Chave no Google AI Studio</span>
+                        <ExternalLink size={13} />
+                      </a>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400 pt-1">
+                      <label className="font-semibold text-slate-300 flex items-center gap-1.5">
+                        <Key size={14} className="text-[#00a884]" />
+                        <span>{hasSavedGeminiKey ? 'Nova Chave de API do Gemini:' : 'Inserir Chave do Google Gemini:'}</span>
                       </label>
-                      <span className="text-[11px] text-slate-500">Mínimo 20 caracteres • Prefixo AIza...</span>
+                      <div className="flex items-center gap-2">
+                        <a
+                          href="https://aistudio.google.com/app/apikey"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[#00a884] hover:text-[#00c298] text-[11px] font-semibold hover:underline inline-flex items-center gap-1"
+                        >
+                          <span>Tela de chaves do Google</span>
+                          <ExternalLink size={11} />
+                        </a>
+                        <span className="text-slate-600 hidden sm:inline">•</span>
+                        <span className="text-[11px] text-slate-500 hidden sm:inline">Mínimo 20 caracteres • Prefixo AIza...</span>
+                      </div>
                     </div>
 
                     <div className="flex items-center gap-2">
@@ -1150,9 +1202,20 @@ fetch("${ENGINE_URL}/message/sendMedia", requestOptions)
                     )}
 
                     {!hasSavedGeminiKey && (
-                      <div className="flex items-center gap-2 text-xs text-amber-400/90 bg-amber-500/10 border border-amber-500/20 px-3 py-2.5 rounded-xl leading-relaxed">
-                        <AlertTriangle size={14} className="shrink-0" />
-                        <span>Nenhuma chave individual configurada. O sistema opera com as chaves globais da plataforma ou plano de contingência inteligente.</span>
+                      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/20 p-3.5 rounded-xl leading-relaxed">
+                        <div className="flex items-start sm:items-center gap-2.5">
+                          <AlertTriangle size={16} className="text-amber-400 shrink-0 mt-0.5 sm:mt-0" />
+                          <span>Nenhuma chave individual configurada. O sistema opera com as chaves globais da plataforma ou plano de contingência inteligente.</span>
+                        </div>
+                        <a
+                          href="https://aistudio.google.com/app/apikey"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 hover:text-white border border-amber-500/40 text-[11px] font-semibold transition-all shrink-0 active:scale-95 group"
+                        >
+                          <span>Obter Chave Grátis</span>
+                          <ExternalLink size={11} className="group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
+                        </a>
                       </div>
                     )}
                   </div>

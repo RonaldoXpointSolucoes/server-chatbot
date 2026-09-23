@@ -227,7 +227,7 @@ async function sendViaFoodNext(targetJid, textMessage, cooldownKey) {
             notificationCooldownMap.set(cooldownKey, Date.now());
             console.log(`[ConnectionNotifier] ⚠️ Alerta de FALHA enviado via FoodNext para o Suporte (${targetJid}).`);
         } else {
-            console.warn('[ConnectionNotifier] Caixa FoodNext não está conectada no momento para despachar o alerta.');
+            console.info('[ConnectionNotifier] Caixa FoodNext não está conectada neste nó no momento para despachar alerta.');
         }
     } catch (foodErr) {
         console.error('[ConnectionNotifier] Erro ao disparar alerta via FoodNext:', foodErr.message);

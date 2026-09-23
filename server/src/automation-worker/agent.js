@@ -1378,9 +1378,9 @@ class AutomationWorker {
                 if (now - lastWarn > 60 * 60 * 1000) {
                     geminiAuthWarnTracker.set(`custom_key_${clean.slice(0, 8)}`, now);
                     if (!clean.startsWith('AIza')) {
-                        console.warn(`[AutomationWorker] Chave de API Gemini personalizada ignorada por formato incompatível (inicia com "${clean.slice(0, 6)}..."). O Google AI Studio exige prefixo "AIza".`);
+                        console.info(`[AutomationWorker] Chave de API Gemini personalizada ignorada por formato incompatível (inicia com "${clean.slice(0, 6)}..."). Operando com chave global ou contingência.`);
                     } else {
-                        console.warn(`[AutomationWorker] Chave de API Gemini personalizada suspensa temporariamente por falha 401/403.`);
+                        console.info(`[AutomationWorker] Chave de API Gemini personalizada suspensa temporariamente por falha 401/403.`);
                     }
                 }
             }
@@ -1496,7 +1496,10 @@ class AutomationWorker {
                 supabase.from('conversations')
                     .update({ status: 'open', ai_paused: true })
                     .eq('id', conversationId)
-                    .catch(err => console.warn('[Contingency] Erro ao pausar IA após repetições:', err?.message));
+                    .then(({ error }) => {
+                        if (error) console.warn('[Contingency] Erro ao pausar IA após repetições:', error.message);
+                    })
+                    .catch(err => console.warn('[Contingency] Exceção ao pausar IA após repetições:', err?.message));
 
                 return `Notei suas mensagens! Para te dar um atendimento ágil e personalizado, já transferi a conversa para nossa equipe e um atendente continuará por aqui em instantes. ⏳`;
             }
@@ -1508,7 +1511,10 @@ class AutomationWorker {
                     supabase.from('conversations')
                         .update({ status: 'open', ai_paused: true })
                         .eq('id', conversationId)
-                        .catch(err => console.warn('[Contingency] Erro ao pausar IA para atendimento humano:', err?.message));
+                        .then(({ error }) => {
+                            if (error) console.warn('[Contingency] Erro ao pausar IA para atendimento humano:', error.message);
+                        })
+                        .catch(err => console.warn('[Contingency] Exceção ao pausar IA para atendimento humano:', err?.message));
                 }
                 return `Com certeza! Já transferi seu atendimento para nossa equipe humana. Em instantes um de nossos atendentes irá continuar sua conversa por aqui! ⏳`;
             }
