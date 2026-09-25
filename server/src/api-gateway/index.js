@@ -670,9 +670,9 @@ router.post('/v1/ai/analyze-logs', async (req, res) => {
         ];
 
         const hasBaileysError = allErrors.some(e => /baileys|socket|disconnect|qr|session|connection lost|restart required/i.test(e.msg));
-        const hasGeminiError = allErrors.some(e => /gemini|google|generativelanguage|circuitbreaker|401 unauthorized|api_key_invalid/i.test(e.msg));
-        const hasGastrofoodError = (gastrofoodLogs && gastrofoodLogs.length > 0) || allErrors.some(e => /gastrofood|cardapio|pedido|produtopdv/i.test(e.msg));
-        const hasDbError = allErrors.some(e => /supabase|postgres|pgrst|database|foreign key|null value/i.test(e.msg));
+        const hasGeminiError = allErrors.some(e => /(gemini|generativelanguage|google-ai|googleai|gemini.*circuitbreaker)/i.test(e.msg) && !/supabase.*circuitbreaker/i.test(e.msg));
+        const hasGastrofoodError = (gastrofoodLogs && gastrofoodLogs.some(g => g.direction === 'error' || String(g.status || '').includes('FAILED') || (typeof g.status === 'number' && g.status >= 400) || g.error)) || allErrors.some(e => /gastrofood.*(erro|falha|error|fail|timeout|500|502|503)/i.test(e.msg));
+        const hasDbError = allErrors.some(e => /supabase|postgres|pgrst|database|foreign key|constraint|null value|BatchProcessor.*violates/i.test(e.msg));
         const hasNetworkError = allErrors.some(e => /failed to fetch|econnreset|etimedout|networkerror/i.test(e.msg));
 
         let category = 'Correção';
@@ -680,21 +680,26 @@ router.post('/v1/ai/analyze-logs', async (req, res) => {
         let title = '[Diagnóstico de Sistema] Estabilização e Resiliência Operacional';
         const tags = ['SISTEMA', 'DEVLOGGER', 'DIAGNOSTICO-HEURISTICO', 'IA-PLANO'];
 
-        if (hasBaileysError) {
+        if (hasDbError && allErrors.some(e => /foreign key|constraint|BatchProcessor.*violates/i.test(e.msg))) {
+            title = '[Banco de Dados] Resolução de Integridade Referencial e Violação de Chaves Estrangeiras';
+            tags.push('SUPABASE', 'POSTGRES', 'DATABASE', 'FOREIGN-KEY');
+            category = 'Backend / API';
+            priority = 3;
+        } else if (hasBaileysError) {
             title = '[WhatsApp Engine] Estabilização de Conexão Baileys e Gestão de Sockets';
             tags.push('BAILEYS', 'WHATSAPP', 'SOCKET');
             category = 'Chat';
+            priority = 3;
+        } else if (hasDbError) {
+            title = '[Banco de Dados] Resolução de Erros de Consulta e Sincronização Supabase';
+            tags.push('SUPABASE', 'POSTGRES', 'DATABASE');
+            category = 'Backend / API';
             priority = 3;
         } else if (hasGastrofoodError) {
             title = '[Integração Gastrofood] Tratamento de Falhas e Resiliência em Chamadas de API';
             tags.push('GASTROFOOD', 'INTEGRACAO', 'RESILIENCIA');
             category = 'Integração';
             priority = 2;
-        } else if (hasDbError) {
-            title = '[Banco de Dados] Resolução de Erros de Consulta e Sincronização Supabase';
-            tags.push('SUPABASE', 'POSTGRES', 'DATABASE');
-            category = 'Backend / API';
-            priority = 3;
         } else if (hasGeminiError) {
             title = '[IA / Automação] Resolução de Credenciais Gemini e Proteção contra CircuitBreaker';
             tags.push('GEMINI-AI', 'CREDENCIAIS', 'CIRCUIT-BREAKER');

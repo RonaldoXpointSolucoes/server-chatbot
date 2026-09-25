@@ -1326,29 +1326,34 @@ DIRETRIZES TÉCNICAS OBRIGATÓRIAS:
     ];
 
     const hasBaileysError = allErrors.some(e => /baileys|socket|disconnect|qr|session/i.test(e.msg));
-    const hasGeminiError = allErrors.some(e => /gemini|google|generativelanguage|circuitbreaker|401 unauthorized/i.test(e.msg));
-    const hasGastrofoodError = (params.gastrofoodLogs && params.gastrofoodLogs.length > 0) || allErrors.some(e => /gastrofood/i.test(e.msg));
-    const hasDbError = allErrors.some(e => /supabase|postgres|pgrst|database/i.test(e.msg));
+    const hasGeminiError = allErrors.some(e => /(gemini|generativelanguage|google-ai|googleai|gemini.*circuitbreaker)/i.test(e.msg) && !/supabase.*circuitbreaker/i.test(e.msg));
+    const hasGastrofoodError = (params.gastrofoodLogs && params.gastrofoodLogs.some((g: any) => g.direction === 'error' || String(g.status || '').includes('FAILED') || (typeof g.status === 'number' && g.status >= 400) || g.error)) || allErrors.some(e => /gastrofood.*(erro|falha|fail|timeout|500|502|503)/i.test(e.msg));
+    const hasDbError = allErrors.some(e => /supabase|postgres|pgrst|database|foreign key|constraint|BatchProcessor.*violates/i.test(e.msg));
 
     let category = 'Correção';
     let title = '[Diagnóstico de Sistema] Estabilização e Correção de Erros Operacionais';
     const tags = ['SISTEMA', 'DIAGNOSTICO', 'DEVLOGGER'];
 
-    if (hasGeminiError) {
-      title = '[IA / Automação] Resolução de Credenciais Gemini e Proteção contra CircuitBreaker';
-      tags.push('GEMINI-AI', 'CREDENCIAIS', 'CIRCUIT-BREAKER');
+    if (hasDbError && allErrors.some(e => /foreign key|constraint|BatchProcessor.*violates/i.test(e.msg))) {
+      title = '[Banco de Dados] Resolução de Integridade Referencial e Violação de Chaves Estrangeiras';
+      tags.push('SUPABASE', 'POSTGRES', 'DATABASE', 'FOREIGN-KEY');
       category = 'Backend / API';
     } else if (hasBaileysError) {
       title = '[WhatsApp Engine] Estabilização de Conexão Baileys e Gestão de Sockets';
       tags.push('BAILEYS', 'WHATSAPP', 'SOCKET');
       category = 'Chat';
+    } else if (hasDbError) {
+      title = '[Banco de Dados] Resolução de Erros de Consulta e Sincronização Supabase';
+      tags.push('SUPABASE', 'POSTGRES', 'DATABASE');
+      category = 'Backend / API';
     } else if (hasGastrofoodError) {
       title = '[Integração Gastrofood] Tratamento de Falhas e Resiliência em Chamadas de API';
       tags.push('GASTROFOOD', 'INTEGRACAO', 'RESILIENCIA');
       category = 'Integração';
-    } else if (hasDbError) {
-      title = '[Banco de Dados] Resolução de Erros de Consulta e Sincronização Supabase';
-      tags.push('SUPABASE', 'POSTGRES', 'DATABASE');
+    } else if (hasGeminiError) {
+      title = '[IA / Automação] Resolução de Credenciais Gemini e Proteção contra CircuitBreaker';
+      tags.push('GEMINI-AI', 'CREDENCIAIS', 'CIRCUIT-BREAKER');
+      category = 'Backend / API';
     }
 
     const errorSample = allErrors.slice(0, 10).map(e => `- \`[${e.src}]\` ${e.msg.substring(0, 200)}`).join('\n') || '- Nenhum erro crítico isolado; logs de rotina arquivados.';

@@ -3,7 +3,16 @@
  */
 
 export function isBroadcast(jid) {
-    return Boolean(jid && (jid.includes('@broadcast') || jid.includes('status@broadcast')));
+    return Boolean(jid && (
+        jid.includes('@broadcast') || 
+        jid.includes('status@broadcast') ||
+        jid.endsWith('@newsletter') ||
+        jid.includes('@newsletter')
+    ));
+}
+
+export function isNewsletter(jid) {
+    return Boolean(jid && (jid.endsWith('@newsletter') || jid.includes('@newsletter')));
 }
 
 export function isGroup(jid) {

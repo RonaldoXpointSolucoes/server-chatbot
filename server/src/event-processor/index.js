@@ -90,14 +90,16 @@ class EventProcessor {
             if (error || !rawMessages || rawMessages.length === 0) return;
 
             // Filtra mensagens que não são de broadcast, não são protocolMessages e ainda não foram verificadas
-            const candidateMessages = rawMessages.filter(r => 
-                r.message_id && 
-                !this.reconciliationAttempts.has(r.message_id) && 
-                !this.isBroadcast(r.chat_jid) &&
-                r.message_type !== 'protocolMessage' &&
-                r.message_type !== 'senderKeyDistributionMessage' &&
-                r.raw_payload
-            );
+            const candidateMessages = rawMessages.filter(r => {
+                if (!r.message_id || this.reconciliationAttempts.has(r.message_id)) return false;
+                if (this.isBroadcast(r.chat_jid)) {
+                    this.reconciliationAttempts.add(r.message_id);
+                    return false;
+                }
+                return r.message_type !== 'protocolMessage' && 
+                       r.message_type !== 'senderKeyDistributionMessage' && 
+                       r.raw_payload;
+            });
 
             if (candidateMessages.length === 0) return;
 
@@ -262,9 +264,9 @@ class EventProcessor {
         return jid && jid.endsWith('@g.us');
     }
 
-    // Auxiliar: Filtra se é um status ou newsletter
+    // Auxiliar: Filtra se é um status, broadcast ou newsletter
     isBroadcast(jid) {
-        return jid === 'status@broadcast' || (jid && jid.endsWith('@newsletter'));
+        return isBroadcast(jid);
     }
 
     // Auxiliar: Filtra se é um LID (Linked Device ID)
@@ -823,17 +825,19 @@ class EventProcessor {
                   const phone = c.phone || (c.whatsapp_jid ? c.whatsapp_jid.split('@')[0] : null);
                   return phone ? getBrPhoneVariations(phone) : [];
               })));
+              const jidsToSeek = Array.from(new Set(contactsArray.map(c => c.whatsapp_jid).filter(Boolean)));
               const tenantIdsToSeek = Array.from(new Set(contactsArray.map(c => c.tenant_id).filter(Boolean)));
               
               let existingMap = new Map();
               const contactBotStatusMap = new Map();
-              if (tenantIdsToSeek.length > 0 && phonesToSeek.length > 0) {
-                  const { data: existingDbContacts } = await supabase.from('contacts')
-                      .select('*')
-                      .in('tenant_id', tenantIdsToSeek)
-                      .in('phone', phonesToSeek);
+              if (tenantIdsToSeek.length > 0 && (phonesToSeek.length > 0 || jidsToSeek.length > 0)) {
+                  const [phonesRes, jidsRes] = await Promise.all([
+                      phonesToSeek.length > 0 ? supabase.from('contacts').select('*').in('tenant_id', tenantIdsToSeek).in('phone', phonesToSeek) : Promise.resolve({ data: [] }),
+                      jidsToSeek.length > 0 ? supabase.from('contacts').select('*').in('tenant_id', tenantIdsToSeek).in('whatsapp_jid', jidsToSeek) : Promise.resolve({ data: [] })
+                  ]);
+                  const existingDbContacts = [...(phonesRes.data || []), ...(jidsRes.data || [])];
                       
-                  if (existingDbContacts) {
+                  if (existingDbContacts.length > 0) {
                       for (const e of existingDbContacts) {
                           const mainKey = `${e.tenant_id}_${e.phone}`;
                           existingMap.set(mainKey, e);
@@ -953,10 +957,11 @@ class EventProcessor {
                       console.warn('[BatchProcessor] Inserção de novos contatos em lote falhou (código ' + errIns.code + '): ' + errIns.message + '. Aplicando resolução resiliente...');
                       
                       // Busca contatos no DB para garantir recuperação de IDs reais em caso de concorrência
-                      const { data: fallbackContacts } = await supabase.from('contacts')
-                          .select('id, tenant_id, phone, whatsapp_jid')
-                          .in('tenant_id', tenantIdsToSeek.length > 0 ? tenantIdsToSeek : ['00000000-0000-0000-0000-000000000000'])
-                          .in('phone', phonesToSeek);
+                      const [fbPhones, fbJids] = await Promise.all([
+                          phonesToSeek.length > 0 ? supabase.from('contacts').select('id, tenant_id, phone, whatsapp_jid').in('tenant_id', tenantIdsToSeek.length > 0 ? tenantIdsToSeek : ['00000000-0000-0000-0000-000000000000']).in('phone', phonesToSeek) : Promise.resolve({ data: [] }),
+                          jidsToSeek.length > 0 ? supabase.from('contacts').select('id, tenant_id, phone, whatsapp_jid').in('tenant_id', tenantIdsToSeek.length > 0 ? tenantIdsToSeek : ['00000000-0000-0000-0000-000000000000']).in('whatsapp_jid', jidsToSeek) : Promise.resolve({ data: [] })
+                      ]);
+                      const fallbackContacts = [...(fbPhones.data || []), ...(fbJids.data || [])];
 
                       const fallbackIdMap = new Map();
                       if (fallbackContacts) {
@@ -965,26 +970,39 @@ class EventProcessor {
                               for (const v of getBrPhoneVariations(fb.phone)) {
                                   fallbackIdMap.set(`${fb.tenant_id}_${v}`, fb);
                               }
+                              if (fb.whatsapp_jid) {
+                                  fallbackIdMap.set(`${fb.tenant_id}_${fb.whatsapp_jid}`, fb);
+                              }
                           }
                       }
 
                       for (const item of contactsToInsert) {
-                          const existingFb = fallbackIdMap.get(`${item.tenant_id}_${item.phone}`);
+                          const existingFb = fallbackIdMap.get(`${item.tenant_id}_${item.phone}`) || (item.whatsapp_jid ? fallbackIdMap.get(`${item.tenant_id}_${item.whatsapp_jid}`) : null);
                           if (existingFb) {
                               upsertedContacts.push(existingFb);
                           } else {
                               try {
-                                  const { data: singleRes } = await supabase.from('contacts')
+                                  const { data: singleRes, error: singleErr } = await supabase.from('contacts')
                                       .upsert(item, { onConflict: 'tenant_id, phone' })
                                       .select('id, tenant_id, phone, whatsapp_jid');
-                                  if (singleRes && singleRes.length > 0) {
+                                  if (!singleErr && singleRes && singleRes.length > 0) {
                                       upsertedContacts.push(...singleRes);
                                   } else {
-                                      upsertedContacts.push(item);
+                                      // Se falhou, busca no banco pelo telefone ou JID existente
+                                      const { data: found } = await supabase.from('contacts')
+                                          .select('id, tenant_id, phone, whatsapp_jid')
+                                          .eq('tenant_id', item.tenant_id)
+                                          .or(`phone.eq.${item.phone}${item.whatsapp_jid ? `,whatsapp_jid.eq.${item.whatsapp_jid}` : ''}`)
+                                          .limit(1)
+                                          .maybeSingle();
+                                      if (found) {
+                                          upsertedContacts.push(found);
+                                      } else {
+                                          console.error('[BatchProcessor] Contato não pôde ser inserido nem recuperado:', singleErr?.message || 'Falha na inserção individual');
+                                      }
                                   }
                               } catch (sErr) {
-                                  console.error('[BatchProcessor] Erro na inserção individual de contato:', sErr.message);
-                                  upsertedContacts.push(item);
+                                  console.error('[BatchProcessor] Erro na inserção individual de contato:', sErr?.message || sErr);
                               }
                           }
                       }
@@ -993,6 +1011,7 @@ class EventProcessor {
              
              const contactIdMap = new Map(); // phone+tenant -> contact_id (mapeia variações 8 e 9 dígitos)
              for (const c of upsertedContacts) {
+                 if (!c || !c.id) continue;
                  contactIdMap.set(`${c.tenant_id}_${c.phone}`, c.id);
                  if (c.whatsapp_jid) {
                      contactIdMap.set(`${c.tenant_id}_${c.whatsapp_jid}`, c.id);
@@ -1005,13 +1024,19 @@ class EventProcessor {
              
               const convMap = new Map();
               for(const b of batch) {
-                  let cid = contactIdMap.get(`${b.tenantId}_${b.phone}`);
+                  let cid = contactIdMap.get(`${b.tenantId}_${b.phone}`) || (b.jid ? contactIdMap.get(`${b.tenantId}_${b.jid}`) : null);
                   if (!cid) {
                       const targetPhone = getCanonicalBrPhone(b.phone) || b.phone;
-                      const fallbackContact = upsertedContacts.find(sc => sc.tenant_id === b.tenantId && (sc.phone === targetPhone || sc.phone === b.phone));
-                      cid = fallbackContact?.id || crypto.randomUUID();
-                      contactIdMap.set(`${b.tenantId}_${b.phone}`, cid);
+                      const fallbackContact = upsertedContacts.find(sc => sc.tenant_id === b.tenantId && (sc.phone === targetPhone || sc.phone === b.phone || sc.whatsapp_jid === b.jid));
+                      cid = fallbackContact?.id;
                   }
+
+                  if (!cid) {
+                      console.warn(`[BatchProcessor] Aviso: Contato não validado no banco para ${b.phone} (${b.jid}). Conversa ignorada para evitar violação de FK.`);
+                      continue;
+                  }
+                  contactIdMap.set(`${b.tenantId}_${b.phone}`, cid);
+                  if (b.jid) contactIdMap.set(`${b.tenantId}_${b.jid}`, cid);
 
                   const key = `${b.tenantId}_${b.instanceId || 'null_instance'}_${cid}`;
                   if (!convMap.has(key)) {
@@ -1197,14 +1222,10 @@ class EventProcessor {
                   if(errUp) console.warn('[BatchProcessor] Aviso: falha atualizando unread batch.', errUp.message);
               }
               
-              // Agrupa os IDs das conversas finais no MAPA ESTRITO POR INSTÂNCIA
+              // Agrupa os IDs das conversas finais no MAPA ESTRITO POR INSTÂNCIA (apenas conversas confirmadas no banco)
               const finalConvIdMap = new Map();
               for(const e of existingConvs) finalConvIdMap.set(`${e.tenant_id}_${e.instance_id || 'null_instance'}_${e.contact_id}`, e.id);
               for(const e of insertedConvs) finalConvIdMap.set(`${e.tenant_id}_${e.instance_id || 'null_instance'}_${e.contact_id}`, e.id);
-              for(const item of toInsertConvs) {
-                  const k = `${item.tenant_id}_${item.instance_id || 'null_instance'}_${item.contact_id}`;
-                  if (!finalConvIdMap.has(k)) finalConvIdMap.set(k, item.id);
-              }
              
              // 2.5 Resolve Duplicatas de Mensagens ANTES do processo pesado de mídias e inserções
              const allMessageIds = batch.map(b => b.rawMsg.key.id).filter(Boolean);
@@ -1245,32 +1266,56 @@ class EventProcessor {
 
              // 3. Processa Mídias em Paralelo Segura (evitando Memory leaks)
              await Promise.all(activeBatch.map(async b => {
-                 let cid = contactIdMap.get(`${b.tenantId}_${b.phone}`);
+                 let cid = contactIdMap.get(`${b.tenantId}_${b.phone}`) || (b.jid ? contactIdMap.get(`${b.tenantId}_${b.jid}`) : null);
                  if (!cid) {
                      const targetPhone = getCanonicalBrPhone(b.phone) || b.phone;
-                     const fallbackContact = upsertedContacts.find(sc => sc.tenant_id === b.tenantId && (sc.phone === targetPhone || sc.phone === b.phone));
-                     cid = fallbackContact?.id || crypto.randomUUID();
-                     contactIdMap.set(`${b.tenantId}_${b.phone}`, cid);
+                     const fallbackContact = upsertedContacts.find(sc => sc.tenant_id === b.tenantId && (sc.phone === targetPhone || sc.phone === b.phone || sc.whatsapp_jid === b.jid));
+                     cid = fallbackContact?.id;
+                 }
+
+                 if (!cid) {
+                     b.conversationId = null;
+                     return;
                  }
 
                  const mapKey = `${b.tenantId}_${b.instanceId || 'null_instance'}_${cid}`;
                  b.conversationId = finalConvIdMap.get(mapKey) || finalConvIdMap.get(`${b.tenantId}_null_instance_${cid}`);
 
-                 // Fallback isolado e seguro: se não tiver conversa mapeada, cria uma nova exclusiva desta instância
+                 // Fallback isolado e seguro: se não tiver conversa mapeada, cria e aguarda confirmação real do banco
                  if (!b.conversationId) {
-                     const fallbackConvId = crypto.randomUUID();
-                     finalConvIdMap.set(mapKey, fallbackConvId);
-                     b.conversationId = fallbackConvId;
-                     supabase.from('conversations').insert([{
-                         id: fallbackConvId,
-                         tenant_id: b.tenantId,
-                         instance_id: b.instanceId,
-                         contact_id: cid,
-                         status: 'bot',
-                         unread_count: 1,
-                         last_message_preview: Array.from(String(b.textMessage || '')).slice(0, 500).join(''),
-                         last_message_at: new Date(b.timestamp).toISOString()
-                     }]).then(() => {}).catch(e => console.error('[BatchProcessor] Erro no fallback de conversa isolada:', e));
+                     try {
+                         const fallbackConvId = crypto.randomUUID();
+                         const { data: convCreated, error: convErr } = await supabase.from('conversations').insert([{
+                             id: fallbackConvId,
+                             tenant_id: b.tenantId,
+                             instance_id: b.instanceId,
+                             contact_id: cid,
+                             status: 'bot',
+                             unread_count: 1,
+                             last_message_preview: Array.from(String(b.textMessage || '')).slice(0, 500).join(''),
+                             last_message_at: new Date(b.timestamp).toISOString()
+                         }]).select('id').maybeSingle();
+
+                         if (!convErr && convCreated) {
+                             finalConvIdMap.set(mapKey, convCreated.id);
+                             b.conversationId = convCreated.id;
+                         } else {
+                             const { data: convFound } = await supabase.from('conversations')
+                                 .select('id')
+                                 .eq('tenant_id', b.tenantId)
+                                 .eq('contact_id', cid)
+                                 .limit(1)
+                                 .maybeSingle();
+                             if (convFound) {
+                                 finalConvIdMap.set(mapKey, convFound.id);
+                                 b.conversationId = convFound.id;
+                             } else {
+                                 console.warn('[BatchProcessor] Falha ao criar conversa em fallback:', convErr?.message || 'Erro desconhecido');
+                             }
+                         }
+                     } catch (fbErr) {
+                         console.error('[BatchProcessor] Exceção no fallback de conversa:', fbErr?.message || fbErr);
+                     }
                  }
                  
                  b.convStatus = updatedStatusMap.get(mapKey) || existingConvMap.get(`${b.tenantId}_${b.instanceId}_${cid}`)?.status || existingConvMap.get(`${b.tenantId}_null_instance_${cid}`)?.status || 'bot';
@@ -1729,7 +1774,14 @@ class EventProcessor {
                                   botData = eligibleSpecialists[0];
                               }
                           } else if (orchestratorBot) {
-                              console.warn(`[EventProcessor] Atenção: Apenas o Orquestrador (${orchestratorBot.name}) está ativo para a instância ${b.instanceId}. O Orquestrador é apenas roteador e NÃO envia mensagens diretamente aos clientes. Ative ao menos um especialista (ex: Luna Recepção).`);
+                              const warnKey = String(b.instanceId || 'default');
+                              const lastWarn = EventProcessor.orchestratorWarnMap?.get(warnKey) || 0;
+                              const now = Date.now();
+                              if (now - lastWarn > 30 * 60 * 1000) {
+                                  if (!EventProcessor.orchestratorWarnMap) EventProcessor.orchestratorWarnMap = new Map();
+                                  EventProcessor.orchestratorWarnMap.set(warnKey, now);
+                                  console.info(`[EventProcessor] Atenção: Apenas o Orquestrador (${orchestratorBot.name}) está ativo para a instância ${b.instanceId}. O Orquestrador é apenas roteador e NÃO envia mensagens diretamente aos clientes. Ative ao menos um especialista (ex: Luna Recepção).`);
+                              }
                           }
 
                           // Se for teste_robo e não achou especialista nos canais, busca um especialista de contingência
