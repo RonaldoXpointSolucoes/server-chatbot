@@ -1693,27 +1693,55 @@ class EventProcessor {
                           const { data: allBotsData } = await supabase.from('bots').select('*').eq('tenant_id', b.tenantId);
                           const botsData = allBotsData || [];
 
-                          // Filtra os bots ativos e habilitados para a instância atual
-                          const eligibleBots = botsData.filter(bot => bot.status === 'active' && bot.autoReply !== false && bot.channels && bot.channels.includes(b.instanceId));
+                          // Helper para identificar robôs com papel de Orquestrador/Maestro (não respondem diretamente)
+                          const isOrchestratorBot = (bot) => {
+                              if (!bot) return false;
+                              const name = String(bot.name || '').toLowerCase();
+                              const role = String(bot.role || '').toLowerCase();
+                              const cat = String(bot.category || '').toLowerCase();
+                              return name.includes('(orquestrador)') || name.includes('orquestrador') || role === 'orquestrador' || cat === 'orquestrador';
+                          };
+
+                          // Identifica se há um robô Orquestrador ativo para extrair diretrizes de roteamento
+                          const orchestratorBot = botsData.find(bot => isOrchestratorBot(bot) && bot.status === 'active');
+
+                          // Filtra APENAS os robôs especialistas elegíveis para responder ao cliente (exclui o Orquestrador)
+                          const eligibleSpecialists = botsData.filter(bot => 
+                              !isOrchestratorBot(bot) && 
+                              bot.status === 'active' && 
+                              bot.autoReply !== false && 
+                              bot.channels && 
+                              bot.channels.includes(b.instanceId)
+                          );
 
                           let botData = null;
-                          if (eligibleBots.length > 0) {
-                              if (eligibleBots.length > 1) {
-                                  console.log(`[EventProcessor] Múltiplos bots ativos (${eligibleBots.length}) elegíveis. Iniciando roteamento por assunto...`);
-                                  botData = await AutomationWorker.routeMessageToBot(eligibleBots, b.textMessage, b.tenantId, b.conversationId);
+                          if (eligibleSpecialists.length > 0) {
+                              if (eligibleSpecialists.length > 1) {
+                                  console.log(`[EventProcessor] Múltiplos especialistas ativos (${eligibleSpecialists.length}) elegíveis. Iniciando roteamento por assunto...`);
+                                  botData = await AutomationWorker.routeMessageToBot(
+                                      eligibleSpecialists, 
+                                      b.textMessage, 
+                                      b.tenantId, 
+                                      b.conversationId,
+                                      orchestratorBot?.systemPrompt
+                                  );
                               } else {
-                                  botData = eligibleBots[0];
+                                  botData = eligibleSpecialists[0];
                               }
+                          } else if (orchestratorBot) {
+                              console.warn(`[EventProcessor] Atenção: Apenas o Orquestrador (${orchestratorBot.name}) está ativo para a instância ${b.instanceId}. O Orquestrador é apenas roteador e NÃO envia mensagens diretamente aos clientes. Ative ao menos um especialista (ex: Luna Recepção).`);
                           }
 
-                          // Se for teste_robo e não achou bot, tenta capturar a configuração base
+                          // Se for teste_robo e não achou especialista nos canais, busca um especialista de contingência
                           if (!botData && b.convStatus === 'teste_robo') {
-                              botData = botsData.find(bot => bot.channels && bot.channels.includes(b.instanceId)) || botsData[0];
+                              botData = botsData.find(bot => !isOrchestratorBot(bot) && bot.channels && bot.channels.includes(b.instanceId)) 
+                                  || botsData.find(bot => !isOrchestratorBot(bot)) 
+                                  || null;
                           }
 
-                           if (!botData) {
-                               console.log(`[EventProcessor] Nenhum bot ativo ou elegível encontrado para a caixa de entrada ${b.instanceId}. Silenciando robô.`);
-                           }
+                          if (!botData) {
+                              console.log(`[EventProcessor] Nenhum especialista ativo ou elegível encontrado para a caixa de entrada ${b.instanceId}. Silenciando robô.`);
+                          }
 
                           if (botData) {
                               // --- MODO SANDBOX / FILTRO DE TELEFONE DE TESTE ---

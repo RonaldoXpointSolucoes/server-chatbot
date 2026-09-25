@@ -77,6 +77,20 @@ const invalidGeminiKeysBlacklist = new Set();
 const geminiAuthWarnTracker = new Map();
 const botRouterWarnTracker = new Map();
 
+function blacklistGeminiKey(key, reason = 'Falha 401/403 ou credenciais inválidas') {
+  if (!key || typeof key !== 'string') return;
+  const clean = key.replace(/^['"]|['"]$/g, '').trim();
+  if (clean.length > 0 && !invalidGeminiKeysBlacklist.has(clean)) {
+    invalidGeminiKeysBlacklist.add(clean);
+    const now = Date.now();
+    const lastWarn = geminiAuthWarnTracker.get(`bl_${clean.slice(0, 8)}`) || 0;
+    if (now - lastWarn > 60 * 60 * 1000) {
+      geminiAuthWarnTracker.set(`bl_${clean.slice(0, 8)}`, now);
+      console.warn(`[AutomationWorker] Chave de API Gemini (${clean.slice(0, 8)}...) suspensa temporariamente: ${reason}. Ativando contingência e fallback global.`);
+    }
+  }
+}
+
 async function callWithGeminiRetry(fn, operationName = 'Gemini Operation', maxRetries = 4) {
   if (geminiCircuitBreaker.isOpen()) {
     throw new Error(`[CircuitBreaker:OPEN] A API Gemini está em cooldown de proteção após falhas consecutivas de servidor 500.`);
@@ -96,6 +110,7 @@ async function callWithGeminiRetry(fn, operationName = 'Gemini Operation', maxRe
       const isAuthOrFatal = errMsg.includes('401') || 
                             errMsg.includes('Unauthorized') || 
                             errMsg.includes('ACCESS_TOKEN_TYPE_UNSUPPORTED') || 
+                            errMsg.includes('UNAUTHENTICATED') ||
                             errMsg.includes('API_KEY_INVALID') || 
                             errMsg.includes('API_KEY_SERVICE_BLOCKED') ||
                             errMsg.includes('API key not valid') || 
@@ -1833,9 +1848,22 @@ class AutomationWorker {
         }
     }
 
-    async routeMessageToBot(eligibleBots, textMessage, tenantId, conversationId) {
+    async routeMessageToBot(eligibleBots, textMessage, tenantId, conversationId, orchestratorInstructions = '') {
         if (!eligibleBots || eligibleBots.length === 0) return null;
-        if (eligibleBots.length === 1) return eligibleBots[0];
+
+        // Filtrar preventivamente qualquer robô que tenha papel de Orquestrador (apenas especialistas respondem)
+        const candidates = (eligibleBots || []).filter(b => {
+            const name = String(b.name || '').toLowerCase();
+            const role = String(b.role || '').toLowerCase();
+            const cat = String(b.category || '').toLowerCase();
+            return !name.includes('(orquestrador)') && !name.includes('orquestrador') && role !== 'orquestrador' && cat !== 'orquestrador';
+        });
+
+        if (candidates.length === 0) {
+            console.warn('[BotRouter] Nenhum especialista disponível após filtrar orquestradores.');
+            return null;
+        }
+        if (candidates.length === 1) return candidates[0];
 
         try {
             let tenantApiKey = null;
@@ -1852,9 +1880,9 @@ class AutomationWorker {
                 const lastWarn = botRouterWarnTracker.get(`no_gemini_${tenantId || 'global'}`) || 0;
                 if (now - lastWarn > 60 * 60 * 1000) {
                     botRouterWarnTracker.set(`no_gemini_${tenantId || 'global'}`, now);
-                    console.info('[AutomationWorker] Gemini não configurado no roteamento de bots (modo contingência ativo). Usando fallback do primeiro bot.');
+                    console.info('[AutomationWorker] Gemini não configurado no roteamento de bots (modo contingência ativo). Usando fallback do primeiro especialista.');
                 }
-                return eligibleBots[0];
+                return candidates[0];
             }
 
             const model = activeGenAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
@@ -1867,44 +1895,69 @@ class AutomationWorker {
                 }
             }
 
-            const prompt = `Você é um orquestrador de atendimento inteligente para negócios de alimentação. Analise a mensagem atual do cliente e o histórico recente da conversa para decidir qual dos seguintes agentes (bots) é o mais adequado para responder ao cliente com base em seus nomes e descrições.
+            const prompt = `Você é o Orquestrador de atendimento inteligente do ecossistema de robôs. Analise a mensagem atual do cliente e o histórico recente da conversa para decidir qual dos seguintes agentes especialistas é o mais adequado para responder ao cliente com base em seus nomes e descrições.
 
-Agentes disponíveis:
-${eligibleBots.map(b => `- ID: "${b.id}" | Nome: "${b.name}" | Descrição: "${b.description || 'Sem descrição.'}"`).join('\n')}
+Agentes especialistas disponíveis para responder:
+${candidates.map(b => `- ID: "${b.id}" | Nome: "${b.name}" | Descrição: "${b.description || 'Sem descrição.'}"`).join('\n')}
 ${historyText}
 Mensagem atual do cliente:
 "${textMessage}"
 
-Regras importantes de roteamento:
-1. Se a conversa estiver ativamente no fluxo de um pedido (ex: o cliente está escolhendo produtos, adicionais, informando endereço de entrega, selecionando a forma de pagamento, ou confirmando o resumo do pedido), você deve continuar roteando para o bot de pedido (ex: "Luna Pedido"). Respostas curtas como "não", "sim", "está certo", "crédito", "débito", "pix", "dinheiro" ou dados de endereço fazem parte do fechamento de pedido e devem permanecer com o bot de pedido.
-2. Só mude de agente se o cliente de fato mudar claramente o assunto (ex: pedir para falar com humano, reclamar de um pedido anterior, ou fazer uma pergunta sobre o horário de funcionamento/endereço físico).
+Regras fundamentais de roteamento:
+1. Saudação inicial / Primeiro contato: Se a mensagem for um cumprimento inicial, apresentação ou abertura de conversa (ex: "olá", "oi", "boa noite", "bom dia", "tudo bem?", "como funciona?"), você DEVE obrigatoriamente rotear para o robô de Recepção/Acolhimento (ex: "Luna Recepção" ou recepcionista equivalente).
+2. Fluxo de pedido: Se a conversa estiver ativamente no fluxo de um pedido (ex: o cliente está escolhendo produtos, adicionais, informando endereço de entrega, selecionando a forma de pagamento, ou confirmando o resumo do pedido), você deve continuar roteando para o bot de pedido (ex: "Luna Pedido"). Respostas curtas como "não", "sim", "está certo", "crédito", "débito", "pix", "dinheiro" ou dados de endereço fazem parte do fechamento de pedido e devem permanecer com o bot de pedido.
+3. Cardápio e dúvidas sobre itens: Se o cliente perguntar sobre opções de produtos, sabores, ingredientes, combos ou solicitar o link do cardápio, roteie para o robô de Cardápio/Menu (ex: "Luna Menu").
+4. Atendimento Humano: Se o cliente pedir expressamente para falar com uma pessoa/atendente humano ou relatar problema grave, priorize o bot de suporte/humano.
+5. Continuidade: Só mude de agente se o cliente de fato mudar claramente o assunto.
+${orchestratorInstructions ? `\nDiretrizes adicionais do Orquestrador:\n${orchestratorInstructions}\n` : ''}
 
-Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem formatações adicionais, sem markdown, sem aspas. Exemplo de resposta: "53a2db6c-d9c2-4760-8cbd-454ceccd280c".`;
+Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem formatações adicionais, sem markdown, sem aspas. Exemplo de resposta: "${candidates[0].id}".`;
 
             const result = await callWithGeminiRetry(() => model.generateContent(prompt), 'routeMessageToBot');
             const responseText = result.response.text().trim();
             
-            const chosenBot = eligibleBots.find(b => responseText.includes(b.id) || b.id === responseText);
+            const chosenBot = candidates.find(b => responseText.includes(b.id) || b.id === responseText);
             if (chosenBot) {
-                console.log(`[BotRouter] Roteamento inteligente escolheu o bot: "${chosenBot.name}" (ID: ${chosenBot.id}) para a mensagem: "${textMessage}"`);
+                console.log(`[BotRouter] Roteamento inteligente escolheu o especialista: "${chosenBot.name}" (ID: ${chosenBot.id}) para a mensagem: "${textMessage}"`);
                 return chosenBot;
             } else {
-                console.warn(`[BotRouter] Escolha da IA (${responseText}) não bate com os bots disponíveis. Usando fallback do primeiro bot.`);
-                return eligibleBots[0];
+                console.warn(`[BotRouter] Escolha da IA (${responseText}) não bate com os especialistas disponíveis. Usando fallback do primeiro especialista: "${candidates[0].name}".`);
+                return candidates[0];
             }
         } catch (err) {
             const errMsg = err?.message || String(err);
+            const isAuthError = errMsg.includes('401') || errMsg.includes('Unauthorized') || errMsg.includes('ACCESS_TOKEN_TYPE_UNSUPPORTED') || errMsg.includes('UNAUTHENTICATED') || errMsg.includes('403') || errMsg.includes('PERMISSION_DENIED');
+            
+            if (isAuthError && tenantApiKey) {
+                blacklistGeminiKey(tenantApiKey, errMsg.slice(0, 100));
+                // Tenta re-executar o roteamento com a chave global se disponível
+                if (this.genAI && this.genAI !== activeGenAI) {
+                    try {
+                        const fallbackModel = this.genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+                        const fallbackResult = await callWithGeminiRetry(() => fallbackModel.generateContent(prompt), 'routeMessageToBot (fallback global)');
+                        const fallbackText = fallbackResult.response.text().trim();
+                        const fallbackBot = candidates.find(b => fallbackText.includes(b.id) || b.id === fallbackText);
+                        if (fallbackBot) {
+                            console.log(`[BotRouter] Roteamento inteligente recuperado via chave global para o especialista: "${fallbackBot.name}" (ID: ${fallbackBot.id})`);
+                            return fallbackBot;
+                        }
+                    } catch (eFallback) {
+                        // continua para o fallback de primeiro especialista
+                    }
+                }
+            }
+
             if (errMsg.includes('PROHIBITED_CONTENT')) {
-                console.warn(`[BotRouter] Roteamento inteligente bloqueado pela API do Gemini devido a conteúdo proibido (PROHIBITED_CONTENT). Mensagem do cliente: "${textMessage}". Usando fallback do primeiro bot.`);
+                console.warn(`[BotRouter] Roteamento inteligente bloqueado pela API do Gemini devido a conteúdo proibido (PROHIBITED_CONTENT). Mensagem do cliente: "${textMessage}". Usando fallback do primeiro especialista.`);
             } else {
                 const now = Date.now();
                 const lastLog = botRouterWarnTracker.get(`err_${tenantId || 'global'}`) || 0;
                 if (now - lastLog > 60 * 60 * 1000) {
                     botRouterWarnTracker.set(`err_${tenantId || 'global'}`, now);
-                    console.warn(`[BotRouter] Roteamento inteligente em contingência para o tenant ${tenantId || 'global'}: ${errMsg.slice(0, 140)}. Utilizando bot padrão.`);
+                    console.warn(`[BotRouter] Roteamento inteligente em contingência para o tenant ${tenantId || 'global'}: ${errMsg.slice(0, 140)}. Utilizando especialista padrão.`);
                 }
             }
-            return eligibleBots[0];
+            return candidates[0];
         }
     }
 
@@ -4050,9 +4103,9 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                     if (errMsg.includes('PROHIBITED_CONTENT')) {
                         console.warn(`[AutomationWorker] O processamento da conversa ${conversationId} foi bloqueado pela API do Gemini devido a conteúdo proibido (PROHIBITED_CONTENT). Mensagem do cliente: "${textMessage}"`);
                         finalResponseText = "Desculpe, não posso responder a essa pergunta devido às diretrizes de segurança de conteúdo do sistema.";
-                    } else if (errMsg.includes('401') || errMsg.includes('Unauthorized') || errMsg.includes('ACCESS_TOKEN_TYPE_UNSUPPORTED') || errMsg.includes('API_KEY_INVALID') || errMsg.includes('API_KEY_SERVICE_BLOCKED') || errMsg.includes('API key not valid') || errMsg.includes('403') || errMsg.includes('PERMISSION_DENIED') || errMsg.includes('leaked')) {
+                    } else if (errMsg.includes('401') || errMsg.includes('Unauthorized') || errMsg.includes('ACCESS_TOKEN_TYPE_UNSUPPORTED') || errMsg.includes('UNAUTHENTICATED') || errMsg.includes('API_KEY_INVALID') || errMsg.includes('API_KEY_SERVICE_BLOCKED') || errMsg.includes('API key not valid') || errMsg.includes('403') || errMsg.includes('PERMISSION_DENIED') || errMsg.includes('leaked')) {
                         if (tenantApiKey) {
-                            invalidGeminiKeysBlacklist.add(tenantApiKey);
+                            blacklistGeminiKey(tenantApiKey, errMsg.slice(0, 100));
                         }
                         const now = Date.now();
                         const lastWarn = geminiAuthWarnTracker.get(`auth_${tenantId}`) || 0;

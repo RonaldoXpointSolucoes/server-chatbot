@@ -805,6 +805,20 @@ export function BotModal({ isOpen, onClose, onSave, botToEdit, availableBots = [
             {/* Identity Tab */}
             <div className={cn("space-y-8 animate-in slide-in-from-right-4 duration-500", activeTab !== 'identity' && "hidden")}>
                 
+                {name.toLowerCase().includes('orquestrador') && (
+                  <div className="bg-gradient-to-r from-indigo-950/60 to-purple-950/40 border border-indigo-500/30 rounded-2xl p-4 flex items-start gap-3 backdrop-blur-md">
+                    <div className="w-8 h-8 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shrink-0 mt-0.5">
+                      <BrainCircuit className="w-4 h-4" />
+                    </div>
+                    <div className="text-xs">
+                      <h5 className="font-bold text-indigo-300">Papel de Orquestrador (Maestro do Ecossistema)</h5>
+                      <p className="text-white/60 mt-1 leading-relaxed">
+                        Este robô atua internamente analisando mensagens e roteando as intenções para os especialistas (ex: Recepção, Menu, Pedidos, SAC). <strong>Ele não envia mensagens diretamente aos clientes no WhatsApp.</strong> Seu System Prompt serve como diretrizes globais para guiar as decisões de roteamento.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                    <div className="space-y-2">
                      <label className="text-xs font-bold text-white/60 uppercase tracking-widest ml-1">Nomenclatura do Robô</label>

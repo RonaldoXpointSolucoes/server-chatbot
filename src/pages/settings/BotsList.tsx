@@ -1102,7 +1102,15 @@ export default function BotsList() {
       .replace(/\[LINK_TIKTOK\]/g, vars.tiktok);
   };
 
-  const activeBots = bots.filter(b => b.status === 'active');
+  const isOrquestradorBot = (b: any) => {
+    const name = String(b?.name || '').toLowerCase();
+    const role = String(b?.role || '').toLowerCase();
+    const cat = String(b?.category || '').toLowerCase();
+    return name.includes('(orquestrador)') || name.includes('orquestrador') || role === 'orquestrador' || cat === 'orquestrador';
+  };
+
+  const activeBots = bots.filter(b => b.status === 'active' && !isOrquestradorBot(b));
+  const activeOrchestrator = bots.find(b => b.status === 'active' && isOrquestradorBot(b));
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -1222,9 +1230,11 @@ ${activeBots.length > 0
 INSTRUÇÕES DO ORQUESTRADOR:
 1. Analise a última mensagem do usuário.
 2. Identifique qual é a intenção do usuário.
-3. Escolha OBRIGATORIAMENTE um dos robôs da lista acima (usando o campo ID) para assumir a resposta.
-   - Se for o primeiro contato ou se nenhum robô se encaixar perfeitamente, escolha o robô mais adequado.
-4. Gere a resposta final EXATAMENTE COMO o robô escolhido responderia, assumindo sua personalidade e system prompt.
+3. Escolha OBRIGATORIAMENTE um dos robôs especialistas da lista acima (usando o campo ID) para assumir a resposta.
+   - REGRA DE SAUDAÇÃO/ACOLHIMENTO: Se a mensagem for um cumprimento inicial, apresentação ou primeiro contato (ex: "olá", "oi", "boa noite", "bom dia"), escolha OBRIGATORIAMENTE o robô de Recepção/Acolhimento (ex: "Luna Recepção").
+   - REGRA DE CARDÁPIO: Se a mensagem for sobre produtos, cardápio ou preços, escolha o robô especialista em Cardápio/Menu.
+   - REGRA DE PEDIDO: Se a mensagem for sobre montar ou acompanhar pedidos, escolha o robô especialista em Pedidos.
+4. Gere a resposta final EXATAMENTE COMO o robô especialista escolhido responderia, assumindo sua personalidade e system prompt.
 5. Se houver informações da base de conhecimento (RAG) no contexto abaixo, use-as para responder ao cliente caso o robô escolhido precise delas.
 6. Responda ESTRITAMENTE em formato JSON com os seguintes campos:
    {
@@ -1726,6 +1736,7 @@ Instruções importantes:
                           <div className="flex-1 overflow-y-auto pr-1 flex flex-col gap-4 styled-scrollbar pb-4">
                             {botsInCategory.map((bot) => {
                               const isDefault = isBotDefault(bot);
+                              const isOrch = isOrquestradorBot(bot);
                               return (
                                 <div 
                                   key={bot.id}
@@ -1763,7 +1774,11 @@ Instruções importantes:
                                   </p>
 
                                   <div className="flex flex-wrap items-center gap-2 mb-4 border-t border-white/[0.03] pt-4">
-                                    {isDefault ? (
+                                    {isOrch ? (
+                                      <span className="px-2 py-0.5 rounded-lg bg-indigo-500/20 border border-indigo-500/35 text-indigo-300 text-[9px] font-extrabold uppercase tracking-wide flex items-center gap-1">
+                                        🧠 Orquestrador (Roteador)
+                                      </span>
+                                    ) : isDefault ? (
                                       <span className="px-2 py-0.5 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[9px] font-extrabold uppercase tracking-wide">
                                         Padrão (Original)
                                       </span>

@@ -447,14 +447,19 @@ async function orchestrateSimulate(eligibleBots, textMessage) {
             generationConfig: { responseMimeType: 'application/json' }
         });
 
-        const prompt = `Você é um orquestrador de atendimento inteligente. Analise a mensagem do cliente e decida qual dos robôs (bots) ativos disponíveis é o mais adequado para responder ao cliente.
+        const prompt = `Você é um orquestrador de atendimento inteligente. Analise a mensagem do cliente e decida qual dos robôs especialistas ativos disponíveis é o mais adequado para responder ao cliente.
 Você deve classificar a intenção e escolher o ID do robô adequado.
 
-Robôs disponíveis:
+Robôs especialistas disponíveis:
 ${eligibleBots.map(b => `- ID: "${b.id}" | Nome: "${b.name}" | Descrição: "${b.description || 'Sem descrição.'}"`).join('\n')}
 
 Mensagem do cliente:
 "${textMessage}"
+
+Regras de roteamento:
+1. Se a mensagem for um cumprimento inicial, apresentação ou primeiro contato (ex: "olá", "oi", "boa noite", "bom dia"), direcione obrigatoriamente para o robô de Recepção/Acolhimento.
+2. Dúvidas sobre o cardápio, opções e preços devem ir para o robô de Cardápio/Menu.
+3. Montagem e acompanhamento de pedidos devem ir para o robô de Pedidos.
 
 Responda ESTRITAMENTE em formato JSON com a seguinte estrutura:
 {
@@ -519,17 +524,27 @@ router.post('/v1/bots/simulate', async (req, res) => {
             return res.status(404).json({ error: 'Nenhum robô ativo encontrado para este cliente. Ative ao menos um especialista.' });
         }
 
-        // 2. Orquestração / Escolha do Bot
-        let intent = 'atendimento_geral';
-        let chosenBotId = botsData[0].id;
-        let reasoning = 'Apenas um robô ativo disponível.';
-        let targetBot = botsData[0];
+        // 2. Orquestração / Escolha do Bot Especialista
+        const isOrchestrator = (b) => {
+            const name = String(b.name || '').toLowerCase();
+            const role = String(b.role || '').toLowerCase();
+            const cat = String(b.category || '').toLowerCase();
+            return name.includes('(orquestrador)') || name.includes('orquestrador') || role === 'orquestrador' || cat === 'orquestrador';
+        };
 
-        if (botsData.length > 1) {
+        const specialistBots = botsData.filter(b => !isOrchestrator(b));
+        const candidateBots = specialistBots.length > 0 ? specialistBots : botsData;
+
+        let intent = 'atendimento_geral';
+        let chosenBotId = candidateBots[0].id;
+        let reasoning = 'Apenas um especialista ativo disponível.';
+        let targetBot = candidateBots[0];
+
+        if (candidateBots.length > 1) {
             try {
-                const orchResult = await orchestrateSimulate(botsData, textMessage);
+                const orchResult = await orchestrateSimulate(candidateBots, textMessage);
                 if (orchResult && orchResult.agentId) {
-                    const matchedBot = botsData.find(b => b.id === orchResult.agentId);
+                    const matchedBot = candidateBots.find(b => b.id === orchResult.agentId);
                     if (matchedBot) {
                         intent = orchResult.intent || 'indefinida';
                         chosenBotId = matchedBot.id;
@@ -539,9 +554,9 @@ router.post('/v1/bots/simulate', async (req, res) => {
                 }
             } catch (orchErr) {
                 console.error('[SimulationRoute] Falha ao orquestrar mensagem:', orchErr);
-                targetBot = botsData[0];
+                targetBot = candidateBots[0];
                 chosenBotId = targetBot.id;
-                reasoning = `Falha na orquestração: ${orchErr.message}. Usando primeiro bot ativo.`;
+                reasoning = `Falha na orquestração: ${orchErr.message}. Usando primeiro especialista ativo.`;
             }
         }
 
@@ -901,6 +916,57 @@ DIRETRIZES TÉCNICAS:
         });
     } catch (err) {
         console.error('[API Gateway] Erro na análise de logs com IA:', err?.message || err);
+        const errMsg = err?.message || String(err);
+        const isAuthError = errMsg.includes('401') || errMsg.includes('Unauthorized') || errMsg.includes('ACCESS_TOKEN_TYPE_UNSUPPORTED') || errMsg.includes('UNAUTHENTICATED');
+        const serverGlobalKey = (process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
+
+        // Se a chave fornecida na requisição falhou por autenticação e o servidor tem chave global válida, tenta utilizá-la
+        if (isAuthError && serverGlobalKey && serverGlobalKey !== apiKey && serverGlobalKey.length >= 20) {
+            try {
+                console.info('[API Gateway] Chave informada falhou por autenticação (401). Tentando com a chave global oficial do servidor...');
+                const fallbackGenAI = new GoogleGenerativeAI(serverGlobalKey);
+                const fallbackModel = fallbackGenAI.getGenerativeModel({
+                    model: 'gemini-2.5-flash',
+                    generationConfig: {
+                        responseMimeType: 'application/json',
+                        responseSchema: {
+                            type: 'object',
+                            properties: {
+                                title: { type: 'string' },
+                                category: { type: 'string' },
+                                priority: { type: 'integer' },
+                                tags: { type: 'array', items: { type: 'string' } },
+                                summary: { type: 'string' },
+                                suggested_stage_label: { type: 'string' },
+                                technical_plan: { type: 'string' }
+                            },
+                            required: ['title', 'category', 'priority', 'tags', 'summary', 'suggested_stage_label', 'technical_plan']
+                        }
+                    }
+                });
+                const fallbackResult = await fallbackModel.generateContent(promptParts);
+                const responseText = fallbackResult.response.text().trim();
+                const cleaned = responseText.replace(/```json/gi, '').replace(/```/g, '').trim();
+                const parsedPlan = JSON.parse(cleaned);
+
+                return res.json({
+                    success: true,
+                    plan: {
+                        ...parsedPlan,
+                        suggested_stage_label: 'Em Análise',
+                        analyzed_count: {
+                            console: consoleLogs.length,
+                            server: serverErrors.length,
+                            gastrofood: gastrofoodLogs.length,
+                            asts: astsErrors.length
+                        }
+                    }
+                });
+            } catch (fallbackErr) {
+                console.warn('[API Gateway] Fallback da chave global também falhou. Acionando síntese heurística:', fallbackErr?.message);
+            }
+        }
+
         // Fallback Heurístico SRE no Backend caso a API externa do Gemini oscile ou rejeite credencial
         return res.json({
             success: true,
