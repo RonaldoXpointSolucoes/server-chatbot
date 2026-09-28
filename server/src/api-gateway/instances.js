@@ -584,6 +584,50 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                 const mockId = `EDGE_${newOutbox.id.replace(/-/g, '')}`;
                 console.log(`[API Gateway] [MSG_TRACE:OUTBOX_ENQUEUED] Instância: ${instanceId} | OutboxId: ${newOutbox.id} | MockId: ${mockId} | JID: ${targetJid}`);
 
+                // Sincroniza imediatamente na tabela 'messages' para garantir que nunca suma ao recarregar a tela (F5)
+                try {
+                    const cleanPhone = String(targetJid).replace(/\D/g, '');
+                    supabase
+                        .from('contacts')
+                        .select('id')
+                        .eq('tenant_id', req.tenantId)
+                        .eq('phone', cleanPhone)
+                        .limit(1)
+                        .then(({ data: contacts }) => {
+                            if (contacts && contacts.length > 0) {
+                                supabase
+                                    .from('conversations')
+                                    .select('id')
+                                    .eq('contact_id', contacts[0].id)
+                                    .eq('tenant_id', req.tenantId)
+                                    .order('updated_at', { ascending: false })
+                                    .limit(1)
+                                    .then(({ data: convs }) => {
+                                        if (convs && convs.length > 0) {
+                                            supabase.from('messages').upsert({
+                                                conversation_id: convs[0].id,
+                                                tenant_id: req.tenantId,
+                                                instance_id: instanceId,
+                                                direction: 'outbound',
+                                                message_type: messageType || 'text',
+                                                text_content: body,
+                                                sender_type: 'human',
+                                                status: 'pending',
+                                                whatsapp_message_id: mockId,
+                                                raw_payload: {
+                                                    outbox_id: newOutbox.id,
+                                                    enqueued_at: new Date().toISOString()
+                                                },
+                                                timestamp: new Date().toISOString()
+                                            }, { onConflict: 'whatsapp_message_id' }).then(() => {}).catch(() => {});
+                                        }
+                                    }).catch(() => {});
+                            }
+                        }).catch(() => {});
+                } catch (e) {
+                    console.warn('[API Gateway] Aviso ao sincronizar outbox pendente em messages:', e.message);
+                }
+
                 // Tenta acordar o socket em segundo plano e engatilha o QueueProcessor de imediato
                 sessionManager.getSocketOrWake(req.tenantId, instanceId).catch(() => {});
                 queueProcessor.trigger(req.tenantId, instanceId);

@@ -414,6 +414,19 @@ class QueueProcessor {
                     })
                     .eq('id', msg.id);
 
+                // Converte qualquer mensagem temporária mockId em messages para o ID definitivo do WhatsApp
+                const mockId = `EDGE_${msg.id.replace(/-/g, '')}`;
+                if (result?.key?.id) {
+                    supabase.from('messages')
+                        .update({ 
+                            whatsapp_message_id: result.key.id,
+                            status: 'sent'
+                        })
+                        .eq('whatsapp_message_id', mockId)
+                        .then(() => {})
+                        .catch(() => {});
+                }
+
                 // 6. Sincroniza a mensagem enviada com a tabela clássica de mensagens para o Frontend refletir
                 try {
                     const { EventProcessor, default: eventProcessor } = await import('../event-processor/index.js');
@@ -457,11 +470,35 @@ class QueueProcessor {
                         console.error(`[QueueProcessor] [MSG_TRACE:OUTBOX_ERROR] Falha ao enviar mensagem ${msg.id}:`, errMsg);
                     }
 
+                    const isCryptoErr = 
+                        errMsg.includes('All encryptions failed') || 
+                        errMsg.includes('No sessions') || 
+                        errMsg.includes('SessionError') || 
+                        errMsg.includes('PreKey') || 
+                        errMsg.includes('Bad MAC');
+
+                    if (isCryptoErr) {
+                        console.warn(`[QueueProcessor] Erro criptográfico de sessão (${errMsg}) para ${msg.chat_jid} via instância ${instanceId}. Limpando chaves e device-list para forçar renovação de pre-keys...`);
+                        try {
+                            const { clearRecipientSession } = await import('./auth.js');
+                            clearRecipientSession(instanceId, msg.chat_jid);
+                            const cleanPhone = String(msg.chat_jid).replace(/\D/g, '');
+                            if (cleanPhone && cleanPhone.length >= 8) {
+                                supabase.from('wa_auth_keys')
+                                    .delete()
+                                    .eq('instance_id', instanceId)
+                                    .or(`key_name.eq.device-list-${cleanPhone},key_name.ilike.%${cleanPhone}%`)
+                                    .then(() => {})
+                                    .catch(() => {});
+                            }
+                        } catch (e) {}
+                    }
+
                     const newAttempts = (msg.attempts || 0) + 1;
                     const maxAttempts = 3;
                     const newStatus = newAttempts >= maxAttempts ? 'failed' : 'pending';
                     const isOperator = (msg.priority || 1) < 5;
-                    const retryDelayMs = isOperator ? 2000 : 12000;
+                    const retryDelayMs = isOperator ? (isCryptoErr ? 1500 : 2000) : 12000;
 
                     try {
                         const { default: sManager } = await import('./index.js');
@@ -482,6 +519,71 @@ class QueueProcessor {
                             scheduled_at: new Date(Date.now() + retryDelayMs).toISOString()
                         })
                         .eq('id', msg.id);
+
+                    // PREVENÇÃO DE SUMIÇO DE MENSAGEM: Se a mensagem falhar definitivamente,
+                    // persiste na tabela 'messages' com status 'error' para ficar salva permanentemente no banco.
+                    if (newStatus === 'failed') {
+                        try {
+                            const cleanPhone = String(msg.chat_jid).replace(/\D/g, '');
+                            const mockId = `EDGE_${msg.id.replace(/-/g, '')}`;
+                            
+                            // Localiza o contato e a conversa ativa
+                            const { data: contacts } = await supabase
+                                .from('contacts')
+                                .select('id')
+                                .eq('tenant_id', msg.tenant_id)
+                                .eq('phone', cleanPhone)
+                                .limit(1);
+
+                            let convId = null;
+                            if (contacts && contacts.length > 0) {
+                                const { data: convs } = await supabase
+                                    .from('conversations')
+                                    .select('id')
+                                    .eq('contact_id', contacts[0].id)
+                                    .eq('tenant_id', msg.tenant_id)
+                                    .order('updated_at', { ascending: false })
+                                    .limit(1);
+                                if (convs && convs.length > 0) {
+                                    convId = convs[0].id;
+                                }
+                            }
+
+                            if (convId) {
+                                await supabase.from('messages').upsert({
+                                    conversation_id: convId,
+                                    tenant_id: msg.tenant_id,
+                                    instance_id: instanceId,
+                                    direction: 'outbound',
+                                    message_type: msg.message_type || 'text',
+                                    text_content: msg.body,
+                                    sender_type: 'human',
+                                    status: 'error',
+                                    whatsapp_message_id: mockId,
+                                    raw_payload: {
+                                        error: errMsg,
+                                        outbox_id: msg.id,
+                                        failed_at: new Date().toISOString()
+                                    },
+                                    timestamp: msg.created_at || new Date().toISOString()
+                                }, { onConflict: 'whatsapp_message_id' });
+
+                                console.log(`[QueueProcessor] Mensagem ${msg.id} com falha definitiva persistida na tabela 'messages' da conversa ${convId}.`);
+
+                                // Notifica a interface em tempo real
+                                const { default: realtime } = await import('../realtime.js');
+                                if (realtime && typeof realtime.publishInboxEvent === 'function') {
+                                    realtime.publishInboxEvent(msg.tenant_id, 'message.update', {
+                                        whatsapp_message_id: mockId,
+                                        status: 'error',
+                                        errorMessage: errMsg
+                                    }).catch(() => {});
+                                }
+                            }
+                        } catch (persistErr) {
+                            console.warn('[QueueProcessor] Falha ao persistir mensagem com erro em messages:', persistErr.message);
+                        }
+                    }
                 } else {
                     if (err.message && (err.message.includes('fetch failed') || err.message.includes('timeout') || err.message.includes('Network'))) {
                         console.warn(`[QueueProcessor] Falha de rede temporária ao carregar fila de mensagens:`, err.message);

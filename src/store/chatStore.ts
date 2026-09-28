@@ -2117,7 +2117,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (!targetJid) {
           throw new Error('Número de telefone do contato inválido ou incompleto.');
         }
-        await sendTextMessage(state.tenantInfo.id, resolvedInstanceId, targetJid, finalMessageText, apiKey);
+        const res = await sendTextMessage(state.tenantInfo.id, resolvedInstanceId, targetJid, finalMessageText, apiKey);
+        if (res && res.result?.key?.id) {
+          const officialMsgId = res.result.key.id;
+          set((s) => ({
+            contacts: s.contacts.map(c => {
+              if (c.id === contactId) {
+                return {
+                  ...c,
+                  messages: c.messages.map(m => m.id === pseudoId ? {
+                    ...m,
+                    id: officialMsgId,
+                    whatsapp_id: officialMsgId
+                  } : m)
+                };
+              }
+              return c;
+            })
+          }));
+        }
       }
 
     } catch (err: any) {

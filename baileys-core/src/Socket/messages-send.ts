@@ -591,10 +591,76 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 			}
 		)
 
-		const nodes = (await Promise.all(encryptionPromises)).filter(node => node !== null) as BinaryNode[]
+		let nodes = (await Promise.all(encryptionPromises)).filter(node => node !== null) as BinaryNode[]
 
 		if (recipientJids.length > 0 && nodes.length === 0) {
-			throw new Boom('All encryptions failed', { statusCode: 500 })
+			logger.warn({ recipientJids }, 'All encryptions initially failed, attempting auto-healing with assertSessions force')
+			try {
+				for (const rJid of recipientJids) {
+					const sId = signalRepository.jidToSignalProtocolAddress(rJid)
+					peerSessionsCache.del(sId)
+				}
+				await assertSessions(recipientJids, true)
+
+				const retryPromises = (patchedMessages as any).map(
+					async ({ recipientJid: jid, message: patchedMessage }: any) => {
+						try {
+							if (!jid) return null
+
+							let msgToEncrypt = patchedMessage
+
+							if (dsmMessage) {
+								const { user: targetUser } = jidDecode(jid)!
+								const { user: ownPnUser } = jidDecode(meId)!
+								const ownLidUser = meLidUser
+
+								const isOwnUser = targetUser === ownPnUser || (ownLidUser && targetUser === ownLidUser)
+								const isExactSenderDevice = jid === meId || (meLid && jid === meLid)
+
+								if (isOwnUser && !isExactSenderDevice) {
+									msgToEncrypt = dsmMessage
+								}
+							}
+
+							const bytes = encodeWAMessage(msgToEncrypt)
+							const mutexKey = jid
+
+							const node = await encryptionMutex.mutex(mutexKey, async () => {
+								const { type, ciphertext } = await signalRepository.encryptMessage({ jid, data: bytes })
+
+								if (type === 'pkmsg') {
+									shouldIncludeDeviceIdentity = true
+								}
+
+								return {
+									tag: 'to',
+									attrs: { jid },
+									content: [
+										{
+											tag: 'enc',
+											attrs: { v: '2', type, ...(extraAttrs || {}) },
+											content: ciphertext
+										}
+									]
+								}
+							})
+
+							return node
+						} catch (retryErr) {
+							logger.error({ jid, err: retryErr }, 'Retry encryption also failed for recipient')
+							return null
+						}
+					}
+				)
+
+				nodes = (await Promise.all(retryPromises)).filter(node => node !== null) as BinaryNode[]
+			} catch (healErr) {
+				logger.error({ err: healErr }, 'Auto-healing session renewal failed')
+			}
+
+			if (nodes.length === 0) {
+				throw new Boom('All encryptions failed', { statusCode: 500 })
+			}
 		}
 
 		return { nodes, shouldIncludeDeviceIdentity }
