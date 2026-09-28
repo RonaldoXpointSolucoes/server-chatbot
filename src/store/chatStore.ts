@@ -26,7 +26,8 @@ export const isSameBrPhone = (phoneA: string | null | undefined, phoneB: string 
   const varsA = getBrPhoneVariations(cleanA);
   return varsA.includes(cleanB);
 };
-
+// Registro de idempotência temporal para impedir envio de mensagens duplicadas (cooldown de 4s)
+const recentOutgoingHumanMessages = new Map<string, number>();
 
 export type MessageType = {
   id: string;
@@ -1984,6 +1985,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   sendHumanMessage: async (contactId, text, instanceName) => {
+    const cleanText = (text || '').trim();
+    if (!cleanText) return;
+
+    // Trava Estrita de Idempotência: Impede envio duplo idêntico em janela de 4 segundos
+    const dedupKey = `${contactId}_${cleanText}`;
+    const now = Date.now();
+    const lastSentAt = recentOutgoingHumanMessages.get(dedupKey) || 0;
+    if (now - lastSentAt < 4000) {
+      console.warn(`[sendHumanMessage] Bloqueado envio duplicado detectado para ${contactId} há menos de 4s (${now - lastSentAt}ms).`);
+      return;
+    }
+    recentOutgoingHumanMessages.set(dedupKey, now);
+
+    // Limpeza de cache antigo para poupar memória
+    if (recentOutgoingHumanMessages.size > 150) {
+      for (const [k, ts] of recentOutgoingHumanMessages.entries()) {
+        if (now - ts > 30000) recentOutgoingHumanMessages.delete(k);
+      }
+    }
+
     console.log("[sendHumanMessage] Called with:", { contactId, text, instanceName });
     const state = get();
     const realContactId = getRealContactId(contactId);

@@ -3643,16 +3643,16 @@ export default function ChatDashboard() {
   const handleSendHuman = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSendingRef.current) {
-      console.warn("[handleSendHuman] Blocked! One message is already sending.");
+      console.warn("[handleSendHuman] Bloqueado! Envio já em andamento.");
       return;
     }
 
     const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
-    console.log("[handleSendHuman] Attempting to send. Values:", { inputText, activeChatId, activeChatInstance: activeChat?.instance_id, connectedInstanceName, properTargetInstance });
-    
     const isChecklistFilled = isTaskMode && checklistDraft.filter(i => i.trim()).length > 0;
-    if ((!inputText.trim() && !isChecklistFilled) || !activeChatId || !properTargetInstance) {
-       console.warn("[handleSendHuman] Blocked! One of the required values is missing.");
+    const textToSend = inputText.trim();
+
+    if ((!textToSend && !isChecklistFilled) || !activeChatId || !properTargetInstance) {
+       console.warn("[handleSendHuman] Bloqueado! Valores obrigatórios ausentes.");
        return;
     }
     
@@ -3666,6 +3666,10 @@ export default function ChatDashboard() {
        return;
     }
 
+    // Ativa trava síncrona imediatamente para bloquear cliques múltiplos/concorrentes
+    isSendingRef.current = true;
+    setIsSendingMessage(true);
+
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
     }
@@ -3673,13 +3677,10 @@ export default function ChatDashboard() {
       sendPresenceUpdate(activeChatId, 'paused', properTargetInstance).catch(() => {});
     }
     lastPresenceSentRef.current = 0;
-    
-    isSendingRef.current = true;
-    setIsSendingMessage(true);
 
     try {
       if (chatMode === 'internal_note') {
-        const noteText = !inputText.trim() && isTaskMode ? "📋 Checklist de Tarefa CRM criado." : inputText;
+        const noteText = !textToSend && isTaskMode ? "📋 Checklist de Tarefa CRM criado." : textToSend;
         const formattedChecklist = isTaskMode 
           ? checklistDraft
               .filter(item => item.trim() !== '')
@@ -3747,6 +3748,10 @@ export default function ChatDashboard() {
         
         // Reseta estados locais
         setInputText('');
+        if (textareaRef.current) {
+          textareaRef.current.value = '';
+          textareaRef.current.style.height = 'auto';
+        }
         setChecklistDraft([]);
         setIsTaskMode(false);
         setTaskAssignedTo(null);
@@ -3759,25 +3764,26 @@ export default function ChatDashboard() {
         setScheduleNoteDate('');
         setScheduleNoteTime('');
       } else {
-        let finalMessageText = inputText;
+        let finalMessageText = textToSend;
         if (replyMessage) {
             const shortQuote = replyMessage.text.length > 80 ? replyMessage.text.substring(0, 80) + '...' : replyMessage.text;
-            finalMessageText = `> *Mensagem Citada:* "${shortQuote}"\n\n${inputText}`;
+            finalMessageText = `> *Mensagem Citada:* "${shortQuote}"\n\n${textToSend}`;
         }
 
-        // Reseta estados locais IMEDIATAMENTE para UX instantânea e responsiva
+        // Reseta o input e o DOM do textarea IMEDIATAMENTE de forma síncrona
         setInputText('');
-        setReplyMessage(null);
-        if (activeChatId) draftsRef.current[activeChatId] = '';
         if (textareaRef.current) {
+           textareaRef.current.value = '';
            textareaRef.current.style.height = 'auto';
         }
+        setReplyMessage(null);
+        if (activeChatId) draftsRef.current[activeChatId] = '';
 
         if (pendingMediaToSend) {
           const mediaInfo = pendingMediaToSend;
           setPendingMediaToSend(null);
           
-          useChatStore.getState().sendMediaFromUrl(
+          await useChatStore.getState().sendMediaFromUrl(
             activeChatId, 
             mediaInfo.url, 
             mediaInfo.type, 
@@ -3785,25 +3791,22 @@ export default function ChatDashboard() {
             finalMessageText,
             mediaInfo.name,
             mediaInfo.cannedResponseType
-          ).then(() => {
-            setQuickReplyToast({ shortcut: mediaInfo.cannedResponseType === 'TUTORIAL' ? 'Tutorial' : 'Mídia', type: 'sent' });
-            setTimeout(() => setQuickReplyToast(null), 3500);
-          }).catch(mediaError => {
-            console.error('[handleSendHuman] Erro ao enviar mídia engatilhada:', mediaError);
-            alert('Erro ao enviar a mídia anexada.');
-          });
+          );
+          setQuickReplyToast({ shortcut: mediaInfo.cannedResponseType === 'TUTORIAL' ? 'Tutorial' : 'Mídia', type: 'sent' });
+          setTimeout(() => setQuickReplyToast(null), 3500);
         } else {
-          // Envia em segundo plano (background) para não travar a digitação ou exibir loaders
-          sendHumanMessage(activeChatId, finalMessageText, properTargetInstance as string).catch(err => {
-             console.error('[handleSendHuman] Erro ao enviar mensagem:', err);
-          });
+          // Envia aguardando a finalização para manter a trava segura
+          await sendHumanMessage(activeChatId, finalMessageText, properTargetInstance as string);
         }
       }
     } catch (error) {
       console.error('[handleSendHuman] Erro inesperado durante o envio:', error);
     } finally {
-      isSendingRef.current = false;
-      setIsSendingMessage(false);
+      // Cooldown de proteção contra mouse bouncing e double click
+      setTimeout(() => {
+        isSendingRef.current = false;
+        setIsSendingMessage(false);
+      }, 400);
     }
   };
 
@@ -5713,13 +5716,24 @@ export default function ChatDashboard() {
           // Modo WhatsApp
           const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
           if (activeChatId && properTargetInstance) {
+            if (isSendingRef.current) return;
+            isSendingRef.current = true;
+            setIsSendingMessage(true);
             setInputText('');
             if (textareaRef.current) {
+               textareaRef.current.value = '';
                textareaRef.current.style.height = 'auto';
             }
-            sendHumanMessage(activeChatId, finalText, properTargetInstance as string).catch(err => {
-               console.error('[GeminiEditorModal onSend] Erro ao enviar mensagem:', err);
-            });
+            try {
+              await sendHumanMessage(activeChatId, finalText, properTargetInstance as string);
+            } catch (err) {
+              console.error('[GeminiEditorModal onSend] Erro ao enviar mensagem:', err);
+            } finally {
+              setTimeout(() => {
+                isSendingRef.current = false;
+                setIsSendingMessage(false);
+              }, 400);
+            }
           }
         }}
       />
@@ -9026,8 +9040,14 @@ export default function ChatDashboard() {
                             }}
                             onKeyDown={(e) => {
                               if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                                if (e.repeat) {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  return;
+                                }
                                 e.preventDefault();
-                                if (inputText.trim() || isTaskMode) {
+                                e.stopPropagation();
+                                if ((inputText.trim() || isTaskMode) && !isSendingRef.current) {
                                   handleSendHuman(e as any);
                                 }
                               }
@@ -9882,12 +9902,18 @@ export default function ChatDashboard() {
                             }}
                             onKeyDown={(e) => {
                               if (e.key === 'Enter' && !e.shiftKey) {
+                                if (e.repeat) {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  return;
+                                }
                                 const isCompactMobile = window.innerWidth < 500;
                                 if (isCompactMobile) {
                                     return;
                                 }
                                 e.preventDefault();
-                                if (inputText.trim()) {
+                                e.stopPropagation();
+                                if (inputText.trim() && !isSendingRef.current) {
                                   handleSendHuman(e as any);
                                 }
                               }

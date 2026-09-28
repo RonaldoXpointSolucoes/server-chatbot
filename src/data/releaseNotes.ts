@@ -20,6 +20,37 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.5.5',
+    date: '2026-09-28',
+    summary: 'Blindagem contra Envio Duplicado de Mensagens no WhatsApp e Resiliência Global da Magia da IA',
+    notes: [
+      {
+        id: '7.5.5-1',
+        category: 'fixes',
+        title: 'Blindagem Definitiva contra Envio Duplicado de Mensagens',
+        description: 'Implementada trava temporal de idempotência de 4 segundos na store central (chatStore.ts) associada a controle assíncrono estrito, limpeza imediata síncrona do DOM e bloqueio de repetição de tecla (e.repeat) e mouse bouncing.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      },
+      {
+        id: '7.5.5-2',
+        category: 'fixes',
+        title: 'Resolução do Corretor Ortográfico e Menus de IA',
+        description: 'Eliminado o alerta de chave ausente através de sincronização de credenciais no banco Supabase para todos os tenants e adição de fallback mestre permanente de nível 5 no GeminiService.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      },
+      {
+        id: '7.5.5-3',
+        category: 'improvements',
+        title: 'Otimização dos Prompts da Magia da IA',
+        description: 'Prompts reestruturados para retornar textos limpos, diretos e naturais, sem preâmbulos ou notas de revisão, otimizados para o modelo gemini-2.5-flash.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      }
+    ]
+  },
+  {
     version: '7.5.4',
     date: '2026-09-21',
     summary: 'Suporte Oficial às Chaves de Autenticação AQ. do Google AI Studio, Correção Ortográfica e Resiliência da Magia da IA',
