@@ -20,6 +20,37 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.5.7',
+    date: '2026-09-29',
+    summary: 'Criador de Skill para IAs, API REST Oficial por Quadro Kanban e Governança Estrita da Fila Dev',
+    notes: [
+      {
+        id: '7.5.7-1',
+        category: 'features',
+        title: 'Criador de Skill & Conhecimento Técnico para IAs (Claude, Cursor, ChatGPT, Codex)',
+        description: 'Gerador em tempo real de especificações completas em Markdown (SKILL.md) que ensinam qualquer IA externa a operar o quadro Kanban via API REST com chave bearer embutida, mapeamento de colunas e botões de 1 clique para Copiar e Baixar .md.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.5.7-2',
+        category: 'features',
+        title: 'Painel e Modal de Acesso à API REST no Quadro Kanban',
+        description: 'Interface avançada para habilitar/desabilitar acesso externo por quadro, gerar chaves de API secretas (x-api-key), mapear IDs das colunas e testar requisições em terminal interativo cURL, Node.js e Python com AI Pack multimodal.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.5.7-3',
+        category: 'improvements',
+        title: 'Governança Inviolável da Fila Dev e Migração Automática para QA',
+        description: 'Definição rigorosa no protocolo de IA: foco exclusivo na lista "Em Desenvolvimento", bloqueio estrito da lista "Em Análise" (somente leitura), e obrigatoriedade de documentar a entrega técnica antes de migrar o card para "Em Testes & QA".',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      }
+    ]
+  },
+  {
     version: '7.5.6',
     date: '2026-09-29',
     summary: 'Resolução Definitiva de Mensagens Duplicadas no Envio, Resiliência Silenciosa do Supabase e Restauração de Rascunho',

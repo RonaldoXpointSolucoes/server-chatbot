@@ -131,12 +131,14 @@ Sempre que o usuário digitar `teste envios` (ou variações como `teste envios.
 Sempre que o usuário digitar `Fila dev` (ou variações como `fila dev`, `Fila Dev`, `/fila-dev`, `fila dev.` ou `Desenvolver Fila`):
 1. **Acionamento Automático**: A IA deve invocar a skill `fila-dev` e executar `node .agents/skills/fila-dev/scripts/get_dev_queue.cjs list` para inspecionar os cards do quadro **Desenvolvimento & Roadmap** (`95be1dee-9d28-47d9-8ccf-d51a337f1572`).
 2. **Governança da Coluna "Em Análise" (`analysis`)**:
-   - **PROIBIDO INICIAR DESENVOLVIMENTO**: A IA **NÃO PODE** alterar código nem iniciar tarefas que estejam nesta coluna.
-   - **VISUALIZAÇÃO COMPLETA**: Exibir a listagem clara dos cards em análise, informando ao usuário que aguardam autorização prévia.
+   - **PROIBIDO INICIAR DESENVOLVIMENTO**: A IA **NÃO PODE** alterar código nem iniciar tarefas que estejam nesta coluna. Eles aguardam autorização prévia (o usuário deve arrastar para "Em Desenvolvimento").
+   - **VISUALIZAÇÃO COMPLETA**: Exibir a listagem clara dos cards em análise apenas para transparência e reporte.
 3. **Autonomia Sênior e Tratamento Sequencial da Coluna "Em Desenvolvimento" (`development`)**:
+   - **REGRA CRÍTICA INVIOLÁVEL**: A IA **SÓ DEVE PEGAR E PROCESSAR CARDS QUE ESTÃO NA LISTA 'Em Desenvolvimento'**.
    - **POSTURA TÉCNICA SÊNIOR / STAFF ENGINEER**: A IA atua com profundo conhecimento de arquitetura, Clean Code, concorrência, banco de dados e UI/UX.
    - **INSPEÇÃO VISUAL OBRIGATÓRIA DE IMAGENS E EVIDÊNCIAS**: A IA deve inspecionar e abrir cada imagem/print anexado ao card antes de codificar, correlacionando os elementos visuais com o código.
-   - **PROCESSAMENTO CONTÍNUO DE TODA A FILA (LOOP SEQUENCIAL)**: A IA não deve parar no primeiro card. Ela processa o Card 1 ➔ Codifica ➔ Valida ➔ Move para "Em Testes & QA" (`node .agents/skills/fila-dev/scripts/get_dev_queue.cjs move <CARD_ID> testing <REPORT>`) e **imediatamente pega o Card 2 e repete até zerar toda a coluna "Em Desenvolvimento"**.
+   - **DOCUMENTAÇÃO OBRIGATÓRIA E MIGRAÇÃO PARA "Em Testes & QA"**: Após executar as correções de cada card, a IA **DEVE OBRIGATORIAMENTE documentar o que foi feito** (resumo executivo, arquitetura e arquivos modificados) e **enviar o card para a lista 'Em Testes & QA'** (`node .agents/skills/fila-dev/scripts/get_dev_queue.cjs move <CARD_ID> testing <REPORT>`).
+   - **PROCESSAMENTO CONTÍNUO (LOOP SEQUENCIAL)**: Imediatamente após mover o card resolvido para "Em Testes & QA", a IA pega o próximo card de "Em Desenvolvimento" e repete o fluxo até **zerar toda a coluna 'Em Desenvolvimento'**.
    - Apresentar o relatório consolidado de todas as entregas e a esteira atualizada.
 
 

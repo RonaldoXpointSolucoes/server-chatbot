@@ -11,14 +11,28 @@ Esta skill rege a governança e o pipeline de execução autônoma do quadro **D
 
 ---
 
+> [!CRITICAL]
+> **REGRA DE OURO E GOVERNANÇA INVIOLÁVEL DA FILA DEV**:
+> 1. **FOCO EXCLUSIVO NA LISTA 'Em Desenvolvimento' (`status === 'development'`)**:
+>    - A IA **SÓ DEVE** pegar, assumir e processar cards que estejam estritamente na lista/coluna **'Em Desenvolvimento'**.
+> 2. **BLOQUEIO TOTAL DA LISTA 'Em Análise' (`status === 'analysis'`) E 'Backlog'**:
+>    - É **ESTRITAMENTE PROIBIDO** mexer, codificar ou mover cards da lista **'Em Análise'**. Eles aguardam aprovação manual do usuário. A IA apenas lista esses cards de forma transparente para conhecimento.
+> 3. **DOCUMENTAÇÃO OBRIGATÓRIA DA ENTREGA & ENVIO PARA 'Em Testes & QA' (`status === 'testing'`)**:
+>    - Ao concluir o desenvolvimento de cada card, a IA **DEVE OBRIGATORIAMENTE**:
+>      a) Registrar um relatório técnico detalhado documentando o que foi feito (resumo executivo, arquivos alterados, componentes criados e testes de validação).
+>      b) Mover/enviar o card imediatamente para a lista **'Em Testes & QA'** (`status: 'testing'`).
+>    - Após mover o card para QA, avançar imediatamente para o próximo card de 'Em Desenvolvimento' até zerar toda a lista.
+
+---
+
 ## 🏛️ 1. Filosofia de Governança e Papel Sênior
 
 ```mermaid
 graph LR
     subgraph CRM_KANBAN["Quadro: Desenvolvimento & Roadmap"]
-        A["1. Backlog / Ideias"] --> B["2. Em Análise<br/><b>(🔒 Somente Leitura)</b>"]
+        A["1. Backlog / Ideias"] --> B["2. Em Análise<br/><b>(🔒 Somente Leitura - Não Mexer)</b>"]
         B -.->|"Aprovação do Usuário (Arrastar)"| C["3. Em Desenvolvimento<br/><b>(⚡ Execução Sequencial Sênior IA)</b>"]
-        C -->|"IA Conclui e Move Card"| D["4. Em Testes & QA<br/><b>(🧪 Homologação)</b>"]
+        C -->|"IA Documenta e Move Card"| D["4. Em Testes & QA<br/><b>(🧪 Homologação e Testes)</b>"]
         D --> E["5. Concluído / Produção"]
     end
 ```
@@ -37,7 +51,7 @@ Ao assumir um card para desenvolvimento, a IA **NÃO** deve fazer correções su
 Cada card pode conter capturas de tela, fotos de terminais, fluxogramas ou prints de erros anexados no markdown (`notes`) ou no Supabase Storage (`chat_media/crm_cards`).
 
 ### Protocolo de Análise Visual:
-1. **Identificar Anexos**: Ler os campos `attached_media` e `media_count` retornados pelo script `get_dev_queue.cjs`.
+1. **Identificar Anexos**: Ler os campos `attached_media` e `media_count` retornados pelo script `get_dev_queue.cjs` ou pela API REST (`ai_context.image_urls_for_vision`).
 2. **Abrir e Inspecionar Visualmente Cada Imagem**:
    - Usar as ferramentas de visualização (`view_file` ou download temporário) para analisar os prints de erro, layouts de tela ou telas de teste.
    - Compreender exatamente o que o usuário/sistema destacou no print (ex: botões sobrepostos, erros de console, estados de botões, valores incorretos).
@@ -53,22 +67,22 @@ O comando **`Fila dev`** trata a fila de forma **contínua e exaustiva** até ze
 sequenceDiagram
     autonumber
     actor User as Usuário
-    participant Script as get_dev_queue.cjs
+    participant Script as get_dev_queue.cjs / API REST
     participant AI as Antigravity AI (Sênior)
     participant Code as Base de Código
     participant QA as Coluna Em Testes & QA
 
     User->>AI: "Fila dev"
-    AI->>Script: get_dev_queue.cjs list
-    Script-->>AI: Retorna fila com cards e mídias
-    loop Para cada Card em "Em Desenvolvimento" (por ordem de posição/prioridade)
+    AI->>Script: get_dev_queue.cjs list (ou GET /v1/crm/cards?stage=development)
+    Script-->>AI: Retorna fila de "Em Desenvolvimento" e resumo de "Em Análise"
+    loop Para cada Card em "Em Desenvolvimento" (por ordem sequencial)
         AI->>AI: Analisa notas técnicas e inspeciona TODAS as imagens anexadas
-        AI->>Code: Codifica a solução de alto nível no backend/frontend
-        AI->>Code: Valida compilação (tsc / node -c)
-        AI->>Script: get_dev_queue.cjs move <CARD_ID> testing <REPORT>
-        Script-->>QA: Card migrado para "Em Testes & QA"
+        AI->>Code: Codifica a solução sênior completa (Clean Code & TypeScript)
+        AI->>Code: Valida compilação local (tsc / node -c)
+        AI->>Script: Registra relatório detalhado e move card para "testing"
+        Script-->>QA: Card migrado para "Em Testes & QA" com notas de entrega
     end
-    AI->>User: Relatório consolidado de todas as entregas realizadas
+    AI->>User: Relatório executivo consolidado de todas as entregas realizadas
 ```
 
 ---
@@ -81,12 +95,13 @@ sequenceDiagram
 
 ### ⚡ Coluna "Em Desenvolvimento" (`status: 'development'`):
 - **EXECUÇÃO AUTÔNOMA TOTAL & SEQUENCIAL**:
-  1. A IA extrai o primeiro card prioritário da fila.
+  1. A IA extrai o primeiro card prioritário da fila de 'Em Desenvolvimento'.
   2. Inspeciona todas as imagens e notas técnicas.
   3. Realiza o desenvolvimento completo e refatoração necessária com qualidade sênior.
   4. Valida a compilação (`npm run build` ou `node -c`).
-  5. Migra o card para **"Em Testes & QA"** (`testing`).
-  6. **Avança imediatamente para o próximo card da fila e repete o processo até que a coluna esteja vazia (0 cards).**
+  5. Documenta o que foi feito com clareza técnica.
+  6. Migra o card para **"Em Testes & QA"** (`testing`).
+  7. **Avança imediatamente para o próximo card da fila e repete o processo até que a coluna esteja vazia (0 cards).**
 
 ---
 
