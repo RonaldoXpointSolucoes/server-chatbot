@@ -61,6 +61,7 @@ import { useChatStore, instanceCache } from '../store/chatStore';
 import { supabase } from '../services/supabase';
 import { geminiService } from '../services/geminiService';
 import KanbanBoardCreator from '../components/KanbanBoardCreator';
+import CrmBoardApiModal from '../components/CrmBoardApiModal';
 import RichTextEditor from '../components/RichTextEditor';
 import { CardMediaCarousel, extractCardMedia } from '../components/CardMediaCarousel';
 import { 
@@ -263,6 +264,13 @@ interface CRMBoard {
       subtitle?: string;
       color: string;
     }[];
+    api?: {
+      enabled: boolean;
+      key: string;
+      created_at: string;
+      last_used_at?: string | null;
+      permissions?: any;
+    };
   };
 }
 
@@ -318,6 +326,7 @@ export default function CrmKanban() {
   // Modais
   const [isCreatorOpen, setIsCreatorOpen] = useState(false);
   const [isEditBoardOpen, setIsEditBoardOpen] = useState(false);
+  const [isApiModalOpen, setIsApiModalOpen] = useState(false);
   const [isAddLeadOpen, setIsAddLeadOpen] = useState(false);
   const [selectedLead, setSelectedLead] = useState<CRMLead | null>(null);
 
@@ -1899,8 +1908,32 @@ export default function CrmKanban() {
             </div>
           </div>
 
-          {/* IconButton Configurações do Quadro */}
-          <div className="flex items-center shrink-0">
+          {/* Ações do Quadro: API & Configurações */}
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Botão de API & Automação com IAs */}
+            <button
+              onClick={() => setIsApiModalOpen(true)}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition-all duration-200 cursor-pointer shadow-xs hover:scale-105 active:scale-95",
+                board.config?.api?.enabled
+                  ? "bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/20 shadow-[0_0_12px_rgba(16,185,129,0.15)]"
+                  : "bg-slate-100/90 dark:bg-[#182229]/70 text-slate-600 dark:text-slate-300 border-slate-200/80 dark:border-white/[0.08] hover:bg-slate-200 dark:hover:bg-white/[0.08]"
+              )}
+              title="Acesso à API & Automação com IAs Externas"
+              aria-label="Acesso à API & Automação com IAs Externas"
+            >
+              <Zap size={14} className={board.config?.api?.enabled ? "text-emerald-500 animate-pulse" : "text-slate-400"} />
+              <span className="font-sans font-bold">API</span>
+              <span className={cn(
+                "w-1.5 h-1.5 rounded-full",
+                board.config?.api?.enabled ? "bg-emerald-500 animate-ping" : "bg-slate-400"
+              )} />
+              <span className="text-[10px] uppercase font-black">
+                {board.config?.api?.enabled ? 'Ativa' : 'Off'}
+              </span>
+            </button>
+
+            {/* IconButton Configurações do Quadro */}
             <button
               onClick={() => setIsEditBoardOpen(true)}
               className="p-2.5 bg-slate-100/90 dark:bg-[#182229]/70 hover:bg-slate-200 dark:hover:bg-white/[0.08] border border-slate-200/80 dark:border-white/[0.08] text-slate-700 dark:text-slate-300 rounded-xl transition-all duration-200 cursor-pointer shadow-xs hover:scale-105 active:scale-95"
@@ -3588,6 +3621,31 @@ export default function CrmKanban() {
                   />
                 </div>
 
+                {/* Acesso à API para IAs e Integrações */}
+                <div className="p-3.5 bg-gradient-to-r from-violet-500/10 via-indigo-500/10 to-cyan-500/10 rounded-2xl border border-indigo-500/20 flex items-center justify-between gap-3 shadow-xs">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+                      <Zap size={16} className="text-amber-300" />
+                    </div>
+                    <div className="truncate">
+                      <p className="font-extrabold text-slate-800 dark:text-slate-100 text-xs truncate">Acesso à API & IAs Externas</p>
+                      <p className="text-[10.5px] text-slate-500 dark:text-slate-400 truncate">
+                        Status: <span className={board.config?.api?.enabled ? "text-emerald-500 font-black" : "text-slate-400 font-bold"}>{board.config?.api?.enabled ? "Ativada" : "Desativada"}</span>
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsEditBoardOpen(false);
+                      setIsApiModalOpen(true);
+                    }}
+                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-xs font-bold rounded-xl transition-all shadow-sm shrink-0 cursor-pointer"
+                  >
+                    Gerenciar Chave
+                  </button>
+                </div>
+
                 {/* Lista de colunas/etapas editáveis */}
                 <div className="space-y-3 pt-2">
                   <div className="flex justify-between items-center">
@@ -4464,6 +4522,18 @@ export default function CrmKanban() {
           useChatStore.getState().fetchCrmBoards(); // recarregar sidebar
         }}
       />
+
+      {/* MODAL: Acesso à API do Quadro & Automação com IAs */}
+      {isApiModalOpen && board && (
+        <CrmBoardApiModal
+          isOpen={isApiModalOpen}
+          onClose={() => setIsApiModalOpen(false)}
+          board={board}
+          onBoardUpdated={(updatedBoard) => {
+            setBoard(updatedBoard);
+          }}
+        />
+      )}
 
       {/* MODAL: Roteiro de Homologação & Dica de Teste (Card 4) */}
       {validatingLead && validationData && (

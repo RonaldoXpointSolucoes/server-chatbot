@@ -22,6 +22,7 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import apiGateway from './api-gateway/index.js';
 import publicRestRoutes from './api-gateway/public-rest.js';
+import crmApiRoutes from './api-gateway/crm-api.js';
 import { setupSwagger } from './api-gateway/swagger.js';
 import systemLogger, { errorBuffer, persistSystemLog } from './system-logger.js';
 import { supabase, NODE_ID } from './supabase.js';
@@ -409,6 +410,10 @@ setupSwagger(app);
 
 // Rotas públicas formato REST (Evolution API style)
 app.use('/', publicRestRoutes);
+
+// Rotas da API Externa de CRM para IAs e Integrações
+app.use('/v1/crm', crmApiRoutes);
+app.use('/crm', crmApiRoutes);
 
 app.use('/api', apiGateway);
 app.use('/api/logs', systemLogger);
