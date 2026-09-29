@@ -20,6 +20,37 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.5.8',
+    date: '2026-09-29',
+    summary: 'Base de Conhecimento & Contexto do Projeto (IA Skill) por Quadro Kanban',
+    notes: [
+      {
+        id: '7.5.8-1',
+        category: 'features',
+        title: 'Base de Conhecimento & Contexto do Projeto para Criação de Cards com IA',
+        description: 'Módulo dedicado (CrmProjectKnowledgeModal) para cadastrar e gerenciar a documentação técnica, stack, regras de negócio e objetivos do projeto por quadro, alimentando o Gemini com contexto de verdade absoluta.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.5.8-2',
+        category: 'features',
+        title: 'Assistente de IA para Estruturação da Documentação Técnica',
+        description: 'Botão "Estruturar com IA" que transforma anotações e rascunhos livres em documentações técnicas profissionais completas (Stack, Propósito, Módulos, Regras de Negócio e Padrões de Código).',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.5.8-3',
+        category: 'improvements',
+        title: 'Transparência de Contexto no Modal de Criação Multimodal e Barra Superior',
+        description: 'Novo botão de atalho [ 📚 Contexto IA ] na toolbar do Kanban e banner informativo em tempo real dentro do modal Criar com Áudio & IA, exibindo o status de contexto ativo e contagem de palavras.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      }
+    ]
+  },
+  {
     version: '7.5.7',
     date: '2026-09-29',
     summary: 'Criador de Skill para IAs, API REST Oficial por Quadro Kanban e Governança Estrita da Fila Dev',

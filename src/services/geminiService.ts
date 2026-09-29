@@ -730,6 +730,7 @@ Gere o JSON contendo exatamente as informações solicitadas no schema.`;
       type: 'image' | 'video' | 'audio';
     }>;
     boardName?: string;
+    projectKnowledge?: string;
   }): Promise<{
     title: string;
     category: string;
@@ -790,6 +791,16 @@ Sua missão é analisar de forma profunda e abrangente todos os dados fornecidos
 
 Quadro de destino: ${params.boardName || 'Desenvolvimento & Roadmap'}
 ${params.textPrompt ? `Descrição ou instruções fornecidas pelo usuário: "${params.textPrompt}"` : ''}
+${params.projectKnowledge?.trim() ? `
+================================================================================
+📚 BASE DE CONHECIMENTO & CONTEXTO OFICIAL DO PROJETO (PROJECT KNOWLEDGE & SKILL):
+================================================================================
+${params.projectKnowledge.trim()}
+================================================================================
+⚠️ DIRETRIZ CRÍTICA DE CONTEXTO DO PROJETO:
+- Utilize todas as informações, regras de negócio, arquitetura, telas e convenções técnicas descritas na Base de Conhecimento acima como a verdade do projeto.
+- Conecte o que foi pedido no áudio/texto/fotos diretamente ao contexto deste projeto para gerar um card com máxima perfeição técnica e critérios de aceite precisos.
+` : ''}
 
 DIRETRIZES DE PROCESSAMENTO MULTIMODAL AVANÇADO:
 1. 🎙️ **ANÁLISE DE ÁUDIO**:
@@ -853,6 +864,41 @@ Seja extremamente prático, direto, profissional e com foco em código limpo, se
       console.error("Erro no parse do plano técnico multimodal:", text);
       throw new Error("Falha ao estruturar o plano técnico multimodal com a IA.");
     }
+  }
+
+  /**
+   * Estrutura e enriquece a Base de Conhecimento e Contexto do Projeto para IAs
+   */
+  async enhanceProjectKnowledge(params: {
+    draft: string;
+    boardName?: string;
+  }): Promise<string> {
+    if (!this.isConfigured()) {
+      throw new Error('Chave de API do Gemini não configurada. Configure a sua chave de API nas Configurações.');
+    }
+    const model = this.getGenAI().getGenerativeModel({ model: "gemini-2.5-flash" });
+    const prompt = `Aja como Arquiteto de Software Sênior & Especialista em Documentação Técnica de Projetos.
+O usuário está cadastrando a Base de Conhecimento / Contexto do Projeto para o quadro "${params.boardName || 'Projeto'}".
+Essa documentação é usada como SKILL e conhecimento de contexto para Inteligências Artificiais criarem cartões com precisão máxima a partir de áudios, textos e imagens.
+
+Rascunho ou anotações fornecidas:
+"""
+${params.draft}
+"""
+
+Sua tarefa:
+Organize, aprimore e estruture essas informações em um documento Markdown impecável, profissional, claro e direto ao ponto.
+Estruture com títulos e listas:
+1. 🎯 **Visão Geral & Propósito**: O que é o projeto e qual problema resolve.
+2. 💻 **Stack Tecnológica & Arquitetura**: Linguagens, frameworks, bibliotecas e infraestrutura.
+3. 📋 **Módulos, Telas & Fluxos Principais**: As partes centrais do sistema.
+4. ⚙️ **Regras de Negócio Inegociáveis**: Condições que o código e os fluxos devem respeitar.
+5. 🛠️ **Padrões de Código & Critérios de Aceite**: Convenções (Clean Code, Mobile-First, TypeScript, etc.).
+
+Retorne APENAS o texto Markdown formatado, sem preâmbulos ("Aqui está:", "Com certeza"), sem conversinha.`;
+
+    const result = await model.generateContent(prompt);
+    return (await result.response).text().trim();
   }
 
   async qualifyCrmLead(historyText: string, additionalNotes?: string): Promise<{ customerName: string, mainInterest: string, businessType: string, priority: number, summaryHTML: string }> {

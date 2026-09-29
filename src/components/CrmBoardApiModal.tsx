@@ -308,8 +308,12 @@ Esta skill ensina à IA (Cursor, Claude, Codex, ChatGPT ou Antigravity) como int
 >    - Ao concluir as correções de cada card, a IA **DEVE OBRIGATORIAMENTE:**
 >      a) Registrar um relatório técnico documentando com precisão o que foi feito (resumo executivo, arquitetura, arquivos modificados e testes de compilação).
 >      b) Mover/enviar o card imediatamente para a lista **'${testStageObj.label}'** (\`${testStageObj.id}\`) através do endpoint oficial de transição.
->    - Após mover o card para QA, avançar imediatamente para o próximo card de '${devStageObj.label}' até que a coluna esteja completamente zerada (0 cards).
+>${board.config?.project_knowledge?.trim() ? `
+---
 
+## 📚 0. Base de Conhecimento & Contexto do Projeto
+${board.config.project_knowledge.trim()}
+` : ''}
 ---
 
 ## 🔑 1. Credenciais e Conexão com a API REST

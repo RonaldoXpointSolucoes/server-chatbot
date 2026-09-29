@@ -55,13 +55,15 @@ import {
   RotateCcw,
   FileImage,
   FileVideo,
-  Tag
+  Tag,
+  BookOpen
 } from 'lucide-react';
 import { useChatStore, instanceCache } from '../store/chatStore';
 import { supabase } from '../services/supabase';
 import { geminiService } from '../services/geminiService';
 import KanbanBoardCreator from '../components/KanbanBoardCreator';
 import CrmBoardApiModal from '../components/CrmBoardApiModal';
+import CrmProjectKnowledgeModal from '../components/CrmProjectKnowledgeModal';
 import RichTextEditor from '../components/RichTextEditor';
 import { CardMediaCarousel, extractCardMedia } from '../components/CardMediaCarousel';
 import { 
@@ -327,6 +329,7 @@ export default function CrmKanban() {
   const [isCreatorOpen, setIsCreatorOpen] = useState(false);
   const [isEditBoardOpen, setIsEditBoardOpen] = useState(false);
   const [isApiModalOpen, setIsApiModalOpen] = useState(false);
+  const [isKnowledgeModalOpen, setIsKnowledgeModalOpen] = useState(false);
   const [isAddLeadOpen, setIsAddLeadOpen] = useState(false);
   const [selectedLead, setSelectedLead] = useState<CRMLead | null>(null);
 
@@ -712,7 +715,8 @@ export default function CrmKanban() {
           fileName: a.name,
           type: a.type
         })),
-        boardName: board?.name
+        boardName: board?.name,
+        projectKnowledge: board?.config?.project_knowledge || undefined
       });
 
       setGeneratedPlan(plan);
@@ -1931,6 +1935,30 @@ export default function CrmKanban() {
               <span className="text-[10px] uppercase font-black">
                 {board.config?.api?.enabled ? 'Ativa' : 'Off'}
               </span>
+            </button>
+
+            {/* Botão Oficial: Base de Conhecimento & Contexto do Projeto (IA Skill) */}
+            <button
+              onClick={() => setIsKnowledgeModalOpen(true)}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition-all duration-200 cursor-pointer shadow-xs hover:scale-105 active:scale-95",
+                board.config?.project_knowledge?.trim()
+                  ? "bg-purple-500/10 dark:bg-purple-500/20 text-purple-600 dark:text-purple-300 border-purple-500/30 hover:bg-purple-500/20 shadow-[0_0_12px_rgba(168,85,247,0.15)]"
+                  : "bg-slate-100/90 dark:bg-[#182229]/70 text-slate-600 dark:text-slate-300 border-slate-200/80 dark:border-white/[0.08] hover:bg-slate-200 dark:hover:bg-white/[0.08]"
+              )}
+              title="Base de Conhecimento & Contexto do Projeto (IA Skill)"
+              aria-label="Base de Conhecimento & Contexto do Projeto"
+            >
+              <BookOpen size={14} className={board.config?.project_knowledge?.trim() ? "text-purple-500" : "text-slate-400"} />
+              <span className="font-sans font-bold">Contexto IA</span>
+              {board.config?.project_knowledge?.trim() ? (
+                <>
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
+                  <span className="text-[10px] uppercase font-black text-emerald-500">Ativo</span>
+                </>
+              ) : (
+                <span className="text-[10px] uppercase font-bold text-slate-400">Vazio</span>
+              )}
             </button>
 
             {/* IconButton Configurações do Quadro */}
@@ -3646,6 +3674,33 @@ export default function CrmKanban() {
                   </button>
                 </div>
 
+                {/* Base de Conhecimento do Projeto (IA Skill & Contexto) */}
+                <div className="p-3.5 bg-gradient-to-r from-purple-500/10 via-indigo-500/10 to-transparent rounded-2xl border border-purple-500/20 flex items-center justify-between gap-3 shadow-xs">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-8 h-8 rounded-xl bg-purple-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+                      <BookOpen size={16} />
+                    </div>
+                    <div className="truncate">
+                      <p className="font-extrabold text-slate-800 dark:text-slate-100 text-xs truncate">Base de Conhecimento do Projeto (IA Skill)</p>
+                      <p className="text-[10.5px] text-slate-500 dark:text-slate-400 truncate">
+                        Status: <span className={board.config?.project_knowledge?.trim() ? "text-emerald-500 font-black" : "text-amber-500 font-bold"}>
+                          {board.config?.project_knowledge?.trim() ? "Contexto Ativo" : "Não configurada"}
+                        </span>
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsEditBoardOpen(false);
+                      setIsKnowledgeModalOpen(true);
+                    }}
+                    className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 active:scale-95 text-white text-xs font-bold rounded-xl transition-all shadow-sm shrink-0 cursor-pointer"
+                  >
+                    Editar Documentação
+                  </button>
+                </div>
+
                 {/* Lista de colunas/etapas editáveis */}
                 <div className="space-y-3 pt-2">
                   <div className="flex justify-between items-center">
@@ -4088,6 +4143,43 @@ export default function CrmKanban() {
             {/* Conteúdo Rolável */}
             <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5 custom-scrollbar text-xs">
               
+              {/* Card Informativo: Contexto & Base de Conhecimento do Projeto */}
+              <div className="p-3.5 rounded-2xl bg-gradient-to-r from-purple-500/10 via-indigo-500/10 to-transparent border border-purple-500/20 flex items-center justify-between gap-3 shadow-xs">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-8 h-8 rounded-xl bg-purple-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+                    <BookOpen size={15} />
+                  </div>
+                  <div className="truncate">
+                    <div className="flex items-center gap-2">
+                      <span className="font-extrabold text-slate-800 dark:text-slate-200 text-xs truncate">
+                        Contexto do Projeto: {board?.name}
+                      </span>
+                      <span className={cn(
+                        "text-[9px] px-2 py-0.2 rounded-full font-black uppercase border",
+                        board?.config?.project_knowledge?.trim()
+                          ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
+                          : "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30"
+                      )}>
+                        {board?.config?.project_knowledge?.trim() ? '✓ Contexto Ativo' : 'Sem Contexto'}
+                      </span>
+                    </div>
+                    <p className="text-[10.5px] text-slate-500 dark:text-slate-400 truncate">
+                      {board?.config?.project_knowledge?.trim() 
+                        ? 'A IA aplicará a documentação e stack do projeto para estruturar o card com perfeição.'
+                        : 'Nenhuma documentação cadastrada. Adicione para a IA entender o projeto.'}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setIsKnowledgeModalOpen(true)}
+                  className="px-3 py-1.5 bg-white dark:bg-[#182229] hover:bg-slate-100 dark:hover:bg-white/10 text-indigo-600 dark:text-indigo-400 border border-slate-200 dark:border-white/10 text-[11px] font-extrabold rounded-xl transition-all shadow-2xs shrink-0 cursor-pointer active:scale-95"
+                >
+                  {board?.config?.project_knowledge?.trim() ? 'Editar Contexto' : '+ Adicionar Contexto'}
+                </button>
+              </div>
+
               {/* 1. Gravador de Áudio */}
               <div className="p-4 sm:p-5 rounded-2xl border border-dashed border-indigo-500/30 bg-gradient-to-br from-indigo-500/[0.04] via-purple-500/[0.02] to-transparent flex flex-col sm:flex-row items-center justify-between gap-4">
                 <div className="flex items-center gap-3.5 w-full sm:w-auto">
@@ -4531,6 +4623,19 @@ export default function CrmKanban() {
           board={board}
           onBoardUpdated={(updatedBoard) => {
             setBoard(updatedBoard);
+          }}
+        />
+      )}
+
+      {/* MODAL: Base de Conhecimento & Contexto do Projeto (IA Skill) */}
+      {isKnowledgeModalOpen && board && (
+        <CrmProjectKnowledgeModal
+          isOpen={isKnowledgeModalOpen}
+          onClose={() => setIsKnowledgeModalOpen(false)}
+          board={board}
+          onBoardUpdated={(updatedBoard) => {
+            setBoard(updatedBoard);
+            useChatStore.getState().fetchCrmBoards();
           }}
         />
       )}
