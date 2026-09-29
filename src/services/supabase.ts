@@ -53,6 +53,7 @@ class SupabaseCircuitBreaker {
 
 const supabaseCircuitBreaker = new SupabaseCircuitBreaker();
 let hasReportedServiceError = false;
+let lastSupabaseOscillationLog = 0;
 
 const customFetch = async (input: RequestInfo | URL, init?: RequestInit, retries = 5, delay = 1000): Promise<Response> => {
   const urlStr = typeof input === 'string' ? input : input.toString();
@@ -117,9 +118,11 @@ const customFetch = async (input: RequestInfo | URL, init?: RequestInit, retries
       const jitter = Math.floor(Math.random() * 350);
       const waitTime = delay + jitter;
       
-      // Só alerta nos logs quando já falhou pelo menos 2 vezes para evitar warnings espúrios em micro-oscilações transitórias
-      if (retries <= 3) {
-        console.warn(`[Supabase Cloud] Oscilação de rede no servidor Supabase${isAuthRequest ? ' (Auth Refresh)' : ''}. Auto-recuperando em ${waitTime}ms... (Tentativas restantes: ${retries})`);
+      // Só alerta nos logs quando persistir até as tentativas finais (evita warnings espúrios em micro-oscilações de milissegundos)
+      const now = Date.now();
+      if (retries <= 1 && now - lastSupabaseOscillationLog > 8000) {
+        lastSupabaseOscillationLog = now;
+        console.warn(`[Supabase Cloud] Oscilação de rede detectada no servidor Supabase${isAuthRequest ? ' (Auth Refresh)' : ''}. Auto-recuperando em ${waitTime}ms... (Tentativa de contingência)`);
       }
       if (retries <= 1) {
         hasReportedServiceError = true;

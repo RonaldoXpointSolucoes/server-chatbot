@@ -20,6 +20,37 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.5.6',
+    date: '2026-09-29',
+    summary: 'Resolução Definitiva de Mensagens Duplicadas no Envio, Resiliência Silenciosa do Supabase e Restauração de Rascunho',
+    notes: [
+      {
+        id: '7.5.6-1',
+        category: 'fixes',
+        title: 'Eliminação da Duplicação Visual de Mensagens no Envio',
+        description: 'Implementada reconciliação in-place no chatStore (addMessageLocally) com suporte a normalização de texto sem assinaturas de atendentes, absorção imediata de mensagens otimistas pelo Realtime e prevenção de bolhas duplicadas transitórias.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      },
+      {
+        id: '7.5.6-2',
+        category: 'improvements',
+        title: 'Resiliência de Rede e Silenciamento de Micro-Oscilações no Supabase',
+        description: 'Adicionado controle de throttling no customFetch com backoff exponencial para amortecer micro-quedas de rede sem disparar enxurradas de warnings repetitivos no console e no DevLogger.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      },
+      {
+        id: '7.5.6-3',
+        category: 'features',
+        title: 'Restauração Resiliente de Mensagem Estilo ChatGPT',
+        description: 'Preservação automática e instantânea do texto digitado no campo de mensagem caso ocorra qualquer instabilidade de conexão, com banner superior intuitivo para reenvio imediato.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      }
+    ]
+  },
+  {
     version: '7.5.5',
     date: '2026-09-28',
     summary: 'Blindagem contra Envio Duplicado de Mensagens no WhatsApp e Resiliência Global da Magia da IA',

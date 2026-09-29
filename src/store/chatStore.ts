@@ -577,7 +577,8 @@ interface ChatState {
   loadHistoricalMessages: (contactId: string, instanceName: string, forceSync?: boolean) => Promise<void>;
 
   // Local state updaters
-  addMessageLocally: (contactId: string, msg: MessageType) => void;
+  addMessageLocally: (contactId: string, msg: MessageType, options?: any) => void;
+  removeMessageLocally: (contactId: string, messageId: string) => void;
   upsertContactLocally: (contact: ContactRow) => void;
   sendPresenceUpdate: (contactId: string, presence: 'composing' | 'recording' | 'paused' | 'available' | 'unavailable', instanceName?: string) => Promise<void>;
   sendHumanMessage: (contactId: string, text: string, instanceName: string) => Promise<void>;
@@ -2059,9 +2060,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       console.error("Erro na injeção de assinatura síncrona:", e);
     }
 
-    // Atualiza otimista UI imediatamente (Instantâneo)
+    // Atualiza otimista UI imediatamente com status 'pending' (reloginho animado)
     const pseudoId = 'optimistic-' + Math.random().toString();
-    state.addMessageLocally(contactId, { id: pseudoId, text: finalMessageText, sender: 'human', timestamp: new Date() });
+    state.addMessageLocally(contactId, { id: pseudoId, text: finalMessageText, sender: 'human', status: 'pending', timestamp: new Date() });
 
     // Auto-pause da IA por 30 minutos se o atendente mandou mensagem manual e ela não está pausada definitivamente
     if (state.globalAiEnabled && contact.bot_status !== 'paused') {
@@ -2095,80 +2096,79 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const resolvedInstanceId = await resolveInstanceUuid(state.tenantInfo?.id || '', finalTargetInstance);
       const resolvedExpectedInstance = await resolveInstanceUuid(state.tenantInfo?.id || '', expectedInstance);
 
+      if (!resolvedInstanceId) {
+        throw new Error('Instância do WhatsApp não configurada ou não encontrada para envio.');
+      }
+
       // VALIDAÇÃO IMPETRANTE DE SEGURANÇA: Bloqueia vazamentos forçando a instância estrita da conversa aberta
       if (resolvedExpectedInstance && resolvedInstanceId !== resolvedExpectedInstance) {
         console.warn(`[Security Guard] Bloqueada tentativa de envio por canal incorreto! Esperado: ${resolvedExpectedInstance}, Recebido: ${resolvedInstanceId}. Forçando canal da conversa.`);
       }
 
       // Verifica a conexão da instância específica da conversa: bloqueia apenas se explicitamente offline
-      if (resolvedInstanceId && state.instancesStatus[resolvedInstanceId] === 'offline') {
+      if (state.instancesStatus[resolvedInstanceId] === 'offline') {
         set({ modalReason: 'A instância do WhatsApp atrelada a esta conversa está offline. Por favor, reconecte para enviar mensagens.' });
         throw new Error('whatsapp_offline');
       }
 
       const { sendTextMessage } = await import('../services/whatsappEngine');
-      // 1. Manda pra Baileys Engine Local
-      if (!state.tenantInfo) return;
+      if (!state.tenantInfo) {
+        throw new Error('Sessão do tenant expirada ou inválida.');
+      }
 
       const apiKey = resolvedInstanceId ? await getOrFetchApiKey(resolvedInstanceId) : '';
 
-      if (resolvedInstanceId) {
-        const targetJid = getContactJid(contact);
-        if (!targetJid) {
-          throw new Error('Número de telefone do contato inválido ou incompleto.');
-        }
-        const res = await sendTextMessage(state.tenantInfo.id, resolvedInstanceId, targetJid, finalMessageText, apiKey);
-        if (res && res.result?.key?.id) {
-          const officialMsgId = res.result.key.id;
-          set((s) => ({
-            contacts: s.contacts.map(c => {
-              if (c.id === contactId) {
-                return {
-                  ...c,
-                  messages: c.messages.map(m => m.id === pseudoId ? {
-                    ...m,
-                    id: officialMsgId,
-                    whatsapp_id: officialMsgId
-                  } : m)
-                };
-              }
-              return c;
-            })
-          }));
-        }
+      const targetJid = getContactJid(contact);
+      if (!targetJid) {
+        throw new Error('Número de telefone do contato inválido ou incompleto.');
+      }
+
+      const res = await sendTextMessage(state.tenantInfo.id, resolvedInstanceId, targetJid, finalMessageText, apiKey);
+      if (res && (res.result?.key?.id || res.key?.id)) {
+        const officialMsgId = res.result?.key?.id || res.key?.id;
+        set((s) => ({
+          contacts: s.contacts.map(c => {
+            if (c.id === contactId || c.conv_id === contactId || (c.id && getRealContactId(c.id) === realContactId)) {
+              return {
+                ...c,
+                messages: c.messages.map(m => (m.id === pseudoId || (officialMsgId && m.whatsapp_id === officialMsgId)) ? {
+                  ...m,
+                  id: m.id === pseudoId ? officialMsgId : m.id,
+                  whatsapp_id: officialMsgId,
+                  status: 'sent'
+                } : m)
+              };
+            }
+            return c;
+          })
+        }));
+        return { success: true, messageId: officialMsgId };
+      } else {
+        const errDetail = res?.error || res?.message || 'Servidor não confirmou o envio da mensagem.';
+        throw new Error(errDetail);
       }
 
     } catch (err: any) {
-      console.error(err);
+      console.error('[sendHumanMessage] Erro:', err);
 
-      // Preserva a mensagem otimista com status de erro sem deletar o texto digitado da tela
-      set((s) => ({
-        contacts: s.contacts.map(c => {
-          if (c.id === contactId) {
-            return {
-              ...c,
-              messages: c.messages.map(m => m.id === pseudoId ? {
-                ...m,
-                status: 'error',
-                errorMessage: err.message || 'Falha ao enviar mensagem'
-              } : m)
-            };
-          }
-          return c;
-        })
-      }));
+      // Libera trava de idempotência imediatamente para permitir novo envio
+      recentOutgoingHumanMessages.delete(dedupKey);
+
+      // Remove a mensagem otimista que falhou do feed local para evitar estado fantasma e sumiço posterior
+      state.removeMessageLocally(contactId, pseudoId);
 
       if (err.message === 'whatsapp_offline') {
-        return;
+        window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'A instância do WhatsApp está offline. O texto foi restaurado no campo.', type: 'warning', duration: 7000 } }));
+      } else if (err.message === 'Failed to fetch') {
+        window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Falha crítica de comunicação com o Motor Baileys. O texto foi restaurado no campo.', type: 'error', duration: 7000 } }));
+      } else if (err.message && err.message.includes('Connection Closed')) {
+        window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Conexão instável com o WhatsApp (Connection Closed). O texto foi restaurado no campo.', type: 'warning', duration: 7000 } }));
+      } else {
+        window.dispatchEvent(new CustomEvent('toast', { detail: { message: `Não foi possível enviar a mensagem: ${err.message}. O texto foi restaurado.`, type: 'error', duration: 7000 } }));
       }
 
-      if (err.message === 'Failed to fetch') {
-        window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Falha crítica de comunicação com o Motor Baileys. Verifique se o backend está rodando e online.', type: 'error' } }));
-      } else if (err.message.includes('Connection Closed')) {
-        window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Conexão instável com o WhatsApp (Connection Closed). O motor Baileys está tentando reconectar em segundo plano. Aguarde 5 segundos e tente novamente.', type: 'warning', duration: 7000 } }));
-      } else {
-        window.dispatchEvent(new CustomEvent('toast', { detail: { message: `Não foi possível enviar a mensagem: ${err.message}`, type: 'error' } }));
-      }
+      // Re-lança o erro para o chamador (handleSendHuman) restaurar no textarea e exibir o banner
+      throw err;
     }
   },
 
@@ -2195,7 +2195,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       sender: 'human',
       mediaType: 'contact',
       vcardWaid: cleanPhone,
-      status: 'sent',
+      status: 'pending',
       timestamp: new Date()
     });
 
@@ -2224,17 +2224,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const { sendContactMessage } = await import('../services/whatsappEngine');
       await sendContactMessage(state.tenantInfo?.id || '', resolvedInstanceId, targetJid, contactName, contactPhone, apiKey);
 
-      window.dispatchEvent(new CustomEvent('toast', { detail: { message: `Contato "${contactName}" compartilhado com sucesso!`, type: 'success' } }));
-    } catch (err: any) {
-      console.error('[shareContactMessage] Erro:', err);
       set((s) => ({
         contacts: s.contacts.map(c => {
           if (c.id === contactId) {
-            return { ...c, messages: c.messages.filter(m => m.id !== pseudoId) };
+            return {
+              ...c,
+              messages: c.messages.map(m => m.id === pseudoId ? { ...m, status: 'sent' } : m)
+            };
           }
           return c;
         })
       }));
+
+      window.dispatchEvent(new CustomEvent('toast', { detail: { message: `Contato "${contactName}" compartilhado com sucesso!`, type: 'success' } }));
+    } catch (err: any) {
+      console.error('[shareContactMessage] Erro:', err);
+      state.removeMessageLocally(contactId, pseudoId);
       if (err.message !== 'whatsapp_offline') {
         window.dispatchEvent(new CustomEvent('toast', { detail: { message: `Falha ao compartilhar contato: ${err.message}`, type: 'error' } }));
       }
@@ -2517,6 +2522,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       sender: 'human',
       mediaType: mediaType,
       mediaUrl: tempUrl,
+      status: 'pending',
       timestamp: new Date()
     });
 
@@ -2581,7 +2587,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
             messages: c.messages.map(m => m.id === pseudoId ? {
               ...m,
               ...(data.media_url && { mediaUrl: data.media_url }),
-              ...(data.result?.key?.id && { whatsapp_id: data.result.key.id })
+              ...(data.result?.key?.id && { whatsapp_id: data.result.key.id }),
+              status: 'sent'
             } : m)
           } : c)
         }));
@@ -2589,13 +2596,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     } catch (err: any) {
       console.error('[uploadAndSendMedia] Falha crítica:', err);
-      set((s) => ({
-        contacts: s.contacts.map(c => c.id === contactId ? {
-          ...c,
-          messages: c.messages.map(m => m.id === pseudoId ? { ...m, status: 'error', errorMessage: err.message } : m)
-        } : c)
-      }));
+      state.removeMessageLocally(contactId, pseudoId);
       window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Falha ao enviar arquivo para o WhatsApp: ' + (err.message || err), type: 'error' } }));
+      throw err;
     }
   },
 
@@ -2694,6 +2697,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       sender: 'human',
       mediaType: mediaType,
       mediaUrl: mediaUrl, // Always keep the mediaUrl so it renders the video properly
+      status: 'pending',
       timestamp: new Date()
     });
 
@@ -2782,24 +2786,32 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       console.log(`[sendMediaFromUrl] Retorno do webhook:`, data);
 
+      if (data.media_url || (data.result?.key?.id)) {
+        set((s) => ({
+          contacts: s.contacts.map(c => c.id === contactId ? {
+            ...c,
+            messages: c.messages.map(m => m.id === pseudoId ? {
+              ...m,
+              ...(data.media_url && { mediaUrl: data.media_url }),
+              ...(data.result?.key?.id && { whatsapp_id: data.result.key.id }),
+              status: 'sent'
+            } : m)
+          } : c)
+        }));
+      }
+
     } catch (err: any) {
       console.error('[sendMediaFromUrl] Falha:', err);
 
       // Reverter mídia otimista
-      set((s) => ({
-        contacts: s.contacts.map(c => {
-          if (c.id === contactId) {
-            return { ...c, messages: c.messages.filter(m => m.id !== pseudoId) };
-          }
-          return c;
-        })
-      }));
+      state.removeMessageLocally(contactId, pseudoId);
 
       if (err.message === 'whatsapp_offline') {
-        return;
+        throw err;
       }
 
-      window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Falha ao enviar mídia da resposta pronta: ' + err.message, type: 'error' } }));
+      window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Falha ao enviar mídia: ' + err.message, type: 'error' } }));
+      throw err;
     }
   },
 
@@ -2944,6 +2956,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
+  removeMessageLocally: (contactId, messageId) => {
+    const rawTargetId = contactId ? getRealContactId(contactId) : null;
+    const targetInstance = contactId && contactId.includes('_') ? contactId.split('_')[1] : null;
+
+    set((state) => ({
+      contacts: state.contacts.map((c) => {
+        const isMatch = c.id === contactId ||
+          Boolean(c.conv_id && c.conv_id === contactId) ||
+          Boolean(rawTargetId && getRealContactId(c.id) === rawTargetId && (!targetInstance || targetInstance === 'default' || c.instance_id === targetInstance));
+
+        if (isMatch) {
+          return {
+            ...c,
+            messages: (c.messages || []).filter(m => m.id !== messageId && m.whatsapp_id !== messageId)
+          };
+        }
+        return c;
+      })
+    }));
+  },
+
   addMessageLocally: (contactId, msg, options) => {
     if (options?.isIgnored) msg.isIgnored = true;
     if (options?.isIgnoredSilent) msg.isIgnoredSilent = true;
@@ -2987,26 +3020,73 @@ export const useChatStore = create<ChatState>((set, get) => ({
             updatedSnooze = undefined;
           }
 
-          // Previne duplicados por ID do DB ou whatsapp_id
-          if (c.messages.some(m => m.id === msg.id || (msg.whatsapp_id && m.whatsapp_id === msg.whatsapp_id))) {
+          // Helper de normalização rigorosa para desduplicação
+          const cleanSignatureAndFormatting = (txt: any) => {
+            if (!txt) return '';
+            return String(txt)
+              .replace(/^\*([^*:]+):\*\s*/i, '') // Remove *Nome:*
+              .replace(/^([A-Za-zÀ-ÿ\s]+):\s*/i, '') // Remove Nome:
+              .replace(/\r\n/g, '\n')
+              .trim()
+              .toLowerCase();
+          };
+
+          // 1. Previne duplicados exatos por ID do DB ou whatsapp_id
+          const isAlreadyPresent = c.messages.some(m => 
+            (msg.id && m.id === msg.id) ||
+            (msg.whatsapp_id && (m.whatsapp_id === msg.whatsapp_id || m.id === msg.whatsapp_id)) ||
+            (m.whatsapp_id && m.whatsapp_id === msg.id)
+          );
+
+          if (isAlreadyPresent) {
             if (updatedStatus !== c.conv_status) return { ...c, conv_status: updatedStatus, snoozed_until: updatedSnooze };
             return c;
           }
 
-          // Tratamento de UI otimista: varre se ja tem uma mensagem igualzinha pendente
-          if (msg.sender === 'human' || msg.sender === 'bot') {
-            const optIndex = c.messages.findIndex(m => {
-              if (msg.whatsapp_id && m.whatsapp_id === msg.whatsapp_id) return true;
-              if (!String(m.id).startsWith('optimistic-')) return false;
-              if (m.mediaType && msg.mediaType && m.mediaType === msg.mediaType) return true;
+          // 2. Tratamento e reconciliação de mensagens de saída (otimistas e em trânsito)
+          const isOutboundMsg = ['human', 'agent', 'bot', 'automation'].includes(msg.sender);
+          if (isOutboundMsg) {
+            const normMsg = cleanSignatureAndFormatting(msg.text);
+            const msgTime = msg.timestamp instanceof Date ? msg.timestamp.getTime() : new Date(msg.timestamp || 0).getTime();
 
-              const normM = (m.text || '').replace(/^\*([^*:]+):\*\s*/, '').trim().toLowerCase();
-              const normMsg = (msg.text || '').replace(/^\*([^*:]+):\*\s*/, '').trim().toLowerCase();
-              return normM === normMsg || (!!normM && !!normMsg && (normM.includes(normMsg) || normMsg.includes(normM)));
+            const optIndex = c.messages.findIndex(m => {
+              // Match direto por whatsapp_id caso tenha sido associado antes
+              if (msg.whatsapp_id && (m.whatsapp_id === msg.whatsapp_id || m.id === msg.whatsapp_id)) return true;
+
+              // Identifica mensagens otimistas, temporárias ou pendentes
+              const isPendingOrOptimistic = String(m.id).startsWith('optimistic-') || String(m.id).startsWith('EDGE_') || m.status === 'pending';
+              const mTime = m.timestamp instanceof Date ? m.timestamp.getTime() : new Date(m.timestamp || 0).getTime();
+              const isRecent = Math.abs(msgTime - mTime) < 35000; // Janela de segurança de 35s
+
+              if (m.mediaType && msg.mediaType && m.mediaType === msg.mediaType && (isPendingOrOptimistic || isRecent)) {
+                return true;
+              }
+
+              const normM = cleanSignatureAndFormatting(m.text);
+              const isTextMatch = Boolean(
+                normM && normMsg && 
+                (normM === normMsg || normM.includes(normMsg) || normMsg.includes(normM))
+              );
+
+              // Se o texto bater e for uma mensagem otimista/pendente OU enviada nos últimos 35s
+              if (isTextMatch && (isPendingOrOptimistic || isRecent)) {
+                return true;
+              }
+
+              return false;
             });
+
             if (optIndex !== -1) {
               let updatedMsgs = [...c.messages];
-              updatedMsgs[optIndex] = { ...msg, sender: 'human' }; // substitui pelo registro do Realtime com UUID real mantendo verde na UI
+              // Substitui pelo registro do Realtime com UUID real mantendo status e metadados preservados
+              updatedMsgs[optIndex] = { 
+                ...c.messages[optIndex],
+                ...msg,
+                id: msg.id,
+                whatsapp_id: msg.whatsapp_id || c.messages[optIndex].whatsapp_id,
+                status: msg.status || 'sent',
+                sender: c.messages[optIndex].sender === 'human' || msg.sender === 'human' || msg.sender === 'agent' ? 'human' : msg.sender
+              };
               updatedMsgs = sortMessagesChronologically(updatedMsgs);
               return { 
                 ...c, 
@@ -3015,6 +3095,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 conv_status: updatedStatus, 
                 snoozed_until: updatedSnooze 
               };
+            }
+
+            // 2.1 Prevenção defensiva de duplicação: se já existe mensagem recente com mesmo texto idêntico, descarta
+            const hasDuplicateRecentText = c.messages.some(m => {
+              const mTime = m.timestamp instanceof Date ? m.timestamp.getTime() : new Date(m.timestamp || 0).getTime();
+              if (Math.abs(msgTime - mTime) > 25000) return false;
+              const normM = cleanSignatureAndFormatting(m.text);
+              return Boolean(normM && normMsg && normM === normMsg);
+            });
+
+            if (hasDuplicateRecentText) {
+              if (updatedStatus !== c.conv_status) return { ...c, conv_status: updatedStatus, snoozed_until: updatedSnooze };
+              return c;
             }
           }
 

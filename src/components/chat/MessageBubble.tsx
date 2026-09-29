@@ -1129,10 +1129,27 @@ export const MessageBubble = memo(({
         <div className="absolute right-2 bottom-1 flex items-center gap-1 text-[9px] text-[#54656f] dark:text-gray-400 bg-white/40 dark:bg-[#202c33]/40 px-1.5 py-0.5 rounded-full backdrop-blur-sm">
           {isToday(new Date(msg.timestamp)) ? format(new Date(msg.timestamp), "HH:mm'h'") : isYesterday(new Date(msg.timestamp)) ? `Ontem ${format(new Date(msg.timestamp), "HH:mm'h'")}` : format(new Date(msg.timestamp), "dd/MM HH:mm'h'")}
           {isMe && (
-             msg.status === 'error' || msg.status === 'failed' ? <AlertCircle size={12} className="text-rose-500 ml-0.5" title={msg.errorMessage || 'Falha no envio'} /> :
-             msg.status === 'pending' ? <Clock size={11} className="text-gray-400 ml-0.5 animate-pulse" /> :
-             msg.status === 'READ' || msg.status === 'read' || msg.status === 'PLAYED' || msg.status === 'played' ? <CheckCheck size={12} className="text-[#53bdeb] ml-0.5" /> : 
-             msg.status === 'DELIVERY_ACK' || msg.status === 'delivered' ? <CheckCheck size={12} className="text-gray-400 ml-0.5" /> :
+             msg.status === 'error' || msg.status === 'failed' ? (
+               <span 
+                 onClick={(e) => {
+                   e.stopPropagation();
+                   if (textareaRef.current) {
+                     textareaRef.current.value = msg.text || '';
+                     textareaRef.current.style.height = 'auto';
+                     textareaRef.current.focus();
+                   }
+                   window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Texto da mensagem restaurado no campo para você tentar novamente.', type: 'info' } }));
+                 }}
+                 className="cursor-pointer hover:scale-125 transition-transform inline-flex items-center"
+                 title={msg.errorMessage ? `${msg.errorMessage} (Clique para restaurar no campo)` : 'Falha no envio. Clique para restaurar o texto no campo de digitação.'}
+               >
+                 <AlertCircle size={12} className="text-rose-500 ml-0.5" />
+               </span>
+             ) :
+             msg.status === 'pending' || String(msg.id || '').startsWith('optimistic-') ? <Clock size={11} className="text-gray-400 ml-0.5 animate-pulse" title="Enviando..." /> :
+             msg.status === 'READ' || msg.status === 'read' || msg.status === 'PLAYED' || msg.status === 'played' ? <CheckCheck size={12} className="text-[#53bdeb] ml-0.5" title="Lida" /> : 
+             msg.status === 'DELIVERY_ACK' || msg.status === 'delivered' ? <CheckCheck size={12} className="text-gray-400 ml-0.5" title="Entregue" /> :
+             msg.status === 'sent' || msg.status === 'SENT' ? <Check size={12} className="text-gray-400 ml-0.5" title="Enviada" /> :
              <Check size={12} className="text-gray-400 ml-0.5" />
           )}
         </div>

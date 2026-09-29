@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
-import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, ChevronRight, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, Save, ShieldCheck, Smile, Briefcase, Flag, Clock, Calendar, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, CheckSquare, MessageSquare, MessageSquareText, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList, UploadCloud, FolderCheck, Globe, Lock, Zap, Folder, FolderOpen, FolderTree, CornerDownRight, BookOpen } from 'lucide-react';
+import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, ChevronRight, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, Save, ShieldCheck, Smile, Briefcase, Flag, Clock, Calendar, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, AlertCircle, CheckSquare, MessageSquare, MessageSquareText, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList, UploadCloud, FolderCheck, Globe, Lock, Zap, Folder, FolderOpen, FolderTree, CornerDownRight, BookOpen } from 'lucide-react';
 import { getCurrentEnvironment, setEnvironment, validateServerEnvironment, ENVIRONMENTS } from '../services/environmentService';
 import { useNavigate, useOutletContext, useLocation } from 'react-router-dom';
 import { useChatStore, QuickReplyCategory, instanceCache, resolveInstanceUuid, sortMessagesChronologically, getEffectiveContactTime, getRealContactId, getUniquePersonKey } from '../store/chatStore';
@@ -2055,6 +2055,15 @@ export default function ChatDashboard() {
     }
   }, [inputText]);
 
+  // Estado para Banner de Erro no Envio com Restauração Instantânea (Padrão ChatGPT)
+  const [sendErrorBanner, setSendErrorBanner] = useState<{
+    text: string;
+    error: string;
+    contactId: string;
+    instanceName?: string;
+    timestamp: number;
+  } | null>(null);
+
   // Estados dos novos menus fluídos
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
   const [menuOpenUpward, setMenuOpenUpward] = useState(false);
@@ -2971,6 +2980,7 @@ export default function ChatDashboard() {
       const targetCompositeId = `${existingContact.id}_${targetInstanceId}`;
 
       // 4. Dispara o envio da mensagem
+      const savedDraftText = inputText;
       let finalMessageText = inputText;
       if (replyMessage) {
         const shortQuote = replyMessage.text.length > 80 ? replyMessage.text.substring(0, 80) + '...' : replyMessage.text;
@@ -2999,9 +3009,23 @@ export default function ChatDashboard() {
       // 5. Ativa o novo chat e limpa o modo rascunho
       setActiveChat(targetCompositeId);
       setDraftNewChat(null);
-    } catch (err) {
+      setSendErrorBanner(null);
+    } catch (err: any) {
       console.error('Erro ao enviar mensagem no modo rascunho:', err);
-      alert('Erro ao enviar mensagem.');
+      setInputText(savedDraftText);
+      if (textareaRef.current) {
+        textareaRef.current.value = savedDraftText;
+        textareaRef.current.style.height = 'auto';
+        setTimeout(() => textareaRef.current?.focus(), 50);
+      }
+      setSendErrorBanner({
+        text: savedDraftText,
+        error: err?.message || 'Falha ao enviar mensagem para nova conversa.',
+        contactId: activeChatId || '',
+        instanceName: properInstance as string,
+        timestamp: Date.now()
+      });
+      window.dispatchEvent(new CustomEvent('toast', { detail: { message: `Não foi possível enviar a mensagem: ${err?.message || err}. O texto foi restaurado no campo.`, type: 'error', duration: 7000 } }));
     } finally {
       isSendingRef.current = false;
       setIsSendingMessage(false);
@@ -3666,6 +3690,15 @@ export default function ChatDashboard() {
        return;
     }
 
+    // Backup dos dados originais para restauração instantânea em caso de falha (Padrão ChatGPT)
+    const savedTextToSend = textToSend;
+    const savedReplyMessage = replyMessage;
+    const savedPendingMedia = pendingMediaToSend;
+    const savedChecklistDraft = [...checklistDraft];
+    const savedIsTaskMode = isTaskMode;
+    const savedTaskAssignedTo = taskAssignedTo;
+    const savedNoteAttachedFile = noteAttachedFile;
+
     // Ativa trava síncrona imediatamente para bloquear cliques múltiplos/concorrentes
     isSendingRef.current = true;
     setIsSendingMessage(true);
@@ -3763,6 +3796,7 @@ export default function ChatDashboard() {
         setScheduleNoteTitle('');
         setScheduleNoteDate('');
         setScheduleNoteTime('');
+        setSendErrorBanner(null);
       } else {
         let finalMessageText = textToSend;
         if (replyMessage) {
@@ -3798,9 +3832,52 @@ export default function ChatDashboard() {
           // Envia aguardando a finalização para manter a trava segura
           await sendHumanMessage(activeChatId, finalMessageText, properTargetInstance as string);
         }
+
+        // Sucesso: fecha qualquer banner de erro pendente desta conversa
+        setSendErrorBanner(null);
       }
-    } catch (error) {
-      console.error('[handleSendHuman] Erro inesperado durante o envio:', error);
+    } catch (error: any) {
+      console.error('[handleSendHuman] Falha no envio:', error);
+
+      // RESTAURAÇÃO COMPLETA ESTILO CHATGPT:
+      // O texto digitado é imediatamente recolocado no campo de digitação!
+      if (chatMode === 'internal_note') {
+        setInputText(savedTextToSend);
+        if (textareaRef.current) {
+          textareaRef.current.value = savedTextToSend;
+          textareaRef.current.style.height = 'auto';
+          textareaRef.current.style.height = `${Math.min(Math.max(textareaRef.current.scrollHeight, 20), 250)}px`;
+          setTimeout(() => textareaRef.current?.focus(), 50);
+        }
+        setChecklistDraft(savedChecklistDraft);
+        setIsTaskMode(savedIsTaskMode);
+        setTaskAssignedTo(savedTaskAssignedTo);
+        setNoteAttachedFile(savedNoteAttachedFile);
+      } else {
+        setInputText(savedTextToSend);
+        if (textareaRef.current) {
+          textareaRef.current.value = savedTextToSend;
+          textareaRef.current.style.height = 'auto';
+          textareaRef.current.style.height = `${Math.min(Math.max(textareaRef.current.scrollHeight, 20), 250)}px`;
+          setTimeout(() => textareaRef.current?.focus(), 50);
+        }
+        if (savedReplyMessage) {
+          setReplyMessage(savedReplyMessage);
+        }
+        if (savedPendingMedia) {
+          setPendingMediaToSend(savedPendingMedia);
+        }
+      }
+
+      // Ativa o banner elegante de alerta e reenvio
+      const errorMsg = error?.message || 'Falha de comunicação com o WhatsApp';
+      setSendErrorBanner({
+        text: savedTextToSend,
+        error: errorMsg,
+        contactId: activeChatId,
+        instanceName: properTargetInstance as string,
+        timestamp: Date.now()
+      });
     } finally {
       // Cooldown de proteção contra mouse bouncing e double click
       setTimeout(() => {
@@ -5726,8 +5803,22 @@ export default function ChatDashboard() {
             }
             try {
               await sendHumanMessage(activeChatId, finalText, properTargetInstance as string);
-            } catch (err) {
+              setSendErrorBanner(null);
+            } catch (err: any) {
               console.error('[GeminiEditorModal onSend] Erro ao enviar mensagem:', err);
+              setInputText(finalText);
+              if (textareaRef.current) {
+                textareaRef.current.value = finalText;
+                textareaRef.current.style.height = 'auto';
+                setTimeout(() => textareaRef.current?.focus(), 50);
+              }
+              setSendErrorBanner({
+                text: finalText,
+                error: err?.message || 'Falha ao enviar mensagem gerada pela IA.',
+                contactId: activeChatId,
+                instanceName: properTargetInstance as string,
+                timestamp: Date.now()
+              });
             } finally {
               setTimeout(() => {
                 isSendingRef.current = false;
@@ -8416,6 +8507,56 @@ export default function ChatDashboard() {
                     >
                       <X size={14} />
                     </button>
+                  </div>
+                )}
+
+                {/* Banner de Erro no Envio com Restauração Instantânea (Padrão ChatGPT) */}
+                {sendErrorBanner && sendErrorBanner.contactId === activeChatId && (
+                  <div className="flex items-center justify-between gap-3 bg-rose-500/10 dark:bg-rose-950/40 border border-rose-500/30 rounded-xl p-3 mx-2 mt-2 shadow-sm backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 duration-300 relative z-20">
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <div className="w-8 h-8 rounded-xl bg-rose-500/20 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+                        <AlertCircle size={18} className="animate-pulse" />
+                      </div>
+                      <div className="flex flex-col min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-rose-700 dark:text-rose-300">
+                            Não foi possível enviar a mensagem
+                          </span>
+                          <span className="text-[10px] font-semibold px-2 py-0.2 rounded-full bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-500/20">
+                            Texto restaurado no campo
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-rose-600/90 dark:text-rose-300/80 truncate mt-0.5">
+                          {sendErrorBanner.error || 'Falha de comunicação com o WhatsApp. Verifique sua conexão e tente novamente.'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          if (!isSendingRef.current) {
+                            handleSendHuman(e);
+                          }
+                        }}
+                        disabled={isSendingMessage}
+                        className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all hover:scale-105 active:scale-95 disabled:opacity-50 cursor-pointer"
+                        title="Tentar enviar novamente"
+                      >
+                        <RefreshCw size={13} className={isSendingMessage ? "animate-spin" : ""} />
+                        <span>Tentar novamente</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSendErrorBanner(null)}
+                        className="p-1.5 text-rose-500 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-200 hover:bg-rose-500/10 rounded-xl transition-colors cursor-pointer"
+                        title="Dispensar aviso"
+                      >
+                        <X size={15} />
+                      </button>
+                    </div>
                   </div>
                 )}
                 
