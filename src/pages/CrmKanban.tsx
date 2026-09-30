@@ -66,6 +66,7 @@ import CrmBoardApiModal from '../components/CrmBoardApiModal';
 import CrmProjectKnowledgeModal from '../components/CrmProjectKnowledgeModal';
 import RichTextEditor from '../components/RichTextEditor';
 import { CardMediaCarousel, extractCardMedia } from '../components/CardMediaCarousel';
+import TicketSummaryStatus from '../components/TicketSummaryStatus';
 import { 
   CardMediaAttachment, 
   saveCardDraft, 
@@ -199,11 +200,15 @@ const getLeadSummarySnippet = (notes?: string | null) => {
     .replace(/^#+.*$/gm, '')
     .replace(/---/g, '')
     .replace(/<[^>]*>?/gm, '')
+    .replace(/>\s*\[!.*?\]/gi, '')
+    .replace(/\*\*|__|\*|_|~~|`+/g, '')
+    .replace(/https?:\/\/[^\s\)]+/g, '')
+    .replace(/\s+/g, ' ')
     .trim();
   const lines = clean.split('\n').map(l => l.trim()).filter(p => p.length > 0);
   const firstParagraph = lines.find(p => !p.startsWith('🎯') && !p.startsWith('📋') && !p.startsWith('🛠️') && !p.startsWith('🧪') && !p.startsWith('📎')) || lines[0];
   if (!firstParagraph) return null;
-  return firstParagraph.length > 130 ? firstParagraph.slice(0, 130) + '...' : firstParagraph;
+  return firstParagraph.length > 115 ? firstParagraph.slice(0, 115).trim() + '...' : firstParagraph;
 };
 
 // Extração Inteligente de URL de Teste e Dica de Homologação
@@ -418,7 +423,7 @@ export default function CrmKanban() {
   const [isQualifying, setIsQualifying] = useState(false);
 
   // Estados para o Modal Detalhes do Lead Modernizado
-  const [leadDetailTab, setLeadDetailTab] = useState<'overview' | 'technical' | 'notes' | 'history'>('overview');
+  const [leadDetailTab, setLeadDetailTab] = useState<'summary' | 'overview' | 'technical' | 'notes' | 'history'>('summary');
   const [copiedDelivery, setCopiedDelivery] = useState(false);
 
   // Estados para Modal de Dica de Teste & Validação (Card 4)
@@ -2143,7 +2148,10 @@ export default function CrmKanban() {
                           onDragStart={e => handleDragStart(e, lead.id)}
                           onDragEnd={handleDragEnd}
                           onDragOver={e => handleCardDragOver(e, lead.id)}
-                          onClick={() => setSelectedLead(lead)}
+                          onClick={() => {
+                            setSelectedLead(lead);
+                            setLeadDetailTab('summary');
+                          }}
                           className={cn(
                             "group/card bg-white/95 dark:bg-[#182229]/90 backdrop-blur-xl p-4 rounded-2xl border border-slate-200/80 dark:border-white/[0.08] shadow-[0_4px_16px_rgba(0,0,0,0.03)] dark:shadow-[0_4px_24px_rgba(0,0,0,0.25)] hover:shadow-[0_16px_36px_rgba(0,0,0,0.08)] dark:hover:shadow-[0_16px_40px_rgba(0,0,0,0.4)] hover:border-indigo-500/40 dark:hover:border-indigo-400/40 hover:-translate-y-1 transition-all duration-300 cursor-grab active:cursor-grabbing relative overflow-hidden flex flex-col gap-2.5",
                             isBeingDragged && "border-2 border-dashed border-indigo-500/50 dark:border-indigo-400/40 bg-indigo-50/40 dark:bg-indigo-950/30 opacity-40 shadow-inner rotate-[1.5deg] scale-[0.98]"
@@ -2191,6 +2199,7 @@ export default function CrmKanban() {
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setSelectedLead(lead);
+                                setLeadDetailTab('summary');
                               }}
                               className="p-1 hover:text-amber-400 transition-colors cursor-pointer"
                               title="Editar"
@@ -2253,7 +2262,7 @@ export default function CrmKanban() {
                           {/* Linha 3: Resumo Executivo / O que o card faz (Sem precisar abrir) */}
                           {summarySnippet && (
                             <div className="pl-2 pr-1">
-                              <p className="text-[11px] text-slate-600 dark:text-slate-300/90 font-sans font-normal leading-relaxed line-clamp-2 bg-slate-50/70 dark:bg-black/20 p-2 rounded-xl border border-slate-200/40 dark:border-white/5">
+                              <p className="text-[11px] text-slate-600 dark:text-slate-300/90 font-sans font-normal leading-snug line-clamp-2 overflow-hidden break-words text-ellipsis bg-slate-50/70 dark:bg-black/20 px-2.5 py-1.5 rounded-xl border border-slate-200/40 dark:border-white/5">
                                 {summarySnippet}
                               </p>
                             </div>
@@ -2348,17 +2357,17 @@ export default function CrmKanban() {
                             </div>
                           )}
 
-                          {/* Linha 6: Rodapé com Prazo, Agente e Botão Avançar */}
-                          <div className="mt-1 pt-2 border-t border-slate-200/60 dark:border-white/[0.06] flex items-center justify-between pl-2">
-                            <div className="flex items-center gap-1.5 text-slate-400 dark:text-slate-500 text-[9px] font-semibold">
-                              <Calendar size={10.5} className="text-slate-400" />
-                              <span>{lead.due_date ? format(new Date(lead.due_date), 'dd/MM/yy') : 'Sem prazo'}</span>
+                          {/* Linha 6: Rodapé com Prazo, Agente e Botões de Ação Fluidos */}
+                          <div className="mt-1 pt-2 border-t border-slate-200/60 dark:border-white/[0.06] flex items-center justify-between gap-1.5 pl-2 overflow-hidden">
+                            <div className="flex items-center gap-1 text-slate-400 dark:text-slate-500 text-[8.5px] font-semibold shrink-0">
+                              <Calendar size={10} className="text-slate-400 shrink-0" />
+                              <span className="truncate max-w-[65px]">{lead.due_date ? format(new Date(lead.due_date), 'dd/MM/yy') : 'Sem prazo'}</span>
                             </div>
 
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-1.5 justify-end shrink-0 max-w-[calc(100%-75px)]">
                               {agentObj && (
                                 <span 
-                                  className="w-5 h-5 rounded-full bg-gradient-to-tr from-violet-600 to-indigo-600 text-white text-[8.5px] font-black uppercase flex items-center justify-center border border-white dark:border-[#182229] shadow-sm"
+                                  className="w-5 h-5 rounded-full bg-gradient-to-tr from-violet-600 to-indigo-600 text-white text-[8px] font-black uppercase flex items-center justify-center border border-white dark:border-[#182229] shadow-sm shrink-0"
                                   title={`Responsável: ${agentObj.full_name || agentObj.email}`}
                                 >
                                   {agentObj.full_name?.split(' ').map(n => n[0]).slice(0, 2).join('') || 'AG'}
@@ -2375,10 +2384,10 @@ export default function CrmKanban() {
                                     setRevertingLead(lead);
                                     setRevertReason('');
                                   }}
-                                  className="group/revert text-[10px] font-black uppercase text-rose-500 dark:text-rose-400 hover:text-rose-600 dark:hover:text-rose-300 flex items-center justify-center gap-1.5 hover:scale-[1.03] active:scale-95 transition-all cursor-pointer bg-rose-500/10 dark:bg-rose-500/15 hover:bg-rose-500/25 px-2.5 py-1.5 rounded-xl border border-rose-500/25 shadow-xs min-h-[32px] select-none z-10"
+                                  className="group/revert text-[9px] font-black uppercase text-rose-500 dark:text-rose-400 hover:text-rose-600 dark:hover:text-rose-300 flex items-center justify-center gap-1 hover:scale-[1.02] active:scale-95 transition-all cursor-pointer bg-rose-500/10 dark:bg-rose-500/15 hover:bg-rose-500/25 px-2 py-1 rounded-lg border border-rose-500/25 shadow-xs min-h-[28px] select-none shrink-0"
                                   title="Devolver para 'Em Desenvolvimento'"
                                 >
-                                  <RotateCcw size={11} className="transition-transform group-hover/revert:-rotate-45" />
+                                  <RotateCcw size={10} className="transition-transform group-hover/revert:-rotate-45 shrink-0" />
                                   <span>Devolver</span>
                                 </button>
                               )}
@@ -2392,10 +2401,10 @@ export default function CrmKanban() {
                                     e.preventDefault();
                                     handleOpenValidationModal(lead);
                                   }}
-                                  className="group/valid text-[10px] font-black uppercase text-amber-600 dark:text-amber-300 hover:text-amber-700 dark:hover:text-amber-200 flex items-center justify-center gap-1.5 hover:scale-[1.03] active:scale-95 transition-all cursor-pointer bg-amber-500/15 dark:bg-amber-500/20 hover:bg-amber-500/30 px-3 py-1.5 rounded-xl border border-amber-500/30 shadow-xs min-h-[32px] select-none z-10"
+                                  className="group/valid text-[9px] font-black uppercase text-amber-600 dark:text-amber-300 hover:text-amber-700 dark:hover:text-amber-200 flex items-center justify-center gap-1 hover:scale-[1.02] active:scale-95 transition-all cursor-pointer bg-amber-500/15 dark:bg-amber-500/20 hover:bg-amber-500/30 px-2 py-1 rounded-lg border border-amber-500/30 shadow-xs min-h-[28px] select-none shrink-0"
                                   title="Abrir Roteiro de Teste & Validação"
                                 >
-                                  <Sparkles size={11} className="text-amber-400 animate-pulse" />
+                                  <Sparkles size={10} className="text-amber-400 animate-pulse shrink-0" />
                                   <span>Validar</span>
                                 </button>
                               )}
@@ -2408,11 +2417,16 @@ export default function CrmKanban() {
                                     e.preventDefault();
                                     handleAdvanceLead(lead);
                                   }}
-                                  className="group/btn text-[10px] font-black uppercase text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 flex items-center justify-center gap-1.5 hover:scale-[1.03] active:scale-95 transition-all cursor-pointer bg-indigo-500/10 dark:bg-indigo-500/15 hover:bg-indigo-500/25 px-3 py-1.5 rounded-xl border border-indigo-500/25 shadow-xs min-h-[32px] select-none z-10"
+                                  className={cn(
+                                    "group/btn font-black uppercase text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 flex items-center justify-center gap-1 hover:scale-[1.02] active:scale-95 transition-all cursor-pointer bg-indigo-500/10 dark:bg-indigo-500/15 hover:bg-indigo-500/25 rounded-lg border border-indigo-500/25 shadow-xs select-none shrink-0",
+                                    (lead.status === 'testing' || stage.id === 'testing')
+                                      ? "px-2 py-1 text-[9px] min-h-[28px]"
+                                      : "px-3 py-1.5 text-[10px] min-h-[30px]"
+                                  )}
                                   title="Avançar para a próxima etapa"
                                 >
                                   <span>Avançar</span>
-                                  <ChevronRight size={11} strokeWidth={3} className="transition-transform group-hover/btn:translate-x-0.5" />
+                                  <ChevronRight size={10} strokeWidth={3} className="transition-transform group-hover/btn:translate-x-0.5 shrink-0" />
                                 </button>
                               )}
                             </div>
@@ -2885,9 +2899,23 @@ export default function CrmKanban() {
               <div className="px-5 sm:px-6 pt-3 pb-2 border-b border-slate-200/40 dark:border-white/5 flex items-center gap-2 overflow-x-auto custom-scrollbar bg-slate-50/30 dark:bg-black/10 shrink-0">
                 <button
                   type="button"
+                  onClick={() => setLeadDetailTab('summary')}
+                  className={cn(
+                    "px-4 py-2 rounded-xl text-xs font-black transition-all duration-200 flex items-center gap-2 shrink-0 cursor-pointer active:scale-95",
+                    leadDetailTab === 'summary'
+                      ? "bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-indigo-500/20"
+                      : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5"
+                  )}
+                >
+                  <Sparkles size={14} className={leadDetailTab === 'summary' ? "text-amber-300 animate-pulse" : "text-amber-500"} />
+                  <span>Visão do Chamado (Resumo & Entrega)</span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => setLeadDetailTab('overview')}
                   className={cn(
-                    "px-4 py-2 rounded-xl text-xs font-black transition-all duration-200 flex items-center gap-2 shrink-0 cursor-pointer",
+                    "px-4 py-2 rounded-xl text-xs font-black transition-all duration-200 flex items-center gap-2 shrink-0 cursor-pointer active:scale-95",
                     leadDetailTab === 'overview'
                       ? "bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-indigo-500/20"
                       : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5"
@@ -2901,7 +2929,7 @@ export default function CrmKanban() {
                   type="button"
                   onClick={() => setLeadDetailTab('technical')}
                   className={cn(
-                    "px-4 py-2 rounded-xl text-xs font-black transition-all duration-200 flex items-center gap-2 shrink-0 cursor-pointer relative",
+                    "px-4 py-2 rounded-xl text-xs font-black transition-all duration-200 flex items-center gap-2 shrink-0 cursor-pointer relative active:scale-95",
                     leadDetailTab === 'technical'
                       ? "bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-indigo-500/20"
                       : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5"
@@ -2918,7 +2946,7 @@ export default function CrmKanban() {
                   type="button"
                   onClick={() => setLeadDetailTab('notes')}
                   className={cn(
-                    "px-4 py-2 rounded-xl text-xs font-black transition-all duration-200 flex items-center gap-2 shrink-0 cursor-pointer",
+                    "px-4 py-2 rounded-xl text-xs font-black transition-all duration-200 flex items-center gap-2 shrink-0 cursor-pointer active:scale-95",
                     leadDetailTab === 'notes'
                       ? "bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-indigo-500/20"
                       : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5"
@@ -2942,7 +2970,7 @@ export default function CrmKanban() {
                   type="button"
                   onClick={() => setLeadDetailTab('history')}
                   className={cn(
-                    "px-4 py-2 rounded-xl text-xs font-black transition-all duration-200 flex items-center gap-2 shrink-0 cursor-pointer",
+                    "px-4 py-2 rounded-xl text-xs font-black transition-all duration-200 flex items-center gap-2 shrink-0 cursor-pointer active:scale-95",
                     leadDetailTab === 'history'
                       ? "bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-indigo-500/20"
                       : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5"
@@ -2956,6 +2984,18 @@ export default function CrmKanban() {
               {/* Conteúdo da Aba Ativa */}
               <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-6 custom-scrollbar text-xs text-left bg-white dark:bg-[#111b21]">
                 
+                {/* ABA 0: VISÃO SIMPLIFICADA DO CHAMADO (SOLICITAÇÃO & ENTREGA) */}
+                {leadDetailTab === 'summary' && (
+                  <TicketSummaryStatus
+                    lead={selectedLead}
+                    deliveryReport={deliveryReport}
+                    stageLabel={currentStageObj?.label}
+                    stageColorClass={currentStageObj ? getColorClasses(currentStageObj.color).badge : undefined}
+                    onNavigateToNotes={() => setLeadDetailTab('notes')}
+                    onNavigateToTechnical={() => setLeadDetailTab('technical')}
+                  />
+                )}
+
                 {/* ABA 1: DASHBOARD GERAL & COMERCIAL */}
                 {leadDetailTab === 'overview' && (
                   <div className="space-y-6 animate-in fade-in duration-200">

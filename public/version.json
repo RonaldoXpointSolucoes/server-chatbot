@@ -1,5 +1,5 @@
 {
-  "version": "7.5.8",
-  "buildDate": "2026-09-29T23:28:00.000Z",
-  "summary": "Base de Conhecimento & Contexto do Projeto (IA Skill) por Quadro Kanban"
+  "version": "7.5.9",
+  "buildDate": "2026-09-30T01:10:00.000Z",
+  "summary": "Refatoração de UI/UX do Fluxo de Chamados, Novo TicketSummaryStatus e Otimização do Kanban"
 }

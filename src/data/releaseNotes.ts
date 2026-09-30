@@ -20,6 +20,37 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.5.9',
+    date: '2026-09-29',
+    summary: 'Refatoração de UI/UX do Fluxo de Chamados, Novo TicketSummaryStatus e Otimização do Kanban',
+    notes: [
+      {
+        id: '7.5.9-1',
+        category: 'features',
+        title: 'Visão Simplificada de Chamado (TicketSummaryStatus)',
+        description: 'Nova visão estruturada no modal de chamados separando de forma cristalina "Solicitação Original" e "Resolução & Entrega", com visualização sem cortes, cópia em 1 clique e atalhos rápidos.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.5.9-2',
+        category: 'improvements',
+        title: 'Abertura Direta na Visão do Chamado e Mobile-First Ergonômico',
+        description: 'Qualquer card agora abre instantaneamente na aba de Visão do Chamado, com botões ergonômicos de toque (≥ 44px), feedback tátil (active:scale-95) e formato Bottom Sheet para smartphones.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      },
+      {
+        id: '7.5.9-3',
+        category: 'fixes',
+        title: 'Eliminação de Cortes no Resumo e no Botão Avançar dos Cards do Kanban',
+        description: 'Correção do truncamento vertical de linhas no resumo executivo (summarySnippet) e calibração das dimensões dos botões no rodapé da etapa de testes (Devolver, Validar, Avançar), eliminando vazamento de borda e cortes.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      }
+    ]
+  },
+  {
     version: '7.5.8',
     date: '2026-09-29',
     summary: 'Base de Conhecimento & Contexto do Projeto (IA Skill) por Quadro Kanban',
