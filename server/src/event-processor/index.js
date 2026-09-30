@@ -1773,6 +1773,11 @@ class EventProcessor {
                               } else {
                                   botData = eligibleSpecialists[0];
                               }
+                          } else if (orchestratorBot && orchestratorBot.channels && orchestratorBot.channels.includes(b.instanceId) && orchestratorBot.autoReply !== false) {
+                              // Fallback inteligente: Se o único robô ativo vinculado à caixa for o próprio bot (mesmo com orquestrador no nome)
+                              // e não existirem especialistas adicionais para rotear, utiliza o robô ativo em vez de silenciar e ignorar o cliente!
+                              console.log(`[EventProcessor] Apenas o robô "${orchestratorBot.name}" está ativo para a instância ${b.instanceId}. Assumindo atendimento direto unificado.`);
+                              botData = orchestratorBot;
                           } else if (orchestratorBot) {
                               const warnKey = String(b.instanceId || 'default');
                               const lastWarn = EventProcessor.orchestratorWarnMap?.get(warnKey) || 0;
@@ -1784,11 +1789,14 @@ class EventProcessor {
                               }
                           }
 
-                          // Se for teste_robo e não achou especialista nos canais, busca um especialista de contingência
-                          if (!botData && b.convStatus === 'teste_robo') {
-                              botData = botsData.find(bot => !isOrchestratorBot(bot) && bot.channels && bot.channels.includes(b.instanceId)) 
-                                  || botsData.find(bot => !isOrchestratorBot(bot)) 
+                          // Se for teste_robo ou se ainda não achou botData, busca robô ativo de contingência
+                          if (!botData) {
+                              botData = botsData.find(bot => bot.status === 'active' && bot.autoReply !== false && bot.channels && bot.channels.includes(b.instanceId))
+                                  || botsData.find(bot => bot.status === 'active' && bot.autoReply !== false)
                                   || null;
+                              if (botData) {
+                                  console.log(`[EventProcessor] Ativando robô de contingência "${botData.name}" para a caixa ${b.instanceId}.`);
+                              }
                           }
 
                           if (!botData) {

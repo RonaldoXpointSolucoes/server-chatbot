@@ -3,6 +3,7 @@ import { supabase, ContactRow } from '../services/supabase';
 import { playNotificationSound } from '../utils/AudioEngine';
 import { useDevStore } from './devStore';
 import { shouldNotifyForEvent, NotificationEventType } from '../services/notificationPreferences';
+import { runAiHealthCheck, AiDiagnosticsReport } from '../services/aiHealthCheckService';
 
 export const getBrPhoneVariations = (phoneStr: string | null | undefined): string[] => {
   if (!phoneStr) return [];
@@ -551,7 +552,12 @@ interface ChatState {
     updated_at: string;
   } | null;
   setGlobalAiAuditInfo: (audit: any) => void;
-  toggleGlobalAi: () => Promise<void>;
+  aiDiagnosticsReport: AiDiagnosticsReport | null;
+  isAiValidating: boolean;
+  showAiDiagnosticsModal: boolean;
+  setShowAiDiagnosticsModal: (show: boolean) => void;
+  runAiDiagnostics: (tenantId?: string) => Promise<AiDiagnosticsReport | null>;
+  toggleGlobalAi: (forceState?: boolean) => Promise<void>;
   syncMissedMessages: () => Promise<void>;
 
   searchGlobalContacts: (term: string) => Promise<void>;
@@ -1031,12 +1037,75 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setGlobalAiEnabled: (enabled) => set({ globalAiEnabled: enabled }),
   globalAiAuditInfo: null,
   setGlobalAiAuditInfo: (audit) => set({ globalAiAuditInfo: audit }),
-  toggleGlobalAi: async () => {
+  aiDiagnosticsReport: null,
+  isAiValidating: false,
+  showAiDiagnosticsModal: false,
+  setShowAiDiagnosticsModal: (show) => set({ showAiDiagnosticsModal: show }),
+
+  runAiDiagnostics: async (customTenantId?: string) => {
+    const tenantId = customTenantId || get().tenantInfo?.id;
+    if (!tenantId) return null;
+    set({ isAiValidating: true });
+    try {
+      const report = await runAiHealthCheck(tenantId);
+      set({ aiDiagnosticsReport: report, isAiValidating: false });
+      return report;
+    } catch (err) {
+      console.error('[chatStore] Erro ao executar diagnóstico de IA:', err);
+      set({ isAiValidating: false });
+      return null;
+    }
+  },
+
+  toggleGlobalAi: async (forceState?: boolean) => {
     const tenant = get().tenantInfo;
     if (!tenant) return;
     const prevValue = get().globalAiEnabled;
     const prevAudit = get().globalAiAuditInfo;
-    const newValue = !prevValue;
+    const newValue = typeof forceState === 'boolean' ? forceState : !prevValue;
+
+    // Se estiver ativando o Robô I.A, disparar validação de prontidão
+    if (newValue) {
+      window.dispatchEvent(new CustomEvent('toast', {
+        detail: {
+          message: 'Validando prontidão e componentes do Robô I.A...',
+          type: 'info',
+          duration: 3500
+        }
+      }));
+
+      // Executa validação de saúde do Robô IA
+      get().runAiDiagnostics(tenant.id).then((report) => {
+        if (!report) return;
+
+        if (report.hasErrors) {
+          window.dispatchEvent(new CustomEvent('toast', {
+            detail: {
+              message: '⚠️ Atenção: Falhas de configuração detectadas no Robô I.A! Verifique o diagnóstico.',
+              type: 'error',
+              duration: 7000
+            }
+          }));
+          set({ showAiDiagnosticsModal: true });
+        } else if (report.hasWarnings) {
+          window.dispatchEvent(new CustomEvent('toast', {
+            detail: {
+              message: '⚡ Robô I.A ativo com avisos de configuração. Clique no ícone (i) para ver o diagnóstico.',
+              type: 'warning',
+              duration: 5000
+            }
+          }));
+        } else {
+          window.dispatchEvent(new CustomEvent('toast', {
+            detail: {
+              message: '🤖 Robô I.A validado com 100% de sucesso! Motor ativo e pronto para responder.',
+              type: 'success',
+              duration: 5000
+            }
+          }));
+        }
+      });
+    }
 
     // Identificar o nome do operador atual
     const currentUserEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;

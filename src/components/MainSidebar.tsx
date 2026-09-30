@@ -64,6 +64,7 @@ import KanbanBoardCreator from './KanbanBoardCreator';
 import { AgentSettingsModal } from './AgentSettingsModal';
 import { CreateInboxModal } from './modals/CreateInboxModal';
 import { ManageGroupsModal } from './modals/ManageGroupsModal';
+import { AiDiagnosticsModal } from './modals/AiDiagnosticsModal';
 
 const SidebarContext = React.createContext<{ onClose?: () => void }>({});
 
@@ -261,6 +262,11 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
   const globalAiAuditInfo = useChatStore(state => state.globalAiAuditInfo);
   const setGlobalAiAuditInfo = useChatStore(state => state.setGlobalAiAuditInfo);
   const toggleGlobalAi = useChatStore(state => state.toggleGlobalAi);
+  const isAiValidating = useChatStore(state => state.isAiValidating);
+  const showAiDiagnosticsModal = useChatStore(state => state.showAiDiagnosticsModal);
+  const setShowAiDiagnosticsModal = useChatStore(state => state.setShowAiDiagnosticsModal);
+  const aiDiagnosticsReport = useChatStore(state => state.aiDiagnosticsReport);
+  const runAiDiagnostics = useChatStore(state => state.runAiDiagnostics);
   const [instanceContextMenu, setInstanceContextMenu] = useState<{ id: string, name: string, status?: string, x: number, y: number } | null>(null);
   const [myConversationsMenu, setMyConversationsMenu] = useState<{ x: number, y: number } | null>(null);
   const [isAgentSettingsOpen, setIsAgentSettingsOpen] = useState(false);
@@ -790,7 +796,11 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
            )}>
              <div className="flex items-center gap-2 min-w-0 flex-1">
                <div className={cn("p-1.5 rounded-md transition-colors shrink-0", globalAiEnabled ? "bg-[#00a884]/20" : "bg-gray-200 dark:bg-[#2a3942]")}>
-                 <Bot size={14} className={globalAiEnabled ? "text-[#00a884]" : "text-[#8696a0]"} />
+                 {isAiValidating ? (
+                   <RefreshCw size={14} className="animate-spin text-[#00a884]" />
+                 ) : (
+                   <Bot size={14} className={globalAiEnabled ? "text-[#00a884]" : "text-[#8696a0]"} />
+                 )}
                </div>
                <div className={cn(
                  "flex flex-col min-w-0 flex-1 transition-all duration-200", 
@@ -801,35 +811,30 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
                    <span className="text-[13px] font-semibold text-[#111b21] dark:text-[#d1d7db] leading-tight whitespace-nowrap">
                      Robô I.A
                    </span>
-                   {auditDataFormatted.hasAudit && (
-                     <button
-                       type="button"
-                       onClick={(e) => {
-                         e.stopPropagation();
-                         setShowAiAuditModal(true);
-                       }}
-                       className="text-[#8696a0] hover:text-[#00a884] transition-colors p-0.5 rounded focus:outline-none"
-                       title="Ver detalhes de auditoria"
-                     >
-                       <Info size={11} />
-                     </button>
-                   )}
+                   <button
+                     type="button"
+                     onClick={(e) => {
+                       e.stopPropagation();
+                       setShowAiAuditModal(true);
+                     }}
+                     className="text-[#8696a0] hover:text-[#00a884] transition-colors p-0.5 rounded focus:outline-none"
+                     title="Ver auditoria e diagnóstico operacional do Robô"
+                   >
+                     <Info size={11} />
+                   </button>
                  </div>
                  <div 
                    onClick={(e) => {
-                     if (auditDataFormatted.hasAudit) {
-                       e.stopPropagation();
-                       setShowAiAuditModal(true);
-                     }
+                     e.stopPropagation();
+                     setShowAiAuditModal(true);
                    }}
                    className={cn(
-                     "text-[9.5px] leading-tight font-medium tracking-tight truncate transition-colors mt-0.5",
-                     auditDataFormatted.hasAudit ? "cursor-pointer hover:underline" : "",
-                     globalAiEnabled ? "text-[#00a884] dark:text-[#00a884]" : "text-amber-600 dark:text-amber-400"
+                     "text-[9.5px] leading-tight font-medium tracking-tight truncate transition-colors mt-0.5 cursor-pointer hover:underline",
+                     isAiValidating ? "text-[#00a884] animate-pulse font-semibold" : globalAiEnabled ? "text-[#00a884] dark:text-[#00a884]" : "text-amber-600 dark:text-amber-400"
                    )}
-                   title={auditDataFormatted.fullText}
+                   title={isAiValidating ? 'Validando prontidão e componentes do Robô...' : auditDataFormatted.fullText}
                  >
-                   {auditDataFormatted.compact}
+                   {isAiValidating ? 'Validando prontidão...' : auditDataFormatted.compact}
                  </div>
                </div>
              </div>
@@ -842,6 +847,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
                  type="checkbox" 
                  className="sr-only peer" 
                  checked={globalAiEnabled} 
+                 disabled={isAiValidating}
                  onChange={handleToggleGlobalAi}
                />
                <div className="w-8 h-4 bg-[#3b4a54] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-[16px] peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-[#8696a0] peer-checked:after:bg-white after:border-transparent after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-[#00a884]"></div>
@@ -1669,7 +1675,21 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
             </div>
 
             {/* Footer */}
-            <div className="p-3 bg-gray-50 dark:bg-[#111b21]/60 border-t border-gray-100 dark:border-[#2a3942]/40 flex justify-end">
+            <div className="p-3 bg-gray-50 dark:bg-[#111b21]/60 border-t border-gray-100 dark:border-[#2a3942]/40 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={async () => {
+                  setShowAiAuditModal(false);
+                  if (tenantId) {
+                    await runAiDiagnostics(tenantId);
+                    setShowAiDiagnosticsModal(true);
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#00a884]/15 hover:bg-[#00a884]/25 text-[#00a884] border border-[#00a884]/30 transition"
+              >
+                <ShieldCheck size={14} />
+                <span>Testar Prontidão</span>
+              </button>
               <button
                 onClick={() => setShowAiAuditModal(false)}
                 className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-gray-200 dark:bg-[#2a3942] hover:bg-gray-300 dark:hover:bg-[#3b4a54] text-gray-800 dark:text-gray-200 transition"
@@ -1680,6 +1700,17 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
           </div>
         </div>
       )}
+
+      {/* Modal Completo de Diagnóstico & Health Check do Robô I.A */}
+      <AiDiagnosticsModal
+        isOpen={showAiDiagnosticsModal}
+        onClose={() => setShowAiDiagnosticsModal(false)}
+        report={aiDiagnosticsReport}
+        tenantId={tenantId || ''}
+        onRecheck={(newReport) => {}}
+        onToggleAi={(st) => toggleGlobalAi(st)}
+        globalAiEnabled={globalAiEnabled}
+      />
       </div>
     </SidebarContext.Provider>
   );

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
-import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, ChevronRight, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, Save, ShieldCheck, Smile, Briefcase, Flag, Clock, Calendar, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, AlertCircle, CheckSquare, MessageSquare, MessageSquareText, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList, UploadCloud, FolderCheck, Globe, Lock, Zap, Folder, FolderOpen, FolderTree, CornerDownRight, BookOpen } from 'lucide-react';
+import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, ChevronRight, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, Save, ShieldCheck, Smile, Briefcase, Flag, Clock, Calendar, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, AlertCircle, CheckSquare, MessageSquare, MessageSquareText, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList, UploadCloud, FolderCheck, Globe, Lock, Zap, Folder, FolderOpen, FolderTree, CornerDownRight, BookOpen, Layers } from 'lucide-react';
 import { getCurrentEnvironment, setEnvironment, validateServerEnvironment, ENVIRONMENTS } from '../services/environmentService';
 import { useNavigate, useOutletContext, useLocation } from 'react-router-dom';
 import { useChatStore, QuickReplyCategory, instanceCache, resolveInstanceUuid, sortMessagesChronologically, getEffectiveContactTime, getRealContactId, getUniquePersonKey } from '../store/chatStore';
@@ -1524,9 +1524,13 @@ export default function ChatDashboard() {
     }
   };
 
+  const currentTenantId = typeof window !== 'undefined' ? (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')) : null;
+  const tenantInstances = React.useMemo(() => {
+    return availableInstancesList.filter(inst => !currentTenantId || inst.tenant_id === currentTenantId);
+  }, [availableInstancesList, currentTenantId]);
+  const hasMultipleInstances = tenantInstances.length > 1;
+
   const whatsappStatusMemo = React.useMemo(() => {
-    const currentTenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
-    const tenantInstances = availableInstancesList.filter(inst => !currentTenantId || inst.tenant_id === currentTenantId);
     const total = tenantInstances.length;
     
     if (total === 0) {
@@ -1565,7 +1569,7 @@ export default function ChatDashboard() {
       connectedCount,
       total
     };
-  }, [availableInstancesList, instancesStatus, evolutionConnected]);
+  }, [tenantInstances, instancesStatus, evolutionConnected]);
 
   const systemHealth = React.useMemo<'green' | 'yellow' | 'red'>(() => {
     const internetOk = isOnline;
@@ -6186,46 +6190,180 @@ export default function ChatDashboard() {
 
         {/* Painel Premium de Controle Rápido (Saúde do Sistema & Modo Ticket) */}
         <div className="flex gap-2 mx-3 my-2 z-10 relative">
-          {/* Botão de Semáforo de Saúde */}
-          <button 
-            onClick={() => setShowHealthPanel(!showHealthPanel)}
-            className={cn(
-              "flex-1 px-3 py-2.5 bg-white/40 dark:bg-black/20 backdrop-blur-md border border-gray-200/50 dark:border-white/5 rounded-2xl flex items-center justify-between transition-all hover:bg-gray-100/50 dark:hover:bg-white/10 active:scale-[0.98] shadow-sm select-none animate-in fade-in",
-              showHealthPanel && "bg-gray-100/50 dark:bg-white/10 border-gray-300/50 dark:border-white/10"
-            )}
-          >
-            <div className="flex items-center gap-1.5 min-w-0">
-              <span className="relative flex h-2 w-2 shrink-0">
-                <span className={cn(
-                  "animate-ping absolute inline-flex h-full w-full rounded-full opacity-75",
-                  systemHealth === 'green' ? "bg-emerald-400" :
-                  systemHealth === 'yellow' ? "bg-amber-400" : "bg-rose-400"
-                )}></span>
-                <span className={cn(
-                  "relative inline-flex rounded-full h-2 w-2",
-                  systemHealth === 'green' ? "bg-emerald-500" :
-                  systemHealth === 'yellow' ? "bg-amber-500" : "bg-rose-500"
-                )}></span>
-              </span>
-              <span className="text-[11px] font-bold text-gray-600 dark:text-[#d1d7db] truncate">
-                {activeChannelFilter ? (activeChannelName || activeChannelFilter) : (
-                  systemHealth === 'green' ? "Operando" :
-                  systemHealth === 'yellow' ? (
-                    whatsappStatusMemo.total > 0 && whatsappStatusMemo.connectedCount < whatsappStatusMemo.total
-                      ? `Atenção (${whatsappStatusMemo.percentage}%)`
-                      : "Atenção"
-                  ) : "Offline"
-                )}
-              </span>
-            </div>
-            <ChevronDown 
-              size={12} 
+          {/* Botão de Semáforo de Saúde / Seletor de Caixas de Entrada */}
+          <div className="flex-1 relative flex items-stretch">
+            <button 
+              onClick={(e) => {
+                e.stopPropagation();
+                if (hasMultipleInstances) {
+                  setActiveDropdown(activeDropdown === 'channel-picker' ? null : 'channel-picker');
+                } else {
+                  setShowHealthPanel(!showHealthPanel);
+                }
+              }}
               className={cn(
-                "text-gray-400 dark:text-[#aebac1] transition-transform duration-300 shrink-0",
-                showHealthPanel && "rotate-180"
-              )} 
-            />
-          </button>
+                "flex-1 px-3 py-2.5 bg-white/40 dark:bg-black/20 backdrop-blur-md border border-gray-200/50 dark:border-white/5 rounded-2xl flex items-center justify-between transition-all hover:bg-gray-100/50 dark:hover:bg-white/10 active:scale-[0.98] shadow-sm select-none animate-in fade-in",
+                ((!hasMultipleInstances && showHealthPanel) || (hasMultipleInstances && activeDropdown === 'channel-picker')) && "bg-gray-100/50 dark:bg-white/10 border-gray-300/50 dark:border-white/10"
+              )}
+            >
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="relative flex h-2 w-2 shrink-0">
+                  <span className={cn(
+                    "animate-ping absolute inline-flex h-full w-full rounded-full opacity-75",
+                    (() => {
+                      if (hasMultipleInstances && activeChannelFilter) {
+                        const actInst = tenantInstances.find(i => i.id === activeChannelFilter || i.display_name === activeChannelFilter);
+                        const isConn = instancesStatus[actInst?.id || ''] === 'connected' || instancesStatus[actInst?.id || ''] === 'connected_local';
+                        const isConnecting = instancesStatus[actInst?.id || ''] === 'connecting';
+                        return isConn ? "bg-emerald-400" : isConnecting ? "bg-amber-400" : "bg-rose-400";
+                      }
+                      return systemHealth === 'green' ? "bg-emerald-400" :
+                        systemHealth === 'yellow' ? "bg-amber-400" : "bg-rose-400";
+                    })()
+                  )}></span>
+                  <span className={cn(
+                    "relative inline-flex rounded-full h-2 w-2",
+                    (() => {
+                      if (hasMultipleInstances && activeChannelFilter) {
+                        const actInst = tenantInstances.find(i => i.id === activeChannelFilter || i.display_name === activeChannelFilter);
+                        const isConn = instancesStatus[actInst?.id || ''] === 'connected' || instancesStatus[actInst?.id || ''] === 'connected_local';
+                        const isConnecting = instancesStatus[actInst?.id || ''] === 'connecting';
+                        return isConn ? "bg-emerald-500" : isConnecting ? "bg-amber-500" : "bg-rose-500";
+                      }
+                      return systemHealth === 'green' ? "bg-emerald-500" :
+                        systemHealth === 'yellow' ? "bg-amber-500" : "bg-rose-500";
+                    })()
+                  )}></span>
+                </span>
+                <span className="text-[11px] font-bold text-gray-600 dark:text-[#d1d7db] truncate">
+                  {hasMultipleInstances ? (
+                    activeChannelFilter 
+                      ? (activeChannelName || tenantInstances.find(i => i.id === activeChannelFilter || i.display_name === activeChannelFilter)?.display_name || activeChannelFilter)
+                      : "Todas as Caixas"
+                  ) : (
+                    activeChannelFilter ? (activeChannelName || activeChannelFilter) : (
+                      tenantInstances[0]?.display_name || (
+                        systemHealth === 'green' ? "Operando" :
+                        systemHealth === 'yellow' ? (
+                          whatsappStatusMemo.total > 0 && whatsappStatusMemo.connectedCount < whatsappStatusMemo.total
+                            ? `Atenção (${whatsappStatusMemo.percentage}%)`
+                            : "Atenção"
+                        ) : "Offline"
+                      )
+                    )
+                  )}
+                </span>
+              </div>
+              <ChevronDown 
+                size={12} 
+                className={cn(
+                  "text-gray-400 dark:text-[#aebac1] transition-transform duration-300 shrink-0",
+                  ((!hasMultipleInstances && showHealthPanel) || (hasMultipleInstances && activeDropdown === 'channel-picker')) && "rotate-180"
+                )} 
+              />
+            </button>
+
+            {/* Menu Dropdown de Seleção de Caixas (Apenas quando houver múltiplas caixas) */}
+            {hasMultipleInstances && activeDropdown === 'channel-picker' && (
+              <div 
+                onClick={(e) => e.stopPropagation()}
+                className="absolute left-0 top-11 w-72 bg-white dark:bg-[#202c33] border border-gray-200/80 dark:border-white/10 rounded-2xl shadow-2xl py-2 z-50 backdrop-blur-xl animate-in fade-in zoom-in-95 duration-100"
+              >
+                <div className="px-3 py-1 flex items-center justify-between border-b border-gray-100 dark:border-white/5 pb-2 mb-1">
+                  <div className="flex items-center gap-1.5">
+                    <Layers size={13} className="text-[#00a884]" />
+                    <span className="text-[11px] font-bold text-gray-700 dark:text-gray-200 tracking-wide uppercase">
+                      Caixas de Entrada
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-white/5 px-2 py-0.5 rounded-full">
+                    {tenantInstances.length} disponíveis
+                  </span>
+                </div>
+
+                {/* Opção Todas as Caixas */}
+                <button
+                  onClick={() => {
+                    setActiveChannelFilter(null, null);
+                    setActiveDropdown(null);
+                  }}
+                  className={cn(
+                    "w-[calc(100%-12px)] mx-1.5 px-2.5 py-2 text-left flex items-center justify-between transition-colors rounded-xl",
+                    !activeChannelFilter 
+                      ? "bg-[#00a884]/10 dark:bg-[#00a884]/20 text-[#00a884] dark:text-[#25d366] font-bold" 
+                      : "text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5 font-medium"
+                  )}
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className="relative flex h-2 w-2 shrink-0">
+                      <span className={cn(
+                        "relative inline-flex rounded-full h-2 w-2",
+                        systemHealth === 'green' ? "bg-emerald-500" :
+                        systemHealth === 'yellow' ? "bg-amber-500" : "bg-rose-500"
+                      )}></span>
+                    </span>
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-xs truncate">Todas as Caixas</span>
+                      <span className="text-[10px] text-gray-400 dark:text-gray-500 font-normal truncate">Visualizar todas as conversas</span>
+                    </div>
+                  </div>
+                  {!activeChannelFilter && (
+                    <Check size={14} className="text-[#00a884] shrink-0" />
+                  )}
+                </button>
+
+                <div className="my-1 border-t border-gray-100 dark:border-white/5 mx-2" />
+
+                {/* Lista das Caixas */}
+                <div className="max-h-60 overflow-y-auto custom-scrollbar flex flex-col gap-0.5 px-1.5">
+                  {tenantInstances.map((inst) => {
+                    const isConn = instancesStatus[inst.id] === 'connected' || instancesStatus[inst.id] === 'connected_local';
+                    const isConnPending = instancesStatus[inst.id] === 'connecting';
+                    const isSelected = activeChannelFilter === inst.id || activeChannelFilter === inst.display_name;
+                    const displayName = inst.display_name || inst.whatsapp_name || inst.name;
+                    const phoneToDisplay = inst.phone_number || inst.settings?.phone_number || inst.settings?.pairing_phone || (inst as any).number;
+
+                    return (
+                      <button
+                        key={inst.id}
+                        onClick={() => {
+                          setActiveChannelFilter(inst.id, displayName);
+                          setActiveDropdown(null);
+                        }}
+                        className={cn(
+                          "w-full px-2 py-1.5 text-left flex items-center justify-between transition-colors rounded-xl",
+                          isSelected 
+                            ? "bg-[#00a884]/10 dark:bg-[#00a884]/20 text-[#00a884] dark:text-[#25d366] font-bold" 
+                            : "text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5 font-medium"
+                        )}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span 
+                            className="w-2.5 h-2.5 rounded-full shrink-0 border border-black/10 dark:border-white/10"
+                            style={{ 
+                              backgroundColor: isConn ? (inst.color || '#10b981') : isConnPending ? '#f59e0b' : '#ef4444' 
+                            }}
+                            title={isConn ? 'Conectado' : isConnPending ? 'Conectando' : 'Desconectado'}
+                          />
+                          <div className="flex flex-col min-w-0">
+                            <span className="text-xs truncate">{displayName}</span>
+                            {phoneToDisplay && (
+                              <span className="text-[10px] text-gray-400 dark:text-gray-500 font-mono font-normal truncate">
+                                {formatPhoneNumber(phoneToDisplay)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        {isSelected && (
+                          <Check size={14} className="text-[#00a884] shrink-0" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Botão Modo Ticket Ativo */}
           <div className="flex-1 relative flex items-stretch">
@@ -6315,7 +6453,7 @@ export default function ChatDashboard() {
         </div>
 
 
-        {showHealthPanel && (
+        {!hasMultipleInstances && showHealthPanel && (
           <div className="bg-white/40 dark:bg-black/20 backdrop-blur-md border border-gray-200/50 dark:border-white/5 shadow-md rounded-2xl p-3.5 mx-3 mb-2 flex flex-col gap-3 animate-in fade-in slide-in-from-top-4 duration-300">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-bold text-gray-500 dark:text-[#8696a0] uppercase tracking-wider flex items-center gap-1.5">
