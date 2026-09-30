@@ -33,6 +33,7 @@ const recentOutgoingHumanMessages = new Map<string, number>();
 export type MessageType = {
   id: string;
   whatsapp_id?: string;
+  pseudoId?: string; // ID temporário otimista para reconciliação e deduplicação estrita E2E
   text: string;
   sender: 'client' | 'bot' | 'human' | 'system' | 'internal_note' | 'automation';
   mediaUrl?: string;
@@ -60,6 +61,21 @@ export type MessageType = {
   mediaMetadata?: any;
 };
 
+export const normalizeMessageTextForComparison = (txt: any): string => {
+  if (!txt) return '';
+  let str = String(txt);
+  // Remove citações de respostas (> *Mensagem Citada:* ...)
+  str = str.replace(/^>\s*\*Mensagem Citada:\*[\s\S]*?\n\n/i, '');
+  // Remove prefixos de assinatura (*Nome:*, *Nome*:, *Nome*\n\n, Nome:\n\n)
+  str = str.replace(/^\*([^*:]+)(?::\*|\*:\s*|\*\s*\n+)/i, '');
+  str = str.replace(/^([A-Za-zÀ-ÿ\s]{2,40}):\s*\n*/i, '');
+  // Remove formatações markdown superficiais
+  str = str.replace(/[*_~]/g, '');
+  // Normaliza quebras e múltiplos espaços
+  str = str.replace(/\r\n/g, '\n').replace(/\s+/g, ' ');
+  return str.trim().toLowerCase();
+};
+
 export const sortMessagesChronologically = (msgs: MessageType[]): MessageType[] => {
   if (!msgs || msgs.length <= 1) return msgs || [];
   return [...msgs].sort((a, b) => {
@@ -72,8 +88,8 @@ export const sortMessagesChronologically = (msgs: MessageType[]): MessageType[] 
     }
 
     // 2. Desempate para mensagens otimistas: se 'a' for otimista ('optimistic-...'), fica por último
-    const isOptA = String(a.id || '').startsWith('optimistic-');
-    const isOptB = String(b.id || '').startsWith('optimistic-');
+    const isOptA = String(a.id || '').startsWith('optimistic-') || String(a.pseudoId || '').startsWith('optimistic-');
+    const isOptB = String(b.id || '').startsWith('optimistic-') || String(b.pseudoId || '').startsWith('optimistic-');
     if (isOptA && !isOptB) return 1;
     if (!isOptA && isOptB) return -1;
 
@@ -2131,7 +2147,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     // Atualiza otimista UI imediatamente com status 'pending' (reloginho animado)
     const pseudoId = 'optimistic-' + Math.random().toString();
-    state.addMessageLocally(contactId, { id: pseudoId, text: finalMessageText, sender: 'human', status: 'pending', timestamp: new Date() });
+    state.addMessageLocally(contactId, { id: pseudoId, pseudoId: pseudoId, text: finalMessageText, sender: 'human', status: 'pending', timestamp: new Date() });
 
     // Auto-pause da IA por 30 minutos se o atendente mandou mensagem manual e ela não está pausada definitivamente
     if (state.globalAiEnabled && contact.bot_status !== 'paused') {
@@ -2200,7 +2216,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             if (c.id === contactId || c.conv_id === contactId || (c.id && getRealContactId(c.id) === realContactId)) {
               return {
                 ...c,
-                messages: c.messages.map(m => (m.id === pseudoId || (officialMsgId && m.whatsapp_id === officialMsgId)) ? {
+                messages: c.messages.map(m => (m.id === pseudoId || m.pseudoId === pseudoId || (officialMsgId && m.whatsapp_id === officialMsgId)) ? {
                   ...m,
                   id: m.id === pseudoId ? officialMsgId : m.id,
                   whatsapp_id: officialMsgId,
@@ -2260,6 +2276,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const pseudoId = 'optimistic-' + Math.random().toString();
     state.addMessageLocally(contactId, {
       id: pseudoId,
+      pseudoId: pseudoId,
       text: contactName,
       sender: 'human',
       mediaType: 'contact',
@@ -2295,10 +2312,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       set((s) => ({
         contacts: s.contacts.map(c => {
-          if (c.id === contactId) {
+          if (c.id === contactId || (c.id && getRealContactId(c.id) === getRealContactId(contactId))) {
             return {
               ...c,
-              messages: c.messages.map(m => m.id === pseudoId ? { ...m, status: 'sent' } : m)
+              messages: c.messages.map(m => (m.id === pseudoId || m.pseudoId === pseudoId) ? { ...m, status: 'sent' } : m)
             };
           }
           return c;
@@ -2587,6 +2604,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const tempUrl = URL.createObjectURL(file);
     state.addMessageLocally(contactId, {
       id: pseudoId,
+      pseudoId: pseudoId,
       text: finalCaption,
       sender: 'human',
       mediaType: mediaType,
@@ -2649,14 +2667,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
       console.log('[uploadAndSendMedia] Resposta do server:', data);
 
       if (data.media_url || (data.result?.key?.id)) {
+        const mediaMsgId = data.result?.key?.id;
         set((s) => ({
-          contacts: s.contacts.map(c => c.id === contactId ? {
+          contacts: s.contacts.map(c => (c.id === contactId || (c.id && getRealContactId(c.id) === getRealContactId(contactId))) ? {
             ...c,
             // Procura o pseudoId, substitui a url temporaria e adiciona o whatsapp_id correspondente
-            messages: c.messages.map(m => m.id === pseudoId ? {
+            messages: c.messages.map(m => (m.id === pseudoId || m.pseudoId === pseudoId || (mediaMsgId && m.whatsapp_id === mediaMsgId)) ? {
               ...m,
               ...(data.media_url && { mediaUrl: data.media_url }),
-              ...(data.result?.key?.id && { whatsapp_id: data.result.key.id }),
+              ...(mediaMsgId && { whatsapp_id: mediaMsgId }),
               status: 'sent'
             } : m)
           } : c)
@@ -2762,6 +2781,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     state.addMessageLocally(contactId, {
       id: pseudoId,
+      pseudoId: pseudoId,
       text: finalCaption,
       sender: 'human',
       mediaType: mediaType,
@@ -2856,13 +2876,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
       console.log(`[sendMediaFromUrl] Retorno do webhook:`, data);
 
       if (data.media_url || (data.result?.key?.id)) {
+        const officialMsgId = data.result?.key?.id;
         set((s) => ({
           contacts: s.contacts.map(c => c.id === contactId ? {
             ...c,
-            messages: c.messages.map(m => m.id === pseudoId ? {
+            messages: c.messages.map(m => (m.id === pseudoId || m.pseudoId === pseudoId || (officialMsgId && m.whatsapp_id === officialMsgId)) ? {
               ...m,
+              id: m.id.startsWith('optimistic-') && officialMsgId ? officialMsgId : m.id,
+              pseudoId: pseudoId,
               ...(data.media_url && { mediaUrl: data.media_url }),
-              ...(data.result?.key?.id && { whatsapp_id: data.result.key.id }),
+              ...(officialMsgId && { whatsapp_id: officialMsgId }),
               status: 'sent'
             } : m)
           } : c)
@@ -3089,55 +3112,67 @@ export const useChatStore = create<ChatState>((set, get) => ({
             updatedSnooze = undefined;
           }
 
-          // Helper de normalização rigorosa para desduplicação
-          const cleanSignatureAndFormatting = (txt: any) => {
-            if (!txt) return '';
-            return String(txt)
-              .replace(/^\*([^*:]+):\*\s*/i, '') // Remove *Nome:*
-              .replace(/^([A-Za-zÀ-ÿ\s]+):\s*/i, '') // Remove Nome:
-              .replace(/\r\n/g, '\n')
-              .trim()
-              .toLowerCase();
-          };
-
-          // 1. Previne duplicados exatos por ID do DB ou whatsapp_id
-          const isAlreadyPresent = c.messages.some(m => 
+          // 1. Previne duplicados exatos por ID do DB, whatsapp_id ou pseudoId
+          const existingIndex = c.messages.findIndex(m => 
             (msg.id && m.id === msg.id) ||
             (msg.whatsapp_id && (m.whatsapp_id === msg.whatsapp_id || m.id === msg.whatsapp_id)) ||
-            (m.whatsapp_id && m.whatsapp_id === msg.id)
+            (m.whatsapp_id && m.whatsapp_id === msg.id) ||
+            (msg.pseudoId && (m.id === msg.pseudoId || m.pseudoId === msg.pseudoId))
           );
 
-          if (isAlreadyPresent) {
-            if (updatedStatus !== c.conv_status) return { ...c, conv_status: updatedStatus, snoozed_until: updatedSnooze };
-            return c;
+          if (existingIndex !== -1) {
+            // Atualiza os metadados da mensagem existente (ex: status, whatsapp_id, mediaUrl) sem duplicá-la
+            const existingMsg = c.messages[existingIndex];
+            const updatedExisting: MessageType = {
+              ...existingMsg,
+              ...msg,
+              id: existingMsg.id.startsWith('optimistic-') && msg.id ? msg.id : existingMsg.id,
+              whatsapp_id: msg.whatsapp_id || existingMsg.whatsapp_id,
+              status: msg.status || existingMsg.status,
+              mediaUrl: msg.mediaUrl || existingMsg.mediaUrl,
+              text: msg.text || existingMsg.text
+            };
+            const updatedMsgs = [...c.messages];
+            updatedMsgs[existingIndex] = updatedExisting;
+            return {
+              ...c,
+              messages: updatedMsgs,
+              conv_status: updatedStatus,
+              snoozed_until: updatedSnooze
+            };
           }
 
           // 2. Tratamento e reconciliação de mensagens de saída (otimistas e em trânsito)
           const isOutboundMsg = ['human', 'agent', 'bot', 'automation'].includes(msg.sender);
           if (isOutboundMsg) {
-            const normMsg = cleanSignatureAndFormatting(msg.text);
+            const normMsg = normalizeMessageTextForComparison(msg.text);
             const msgTime = msg.timestamp instanceof Date ? msg.timestamp.getTime() : new Date(msg.timestamp || 0).getTime();
 
             const optIndex = c.messages.findIndex(m => {
+              // Match direto por pseudoId
+              if (msg.pseudoId && (m.id === msg.pseudoId || m.pseudoId === msg.pseudoId)) {
+                return true;
+              }
+
               // Match direto por whatsapp_id caso tenha sido associado antes
               if (msg.whatsapp_id && (m.whatsapp_id === msg.whatsapp_id || m.id === msg.whatsapp_id)) return true;
 
               // Identifica mensagens otimistas, temporárias ou pendentes
               const isPendingOrOptimistic = String(m.id).startsWith('optimistic-') || String(m.id).startsWith('EDGE_') || m.status === 'pending';
               const mTime = m.timestamp instanceof Date ? m.timestamp.getTime() : new Date(m.timestamp || 0).getTime();
-              const isRecent = Math.abs(msgTime - mTime) < 35000; // Janela de segurança de 35s
+              const isRecent = Math.abs(msgTime - mTime) < 45000; // Janela de segurança de 45s
 
               if (m.mediaType && msg.mediaType && m.mediaType === msg.mediaType && (isPendingOrOptimistic || isRecent)) {
                 return true;
               }
 
-              const normM = cleanSignatureAndFormatting(m.text);
+              const normM = normalizeMessageTextForComparison(m.text);
               const isTextMatch = Boolean(
                 normM && normMsg && 
                 (normM === normMsg || normM.includes(normMsg) || normMsg.includes(normM))
               );
 
-              // Se o texto bater e for uma mensagem otimista/pendente OU enviada nos últimos 35s
+              // Se o texto bater e for uma mensagem otimista/pendente OU enviada nos últimos 45s
               if (isTextMatch && (isPendingOrOptimistic || isRecent)) {
                 return true;
               }
@@ -3146,16 +3181,33 @@ export const useChatStore = create<ChatState>((set, get) => ({
             });
 
             if (optIndex !== -1) {
-              let updatedMsgs = [...c.messages];
+              const matchedOptimisticId = c.messages[optIndex].id;
+              const matchedPseudoId = c.messages[optIndex].pseudoId;
+
               // Substitui pelo registro do Realtime com UUID real mantendo status e metadados preservados
-              updatedMsgs[optIndex] = { 
+              const updatedItem: MessageType = { 
                 ...c.messages[optIndex],
                 ...msg,
                 id: msg.id,
+                pseudoId: matchedPseudoId || msg.pseudoId,
                 whatsapp_id: msg.whatsapp_id || c.messages[optIndex].whatsapp_id,
                 status: msg.status || 'sent',
                 sender: c.messages[optIndex].sender === 'human' || msg.sender === 'human' || msg.sender === 'agent' ? 'human' : msg.sender
               };
+
+              // Limpa também qualquer mensagem otimista residual que tenha ficado órfã com mesmo pseudoId ou mesmo texto recente
+              let updatedMsgs = c.messages.map((m, idx) => idx === optIndex ? updatedItem : m)
+                .filter((m, idx) => {
+                  if (idx === optIndex) return true;
+                  if (matchedOptimisticId && m.id === matchedOptimisticId) return false;
+                  if (matchedPseudoId && m.pseudoId === matchedPseudoId) return false;
+                  if (String(m.id).startsWith('optimistic-')) {
+                    const normOther = normalizeMessageTextForComparison(m.text);
+                    if (normOther && normMsg && normOther === normMsg) return false;
+                  }
+                  return true;
+                });
+
               updatedMsgs = sortMessagesChronologically(updatedMsgs);
               return { 
                 ...c, 
@@ -3169,8 +3221,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // 2.1 Prevenção defensiva de duplicação: se já existe mensagem recente com mesmo texto idêntico, descarta
             const hasDuplicateRecentText = c.messages.some(m => {
               const mTime = m.timestamp instanceof Date ? m.timestamp.getTime() : new Date(m.timestamp || 0).getTime();
-              if (Math.abs(msgTime - mTime) > 25000) return false;
-              const normM = cleanSignatureAndFormatting(m.text);
+              if (Math.abs(msgTime - mTime) > 35000) return false;
+              const normM = normalizeMessageTextForComparison(m.text);
               return Boolean(normM && normMsg && normM === normMsg);
             });
 
@@ -6299,20 +6351,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
         console.log('[Realtime] Message UPDATE:', m);
         set((s) => {
           const updatedContacts = [...s.contacts];
-          const normalizeTextForCompare = (txt: any) => {
-            if (!txt) return '';
-            return String(txt).replace(/^\*([^*:]+):\*\s*/, '').trim().toLowerCase();
-          };
-          const normUpdateText = normalizeTextForCompare(m.text_content);
+          const normUpdateText = normalizeMessageTextForComparison(m.text_content);
 
           // Tenta achar com fallback iterando as mensagens para bypassar conversa ausente no state.
           for (let i = 0; i < updatedContacts.length; i++) {
             if (!updatedContacts[i].messages) continue;
             const msgIndex = updatedContacts[i].messages.findIndex(msg => {
               if (msg.id === m.id) return true;
-              if (m.whatsapp_message_id && msg.whatsapp_id === m.whatsapp_message_id) return true;
-              if (String(msg.id).startsWith('optimistic-')) {
-                const normMsgText = normalizeTextForCompare(msg.text);
+              if (m.whatsapp_message_id && (msg.whatsapp_id === m.whatsapp_message_id || msg.id === m.whatsapp_message_id)) return true;
+              if (msg.pseudoId && (m.id === msg.pseudoId || m.whatsapp_message_id === msg.pseudoId)) return true;
+              if (String(msg.id).startsWith('optimistic-') || msg.status === 'pending') {
+                const normMsgText = normalizeMessageTextForComparison(msg.text);
                 if (normUpdateText && normMsgText && (normUpdateText === normMsgText || normUpdateText.includes(normMsgText) || normMsgText.includes(normUpdateText))) {
                   return true;
                 }

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from 're
 import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, ChevronRight, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, Save, ShieldCheck, Smile, Briefcase, Flag, Clock, Calendar, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, AlertCircle, CheckSquare, MessageSquare, MessageSquareText, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList, UploadCloud, FolderCheck, Globe, Lock, Zap, Folder, FolderOpen, FolderTree, CornerDownRight, BookOpen, Layers } from 'lucide-react';
 import { getCurrentEnvironment, setEnvironment, validateServerEnvironment, ENVIRONMENTS } from '../services/environmentService';
 import { useNavigate, useOutletContext, useLocation } from 'react-router-dom';
-import { useChatStore, QuickReplyCategory, instanceCache, resolveInstanceUuid, sortMessagesChronologically, getEffectiveContactTime, getRealContactId, getUniquePersonKey } from '../store/chatStore';
+import { useChatStore, QuickReplyCategory, instanceCache, resolveInstanceUuid, sortMessagesChronologically, getEffectiveContactTime, getRealContactId, getUniquePersonKey, normalizeMessageTextForComparison } from '../store/chatStore';
 import { useWaCallsStore } from '../store/useWaCallsStore';
 import { Phone } from 'lucide-react';
 import { playNotificationSound } from '../utils/AudioEngine';
@@ -3075,7 +3075,7 @@ export default function ChatDashboard() {
     }
   }, [activeChatId, activeChat, draftNewChat]);
 
-  // Memoização de alta performance das mensagens do chat ativo (elimina lag de renderização e re-sorts desnecessários)
+  // Memoização de alta performance das mensagens do chat ativo com tripla blindagem de desduplicação
   const { sortedRawMsgs, dedupedMsgs } = useMemo(() => {
     const raw = activeChat?.messages?.filter(m => Boolean(m.text || m.mediaUrl || m.isTask || m.sender || m.payload || m.id)) || [];
     const sorted = sortMessagesChronologically(raw);
@@ -3096,11 +3096,85 @@ export default function ChatDashboard() {
       filtered = todayOnly.length > 0 ? todayOnly : sorted;
     }
 
-    const deduped = filtered.filter((msg, idx) => {
-      if (msg.sender !== 'system') return true;
-      const nextMsg = filtered[idx + 1];
-      return !nextMsg || nextMsg.sender !== 'system';
+    // 1ª Camada: Desduplicação por identificadores únicos (id e whatsapp_id)
+    const seenIds = new Set<string>();
+    const seenWhatsappIds = new Set<string>();
+    const uniqueById = filtered.filter(m => {
+      if (m.id) {
+        if (seenIds.has(m.id)) return false;
+        seenIds.add(m.id);
+      }
+      if (m.whatsapp_id) {
+        if (seenWhatsappIds.has(m.whatsapp_id)) return false;
+        seenWhatsappIds.add(m.whatsapp_id);
+      }
+      return true;
     });
+
+    // 2ª Camada: Ocultação de mensagens otimistas/pendentes se já existir mensagem confirmada equivalente
+    const confirmedOutbounds = uniqueById.filter(m => 
+      !String(m.id).startsWith('optimistic-') && 
+      !String(m.id).startsWith('EDGE_') && 
+      m.status !== 'pending' &&
+      ['human', 'agent', 'bot', 'automation'].includes(m.sender)
+    );
+
+    const nonOrphanMsgs = uniqueById.filter(m => {
+      const isPendingOrOptimistic = String(m.id).startsWith('optimistic-') || String(m.id).startsWith('EDGE_') || m.status === 'pending';
+      if (!isPendingOrOptimistic) return true;
+
+      const mTime = m.timestamp instanceof Date ? m.timestamp.getTime() : new Date(m.timestamp || 0).getTime();
+      const normText = normalizeMessageTextForComparison(m.text);
+
+      const hasConfirmedMatch = confirmedOutbounds.some(conf => {
+        if (m.pseudoId && (conf.id === m.pseudoId || conf.pseudoId === m.pseudoId)) return true;
+        if (m.whatsapp_id && conf.whatsapp_id === m.whatsapp_id) return true;
+        const confTime = conf.timestamp instanceof Date ? conf.timestamp.getTime() : new Date(conf.timestamp || 0).getTime();
+        if (Math.abs(mTime - confTime) < 60000) {
+          if (m.mediaType && conf.mediaType && m.mediaType === conf.mediaType) return true;
+          const confNorm = normalizeMessageTextForComparison(conf.text);
+          if (normText && confNorm && (normText === confNorm || normText.includes(confNorm) || confNorm.includes(normText))) {
+            return true;
+          }
+        }
+        return false;
+      });
+
+      return !hasConfirmedMatch;
+    });
+
+    // 3ª Camada: Desduplicação consecutiva (mensagens idênticas em <15s e mensagens consecutivas de sistema)
+    const deduped: typeof nonOrphanMsgs = [];
+    for (let i = 0; i < nonOrphanMsgs.length; i++) {
+      const current = nonOrphanMsgs[i];
+      const prev = deduped[deduped.length - 1];
+
+      if (prev) {
+        // Desduplica mensagens do sistema consecutivas
+        if (current.sender === 'system' && prev.sender === 'system') {
+          continue;
+        }
+
+        // Desduplica mensagens de outbound com mesmo remetente, mesmo texto em menos de 15s (e sem arquivos distintos)
+        const isCurrentOutbound = ['human', 'agent', 'bot', 'automation'].includes(current.sender);
+        const isPrevOutbound = ['human', 'agent', 'bot', 'automation'].includes(prev.sender);
+
+        if (isCurrentOutbound && isPrevOutbound && !current.isTask && !prev.isTask && !current.mediaUrl && !prev.mediaUrl) {
+          const currTime = current.timestamp instanceof Date ? current.timestamp.getTime() : new Date(current.timestamp || 0).getTime();
+          const prevTime = prev.timestamp instanceof Date ? prev.timestamp.getTime() : new Date(prev.timestamp || 0).getTime();
+          if (Math.abs(currTime - prevTime) < 15000) {
+            const normCurr = normalizeMessageTextForComparison(current.text);
+            const normPrev = normalizeMessageTextForComparison(prev.text);
+            if (normCurr && normPrev && normCurr === normPrev) {
+              // Descarta duplicata consecutiva idêntica
+              continue;
+            }
+          }
+        }
+      }
+
+      deduped.push(current);
+    }
 
     return { sortedRawMsgs: sorted, dedupedMsgs: deduped };
   }, [activeChat?.id, activeChat?.messages, ticketMode, messageFilter]);

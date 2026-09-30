@@ -1,5 +1,5 @@
 {
-  "version": "7.5.9",
-  "buildDate": "2026-09-30T01:10:00.000Z",
-  "summary": "Refatoração de UI/UX do Fluxo de Chamados, Novo TicketSummaryStatus e Otimização do Kanban"
+  "version": "7.6.0",
+  "buildDate": "2026-09-30T17:47:35.567Z",
+  "summary": "Eliminação Definitiva de Duplicidade Visual de Mensagens e Tripla Blindagem de Renderização"
 }

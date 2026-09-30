@@ -20,6 +20,37 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.6.0',
+    date: '2026-09-30',
+    summary: 'Eliminação Definitiva de Duplicidade Visual de Mensagens e Tripla Blindagem de Renderização',
+    notes: [
+      {
+        id: '7.6.0-1',
+        category: 'fixes',
+        title: 'Tripla Blindagem contra Duplicidade Visual de Mensagens',
+        description: 'Eliminação definitiva do problema onde uma mensagem enviada aparecia duplicada na tela antes do F5. Reconciliação inteligente com normalização universal de assinaturas, remoção de mensagens órfãs e descarte de duplicatas consecutivas.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      },
+      {
+        id: '7.6.0-2',
+        category: 'improvements',
+        title: 'Vínculo Único e Reconciliação Determinística (pseudoId)',
+        description: 'Introdução de identificador único persistente (pseudoId) para todas as mensagens de envio humano e mídias, garantindo que respostas assíncronas do Realtime e HTTP substituam com exatidão a mensagem otimista sem gerar balões duplicados.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      },
+      {
+        id: '7.6.0-3',
+        category: 'improvements',
+        title: 'Normalizador Universal de Texto e Assinatura de Atendentes',
+        description: 'Novo algoritmo resiliente capaz de reconhecer e desduplicar mensagens com qualquer formato de assinatura de atendente, quebras de linhas duplas, citações de conversa e formatação rica em Markdown.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      }
+    ]
+  },
+  {
     version: '7.5.9',
     date: '2026-09-29',
     summary: 'Refatoração de UI/UX do Fluxo de Chamados, Novo TicketSummaryStatus e Otimização do Kanban',
