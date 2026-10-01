@@ -20,6 +20,45 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.6.1',
+    date: '2026-10-01',
+    summary: 'Estabilidade de Ordenação no Chat ao Resolver Tickets, Respostas Prontas antes das Pastas e Persistência do Kanban',
+    notes: [
+      {
+        id: '7.6.1-1',
+        category: 'fixes',
+        title: 'Estabilidade da Ordem da Lista de Chats ao Resolver Tickets',
+        description: 'Refatoração da função getEffectiveContactTime para desconsiderar estritamente mensagens de sistema (resoluções individuais ou em lote) no cálculo de tempo de ordenação, impedindo que contatos saltem indevidamente para o topo da lista de chats após resolução.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      },
+      {
+        id: '7.6.1-2',
+        category: 'improvements',
+        title: 'Inversão da Ordem: Mensagens Prontas antes das Pastas',
+        description: 'No modal de respostas rápidas acionado ao digitar "/" no chat, as respostas prontas agora são renderizadas prioritariamente no topo, seguidas pelas pastas e projetos, acelerando a dinâmica do atendimento.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      },
+      {
+        id: '7.6.1-3',
+        category: 'features',
+        title: 'Persistência Multidispositivo da Dobra de Colunas do Kanban',
+        description: 'O estado de recolhimento das colunas do quadro CRM Kanban passa a ser sincronizado na nuvem (crm_boards.config por usuário) em conjunto com o cache local, mantendo a visualização idêntica entre computadores e navegadores.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.6.1-4',
+        category: 'improvements',
+        title: 'Resiliência de Abas em Segundo Plano & Supabase Circuit Breaker',
+        description: 'Aprimorado o monitoramento de conexão com o Supabase para evitar desconexões ou falsos alarmes de instabilidade quando a aba do navegador entra em suspensão em segundo plano.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      }
+    ]
+  },
+  {
     version: '7.6.0',
     date: '2026-09-30',
     summary: 'Eliminação Definitiva de Duplicidade Visual de Mensagens e Tripla Blindagem de Renderização',

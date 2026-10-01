@@ -1,5 +1,5 @@
 {
-  "version": "7.6.0",
-  "buildDate": "2026-09-30T17:47:35.567Z",
-  "summary": "Eliminação Definitiva de Duplicidade Visual de Mensagens e Tripla Blindagem de Renderização"
+  "version": "7.6.1",
+  "buildDate": "2026-10-01T11:58:00.000Z",
+  "summary": "Estabilidade de Ordenação no Chat ao Resolver Tickets, Respostas Prontas antes das Pastas e Persistência do Kanban"
 }

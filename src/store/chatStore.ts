@@ -105,28 +105,29 @@ export const getEffectiveContactTime = (c: any): number => {
 
   let maxTime = 0;
 
-  // 1. Mensagens de conversa real: ignora mensagens de sistema (resolução de ticket, encerramento em lote, etc.)
-  // para que a resolução de ticket NÃO reordene a lista de conversas nem as desloque pro topo
+  // 1. Mensagens de conversa real no histórico local:
+  // Ignora estritamente mensagens de sistema (resolução de ticket individual, encerramento em lote, auditoria, etc.)
+  // para que a resolução de tickets NUNCA reordene a lista de chats nem desloque chats pro topo
   if (Array.isArray(c.messages) && c.messages.length > 0) {
-    let fallbackSystemTime = 0;
     for (let i = c.messages.length - 1; i >= 0; i--) {
       const msg = c.messages[i];
       if (msg && msg.timestamp) {
         const t = msg.timestamp instanceof Date ? msg.timestamp.getTime() : new Date(msg.timestamp).getTime();
         if (!isNaN(t) && t > 0) {
-          const isSystem = msg.sender === 'system' || msg.sender_type === 'system' || (msg.text && (msg.text.includes('Resolvido por') || msg.text.includes('Resolvido em lote por')));
+          const isSystem = msg.sender === 'system' || msg.sender_type === 'system' || msg.sender === 'internal_note' ||
+            (typeof msg.text === 'string' && (
+              msg.text.includes('Resolvido por') || 
+              msg.text.includes('Resolvido em lote por') || 
+              msg.text.startsWith('✅') ||
+              msg.text.includes('Ticket transferido') ||
+              msg.text.includes('Conversa reaberta')
+            ));
           if (!isSystem) {
             maxTime = Math.max(maxTime, t);
             break;
-          } else if (fallbackSystemTime === 0) {
-            fallbackSystemTime = t;
           }
         }
       }
-    }
-    // Se a conversa só possuir mensagens de sistema (raro), usa o timestamp de sistema como contingência
-    if (maxTime === 0 && fallbackSystemTime > 0) {
-      maxTime = fallbackSystemTime;
     }
   }
 
@@ -1398,6 +1399,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               ...c,
               assigned_to: null,
               conv_status: 'resolved',
+              last_message_preview: msgTypeObj.text,
               messages: [...c.messages, msgTypeObj].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
             };
           }
@@ -3268,8 +3270,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
           const msgTs = msg.timestamp ? new Date(msg.timestamp).getTime() : Date.now();
           const previewText = msg.text || (msg.mediaType === 'image' ? '📸 Imagem' : msg.mediaType === 'video' ? '🎥 Vídeo' : msg.mediaType === 'audio' ? '🎵 Áudio' : msg.mediaType === 'document' ? '📁 Documento' : 'Mensagem');
 
-          const isSysResolution = msg.sender === 'system' || (msg.text && (msg.text.includes('Resolvido por') || msg.text.includes('Resolvido em lote por')));
-          const effectiveLastMsgTs = isSysResolution ? (c.lastMsgTimestamp || 0) : Math.max(c.lastMsgTimestamp || 0, msgTs);
+          const isSysResolution = msg.sender === 'system' || msg.sender_type === 'system' || msg.sender === 'internal_note' ||
+            (typeof msg.text === 'string' && (
+              msg.text.includes('Resolvido por') || 
+              msg.text.includes('Resolvido em lote por') || 
+              msg.text.startsWith('✅') ||
+              msg.text.includes('Ticket transferido') ||
+              msg.text.includes('Conversa reaberta')
+            ));
+          const currentConvTs = c.lastMsgTimestamp || (c.last_message_at ? new Date(c.last_message_at).getTime() : 0);
+          const effectiveLastMsgTs = isSysResolution ? currentConvTs : Math.max(currentConvTs, msgTs);
 
           return {
             ...c,
@@ -6296,7 +6306,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
               const isHistorical = (Date.now() - msgTimestamp) > (5 * 60000); // Mais de 5 minutos = histórico
               const currentLastMsgTs = updatedContact.lastMsgTimestamp || 0;
 
-              const isSysResolution = m.sender_type === 'system' || (m.text_content && (m.text_content.includes('Resolvido por') || m.text_content.includes('Resolvido em lote por')));
+              const isSysResolution = m.sender_type === 'system' || m.sender === 'system' || m.sender_type === 'internal_note' ||
+                (typeof m.text_content === 'string' && (
+                  m.text_content.includes('Resolvido por') || 
+                  m.text_content.includes('Resolvido em lote por') || 
+                  m.text_content.startsWith('✅') ||
+                  m.text_content.includes('Ticket transferido') ||
+                  m.text_content.includes('Conversa reaberta')
+                ));
 
               if (msgTimestamp > currentLastMsgTs) {
                 if (!isSysResolution) {
