@@ -369,20 +369,49 @@ export default function CrmKanban() {
     return {};
   });
 
-  // Função helper para alternar colapso de coluna com persistência imediata
-  const toggleStageCollapse = (stageId: string, forceState?: boolean) => {
-    setCollapsedStages(prev => {
-      const nextState = {
-        ...prev,
-        [stageId]: forceState !== undefined ? forceState : !prev[stageId]
-      };
-      if (boardId && typeof window !== 'undefined') {
-        try {
-          localStorage.setItem(`crm_kanban_collapsed_stages_${boardId}`, JSON.stringify(nextState));
-        } catch (e) {}
+  // Função helper para alternar colapso de coluna com persistência imediata (Local + Supabase Multi-dispositivo)
+  const toggleStageCollapse = async (stageId: string, forceState?: boolean) => {
+    const nextState = {
+      ...collapsedStages,
+      [stageId]: forceState !== undefined ? forceState : !collapsedStages[stageId]
+    };
+
+    // 1. Atualiza estado React em 0ms
+    setCollapsedStages(nextState);
+
+    // 2. Salva em cache local imediatamente
+    if (boardId && typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(`crm_kanban_collapsed_stages_${boardId}`, JSON.stringify(nextState));
+      } catch (e) {}
+    }
+
+    // 3. Persiste no Supabase para sincronização entre dispositivos (Mobile, Tablet, Desktop)
+    if (boardId) {
+      try {
+        const userKey = currentUserEmail || currentUserId || 'default';
+        const currentConfig = board?.config || {};
+        const userColumnStates = {
+          ...(currentConfig.user_column_states || {}),
+          [userKey]: nextState
+        };
+
+        const updatedConfig = {
+          ...currentConfig,
+          user_column_states: userColumnStates,
+          collapsed_stages: nextState
+        };
+
+        setBoard(prev => prev ? { ...prev, config: updatedConfig } : prev);
+
+        await supabase
+          .from('crm_boards')
+          .update({ config: updatedConfig })
+          .eq('id', boardId);
+      } catch (err) {
+        console.warn('[CrmKanban] Aviso ao persistir estado de dobra de colunas no banco:', err);
       }
-      return nextState;
-    });
+    }
   };
 
   // Carregar preferências salvas sempre que o boardId mudar
@@ -856,6 +885,18 @@ export default function CrmKanban() {
         description: boardData.config?.description || '',
         stages: boardData.config?.stages || []
       });
+
+      // Sincroniza estado de colapso de colunas a partir do config do quadro ou localStorage
+      const userKey = currentUserEmail || currentUserId || 'default';
+      const remoteCollapsed = boardData.config?.user_column_states?.[userKey] || boardData.config?.collapsed_stages;
+      if (remoteCollapsed && typeof remoteCollapsed === 'object' && Object.keys(remoteCollapsed).length > 0) {
+        setCollapsedStages(remoteCollapsed);
+        if (typeof window !== 'undefined' && boardId) {
+          try {
+            localStorage.setItem(`crm_kanban_collapsed_stages_${boardId}`, JSON.stringify(remoteCollapsed));
+          } catch (e) {}
+        }
+      }
 
       // 2. Leads
       const { data: leadsData, error: leadsErr } = await supabase

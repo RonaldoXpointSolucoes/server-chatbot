@@ -105,11 +105,28 @@ export const getEffectiveContactTime = (c: any): number => {
 
   let maxTime = 0;
 
+  // 1. Mensagens de conversa real: ignora mensagens de sistema (resolução de ticket, encerramento em lote, etc.)
+  // para que a resolução de ticket NÃO reordene a lista de conversas nem as desloque pro topo
   if (Array.isArray(c.messages) && c.messages.length > 0) {
-    const lastMsg = c.messages[c.messages.length - 1];
-    if (lastMsg && lastMsg.timestamp) {
-      const t = lastMsg.timestamp instanceof Date ? lastMsg.timestamp.getTime() : new Date(lastMsg.timestamp).getTime();
-      if (!isNaN(t) && t > 0) maxTime = Math.max(maxTime, t);
+    let fallbackSystemTime = 0;
+    for (let i = c.messages.length - 1; i >= 0; i--) {
+      const msg = c.messages[i];
+      if (msg && msg.timestamp) {
+        const t = msg.timestamp instanceof Date ? msg.timestamp.getTime() : new Date(msg.timestamp).getTime();
+        if (!isNaN(t) && t > 0) {
+          const isSystem = msg.sender === 'system' || msg.sender_type === 'system' || (msg.text && (msg.text.includes('Resolvido por') || msg.text.includes('Resolvido em lote por')));
+          if (!isSystem) {
+            maxTime = Math.max(maxTime, t);
+            break;
+          } else if (fallbackSystemTime === 0) {
+            fallbackSystemTime = t;
+          }
+        }
+      }
+    }
+    // Se a conversa só possuir mensagens de sistema (raro), usa o timestamp de sistema como contingência
+    if (maxTime === 0 && fallbackSystemTime > 0) {
+      maxTime = fallbackSystemTime;
     }
   }
 
@@ -3251,6 +3268,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           const msgTs = msg.timestamp ? new Date(msg.timestamp).getTime() : Date.now();
           const previewText = msg.text || (msg.mediaType === 'image' ? '📸 Imagem' : msg.mediaType === 'video' ? '🎥 Vídeo' : msg.mediaType === 'audio' ? '🎵 Áudio' : msg.mediaType === 'document' ? '📁 Documento' : 'Mensagem');
 
+          const isSysResolution = msg.sender === 'system' || (msg.text && (msg.text.includes('Resolvido por') || msg.text.includes('Resolvido em lote por')));
+          const effectiveLastMsgTs = isSysResolution ? (c.lastMsgTimestamp || 0) : Math.max(c.lastMsgTimestamp || 0, msgTs);
+
           return {
             ...c,
             conv_id: c.conv_id || msg.conversation_id,
@@ -3258,7 +3278,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             conv_status: updatedStatus,
             snoozed_until: updatedSnooze,
             unread: newUnread,
-            lastMsgTimestamp: Math.max(c.lastMsgTimestamp || 0, msgTs),
+            lastMsgTimestamp: effectiveLastMsgTs,
             last_message_preview: previewText
           };
         }
@@ -6276,11 +6296,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
               const isHistorical = (Date.now() - msgTimestamp) > (5 * 60000); // Mais de 5 minutos = histórico
               const currentLastMsgTs = updatedContact.lastMsgTimestamp || 0;
 
+              const isSysResolution = m.sender_type === 'system' || (m.text_content && (m.text_content.includes('Resolvido por') || m.text_content.includes('Resolvido em lote por')));
+
               if (msgTimestamp > currentLastMsgTs) {
-                updatedContact.lastMsgTimestamp = msgTimestamp;
+                if (!isSysResolution) {
+                  updatedContact.lastMsgTimestamp = msgTimestamp;
+                  updatedContact.last_message_at = m.timestamp;
+                  updatedContact.last_message_sender_type = m.sender_type;
+                }
                 updatedContact.last_message_preview = advanced.text || m.text_content || updatedContact.last_message_preview;
-                updatedContact.last_message_at = m.timestamp;
-                updatedContact.last_message_sender_type = m.sender_type;
               }
               if (m.conversation_id && !updatedContact.conv_id) {
                 updatedContact.conv_id = m.conversation_id;

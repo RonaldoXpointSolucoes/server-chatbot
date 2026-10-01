@@ -10040,7 +10040,62 @@ export default function ChatDashboard() {
                               {/* Lista com Pastas e Respostas */}
                               <div className="max-h-72 overflow-y-auto custom-scrollbar divide-y divide-gray-50 dark:divide-white/5">
                                 
-                                {/* 1. Seção de Pastas/Categorias */}
+                                {/* 1. Seção de Respostas Prontas (Prioridade 1 ao digitar /) */}
+                                {displayReplies.length > 0 && (
+                                  <div className="p-2 space-y-1">
+                                    <div className="px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 flex items-center gap-1">
+                                      <MessageSquareText size={11} className="text-amber-500" />
+                                      <span>Respostas Prontas</span>
+                                    </div>
+
+                                    {displayReplies.map(qr => {
+                                      const qrCategoryPath = getCategoryPath(qr.category_id);
+                                      return (
+                                        <button
+                                          key={qr.id}
+                                          type="button"
+                                          className="w-full text-left p-3 hover:bg-blue-50 dark:hover:bg-[#2a3942] rounded-2xl transition-all border border-transparent hover:border-blue-500/20 group cursor-pointer active:scale-[0.99]"
+                                          onClick={() => handleSelectReply(qr)}
+                                        >
+                                          <div className="flex items-center justify-between gap-1 mb-1">
+                                            <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                                              <span className="font-mono font-black text-blue-600 dark:text-blue-400 text-xs group-hover:text-blue-700 dark:group-hover:text-blue-300 transition-colors">
+                                                {qr.shortcut}
+                                              </span>
+
+                                              {hasFilter && qrCategoryPath && (
+                                                <span className="px-1.5 py-0.2 rounded bg-slate-100 dark:bg-white/10 text-[9px] font-bold text-slate-500 dark:text-slate-400 truncate max-w-[120px]">
+                                                  📁 {qrCategoryPath}
+                                                </span>
+                                              )}
+
+                                              {qr.type === 'TUTORIAL' ? (
+                                                <span className="flex items-center gap-1 text-[9px] font-black uppercase tracking-wider text-purple-600 dark:text-purple-400 bg-purple-500/10 px-1.5 py-0.2 rounded-md border border-purple-500/15">
+                                                  <Video className="w-2.5 h-2.5 text-purple-500" />
+                                                  Tutorial
+                                                </span>
+                                              ) : qr.media_url && (
+                                                <span className="flex items-center gap-1 text-[9px] text-gray-500 bg-gray-100 dark:bg-white/10 px-1.5 py-0.2 rounded-md">
+                                                  {qr.media_type === 'video' ? <Video className="w-2.5 h-2.5" /> : qr.media_type === 'audio' ? <Mic className="w-2.5 h-2.5" /> : qr.media_type === 'document' ? <FileText className="w-2.5 h-2.5" /> : <ImageIcon className="w-2.5 h-2.5" />}
+                                                  Mídia
+                                                </span>
+                                              )}
+                                            </div>
+
+                                            <span className="text-[10px] text-slate-400 group-hover:text-blue-500 font-bold opacity-0 group-hover:opacity-100 transition-opacity">
+                                              Inserir ↵
+                                            </span>
+                                          </div>
+                                          <div className="text-gray-600 dark:text-gray-300 text-xs line-clamp-2 leading-relaxed">
+                                            {qr.content}
+                                          </div>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+
+                                {/* 2. Seção de Pastas/Categorias */}
                                 {displayFolders.length > 0 && (
                                   <div className="p-2 space-y-1">
                                     <div className="px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 flex items-center gap-1">
@@ -10092,63 +10147,6 @@ export default function ChatDashboard() {
                                         );
                                       })}
                                     </div>
-                                  </div>
-                                )}
-
-                                {/* 2. Seção de Respostas Prontas */}
-                                {displayReplies.length > 0 && (
-                                  <div className="p-2 space-y-1">
-                                    {displayFolders.length > 0 && (
-                                      <div className="px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 flex items-center gap-1">
-                                        <MessageSquareText size={11} className="text-amber-500" />
-                                        <span>Respostas Prontas</span>
-                                      </div>
-                                    )}
-
-                                    {displayReplies.map(qr => {
-                                      const qrCategoryPath = getCategoryPath(qr.category_id);
-                                      return (
-                                        <button
-                                          key={qr.id}
-                                          type="button"
-                                          className="w-full text-left p-3 hover:bg-blue-50 dark:hover:bg-[#2a3942] rounded-2xl transition-all border border-transparent hover:border-blue-500/20 group cursor-pointer active:scale-[0.99]"
-                                          onClick={() => handleSelectReply(qr)}
-                                        >
-                                          <div className="flex items-center justify-between gap-1 mb-1">
-                                            <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-                                              <span className="font-mono font-black text-blue-600 dark:text-blue-400 text-xs group-hover:text-blue-700 dark:group-hover:text-blue-300 transition-colors">
-                                                {qr.shortcut}
-                                              </span>
-
-                                              {hasFilter && qrCategoryPath && (
-                                                <span className="px-1.5 py-0.2 rounded bg-slate-100 dark:bg-white/10 text-[9px] font-bold text-slate-500 dark:text-slate-400 truncate max-w-[120px]">
-                                                  📁 {qrCategoryPath}
-                                                </span>
-                                              )}
-
-                                              {qr.type === 'TUTORIAL' ? (
-                                                <span className="flex items-center gap-1 text-[9px] font-black uppercase tracking-wider text-purple-600 dark:text-purple-400 bg-purple-500/10 px-1.5 py-0.2 rounded-md border border-purple-500/15">
-                                                  <Video className="w-2.5 h-2.5 text-purple-500" />
-                                                  Tutorial
-                                                </span>
-                                              ) : qr.media_url && (
-                                                <span className="flex items-center gap-1 text-[9px] text-gray-500 bg-gray-100 dark:bg-white/10 px-1.5 py-0.2 rounded-md">
-                                                  {qr.media_type === 'video' ? <Video className="w-2.5 h-2.5" /> : qr.media_type === 'audio' ? <Mic className="w-2.5 h-2.5" /> : qr.media_type === 'document' ? <FileText className="w-2.5 h-2.5" /> : <ImageIcon className="w-2.5 h-2.5" />}
-                                                  Mídia
-                                                </span>
-                                              )}
-                                            </div>
-
-                                            <span className="text-[10px] text-slate-400 group-hover:text-blue-500 font-bold opacity-0 group-hover:opacity-100 transition-opacity">
-                                              Inserir ↵
-                                            </span>
-                                          </div>
-                                          <div className="text-gray-600 dark:text-gray-300 text-xs line-clamp-2 leading-relaxed">
-                                            {qr.content}
-                                          </div>
-                                        </button>
-                                      );
-                                    })}
                                   </div>
                                 )}
 
