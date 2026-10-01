@@ -426,6 +426,10 @@ export default function ChatDashboard() {
     activeChannelFilter,
     setActiveChannelFilter,
     activeChannelName,
+    selectedChannelFilters,
+    setSelectedChannelFilters,
+    toggleChannelFilter,
+    clearChannelFilters,
     isChannelLoading,
     fetchAutomations,
     searchGlobalContacts,
@@ -491,6 +495,10 @@ export default function ChatDashboard() {
     activeChannelFilter: state.activeChannelFilter,
     setActiveChannelFilter: state.setActiveChannelFilter,
     activeChannelName: state.activeChannelName,
+    selectedChannelFilters: state.selectedChannelFilters,
+    setSelectedChannelFilters: state.setSelectedChannelFilters,
+    toggleChannelFilter: state.toggleChannelFilter,
+    clearChannelFilters: state.clearChannelFilters,
     isChannelLoading: state.isChannelLoading,
     fetchAutomations: state.fetchAutomations,
     searchGlobalContacts: state.searchGlobalContacts,
@@ -1592,26 +1600,59 @@ export default function ChatDashboard() {
   const undoTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [messageFilter, setMessageFilter] = useState<'today' | 'all'>(ticketMode ? 'today' : 'all');
 
-  // Helper canônico de correspondência estrita de contato à caixa ativa selecionada
+  // Helper canônico de correspondência estrita de contato à(s) caixa(s) ativa(s) selecionada(s)
   const isMatchingChannel = React.useCallback((c: any) => {
     if (!c) return false;
-    if (!activeChannelFilter || activeChannelFilter === 'all') return true;
+
+    const hasMulti = Boolean(selectedChannelFilters && selectedChannelFilters.length > 0);
+    if (!hasMulti && (!activeChannelFilter || activeChannelFilter === 'all')) return true;
 
     const instanceIdFromId = c.id && typeof c.id === 'string' && c.id.includes('_') ? c.id.split('_')[1] : null;
     const targetInst = instanceIdFromId || c.instance_id || 'default';
     const resolvedTargetUuid = instanceCache.getId(targetInst) || targetInst;
-    const resolvedFilterUuid = instanceCache.getId(activeChannelFilter) || activeChannelFilter;
     const resolvedTargetName = instanceCache.getName(targetInst) || targetInst;
+
+    if (hasMulti) {
+      const matchesAnySelected = selectedChannelFilters.some((filterId: string) => {
+        const resolvedFilterUuid = instanceCache.getId(filterId) || filterId;
+        const filterInst = tenantInstances.find((i: any) => i.id === filterId || i.display_name === filterId);
+        const filterName = filterInst?.display_name || filterInst?.whatsapp_name || filterInst?.name || filterId;
+
+        return targetInst === filterId ||
+               targetInst === filterName ||
+               resolvedTargetUuid === resolvedFilterUuid ||
+               resolvedTargetName === filterName ||
+               resolvedTargetName === filterId;
+      });
+
+      if (!matchesAnySelected) return false;
+
+      // Self-chat check para as caixas selecionadas
+      for (const filterId of selectedChannelFilters) {
+        const resolvedFilterUuid = instanceCache.getId(filterId) || filterId;
+        const channelPhone = resolvedFilterUuid ? instanceCache.phoneNumbers[resolvedFilterUuid] : null;
+        if (channelPhone) {
+          const cleanChannelPhone = channelPhone.replace(/\D/g, '');
+          const cleanContactPhone = c.phone ? c.phone.replace(/\D/g, '') : '';
+          if (cleanChannelPhone && cleanContactPhone && cleanContactPhone === cleanChannelPhone) {
+            return false;
+          }
+        }
+      }
+
+      return true;
+    }
 
     const matchesChannel = targetInst === activeChannelFilter ||
                            targetInst === activeChannelName ||
-                           resolvedTargetUuid === resolvedFilterUuid ||
+                           resolvedTargetUuid === (instanceCache.getId(activeChannelFilter!) || activeChannelFilter) ||
                            resolvedTargetName === activeChannelName ||
                            resolvedTargetName === activeChannelFilter;
 
     if (!matchesChannel) return false;
 
     // Self-chat check
+    const resolvedFilterUuid = instanceCache.getId(activeChannelFilter!) || activeChannelFilter;
     const channelPhone = resolvedFilterUuid ? instanceCache.phoneNumbers[resolvedFilterUuid] : null;
     if (channelPhone) {
       const cleanChannelPhone = channelPhone.replace(/\D/g, '');
@@ -1622,7 +1663,7 @@ export default function ChatDashboard() {
     }
 
     return true;
-  }, [activeChannelFilter, activeChannelName, instanceCache]);
+  }, [selectedChannelFilters, activeChannelFilter, activeChannelName, instanceCache, tenantInstances]);
 
   // Helper de validação de Ticket Aberto para a caixa atual
   const isContactOpenTicket = React.useCallback((c: any) => {
@@ -1953,15 +1994,16 @@ export default function ChatDashboard() {
        const dbInstId = c.instance_id;
        const targetInst = instIdFromContactId || dbInstId || 'default';
 
-       // Quando pesquisando ou aplicando filtro de caixa, a chave de unicidade é o personKey (Pessoa Única)
-       const key = (searchTerm || (activeChannelFilter && activeChannelFilter !== 'all')) ? personKey : `${personKey}_${targetInst}`;
+       // Quando pesquisando ou aplicando filtro de caixa (única ou múltipla), a chave de unicidade é o personKey (Pessoa Única)
+       const isFilteringBoxes = Boolean((selectedChannelFilters && selectedChannelFilters.length > 0) || (activeChannelFilter && activeChannelFilter !== 'all'));
+       const key = (searchTerm || isFilteringBoxes) ? personKey : `${personKey}_${targetInst}`;
 
        if (!seenKeys.has(key)) {
          seenKeys.set(key, c);
        } else {
          const existing = seenKeys.get(key);
 
-         // Se a nova entrada for da caixa ativa atual (activeChannelFilter / activeChannelName), PREFERIR a nova entrada!
+         // Se a nova entrada for da caixa ativa atual (activeChannelFilter / activeChannelName / selectedChannelFilters), PREFERIR a nova entrada!
          const isCurrentInActiveBox = isMatchingChannel(c);
          const isExistingInActiveBox = isMatchingChannel(existing);
 
@@ -1980,7 +2022,7 @@ export default function ChatDashboard() {
        }
      }
      return Array.from(seenKeys.values());
-  }, [contacts, activeChannelFilter, searchTerm, filterType, selectedLabelId, activeChatId, ticketMode, agents, connectedInstanceName, activeChannelName, isMatchingChannel]);
+  }, [contacts, activeChannelFilter, selectedChannelFilters, searchTerm, filterType, selectedLabelId, activeChatId, ticketMode, agents, connectedInstanceName, activeChannelName, isMatchingChannel]);
 
   const handleBatchResolveConfirm = async () => {
     setIsProcessingBatchResolve(true);
@@ -6281,39 +6323,68 @@ export default function ChatDashboard() {
               )}
             >
               <div className="flex items-center gap-1.5 min-w-0">
-                <span className="relative flex h-2 w-2 shrink-0">
-                  <span className={cn(
-                    "animate-ping absolute inline-flex h-full w-full rounded-full opacity-75",
-                    (() => {
-                      if (hasMultipleInstances && activeChannelFilter) {
-                        const actInst = tenantInstances.find(i => i.id === activeChannelFilter || i.display_name === activeChannelFilter);
-                        const isConn = instancesStatus[actInst?.id || ''] === 'connected' || instancesStatus[actInst?.id || ''] === 'connected_local';
-                        const isConnecting = instancesStatus[actInst?.id || ''] === 'connecting';
-                        return isConn ? "bg-emerald-400" : isConnecting ? "bg-amber-400" : "bg-rose-400";
-                      }
-                      return systemHealth === 'green' ? "bg-emerald-400" :
-                        systemHealth === 'yellow' ? "bg-amber-400" : "bg-rose-400";
-                    })()
-                  )}></span>
-                  <span className={cn(
-                    "relative inline-flex rounded-full h-2 w-2",
-                    (() => {
-                      if (hasMultipleInstances && activeChannelFilter) {
-                        const actInst = tenantInstances.find(i => i.id === activeChannelFilter || i.display_name === activeChannelFilter);
-                        const isConn = instancesStatus[actInst?.id || ''] === 'connected' || instancesStatus[actInst?.id || ''] === 'connected_local';
-                        const isConnecting = instancesStatus[actInst?.id || ''] === 'connecting';
-                        return isConn ? "bg-emerald-500" : isConnecting ? "bg-amber-500" : "bg-rose-500";
-                      }
-                      return systemHealth === 'green' ? "bg-emerald-500" :
-                        systemHealth === 'yellow' ? "bg-amber-500" : "bg-rose-500";
-                    })()
-                  )}></span>
-                </span>
+                {/* Indicador de Status com suporte a múltiplos canais selecionados */}
+                {selectedChannelFilters && selectedChannelFilters.length > 1 ? (
+                  <div className="flex -space-x-1 shrink-0 items-center">
+                    {selectedChannelFilters.slice(0, 3).map((fId: string) => {
+                      const instObj = tenantInstances.find((i: any) => i.id === fId || i.display_name === fId);
+                      const isConn = instancesStatus[fId] === 'connected' || instancesStatus[fId] === 'connected_local';
+                      return (
+                        <span 
+                          key={fId}
+                          className="w-2.5 h-2.5 rounded-full ring-1 ring-white dark:ring-[#161f26] shrink-0"
+                          style={{ backgroundColor: instObj?.color || (isConn ? '#10b981' : '#f43f5e') }}
+                        />
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <span className="relative flex h-2 w-2 shrink-0">
+                    <span className={cn(
+                      "animate-ping absolute inline-flex h-full w-full rounded-full opacity-75",
+                      (() => {
+                        const targetId = (selectedChannelFilters && selectedChannelFilters.length === 1) 
+                          ? selectedChannelFilters[0] 
+                          : activeChannelFilter;
+
+                        if (hasMultipleInstances && targetId) {
+                          const actInst = tenantInstances.find(i => i.id === targetId || i.display_name === targetId);
+                          const isConn = instancesStatus[actInst?.id || ''] === 'connected' || instancesStatus[actInst?.id || ''] === 'connected_local';
+                          const isConnecting = instancesStatus[actInst?.id || ''] === 'connecting';
+                          return isConn ? "bg-emerald-400" : isConnecting ? "bg-amber-400" : "bg-rose-400";
+                        }
+                        return systemHealth === 'green' ? "bg-emerald-400" :
+                          systemHealth === 'yellow' ? "bg-amber-400" : "bg-rose-400";
+                      })()
+                    )}></span>
+                    <span className={cn(
+                      "relative inline-flex rounded-full h-2 w-2",
+                      (() => {
+                        const targetId = (selectedChannelFilters && selectedChannelFilters.length === 1) 
+                          ? selectedChannelFilters[0] 
+                          : activeChannelFilter;
+
+                        if (hasMultipleInstances && targetId) {
+                          const actInst = tenantInstances.find(i => i.id === targetId || i.display_name === targetId);
+                          const isConn = instancesStatus[actInst?.id || ''] === 'connected' || instancesStatus[actInst?.id || ''] === 'connected_local';
+                          const isConnecting = instancesStatus[actInst?.id || ''] === 'connecting';
+                          return isConn ? "bg-emerald-500" : isConnecting ? "bg-amber-500" : "bg-rose-500";
+                        }
+                        return systemHealth === 'green' ? "bg-emerald-500" :
+                          systemHealth === 'yellow' ? "bg-amber-500" : "bg-rose-500";
+                      })()
+                    )}></span>
+                  </span>
+                )}
                 <span className="text-[11px] font-bold text-gray-600 dark:text-[#d1d7db] truncate">
                   {hasMultipleInstances ? (
-                    activeChannelFilter 
-                      ? (activeChannelName || tenantInstances.find(i => i.id === activeChannelFilter || i.display_name === activeChannelFilter)?.display_name || activeChannelFilter)
-                      : "Todas as Caixas"
+                    selectedChannelFilters && selectedChannelFilters.length > 1
+                      ? `${selectedChannelFilters.length} Caixas Ativas`
+                      : (selectedChannelFilters && selectedChannelFilters.length === 1)
+                        ? (tenantInstances.find(i => i.id === selectedChannelFilters[0] || i.display_name === selectedChannelFilters[0])?.display_name || selectedChannelFilters[0])
+                        : activeChannelFilter 
+                          ? (activeChannelName || tenantInstances.find(i => i.id === activeChannelFilter || i.display_name === activeChannelFilter)?.display_name || activeChannelFilter)
+                          : "Todas as Caixas"
                   ) : (
                     activeChannelFilter ? (activeChannelName || activeChannelFilter) : (
                       tenantInstances[0]?.display_name || (
@@ -6338,105 +6409,241 @@ export default function ChatDashboard() {
             </button>
 
             {/* Menu Dropdown de Seleção de Caixas (Apenas quando houver múltiplas caixas) */}
-            {hasMultipleInstances && activeDropdown === 'channel-picker' && (
-              <div 
-                onClick={(e) => e.stopPropagation()}
-                className="absolute left-0 top-11 w-72 bg-white dark:bg-[#202c33] border border-gray-200/80 dark:border-white/10 rounded-2xl shadow-2xl py-2 z-50 backdrop-blur-xl animate-in fade-in zoom-in-95 duration-100"
-              >
-                <div className="px-3 py-1 flex items-center justify-between border-b border-gray-100 dark:border-white/5 pb-2 mb-1">
-                  <div className="flex items-center gap-1.5">
-                    <Layers size={13} className="text-[#00a884]" />
-                    <span className="text-[11px] font-bold text-gray-700 dark:text-gray-200 tracking-wide uppercase">
-                      Caixas de Entrada
-                    </span>
-                  </div>
-                  <span className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-white/5 px-2 py-0.5 rounded-full">
-                    {tenantInstances.length} disponíveis
-                  </span>
-                </div>
+            {hasMultipleInstances && activeDropdown === 'channel-picker' && (() => {
+              const connectedCount = tenantInstances.filter(
+                (i) => instancesStatus[i.id] === 'connected' || instancesStatus[i.id] === 'connected_local'
+              ).length;
+              const hasMultiSelection = selectedChannelFilters && selectedChannelFilters.length > 0;
+              const isAllSelected = !hasMultiSelection && !activeChannelFilter;
 
-                {/* Opção Todas as Caixas */}
-                <button
-                  onClick={() => {
-                    setActiveChannelFilter(null, null);
-                    setActiveDropdown(null);
-                  }}
-                  className={cn(
-                    "w-[calc(100%-12px)] mx-1.5 px-2.5 py-2 text-left flex items-center justify-between transition-colors rounded-xl",
-                    !activeChannelFilter 
-                      ? "bg-[#00a884]/10 dark:bg-[#00a884]/20 text-[#00a884] dark:text-[#25d366] font-bold" 
-                      : "text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5 font-medium"
-                  )}
+              return (
+                <div 
+                  onClick={(e) => e.stopPropagation()}
+                  className="absolute left-0 top-11 w-84 sm:w-[360px] max-w-[calc(100vw-24px)] bg-white/95 dark:bg-[#161f26]/95 border border-gray-200/80 dark:border-white/10 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.35)] py-2.5 z-50 backdrop-blur-2xl ring-1 ring-black/5 dark:ring-white/5 animate-in fade-in zoom-in-95 duration-150 flex flex-col"
                 >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <span className="relative flex h-2 w-2 shrink-0">
+                  {/* Cabeçalho do Dropdown com Contador em Tempo Real */}
+                  <div className="px-3.5 py-1.5 flex items-center justify-between border-b border-gray-100 dark:border-white/5 pb-2.5 mb-1.5">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1.5 rounded-lg bg-[#00a884]/10 dark:bg-[#00a884]/20 text-[#00a884] dark:text-[#25d366]">
+                        <Layers size={14} />
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-[11px] font-bold text-gray-800 dark:text-gray-200 tracking-wider uppercase">
+                          Caixas de Entrada
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 bg-gray-100/80 dark:bg-white/5 px-2.5 py-0.5 rounded-full border border-gray-200/50 dark:border-white/5 text-[10px] font-semibold text-gray-500 dark:text-gray-400">
                       <span className={cn(
-                        "relative inline-flex rounded-full h-2 w-2",
-                        systemHealth === 'green' ? "bg-emerald-500" :
-                        systemHealth === 'yellow' ? "bg-amber-500" : "bg-rose-500"
-                      )}></span>
-                    </span>
-                    <div className="flex flex-col min-w-0">
-                      <span className="text-xs truncate">Todas as Caixas</span>
-                      <span className="text-[10px] text-gray-400 dark:text-gray-500 font-normal truncate">Visualizar todas as conversas</span>
+                        "w-1.5 h-1.5 rounded-full shrink-0",
+                        connectedCount === tenantInstances.length ? "bg-emerald-500" : connectedCount > 0 ? "bg-amber-500" : "bg-rose-500"
+                      )} />
+                      <span>{connectedCount}/{tenantInstances.length} online</span>
                     </div>
                   </div>
-                  {!activeChannelFilter && (
-                    <Check size={14} className="text-[#00a884] shrink-0" />
-                  )}
-                </button>
 
-                <div className="my-1 border-t border-gray-100 dark:border-white/5 mx-2" />
+                  {/* Opção Todas as Caixas com Switch */}
+                  <div
+                    onClick={() => {
+                      clearChannelFilters();
+                    }}
+                    className={cn(
+                      "w-[calc(100%-16px)] mx-2 px-3 py-2 text-left flex items-center justify-between transition-all rounded-xl border cursor-pointer group",
+                      isAllSelected 
+                        ? "bg-emerald-500/10 dark:bg-emerald-500/15 border-emerald-500/30 text-emerald-700 dark:text-emerald-400 shadow-sm" 
+                        : "border-transparent text-gray-700 dark:text-gray-200 hover:bg-gray-100/70 dark:hover:bg-white/5 hover:border-gray-200/50 dark:hover:border-white/5"
+                    )}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className={cn(
+                        "w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-transform group-hover:scale-105 border",
+                        isAllSelected 
+                          ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border-emerald-500/30" 
+                          : "bg-gray-100 dark:bg-white/5 text-gray-500 dark:text-gray-400 border-gray-200/50 dark:border-white/10"
+                      )}>
+                        <Layers size={15} />
+                      </div>
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-xs font-bold truncate">Todas as Caixas</span>
+                        <span className="text-[10px] text-gray-400 dark:text-gray-500 font-normal truncate">Monitorar todas as conversas simultaneamente</span>
+                      </div>
+                    </div>
 
-                {/* Lista das Caixas */}
-                <div className="max-h-60 overflow-y-auto custom-scrollbar flex flex-col gap-0.5 px-1.5">
-                  {tenantInstances.map((inst) => {
-                    const isConn = instancesStatus[inst.id] === 'connected' || instancesStatus[inst.id] === 'connected_local';
-                    const isConnPending = instancesStatus[inst.id] === 'connecting';
-                    const isSelected = activeChannelFilter === inst.id || activeChannelFilter === inst.display_name;
-                    const displayName = inst.display_name || inst.whatsapp_name || inst.name;
-                    const phoneToDisplay = inst.phone_number || inst.settings?.phone_number || inst.settings?.pairing_phone || (inst as any).number;
-
-                    return (
-                      <button
-                        key={inst.id}
-                        onClick={() => {
-                          setActiveChannelFilter(inst.id, displayName);
-                          setActiveDropdown(null);
-                        }}
+                    {/* Switch Toggle para Todas as Caixas */}
+                    <div 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        clearChannelFilters();
+                      }}
+                      className={cn(
+                        "w-9 h-5 flex items-center rounded-full p-0.5 cursor-pointer transition-colors duration-200 shrink-0",
+                        isAllSelected 
+                          ? "bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.35)]" 
+                          : "bg-gray-300 dark:bg-white/10 hover:bg-gray-400 dark:hover:bg-white/20"
+                      )}
+                      role="switch"
+                      aria-checked={isAllSelected}
+                    >
+                      <div 
                         className={cn(
-                          "w-full px-2 py-1.5 text-left flex items-center justify-between transition-colors rounded-xl",
-                          isSelected 
-                            ? "bg-[#00a884]/10 dark:bg-[#00a884]/20 text-[#00a884] dark:text-[#25d366] font-bold" 
-                            : "text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5 font-medium"
+                          "bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-200 ease-in-out",
+                          isAllSelected ? "translate-x-4" : "translate-x-0"
                         )}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="my-1.5 border-t border-gray-100 dark:border-white/5 mx-2" />
+
+                  {/* Subtítulo instrutivo */}
+                  <div className="px-3.5 pb-1 flex items-center justify-between text-[10px] text-gray-400 dark:text-gray-500 font-medium">
+                    <span>SELECIONE UMA OU MAIS CAIXAS:</span>
+                    {hasMultiSelection && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          clearChannelFilters();
+                        }}
+                        className="text-emerald-600 dark:text-emerald-400 hover:underline font-semibold"
                       >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span 
-                            className="w-2.5 h-2.5 rounded-full shrink-0 border border-black/10 dark:border-white/10"
-                            style={{ 
-                              backgroundColor: isConn ? (inst.color || '#10b981') : isConnPending ? '#f59e0b' : '#ef4444' 
-                            }}
-                            title={isConn ? 'Conectado' : isConnPending ? 'Conectando' : 'Desconectado'}
-                          />
-                          <div className="flex flex-col min-w-0">
-                            <span className="text-xs truncate">{displayName}</span>
-                            {phoneToDisplay && (
-                              <span className="text-[10px] text-gray-400 dark:text-gray-500 font-mono font-normal truncate">
-                                {formatPhoneNumber(phoneToDisplay)}
+                        Desmarcar todas
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Lista das Caixas com Switches Individuais */}
+                  <div className="max-h-64 overflow-y-auto custom-scrollbar flex flex-col gap-1 px-2">
+                    {tenantInstances.map((inst) => {
+                      const isConn = instancesStatus[inst.id] === 'connected' || instancesStatus[inst.id] === 'connected_local';
+                      const isConnPending = instancesStatus[inst.id] === 'connecting';
+                      const isSelected = selectedChannelFilters?.includes(inst.id) || (selectedChannelFilters?.length === 0 && activeChannelFilter === inst.id);
+                      const displayName = inst.display_name || inst.whatsapp_name || inst.name;
+                      const phoneToDisplay = inst.phone_number || inst.settings?.phone_number || inst.settings?.pairing_phone || (inst as any).number;
+                      const instColor = inst.color || '#00a884';
+
+                      return (
+                        <div
+                          key={inst.id}
+                          onClick={() => {
+                            toggleChannelFilter(inst.id, displayName);
+                          }}
+                          className={cn(
+                            "w-full px-2.5 py-2 text-left flex items-center justify-between transition-all rounded-xl border cursor-pointer group select-none",
+                            isSelected 
+                              ? "bg-emerald-500/10 dark:bg-emerald-500/15 border-emerald-500/30 text-emerald-700 dark:text-emerald-400 shadow-sm" 
+                              : "border-transparent text-gray-700 dark:text-gray-200 hover:bg-gray-100/70 dark:hover:bg-white/5 hover:border-gray-200/50 dark:hover:border-white/5"
+                          )}
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1 mr-2">
+                            {/* Avatar com cor temática da caixa + indicador de conexão */}
+                            <div className="relative shrink-0">
+                              <div 
+                                className="w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs uppercase transition-transform group-hover:scale-105 shadow-sm border"
+                                style={{ 
+                                  backgroundColor: `${instColor}18`,
+                                  borderColor: `${instColor}35`,
+                                  color: instColor 
+                                }}
+                              >
+                                {displayName ? displayName.slice(0, 2) : 'CX'}
+                              </div>
+
+                              {/* Indicador de Status Operacional Real (Online/Conectando/Offline) */}
+                              <span className="absolute -bottom-0.5 -right-0.5 flex h-2.5 w-2.5">
+                                {isConn && (
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                                )}
+                                <span 
+                                  className={cn(
+                                    "relative inline-flex rounded-full h-2.5 w-2.5 ring-2 ring-white dark:ring-[#161f26]",
+                                    isConn ? "bg-emerald-500" : isConnPending ? "bg-amber-500 animate-pulse" : "bg-rose-500"
+                                  )}
+                                  title={isConn ? 'Online (Conectado)' : isConnPending ? 'Conectando...' : 'Offline (Desconectado)'}
+                                />
                               </span>
-                            )}
+                            </div>
+
+                            {/* Informações da Caixa */}
+                            <div className="flex flex-col min-w-0">
+                              <span className={cn(
+                                "text-xs truncate transition-colors",
+                                isSelected ? "font-bold text-gray-900 dark:text-white" : "font-medium text-gray-700 dark:text-gray-200"
+                              )}>
+                                {displayName}
+                              </span>
+                              <div className="flex items-center gap-1.5 text-[10px] text-gray-400 dark:text-gray-500 font-normal truncate">
+                                {phoneToDisplay ? (
+                                  <span className="font-mono">{formatPhoneNumber(phoneToDisplay)}</span>
+                                ) : (
+                                  <span>{isConn ? 'Conectada' : isConnPending ? 'Conectando...' : 'Desconectada'}</span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Lado Direito: Status Tag e Switch Toggle */}
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className={cn(
+                              "text-[9px] font-semibold px-2 py-0.5 rounded-full border tracking-wide uppercase hidden sm:inline-block",
+                              isConn 
+                                ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20" 
+                                : isConnPending
+                                  ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"
+                                  : "bg-rose-500/10 text-rose-500 dark:text-rose-400 border-rose-500/20"
+                            )}>
+                              {isConn ? 'Online' : isConnPending ? 'Conectando' : 'Offline'}
+                            </span>
+
+                            {/* Switch Toggle */}
+                            <div 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleChannelFilter(inst.id, displayName);
+                              }}
+                              className={cn(
+                                "w-9 h-5 flex items-center rounded-full p-0.5 cursor-pointer transition-colors duration-200 shrink-0",
+                                isSelected 
+                                  ? "bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.35)]" 
+                                  : "bg-gray-300 dark:bg-white/10 hover:bg-gray-400 dark:hover:bg-white/20"
+                              )}
+                              role="switch"
+                              aria-checked={isSelected}
+                              title={isSelected ? `Desmarcar ${displayName}` : `Selecionar ${displayName}`}
+                            >
+                              <div 
+                                className={cn(
+                                  "bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-200 ease-in-out",
+                                  isSelected ? "translate-x-4" : "translate-x-0"
+                                )}
+                              />
+                            </div>
                           </div>
                         </div>
-                        {isSelected && (
-                          <Check size={14} className="text-[#00a884] shrink-0" />
-                        )}
-                      </button>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
+
+                  {/* Rodapé com Resumo e Botão Concluir */}
+                  <div className="mt-2 pt-2 px-3 border-t border-gray-100 dark:border-white/5 flex items-center justify-between">
+                    <span className="text-[11px] text-gray-500 dark:text-gray-400 font-medium">
+                      {hasMultiSelection ? (
+                        <>
+                          <strong className="text-emerald-600 dark:text-emerald-400 font-bold">{selectedChannelFilters.length}</strong> {selectedChannelFilters.length === 1 ? 'caixa ativa' : 'caixas ativas'}
+                        </>
+                      ) : (
+                        'Todas as caixas ativas'
+                      )}
+                    </span>
+                    <button
+                      onClick={() => setActiveDropdown(null)}
+                      className="text-xs bg-[#00a884] hover:bg-[#008f6f] text-white font-semibold py-1 px-3 rounded-lg shadow-sm transition-all active:scale-95"
+                    >
+                      Concluir
+                    </button>
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
 
           {/* Botão Modo Ticket Ativo */}

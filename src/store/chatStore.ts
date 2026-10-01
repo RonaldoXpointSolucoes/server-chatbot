@@ -598,6 +598,10 @@ interface ChatState {
   openQRModal: (instanceId?: string | null) => void;
   closeQRModal: () => void;
 
+  selectedChannelFilters: string[];
+  setSelectedChannelFilters: (channelIds: string[]) => void;
+  toggleChannelFilter: (channelId: string, channelName?: string | null) => void;
+  clearChannelFilters: () => void;
   setActiveChannelFilter: (channelId: string | null, channelName?: string) => void;
   setEvolutionConnection: (status: boolean, instanceName?: string | null) => void;
   setActiveChat: (id: string | null) => void;
@@ -1047,6 +1051,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
   appVersion: null,
   activeChannelFilter: localStorage.getItem('activeChannelFilter') || null,
   activeChannelName: localStorage.getItem('activeChannelName') || null,
+  selectedChannelFilters: (() => {
+    try {
+      const saved = localStorage.getItem('selectedChannelFilters');
+      if (saved) return JSON.parse(saved);
+      const single = localStorage.getItem('activeChannelFilter');
+      return single ? [single] : [];
+    } catch (e) {
+      return [];
+    }
+  })(),
   isChannelLoading: false,
   isQRModalOpen: false,
   qrModalTargetInstance: null,
@@ -1951,8 +1965,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
       localStorage.removeItem('activeChannelName');
     }
 
+    const updatedList = id ? [id] : [];
+    try {
+      localStorage.setItem('selectedChannelFilters', JSON.stringify(updatedList));
+    } catch (e) {}
+
     // Mantém os contatos atuais exibidos durante o carregamento dos novos contatos para transição suave
-    set({ activeChannelFilter: id, activeChannelName: name || null, activeChatId: null, isChannelLoading: true });
+    set({ 
+      activeChannelFilter: id, 
+      activeChannelName: name || null, 
+      selectedChannelFilters: updatedList,
+      activeChatId: null, 
+      isChannelLoading: true 
+    });
 
     // Timer de segurança para desativar isChannelLoading em caso de oscilação de rede
     setTimeout(() => {
@@ -1962,6 +1987,99 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }, 5000);
 
     // Recarrega os contatos baseados no novo filtro de canal de imediato
+    get().fetchInitialData();
+  },
+
+  setSelectedChannelFilters: (ids: string[]) => {
+    try {
+      localStorage.setItem('selectedChannelFilters', JSON.stringify(ids));
+    } catch (e) {}
+
+    const singleId = ids.length === 1 ? ids[0] : null;
+    if (singleId) {
+      localStorage.setItem('activeChannelFilter', singleId);
+    } else {
+      localStorage.removeItem('activeChannelFilter');
+      localStorage.removeItem('activeChannelName');
+    }
+
+    set({ 
+      selectedChannelFilters: ids, 
+      activeChannelFilter: singleId, 
+      activeChannelName: singleId ? get().activeChannelName : null,
+      activeChatId: null, 
+      isChannelLoading: true 
+    });
+
+    setTimeout(() => {
+      if (get().isChannelLoading) {
+        set({ isChannelLoading: false });
+      }
+    }, 4000);
+
+    get().fetchInitialData();
+  },
+
+  toggleChannelFilter: (channelId: string, channelName?: string | null) => {
+    const current = get().selectedChannelFilters || [];
+    let updated: string[];
+    if (current.includes(channelId)) {
+      updated = current.filter(id => id !== channelId);
+    } else {
+      updated = [...current, channelId];
+    }
+
+    try {
+      localStorage.setItem('selectedChannelFilters', JSON.stringify(updated));
+    } catch (e) {}
+
+    const singleId = updated.length === 1 ? updated[0] : null;
+    if (singleId) {
+      localStorage.setItem('activeChannelFilter', singleId);
+      if (channelName) localStorage.setItem('activeChannelName', channelName);
+    } else {
+      localStorage.removeItem('activeChannelFilter');
+      localStorage.removeItem('activeChannelName');
+    }
+
+    set({ 
+      selectedChannelFilters: updated, 
+      activeChannelFilter: singleId, 
+      activeChannelName: singleId ? (channelName || null) : null,
+      activeChatId: null, 
+      isChannelLoading: true 
+    });
+
+    setTimeout(() => {
+      if (get().isChannelLoading) {
+        set({ isChannelLoading: false });
+      }
+    }, 4000);
+
+    get().fetchInitialData();
+  },
+
+  clearChannelFilters: () => {
+    try {
+      localStorage.setItem('selectedChannelFilters', JSON.stringify([]));
+      localStorage.removeItem('activeChannelFilter');
+      localStorage.removeItem('activeChannelName');
+    } catch (e) {}
+
+    set({ 
+      selectedChannelFilters: [], 
+      activeChannelFilter: null, 
+      activeChannelName: null,
+      activeChatId: null, 
+      isChannelLoading: true 
+    });
+
+    setTimeout(() => {
+      if (get().isChannelLoading) {
+        set({ isChannelLoading: false });
+      }
+    }, 4000);
+
     get().fetchInitialData();
   },
   setActiveChat: (id) => {

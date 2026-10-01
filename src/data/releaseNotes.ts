@@ -20,6 +20,37 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.6.2',
+    date: '2026-10-01',
+    summary: 'Filtro Multicanal de Caixas de Entrada com Switches Interativos, Dual-Indicator de Status e Glassmorphism SaaS Premium',
+    notes: [
+      {
+        id: '7.6.2-1',
+        category: 'features',
+        title: 'Monitoramento Multicanal com Switches Toggles Individuais',
+        description: 'Implementado seletor multicanal com switches interativos ao lado de cada caixa de entrada, permitindo monitorar conversas de duas, três ou mais caixas simultaneamente com persistência local instantânea.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.6.2-2',
+        category: 'improvements',
+        title: 'Dual-Indicator: Separação de Identidade da Caixa vs. Status Operacional',
+        description: 'Desacoplada a cor de identidade do canal do status real de conexão. Cada caixa possui avatar colorido estilizado e indicador independente de status operacional (Online verde com ping, Âmbar conectando e Offline vermelho).',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      },
+      {
+        id: '7.6.2-3',
+        category: 'improvements',
+        title: 'Design System SaaS Premium & Contador de Conexão em Tempo Real',
+        description: 'Menu suspenso de Caixas de Entrada modernizado com Glassmorphism de alta densidade (backdrop-blur-2xl), contador dinâmico de instâncias online no cabeçalho e botão de conclusão rápida sem fechamento involuntário.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      }
+    ]
+  },
+  {
     version: '7.6.1',
     date: '2026-10-01',
     summary: 'Estabilidade de Ordenação no Chat ao Resolver Tickets, Respostas Prontas antes das Pastas e Persistência do Kanban',
