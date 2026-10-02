@@ -262,17 +262,32 @@ export default function InstancesDashboard() {
     fetchInstances();
     fetchWacallsSessions().catch(console.error);
 
-    // Inscrição para Realtime Sync
-    const channel = supabase
-      .channel('public:whatsapp_instances')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'whatsapp_instances' }, () => {
+    // Inscrição para Realtime Sync com filtro de tenant e debounce
+    const currentT = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+    const channelName = currentT ? `instances_sync_${currentT}` : 'public:whatsapp_instances';
+    const channelFilter = currentT 
+      ? { event: '*', schema: 'public', table: 'whatsapp_instances', filter: `tenant_id=eq.${currentT}` }
+      : { event: '*', schema: 'public', table: 'whatsapp_instances' };
+
+    let instDebounceTimer: any = null;
+    const debouncedFetchInstances = () => {
+      if (instDebounceTimer) clearTimeout(instDebounceTimer);
+      instDebounceTimer = setTimeout(() => {
         fetchInstances();
+      }, 1500);
+    };
+
+    const channel = supabase
+      .channel(channelName)
+      .on('postgres_changes', channelFilter as any, () => {
+        debouncedFetchInstances();
       })
       .subscribe();
 
     fetchActiveInstance();
 
     return () => {
+      if (instDebounceTimer) clearTimeout(instDebounceTimer);
       supabase.removeChannel(channel);
     };
   }, []);

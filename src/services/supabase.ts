@@ -93,6 +93,19 @@ const customFetch = async (input: RequestInfo | URL, init?: RequestInit, retries
           }
         }));
       }
+    } else if (response.status === 402) {
+      console.error('[Supabase Cloud] SERVIÇOS RESTRITOS (HTTP 402): A cota de mensagens Realtime foi excedida e o Spend Cap está ativado na organização. Desative o Spend Cap no painel de Billing do Supabase para restaurar o serviço.');
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('supabase-quota-error', {
+          detail: {
+            status: 402,
+            service: 'Supabase Cloud (Billing / Quota)',
+            title: '🚫 Serviços Restritos no Supabase (Cota Excedida / HTTP 402)',
+            message: 'O Supabase bloqueou as requisições porque o limite da cota do plano Pro foi atingido e o Spend Cap está ativado na organização.',
+            url: urlStr
+          }
+        }));
+      }
     } else if (response.ok) {
       supabaseCircuitBreaker.recordSuccess();
       if (hasReportedServiceError) {

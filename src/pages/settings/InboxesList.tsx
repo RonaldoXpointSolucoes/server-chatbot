@@ -182,13 +182,22 @@ export default function InboxesList() {
       supabase.removeChannel(existingChannel);
     }
 
+    let inboxesDebounceTimer: any = null;
+    const debouncedFetchInstances = () => {
+      if (inboxesDebounceTimer) clearTimeout(inboxesDebounceTimer);
+      inboxesDebounceTimer = setTimeout(() => {
+        fetchInstances();
+      }, 1500);
+    };
+
     const channel = supabase.channel(channelName)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'whatsapp_instances', filter: `tenant_id=eq.${tenantId}` }, () => {
-         fetchInstances();
+         debouncedFetchInstances();
       })
       .subscribe();
 
     return () => {
+      if (inboxesDebounceTimer) clearTimeout(inboxesDebounceTimer);
       supabase.removeChannel(channel);
     };
   }, [tenantId]);

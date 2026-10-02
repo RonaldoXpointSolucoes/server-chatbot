@@ -530,19 +530,28 @@ export default function InstanceManagerStandalone() {
       fetchCompanies();
       checkEngineHealth();
 
-      // Assinar alterações em tempo real via Supabase Realtime (atualiza sem piscar a UI)
+      // Assinar alterações em tempo real via Supabase Realtime (atualiza sem piscar a UI com debounce)
+      let masterDebounceTimer: any = null;
+      const debouncedFetchInstances = () => {
+        if (masterDebounceTimer) clearTimeout(masterDebounceTimer);
+        masterDebounceTimer = setTimeout(() => {
+          fetchInstances(false);
+        }, 1500);
+      };
+
       const channel = supabase
         .channel('public:whatsapp_instances_master')
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'whatsapp_instances' },
           () => {
-            fetchInstances(false);
+            debouncedFetchInstances();
           }
         )
         .subscribe();
 
       return () => {
+        if (masterDebounceTimer) clearTimeout(masterDebounceTimer);
         supabase.removeChannel(channel);
       };
     }

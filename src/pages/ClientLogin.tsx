@@ -1,16 +1,21 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Building2, ArrowRight, Loader2, AlertCircle, Terminal, X, ChevronRight, Eye, EyeOff, Camera, ShieldCheck, KeyRound, UserCheck, RefreshCw } from 'lucide-react';
+import { Building2, ArrowRight, Loader2, AlertCircle, Terminal, X, ChevronRight, Eye, EyeOff, Camera, ShieldCheck, KeyRound, UserCheck, RefreshCw, Activity } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import ThemeToggle from '../components/ThemeToggle';
 import { useChatStore } from '../store/chatStore';
 import { geminiService } from '../services/geminiService';
+import LoginErrorAlert from '../components/LoginErrorAlert';
+import InfraHealthModal from '../components/InfraHealthModal';
+import { parseLoginError, LoginErrorInfo } from '../utils/authErrorDiagnostics';
 
 export default function ClientLogin() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [loginError, setLoginError] = useState<LoginErrorInfo | null>(null);
+  const [infraModalOpen, setInfraModalOpen] = useState(false);
   const [keepLogged, setKeepLogged] = useState(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('keep_logged') === 'true';
@@ -210,7 +215,9 @@ export default function ClientLogin() {
         });
 
         if (authError || !authResult) {
-           setErrorMsg("Erro de sincronização de credenciais de Face ID.");
+           const parsed = parseLoginError(authError, "Erro de sincronização de credenciais de Face ID.");
+           setLoginError(parsed);
+           setErrorMsg(parsed.message);
            setIsLoading(false);
            return;
         }
@@ -275,7 +282,9 @@ export default function ClientLogin() {
         });
 
         if (signInError) {
-           setErrorMsg("Erro de sincronia de sessão do Face ID no Auth.");
+           const parsed = parseLoginError(signInError, "Erro de sincronia de sessão do Face ID no Auth.");
+           setLoginError(parsed);
+           setErrorMsg(parsed.message);
            setIsLoading(false);
            return;
         }
@@ -376,8 +385,9 @@ export default function ClientLogin() {
       });
 
       if (authError || !authResult) {
-        addDevLog('LINK_FACE_AUTH_ERROR', 'Credenciais inválidas no banco de dados para vínculo.', 'error');
-        setFaceVerifyError("E-mail ou senha inválidos.");
+        addDevLog('LINK_FACE_AUTH_ERROR', authError?.message || 'Credenciais inválidas no banco de dados para vínculo.', 'error');
+        const parsed = parseLoginError(authError, "E-mail ou senha inválidos.");
+        setFaceVerifyError(parsed.message);
         setFaceScanning(false);
         return;
       }
@@ -395,7 +405,8 @@ export default function ClientLogin() {
 
       if (insertError) {
         addDevLog('LINK_FACE_SAVE_ERROR', insertError.message || JSON.stringify(insertError), 'error');
-        setFaceVerifyError("Erro ao salvar biometria facial na sua conta.");
+        const parsed = parseLoginError(insertError, "Erro ao salvar biometria facial na sua conta.");
+        setFaceVerifyError(parsed.message);
         setFaceScanning(false);
         return;
       }
@@ -411,7 +422,8 @@ export default function ClientLogin() {
 
       if (signInError) {
          addDevLog('LINK_SUPABASE_AUTH_ERROR', signInError.message, 'error');
-         setFaceVerifyError("Erro de sincronia de sessão corporativa.");
+         const parsed = parseLoginError(signInError, "Erro de sincronia de sessão corporativa.");
+         setFaceVerifyError(parsed.message);
          setFaceScanning(false);
          return;
       }
@@ -533,6 +545,7 @@ export default function ClientLogin() {
 
     setIsLoading(true);
     setErrorMsg('');
+    setLoginError(null);
     setDevLogs([]); // Limpa logs anteriores
     useChatStore.getState().clearStore(); // Limpa store global antes do login
 
@@ -554,14 +567,18 @@ export default function ClientLogin() {
 
       if (authError) {
          addDevLog('AUTH_RPC_ERROR', authError.message || JSON.stringify(authError), 'error');
-         setErrorMsg('Erro interno no servidor ao validar credenciais.');
+         const parsed = parseLoginError(authError, 'Erro interno no servidor ao validar credenciais.');
+         setLoginError(parsed);
+         setErrorMsg(parsed.message);
          setIsLoading(false);
          return;
       }
 
       if (!authResult) {
          addDevLog('AUTH_RPC_NOT_FOUND', 'Nenhuma credencial válida encontrada no banco.', 'error');
-         setErrorMsg('E-mail ou senha inválidos.');
+         const parsed = parseLoginError({ message: 'E-mail ou senha inválidos.' });
+         setLoginError(parsed);
+         setErrorMsg(parsed.message);
          setIsLoading(false);
          return;
       }
@@ -596,7 +613,9 @@ export default function ClientLogin() {
       } else if (authResult.type === 'agent') {
          if (!authResult.parent) {
             addDevLog('FETCH_PARENT_COMPANY_NOT_FOUND', 'Empresa matriz não encontrada para o agente.', 'error');
-            setErrorMsg('Configuração inválida. A empresa matriz foi excluída ou desativada.');
+            const parsed = parseLoginError({ message: 'Configuração inválida. A empresa matriz foi excluída ou desativada.' });
+            setLoginError(parsed);
+            setErrorMsg(parsed.message);
             setIsLoading(false);
             return;
          }
@@ -608,7 +627,9 @@ export default function ClientLogin() {
          
          if (allowedCompanies.length === 0) {
             addDevLog('NO_ALLOWED_COMPANIES', 'Agente não tem empresas permitidas.', 'error');
-            setErrorMsg('Você não tem acesso a nenhuma empresa. Contate o administrador.');
+            const parsed = parseLoginError({ message: 'Você não tem acesso a nenhuma empresa. Contate o administrador.' });
+            setLoginError(parsed);
+            setErrorMsg(parsed.message);
             setIsLoading(false);
             return;
          }
@@ -622,7 +643,9 @@ export default function ClientLogin() {
 
       if (tenantData.status === 'suspended') {
         addDevLog('LOGIN_VALIDATION_FAILED', 'Acesso bloqueado: Status da empresa é suspended.', 'error');
-        setErrorMsg('Acesso bloqueado. Contate o administrador.');
+        const parsed = parseLoginError({ message: 'Acesso bloqueado. Status da empresa suspenso. Contate o administrador.' });
+        setLoginError(parsed);
+        setErrorMsg(parsed.message);
         setIsLoading(false);
         return;
       }
@@ -636,7 +659,9 @@ export default function ClientLogin() {
 
       if (signInError) {
          addDevLog('SUPABASE_AUTH_ERROR', signInError.message, 'error');
-         setErrorMsg('Erro de sincronia de sessão. Senha pode estar incorreta no Auth. Contate o suporte.');
+         const parsed = parseLoginError(signInError, 'Erro de sincronia de sessão. Senha pode estar incorreta no Auth. Contate o suporte.');
+         setLoginError(parsed);
+         setErrorMsg(parsed.message);
          setIsLoading(false);
          return;
       }
@@ -677,10 +702,12 @@ export default function ClientLogin() {
 
       addDevLog('LOGIN_SUCCESS_FINAL', 'Processo de login concluído com sucesso. Redirecionando...', 'success');
       navigate('/chat', { replace: true });
-    } catch (err) {
+    } catch (err: any) {
       addDevLog('UNHANDLED_EXCEPTION', err, 'error');
       console.error(err);
-      setErrorMsg('Erro de conexão com o banco de dados.');
+      const parsed = parseLoginError(err, 'Erro de conexão com o banco de dados.');
+      setLoginError(parsed);
+      setErrorMsg(parsed.message);
     } finally {
       setIsLoading(false);
     }
@@ -774,12 +801,27 @@ export default function ClientLogin() {
             Entrar com Face ID
           </button>
           
-          {errorMsg && (
-            <div className="flex items-center gap-2 mt-4 text-red-500 text-sm font-medium bg-red-50 dark:bg-red-500/10 p-3 rounded-lg animate-in fade-in">
-              <AlertCircle size={16} />
-              {errorMsg}
-            </div>
-          )}
+          {/* Card de Alerta Rico com Diagnóstico Real do Erro */}
+          <LoginErrorAlert
+            error={loginError}
+            onClear={() => {
+              setLoginError(null);
+              setErrorMsg('');
+            }}
+            onOpenDiagnostics={() => setInfraModalOpen(true)}
+          />
+
+          {/* Botão de Diagnóstico de Servidores (Status da Nuvem) */}
+          <div className="pt-2 text-center">
+            <button
+              type="button"
+              onClick={() => setInfraModalOpen(true)}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-500 hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-400 transition-colors py-1.5 px-3 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer"
+            >
+              <Activity size={14} className="text-blue-500 shrink-0" />
+              <span>Diagnóstico de Servidores (Status da Nuvem)</span>
+            </button>
+          </div>
         </form>
       </div>
 
@@ -1215,6 +1257,12 @@ export default function ClientLogin() {
           100% { transform: rotate(360deg); }
         }
       `}</style>
+
+      {/* Modal de Diagnóstico de Infraestrutura */}
+      <InfraHealthModal
+        isOpen={infraModalOpen}
+        onClose={() => setInfraModalOpen(false)}
+      />
     </div>
   );
 }

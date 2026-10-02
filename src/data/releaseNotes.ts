@@ -20,6 +20,37 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.6.3',
+    date: '2026-10-01',
+    summary: 'Diagnóstico Transparente de Erros no Login (Supabase Quota 402 vs Coolify), Modal de Saúde da Infraestrutura e Otimização do Consumo Realtime',
+    notes: [
+      {
+        id: '7.6.3-1',
+        category: 'features',
+        title: 'Diagnóstico Inteligente de Infraestrutura & LoginErrorAlert',
+        description: 'Implementado card rico de diagnóstico no Workspace Login que identifica a causa raiz exata de falhas de autenticação (Cota Excedida / HTTP 402 do Supabase, instabilidade de servidor, rede ou credenciais incorretas), com link direto para o Faturamento e detalhes técnicos da API.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.6.3-2',
+        category: 'features',
+        title: 'Modal de Saúde dos Servidores em Tempo Real (InfraHealthModal)',
+        description: 'Novo botão no login que executa testes de ping simultâneos no Supabase Cloud, no motor WhatsApp (Coolify Node.js) e na conexão de internet, emitindo um veredito automático para que o usuário saiba exatamente qual serviço está com instabilidade.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.6.3-3',
+        category: 'improvements',
+        title: 'Otimização e Estancamento de Quota Realtime no Frontend',
+        description: 'Aplicados filtros estritos por tenant (tenant_id=eq...) e debounces de 1,5s nos canais Realtime de instâncias de WhatsApp no MainSidebar, InstancesDashboard, InboxesList e InstanceManager, prevenindo tempestades de mensagens causadas pelo heartbeat a cada 15s.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      }
+    ]
+  },
+  {
     version: '7.6.2',
     date: '2026-10-01',
     summary: 'Filtro Multicanal de Caixas de Entrada com Switches Interativos, Dual-Indicator de Status e Glassmorphism SaaS Premium',

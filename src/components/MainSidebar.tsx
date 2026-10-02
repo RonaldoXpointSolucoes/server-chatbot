@@ -583,9 +583,17 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
       supabase.removeChannel(existingSidebarChannel);
     }
 
+    let debounceTimer: any = null;
+    const debouncedFetchInstances = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        fetchInstances();
+      }, 1500);
+    };
+
     const channel = supabase.channel(sidebarChannelName)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'whatsapp_instances' }, () => {
-         fetchInstances();
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'whatsapp_instances', filter: `tenant_id=eq.${tenantId}` }, () => {
+         debouncedFetchInstances();
       })
       .subscribe();
 
@@ -652,6 +660,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
       .subscribe();
 
     return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
       supabase.removeChannel(channel);
       supabase.removeChannel(permsChannel);
       supabase.removeChannel(companyChannel);
