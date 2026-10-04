@@ -909,7 +909,7 @@ fetch("${ENGINE_URL}/message/sendMedia", requestOptions)
               <div className="space-y-4">
                 <p className="text-xs text-slate-400 leading-relaxed">
                   Para que a I.A responda às conversas dos clientes no WhatsApp de forma personalizada e utilize as ferramentas inteligentes, você pode configurar uma chave individual de API do Gemini. 
-                  Gere sua chave gratuitamente no <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-[#00a884] hover:underline font-semibold inline-flex items-center gap-0.5">Google AI Studio <ExternalLink size={10} className="inline" /></a> (as chaves oficiais iniciam com <code className="text-emerald-300 font-mono text-[11px] bg-emerald-950/50 px-1.5 py-0.5 rounded border border-emerald-500/20">AIzaSy...</code>).
+                  Gere sua chave gratuitamente no <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-[#00a884] hover:underline font-semibold inline-flex items-center gap-0.5">Google AI Studio <ExternalLink size={10} className="inline" /></a> (as chaves oficiais iniciam com <code className="text-emerald-300 font-mono text-[11px] bg-emerald-950/50 px-1.5 py-0.5 rounded border border-emerald-500/20">AIzaSy...</code> ou <code className="text-emerald-300 font-mono text-[11px] bg-emerald-950/50 px-1.5 py-0.5 rounded border border-emerald-500/20">AQ....</code>).
                 </p>
 
                 {/* MODO PROTEGIDO (Chave salva e mascarada, impossível de ver o miolo ou copiar) */}
@@ -1143,7 +1143,7 @@ fetch("${ENGINE_URL}/message/sendMedia", requestOptions)
                           <ExternalLink size={11} />
                         </a>
                         <span className="text-slate-600 hidden sm:inline">•</span>
-                        <span className="text-[11px] text-slate-500 hidden sm:inline">Mínimo 20 caracteres • Prefixo AIza...</span>
+                        <span className="text-[11px] text-slate-500 hidden sm:inline">Mínimo 20 caracteres • Prefixo AIza... ou AQ....</span>
                       </div>
                     </div>
 
@@ -1156,7 +1156,7 @@ fetch("${ENGINE_URL}/message/sendMedia", requestOptions)
                           value={newGeminiKeyInput}
                           onChange={(e) => setNewGeminiKeyInput(e.target.value)}
                           onCopy={(e) => e.preventDefault()}
-                          placeholder="Cole sua nova chave (ex: AIzaSy...)"
+                          placeholder="Cole sua nova chave (ex: AIzaSy... ou AQ....)"
                           className="w-full bg-[#141416]/95 border border-[#2a2a2f] rounded-xl px-4 py-3 text-sm font-mono text-emerald-300 focus:outline-none focus:border-[#00a884]/60 transition-colors"
                         />
                       </div>

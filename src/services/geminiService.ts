@@ -40,9 +40,10 @@ class GeminiService {
 
   getApiKey(): string {
     const isValidKey = (key: string | null | undefined): boolean => {
-      if (!key || key.length < 30) return false;
+      if (!key || typeof key !== 'string') return false;
       const clean = key.replace(/^['"]|['"]$/g, '').trim();
-      return clean.length >= 30 && clean.startsWith('AIza') && !this.failedKeys.has(clean);
+      const isOfficialFormat = clean.startsWith('AIza') || clean.startsWith('AQ.');
+      return clean.length >= 25 && isOfficialFormat && !this.failedKeys.has(clean);
     };
 
     // 1. Check local override
@@ -64,12 +65,10 @@ class GeminiService {
       return fallbackApiKey.replace(/^['"]|['"]$/g, '').trim();
     }
 
-    // 4. Fallback to Google Cloud API key if it starts with AIza
+    // 4. Fallback to Google Cloud API key if it starts with AIza or AQ.
     if (isValidKey(fallbackGcpKey)) {
       const cleanGcp = fallbackGcpKey.replace(/^['"]|['"]$/g, '').trim();
-      if (cleanGcp.startsWith('AIza')) {
-        return cleanGcp;
-      }
+      return cleanGcp;
     }
 
     // 5. Fallback Mestre do Ecossistema ChatBoot
@@ -88,7 +87,7 @@ class GeminiService {
 
   isConfigured(): boolean {
     const key = this.getApiKey();
-    return key.length >= 30 && key.startsWith('AIza');
+    return key.length >= 25 && (key.startsWith('AIza') || key.startsWith('AQ.'));
   }
 
   async testConnection(customKey?: string): Promise<{ ok: boolean; message: string; model?: string; latencyMs?: number }> {
@@ -96,8 +95,9 @@ class GeminiService {
     if (!key) {
       return { ok: false, message: 'Nenhuma chave de API configurada.' };
     }
-    if (!key.startsWith('AIza') || key.length < 30) {
-      return { ok: false, message: 'Formato inválido. Chaves oficiais do Google AI Studio iniciam com "AIza" e possuem no mínimo 30 caracteres.' };
+    const isOfficialFormat = key.startsWith('AIza') || key.startsWith('AQ.');
+    if (!isOfficialFormat || key.length < 25) {
+      return { ok: false, message: 'Formato inválido. Chaves oficiais do Google (AI Studio ou Cloud/Vertex) iniciam com "AIza" ou "AQ." e possuem no mínimo 25 caracteres.' };
     }
 
     const startTime = Date.now();
@@ -898,9 +898,77 @@ Seja extremamente prático, direto, profissional e com foco em código limpo, se
       }
     }
 
-    const result = await model.generateContent(parts);
-    const response = await result.response;
-    const text = response.text().trim();
+    let text = '';
+    try {
+      const result = await model.generateContent(parts);
+      const response = await result.response;
+      text = response.text().trim();
+    } catch (err: any) {
+      const errMsg = err?.message || String(err);
+      const isAuthOrPerm = errMsg.includes('401') || errMsg.includes('Unauthorized') || errMsg.includes('ACCESS_TOKEN_TYPE_UNSUPPORTED') || errMsg.includes('UNAUTHENTICATED') || errMsg.includes('403') || errMsg.includes('PERMISSION_DENIED') || errMsg.includes('API_KEY_SERVICE_BLOCKED');
+      if (isAuthOrPerm) {
+        this.markKeyAsFailed(this.getApiKey(), errMsg);
+        if (this.isConfigured()) {
+          console.warn('[GeminiService] Falha na chave inicial. Tentando contingência com chave de fallback...');
+          const fallbackModel = this.getGenAI().getGenerativeModel({
+            model: "gemini-2.5-flash",
+            generationConfig: {
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: "object",
+                properties: {
+                  title: {
+                    type: "string",
+                    description: "Título curto, claro e profissional da funcionalidade, melhoria ou correção (ex: '[Chat] Envio de Áudio com Transcrição e Fotos')."
+                  },
+                  category: {
+                    type: "string",
+                    description: "Categoria principal: 'Chat', 'Sistema / SaaS', 'Backend / API', 'I.A / Gemini', 'Integração', 'UI/UX' ou 'Correção'."
+                  },
+                  priority: {
+                    type: "integer",
+                    description: "1 (Normal/Baixa), 2 (Média/Importante) ou 3 (Alta/Crítica)."
+                  },
+                  tags: {
+                    type: "array",
+                    description: "Lista de 3 a 6 tags curtas e técnicas (ex: ['Frontend', 'Mobile-First', 'Supabase', 'IA', 'Video', 'UI/UX']).",
+                    items: { type: "string" }
+                  },
+                  summary: {
+                    type: "string",
+                    description: "Resumo executivo de 1 a 3 linhas explicando com precisão o que será feito e o valor agregado para o usuário/negócio."
+                  },
+                  suggested_stage_label: {
+                    type: "string",
+                    description: "Etapa recomendada para o card (ex: 'Backlog / Ideias', 'Em Análise' ou 'Em Desenvolvimento')."
+                  },
+                  recommended_skills: {
+                    type: "array",
+                    description: "Lista de 1 a 4 IDs exatos de skills do framework Superpowers / Antigravity mais adequadas para executar esta demanda técnica.",
+                    items: { type: "string" }
+                  },
+                  skills_rationale: {
+                    type: "string",
+                    description: "Justificativa técnica em tópicos explicando objetivamente por que cada uma das skills selecionadas foi escolhida para este card."
+                  },
+                  technical_plan: {
+                    type: "string",
+                    description: "Plano técnico completo e altamente estruturado em Markdown."
+                  }
+                },
+                required: ["title", "category", "priority", "tags", "summary", "suggested_stage_label", "technical_plan", "recommended_skills", "skills_rationale"]
+              }
+            }
+          });
+          const retryResult = await fallbackModel.generateContent(parts);
+          text = (await retryResult.response).text().trim();
+        } else {
+          throw err;
+        }
+      } else {
+        throw err;
+      }
+    }
     try {
       const cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();
       const parsed = JSON.parse(cleaned);

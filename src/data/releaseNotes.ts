@@ -20,6 +20,37 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.6.9',
+    date: '2026-10-04',
+    summary: 'Compatibilidade Plena com Chaves Oficiais Google Formatos AQ. e AIza, Fallback Mestre Resiliente e Estabilização do Criador Multimodal de Cards',
+    notes: [
+      {
+        id: '7.6.9-1',
+        category: 'fixes',
+        title: 'Suporte Nativo a Chaves Google Formato AQ. e AIza no Gemini Service',
+        description: 'Correção no validador de chaves do Gemini que bloqueava chaves oficiais iniciadas por "AQ." (padrão Google Cloud / Vertex AI e chaves de contingência mestre), eliminando o alerta "Chave de API do Gemini não configurada".',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      },
+      {
+        id: '7.6.9-2',
+        category: 'improvements',
+        title: 'Resiliência com Auto-Contingência na Geração Multimodal do Kanban',
+        description: 'Implementado mecanismo de auto-recuperação transparente na geração de planos com IA: em caso de falha de autenticação ou expiração da chave ativa, o sistema aciona automaticamente a contingência sem interrupção para o usuário.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      },
+      {
+        id: '7.6.9-3',
+        category: 'improvements',
+        title: 'Refinamento das Telas de Credenciais e Testes de Conexão',
+        description: 'Ajustes nos painéis de Configurações da Empresa e Auditoria de Chaves para refletir o reconhecimento dos padrões AIzaSy... e AQ.... com validação em tempo real.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      }
+    ]
+  },
+  {
     version: '7.6.8',
     date: '2026-10-04',
     summary: 'Integração Completa do Framework Superpowers (15 Skills) ao Criador Multimodal de Cards com IA do Kanban, Catálogo Visual Interativo e Protocolo de Execução Técnica na Fila Dev',
