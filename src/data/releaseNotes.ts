@@ -20,6 +20,45 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.6.8',
+    date: '2026-10-04',
+    summary: 'Integração Completa do Framework Superpowers (15 Skills) ao Criador Multimodal de Cards com IA do Kanban, Catálogo Visual Interativo e Protocolo de Execução Técnica na Fila Dev',
+    notes: [
+      {
+        id: '7.6.8-1',
+        category: 'features',
+        title: 'Diagnóstico e Ativação de Skills do Superpowers via IA Multimodal',
+        description: 'O Gemini 2.5 analisa agora todas as entradas do Kanban (áudio gravado por voz, texto descritivo, prints de tela e vídeos de demonstração) e seleciona de 1 a 4 skills do Superpowers ideais para guiar a solução (ex: systematic-debugging, test-driven-development, verification-before-completion).',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.6.8-2',
+        category: 'features',
+        title: 'Catálogo Visual Interativo de Skills no Modal Multimodal',
+        description: 'Novo painel dinâmico no modal do Kanban exibindo badges das skills selecionadas, botão interativo para adicionar/remover habilidades do catálogo oficial de 15 skills e a Justificativa Técnica da IA.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.6.8-3',
+        category: 'improvements',
+        title: 'Protocolo de Execução de Skills Injetado nas Notas do Card',
+        description: 'Os cards gerados armazenam no campo de notas a seção estruturada com comandos @skill:id e critérios práticos para que desenvolvedores e IAs da Fila Dev executem com qualidade sênior.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      },
+      {
+        id: '7.6.8-4',
+        category: 'improvements',
+        title: 'Extração Automática de Skills Recomendadas na Fila Dev',
+        description: 'O script get_dev_queue.cjs agora extrai o array recommended_skills de cada card, integrando a esteira autônoma às diretrizes mandatórias do framework Superpowers.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      }
+    ]
+  },
+  {
     version: '7.6.7',
     date: '2026-10-04',
     summary: 'Correção de Visibilidade do Feed Geral ao Selecionar Todas as Caixas, Empty State Educativo para Minhas Conversas e Redimensionamento Perfeito do Popover de Caixas no Desktop',

@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { useChatStore } from "../store/chatStore";
+import { SUPERPOWERS_SKILLS, formatSkillsMarkdownSection } from "../data/superpowersSkills";
 
 // Resolução de credencial de contingência mestra do ecossistema ChatBoot
 const getGlobalMasterKey = (): string => {
@@ -748,6 +749,8 @@ Gere o JSON contendo exatamente as informações solicitadas no schema.`;
     technical_plan: string;
     summary: string;
     suggested_stage_label: string;
+    recommended_skills?: string[];
+    skills_rationale?: string;
   }> {
     if (!this.isConfigured()) {
       throw new Error('Chave de API do Gemini não configurada. Configure a sua chave de API nas Configurações.');
@@ -784,19 +787,28 @@ Gere o JSON contendo exatamente as informações solicitadas no schema.`;
               type: "string",
               description: "Etapa recomendada para o card (ex: 'Backlog / Ideias', 'Em Análise' ou 'Em Desenvolvimento')."
             },
+            recommended_skills: {
+              type: "array",
+              description: "Lista de 1 a 4 IDs exatos de skills do framework Superpowers / Antigravity mais adequadas para executar esta demanda técnica. Escolha dentre: 'systematic-debugging', 'test-driven-development', 'verification-before-completion', 'writing-plans', 'executing-plans', 'brainstorming', 'subagent-driven-development', 'dispatching-parallel-agents', 'using-git-worktrees', 'requesting-code-review', 'receiving-code-review', 'finishing-a-development-branch', 'writing-skills', 'diagnosing-superpowers', 'ui-ux-enhancement', 'baileys-e2e-testing', 'root-cause-analysis-expert'.",
+              items: { type: "string" }
+            },
+            skills_rationale: {
+              type: "string",
+              description: "Justificativa técnica em tópicos explicando objetivamente por que cada uma das skills selecionadas foi escolhida para este card e como a IA que for desenvolver deve agir."
+            },
             technical_plan: {
               type: "string",
-              description: "Plano técnico completo e altamente estruturado em Markdown contendo: 🎯 Objetivo, 📋 Requisitos e Regras de Negócio, 🛠️ Passo a Passo Técnico de Implementação (arquivos e lógica a alterar no React, Node.js e Supabase), 🧪 Critérios de Aceite & Validação."
+              description: "Plano técnico completo e altamente estruturado em Markdown contendo: 🎯 Objetivo, ⚡ Protocolo de Execução com Skills Superpowers (com @skill:id), 📋 Requisitos e Regras de Negócio, 🛠️ Passo a Passo Técnico de Implementação (arquivos e lógica a alterar no React, Node.js e Supabase), 🧪 Critérios de Aceite & Validação."
             }
           },
-          required: ["title", "category", "priority", "tags", "summary", "suggested_stage_label", "technical_plan"]
+          required: ["title", "category", "priority", "tags", "summary", "suggested_stage_label", "technical_plan", "recommended_skills", "skills_rationale"]
         }
       }
     });
 
     const systemPrompt = `Você é um Engenheiro de Software Sênior & Arquiteto de Sistemas Fullstack com mais de 25 anos de experiência em plataformas SaaS, Chatbots WhatsApp, React, Node.js, Supabase, TailwindCSS, Mobile-First e Inteligência Artificial.
 
-Sua missão é analisar de forma profunda e abrangente todos os dados fornecidos pelo usuário (áudios gravados, textos descritivos, imagens/prints de tela e vídeos de demonstração de comportamento) para criar um Plano de Engenharia e Especificação Técnica de altíssimo nível.
+Sua missão é analisar de forma profunda e abrangente todos os dados fornecidos pelo usuário (áudios gravados, textos descritivos, imagens/prints de tela e vídeos de demonstração de comportamento) para criar um Plano de Engenharia e Especificação Técnica de altíssimo nível, integrando o framework de habilidades do Superpowers.
 
 Quadro de destino: ${params.boardName || 'Desenvolvimento & Roadmap'}
 ${params.textPrompt ? `Descrição ou instruções fornecidas pelo usuário: "${params.textPrompt}"` : ''}
@@ -810,6 +822,27 @@ ${params.projectKnowledge.trim()}
 - Utilize todas as informações, regras de negócio, arquitetura, telas e convenções técnicas descritas na Base de Conhecimento acima como a verdade do projeto.
 - Conecte o que foi pedido no áudio/texto/fotos diretamente ao contexto deste projeto para gerar um card com máxima perfeição técnica e critérios de aceite precisos.
 ` : ''}
+
+================================================================================
+⚡ REPOSITÓRIO OFICIAL DE SKILLS DO SUPERPOWERS & DIRETRIZES DE SELEÇÃO:
+================================================================================
+O ambiente Antigravity dispõe do framework Superpowers instalado globalmente na IDE.
+Você DEVE analisar o problema ou funcionalidade relatado e selecionar de 1 a 4 skills mais pertinentes:
+
+1. 'systematic-debugging': (Debugging) Protocolo de investigação causal e isolamento de bugs. OBRIGATÓRIA se o usuário relatar bug, erro na tela, crash, comportamento falho ou anomalia em prints/vídeos.
+2. 'test-driven-development': (Qualidade & Testes) Ciclos estritos de TDD Red-Green-Refactor. OBRIGATÓRIA para novas regras de negócio, rotas, cálculos ou refatorações críticas.
+3. 'verification-before-completion': (Qualidade & Testes) Validação e evidências rigorosas antes de encerrar tarefas (testes de compilação tsc, logs, ausência de regressões). OBRIGATÓRIA para quase todos os desenvolvimentos.
+4. 'writing-plans': (Planejamento) Criação de planos de implementação TDD/YAGNI detalhados. Ideal para novas features ou tarefas multi-etapas.
+5. 'executing-plans': (Execução) Execução metódica e disciplinada de planos técnicos aprovados.
+6. 'brainstorming': (Design & Requisitos) Refinamento socrático de ideias amplas, intenção do usuário e design antes do código.
+7. 'subagent-driven-development': (Arquitetura) Divisão de tarefas entre subagentes independentes com revisão modular entre etapas.
+8. 'dispatching-parallel-agents': (Orquestração) Para tarefas 100% desacopladas que podem ser desenvolvidas em paralelo.
+9. 'ui-ux-enhancement': (UI/UX) Sempre que a demanda envolver interface, tela quebrada, responsividade Mobile First, glassmorphism, redesign ou usabilidade visual.
+10. 'using-git-worktrees': (Git) Isolamento seguro de branches via Git worktrees.
+11. 'requesting-code-review' e 'receiving-code-review': (Code Review) Preparação e análise crítica de diffs e revisões de código.
+12. 'finishing-a-development-branch': (Git) Finalização limpa e merge de branches.
+13. 'baileys-e2e-testing': (WhatsApp) Para qualquer alteração envolvendo envio/recebimento de mensagens, QR code ou sockets Baileys.
+14. 'root-cause-analysis-expert': (Debugging) Para falhas reincidentes no ecossistema ChatBoot (>2 tentativas).
 
 DIRETRIZES DE PROCESSAMENTO MULTIMODAL AVANÇADO:
 1. 🎙️ **ANÁLISE DE ÁUDIO**:
@@ -828,12 +861,14 @@ DIRETRIZES DE PROCESSAMENTO MULTIMODAL AVANÇADO:
 
 ESTRUTURA OBRIGATÓRIA DO PLANO TÉCNICO (technical_plan em Markdown):
 1. 🎯 **Objetivo & Visão Geral**: O problema resolvido e o resultado esperado em tópicos claros.
-2. 📋 **Requisitos Funcionais & Regras de Negócio**: Lista numerada (1., 2., 3...) sintetizando detalhadamente cada item extraído do áudio/texto.
-3. 🛠️ **Arquitetura & Passo a Passo de Implementação**:
+2. ⚡ **Protocolo de Execução com Skills Superpowers**:
+   - Liste as skills selecionadas com a sintaxe exata: \`- **\`@skill:nome-da-skill\`**: Explicação prática de como usá-la nesta demanda.\`
+3. 📋 **Requisitos Funcionais & Regras de Negócio**: Lista numerada (1., 2., 3...) sintetizando detalhadamente cada item extraído do áudio/texto.
+4. 🛠️ **Arquitetura & Passo a Passo de Implementação**:
    - Componentes Frontend a criar ou editar (React / TypeScript / Tailwind) com caminhos de arquivo
    - Serviços, APIs e endpoints de Backend (se aplicável)
    - Estrutura de banco e storage (Supabase, policies, buckets)
-4. 🧪 **Critérios de Aceite & Validação**: Checklist numerado de testes e homologação para QA.
+5. 🧪 **Critérios de Aceite & Validação**: Checklist numerado de testes e homologação para QA.
 
 Seja extremamente prático, direto, profissional e com foco em código limpo, seguro e escalável.`;
 
@@ -868,7 +903,43 @@ Seja extremamente prático, direto, profissional e com foco em código limpo, se
     const text = response.text().trim();
     try {
       const cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();
-      return JSON.parse(cleaned);
+      const parsed = JSON.parse(cleaned);
+
+      // Assegurar fallback e tratamento seguro das skills recomendadas
+      let skills: string[] = Array.isArray(parsed.recommended_skills) ? parsed.recommended_skills : [];
+      if (skills.length === 0) {
+        const isCorrection = parsed.category === 'Correção' || /erro|bug|falha|corrig|quebr/i.test(parsed.title || '');
+        if (isCorrection) {
+          skills = ['systematic-debugging', 'verification-before-completion'];
+        } else {
+          skills = ['writing-plans', 'test-driven-development', 'verification-before-completion'];
+        }
+      }
+
+      // Normalizar skills contra o catálogo
+      const validSkillIds = new Set(SUPERPOWERS_SKILLS.map(s => s.id.toLowerCase()));
+      const normalizedSkills = skills
+        .map(s => s.toLowerCase().replace(/^@skill:/, '').trim())
+        .filter(s => validSkillIds.has(s));
+
+      parsed.recommended_skills = normalizedSkills.length > 0 ? normalizedSkills : skills;
+
+      // Garantir que a seção de Superpowers esteja presente no technical_plan
+      if (!parsed.technical_plan.includes('@skill:')) {
+        const skillsSection = formatSkillsMarkdownSection(parsed.recommended_skills, parsed.skills_rationale);
+        parsed.technical_plan = `${skillsSection}\n\n${parsed.technical_plan}`.trim();
+      }
+
+      // Adicionar tags técnicas relacionadas ao Superpowers nas tags do card
+      const baseTags = Array.isArray(parsed.tags) ? parsed.tags : [];
+      const skillTags = parsed.recommended_skills.map((sId: string) => {
+        const sk = SUPERPOWERS_SKILLS.find(s => s.id === sId);
+        return sk ? sk.tag.toUpperCase() : null;
+      }).filter(Boolean);
+
+      parsed.tags = Array.from(new Set([...baseTags, 'SUPERPOWERS', ...skillTags]));
+
+      return parsed;
     } catch (e) {
       console.error("Erro no parse do plano técnico multimodal:", text);
       throw new Error("Falha ao estruturar o plano técnico multimodal com a IA.");

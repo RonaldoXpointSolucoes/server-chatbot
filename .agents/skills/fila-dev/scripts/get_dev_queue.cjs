@@ -394,12 +394,49 @@ async function getDevQueue(action = 'list', cardIdToMove = null, targetStatus = 
       return items;
     };
 
+    // Helper para extrair skills recomendadas do Superpowers citadas no card
+    const extractCardSuperpowersSkills = (notes, tags) => {
+      const skills = [];
+      const seen = new Set();
+      if (notes && typeof notes === 'string') {
+        const skillRegex = /@skill:([a-z0-9\-]+)/gi;
+        let match;
+        while ((match = skillRegex.exec(notes)) !== null) {
+          const sk = match[1].toLowerCase();
+          if (!seen.has(sk)) {
+            seen.add(sk);
+            skills.push(sk);
+          }
+        }
+      }
+      if (Array.isArray(tags)) {
+        const knownSkills = [
+          'using-superpowers', 'brainstorming', 'writing-plans', 'executing-plans',
+          'subagent-driven-development', 'test-driven-development', 'systematic-debugging',
+          'verification-before-completion', 'requesting-code-review', 'receiving-code-review',
+          'dispatching-parallel-agents', 'using-git-worktrees', 'finishing-a-development-branch',
+          'writing-skills', 'diagnosing-superpowers', 'ui-ux-enhancement', 'baileys-e2e-testing',
+          'root-cause-analysis-expert'
+        ];
+        tags.forEach(t => {
+          const lower = String(t).toLowerCase();
+          if (knownSkills.includes(lower) && !seen.has(lower)) {
+            seen.add(lower);
+            skills.push(lower);
+          }
+        });
+      }
+      return skills;
+    };
+
     const enrichLead = (lead) => {
       const media = extractCardMedia(lead.notes);
+      const skills = extractCardSuperpowersSkills(lead.notes, lead.tags);
       return {
         ...lead,
         media_count: media.length,
-        attached_media: media
+        attached_media: media,
+        recommended_skills: skills
       };
     };
 

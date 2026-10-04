@@ -73,6 +73,12 @@ import {
   loadCardDraft, 
   clearCardDraft 
 } from '../utils/cardDraftStorage';
+import { 
+  SUPERPOWERS_SKILLS, 
+  getSkillById, 
+  formatSkillsMarkdownSection, 
+  SuperpowerSkill 
+} from '../data/superpowersSkills';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { motion } from 'framer-motion';
@@ -498,11 +504,36 @@ export default function CrmKanban() {
     technical_plan: string;
     summary: string;
     suggested_stage_label: string;
+    recommended_skills?: string[];
+    skills_rationale?: string;
   } | null>(null);
   const [selectedTargetStage, setSelectedTargetStage] = useState<string>('');
   const [newTagInput, setNewTagInput] = useState('');
+  const [isSkillSelectorOpen, setIsSkillSelectorOpen] = useState(false);
 
   const CARD_CATEGORIES = ['Chat', 'Sistema / SaaS', 'Backend / API', 'I.A / Gemini', 'Integração', 'UI/UX', 'Correção'];
+
+  const handleTogglePlanSkill = (skillId: string) => {
+    if (!generatedPlan) return;
+    const current = generatedPlan.recommended_skills || [];
+    const exists = current.includes(skillId);
+    const updatedSkills = exists 
+      ? current.filter(id => id !== skillId)
+      : [...current, skillId];
+    
+    // Atualizar tags se foi adicionada
+    const sk = getSkillById(skillId);
+    let updatedTags = [...generatedPlan.tags];
+    if (!exists && sk && !updatedTags.includes(sk.tag.toUpperCase())) {
+      updatedTags.push(sk.tag.toUpperCase());
+    }
+
+    setGeneratedPlan({
+      ...generatedPlan,
+      recommended_skills: updatedSkills,
+      tags: updatedTags
+    });
+  };
 
   const handleAddPlanTag = (e?: React.KeyboardEvent | React.MouseEvent) => {
     if (e && 'key' in e && e.key !== 'Enter') return;
@@ -823,7 +854,18 @@ export default function CrmKanban() {
         }
       }
 
-      const fullNotes = `${generatedPlan.summary}\n\n${generatedPlan.technical_plan}${mediaMarkdownLinks}`;
+      let planWithSkills = generatedPlan.technical_plan;
+      if (generatedPlan.recommended_skills && generatedPlan.recommended_skills.length > 0 && !planWithSkills.includes('@skill:')) {
+        const skillsSection = formatSkillsMarkdownSection(generatedPlan.recommended_skills, generatedPlan.skills_rationale);
+        planWithSkills = `${skillsSection}\n\n${planWithSkills}`.trim();
+      }
+
+      const fullNotes = `${generatedPlan.summary}\n\n${planWithSkills}${mediaMarkdownLinks}`;
+
+      const skillTags = (generatedPlan.recommended_skills || []).map(sId => {
+        const sk = getSkillById(sId);
+        return sk ? sk.tag.toUpperCase() : null;
+      }).filter(Boolean) as string[];
 
       const payload = {
         tenant_id: tenantId,
@@ -837,7 +879,13 @@ export default function CrmKanban() {
         customer_id: null,
         agent_id: null,
         due_date: null,
-        tags: Array.from(new Set([...(generatedPlan.tags || []), generatedPlan.category, 'IA-PLANO'])),
+        tags: Array.from(new Set([
+          ...(generatedPlan.tags || []),
+          generatedPlan.category,
+          'IA-PLANO',
+          'SUPERPOWERS',
+          ...skillTags
+        ])),
         notes: fullNotes
       };
 
@@ -4187,6 +4235,10 @@ export default function CrmKanban() {
                     <span className="text-[9px] px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-400 font-extrabold border border-indigo-500/30">
                       Gemini 2.5 Multimodal
                     </span>
+                    <span className="text-[9px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-500 dark:text-amber-400 font-extrabold border border-amber-500/30 flex items-center gap-1 shadow-xs">
+                      <Zap size={10} className="animate-pulse text-amber-400" />
+                      Superpowers Ativo
+                    </span>
                   </h3>
                   <p className="text-[10px] sm:text-[11px] text-slate-500 dark:text-slate-400">
                     Grave áudio, anexe fotos/prints ou vídeos. A IA estruturará o plano de engenharia.
@@ -4608,6 +4660,129 @@ export default function CrmKanban() {
                         )}
                       </div>
                     </div>
+                  </div>
+
+                  {/* Seção Especial: Skills do Superpowers Recomendadas */}
+                  <div className="space-y-2 p-3.5 rounded-2xl bg-gradient-to-r from-purple-500/10 via-indigo-500/10 to-amber-500/5 border border-indigo-500/20 shadow-xs">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <label className="font-black text-slate-800 dark:text-slate-200 uppercase tracking-wider text-[10px] flex items-center gap-1.5">
+                        <Zap size={13} className="text-amber-400" />
+                        <span>Superpowers & Habilidades Recomendadas</span>
+                        <span className="text-[9px] px-2 py-0.2 rounded-full bg-amber-500/15 text-amber-500 dark:text-amber-300 font-extrabold border border-amber-500/30">
+                          {generatedPlan.recommended_skills?.length || 0} Ativa{(generatedPlan.recommended_skills?.length || 0) === 1 ? '' : 's'}
+                        </span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setIsSkillSelectorOpen(!isSkillSelectorOpen)}
+                        className="text-[10px] font-extrabold text-indigo-500 hover:text-indigo-400 dark:text-indigo-300 flex items-center gap-1 cursor-pointer px-2 py-1 rounded-lg hover:bg-indigo-500/10 transition-colors"
+                      >
+                        <Plus size={11} />
+                        <span>{isSkillSelectorOpen ? 'Fechar Catálogo' : '+ Adicionar Skill'}</span>
+                      </button>
+                    </div>
+
+                    <p className="text-[10.5px] text-slate-500 dark:text-slate-400">
+                      A IA mapeou estas habilidades do Superpowers para guiar o agente que for desenvolver este card:
+                    </p>
+
+                    {/* Chips das Skills Selecionadas */}
+                    <div className="flex flex-wrap items-center gap-1.5 min-h-[34px]">
+                      {(generatedPlan.recommended_skills || []).length === 0 ? (
+                        <span className="text-[10.5px] text-slate-400 italic">
+                          Nenhuma skill específica selecionada. Clique em "+ Adicionar Skill" para incluir.
+                        </span>
+                      ) : (
+                        (generatedPlan.recommended_skills || []).map((skillId) => {
+                          const sk = getSkillById(skillId) || {
+                            id: skillId,
+                            name: skillId,
+                            emoji: '⚡',
+                            description: 'Habilidade do framework',
+                            badgeStyle: {
+                              bg: 'bg-indigo-500/15',
+                              text: 'text-indigo-600 dark:text-indigo-300',
+                              border: 'border-indigo-500/30'
+                            }
+                          };
+                          return (
+                            <span
+                              key={skillId}
+                              className={cn(
+                                "inline-flex items-center gap-1.5 text-[10.5px] font-extrabold pl-2.5 pr-1.5 py-1 rounded-xl border shadow-2xs group transition-all animate-in zoom-in-95",
+                                sk.badgeStyle.bg,
+                                sk.badgeStyle.text,
+                                sk.badgeStyle.border
+                              )}
+                              title={sk.description}
+                            >
+                              <span>{sk.emoji}</span>
+                              <span>{sk.name}</span>
+                              <button
+                                type="button"
+                                onClick={() => handleTogglePlanSkill(skillId)}
+                                className="p-0.5 hover:bg-rose-500 hover:text-white rounded-md transition-colors text-slate-400 dark:text-slate-300 cursor-pointer ml-0.5"
+                                title={`Remover ${sk.name}`}
+                              >
+                                <X size={11} />
+                              </button>
+                            </span>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    {/* Gaveta / Dropdown de Seleção de Skills */}
+                    {isSkillSelectorOpen && (
+                      <div className="mt-2.5 p-3 rounded-2xl bg-white dark:bg-[#121b22] border border-indigo-500/30 shadow-lg space-y-2 animate-in fade-in slide-in-from-top-2 duration-150">
+                        <div className="flex items-center justify-between text-[10px] font-bold text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-white/10 pb-1.5">
+                          <span>Catálogo de Skills do Superpowers (Clique para ativar/desativar):</span>
+                          <span className="text-[9px] text-indigo-400 font-semibold">{SUPERPOWERS_SKILLS.length} disponíveis</span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-[220px] overflow-y-auto custom-scrollbar pr-1">
+                          {SUPERPOWERS_SKILLS.map(sk => {
+                            const isSelected = (generatedPlan.recommended_skills || []).includes(sk.id);
+                            return (
+                              <button
+                                key={sk.id}
+                                type="button"
+                                onClick={() => handleTogglePlanSkill(sk.id)}
+                                className={cn(
+                                  "p-2 rounded-xl text-left border transition-all duration-150 flex items-start gap-2 cursor-pointer text-[10.5px]",
+                                  isSelected 
+                                    ? "bg-indigo-500/20 border-indigo-500 text-indigo-600 dark:text-indigo-300 ring-1 ring-indigo-500/30 font-bold"
+                                    : "bg-slate-50/70 dark:bg-white/5 border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10"
+                                )}
+                              >
+                                <span className="text-sm shrink-0 mt-0.5">{sk.emoji}</span>
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center justify-between gap-1">
+                                    <span className="font-extrabold truncate">{sk.name}</span>
+                                    {isSelected && <Check size={12} className="text-emerald-500 shrink-0" />}
+                                  </div>
+                                  <p className="text-[9.5px] text-slate-500 dark:text-slate-400 line-clamp-1 mt-0.5">
+                                    {sk.description}
+                                  </p>
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Justificativa Técnica da IA (se houver) */}
+                    {generatedPlan.skills_rationale && (
+                      <div className="mt-2 p-2.5 rounded-xl bg-indigo-500/5 border border-indigo-500/15 text-[10.5px] text-slate-700 dark:text-slate-300 leading-relaxed flex items-start gap-2">
+                        <span className="text-amber-400 mt-0.5 shrink-0">💡</span>
+                        <div className="flex-1">
+                          <strong className="font-bold text-indigo-600 dark:text-indigo-400 block mb-0.5">
+                            Justificativa Técnica da IA:
+                          </strong>
+                          <span className="text-slate-600 dark:text-slate-300">{generatedPlan.skills_rationale}</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Resumo Executivo Editável */}

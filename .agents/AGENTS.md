@@ -138,6 +138,7 @@ Sempre que o usuário digitar `Fila dev` (ou variações como `fila dev`, `Fila 
    - **POSTURA TÉCNICA SÊNIOR / STAFF ENGINEER**: A IA atua com profundo conhecimento de arquitetura, Clean Code, concorrência, banco de dados e UI/UX.
    - **INSPEÇÃO VISUAL OBRIGATÓRIA DE IMAGENS E EVIDÊNCIAS**: A IA deve inspecionar e abrir cada imagem/print anexado ao card antes de codificar, correlacionando os elementos visuais com o código.
    - **DOCUMENTAÇÃO OBRIGATÓRIA E MIGRAÇÃO PARA "Em Testes & QA"**: Após executar as correções de cada card, a IA **DEVE OBRIGATORIAMENTE documentar o que foi feito** (resumo executivo, arquitetura e arquivos modificados) e **enviar o card para a lista 'Em Testes & QA'** (`node .agents/skills/fila-dev/scripts/get_dev_queue.cjs move <CARD_ID> testing <REPORT>`).
+   - **EXECUÇÃO OBRIGATÓRIA DAS SKILLS DO SUPERPOWERS**: Ao assumir um card para desenvolvimento, a IA deve inspecionar as skills recomendadas (`recommended_skills` ou `@skill:nome-da-skill` na seção do card) e invocar/seguir os preceitos de cada habilidade do framework Superpowers (como `systematic-debugging`, `test-driven-development`, `verification-before-completion`, etc.) durante a codificação e antes de migrar para 'Em Testes & QA'.
    - **PROCESSAMENTO CONTÍNUO (LOOP SEQUENCIAL)**: Imediatamente após mover o card resolvido para "Em Testes & QA", a IA pega o próximo card de "Em Desenvolvimento" e repete o fluxo até **zerar toda a coluna 'Em Desenvolvimento'**.
    - Apresentar o relatório consolidado de todas as entregas e a esteira atualizada.
 

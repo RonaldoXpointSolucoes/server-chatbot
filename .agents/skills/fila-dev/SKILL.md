@@ -59,6 +59,24 @@ Cada card pode conter capturas de tela, fotos de terminais, fluxogramas ou print
 
 ---
 
+## ⚡ 2.1 Ativação Obrigatória das Skills do Superpowers Citadas no Card
+
+Cada card criado via **"Criar Card Multimodal & IA"** (por áudio, texto, prints ou vídeos) possui mapeamento das skills do framework **Superpowers**:
+
+1. **Leitura das Skills Recomendadas**:
+   - Inspecionar o campo `recommended_skills` do script `get_dev_queue.cjs list` ou as menções `@skill:nome-da-skill` presentes na seção `### ⚡ Protocolo de Execução com Skills Superpowers` dentro das `notes` do card.
+2. **Ativação e Execução Estrita**:
+   - A IA desenvolvedora deve ler e seguir o protocolo da respectiva skill localizada em `C:\Users\NOTE-(FORM)02JUL26\.gemini\config\plugins\superpowers\skills/<skill_name>/SKILL.md`:
+     - 🔍 **`systematic-debugging`**: Investigar a causa raiz, inspecionar logs e estados antes de tentar propor qualquer correção de código.
+     - 🧪 **`test-driven-development`**: Elaborar testes de validação ou verificação prévia de falha (Red) antes de aplicar a solução (Green).
+     - ✅ **`verification-before-completion`**: OBRIGATÓRIA antes de encerrar o card: executar comandos de compilação (`npx tsc --noEmit` ou testes) e coletar evidências reais do sucesso.
+     - 📝 **`writing-plans`** / ⚙️ **`executing-plans`**: Seguir rigorosamente o plano técnico e arquivos impactados descritos no card.
+     - 🎨 **`ui-ux-enhancement`**: Aplicar análise de 10 pontos, Mobile First e glassmorphism caso o card envolva interface.
+3. **Registro na Entrega**:
+   - No relatório de entrega ao mover para **'Em Testes & QA'**, relatar como as skills recomendadas foram aplicadas e as evidências obtidas.
+
+---
+
 ## 🔄 3. Processamento Contínuo e Sequencial da Fila ("Tratar a Fila")
 
 O comando **`Fila dev`** trata a fila de forma **contínua e exaustiva** até zerar todos os itens da coluna **"Em Desenvolvimento"** (`development`).
