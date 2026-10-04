@@ -1,5 +1,5 @@
 {
-  "version": "7.6.6",
-  "buildDate": "2026-10-04T12:28:00.000Z",
-  "summary": "Refatoração Responsiva Mobile-First do Painel de Caixas de Entrada (Bottom Sheet), Otimização da Barra de Tickets e Eliminação de Cortes em Dispositivos Móveis"
+  "version": "7.6.7",
+  "buildDate": "2026-10-04T12:57:00.000Z",
+  "summary": "Correção de Visibilidade do Feed Geral ao Selecionar Todas as Caixas, Empty State Educativo para Minhas Conversas e Redimensionamento Perfeito do Popover de Caixas no Desktop"
 }

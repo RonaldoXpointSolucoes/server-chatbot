@@ -2075,6 +2075,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       localStorage.setItem('selectedChannelFilters', JSON.stringify([]));
       localStorage.removeItem('activeChannelFilter');
       localStorage.removeItem('activeChannelName');
+      localStorage.setItem('chat_filter_preference', 'all');
     } catch (e) {}
 
     set({ 
@@ -2082,6 +2083,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       activeChannelFilter: null, 
       activeChannelName: null,
       activeChatId: null, 
+      filterType: 'all',
       isChannelLoading: true 
     });
 

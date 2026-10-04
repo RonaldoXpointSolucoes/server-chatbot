@@ -6496,7 +6496,7 @@ export default function ChatDashboard() {
                         ? getChannelDisplayName(selectedChannelFilters[0])
                         : activeChannelFilter 
                           ? getChannelDisplayName(activeChannelFilter)
-                          : "Todas as Caixas"
+                          : (filterType === 'mine' ? "Todas as Caixas (Minhas)" : "Todas as Caixas")
                   ) : (
                     activeChannelFilter ? getChannelDisplayName(activeChannelFilter) : (
                       tenantInstances[0]?.display_name || (
@@ -6569,7 +6569,7 @@ export default function ChatDashboard() {
                   {/* Opção Todas as Caixas com Switch */}
                   <div
                     onClick={() => {
-                      clearChannelFilters();
+                      clearChannelFilters(); if (filterType === 'mine') setFilterType('all');
                     }}
                     className={cn(
                       "transition-all rounded-xl border cursor-pointer group flex items-center justify-between",
@@ -6600,7 +6600,7 @@ export default function ChatDashboard() {
                     <div 
                       onClick={(e) => {
                         e.stopPropagation();
-                        clearChannelFilters();
+                        clearChannelFilters(); if (filterType === 'mine') setFilterType('all');
                       }}
                       className={cn(
                         "w-9 h-5 flex items-center rounded-full p-0.5 cursor-pointer transition-colors duration-200 shrink-0 mr-0.5",
@@ -6632,7 +6632,7 @@ export default function ChatDashboard() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          clearChannelFilters();
+                          clearChannelFilters(); if (filterType === 'mine') setFilterType('all');
                         }}
                         className="text-emerald-600 dark:text-emerald-400 hover:underline font-semibold shrink-0"
                       >
@@ -6823,7 +6823,8 @@ export default function ChatDashboard() {
                   {/* Variante Desktop: Popover Flutuante Perfeitamente Dimensionado */}
                   <div 
                     onClick={(e) => e.stopPropagation()}
-                    className="hidden sm:flex absolute left-0 top-11 w-84 sm:w-[360px] max-w-[calc(100vw-32px)] bg-white/95 dark:bg-[#161f26]/95 border border-gray-200/80 dark:border-white/10 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.35)] py-2.5 z-50 backdrop-blur-2xl ring-1 ring-black/5 dark:ring-white/5 animate-in fade-in zoom-in-95 duration-150 flex-col"
+                    className="hidden sm:flex absolute left-0 top-11 w-[calc(100vw-32px)] sm:w-[300px] max-w-[calc(100%-0px)] bg-white/95 dark:bg-[#161f26]/95 border border-gray-200/80 dark:border-white/10 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.35)] py-2.5 z-50 backdrop-blur-2xl ring-1 ring-black/5 dark:ring-white/5 animate-in fade-in zoom-in-95 duration-150 flex-col"
+                    style={{ minWidth: '280px', maxWidth: '320px' }}
                   >
                     {renderChannelPickerInner(false)}
                   </div>
@@ -7828,6 +7829,42 @@ export default function ChatDashboard() {
               );
             });
             })()}
+
+            {!isChannelLoading && filteredContacts.length === 0 && !searchTerm && (
+              <motion.div
+                key="empty-contacts-state"
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="flex flex-col items-center justify-center p-6 text-center w-full my-auto"
+              >
+                <div className="w-full max-w-xs bg-white/40 dark:bg-black/20 backdrop-blur-md border border-gray-200/50 dark:border-white/5 rounded-3xl p-6 shadow-sm flex flex-col items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-[#00a884]/10 dark:bg-[#00a884]/20 text-[#00a884] dark:text-[#25d366] flex items-center justify-center shadow-inner">
+                    {filterType === 'mine' ? <User size={22} /> : <Layers size={22} />}
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <p className="text-sm font-bold text-gray-800 dark:text-gray-200">
+                      {filterType === 'mine' ? "Nenhuma conversa atribuída" : "Nenhuma conversa encontrada"}
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-[#8696a0] max-w-[210px] mx-auto leading-relaxed">
+                      {filterType === 'mine' 
+                        ? "Você está no filtro Minhas conversas, mas não há chats direcionados para você."
+                        : "Nenhuma conversa ativa atende aos filtros atuais."}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      clearChannelFilters();
+                      setFilterType('all');
+                    }}
+                    className="w-full mt-1 flex items-center justify-center gap-2 py-2.5 px-4 bg-[#00a884] hover:bg-[#008f6f] text-white rounded-xl shadow-md font-semibold text-xs transition-all active:scale-95"
+                  >
+                    <Layers size={14} />
+                    Ver Todas as Conversas
+                  </button>
+                </div>
+              </motion.div>
+            )}
 
             {isChannelLoading && filteredContacts.length === 0 && (
               <motion.div 

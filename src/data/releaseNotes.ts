@@ -20,6 +20,45 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.6.7',
+    date: '2026-10-04',
+    summary: 'Correção de Visibilidade do Feed Geral ao Selecionar Todas as Caixas, Empty State Educativo para Minhas Conversas e Redimensionamento Perfeito do Popover de Caixas no Desktop',
+    notes: [
+      {
+        id: '7.6.7-1',
+        category: 'fixes',
+        title: 'Restauração do Feed Geral ao Clicar em "Todas as Caixas"',
+        description: 'Ao selecionar a opção "Todas as Caixas" no seletor rápido ou no menu de canais, o sistema agora reseta automaticamente o filtro de atendente para o feed global (filterType: all), exibindo todas as conversas sem travamentos.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      },
+      {
+        id: '7.6.7-2',
+        category: 'features',
+        title: 'Empty State Educativo com Ação Rápida em "Minhas Conversas"',
+        description: 'Quando o atendente estiver com o filtro "Minhas conversas" ativo mas não possuir mensagens direcionadas a ele, a tela agora exibe uma mensagem acolhedora com o botão direto "[Ver Todas as Conversas]" para alternar o feed em 1 clique.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.6.7-3',
+        category: 'fixes',
+        title: 'Redimensionamento Perfeito do Popover de Caixas no Desktop (Zero Cortes)',
+        description: 'O dropdown de caixas de entrada na versão desktop foi recalculado para maxWidth: 300px, ficando 100% contido dentro da coluna de 320px, garantindo que switches, tags de status e o botão "Concluir" nunca mais sejam cortados pela metade.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      },
+      {
+        id: '7.6.7-4',
+        category: 'improvements',
+        title: 'Transparência no Botão de Caixa da Barra Superior',
+        description: 'Quando o filtro de atendente estiver ativo, o botão superior reflete o estado real exibindo "Todas as Caixas (Minhas)", eliminando ambiguidades entre filtros de caixa e filtros de operador.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      }
+    ]
+  },
+  {
     version: '7.6.6',
     date: '2026-10-04',
     summary: 'Refatoração Responsiva Mobile-First do Painel de Caixas de Entrada (Bottom Sheet), Otimização da Barra de Tickets e Eliminação de Cortes em Dispositivos Móveis',
