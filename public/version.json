@@ -1,5 +1,5 @@
 {
-  "version": "7.6.5",
-  "buildDate": "2026-10-04T03:17:06.793Z",
-  "summary": "Player de Áudio Premium Glassmorphism com Transcrição IA, Gravação Otimizada com Codecs Nativos, Blindagem de CircuitBreaker e Eliminação de Erros 400 Bad Request no Supabase"
+  "version": "7.6.6",
+  "buildDate": "2026-10-04T12:28:00.000Z",
+  "summary": "Refatoração Responsiva Mobile-First do Painel de Caixas de Entrada (Bottom Sheet), Otimização da Barra de Tickets e Eliminação de Cortes em Dispositivos Móveis"
 }

@@ -6246,7 +6246,10 @@ export default function ChatDashboard() {
                     title={isAdmin ? `Ambiente Atual: ${env.name}. Clique para alternar ambiente.` : `Ambiente Servidor: ${env.name}`}
                   >
                     <span className={cn("w-1.5 h-1.5 rounded-full", env.id === 'alpha' ? "bg-rose-500 animate-pulse" : "bg-emerald-500")} />
-                    <span className="tracking-tight uppercase">{env.name}</span>
+                    <span className="tracking-tight uppercase">
+                      <span className="inline sm:hidden">{env.id === 'alpha' ? 'ALF' : 'PROD'}</span>
+                      <span className="hidden sm:inline">{env.name}</span>
+                    </span>
                   </div>
                 );
               })()}
@@ -6405,7 +6408,7 @@ export default function ChatDashboard() {
         {/* Painel Premium de Controle Rápido (Saúde do Sistema & Modo Ticket) */}
         <div className="flex items-center gap-2 mx-3 my-2 z-10 relative">
           {/* Botão de Semáforo de Saúde / Seletor de Caixas de Entrada */}
-          <div className="flex-[1.25] min-w-0 relative flex items-stretch">
+          <div className="flex-[1.15] min-w-0 relative flex items-stretch">
             <button 
               onClick={(e) => {
                 e.stopPropagation();
@@ -6525,29 +6528,41 @@ export default function ChatDashboard() {
               const hasMultiSelection = selectedChannelFilters && selectedChannelFilters.length > 0;
               const isAllSelected = !hasMultiSelection && !activeChannelFilter;
 
-              return (
-                <div 
-                  onClick={(e) => e.stopPropagation()}
-                  className="absolute left-0 top-11 w-84 sm:w-[360px] max-w-[calc(100vw-24px)] bg-white/95 dark:bg-[#161f26]/95 border border-gray-200/80 dark:border-white/10 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.35)] py-2.5 z-50 backdrop-blur-2xl ring-1 ring-black/5 dark:ring-white/5 animate-in fade-in zoom-in-95 duration-150 flex flex-col"
-                >
+              // Componente reutilizável para o corpo do seletor de caixas
+              const renderChannelPickerInner = (isMobileSheet = false) => (
+                <>
                   {/* Cabeçalho do Dropdown com Contador em Tempo Real */}
-                  <div className="px-3.5 py-1.5 flex items-center justify-between border-b border-gray-100 dark:border-white/5 pb-2.5 mb-1.5">
+                  <div className={cn(
+                    "flex items-center justify-between border-b border-gray-100 dark:border-white/5 pb-2.5 mb-1.5",
+                    isMobileSheet ? "px-1" : "px-3.5 py-1.5"
+                  )}>
                     <div className="flex items-center gap-2">
-                      <div className="p-1.5 rounded-lg bg-[#00a884]/10 dark:bg-[#00a884]/20 text-[#00a884] dark:text-[#25d366]">
-                        <Layers size={14} />
+                      <div className="p-1.5 rounded-lg bg-[#00a884]/10 dark:bg-[#00a884]/20 text-[#00a884] dark:text-[#25d366] shrink-0">
+                        <Layers size={15} />
                       </div>
                       <div className="flex flex-col">
-                        <span className="text-[11px] font-bold text-gray-800 dark:text-gray-200 tracking-wider uppercase">
+                        <span className="text-xs font-bold text-gray-800 dark:text-gray-100 tracking-wider uppercase">
                           Caixas de Entrada
                         </span>
                       </div>
                     </div>
-                    <div className="flex items-center gap-1.5 bg-gray-100/80 dark:bg-white/5 px-2.5 py-0.5 rounded-full border border-gray-200/50 dark:border-white/5 text-[10px] font-semibold text-gray-500 dark:text-gray-400">
-                      <span className={cn(
-                        "w-1.5 h-1.5 rounded-full shrink-0",
-                        connectedCount === tenantInstances.length ? "bg-emerald-500" : connectedCount > 0 ? "bg-amber-500" : "bg-rose-500"
-                      )} />
-                      <span>{connectedCount}/{tenantInstances.length} online</span>
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5 bg-gray-100/80 dark:bg-white/5 px-2.5 py-1 rounded-full border border-gray-200/50 dark:border-white/5 text-[10px] font-semibold text-gray-500 dark:text-gray-400 shrink-0">
+                        <span className={cn(
+                          "w-2 h-2 rounded-full shrink-0",
+                          connectedCount === tenantInstances.length ? "bg-emerald-500 animate-pulse" : connectedCount > 0 ? "bg-amber-500 animate-pulse" : "bg-rose-500"
+                        )} />
+                        <span>{connectedCount}/{tenantInstances.length} online</span>
+                      </div>
+                      {isMobileSheet && (
+                        <button
+                          onClick={() => setActiveDropdown(null)}
+                          className="p-1.5 rounded-full text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors"
+                          title="Fechar"
+                        >
+                          <X size={18} />
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -6557,13 +6572,16 @@ export default function ChatDashboard() {
                       clearChannelFilters();
                     }}
                     className={cn(
-                      "w-[calc(100%-16px)] mx-2 px-3 py-2 text-left flex items-center justify-between transition-all rounded-xl border cursor-pointer group",
+                      "transition-all rounded-xl border cursor-pointer group flex items-center justify-between",
+                      isMobileSheet 
+                        ? "w-full px-3 py-2.5 my-1" 
+                        : "w-[calc(100%-16px)] mx-2 px-3 py-2",
                       isAllSelected 
                         ? "bg-emerald-500/10 dark:bg-emerald-500/15 border-emerald-500/30 text-emerald-700 dark:text-emerald-400 shadow-sm" 
                         : "border-transparent text-gray-700 dark:text-gray-200 hover:bg-gray-100/70 dark:hover:bg-white/5 hover:border-gray-200/50 dark:hover:border-white/5"
                     )}
                   >
-                    <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1 mr-2">
                       <div className={cn(
                         "w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-transform group-hover:scale-105 border",
                         isAllSelected 
@@ -6585,7 +6603,7 @@ export default function ChatDashboard() {
                         clearChannelFilters();
                       }}
                       className={cn(
-                        "w-9 h-5 flex items-center rounded-full p-0.5 cursor-pointer transition-colors duration-200 shrink-0",
+                        "w-9 h-5 flex items-center rounded-full p-0.5 cursor-pointer transition-colors duration-200 shrink-0 mr-0.5",
                         isAllSelected 
                           ? "bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.35)]" 
                           : "bg-gray-300 dark:bg-white/10 hover:bg-gray-400 dark:hover:bg-white/20"
@@ -6605,7 +6623,10 @@ export default function ChatDashboard() {
                   <div className="my-1.5 border-t border-gray-100 dark:border-white/5 mx-2" />
 
                   {/* Subtítulo instrutivo */}
-                  <div className="px-3.5 pb-1 flex items-center justify-between text-[10px] text-gray-400 dark:text-gray-500 font-medium">
+                  <div className={cn(
+                    "pb-1 flex items-center justify-between text-[10px] text-gray-400 dark:text-gray-500 font-medium",
+                    isMobileSheet ? "px-1" : "px-3.5"
+                  )}>
                     <span>SELECIONE UMA OU MAIS CAIXAS:</span>
                     {hasMultiSelection && (
                       <button
@@ -6613,7 +6634,7 @@ export default function ChatDashboard() {
                           e.stopPropagation();
                           clearChannelFilters();
                         }}
-                        className="text-emerald-600 dark:text-emerald-400 hover:underline font-semibold"
+                        className="text-emerald-600 dark:text-emerald-400 hover:underline font-semibold shrink-0"
                       >
                         Desmarcar todas
                       </button>
@@ -6621,7 +6642,10 @@ export default function ChatDashboard() {
                   </div>
 
                   {/* Lista das Caixas com Switches Individuais */}
-                  <div className="max-h-64 overflow-y-auto custom-scrollbar flex flex-col gap-1 px-2">
+                  <div className={cn(
+                    "overflow-y-auto custom-scrollbar flex flex-col gap-1.5",
+                    isMobileSheet ? "max-h-[48vh] px-0.5" : "max-h-64 px-2"
+                  )}>
                     {tenantInstances.map((inst) => {
                       const isConn = instancesStatus[inst.id] === 'connected' || instancesStatus[inst.id] === 'connected_local';
                       const isConnPending = instancesStatus[inst.id] === 'connecting';
@@ -6637,13 +6661,14 @@ export default function ChatDashboard() {
                             toggleChannelFilter(inst.id, displayName);
                           }}
                           className={cn(
-                            "w-full px-2.5 py-2 text-left flex items-center justify-between transition-all rounded-xl border cursor-pointer group select-none",
+                            "w-full text-left flex items-center justify-between transition-all rounded-xl border cursor-pointer group select-none gap-2",
+                            isMobileSheet ? "px-3 py-2.5" : "px-2.5 py-2",
                             isSelected 
                               ? "bg-emerald-500/10 dark:bg-emerald-500/15 border-emerald-500/30 text-emerald-700 dark:text-emerald-400 shadow-sm" 
                               : "border-transparent text-gray-700 dark:text-gray-200 hover:bg-gray-100/70 dark:hover:bg-white/5 hover:border-gray-200/50 dark:hover:border-white/5"
                           )}
                         >
-                          <div className="flex items-center gap-2.5 min-w-0 flex-1 mr-2">
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1 mr-1">
                             {/* Avatar com cor temática da caixa + indicador de conexão */}
                             <div className="relative shrink-0">
                               <div 
@@ -6691,9 +6716,9 @@ export default function ChatDashboard() {
                           </div>
 
                           {/* Lado Direito: Status Tag e Switch Toggle */}
-                          <div className="flex items-center gap-2 shrink-0">
+                          <div className="flex items-center gap-2 shrink-0 mr-0.5">
                             <span className={cn(
-                              "text-[9px] font-semibold px-2 py-0.5 rounded-full border tracking-wide uppercase hidden sm:inline-block",
+                              "text-[9px] font-semibold px-2 py-0.5 rounded-full border tracking-wide uppercase shrink-0",
                               isConn 
                                 ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20" 
                                 : isConnPending
@@ -6733,24 +6758,76 @@ export default function ChatDashboard() {
                   </div>
 
                   {/* Rodapé com Resumo e Botão Concluir */}
-                  <div className="mt-2 pt-2 px-3 border-t border-gray-100 dark:border-white/5 flex items-center justify-between">
-                    <span className="text-[11px] text-gray-500 dark:text-gray-400 font-medium">
-                      {hasMultiSelection ? (
-                        <>
-                          <strong className="text-emerald-600 dark:text-emerald-400 font-bold">{selectedChannelFilters.length}</strong> {selectedChannelFilters.length === 1 ? 'caixa ativa' : 'caixas ativas'}
-                        </>
-                      ) : (
-                        'Todas as caixas ativas'
-                      )}
-                    </span>
-                    <button
+                  {isMobileSheet ? (
+                    <div className="mt-3 pt-3 border-t border-gray-100 dark:border-white/5 flex flex-col gap-2">
+                      <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 font-medium px-1">
+                        <span>Filtro selecionado:</span>
+                        <span>
+                          {hasMultiSelection ? (
+                            <>
+                              <strong className="text-emerald-600 dark:text-emerald-400 font-bold">{selectedChannelFilters.length}</strong> {selectedChannelFilters.length === 1 ? 'caixa ativa' : 'caixas ativas'}
+                            </>
+                          ) : (
+                            'Todas as caixas ativas'
+                          )}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => setActiveDropdown(null)}
+                        className="w-full py-3 rounded-2xl bg-gradient-to-r from-[#00a884] to-teal-500 hover:from-[#008f6f] hover:to-teal-600 text-white font-bold text-sm shadow-lg shadow-emerald-500/20 active:scale-95 transition-all text-center flex items-center justify-center gap-2"
+                      >
+                        <CheckCheck size={16} />
+                        Concluir Seleção
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="mt-2 pt-2 px-3 border-t border-gray-100 dark:border-white/5 flex items-center justify-between">
+                      <span className="text-[11px] text-gray-500 dark:text-gray-400 font-medium">
+                        {hasMultiSelection ? (
+                          <>
+                            <strong className="text-emerald-600 dark:text-emerald-400 font-bold">{selectedChannelFilters.length}</strong> {selectedChannelFilters.length === 1 ? 'caixa ativa' : 'caixas ativas'}
+                          </>
+                        ) : (
+                          'Todas as caixas ativas'
+                        )}
+                      </span>
+                      <button
+                        onClick={() => setActiveDropdown(null)}
+                        className="text-xs bg-[#00a884] hover:bg-[#008f6f] text-white font-semibold py-1.5 px-3.5 rounded-lg shadow-sm transition-all active:scale-95"
+                      >
+                        Concluir
+                      </button>
+                    </div>
+                  )}
+                </>
+              );
+
+              return (
+                <>
+                  {/* Variante Mobile: Bottom Sheet Modal com Backdrop */}
+                  <div className="fixed inset-0 z-[100] sm:hidden flex items-end justify-center pointer-events-auto">
+                    <div 
+                      className="fixed inset-0 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
                       onClick={() => setActiveDropdown(null)}
-                      className="text-xs bg-[#00a884] hover:bg-[#008f6f] text-white font-semibold py-1 px-3 rounded-lg shadow-sm transition-all active:scale-95"
+                    />
+                    <div 
+                      onClick={(e) => e.stopPropagation()}
+                      className="relative w-full max-h-[85vh] bg-white dark:bg-[#161f26] border-t border-gray-200 dark:border-white/10 rounded-t-[28px] shadow-[0_-10px_40px_rgba(0,0,0,0.4)] p-4 flex flex-col z-10 animate-in slide-in-from-bottom duration-250 overscroll-contain safe-bottom-padding"
                     >
-                      Concluir
-                    </button>
+                      {/* Puxador decorativo */}
+                      <div className="w-12 h-1.5 rounded-full bg-gray-300 dark:bg-white/20 mx-auto mb-3 shrink-0" />
+                      {renderChannelPickerInner(true)}
+                    </div>
                   </div>
-                </div>
+
+                  {/* Variante Desktop: Popover Flutuante Perfeitamente Dimensionado */}
+                  <div 
+                    onClick={(e) => e.stopPropagation()}
+                    className="hidden sm:flex absolute left-0 top-11 w-84 sm:w-[360px] max-w-[calc(100vw-32px)] bg-white/95 dark:bg-[#161f26]/95 border border-gray-200/80 dark:border-white/10 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.35)] py-2.5 z-50 backdrop-blur-2xl ring-1 ring-black/5 dark:ring-white/5 animate-in fade-in zoom-in-95 duration-150 flex-col"
+                  >
+                    {renderChannelPickerInner(false)}
+                  </div>
+                </>
               );
             })()}
           </div>
@@ -6761,7 +6838,7 @@ export default function ChatDashboard() {
               onClick={() => setTicketMode(!ticketMode)}
               title={ticketMode ? `Modo Ticket Ativo: ${activeTicketsCount} pendente(s)` : "Ativar Modo Ticket"}
               className={cn(
-                "flex-1 min-w-0 px-2.5 py-2.5 backdrop-blur-md flex items-center justify-between gap-1 transition-all active:scale-[0.98] shadow-sm select-none border animate-in fade-in group",
+                "flex-1 min-w-0 px-2 sm:px-2.5 py-2 sm:py-2.5 backdrop-blur-md flex items-center justify-between gap-1 transition-all active:scale-[0.98] shadow-sm select-none border animate-in fade-in group",
                 ticketMode 
                   ? "bg-violet-500/15 dark:bg-violet-500/25 border-violet-500/30 text-violet-700 dark:text-violet-300 font-semibold rounded-l-2xl rounded-r-none" 
                   : "bg-white/40 dark:bg-black/20 border-gray-200/50 dark:border-white/5 text-gray-500 dark:text-gray-400 hover:bg-gray-100/50 dark:hover:bg-white/10 rounded-2xl"

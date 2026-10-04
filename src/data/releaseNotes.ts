@@ -20,6 +20,45 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.6.6',
+    date: '2026-10-04',
+    summary: 'Refatoração Responsiva Mobile-First do Painel de Caixas de Entrada (Bottom Sheet), Otimização da Barra de Tickets e Eliminação de Cortes em Dispositivos Móveis',
+    notes: [
+      {
+        id: '7.6.6-1',
+        category: 'features',
+        title: 'Seletor de Caixas de Entrada Adaptativo (Mobile Bottom Sheet & Desktop Popover)',
+        description: 'Em smartphones e telas compactas, o seletor de caixas agora abre como um Bottom Sheet Modal nativo com backdrop blur, puxador ergonômico, espaçamento generoso e botão de submissão full-width de 48px com feedback tátil.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.6.6-2',
+        category: 'improvements',
+        title: 'Ergonomia & Respiro Visual dos Controles Rápidos',
+        description: 'Redistribuição flexível da barra de ferramentas rápida (Tickets e Caixas de Entrada) com proporção equilibrada e padding responsivo, impedindo truncamento do rótulo de tickets para "Tick...".',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      },
+      {
+        id: '7.6.6-3',
+        category: 'fixes',
+        title: 'Eliminação Completa de Cortes e Overflow Lateral no Mobile',
+        description: 'Correção de transbordamento horizontal de switches, tags de conexão "Online" e do botão "Concluir", garantindo que 100% dos elementos estejam visíveis e operáveis em qualquer celular ou tablet.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      },
+      {
+        id: '7.6.6-4',
+        category: 'improvements',
+        title: 'Badge de Ambiente Responsivo no Topo da Sidebar',
+        description: 'Badge de servidor otimizado para exibir "PROD/ALF" em telas móveis e "PRODUÇÃO/ALFA" no desktop, evitando espremedura dos botões de nova conversa, IA, tema e menu lateral.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      }
+    ]
+  },
+  {
     version: '7.6.5',
     date: '2026-10-04',
     summary: 'Player de Áudio Premium Glassmorphism com Transcrição IA, Gravação Otimizada com Codecs Nativos, Blindagem de CircuitBreaker e Eliminação de Erros 400 Bad Request no Supabase',
