@@ -3804,7 +3804,7 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
           const { data: dbMsgs } = await supabase
             .from('messages')
             .select('id, text_content, sender_type, timestamp, transcription, message_type, media_url')
-            .eq('conversation_id', contact.conv_id || '')
+            .eq('conversation_id', (contact.conv_id && /^[0-9a-f-]{36}$/i.test(contact.conv_id)) ? contact.conv_id : '00000000-0000-0000-0000-000000000000')
             .gte('timestamp', activeTicket.opened_at)
             .order('timestamp', { ascending: true });
 

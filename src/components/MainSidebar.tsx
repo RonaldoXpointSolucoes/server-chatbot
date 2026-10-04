@@ -256,7 +256,15 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
   const [userCompanies, setUserCompanies] = useState<any[]>([]);
   const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
   const [newWorkspaceName, setNewWorkspaceName] = useState('');
-  const [currentCompanyContext, setCurrentCompanyContext] = useState<any>(null);
+  const [currentCompanyContext, setCurrentCompanyContext] = useState<any>(() => {
+    if (typeof window === 'undefined') return null;
+    const tid = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+    const tname = localStorage.getItem('current_tenant_name') || sessionStorage.getItem('current_tenant_name');
+    if (tname && tname !== 'Carregando...') {
+      return { id: tid, name: tname };
+    }
+    return null;
+  });
   const globalAiEnabled = useChatStore(state => state.globalAiEnabled);
   const setGlobalAiEnabled = useChatStore(state => state.setGlobalAiEnabled);
   const globalAiAuditInfo = useChatStore(state => state.globalAiAuditInfo);
@@ -739,7 +747,11 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
         <img src="/pwa-192x192.png" alt="Logo" className="w-7 h-7 object-contain rounded-lg shadow-sm shrink-0" />
         <div className={cn("flex-1 min-w-0 ml-3 transition-all duration-200", "group-[.is-minimized]/sidebar:opacity-0 group-[.is-minimized]/sidebar:w-0 group-[.is-minimized]/sidebar:hidden group-hover/sidebar:!opacity-100 group-hover/sidebar:!w-auto group-hover/sidebar:!block")}>
           <h2 className="font-semibold text-[#111b21] dark:text-[#e9edef] truncate text-[15px] tracking-tight group-hover:text-emerald-600 dark:group-hover:text-white transition-colors">
-            {tenantInfo?.name || currentCompanyContext?.name || 'Carregando...'}
+            {tenantInfo?.name && tenantInfo.name !== 'Carregando...' 
+              ? tenantInfo.name 
+              : currentCompanyContext?.name && currentCompanyContext.name !== 'Carregando...' 
+                ? currentCompanyContext.name 
+                : (typeof window !== 'undefined' && localStorage.getItem('current_tenant_name') && localStorage.getItem('current_tenant_name') !== 'Carregando...' ? localStorage.getItem('current_tenant_name') : null) || 'X-Point Soluções'}
           </h2>
         </div>
         {(userCompanies.length > 1 || currentUserRole === 'admin') && (
@@ -747,6 +759,20 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
              <ChevronDown size={14} className="text-[#54656f] dark:text-[#8696a0] group-hover:text-emerald-600 dark:group-hover:text-white transition-colors" />
           </div>
         )}
+
+        {/* Botão de Fechar Exclusivo para Mobile */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onClose?.();
+          }}
+          className="lg:hidden p-1.5 ml-2 rounded-lg text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
+          title="Fechar Menu"
+          aria-label="Fechar Menu"
+        >
+          <X size={18} />
+        </button>
 
         {/* Workspace Dropdown Panel */}
         {showWorkspaceMenu && (userCompanies.length > 1 || currentUserRole === 'admin') && (
@@ -889,10 +915,12 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
                 icon={<User size={16} className={filterType === 'mine' ? "text-indigo-400" : ""} />} 
                 isActive={filterType === 'mine'} 
                 onClick={() => {
-                  if (activeChannelFilter === null && filterType === 'mine' && window.location.pathname === '/chat') return;
                   setActiveChannelFilter(null, null);
                   setFilterType('mine');
-                  navigate('/chat');
+                  if (window.location.pathname !== '/chat') {
+                    navigate('/chat');
+                  }
+                  onClose?.();
                 }} 
               />
             </div>
@@ -910,10 +938,12 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
               icon={<CheckSquare size={16} className={filterType === 'tasks' ? "text-amber-400" : ""} />} 
               isActive={filterType === 'tasks'} 
               onClick={() => {
-                if (activeChannelFilter === null && filterType === 'tasks' && window.location.pathname === '/chat') return;
                 setActiveChannelFilter(null, null);
                 setFilterType('tasks');
-                navigate('/chat');
+                if (window.location.pathname !== '/chat') {
+                  navigate('/chat');
+                }
+                onClose?.();
               }} 
             />
             {instances.length !== 1 && (
@@ -922,12 +952,12 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
                   title="Todas as conversas" 
                   isActive={filterType === 'all' && activeChannelFilter === null} 
                   onClick={() => {
-                    if (activeChannelFilter === null && filterType === 'all' && window.location.pathname === '/chat') return;
                     setActiveChannelFilter(null, null);
                     setFilterType('all');
                     if (window.location.pathname !== '/chat') {
                       navigate('/chat');
                     }
+                    onClose?.();
                   }} 
                   alwaysShowAction={true}
                   actionNode={
@@ -1025,14 +1055,12 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
                           className={cn(!isConnected && !isConnecting ? "opacity-60 hover:opacity-100 hover:bg-gray-200/30 dark:hover:bg-[#202c33]/40" : isConnecting ? "opacity-90 hover:opacity-100 hover:bg-yellow-500/5" : "")}
                           onClick={() => {
                              const state = useChatStore.getState();
-                             if (state.activeChannelFilter === inst.id && state.filterType === 'all' && window.location.pathname === '/chat') {
-                               return;
-                             }
                              state.setActiveChannelFilter(inst.id, inst.display_name);
                              state.setFilterType('all');
                              if (window.location.pathname !== '/chat') {
                                navigate('/chat');
                              }
+                             onClose?.();
                            }}
                         />
                         {(unreadCount > 0 || notifPrefs[inst.id]?.is_enabled === false) && (

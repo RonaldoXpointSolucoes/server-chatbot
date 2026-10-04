@@ -20,6 +20,76 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.6.5',
+    date: '2026-10-04',
+    summary: 'Player de Áudio Premium Glassmorphism com Transcrição IA, Gravação Otimizada com Codecs Nativos, Blindagem de CircuitBreaker e Eliminação de Erros 400 Bad Request no Supabase',
+    notes: [
+      {
+        id: '7.6.5-1',
+        category: 'features',
+        title: 'Player de Áudio Premium Glassmorphism & Transcrição IA',
+        description: 'Novo componente AudioPlayerBubble com controles táteis (botão play/pause circular 40px+, barra de progresso suave, velocidades 1x/1.5x/2x, formatação de tempo e transcrição por IA integrada com botão de cópia rápida).',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.6.5-2',
+        category: 'improvements',
+        title: 'Gravação de Áudio de Alta Fidelidade (Echo Cancellation & Codecs Nativos)',
+        description: 'Gravação web refatorada com cancelamento de eco, supressão de ruído e ganho automático, suporte dinâmico a codecs WebM/OGG Opus e timeslice incremental de 250ms, eliminando truncamento de final de áudio no mobile.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      },
+      {
+        id: '7.6.5-3',
+        category: 'fixes',
+        title: 'Eliminação de Erros 400 Bad Request no Supabase PostgREST',
+        description: 'Sanitização estrita com validação Regex de UUID em consultas por conversation_id no ChatDashboard, ChatModals e chatStore, impedindo que parâmetros vazios ou não-UUID sejam enviados ao banco de dados.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      },
+      {
+        id: '7.6.5-4',
+        category: 'fixes',
+        title: 'Blindagem de CircuitBreaker e Validação Oficial de Chaves Gemini',
+        description: 'Detecção imediata de erros 400/401/chaves inválidas sem retries transitórios desnecessários em agent.js e geminiService.ts, protegendo o disjuntor do worker e ativando contingência heurística sem interrupção de atendimento.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      }
+    ]
+  },
+  {
+    version: '7.6.4',
+    date: '2026-10-04',
+    summary: 'Novo Ícone Oficial PWA 3D Glassmorphism no Android, Eliminação do Loop "Carregando..." e Otimização da Sidebar Mobile',
+    notes: [
+      {
+        id: '7.6.4-1',
+        category: 'features',
+        title: 'Nova Identidade Visual Oficial PWA & Android (3D Glassmorphism)',
+        description: 'Substituição integral de todos os ícones PWA (72x72 até 1024x1024, maskable, apple-touch-icon e favicon), aposentando o ícone antigo laranja e ativando a nova marca tridimensional em vidro com nós inteligentes e checkmark verde.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.6.4-2',
+        category: 'fixes',
+        title: 'Eliminação Definitiva do Estado "Carregando..." no Mobile',
+        description: 'Correção arquitetural no chatStore e MainSidebar com hidratação síncrona e resiliente do tenant ativo a partir do storage. Não bloqueia mais o carregamento inicial de tickets e contatos aguardando auth.getUser(), exibindo imediatamente o nome correto da empresa (X-Point Soluções).',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      },
+      {
+        id: '7.6.4-3',
+        category: 'improvements',
+        title: 'Fluidez da Sidebar no Celular com Botão Fechar e Toque Direto',
+        description: 'Inclusão de botão dedicado "X" no topo da sidebar em dispositivos móveis e recolhimento automático da barra lateral ao tocar em qualquer caixa de WhatsApp ou filtro de conversas, liberando instantaneamente a visualização da tela de chat.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      }
+    ]
+  },
+  {
     version: '7.6.3',
     date: '2026-10-01',
     summary: 'Diagnóstico Transparente de Erros no Login (Supabase Quota 402 vs Coolify), Modal de Saúde da Infraestrutura e Otimização do Consumo Realtime',

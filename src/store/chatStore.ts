@@ -1041,7 +1041,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
   connectedInstanceName: null,
   rawInstances: [],
-  tenantInfo: null,
+  tenantInfo: (() => {
+    if (typeof window === 'undefined') return null;
+    const tid = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+    const tname = localStorage.getItem('current_tenant_name') || sessionStorage.getItem('current_tenant_name');
+    if (tid) {
+      return {
+        id: tid,
+        name: (tname && tname !== 'Carregando...') ? tname : 'X-Point Soluções'
+      } as any;
+    }
+    return null;
+  })(),
   agents: [],
   crmBoards: [],
   modalReason: null,
@@ -3791,7 +3802,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const { data: convs } = await supabase.from('conversations').select('id').eq('contact_id', realId);
       if (convs && convs.length > 0) {
         const convIds = convs.map(c => c.id);
-        await supabase.from('messages').delete().in('conversation_id', convIds);
+        await supabase.from('messages').delete().in('conversation_id', safeConvIds);
         await supabase.from('conversations').delete().in('id', convIds);
       }
       await supabase.from('contacts').delete().eq('id', realId);
@@ -4305,10 +4316,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   fetchInitialData: async () => {
-    const tenant = get().tenantInfo;
-    if (!tenant) {
+    let tenant = get().tenantInfo;
+    const resolvedTenantId = tenant?.id || (typeof window !== 'undefined' ? (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')) : null);
+    if (!resolvedTenantId) {
       set({ isChannelLoading: false });
       return;
+    }
+    if (!tenant) {
+      const cachedName = typeof window !== 'undefined' ? (localStorage.getItem('current_tenant_name') || sessionStorage.getItem('current_tenant_name')) : null;
+      tenant = {
+        id: resolvedTenantId,
+        name: (cachedName && cachedName !== 'Carregando...') ? cachedName : 'X-Point Soluções'
+      } as any;
+      set({ tenantInfo: tenant });
     }
 
     // Safety fallback timeout to prevent infinite skeleton loader state if network fails
@@ -4706,14 +4726,37 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
       let currentTenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
 
+      // Dispara busca imediata da empresa ativa em background se tenantId já existe no storage
+      if (currentTenantId) {
+        supabase.from('companies').select('*').eq('id', currentTenantId).maybeSingle().then(({ data: earlyTenantData }) => {
+          if (earlyTenantData) {
+            set({
+              tenantInfo: earlyTenantData,
+              connectedInstanceName: earlyTenantData.evolution_api_instance || null,
+              globalAiEnabled: earlyTenantData.global_ai_enabled ?? true,
+              globalAiAuditInfo: earlyTenantData.settings?.global_ai_audit || null
+            });
+            if (earlyTenantData.name && earlyTenantData.name !== 'Carregando...') {
+              localStorage.setItem('current_tenant_name', earlyTenantData.name);
+            }
+          }
+        }).catch(() => {});
+      }
+
       const { data: userData } = await supabase.auth.getUser();
       if (userData?.user?.id) {
-        const { data: tu } = await supabase
+        const userEmail = userData.user.email || localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
+        let tuQuery = supabase
           .from('tenant_users')
           .select('tenant_id, allowed_companies')
-          .eq('user_id', userData.user.id)
-          .limit(1)
-          .maybeSingle();
+          .eq('user_id', userData.user.id);
+
+        if (userEmail) {
+          tuQuery = tuQuery.ilike('email', userEmail);
+        }
+
+        const { data: tuList } = await tuQuery.limit(1);
+        const tu = tuList && tuList.length > 0 ? tuList[0] : null;
 
         if (tu) {
           const allowedCompanies = Array.isArray(tu.allowed_companies) ? tu.allowed_companies : [];
@@ -4742,6 +4785,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           globalAiEnabled: tenantData.global_ai_enabled ?? true,
           globalAiAuditInfo: tenantData.settings?.global_ai_audit || null
         });
+        if (tenantData.name && tenantData.name !== 'Carregando...') {
+          localStorage.setItem('current_tenant_name', tenantData.name);
+        }
 
         // Pré-popular cache com todas as instâncias do tenant para máxima performance de mensagens
         try {
@@ -5113,7 +5159,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           });
         }
 
-        if (rawFetchedMsgs.length === 0 && convIds.length > 0) {
+        const safeConvIds = convIds.filter(id => isUuid(id));
+        if (rawFetchedMsgs.length === 0 && safeConvIds.length > 0) {
           let msgQuery = supabase.from('messages')
             .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
             .eq('tenant_id', tenant.id)
@@ -5146,7 +5193,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
           const { data: contactConvs } = await contactConvsQuery;
 
-          const allContactConvIds = (contactConvs || []).map(c => c.id);
+          const allContactConvIds = (contactConvs || []).map(c => c.id).filter(id => isUuid(id));
           if (allContactConvIds.length > 0) {
             let fallbackMsgQuery = supabase.from('messages')
               .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
@@ -5229,7 +5276,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
                 const currentMsgsLength = (msgs && msgs.length) || 0;
                 const newLimit = currentMsgsLength + 100;
-                const validConvIds = convIds.length > 0 ? convIds : (conv?.id ? [conv.id] : []);
+                const validConvIds = (convIds.length > 0 ? convIds : (conv?.id ? [conv.id] : [])).filter(id => isUuid(id));
 
                 // 1ª checagem intermediária
                 if (validConvIds.length > 0) {

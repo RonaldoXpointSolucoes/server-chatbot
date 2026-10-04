@@ -108,12 +108,16 @@ async function callWithGeminiRetry(fn, operationName = 'Gemini Operation', maxRe
 
       // 1. Identificar falhas não-transitórias (credenciais, autenticação, conteúdo proibido)
       const isAuthOrFatal = errMsg.includes('401') || 
+                            errMsg.includes('400') ||
                             errMsg.includes('Unauthorized') || 
                             errMsg.includes('ACCESS_TOKEN_TYPE_UNSUPPORTED') || 
                             errMsg.includes('UNAUTHENTICATED') ||
                             errMsg.includes('API_KEY_INVALID') || 
                             errMsg.includes('API_KEY_SERVICE_BLOCKED') ||
                             errMsg.includes('API key not valid') || 
+                            errMsg.includes('API key expired') ||
+                            errMsg.includes('API_KEY') ||
+                            errMsg.includes('API key') ||
                             errMsg.includes('403') || 
                             errMsg.includes('PERMISSION_DENIED') ||
                             errMsg.includes('PROHIBITED_CONTENT') ||
@@ -133,7 +137,7 @@ async function callWithGeminiRetry(fn, operationName = 'Gemini Operation', maxRe
       }
 
       // 2. Erros genuinamente transitórios de servidor ou rede
-      const isTransient = errMsg.includes('500') || 
+      const isTransient = !isAuthOrFatal && (errMsg.includes('500') || 
                           errMsg.includes('502') || 
                           errMsg.includes('503') || 
                           errMsg.includes('504') || 
@@ -145,7 +149,7 @@ async function callWithGeminiRetry(fn, operationName = 'Gemini Operation', maxRe
                           errMsg.includes('Internal error') || 
                           errMsg.includes('internal error') || 
                           errMsg.includes('An internal error has occurred') ||
-                          (errMsg.includes('fetch failed') && !errMsg.includes('401') && !errMsg.includes('403'));
+                          (errMsg.includes('fetch failed') && !errMsg.includes('401') && !errMsg.includes('403') && !errMsg.includes('400')));
 
       if (isTransient && attempt < maxRetries) {
         // Backoff exponencial com jitter randômico para evitar thundering herd
@@ -1385,7 +1389,7 @@ class AutomationWorker {
             if (!k || typeof k !== 'string') return false;
             const clean = k.replace(/^['"]|['"]$/g, '').trim();
             // Aceita formatos oficiais da Google: AIza (Google AI Studio) e AQ. (Google Cloud / Vertex AI)
-            return clean.length >= 20 && (clean.startsWith('AIza') || clean.startsWith('AQ.')) && !invalidGeminiKeysBlacklist.has(clean);
+            return clean.length >= 30 && clean.startsWith('AIza') && !invalidGeminiKeysBlacklist.has(clean);
         };
 
         let keyToUse = '';

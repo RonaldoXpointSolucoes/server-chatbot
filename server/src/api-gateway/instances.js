@@ -853,13 +853,13 @@ router.post('/instances/:instanceId/send-media', requireTenant, upload.single('m
                     ffmpeg(tempInput)
                         .audioCodec('libopus')
                         .audioChannels(1)
-                        .audioFrequency(16000)
+                        .audioFrequency(48000)
                         .outputOptions([
                             '-avoid_negative_ts make_zero',
                             '-map_metadata -1',
-                            '-b:a 24k',
+                            '-b:a 48k',
                             '-vbr on',
-                            '-compression_level 10',
+                            '-compression_level 8',
                             '-application voip'
                         ])
                         .format('ogg')
@@ -879,7 +879,7 @@ router.post('/instances/:instanceId/send-media', requireTenant, upload.single('m
                 
                 // Sobrescreve as propriedades do arquivo com a versão convertida
                 file.buffer = convertedBuffer;
-                file.mimetype = 'audio/ogg; codecs=opus';
+                file.mimetype = 'audio/ogg';
                 
                 // Atualiza a extensão pra ogg se não for
                 file.originalname = file.originalname.replace(/\.[^/.]+$/, "") + ".ogg";

@@ -636,8 +636,23 @@ export default function ClientLogin() {
 
          if (!allowedCompanies.includes(tenantData.id)) {
             // Se a empresa principal (matriz) não estiver nas permitidas, pega a primeira permitida.
-            // O nome real será carregado pelo MainSidebar.tsx depois do login.
-            tenantData = { id: allowedCompanies[0], name: "Carregando..." };
+            try {
+              const { data: comp } = await supabase
+                .from('companies')
+                .select('id, name, status, evolution_api_instance')
+                .eq('id', allowedCompanies[0])
+                .maybeSingle();
+              if (comp && comp.name) {
+                tenantData = comp;
+              } else {
+                tenantData = { id: allowedCompanies[0], name: "X-Point Soluções" };
+              }
+            } catch (_) {
+              tenantData = { id: allowedCompanies[0], name: "X-Point Soluções" };
+            }
+         }
+         if (!tenantData.name || tenantData.name === "Carregando...") {
+            tenantData.name = "X-Point Soluções";
          }
       }
 

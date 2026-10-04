@@ -134,9 +134,9 @@ const customFetch = async (input: RequestInfo | URL, init?: RequestInit, retries
       // Só alerta nos logs quando a aba estiver ativa e persistir até as tentativas finais (evita warnings espúrios quando o dispositivo dorme em segundo plano)
       const now = Date.now();
       const isTabHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
-      if (!isTabHidden && retries <= 1 && now - lastSupabaseOscillationLog > 15000) {
+      if (!isTabHidden && retries === 1 && now - lastSupabaseOscillationLog > 60000) {
         lastSupabaseOscillationLog = now;
-        console.warn(`[Supabase Cloud] Oscilação de rede detectada no servidor Supabase${isAuthRequest ? ' (Auth Refresh)' : ''}. Auto-recuperando em ${waitTime}ms... (Tentativa de contingência)`);
+        console.warn(`[Supabase Cloud] Oscilação de rede detectada no servidor Supabase${isAuthRequest ? ' (Auth Refresh)' : ''}. Auto-recuperando em ${waitTime}ms...`);
       }
       if (retries <= 1) {
         hasReportedServiceError = true;
@@ -148,8 +148,10 @@ const customFetch = async (input: RequestInfo | URL, init?: RequestInit, retries
     if (isNetworkError) {
       supabaseCircuitBreaker.recordFailure();
       const isTabHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
-      if (!isTabHidden) {
-        console.error('[Supabase Cloud Network] Falha persistente de conexão com a API do Supabase após retentativas com backoff.', error);
+      const now = Date.now();
+      if (!isTabHidden && now - lastSupabaseOscillationLog > 60000) {
+        lastSupabaseOscillationLog = now;
+        console.warn('[Supabase Cloud Network] Falha transitória de conexão com a API do Supabase após retentativas com backoff.');
       }
       if (typeof window !== 'undefined') {
         hasReportedServiceError = true;

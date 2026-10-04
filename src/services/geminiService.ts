@@ -39,9 +39,9 @@ class GeminiService {
 
   getApiKey(): string {
     const isValidKey = (key: string | null | undefined): boolean => {
-      if (!key || key.length < 15) return false;
+      if (!key || key.length < 30) return false;
       const clean = key.replace(/^['"]|['"]$/g, '').trim();
-      return clean.length >= 20 && (clean.startsWith('AIza') || clean.startsWith('AQ.')) && !this.failedKeys.has(clean);
+      return clean.length >= 30 && clean.startsWith('AIza') && !this.failedKeys.has(clean);
     };
 
     // 1. Check local override
@@ -63,15 +63,15 @@ class GeminiService {
       return fallbackApiKey.replace(/^['"]|['"]$/g, '').trim();
     }
 
-    // 4. Fallback to Google Cloud API key if it starts with AIza or AQ (only if Gemini key is not set)
+    // 4. Fallback to Google Cloud API key if it starts with AIza
     if (isValidKey(fallbackGcpKey)) {
       const cleanGcp = fallbackGcpKey.replace(/^['"]|['"]$/g, '').trim();
-      if (cleanGcp.startsWith('AIza') || cleanGcp.startsWith('AQ.')) {
+      if (cleanGcp.startsWith('AIza')) {
         return cleanGcp;
       }
     }
 
-    // 5. Fallback Mestre do Ecossistema ChatBoot (Garante 100% de disponibilidade)
+    // 5. Fallback Mestre do Ecossistema ChatBoot
     const masterKey = getGlobalMasterKey();
     if (isValidKey(masterKey)) {
       return masterKey;
@@ -87,7 +87,7 @@ class GeminiService {
 
   isConfigured(): boolean {
     const key = this.getApiKey();
-    return key.length >= 20 && (key.startsWith('AIza') || key.startsWith('AQ.'));
+    return key.length >= 30 && key.startsWith('AIza');
   }
 
   async testConnection(customKey?: string): Promise<{ ok: boolean; message: string; model?: string; latencyMs?: number }> {
@@ -95,8 +95,8 @@ class GeminiService {
     if (!key) {
       return { ok: false, message: 'Nenhuma chave de API configurada.' };
     }
-    if ((!key.startsWith('AIza') && !key.startsWith('AQ.')) || key.length < 20) {
-      return { ok: false, message: 'Formato inválido. Chaves oficiais do Google iniciam com "AIza" ou "AQ." e possuem no mínimo 20 caracteres.' };
+    if (!key.startsWith('AIza') || key.length < 30) {
+      return { ok: false, message: 'Formato inválido. Chaves oficiais do Google AI Studio iniciam com "AIza" e possuem no mínimo 30 caracteres.' };
     }
 
     const startTime = Date.now();
@@ -260,18 +260,24 @@ Nunca esqueça dessa formatação JSON quando for a hora da entrega. Até lá, a
       });
       const base64Audio = base64DataUrl.split(',')[1];
       
-      // Vamos tentar deduzir o mimetype (ex vindo do whatsapp geralmente é ogg/oga, ou mpeg se for MP3)
-      let mimeType = req.headers.get("content-type") || "audio/ogg";
+      // Normalização rigorosa de MIME Type aceito pelo endpoint Google Generative AI
+      const rawHeader = req.headers.get("content-type") || "";
+      let mimeType = rawHeader.split(';')[0].trim().toLowerCase();
       
-      // DEBUB: if it's HTML, we shouldn't send it to Gemini! It means the URL is an error page or a Vercel 404.
       if (mimeType.includes("text/html")) {
-        console.error("GeminiService Error: audio URL returned HTML string. URL:", mediaUrl);
-        const textBody = await blob.text();
-        console.error("HTML Body snippet:", textBody.substring(0, 500));
-        throw new Error(`A URL do áudio é inválida ou não está acessível (retornou página web). URL: ${mediaUrl}`);
+        console.error("[GeminiService] URL de áudio retornou página HTML:", mediaUrl);
+        throw new Error(`A URL do áudio é inválida ou não está acessível publicamente.`);
       }
 
-      if(mimeType.includes("application/octet-stream")) mimeType = "audio/ogg"; // fallback comum
+      if (!mimeType || mimeType.includes("application/octet-stream") || !mimeType.startsWith("audio/")) {
+        const lowerUrl = mediaUrl.toLowerCase();
+        if (lowerUrl.includes(".ogg") || lowerUrl.includes(".opus")) mimeType = "audio/ogg";
+        else if (lowerUrl.includes(".webm")) mimeType = "audio/webm";
+        else if (lowerUrl.includes(".mp3") || lowerUrl.includes(".mpeg")) mimeType = "audio/mp3";
+        else if (lowerUrl.includes(".m4a") || lowerUrl.includes(".aac")) mimeType = "audio/aac";
+        else if (lowerUrl.includes(".wav")) mimeType = "audio/wav";
+        else mimeType = "audio/ogg";
+      }
 
       const payload = {
         contents: [
@@ -301,14 +307,17 @@ Nunca esqueça dessa formatação JSON quando for a hora da entrega. Até lá, a
       });
 
       const data = await response.json();
-      if(data.error) {
-         throw new Error(data.error.message);
+      if (data.error) {
+        if (data.error.code === 400 || data.error.code === 401 || data.error.status === 'UNAUTHENTICATED') {
+          this.markKeyAsFailed(apiKey, data.error.message);
+        }
+        throw new Error(data.error.message || 'Falha na API Gemini');
       }
 
       const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
       return text ? text.trim() : "[Nenhuma transcrição retornada]";
-    } catch (err) {
-      console.error("Erro em transcribeAudio:", err);
+    } catch (err: any) {
+      console.error("[GeminiService] Erro em transcribeAudio:", err);
       throw err;
     }
   }

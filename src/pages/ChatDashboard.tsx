@@ -672,7 +672,7 @@ export default function ChatDashboard() {
       const { data: msgs } = await supabase
         .from('messages')
         .select('text_content, sender_type, timestamp, raw_payload')
-        .eq('conversation_id', contact.conv_id || '')
+        .eq('conversation_id', (contact.conv_id && /^[0-9a-f-]{36}$/i.test(contact.conv_id)) ? contact.conv_id : '00000000-0000-0000-0000-000000000000')
         .gte('timestamp', activeTicket.opened_at);
 
       if (!msgs || msgs.length === 0) {
@@ -1664,6 +1664,46 @@ export default function ChatDashboard() {
 
     return true;
   }, [selectedChannelFilters, activeChannelFilter, activeChannelName, instanceCache, tenantInstances]);
+
+  // Helper canônico e resiliente para obter o nome amigável de exibição de uma caixa sem expor UUID cru
+  const getChannelDisplayName = React.useCallback((channelId: string | null | undefined): string => {
+    if (!channelId || channelId === 'all') return "Todas as Caixas";
+    
+    // 1. Se activeChannelName estiver definido e não for um UUID cru
+    if (activeChannelFilter === channelId && activeChannelName && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(activeChannelName)) {
+      return activeChannelName;
+    }
+
+    // 2. Busca nas instâncias do tenant
+    const fromTenant = tenantInstances.find((i: any) => i.id === channelId || i.display_name === channelId || i.name === channelId);
+    if (fromTenant?.display_name || fromTenant?.whatsapp_name || fromTenant?.name) {
+      return fromTenant.display_name || fromTenant.whatsapp_name || fromTenant.name;
+    }
+
+    // 3. Busca nas instâncias disponíveis globais
+    const fromAvailable = availableInstancesList.find((i: any) => i.id === channelId || i.display_name === channelId);
+    if (fromAvailable?.display_name) return fromAvailable.display_name;
+
+    // 4. Busca no mapa de nomes em memória
+    if (instanceNamesMap[channelId]) return instanceNamesMap[channelId];
+
+    // 5. Busca no instanceCache
+    const fromCache = instanceCache.getName(channelId);
+    if (fromCache && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(fromCache)) {
+      return fromCache;
+    }
+
+    // 6. Busca nos contatos
+    const contactMatch = contacts.find((c: any) => c.instance_id === channelId || (c.id && c.id.includes(channelId)));
+    if (contactMatch?.instance_name) return contactMatch.instance_name;
+
+    // 7. Se for um UUID cru, não expõe o hash na UI
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(channelId) || channelId.length > 25) {
+      return "Caixa WhatsApp";
+    }
+
+    return channelId;
+  }, [activeChannelFilter, activeChannelName, tenantInstances, availableInstancesList, instanceNamesMap, contacts]);
 
   // Helper de validação de Ticket Aberto para a caixa atual
   const isContactOpenTicket = React.useCallback((c: any) => {
@@ -2691,7 +2731,7 @@ export default function ChatDashboard() {
                     const { data: ticketMsgs } = await supabase
                       .from('messages')
                       .select('id, text_content, sender_type, timestamp, raw_payload, transcription, message_type, media_url')
-                      .eq('conversation_id', contact.conv_id || '')
+                      .eq('conversation_id', (contact.conv_id && /^[0-9a-f-]{36}$/i.test(contact.conv_id)) ? contact.conv_id : '00000000-0000-0000-0000-000000000000')
                       .gte('timestamp', dbTicket.opened_at)
                       .order('timestamp', { ascending: true });
 
@@ -3416,6 +3456,18 @@ export default function ChatDashboard() {
           setInstanceNamesMap(nameMap);
           setInstanceColorsMap(colorMap);
           setAvailableInstancesList(availableInstances);
+
+          // Sincroniza activeChannelName se o filtro ativo estiver sem nome amigável ou com UUID cru
+          const currentStore = useChatStore.getState();
+          if (currentStore.activeChannelFilter) {
+            const matchedInst = availableInstances.find(i => i.id === currentStore.activeChannelFilter || i.display_name === currentStore.activeChannelFilter);
+            if (matchedInst?.display_name) {
+              const currentName = currentStore.activeChannelName;
+              if (!currentName || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(currentName)) {
+                currentStore.setActiveChannelFilter(matchedInst.id, matchedInst.display_name);
+              }
+            }
+          }
         }
       } catch (err) {
         console.error("Erro ao carregar instâncias permitidas no ChatDashboard:", err);
@@ -4128,18 +4180,62 @@ export default function ChatDashboard() {
        // Stop recording (para revisar)
        handleStopRecording();
     } else {
-       // Start recording
+       // Start recording com alta fidelidade e detecção precisa de codecs
        try {
-         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-         const mediaRecorder = new MediaRecorder(stream);
+         const stream = await navigator.mediaDevices.getUserMedia({
+           audio: {
+             echoCancellation: true,
+             noiseSuppression: true,
+             autoGainControl: true,
+             channelCount: 1,
+           }
+         });
+
+         let selectedMimeType = '';
+         let fileExt = 'webm';
+
+         if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported) {
+           if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+             selectedMimeType = 'audio/webm;codecs=opus';
+             fileExt = 'webm';
+           } else if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
+             selectedMimeType = 'audio/ogg;codecs=opus';
+             fileExt = 'ogg';
+           } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+             selectedMimeType = 'audio/webm';
+             fileExt = 'webm';
+           } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+             selectedMimeType = 'audio/mp4';
+             fileExt = 'mp4';
+           } else if (MediaRecorder.isTypeSupported('audio/aac')) {
+             selectedMimeType = 'audio/aac';
+             fileExt = 'aac';
+           }
+         }
+
+         const recorderOptions: MediaRecorderOptions = selectedMimeType
+           ? { mimeType: selectedMimeType, audioBitsPerSecond: 64000 }
+           : {};
+
+         const mediaRecorder = new MediaRecorder(stream, recorderOptions);
          mediaRecorderRef.current = mediaRecorder;
          audioChunksRef.current = [];
 
-         mediaRecorder.ondataavailable = e => audioChunksRef.current.push(e.data);
+         mediaRecorder.ondataavailable = e => {
+           if (e.data && e.data.size > 0) {
+             audioChunksRef.current.push(e.data);
+           }
+         };
+
+         mediaRecorder.onerror = (e: any) => {
+           console.error('[MediaRecorder] Erro de captura:', e?.error || e);
+         };
+
          mediaRecorder.onstop = async () => {
-            const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-            const fileName = `audio_record_${Date.now()}.webm`;
-            const file = new File([audioBlob], fileName, { type: 'audio/webm' });
+            const mimeBase = (selectedMimeType || 'audio/webm').split(';')[0];
+            const audioBlob = new Blob(audioChunksRef.current, { type: mimeBase });
+            const fileName = `audio_record_${Date.now()}.${fileExt}`;
+            const file = new File([audioBlob], fileName, { type: mimeBase });
             const localUrl = URL.createObjectURL(audioBlob);
 
             setRecordedAudioFile(file);
@@ -4151,7 +4247,8 @@ export default function ChatDashboard() {
             setPlaybackRate(1);
          };
 
-         mediaRecorder.start();
+         // Coleta incremental a cada 250ms previne perda de chunks no mobile Android
+         mediaRecorder.start(250);
          setIsRecording(true);
          setAudioState('recording');
          setRecordingTime(0);
@@ -4162,6 +4259,7 @@ export default function ChatDashboard() {
            setRecordingTime(prev => prev + 1);
          }, 1000);
        } catch (e) {
+         console.error('[handleMicClick] Falha de permissão ou microfone:', e);
          alert("Permissão de microfone negada ou não suportada no seu navegador.");
        }
     }
@@ -6288,7 +6386,7 @@ export default function ChatDashboard() {
                 Atenção: Instância Offline
              </div>
              <p className="text-xs text-orange-700/80 dark:text-orange-300/80 leading-tight">
-                A instância "{activeChannelName || activeChannelFilter}" está offline. Verifique o aparelho ou tente reconectar.
+                A instância "{getChannelDisplayName(activeChannelFilter)}" está offline. Verifique o aparelho ou tente reconectar.
              </p>
              <div className="flex items-center gap-2 mt-1">
                  <button onClick={() => {
@@ -6305,9 +6403,9 @@ export default function ChatDashboard() {
         )}
 
         {/* Painel Premium de Controle Rápido (Saúde do Sistema & Modo Ticket) */}
-        <div className="flex gap-2 mx-3 my-2 z-10 relative">
+        <div className="flex items-center gap-2 mx-3 my-2 z-10 relative">
           {/* Botão de Semáforo de Saúde / Seletor de Caixas de Entrada */}
-          <div className="flex-1 relative flex items-stretch">
+          <div className="flex-[1.25] min-w-0 relative flex items-stretch">
             <button 
               onClick={(e) => {
                 e.stopPropagation();
@@ -6317,12 +6415,23 @@ export default function ChatDashboard() {
                   setShowHealthPanel(!showHealthPanel);
                 }
               }}
+              title={
+                hasMultipleInstances
+                  ? (selectedChannelFilters && selectedChannelFilters.length > 1
+                      ? `${selectedChannelFilters.length} Caixas Ativas`
+                      : (selectedChannelFilters && selectedChannelFilters.length === 1)
+                        ? getChannelDisplayName(selectedChannelFilters[0])
+                        : activeChannelFilter 
+                          ? getChannelDisplayName(activeChannelFilter)
+                          : "Todas as Caixas")
+                  : (activeChannelFilter ? getChannelDisplayName(activeChannelFilter) : "Status da Caixa")
+              }
               className={cn(
-                "flex-1 px-3 py-2.5 bg-white/40 dark:bg-black/20 backdrop-blur-md border border-gray-200/50 dark:border-white/5 rounded-2xl flex items-center justify-between transition-all hover:bg-gray-100/50 dark:hover:bg-white/10 active:scale-[0.98] shadow-sm select-none animate-in fade-in",
-                ((!hasMultipleInstances && showHealthPanel) || (hasMultipleInstances && activeDropdown === 'channel-picker')) && "bg-gray-100/50 dark:bg-white/10 border-gray-300/50 dark:border-white/10"
+                "flex-1 min-w-0 px-2.5 py-2.5 bg-white/40 dark:bg-black/20 backdrop-blur-md border border-gray-200/50 dark:border-white/5 rounded-2xl flex items-center justify-between gap-1.5 transition-all hover:bg-gray-100/50 dark:hover:bg-white/10 active:scale-[0.98] shadow-sm select-none animate-in fade-in",
+                ((!hasMultipleInstances && showHealthPanel) || (hasMultipleInstances && activeDropdown === 'channel-picker')) && "bg-gray-100/50 dark:bg-white/10 border-gray-300/50 dark:border-white/10 ring-1 ring-[#00a884]/30"
               )}
             >
-              <div className="flex items-center gap-1.5 min-w-0">
+              <div className="flex items-center gap-1.5 min-w-0 flex-1">
                 {/* Indicador de Status com suporte a múltiplos canais selecionados */}
                 {selectedChannelFilters && selectedChannelFilters.length > 1 ? (
                   <div className="flex -space-x-1 shrink-0 items-center">
@@ -6376,17 +6485,17 @@ export default function ChatDashboard() {
                     )}></span>
                   </span>
                 )}
-                <span className="text-[11px] font-bold text-gray-600 dark:text-[#d1d7db] truncate">
+                <span className="text-[11px] font-bold text-gray-700 dark:text-[#d1d7db] truncate min-w-0 text-left">
                   {hasMultipleInstances ? (
                     selectedChannelFilters && selectedChannelFilters.length > 1
                       ? `${selectedChannelFilters.length} Caixas Ativas`
                       : (selectedChannelFilters && selectedChannelFilters.length === 1)
-                        ? (tenantInstances.find(i => i.id === selectedChannelFilters[0] || i.display_name === selectedChannelFilters[0])?.display_name || selectedChannelFilters[0])
+                        ? getChannelDisplayName(selectedChannelFilters[0])
                         : activeChannelFilter 
-                          ? (activeChannelName || tenantInstances.find(i => i.id === activeChannelFilter || i.display_name === activeChannelFilter)?.display_name || activeChannelFilter)
+                          ? getChannelDisplayName(activeChannelFilter)
                           : "Todas as Caixas"
                   ) : (
-                    activeChannelFilter ? (activeChannelName || activeChannelFilter) : (
+                    activeChannelFilter ? getChannelDisplayName(activeChannelFilter) : (
                       tenantInstances[0]?.display_name || (
                         systemHealth === 'green' ? "Operando" :
                         systemHealth === 'yellow' ? (
@@ -6517,7 +6626,7 @@ export default function ChatDashboard() {
                       const isConn = instancesStatus[inst.id] === 'connected' || instancesStatus[inst.id] === 'connected_local';
                       const isConnPending = instancesStatus[inst.id] === 'connecting';
                       const isSelected = selectedChannelFilters?.includes(inst.id) || (selectedChannelFilters?.length === 0 && activeChannelFilter === inst.id);
-                      const displayName = inst.display_name || inst.whatsapp_name || inst.name;
+                      const displayName = getChannelDisplayName(inst.id) || inst.display_name || inst.whatsapp_name || inst.name;
                       const phoneToDisplay = inst.phone_number || inst.settings?.phone_number || inst.settings?.pairing_phone || (inst as any).number;
                       const instColor = inst.color || '#00a884';
 
@@ -6647,18 +6756,19 @@ export default function ChatDashboard() {
           </div>
 
           {/* Botão Modo Ticket Ativo */}
-          <div className="flex-1 relative flex items-stretch">
+          <div className="flex-1 min-w-0 relative flex items-stretch">
             <button 
               onClick={() => setTicketMode(!ticketMode)}
+              title={ticketMode ? `Modo Ticket Ativo: ${activeTicketsCount} pendente(s)` : "Ativar Modo Ticket"}
               className={cn(
-                "flex-1 px-3 py-2.5 backdrop-blur-md rounded-2xl flex items-center justify-between transition-all active:scale-[0.98] shadow-sm select-none border animate-in fade-in group",
+                "flex-1 min-w-0 px-2.5 py-2.5 backdrop-blur-md flex items-center justify-between gap-1 transition-all active:scale-[0.98] shadow-sm select-none border animate-in fade-in group",
                 ticketMode 
-                  ? "bg-violet-500/15 dark:bg-violet-500/25 border-violet-500/30 text-violet-700 dark:text-violet-300 font-semibold" 
-                  : "bg-white/40 dark:bg-black/20 border-gray-200/50 dark:border-white/5 text-gray-500 dark:text-gray-400 hover:bg-gray-100/50 dark:hover:bg-white/10"
+                  ? "bg-violet-500/15 dark:bg-violet-500/25 border-violet-500/30 text-violet-700 dark:text-violet-300 font-semibold rounded-l-2xl rounded-r-none" 
+                  : "bg-white/40 dark:bg-black/20 border-gray-200/50 dark:border-white/5 text-gray-500 dark:text-gray-400 hover:bg-gray-100/50 dark:hover:bg-white/10 rounded-2xl"
               )}
             >
               <div className="flex items-center gap-1.5 min-w-0">
-                <Ticket size={13} className={cn("shrink-0 transition-transform duration-300 group-hover:scale-110", ticketMode && "animate-pulse text-violet-500 dark:text-violet-400")} />
+                <Ticket size={13} className={cn("shrink-0 transition-transform duration-300 group-hover:scale-110", ticketMode ? "animate-pulse text-violet-500 dark:text-violet-400" : "text-gray-400 dark:text-gray-500")} />
                 <span className="text-[11px] font-bold truncate">
                   Tickets
                 </span>
@@ -6678,7 +6788,7 @@ export default function ChatDashboard() {
                     e.stopPropagation();
                     setActiveDropdown(activeDropdown === 'ticket-menu' ? null : 'ticket-menu');
                   }}
-                  className="px-1.5 py-2.5 rounded-r-2xl border-l border-violet-500/20 bg-violet-500/10 dark:bg-violet-500/20 text-violet-700 dark:text-violet-400 hover:bg-violet-500/25 flex items-center justify-center transition-all"
+                  className="px-2 py-2.5 rounded-r-2xl border-y border-r border-l border-violet-500/30 bg-violet-500/15 dark:bg-violet-500/25 text-violet-700 dark:text-violet-400 hover:bg-violet-500/30 flex items-center justify-center transition-all"
                   title="Opções do Ticket"
                 >
                   <MoreVertical size={13} />

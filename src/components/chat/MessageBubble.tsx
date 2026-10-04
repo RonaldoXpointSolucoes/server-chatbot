@@ -13,6 +13,7 @@ import { cn, getContactDisplayName, formatPhoneNumber } from '../../pages/ChatDa
 import { instanceCache } from '../../store/chatStore';
 import { ImageIcon, Download } from 'lucide-react';
 import { VideoPlayerPremium } from './VideoPlayerPremium';
+import { AudioPlayerBubble } from './AudioPlayerBubble';
 import { useChatStore } from '../../store/chatStore';
 
 // Necessitamos tipagens básicas
@@ -339,9 +340,10 @@ export const MessageBubble = memo(({
                 )}
                 
                 {msg.mediaType === 'audio' && (
-                  <div className="flex items-center gap-2 bg-amber-500/5 dark:bg-amber-500/10 p-2 rounded-3xl border border-amber-500/20 max-w-sm mb-2 animate-in fade-in zoom-in-95 duration-200">
-                    <audio src={msg.mediaUrl} controls controlsList="nodownload" className="max-w-[220px] sm:max-w-[260px] h-10 custom-audio flex-1" />
-                  </div>
+                  <AudioPlayerBubble
+                    mediaUrl={msg.mediaUrl}
+                    isMe={false}
+                  />
                 )}
                 
                 {msg.mediaType === 'document' && (
@@ -779,7 +781,10 @@ export const MessageBubble = memo(({
                         )}
                         
                         {msg.mediaType === 'audio' && (
-                          <audio src={msg.mediaUrl} controls controlsList="nodownload" className="max-w-[220px] sm:max-w-[260px] h-10 custom-audio" />
+                          <AudioPlayerBubble
+                            mediaUrl={msg.mediaUrl}
+                            isMe={isMe}
+                          />
                         )}
 
                         {(msg.mediaType === 'video' || msg.mediaUrl.endsWith('.mp4')) && (
@@ -904,32 +909,16 @@ export const MessageBubble = memo(({
                )}
                
                {msg.mediaUrl && msg.mediaType === 'audio' && (
-                  <div className="flex flex-col gap-1 mb-1">
-                    <div className={`flex items-center gap-2 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-[#1d272b] dark:to-[#172124] p-1.5 rounded-3xl border border-emerald-100/50 dark:border-emerald-900/30 ${msg.transcription ? 'rounded-b-md' : ''}`}>
-                       <audio src={msg.mediaUrl} controls controlsList="nodownload" className="max-w-[220px] sm:max-w-[260px] h-10 custom-audio flex-1" />
-                       {!msg.transcription && (
-                         <button 
-                           onClick={() => handleTranscribeAudio(msg.id, msg.mediaUrl!)}
-                           disabled={transcribingIds[msg.id]}
-                           className="mr-2 p-1.5 rounded-full bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-all border border-indigo-100 dark:border-indigo-800 disabled:opacity-50 group/btn"
-                           title="Transcrever Áudio com IA"
-                         >
-                           {transcribingIds[msg.id] ? <RefreshCw size={15} className="animate-spin" /> : <Sparkles size={15} className="group-hover/btn:scale-110 transition-transform" />}
-                         </button>
-                       )}
-                    </div>
-                    {msg.transcription && (
-                      <div className="flex animate-in fade-in slide-in-from-top-1 bg-white/60 dark:bg-black/20 backdrop-blur-md rounded-xl rounded-t-md p-3 text-sm text-gray-800 dark:text-gray-200 border border-black/5 dark:border-white/5 relative items-start gap-3 shadow-sm">
-                        <Sparkles size={16} className="text-indigo-500 mt-0.5 shrink-0" />
-                        <div className="flex-1 whitespace-pre-wrap leading-relaxed italic">
-                          {msg.transcription}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-               )}
-               
-               {msg.mediaUrl && msg.mediaType === 'document' && (
+                  <AudioPlayerBubble
+                    mediaUrl={msg.mediaUrl}
+                    transcription={msg.transcription}
+                    onTranscribe={() => handleTranscribeAudio(msg.id, msg.mediaUrl!)}
+                    isTranscribing={Boolean(transcribingIds[msg.id])}
+                    isMe={isMe}
+                  />
+                )}
+                
+                {msg.mediaUrl && msg.mediaType === 'document' && (
                   <div className="flex items-center gap-3 bg-gradient-to-br from-[#f0f2f5] to-white dark:from-[#2a3942] dark:to-[#202c33] p-3 rounded-xl mb-1 border border-gray-200 dark:border-gray-700/50 group">
                      <div className="bg-[#00a884]/10 p-2 text-[#00a884] rounded-lg group-hover:scale-110 transition-transform">
                        <FileText size={20} />
