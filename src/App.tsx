@@ -136,7 +136,6 @@ export default function App() {
 
             {/* Módulo de Fluxos e Typebot */}
             <Route path="/flows" element={<FlowManager />} />
-            <Route path="/flows/:id/edit" element={<FlowBuilder />} />
 
             {/* Rotas Nativas do Módulo de Checklists Operacionais (Tema Administrativo) */}
             <Route path="/checklist/dashboard" element={<ErrorBoundary><ChecklistDashboard /></ErrorBoundary>} />
@@ -155,6 +154,9 @@ export default function App() {
             <Route path="/apps/financeiro" element={<FinanceiroApp />} />
             <Route path="/apps/agenda" element={<ScheduleManager />} />
           </Route>
+
+          {/* FlowBuilder Fullscreen (Experiência Imersiva Estilo Typebot Original) */}
+          <Route path="/flows/:id/edit" element={<ErrorBoundary><FlowBuilder /></ErrorBoundary>} />
 
           {/* Rota Blindada de Operador (Sem Sidebar para tablets de cozinha compartilhados) */}
           <Route path="/checklist/tablet" element={<ErrorBoundary><ChecklistTablet /></ErrorBoundary>} />

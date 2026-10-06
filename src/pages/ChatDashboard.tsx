@@ -768,8 +768,36 @@ export default function ChatDashboard() {
     setSearchTerm('');
   }, [activeChannelFilter, filterType]);
 
-  // Execucao Incial Reativa
-  // Efect removido (duplicado com o useEffect consolidado mais abaixo)
+  // Higienização Reativa de Filtros de Canais entre Empresas/Tenants
+  useEffect(() => {
+    if (!tenantInstances || tenantInstances.length === 0) return;
+
+    const validIds = new Set([
+      ...tenantInstances.map((i: any) => i.id),
+      ...availableInstancesList.map((i: any) => i.id)
+    ]);
+
+    const store = useChatStore.getState();
+    const currentActive = store.activeChannelFilter;
+    const currentSelected = store.selectedChannelFilters || [];
+
+    const isCurrentActiveOrphan = Boolean(
+      currentActive && 
+      currentActive !== 'all' && 
+      !validIds.has(currentActive) && 
+      !tenantInstances.some((i: any) => i.display_name === currentActive)
+    );
+    const hasOrphanSelected = currentSelected.length > 0 && currentSelected.some(id => !validIds.has(id));
+
+    if (isCurrentActiveOrphan || hasOrphanSelected) {
+      console.warn('[ChatDashboard] Filtro de caixa órfão de outra empresa detectado! Higienizando filtros...', {
+        currentActive,
+        currentSelected,
+        validIds: Array.from(validIds)
+      });
+      store.clearChannelFilters();
+    }
+  }, [tenantInfo?.id, tenantInstances, availableInstancesList]);
   
   const [chatMode, setChatMode] = useState<'chat' | 'internal_note'>('chat');
   
@@ -1625,6 +1653,26 @@ export default function ChatDashboard() {
   const isMatchingChannel = React.useCallback((c: any) => {
     if (!c) return false;
 
+    // Salvaguarda Multi-tenant: Se houver instâncias carregadas no tenant, certifique-se de que o filtro não é órfão
+    if (tenantInstances && tenantInstances.length > 0) {
+      const validIds = new Set(tenantInstances.map((i: any) => i.id));
+      const hasMulti = Boolean(selectedChannelFilters && selectedChannelFilters.length > 0);
+      
+      if (hasMulti) {
+        const hasAnyValid = selectedChannelFilters.some((fId: string) => validIds.has(fId));
+        if (!hasAnyValid) {
+          // Nenhum dos canais selecionados pertence a este tenant: exibe as conversas do tenant atual
+          return true;
+        }
+      } else if (activeChannelFilter && activeChannelFilter !== 'all') {
+        const isValid = validIds.has(activeChannelFilter) || tenantInstances.some((i: any) => i.display_name === activeChannelFilter);
+        if (!isValid) {
+          // Filtro ativo é órfão de outro tenant: exibe as conversas do tenant atual
+          return true;
+        }
+      }
+    }
+
     const hasMulti = Boolean(selectedChannelFilters && selectedChannelFilters.length > 0);
     if (!hasMulti && (!activeChannelFilter || activeChannelFilter === 'all')) return true;
 
@@ -1690,23 +1738,31 @@ export default function ChatDashboard() {
   const getChannelDisplayName = React.useCallback((channelId: string | null | undefined): string => {
     if (!channelId || channelId === 'all') return "Todas as Caixas";
     
-    // 1. Se activeChannelName estiver definido e não for um UUID cru
-    if (activeChannelFilter === channelId && activeChannelName && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(activeChannelName)) {
-      return activeChannelName;
-    }
-
-    // 2. Busca nas instâncias do tenant
+    // 1. Busca prioritária nas instâncias do tenant atual
     const fromTenant = tenantInstances.find((i: any) => i.id === channelId || i.display_name === channelId || i.name === channelId);
     if (fromTenant?.display_name || fromTenant?.whatsapp_name || fromTenant?.name) {
       return fromTenant.display_name || fromTenant.whatsapp_name || fromTenant.name;
     }
 
-    // 3. Busca nas instâncias disponíveis globais
+    // 2. Busca nas instâncias disponíveis globais desta empresa
     const fromAvailable = availableInstancesList.find((i: any) => i.id === channelId || i.display_name === channelId);
     if (fromAvailable?.display_name) return fromAvailable.display_name;
 
-    // 4. Busca no mapa de nomes em memória
-    if (instanceNamesMap[channelId]) return instanceNamesMap[channelId];
+    // 3. Se activeChannelName estiver definido, mas APENAS se a caixa pertencer ao tenant atual
+    const isChannelInCurrentTenant = tenantInstances.some((i: any) => i.id === channelId || i.display_name === channelId) ||
+      availableInstancesList.some((i: any) => i.id === channelId || i.display_name === channelId);
+
+    if (isChannelInCurrentTenant && activeChannelFilter === channelId && activeChannelName && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(activeChannelName)) {
+      return activeChannelName;
+    }
+
+    // 4. Busca no mapa de nomes em memória se pertencer à empresa atual
+    if (instanceNamesMap[channelId] && isChannelInCurrentTenant) return instanceNamesMap[channelId];
+
+    // Se já temos instâncias conhecidas para o tenant atual e o channelId NÃO pertence a nenhuma delas, é um canal órfão de outra empresa!
+    if ((tenantInstances.length > 0 || availableInstancesList.length > 0) && !isChannelInCurrentTenant) {
+      return "Todas as Caixas";
+    }
 
     // 5. Busca no instanceCache
     const fromCache = instanceCache.getName(channelId);
@@ -3497,15 +3553,25 @@ export default function ChatDashboard() {
           setInstanceColorsMap(colorMap);
           setAvailableInstancesList(availableInstances);
 
-          // Sincroniza activeChannelName se o filtro ativo estiver sem nome amigável ou com UUID cru
+          // Sincroniza activeChannelName e higieniza filtros órfãos de outras empresas
           const currentStore = useChatStore.getState();
-          if (currentStore.activeChannelFilter) {
+          if (currentStore.activeChannelFilter && currentStore.activeChannelFilter !== 'all') {
             const matchedInst = availableInstances.find(i => i.id === currentStore.activeChannelFilter || i.display_name === currentStore.activeChannelFilter);
             if (matchedInst?.display_name) {
               const currentName = currentStore.activeChannelName;
               if (!currentName || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(currentName)) {
                 currentStore.setActiveChannelFilter(matchedInst.id, matchedInst.display_name);
               }
+            } else if (availableInstances.length > 0) {
+              console.warn("[ChatDashboard] activeChannelFilter órfão de outra empresa detectado no carregamento. Resetando filtros...");
+              currentStore.clearChannelFilters();
+            }
+          }
+          if (currentStore.selectedChannelFilters && currentStore.selectedChannelFilters.length > 0 && availableInstances.length > 0) {
+            const hasOrphan = currentStore.selectedChannelFilters.some(id => !availableInstances.some(i => i.id === id || i.display_name === id));
+            if (hasOrphan) {
+              console.warn("[ChatDashboard] selectedChannelFilters com canais órfãos detectado no carregamento. Resetando filtros...");
+              currentStore.clearChannelFilters();
             }
           }
         }
@@ -6502,9 +6568,11 @@ export default function ChatDashboard() {
 
                         if (hasMultipleInstances && targetId) {
                           const actInst = tenantInstances.find(i => i.id === targetId || i.display_name === targetId);
-                          const isConn = instancesStatus[actInst?.id || ''] === 'connected' || instancesStatus[actInst?.id || ''] === 'connected_local';
-                          const isConnecting = instancesStatus[actInst?.id || ''] === 'connecting';
-                          return isConn ? "bg-emerald-400" : isConnecting ? "bg-amber-400" : "bg-rose-400";
+                          if (actInst) {
+                            const isConn = instancesStatus[actInst.id] === 'connected' || instancesStatus[actInst.id] === 'connected_local';
+                            const isConnecting = instancesStatus[actInst.id] === 'connecting';
+                            return isConn ? "bg-emerald-400" : isConnecting ? "bg-amber-400" : "bg-rose-400";
+                          }
                         }
                         return systemHealth === 'green' ? "bg-emerald-400" :
                           systemHealth === 'yellow' ? "bg-amber-400" : "bg-rose-400";
@@ -6519,9 +6587,11 @@ export default function ChatDashboard() {
 
                         if (hasMultipleInstances && targetId) {
                           const actInst = tenantInstances.find(i => i.id === targetId || i.display_name === targetId);
-                          const isConn = instancesStatus[actInst?.id || ''] === 'connected' || instancesStatus[actInst?.id || ''] === 'connected_local';
-                          const isConnecting = instancesStatus[actInst?.id || ''] === 'connecting';
-                          return isConn ? "bg-emerald-500" : isConnecting ? "bg-amber-500" : "bg-rose-500";
+                          if (actInst) {
+                            const isConn = instancesStatus[actInst.id] === 'connected' || instancesStatus[actInst.id] === 'connected_local';
+                            const isConnecting = instancesStatus[actInst.id] === 'connecting';
+                            return isConn ? "bg-emerald-500" : isConnecting ? "bg-amber-500" : "bg-rose-500";
+                          }
                         }
                         return systemHealth === 'green' ? "bg-emerald-500" :
                           systemHealth === 'yellow' ? "bg-amber-500" : "bg-rose-500";
@@ -6566,8 +6636,11 @@ export default function ChatDashboard() {
               const connectedCount = tenantInstances.filter(
                 (i) => instancesStatus[i.id] === 'connected' || instancesStatus[i.id] === 'connected_local'
               ).length;
-              const hasMultiSelection = selectedChannelFilters && selectedChannelFilters.length > 0;
-              const isAllSelected = !hasMultiSelection && !activeChannelFilter;
+              const activeSelectedInTenant = (selectedChannelFilters || []).filter(fId => 
+                tenantInstances.some(inst => inst.id === fId || inst.display_name === fId)
+              );
+              const hasMultiSelection = activeSelectedInTenant.length > 0;
+              const isAllSelected = !hasMultiSelection && (!activeChannelFilter || !tenantInstances.some(inst => inst.id === activeChannelFilter || inst.display_name === activeChannelFilter));
 
               // Componente reutilizável para o corpo do seletor de caixas
               const renderChannelPickerInner = (isMobileSheet = false) => (
@@ -6806,7 +6879,7 @@ export default function ChatDashboard() {
                         <span>
                           {hasMultiSelection ? (
                             <>
-                              <strong className="text-emerald-600 dark:text-emerald-400 font-bold">{selectedChannelFilters.length}</strong> {selectedChannelFilters.length === 1 ? 'caixa ativa' : 'caixas ativas'}
+                              <strong className="text-emerald-600 dark:text-emerald-400 font-bold">{activeSelectedInTenant.length}</strong> {activeSelectedInTenant.length === 1 ? 'caixa ativa' : 'caixas ativas'}
                             </>
                           ) : (
                             'Todas as caixas ativas'
@@ -6826,7 +6899,7 @@ export default function ChatDashboard() {
                       <span className="text-[11px] text-gray-500 dark:text-gray-400 font-medium">
                         {hasMultiSelection ? (
                           <>
-                            <strong className="text-emerald-600 dark:text-emerald-400 font-bold">{selectedChannelFilters.length}</strong> {selectedChannelFilters.length === 1 ? 'caixa ativa' : 'caixas ativas'}
+                            <strong className="text-emerald-600 dark:text-emerald-400 font-bold">{activeSelectedInTenant.length}</strong> {activeSelectedInTenant.length === 1 ? 'caixa ativa' : 'caixas ativas'}
                           </>
                         ) : (
                           'Todas as caixas ativas'

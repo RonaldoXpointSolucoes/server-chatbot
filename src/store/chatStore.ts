@@ -2075,6 +2075,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       localStorage.setItem('selectedChannelFilters', JSON.stringify([]));
       localStorage.removeItem('activeChannelFilter');
       localStorage.removeItem('activeChannelName');
+      sessionStorage.removeItem('selectedChannelFilters');
+      sessionStorage.removeItem('activeChannelFilter');
+      sessionStorage.removeItem('activeChannelName');
       localStorage.setItem('chat_filter_preference', 'all');
     } catch (e) {}
 
@@ -4825,6 +4828,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
               }
             });
             set(s => ({ instancesStatus: { ...s.instancesStatus, ...statusUpdates } }));
+
+            // Higienização multi-tenant: valida se activeChannelFilter ou selectedChannelFilters pertencem ao tenant ativo
+            const validInstanceIds = new Set(instances.map(inst => inst.id));
+            const curActive = get().activeChannelFilter;
+            const curSelected = get().selectedChannelFilters || [];
+            const hasOrphanActive = curActive && curActive !== 'all' && !validInstanceIds.has(curActive) && !instances.some(i => i.display_name === curActive);
+            const hasOrphanSelected = curSelected.length > 0 && curSelected.some(id => !validInstanceIds.has(id));
+
+            if (hasOrphanActive || hasOrphanSelected) {
+              console.warn('[chatStore] Filtro de canal órfão de outro tenant detectado. Higienizando para Todas as Caixas...');
+              get().clearChannelFilters();
+            }
           }
         } catch (cacheErr) {
           console.warn("[fetchTenantConfig] Falha ao pré-popular cache de instâncias:", cacheErr);

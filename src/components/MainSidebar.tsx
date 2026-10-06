@@ -678,9 +678,18 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
   const handleSwitchWorkspace = (company: any) => {
     if (company.id === tenantId) return;
     
-    // Clear tenant-specific channel filters when switching workspaces
+    // Higienização completa dos filtros de canal entre workspaces/tenants
     localStorage.removeItem('activeChannelFilter');
     localStorage.removeItem('activeChannelName');
+    localStorage.removeItem('selectedChannelFilters');
+    sessionStorage.removeItem('activeChannelFilter');
+    sessionStorage.removeItem('activeChannelName');
+    sessionStorage.removeItem('selectedChannelFilters');
+    localStorage.setItem('chat_filter_preference', 'all');
+
+    try {
+      useChatStore.getState().clearChannelFilters();
+    } catch (e) {}
     
     if (localStorage.getItem('current_tenant_id')) {
         localStorage.setItem('current_tenant_id', company.id);

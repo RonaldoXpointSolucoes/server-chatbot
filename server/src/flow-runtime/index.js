@@ -94,6 +94,10 @@ class FlowEngine {
                     console.warn('[FlowEngine] Falha ao consultar nome do contato:', cErr.message);
                 }
 
+                // Calcula saudação com base no horário atual
+                const currentHour = new Date().getHours();
+                const saudacao = currentHour >= 5 && currentHour < 12 ? 'Bom dia' : (currentHour >= 12 && currentHour < 18 ? 'Boa tarde' : 'Boa noite');
+
                 const { data: newState, error: insertErr } = await supabase
                     .from('conversation_states')
                     .insert({
@@ -104,6 +108,13 @@ class FlowEngine {
                         variables: {
                             pushName: customerName,
                             nome_cliente: customerName,
+                            saudacao: saudacao,
+                            NomeEmpresa: 'FoodNext Restaurante & Pizzaria',
+                            cardapio: 'https://foodnext.com.br/cardapio',
+                            GoogleMaps: 'https://maps.google.com/?q=Av.+Paulista,+1500',
+                            EnderecoEmpresa: 'Av. Paulista, 1500 - Bela Vista, São Paulo - SP',
+                            DiaFuncionamento: 'Terça a Domingo',
+                            HoraFuncionamento: '11h30 às 15h00 e 18h30 às 23h45',
                             remoteJid: jid,
                             telefone: jid.split('@')[0]
                         },
@@ -496,6 +507,35 @@ class FlowEngine {
                     const waitSec = parseInt(block.wait_time || 2, 10);
                     await this.sleep(Math.min(waitSec, 10) * 1000);
                     currentPoint = this.resolveNextPoint(nodes, edges, parentGroup, block, '', convState.variables);
+                }
+                // 8. Pulo / Redirecionamento (Jump)
+                else if (flowType === 'jump') {
+                    const targetGroupId = block.target_group_id || block.target_node_id || block.data?.targetGroupId;
+                    let targetPoint = null;
+
+                    if (targetGroupId) {
+                        const targetGroup = nodes.find(n => n.id === targetGroupId);
+                        if (targetGroup) {
+                            targetPoint = {
+                                groupId: targetGroup.id,
+                                blockId: targetGroup.data?.blocks?.[0]?.id || null,
+                                isLegacy: targetGroup.type !== 'typebot_group'
+                            };
+                        }
+                    }
+
+                    if (!targetPoint) {
+                        targetPoint = this.resolveNextPoint(nodes, edges, parentGroup, block, '', convState.variables);
+                    }
+
+                    if (!targetPoint) {
+                        const start = this.findStartPoint(nodes, edges);
+                        if (start && start.groupId !== parentGroup.id) {
+                            targetPoint = start;
+                        }
+                    }
+
+                    currentPoint = targetPoint;
                 }
                 // Padrão / Início
                 else {

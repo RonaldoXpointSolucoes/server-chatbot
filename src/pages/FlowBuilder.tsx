@@ -36,7 +36,15 @@ import {
     CornerUpLeft,
     LayoutGrid,
     Play,
-    UploadCloud
+    UploadCloud,
+    Lock,
+    Search,
+    Share2,
+    HelpCircle,
+    MoreHorizontal,
+    Code,
+    Plus,
+    Minus
 } from 'lucide-react';
 import {
     ReactFlow,
@@ -63,41 +71,37 @@ import { parseTypebotToFlow } from '../utils/typebotParser';
 const initialNodes: Node[] = [];
 const initialEdges: Edge[] = [];
 
-// Lista estrita baseada nas opções reais de builder estilo "Typebot"
+// Lista estrita com os mesmos rótulos e seções fiéis ao Typebot
 const NODE_TYPES = [
     // Categoria: Bubbles
-    { type: 'send_message', label: 'Text', icon: MessageSquare, category: 'Bubbles' },
-    { type: 'image', label: 'Image', icon: ImageIcon, category: 'Bubbles' },
-    { type: 'video', label: 'Video', icon: Video, category: 'Bubbles' },
-    { type: 'audio', label: 'Audio', icon: Headphones, category: 'Bubbles' },
-    { type: 'embed', label: 'Embed', icon: Code2, category: 'Bubbles' },
+    { type: 'send_message', label: 'Texto', icon: MessageSquare, category: 'Bubbles' },
+    { type: 'image', label: 'Imagem', icon: ImageIcon, category: 'Bubbles' },
+    { type: 'video', label: 'Vídeo', icon: Video, category: 'Bubbles' },
+    { type: 'embed', label: 'Incorporar', icon: Code2, category: 'Bubbles' },
+    { type: 'audio', label: 'Áudio', icon: Headphones, category: 'Bubbles' },
 
     // Categoria: Inputs
-    { type: 'ask', label: 'Text', icon: Type, category: 'Inputs' },
-    { type: 'number_input', label: 'Number', icon: Hash, category: 'Inputs' },
+    { type: 'ask', label: 'Texto', icon: Type, category: 'Inputs' },
+    { type: 'number_input', label: 'Número', icon: Hash, category: 'Inputs' },
     { type: 'email_input', label: 'Email', icon: Mail, category: 'Inputs' },
     { type: 'website_input', label: 'Website', icon: Globe, category: 'Inputs' },
-    { type: 'date_input', label: 'Date', icon: Calendar, category: 'Inputs' },
-    { type: 'time_input', label: 'Time', icon: Clock, category: 'Inputs' },
-    { type: 'phone_input', label: 'Phone', icon: Phone, category: 'Inputs' },
-    { type: 'buttons', label: 'Buttons', icon: MousePointerClick, category: 'Inputs' },
-    { type: 'pic_choice', label: 'Pic choice', icon: ImagePlay, category: 'Inputs' },
-    { type: 'payment', label: 'Payment', icon: CreditCard, category: 'Inputs' },
-    { type: 'rating', label: 'Rating', icon: Star, category: 'Inputs' },
-    { type: 'file_input', label: 'File', icon: FileUp, category: 'Inputs' },
-    { type: 'cards', label: 'Cards', icon: LayoutTemplate, category: 'Inputs' },
+    { type: 'date_input', label: 'Data', icon: Calendar, category: 'Inputs' },
+    { type: 'phone_input', label: 'Telefone', icon: Phone, category: 'Inputs' },
+    { type: 'buttons', label: 'Botão', icon: MousePointerClick, category: 'Inputs' },
+    { type: 'pic_choice', label: 'Seleção de Imagem', icon: ImagePlay, category: 'Inputs' },
+    { type: 'payment', label: 'Pagamento', icon: CreditCard, category: 'Inputs' },
+    { type: 'rating', label: 'Avaliação', icon: Star, category: 'Inputs' },
+    { type: 'file_input', label: 'Arquivo', icon: FileUp, category: 'Inputs' },
 
-    // Categoria: Logic
-    { type: 'set_variable', label: 'Set variable', icon: PenTool, category: 'Logic' },
-    { type: 'condition', label: 'Condition', icon: Filter, category: 'Logic' },
-    { type: 'redirect', label: 'Redirect', icon: ExternalLink, category: 'Logic' },
-    { type: 'script', label: 'Script', icon: CodeSquare, category: 'Logic' },
-    { type: 'typebot_link', label: 'Typebot', icon: Bot, category: 'Logic' },
-    { type: 'wait', label: 'Wait', icon: Timer, category: 'Logic' },
-    { type: 'ab_test', label: 'AB Test', icon: GitBranch, category: 'Logic' },
-    { type: 'webhook', label: 'Webhook', icon: Webhook, category: 'Logic' },
-    { type: 'jump', label: 'Jump', icon: FastForward, category: 'Logic' },
-    { type: 'return', label: 'Return', icon: CornerUpLeft, category: 'Logic' }
+    // Categoria: Condicionais
+    { type: 'set_variable', label: 'Variável', icon: PenTool, category: 'Condicionais' },
+    { type: 'condition', label: 'Condição', icon: Filter, category: 'Condicionais' },
+    { type: 'redirect', label: 'Redirecionar', icon: ExternalLink, category: 'Condicionais' },
+    { type: 'script', label: 'Script', icon: CodeSquare, category: 'Condicionais' },
+    { type: 'typebot_link', label: 'Typebot', icon: Bot, category: 'Condicionais' },
+    { type: 'wait', label: 'Espera', icon: Timer, category: 'Condicionais' },
+    { type: 'jump', label: 'Pular', icon: FastForward, category: 'Condicionais' },
+    { type: 'ab_test', label: 'Teste AB', icon: GitBranch, category: 'Condicionais' }
 ];
 
 function FlowBuilderContent() {
@@ -409,29 +413,80 @@ function FlowBuilderContent() {
         setSelectedNode(updatedNodes.find(n => n.id === selectedNode.id) || null);
     };
 
-    if (loading) return <div className="animate-pulse p-10 text-slate-300">Carregando flow...</div>;
+    const [activeTab, setActiveTab] = useState<'fluxo' | 'tema' | 'config' | 'share' | 'results'>('fluxo');
+    const [searchFilter, setSearchFilter] = useState('');
 
-    const categories = Array.from(new Set(NODE_TYPES.map(n => n.category)));
+    const filteredNodeTypes = useMemo(() => {
+        if (!searchFilter.trim()) return NODE_TYPES;
+        return NODE_TYPES.filter(n => n.label.toLowerCase().includes(searchFilter.toLowerCase()) || n.category.toLowerCase().includes(searchFilter.toLowerCase()));
+    }, [searchFilter]);
+
+    const categories = Array.from(new Set(filteredNodeTypes.map(n => n.category)));
 
     return (
-        <div className="flex flex-col h-full bg-slate-900 text-slate-200">
-            {/* Header */}
-            <header className="p-4 bg-slate-900/80 border-b border-slate-700/50 backdrop-blur-xl flex justify-between items-center z-20">
-                <div className="flex items-center gap-4">
+        <div className="flex flex-col h-full bg-[#0e0e11] text-zinc-200 select-none">
+            {/* Header Estilo Typebot */}
+            <header className="h-14 px-4 bg-[#18181b] border-b border-zinc-800/80 flex justify-between items-center z-20 shrink-0">
+                {/* Esquerda: Logo + Título + Ajuda */}
+                <div className="flex items-center gap-3">
                     <button
                         onClick={() => navigate('/flows')}
-                        className="p-2 hover:bg-slate-800 rounded-full transition-colors"
-                        title="Voltar ao Gerenciador"
+                        className="p-1.5 hover:bg-zinc-800 rounded-lg transition-colors flex items-center gap-1.5 text-zinc-400 hover:text-white"
+                        title="Voltar ao Gerenciador de Fluxos"
                     >
-                        <ArrowLeft className="w-5 h-5 text-slate-400" />
+                        <ArrowLeft className="w-4 h-4" />
                     </button>
-                    <div>
-                        <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-purple-400">
-                            {flowData?.name}
+                    
+                    <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 bg-indigo-600/30 border border-indigo-500/40 rounded-lg flex items-center justify-center text-indigo-400 font-black text-xs">
+                            ⚡
+                        </div>
+                        <h1 className="text-sm font-semibold text-zinc-100 max-w-[200px] truncate">
+                            {flowData?.name || 'Hbi Pizza'}
                         </h1>
-                        <p className="text-xs text-slate-500">Versão: {versionData?.status === 'PUBLISHED' ? 'Ativa' : 'Rascunho'}</p>
                     </div>
+
+                    <button className="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-200 px-2 py-1 rounded-md hover:bg-zinc-800/60 transition-colors ml-1">
+                        <HelpCircle className="w-3.5 h-3.5" />
+                        <span>Ajuda</span>
+                    </button>
                 </div>
+
+                {/* Centro: Abas do Typebot */}
+                <div className="flex items-center bg-[#202024] p-1 rounded-xl border border-zinc-800 text-xs font-medium">
+                    <button
+                        onClick={() => setActiveTab('fluxo')}
+                        className={`px-3 py-1 rounded-lg transition-all ${activeTab === 'fluxo' ? 'bg-[#2b2b31] text-white shadow-sm font-semibold' : 'text-zinc-400 hover:text-zinc-200'}`}
+                    >
+                        Fluxo
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('tema')}
+                        className={`px-3 py-1 rounded-lg transition-all ${activeTab === 'tema' ? 'bg-[#2b2b31] text-white shadow-sm font-semibold' : 'text-zinc-400 hover:text-zinc-200'}`}
+                    >
+                        Tema
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('config')}
+                        className={`px-3 py-1 rounded-lg transition-all ${activeTab === 'config' ? 'bg-[#2b2b31] text-white shadow-sm font-semibold' : 'text-zinc-400 hover:text-zinc-200'}`}
+                    >
+                        Configurações
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('share')}
+                        className={`px-3 py-1 rounded-lg transition-all ${activeTab === 'share' ? 'bg-[#2b2b31] text-white shadow-sm font-semibold' : 'text-zinc-400 hover:text-zinc-200'}`}
+                    >
+                        Compartilhar
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('results')}
+                        className={`px-3 py-1 rounded-lg transition-all ${activeTab === 'results' ? 'bg-[#2b2b31] text-white shadow-sm font-semibold' : 'text-zinc-400 hover:text-zinc-200'}`}
+                    >
+                        Resultados
+                    </button>
+                </div>
+
+                {/* Direita: Compartilhar + Visualizar + Publicar */}
                 <div className="flex items-center gap-2">
                     <input
                         type="file"
@@ -442,54 +497,75 @@ function FlowBuilderContent() {
                     />
                     <button
                         onClick={() => fileInputRef.current?.click()}
-                        className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-2 transition-all shadow-lg border border-slate-700/50"
+                        className="bg-[#202024] hover:bg-zinc-800 text-zinc-300 hover:text-white px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all border border-zinc-800"
+                        title="Importar arquivo JSON do Typebot"
                     >
-                        <UploadCloud className="w-4 h-4" />
-                        Importar Typebot
+                        <UploadCloud className="w-3.5 h-3.5" />
+                        Importar
                     </button>
+                    
+                    <button
+                        onClick={() => {
+                            navigator.clipboard.writeText(window.location.href);
+                            alert('Link do fluxo copiado para a área de transferência!');
+                        }}
+                        className="bg-[#202024] hover:bg-zinc-800 text-zinc-300 hover:text-white px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all border border-zinc-800"
+                    >
+                        <Share2 className="w-3.5 h-3.5" />
+                        Compartilhar
+                    </button>
+
                     <button
                         onClick={() => setIsTesting(true)}
-                        className="bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600 hover:text-white border border-emerald-500/30 px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-2 transition-all shadow-lg"
+                        className="bg-[#202024] hover:bg-zinc-800 text-zinc-300 hover:text-white px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all border border-zinc-800"
                     >
-                        <Play className="w-4 h-4" />
-                        Testar
+                        <Play className="w-3.5 h-3.5 text-zinc-400 fill-zinc-400" />
+                        Visualizar
                     </button>
+
                     <button
                         onClick={saveFlow}
                         disabled={saving}
-                        className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-2 transition-all shadow-lg shadow-indigo-900/20"
+                        className="bg-[#2563eb] hover:bg-[#1d4ed8] text-white px-4 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all shadow-md active:scale-95"
                     >
-                        <Save className="w-4 h-4" />
+                        <Save className="w-3.5 h-3.5" />
                         {saving ? 'Publicando...' : 'Publicar'}
                     </button>
                 </div>
             </header>
 
             <div className="flex-1 flex overflow-hidden">
-                {/* Sidebar Esquerda (Drag & Drop) */}
-                <div className="w-72 bg-slate-900/95 border-r border-slate-700/50 flex flex-col z-10 shadow-2xl overflow-y-auto">
-                    <div className="p-4 border-b border-slate-800/50">
-                        <div className="flex items-center gap-2 text-slate-300 font-semibold mb-1">
-                            <LayoutGrid className="w-5 h-5 text-indigo-400" />
-                            <h2>Blocos (Bubbles)</h2>
+                {/* Sidebar Esquerda (Toolbox Drag & Drop Estilo Typebot) */}
+                <div className="w-64 bg-[#121215] border-r border-zinc-800/80 flex flex-col z-10 shrink-0 overflow-y-auto">
+                    {/* Campo de Busca com Cadeado */}
+                    <div className="p-3 border-b border-zinc-800/60">
+                        <div className="relative flex items-center">
+                            <input
+                                type="text"
+                                placeholder="Search"
+                                value={searchFilter}
+                                onChange={(e) => setSearchFilter(e.target.value)}
+                                className="w-full bg-[#1c1c21] border border-zinc-800/80 rounded-lg px-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-zinc-700 pr-8"
+                            />
+                            <Lock className="w-3.5 h-3.5 text-zinc-500 absolute right-2.5 pointer-events-none" />
                         </div>
-                        <p className="text-xs text-slate-500">Arraste para o canvas para criar</p>
                     </div>
 
-                    <div className="p-4 flex flex-col gap-6">
+                    {/* Categorias e Blocos */}
+                    <div className="p-3 flex flex-col gap-4">
                         {categories.map((category) => (
                             <div key={category}>
-                                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">{category}</h3>
-                                <div className="grid grid-cols-2 gap-2">
-                                    {NODE_TYPES.filter(n => n.category === category).map((nt) => (
+                                <h3 className="text-xs font-semibold text-zinc-400 mb-2">{category}</h3>
+                                <div className="grid grid-cols-2 gap-1.5">
+                                    {filteredNodeTypes.filter(n => n.category === category).map((nt) => (
                                         <div
                                             key={nt.type}
                                             onDragStart={(event) => onDragStart(event, nt.type, nt.label)}
                                             draggable
-                                            className="flex flex-col items-center justify-center gap-2 p-3 bg-slate-800/50 border border-slate-700/50 rounded-xl cursor-grab hover:bg-slate-800 hover:border-indigo-500/50 hover:shadow-lg transition-all"
+                                            className="flex items-center gap-2 p-2 bg-[#1c1c21] border border-zinc-800/80 rounded-lg cursor-grab hover:bg-[#25252b] hover:border-zinc-700 transition-all text-left group"
                                         >
-                                            <nt.icon className="w-5 h-5 text-slate-400" />
-                                            <span className="text-[11px] text-center font-medium text-slate-300 leading-tight">{nt.label}</span>
+                                            <nt.icon className="w-4 h-4 text-indigo-400 shrink-0 group-hover:scale-110 transition-transform" />
+                                            <span className="text-[11px] font-medium text-zinc-300 truncate">{nt.label}</span>
                                         </div>
                                     ))}
                                 </div>
@@ -499,7 +575,32 @@ function FlowBuilderContent() {
                 </div>
 
                 {/* Editor Graph Canvas */}
-                <div className="flex-1 relative" ref={reactFlowWrapper}>
+                <div className="flex-1 relative bg-[#0e0e11]" ref={reactFlowWrapper}>
+                    {/* Botões Flutuantes Superiores Direitos Estilo Typebot ({}, ..., +, -) */}
+                    <div className="absolute top-4 right-4 z-10 flex items-center gap-1.5 bg-[#18181b]/90 border border-zinc-800 p-1 rounded-lg backdrop-blur shadow-xl">
+                        <button 
+                            className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded transition-colors"
+                            title="Variáveis do Fluxo"
+                            onClick={() => alert('Variáveis disponíveis:\n{{pushName}}, {{saudacao}}, {{NomeEmpresa}}, {{cardapio}}, {{GoogleMaps}}, {{EnderecoEmpresa}}, {{DiaFuncionamento}}, {{HoraFuncionamento}}')}
+                        >
+                            <Code className="w-4 h-4" />
+                        </button>
+                        <button 
+                            className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded transition-colors"
+                            title="Mais Opções"
+                        >
+                            <MoreHorizontal className="w-4 h-4" />
+                        </button>
+                        <div className="w-[1px] h-4 bg-zinc-800 mx-0.5" />
+                        <button 
+                            onClick={() => fitView()}
+                            className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded transition-colors"
+                            title="Ajustar Visualização (Fit View)"
+                        >
+                            <Plus className="w-4 h-4" />
+                        </button>
+                    </div>
+
                     <ReactFlow
                         nodes={nodes}
                         edges={edges}
@@ -511,21 +612,21 @@ function FlowBuilderContent() {
                         onDragOver={onDragOver}
                         onDrop={onDrop}
                         fitView
-                        className="bg-slate-900/40"
+                        className="bg-[#0e0e11]"
                         defaultEdgeOptions={{
                             type: 'smoothstep',
                             animated: true,
-                            style: { stroke: '#818cf8', strokeWidth: 3 },
-                            markerEnd: { type: MarkerType.ArrowClosed, width: 15, height: 15, color: '#818cf8' }
+                            style: { stroke: '#6366f1', strokeWidth: 2.5 },
+                            markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: '#6366f1' }
                         }}
                     >
-                        <Background color="#334155" gap={24} size={2} />
-                        <Controls className="bg-slate-800 border-slate-700 fill-slate-300 shadow-xl" />
+                        <Background color="#1f1f23" gap={20} size={1.5} />
+                        <Controls className="!bg-[#18181b] !border-zinc-800 !fill-zinc-400 !rounded-lg !shadow-xl" />
                         <MiniMap
-                            nodeColor="#6366f1"
-                            maskColor="rgb(15, 23, 42, 0.8)"
-                            style={{ backgroundColor: '#0f172a', border: '1px solid rgba(51, 65, 85, 0.5)' }}
-                            className="rounded-xl shadow-2xl"
+                            nodeColor="#4f46e5"
+                            maskColor="rgba(14, 14, 17, 0.85)"
+                            style={{ backgroundColor: '#121215', border: '1px solid rgba(39, 39, 42, 0.8)' }}
+                            className="rounded-xl shadow-2xl !bottom-4 !right-4"
                         />
                     </ReactFlow>
                 </div>

@@ -20,6 +20,53 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.7.4',
+    date: '2026-10-06',
+    summary: 'Clonagem Oficial do Fluxo Hbi Pizza (Typebot), Canvas Fullscreen e 1-Clique no FlowManager',
+    notes: [
+      {
+        id: '7.7.4-1',
+        category: 'features',
+        title: 'Clonagem Fiel do Modelo Hbi Pizza & Restaurante',
+        description: 'Implementada arquitetura oficial de 9 grupos idêntica à do Typebot: Sessão com condicionais de roteamento, Início Normal com variáveis dinâmicas, fallback de erro com repetição, horários, localização com Google Maps, atendimento humano via webhook e links de cardápio digital com pedidos online.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.7.4-2',
+        category: 'features',
+        title: 'Botão 1-Clique no FlowManager para o Modelo Oficial',
+        description: 'Adicionado botão de destaque "Modelo Hbi Pizza Oficial" no gerenciador de fluxos, permitindo abrir imediatamente ou instanciar uma cópia idêntica no tenant em uso.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      },
+      {
+        id: '7.7.4-3',
+        category: 'improvements',
+        title: 'FlowBuilder Fullscreen e Experiência Imersiva Typebot',
+        description: 'Desacoplada a rota /flows/:id/edit da sidebar de conversas do sistema, permitindo que o construtor visual ocupe 100% da tela com abas superiores, busca na toolbox com cadeado e botões flutuantes.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      },
+      {
+        id: '7.7.4-4',
+        category: 'improvements',
+        title: 'Badges Laranja de Variáveis e Blocos Jump Estilizados',
+        description: 'Detecção e renderização em tempo real de tags como {{pushName}}, {{cardapio}}, {{saudacao}}, {{GoogleMaps}} e {{HoraFuncionamento}} com pílulas alaranjadas e blocos jump estilizados no padrão Typebot.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
+      },
+      {
+        id: '7.7.4-5',
+        category: 'fixes',
+        title: 'Correção de Políticas RLS no Supabase (Erro 42501)',
+        description: 'Ajustadas as políticas de segurança das tabelas flows e flow_versions para permitir criação, clonagem e consulta perfeitas sem bloqueios de autorização.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      }
+    ]
+  },
+  {
     version: '7.7.3',
     date: '2026-10-06',
     summary: 'Automação Dual em Robôs: Fluxos Estilo Typebot sem I.A. e Suporte a Subfluxos Modulares',
