@@ -20,6 +20,37 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.7.1',
+    date: '2026-10-06',
+    summary: 'Estabilização do Modo Ticket: Persistência do Histórico Anterior sem Fechamento Automático',
+    notes: [
+      {
+        id: '7.7.1-1',
+        category: 'fixes',
+        title: 'Fim do Fechamento Involuntário de Mensagens Anteriores no Modo Ticket',
+        description: 'Eliminado o efeito colateral no ChatDashboard que forçava o filtro para "today" a cada sincronização ou ciclo de polling de contatos a cada 40-50s. Agora o filtro só é alterado quando o operador realmente alternar a chave do Modo Ticket.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      },
+      {
+        id: '7.7.1-2',
+        category: 'improvements',
+        title: 'Persistência do Histórico Expandido por Conversa até a Resolução',
+        description: 'Implementado rastreador por chat que memoriza quais conversas tiveram o histórico expandido ("Ver Anteriores"), mantendo as mensagens abertas e sem interrupção de áudios até que a conversa seja resolvida ou encerrada.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      },
+      {
+        id: '7.7.1-3',
+        category: 'improvements',
+        title: 'Acesso Rápido ao Controle do Histórico no Separador de Hoje',
+        description: 'O botão de alternância do Modo Ticket agora também é exibido no divisor de data de HOJE quando todo o histórico estiver visível, facilitando o recolhimento sem a necessidade de rolar até o topo da conversa.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      }
+    ]
+  },
+  {
     version: '7.7.0',
     date: '2026-10-05',
     summary: 'Correção de Reconciliação Otimista e Exibição Sequencial Fluida de Múltiplos Arquivos e Mensagens no Chat',

@@ -134,7 +134,8 @@ export const MessageBubble = memo(({
   };
   
   const separatorNode = showDateSeparator ? (
-    <div className="flex items-center justify-center my-6 w-full gap-2.5 select-none px-2 md:px-6">       {ticketMode && index === 0 ? (
+    <div className="flex items-center justify-center my-6 w-full gap-2.5 select-none px-2 md:px-6">
+        {ticketMode && (index === 0 || (messageFilter === 'all' && dateSeparatorText === 'HOJE')) ? (
           <>
             <div className="flex-1 h-[1px] bg-gradient-to-r from-transparent via-emerald-500/35 to-emerald-500/20 dark:via-emerald-500/40 dark:to-emerald-500/25"></div>
             <button

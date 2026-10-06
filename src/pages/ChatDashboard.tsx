@@ -1600,6 +1600,27 @@ export default function ChatDashboard() {
   const undoTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [messageFilter, setMessageFilter] = useState<'today' | 'all'>(ticketMode ? 'today' : 'all');
 
+  // Mantém rastreado quais conversas o usuário expandiu manualmente o histórico de mensagens anteriores
+  const expandedHistoryByChatRef = useRef<Record<string, boolean>>({});
+
+  const handleToggleMessageFilter = useCallback((customFilter?: 'today' | 'all') => {
+    setMessageFilter(prev => {
+      const next = customFilter !== undefined ? customFilter : (prev === 'today' ? 'all' : 'today');
+      if (activeChatId) {
+        if (next === 'all') {
+          expandedHistoryByChatRef.current[activeChatId] = true;
+          const realId = getRealContactId(activeChatId);
+          if (realId) expandedHistoryByChatRef.current[realId] = true;
+        } else {
+          delete expandedHistoryByChatRef.current[activeChatId];
+          const realId = getRealContactId(activeChatId);
+          if (realId) delete expandedHistoryByChatRef.current[realId];
+        }
+      }
+      return next;
+    });
+  }, [activeChatId]);
+
   // Helper canônico de correspondência estrita de contato à(s) caixa(s) ativa(s) selecionada(s)
   const isMatchingChannel = React.useCallback((c: any) => {
     if (!c) return false;
@@ -1765,29 +1786,35 @@ export default function ChatDashboard() {
     return true;
   }, [tenantInfo, connectedInstanceName, isMatchingChannel]);
 
-  // Sincroniza o filtro de mensagens sempre que o Modo Ticket for alternado
+  // Sincroniza o filtro de mensagens estritamente quando o Modo Ticket for alternado pelo usuário
   const prevTicketModeRef = useRef(ticketMode);
   useEffect(() => {
-    const isActivatingTicketMode = !prevTicketModeRef.current && ticketMode;
-    prevTicketModeRef.current = ticketMode;
+    // Blindagem Crítica: Só age se ticketMode efetivamente mudar de valor (evita resets a cada atualização de contacts/realtime a cada 40-50s)
+    if (prevTicketModeRef.current !== ticketMode) {
+      const isActivatingTicketMode = !prevTicketModeRef.current && ticketMode;
+      prevTicketModeRef.current = ticketMode;
 
-    if (ticketMode) {
-      setMessageFilter('today');
-      // Requisito 5: Ao ativar o Modo Ticket, se a conversa selecionada não for um ticket aberto da caixa, seleciona o primeiro ticket aberto da caixa ativa
-      if (isActivatingTicketMode && activeChatId) {
-        const activeObj = contacts.find(c => (c.id === activeChatId || c.conv_id === activeChatId) && isMatchingChannel(c));
-        const isCurrentOpenTicket = activeObj && isContactOpenTicket(activeObj);
-        if (!isCurrentOpenTicket) {
-          const firstTicket = contacts.find(c => isMatchingChannel(c) && isContactOpenTicket(c));
-          if (firstTicket) {
-            setActiveChat(firstTicket.id);
+      if (ticketMode) {
+        const realId = activeChatId ? getRealContactId(activeChatId) : null;
+        const wasExpanded = activeChatId ? !!(expandedHistoryByChatRef.current[activeChatId] || (realId && expandedHistoryByChatRef.current[realId])) : false;
+        setMessageFilter(wasExpanded ? 'all' : 'today');
+
+        // Requisito 5: Ao ativar o Modo Ticket, se a conversa selecionada não for um ticket aberto da caixa, seleciona o primeiro ticket aberto da caixa ativa
+        if (isActivatingTicketMode && activeChatId) {
+          const activeObj = contacts.find(c => (c.id === activeChatId || c.conv_id === activeChatId) && isMatchingChannel(c));
+          const isCurrentOpenTicket = activeObj && isContactOpenTicket(activeObj);
+          if (!isCurrentOpenTicket) {
+            const firstTicket = contacts.find(c => isMatchingChannel(c) && isContactOpenTicket(c));
+            if (firstTicket) {
+              setActiveChat(firstTicket.id);
+            }
           }
         }
+      } else {
+        setMessageFilter('all');
       }
-    } else {
-      setMessageFilter('all');
     }
-  }, [ticketMode, contacts, activeChatId, isContactOpenTicket]);
+  }, [ticketMode, contacts, activeChatId, isContactOpenTicket, isMatchingChannel, setActiveChat]);
 
   // Cálculo de Tickets Ativos Únicos da Caixa e Filtro Selecionados
   const activeTicketsCount = React.useMemo(() => {
@@ -2608,6 +2635,11 @@ export default function ChatDashboard() {
   };
 
   const executeResolve = async (contactId: string, reactivateAi: boolean) => {
+    // Limpa o estado de histórico expandido do ticket resolvido (para que uma futura nova conversa abra em 'today')
+    delete expandedHistoryByChatRef.current[contactId];
+    const realTargetIdForClear = getRealContactId(contactId);
+    if (realTargetIdForClear) delete expandedHistoryByChatRef.current[realTargetIdForClear];
+
     // 1. Salva a posição de scroll atual da lista lateral de chats
     const currentScrollTop = contactListRef.current ? contactListRef.current.scrollTop : 0;
     
@@ -3324,14 +3356,18 @@ export default function ChatDashboard() {
       if (activeChatId) {
         setInputText(draftsRef.current[activeChatId] || '');
         setDraftNewChat(null);
+        // Se a conversa já estava com histórico expandido pelo operador e não foi encerrada, mantém 'all'
+        const realId = getRealContactId(activeChatId);
+        const wasExpanded = !!(expandedHistoryByChatRef.current[activeChatId] || (realId && expandedHistoryByChatRef.current[realId]));
+        setMessageFilter(ticketMode ? (wasExpanded ? 'all' : 'today') : 'all');
       } else {
         setInputText('');
+        setMessageFilter(ticketMode ? 'today' : 'all');
       }
       setReplyMessage(null); // Limpa rascunho de resposta (quote) ao trocar de conversa
-      setMessageFilter(ticketMode ? 'today' : 'all'); // No Modo Ticket, foca nas mensagens de hoje por padrão
       prevActiveChatId.current = activeChatId || null;
     }
-  }, [activeChatId]);
+  }, [activeChatId, ticketMode]);
 
   // Smart Auto-Scroll para novas mensagens
   useEffect(() => {
@@ -8786,7 +8822,7 @@ export default function ChatDashboard() {
                         </div>
                         <button
                           type="button"
-                          onClick={() => setMessageFilter('all')}
+                          onClick={() => handleToggleMessageFilter('all')}
                           className="mt-1 px-5 py-3 min-h-[48px] bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs rounded-xl shadow-md transition-all active:scale-[0.98] cursor-pointer flex items-center gap-2"
                         >
                           <History size={15} />
@@ -8908,7 +8944,7 @@ export default function ChatDashboard() {
                         onAlterarRaciocinio={handleOpenAlterarRaciocinio}
                         ticketMode={ticketMode}
                         messageFilter={messageFilter}
-                        setMessageFilter={setMessageFilter}
+                        setMessageFilter={handleToggleMessageFilter}
                         onStartAddToRag={handleStartAddToRag}
                         isRagSelectionMode={isRagSelectionMode}
                         isRagSelectedQuestion={ragQuestionMsg?.id === msg.id}
