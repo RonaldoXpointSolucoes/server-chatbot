@@ -20,6 +20,21 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.7.2',
+    date: '2026-10-06',
+    summary: 'Correção Imediata do Import de useCallback no ChatDashboard',
+    notes: [
+      {
+        id: '7.7.2-1',
+        category: 'fixes',
+        title: 'Correção do Import de useCallback no ChatDashboard',
+        description: 'Resolvido o ReferenceError que impedia a renderização do ChatDashboard devido à ausência do import de useCallback na desestruturação do React.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      }
+    ]
+  },
+  {
     version: '7.7.1',
     date: '2026-10-06',
     summary: 'Estabilização do Modo Ticket: Persistência do Histórico Anterior sem Fechamento Automático',

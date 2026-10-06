@@ -1,5 +1,5 @@
 {
-  "version": "7.7.1",
-  "buildDate": "2026-10-06T13:28:00.000Z",
-  "summary": "Estabilização do Modo Ticket: Persistência do Histórico Anterior sem Fechamento Automático"
+  "version": "7.7.2",
+  "buildDate": "2026-10-06T13:54:36.172Z",
+  "summary": "Correção Imediata do Import de useCallback no ChatDashboard"
 }
