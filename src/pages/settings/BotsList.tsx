@@ -46,7 +46,8 @@ import {
   Volume2,
   HelpCircle
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
+import TypebotFlowsManager from '../../components/bots/TypebotFlowsManager';
 import { BotModal } from '../../components/modals/BotModal';
 import { supabase } from '../../services/supabase';
 import { useChatStore } from '../../store/chatStore';
@@ -224,6 +225,9 @@ const getBotTemplateNumber = (botName: string) => {
 };
 
 export default function BotsList() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialMode = searchParams.get('tab') === 'typebot' || searchParams.get('mode') === 'typebot' ? 'typebot' : 'ai';
+  const [automationMode, setAutomationMode] = useState<'ai' | 'typebot'>(initialMode);
   const [activeTab, setActiveTab] = useState<'bots' | 'comercio' | 'simulador'>('bots');
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -1482,65 +1486,124 @@ Instruções importantes:
         <div className="absolute top-0 right-10 w-[500px] h-[500px] bg-emerald-500/10 rounded-full blur-[120px] pointer-events-none" />
 
         <div className="max-w-[1200px] mx-auto relative z-10">
+          {/* Master Selector: Robô com I.A. vs Fluxos de Bot (Estilo Typebot) */}
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+            <div className="inline-flex p-1.5 bg-black/50 border border-white/10 rounded-2xl backdrop-blur-2xl shadow-2xl">
+              <button
+                type="button"
+                onClick={() => {
+                  setAutomationMode('ai');
+                  setSearchParams({ tab: 'ai' });
+                }}
+                className={cn(
+                  "px-5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2.5 cursor-pointer",
+                  automationMode === 'ai'
+                    ? "bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg shadow-indigo-600/30 border border-indigo-400/40 scale-[1.02]"
+                    : "text-white/50 hover:text-white/90 hover:bg-white/[0.04]"
+                )}
+              >
+                <BrainCircuit className="w-4 h-4 text-indigo-300" />
+                <span>Robôs com I.A. (Gemini / RAG)</span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-white/90 font-mono">IA Ativa</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setAutomationMode('typebot');
+                  setSearchParams({ tab: 'typebot' });
+                }}
+                className={cn(
+                  "px-5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2.5 cursor-pointer",
+                  automationMode === 'typebot'
+                    ? "bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-lg shadow-emerald-600/30 border border-emerald-400/40 scale-[1.02]"
+                    : "text-white/50 hover:text-white/90 hover:bg-white/[0.04]"
+                )}
+              >
+                <Waypoints className="w-4 h-4 text-emerald-300" />
+                <span>Fluxos de Bot (Estilo Typebot - Sem I.A.)</span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono font-bold">0 Tokens</span>
+              </button>
+            </div>
+
+            <div className="hidden sm:flex items-center gap-2 text-xs text-white/40 bg-white/[0.02] border border-white/5 px-3 py-1.5 rounded-xl">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span>Automação WhatsApp Pronta</span>
+            </div>
+          </div>
+
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
                <div className="p-3 rounded-2xl bg-white/[0.03] border border-white/10 shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)] flex items-center justify-center">
-                 <BrainCircuit className="w-7 h-7 text-indigo-400 drop-shadow-[0_0_15px_rgba(99,102,241,0.5)]" />
+                 {automationMode === 'ai' ? (
+                   <BrainCircuit className="w-7 h-7 text-indigo-400 drop-shadow-[0_0_15px_rgba(99,102,241,0.5)]" />
+                 ) : (
+                   <Waypoints className="w-7 h-7 text-emerald-400 drop-shadow-[0_0_15px_rgba(16,185,129,0.5)]" />
+                 )}
                </div>
                <div>
                  <h1 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white via-white/90 to-white/60 tracking-tight drop-shadow-sm">
-                   Agentes I.A. (RAG)
+                   {automationMode === 'ai' ? 'Agentes I.A. (RAG)' : 'Fluxos de Bot (Estilo Typebot)'}
                  </h1>
-                 <p className="text-[#a1a1aa] text-xs font-semibold mt-1">Orquestre o cérebro autônomo da sua empresa no WhatsApp.</p>
+                 <p className="text-[#a1a1aa] text-xs font-semibold mt-1">
+                   {automationMode === 'ai' 
+                     ? 'Orquestre o cérebro autônomo da sua empresa no WhatsApp com inteligência Gemini e base RAG.' 
+                     : 'Automação visual determinística sem consumo de I.A. Conecte blocos e chame subfluxos modulares.'}
+                 </p>
                </div>
             </div>
             
-            {/* Seletor de Abas Premium */}
-            <div className="flex bg-white/[0.02] border border-white/10 p-1 rounded-2xl backdrop-blur-md">
-              <button
-                onClick={() => { setActiveTab('bots'); setShowTemplateGallery(false); }}
-                className={cn(
-                  "px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2",
-                  activeTab === 'bots' 
-                    ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30" 
-                    : "text-white/40 hover:text-white/80"
-                )}
-              >
-                <Bot className="w-3.5 h-3.5" />
-                Meus Robôs
-              </button>
-              <button
-                onClick={() => { setActiveTab('comercio'); setShowTemplateGallery(false); }}
-                className={cn(
-                  "px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2",
-                  activeTab === 'comercio' 
-                    ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/30" 
-                    : "text-white/40 hover:text-white/80"
-                )}
-              >
-                <Store className="w-3.5 h-3.5" />
-                Dados da Empresa
-              </button>
-              <button
-                onClick={() => { setActiveTab('simulador'); setShowTemplateGallery(false); }}
-                className={cn(
-                  "px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2",
-                  activeTab === 'simulador' 
-                    ? "bg-purple-600 text-white shadow-lg shadow-purple-600/30" 
-                    : "text-white/40 hover:text-white/80"
-                )}
-              >
-                <Network className="w-3.5 h-3.5" />
-                Simulador
-              </button>
-            </div>
+            {/* Seletor de Abas Premium (Apenas exibido no modo IA) */}
+            {automationMode === 'ai' && (
+              <div className="flex bg-white/[0.02] border border-white/10 p-1 rounded-2xl backdrop-blur-md">
+                <button
+                  onClick={() => { setActiveTab('bots'); setShowTemplateGallery(false); }}
+                  className={cn(
+                    "px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2",
+                    activeTab === 'bots' 
+                      ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30" 
+                      : "text-white/40 hover:text-white/80"
+                  )}
+                >
+                  <Bot className="w-3.5 h-3.5" />
+                  Meus Robôs
+                </button>
+                <button
+                  onClick={() => { setActiveTab('comercio'); setShowTemplateGallery(false); }}
+                  className={cn(
+                    "px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2",
+                    activeTab === 'comercio' 
+                      ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/30" 
+                      : "text-white/40 hover:text-white/80"
+                  )}
+                >
+                  <Store className="w-3.5 h-3.5" />
+                  Dados da Empresa
+                </button>
+                <button
+                  onClick={() => { setActiveTab('simulador'); setShowTemplateGallery(false); }}
+                  className={cn(
+                    "px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2",
+                    activeTab === 'simulador' 
+                      ? "bg-purple-600 text-white shadow-lg shadow-purple-600/30" 
+                      : "text-white/40 hover:text-white/80"
+                  )}
+                >
+                  <Network className="w-3.5 h-3.5" />
+                  Simulador
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
 
       {/* Main Content Area */}
-      <div className="flex-1 overflow-y-auto px-8 py-8 styled-scrollbar bg-[#0f1013] relative">
-        <div className="max-w-[1200px] mx-auto relative z-10 h-full">
+      {automationMode === 'typebot' ? (
+        <TypebotFlowsManager />
+      ) : (
+        <div className="flex-1 overflow-y-auto px-8 py-8 styled-scrollbar bg-[#0f1013] relative">
+          <div className="max-w-[1200px] mx-auto relative z-10 h-full">
           
           {/* ABA 1: ROBÔS / LISTAGEM */}
           {activeTab === 'bots' && (
@@ -2374,6 +2437,7 @@ Instruções importantes:
 
         </div>
       </div>
+      )}
 
       <BotModal 
         isOpen={isModalOpen}

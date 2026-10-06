@@ -20,6 +20,45 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.7.3',
+    date: '2026-10-06',
+    summary: 'Automação Dual em Robôs: Fluxos Estilo Typebot sem I.A. e Suporte a Subfluxos Modulares',
+    notes: [
+      {
+        id: '7.7.3-1',
+        category: 'features',
+        title: 'Master Switcher na Tela de Robôs: I.A. vs Fluxos Typebot',
+        description: 'Implementado seletor mestre no cabeçalho de Robôs separando de forma clara e isolada os Robôs com I.A. (Gemini / RAG) dos Fluxos de Automação Visual (Estilo Typebot sem I.A.), sem conflitos operacionais.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.7.3-2',
+        category: 'features',
+        title: 'Painel Gerenciador de Fluxos de Automação (Typebot)',
+        description: 'Criado painel completo com métricas operacionais (0 Tokens de IA), status ativo/rascunho, atalhos para construtor visual, teste via simulador, clonagem e importação direta de arquivos .json do Typebot.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      },
+      {
+        id: '7.7.3-3',
+        category: 'features',
+        title: 'Modularidade: Um Fluxo Chamando Outro (Subfluxos)',
+        description: 'Adicionado suporte nativo no FlowBuilder e no Simulador para blocos do tipo Chamar Outro Fluxo (Subfluxo), permitindo encadear fluxos independentes de forma modular e escalável.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-purple-500/20 text-purple-300 border-purple-500/30'
+      },
+      {
+        id: '7.7.3-4',
+        category: 'improvements',
+        title: 'Otimização de Limite de Cache do Service Worker (PWA)',
+        description: 'Expandido o limite de precache no Vite PWA para 8MB, garantindo compilações e atualizações estáveis sem avisos de assets excedentes.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
+      }
+    ]
+  },
+  {
     version: '7.7.2',
     date: '2026-10-06',
     summary: 'Correção Imediata do Import de useCallback no ChatDashboard',

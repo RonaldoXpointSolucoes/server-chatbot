@@ -6,6 +6,7 @@ interface TestSimulatorProps {
   nodes: Node[];
   edges: Edge[];
   onClose: () => void;
+  isOpen?: boolean;
 }
 
 type Message = {
@@ -154,8 +155,17 @@ export default function TestSimulator({ nodes, edges, onClose }: TestSimulatorPr
           pushMessage('system', `⏳ Aguardando ${waitTime}s...`);
           autoAdvance(currentBlock.id, waitTime * 1000);
      }
-     // 7. Integrações Síncronas Transpassadas Localmente
-     else if (['webhook', 'script', 'typebot_link', 'redirect', 'ab_test', 'jump', 'return'].includes(flowType)) {
+     // 7. Chamada de Subfluxo Modular (Typebot Link)
+     else if (flowType === 'typebot_link') {
+          const targetId = currentBlock.target_flow_id;
+          pushMessage('system', targetId 
+              ? `🔗 Chamando subfluxo modular [ID: ${targetId}]. Transição efetuada com sucesso!` 
+              : `🔗 Executando bloco: Chamar Outro Fluxo (Subfluxo)`
+          );
+          autoAdvance(currentBlock.id, 600);
+     }
+     // 8. Integrações Síncronas Transpassadas Localmente
+     else if (['webhook', 'script', 'redirect', 'ab_test', 'jump', 'return'].includes(flowType)) {
           pushMessage('system', `⚡ Executando lógico simulado: ${flowType.toUpperCase()}`);
           autoAdvance(currentBlock.id, 500);
      }

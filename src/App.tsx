@@ -18,6 +18,8 @@ import InstanceSettings from './pages/settings/InstanceSettings';
 import AgentsList from './pages/settings/AgentsList';
 import LabelsSettings from './pages/settings/LabelsSettings';
 import BotsList from './pages/settings/BotsList';
+import FlowManager from './pages/FlowManager';
+import FlowBuilder from './pages/FlowBuilder';
 import PromptBuilder from './pages/settings/PromptBuilder';
 import AutomationSettings from './pages/settings/AutomationSettings';
 import OperationLogs from './pages/settings/OperationLogs';
@@ -131,6 +133,10 @@ export default function App() {
             <Route path="/settings/logs" element={<OperationLogs />} />
             <Route path="/settings/account" element={<AccountSettings />} />
             <Route path="/settings/integrations" element={<Integrations />} />
+
+            {/* Módulo de Fluxos e Typebot */}
+            <Route path="/flows" element={<FlowManager />} />
+            <Route path="/flows/:id/edit" element={<FlowBuilder />} />
 
             {/* Rotas Nativas do Módulo de Checklists Operacionais (Tema Administrativo) */}
             <Route path="/checklist/dashboard" element={<ErrorBoundary><ChecklistDashboard /></ErrorBoundary>} />

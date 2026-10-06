@@ -58,7 +58,7 @@ export default defineConfig({
       filename: 'sw.ts',
       injectRegister: 'auto',
       injectManifest: {
-        maximumFileSizeToCacheInBytes: 5000000,
+        maximumFileSizeToCacheInBytes: 8000000,
       },
       includeAssets: [
         'favicon.ico',

@@ -115,6 +115,7 @@ function FlowBuilderContent() {
     const [saving, setSaving] = useState(false);
     const [isTesting, setIsTesting] = useState(false);
     const [selectedNode, setSelectedNode] = useState<Node | null>(null);
+    const [availableFlows, setAvailableFlows] = useState<any[]>([]);
 
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -127,6 +128,20 @@ function FlowBuilderContent() {
 
     useEffect(() => {
         if (tenant_id && id) loadFlow();
+    }, [tenant_id, id]);
+
+    useEffect(() => {
+        async function fetchAvailableFlows() {
+            if (!tenant_id) return;
+            const { data } = await supabase
+                .from('flows')
+                .select('id, name')
+                .eq('tenant_id', tenant_id)
+                .neq('id', id || '')
+                .order('name', { ascending: true });
+            if (data) setAvailableFlows(data);
+        }
+        fetchAvailableFlows();
     }, [tenant_id, id]);
 
     const loadFlow = async () => {
@@ -549,6 +564,28 @@ function FlowBuilderContent() {
                                 </div>
                             )}
 
+                            {selectedNode.type !== 'typebot_group' && (selectedNode.data?.flowType as string) === 'typebot_link' && (
+                                <div className="space-y-2 p-3.5 bg-indigo-950/30 border border-indigo-500/30 rounded-xl">
+                                    <div className="flex items-center gap-2 text-indigo-400">
+                                        <Bot className="w-4 h-4" />
+                                        <label className="text-[10px] font-bold uppercase tracking-wider">Chamar Outro Fluxo (Subfluxo)</label>
+                                    </div>
+                                    <select
+                                        value={selectedNode.data?.target_flow_id as string || ''}
+                                        onChange={(e) => handleDataChange('target_flow_id', e.target.value)}
+                                        className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2 rounded-lg text-xs focus:ring-1 focus:ring-indigo-500 outline-none transition-all cursor-pointer"
+                                    >
+                                        <option value="">Selecione o fluxo a ser chamado...</option>
+                                        {availableFlows.map(f => (
+                                            <option key={f.id} value={f.id}>{f.name}</option>
+                                        ))}
+                                    </select>
+                                    <p className="text-[10px] text-slate-400 leading-relaxed">
+                                        Ao atingir este nó, o bot transita a conversa para o fluxo selecionado.
+                                    </p>
+                                </div>
+                            )}
+
                             {/* Group Internal Blocks Map */}
                             {selectedNode.type === 'typebot_group' && selectedNode.data?.blocks && (selectedNode.data.blocks as any[]).length > 0 && (
                                 <div className="space-y-4">
@@ -699,6 +736,28 @@ function FlowBuilderContent() {
                                                                 className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2 rounded-lg text-xs focus:ring-1 focus:ring-indigo-500 outline-none transition-all font-mono"
                                                             />
                                                         </div>
+                                                    </div>
+                                                )}
+
+                                                {block.flowType === 'typebot_link' && (
+                                                    <div className="space-y-2 p-3 bg-indigo-950/30 border border-indigo-500/30 rounded-xl">
+                                                        <div className="flex items-center gap-2 text-indigo-400">
+                                                            <Bot className="w-4 h-4" />
+                                                            <label className="text-[10px] font-bold uppercase tracking-wider">Chamar Outro Fluxo (Subfluxo)</label>
+                                                        </div>
+                                                        <select
+                                                            value={block.target_flow_id || ''}
+                                                            onChange={(e) => updateBlock('target_flow_id', e.target.value)}
+                                                            className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2 rounded-lg text-xs focus:ring-1 focus:ring-indigo-500 outline-none transition-all cursor-pointer"
+                                                        >
+                                                            <option value="">Selecione o fluxo a ser chamado...</option>
+                                                            {availableFlows.map(f => (
+                                                                <option key={f.id} value={f.id}>{f.name}</option>
+                                                            ))}
+                                                        </select>
+                                                        <p className="text-[10px] text-slate-400 leading-relaxed">
+                                                            Ao atingir este bloco, a conversa transita automaticamente para este fluxo secundário modular.
+                                                        </p>
                                                     </div>
                                                 )}
 
