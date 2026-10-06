@@ -3213,9 +3213,15 @@ export default function ChatDashboard() {
         if (m.whatsapp_id && conf.whatsapp_id === m.whatsapp_id) return true;
         const confTime = conf.timestamp instanceof Date ? conf.timestamp.getTime() : new Date(conf.timestamp || 0).getTime();
         if (Math.abs(mTime - confTime) < 60000) {
-          if (m.mediaType && conf.mediaType && m.mediaType === conf.mediaType) return true;
+          // Se for mídia, NÃO comparar apenas mediaType! Comparar mediaUrl idêntica ou texto idêntico!
+          if (m.mediaType && conf.mediaType && m.mediaType === conf.mediaType) {
+            if (m.mediaUrl && conf.mediaUrl && !m.mediaUrl.startsWith('blob:') && m.mediaUrl === conf.mediaUrl) return true;
+            const confNorm = normalizeMessageTextForComparison(conf.text);
+            if (normText && confNorm && normText === confNorm) return true;
+            return false;
+          }
           const confNorm = normalizeMessageTextForComparison(conf.text);
-          if (normText && confNorm && (normText === confNorm || normText.includes(confNorm) || confNorm.includes(normText))) {
+          if (normText && confNorm && normText === confNorm) {
             return true;
           }
         }
@@ -3232,23 +3238,21 @@ export default function ChatDashboard() {
       const prev = deduped[deduped.length - 1];
 
       if (prev) {
-        // Desduplica mensagens do sistema consecutivas
-        if (current.sender === 'system' && prev.sender === 'system') {
+        // Desduplica mensagens do sistema consecutivas apenas se o texto for idêntico
+        if (current.sender === 'system' && prev.sender === 'system' && current.text === prev.text) {
           continue;
         }
 
-        // Desduplica mensagens de outbound com mesmo remetente, mesmo texto em menos de 15s (e sem arquivos distintos)
-        const isCurrentOutbound = ['human', 'agent', 'bot', 'automation'].includes(current.sender);
-        const isPrevOutbound = ['human', 'agent', 'bot', 'automation'].includes(prev.sender);
-
-        if (isCurrentOutbound && isPrevOutbound && !current.isTask && !prev.isTask && !current.mediaUrl && !prev.mediaUrl) {
+        // Se uma mensagem for otimista residual consecutiva e já existir a equivalente confirmada
+        const isCurrentOpt = String(current.id).startsWith('optimistic-') || current.status === 'pending';
+        const isPrevOpt = String(prev.id).startsWith('optimistic-') || prev.status === 'pending';
+        if (isCurrentOpt && !isPrevOpt) {
           const currTime = current.timestamp instanceof Date ? current.timestamp.getTime() : new Date(current.timestamp || 0).getTime();
           const prevTime = prev.timestamp instanceof Date ? prev.timestamp.getTime() : new Date(prev.timestamp || 0).getTime();
           if (Math.abs(currTime - prevTime) < 15000) {
             const normCurr = normalizeMessageTextForComparison(current.text);
             const normPrev = normalizeMessageTextForComparison(prev.text);
-            if (normCurr && normPrev && normCurr === normPrev) {
-              // Descarta duplicata consecutiva idêntica
+            if (normCurr && normPrev && normCurr === normPrev && current.mediaType === prev.mediaType) {
               continue;
             }
           }
@@ -4087,6 +4091,7 @@ export default function ChatDashboard() {
         else if (file.type.startsWith('audio/')) mediaType = 'audio';
 
         await useChatStore.getState().uploadAndSendMedia(activeChatId, file, mediaType, properTargetInstance as string);
+        scrollToBottom('smooth');
       }
       setReplyMessage(null);
     }

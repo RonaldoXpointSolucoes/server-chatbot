@@ -20,6 +20,37 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.7.0',
+    date: '2026-10-05',
+    summary: 'Correção de Reconciliação Otimista e Exibição Sequencial Fluida de Múltiplos Arquivos e Mensagens no Chat',
+    notes: [
+      {
+        id: '7.7.0-1',
+        category: 'fixes',
+        title: 'Eliminação de Sobrescrita de Arquivos no Envio Múltiplo',
+        description: 'Correção crítica no addMessageLocally do chatStore que considerava novas mensagens otimistas de documentos como confirmações, fazendo com que arquivos subsequentes (ex: propostas) substituíssem visualmente os cards de arquivos anteriores no feed.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      },
+      {
+        id: '7.7.0-2',
+        category: 'fixes',
+        title: 'Blindagem da Janela de Reconciliação e Mensagens Confirmadas',
+        description: 'Removida a condição que permitia que mensagens confirmadas do banco fossem sobrescritas por novas mensagens em até 45s. Apenas mensagens de fato pendentes/otimistas podem ser reconciliadas por correspondência de URL ou nome do arquivo.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      },
+      {
+        id: '7.7.0-3',
+        category: 'improvements',
+        title: 'Fim do Descarte Arbitrário de Mensagens Rápidas e Desduplicação Inteligente',
+        description: 'Eliminado o descarte de 35s por texto idêntico que causava atraso ou sumiço temporário de mensagens legítimas repetidas (ex: "ok", "sim"). Refinamento na 2ª e 3ª camada de renderização do ChatDashboard para preservar arquivos e mensagens consecutivas com segurança.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      }
+    ]
+  },
+  {
     version: '7.6.9',
     date: '2026-10-04',
     summary: 'Compatibilidade Plena com Chaves Oficiais Google Formatos AQ. e AIza, Fallback Mestre Resiliente e Estabilização do Criador Multimodal de Cards',

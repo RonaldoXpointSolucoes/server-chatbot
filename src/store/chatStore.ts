@@ -2296,7 +2296,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
 
     // Atualiza otimista UI imediatamente com status 'pending' (reloginho animado)
-    const pseudoId = 'optimistic-' + Math.random().toString();
+    const pseudoId = 'optimistic-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
     state.addMessageLocally(contactId, { id: pseudoId, pseudoId: pseudoId, text: finalMessageText, sender: 'human', status: 'pending', timestamp: new Date() });
 
     // Auto-pause da IA por 30 minutos se o atendente mandou mensagem manual e ela não está pausada definitivamente
@@ -2750,7 +2750,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
 
     // Atualiza otimista (Render Instantâneo Premium)
-    const pseudoId = 'optimistic-media-' + Math.random().toString();
+    const pseudoId = 'optimistic-media-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
     const tempUrl = URL.createObjectURL(file);
     state.addMessageLocally(contactId, {
       id: pseudoId,
@@ -2822,8 +2822,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
           contacts: s.contacts.map(c => (c.id === contactId || (c.id && getRealContactId(c.id) === getRealContactId(contactId))) ? {
             ...c,
             // Procura o pseudoId, substitui a url temporaria e adiciona o whatsapp_id correspondente
-            messages: c.messages.map(m => (m.id === pseudoId || m.pseudoId === pseudoId || (mediaMsgId && m.whatsapp_id === mediaMsgId)) ? {
+            messages: c.messages.map(m => (m.id === pseudoId || m.pseudoId === pseudoId) ? {
               ...m,
+              id: mediaMsgId || m.id,
+              pseudoId: pseudoId,
               ...(data.media_url && { mediaUrl: data.media_url }),
               ...(mediaMsgId && { whatsapp_id: mediaMsgId }),
               status: 'sent'
@@ -3276,7 +3278,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             const updatedExisting: MessageType = {
               ...existingMsg,
               ...msg,
-              id: existingMsg.id.startsWith('optimistic-') && msg.id ? msg.id : existingMsg.id,
+              id: existingMsg.id.startsWith('optimistic-') && msg.id && !msg.id.startsWith('optimistic-') ? msg.id : existingMsg.id,
               whatsapp_id: msg.whatsapp_id || existingMsg.whatsapp_id,
               status: msg.status || existingMsg.status,
               mediaUrl: msg.mediaUrl || existingMsg.mediaUrl,
@@ -3292,39 +3294,60 @@ export const useChatStore = create<ChatState>((set, get) => ({
             };
           }
 
-          // 2. Tratamento e reconciliação de mensagens de saída (otimistas e em trânsito)
+          // 2. Reconciliação de mensagens de saída:
+          // Se 'msg' for uma nova mensagem OTIMISTA (msg.id inicia com 'optimistic-'), ela é uma nova
+          // mensagem criada pelo usuário e NUNCA deve reconciliar nem sobrescrever mensagens anteriores existentes!
+          const isOptimisticMsg = String(msg.id || '').startsWith('optimistic-') || String(msg.pseudoId || '').startsWith('optimistic-');
           const isOutboundMsg = ['human', 'agent', 'bot', 'automation'].includes(msg.sender);
-          if (isOutboundMsg) {
+
+          if (!isOptimisticMsg && isOutboundMsg) {
             const normMsg = normalizeMessageTextForComparison(msg.text);
             const msgTime = msg.timestamp instanceof Date ? msg.timestamp.getTime() : new Date(msg.timestamp || 0).getTime();
 
             const optIndex = c.messages.findIndex(m => {
+              // Só pode reconciliar se 'm' for de fato uma mensagem PENDENTE / OTIMISTA!
+              // Mensagens já salvas/confirmadas no banco NUNCA devem ser sobrescritas por outras mensagens!
+              const isPendingOrOptimistic = String(m.id).startsWith('optimistic-') || String(m.id).startsWith('EDGE_') || m.status === 'pending';
+              if (!isPendingOrOptimistic) return false;
+
               // Match direto por pseudoId
               if (msg.pseudoId && (m.id === msg.pseudoId || m.pseudoId === msg.pseudoId)) {
                 return true;
               }
 
               // Match direto por whatsapp_id caso tenha sido associado antes
-              if (msg.whatsapp_id && (m.whatsapp_id === msg.whatsapp_id || m.id === msg.whatsapp_id)) return true;
-
-              // Identifica mensagens otimistas, temporárias ou pendentes
-              const isPendingOrOptimistic = String(m.id).startsWith('optimistic-') || String(m.id).startsWith('EDGE_') || m.status === 'pending';
-              const mTime = m.timestamp instanceof Date ? m.timestamp.getTime() : new Date(m.timestamp || 0).getTime();
-              const isRecent = Math.abs(msgTime - mTime) < 45000; // Janela de segurança de 45s
-
-              if (m.mediaType && msg.mediaType && m.mediaType === msg.mediaType && (isPendingOrOptimistic || isRecent)) {
+              if (msg.whatsapp_id && (m.whatsapp_id === msg.whatsapp_id || m.id === msg.whatsapp_id)) {
                 return true;
               }
 
-              const normM = normalizeMessageTextForComparison(m.text);
-              const isTextMatch = Boolean(
-                normM && normMsg && 
-                (normM === normMsg || normM.includes(normMsg) || normMsg.includes(normM))
-              );
+              const mTime = m.timestamp instanceof Date ? m.timestamp.getTime() : new Date(m.timestamp || 0).getTime();
+              const isRecent = Math.abs(msgTime - mTime) < 60000; // Janela de segurança de 60s
+              if (!isRecent) return false;
 
-              // Se o texto bater e for uma mensagem otimista/pendente OU enviada nos últimos 45s
-              if (isTextMatch && (isPendingOrOptimistic || isRecent)) {
-                return true;
+              // Se ambas forem mídia do mesmo tipo
+              if (m.mediaType && msg.mediaType && m.mediaType === msg.mediaType) {
+                // Se ambas possuem mediaUrl e não são blobs locais, checa URL idêntica
+                if (m.mediaUrl && msg.mediaUrl && !m.mediaUrl.startsWith('blob:') && m.mediaUrl === msg.mediaUrl) {
+                  return true;
+                }
+                // Se ambas possuem texto/nome do arquivo, checa igualdade estrita
+                const normM = normalizeMessageTextForComparison(m.text);
+                if (normM && normMsg && normM === normMsg) {
+                  return true;
+                }
+                // Se nenhuma possui texto (ex: foto sem legenda), reconcilia a primeira pendente correspondente
+                if (!normM && !normMsg) {
+                  return true;
+                }
+                return false;
+              }
+
+              // Se ambas forem texto simples (sem mediaType)
+              if (!m.mediaType && !msg.mediaType) {
+                const normM = normalizeMessageTextForComparison(m.text);
+                if (normM && normMsg && normM === normMsg) {
+                  return true;
+                }
               }
 
               return false;
@@ -3345,16 +3368,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 sender: c.messages[optIndex].sender === 'human' || msg.sender === 'human' || msg.sender === 'agent' ? 'human' : msg.sender
               };
 
-              // Limpa também qualquer mensagem otimista residual que tenha ficado órfã com mesmo pseudoId ou mesmo texto recente
+              // Limpa também qualquer mensagem otimista residual que tenha ficado órfã com mesmo pseudoId
               let updatedMsgs = c.messages.map((m, idx) => idx === optIndex ? updatedItem : m)
                 .filter((m, idx) => {
                   if (idx === optIndex) return true;
                   if (matchedOptimisticId && m.id === matchedOptimisticId) return false;
                   if (matchedPseudoId && m.pseudoId === matchedPseudoId) return false;
-                  if (String(m.id).startsWith('optimistic-')) {
-                    const normOther = normalizeMessageTextForComparison(m.text);
-                    if (normOther && normMsg && normOther === normMsg) return false;
-                  }
                   return true;
                 });
 
@@ -3367,26 +3386,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 snoozed_until: updatedSnooze 
               };
             }
-
-            // 2.1 Prevenção defensiva de duplicação: se já existe mensagem recente com mesmo texto idêntico, descarta
-            const hasDuplicateRecentText = c.messages.some(m => {
-              const mTime = m.timestamp instanceof Date ? m.timestamp.getTime() : new Date(m.timestamp || 0).getTime();
-              if (Math.abs(msgTime - mTime) > 35000) return false;
-              const normM = normalizeMessageTextForComparison(m.text);
-              return Boolean(normM && normMsg && normM === normMsg);
-            });
-
-            if (hasDuplicateRecentText) {
-              if (updatedStatus !== c.conv_status) return { ...c, conv_status: updatedStatus, snoozed_until: updatedSnooze };
-              return c;
-            }
           }
 
           // Prevenção de Bug de Ordenação Otimista: se for uma mensagem otimista, garante que ela vá para o fim
           if (String(msg.id).startsWith('optimistic-') && c.messages.length > 0) {
-            const lastTimestamp = c.messages[c.messages.length - 1].timestamp.getTime();
-            if (msg.timestamp.getTime() <= lastTimestamp) {
-              msg.timestamp = new Date(lastTimestamp + 1000);
+            const lastMsg = c.messages[c.messages.length - 1];
+            const lastTimestamp = lastMsg.timestamp instanceof Date ? lastMsg.timestamp.getTime() : new Date(lastMsg.timestamp || Date.now()).getTime();
+            const msgTs = msg.timestamp instanceof Date ? msg.timestamp.getTime() : new Date(msg.timestamp || Date.now()).getTime();
+            if (msgTs <= lastTimestamp) {
+              msg.timestamp = new Date(lastTimestamp + 100);
             }
           }
 
@@ -5130,8 +5138,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 const optNormText = normalizeTextForCompare(opt.text);
                 const alreadyInDb = uniqueMsgs.some(dbMsg => {
                   if (opt.whatsapp_id && dbMsg.whatsapp_id === opt.whatsapp_id) return true;
+                  if (opt.mediaType && dbMsg.mediaType && opt.mediaType === dbMsg.mediaType) {
+                    if (opt.mediaUrl && dbMsg.mediaUrl && !opt.mediaUrl.startsWith('blob:') && opt.mediaUrl === dbMsg.mediaUrl) return true;
+                  }
                   const dbNormText = normalizeTextForCompare(dbMsg.text);
-                  if (optNormText && dbNormText && (optNormText === dbNormText || dbNormText.includes(optNormText) || optNormText.includes(dbNormText))) return true;
+                  if (optNormText && dbNormText && optNormText === dbNormText) return true;
                   return false;
                 });
 
@@ -6570,7 +6581,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               if (msg.pseudoId && (m.id === msg.pseudoId || m.whatsapp_message_id === msg.pseudoId)) return true;
               if (String(msg.id).startsWith('optimistic-') || msg.status === 'pending') {
                 const normMsgText = normalizeMessageTextForComparison(msg.text);
-                if (normUpdateText && normMsgText && (normUpdateText === normMsgText || normUpdateText.includes(normMsgText) || normMsgText.includes(normUpdateText))) {
+                if (normUpdateText && normMsgText && normUpdateText === normMsgText) {
                   return true;
                 }
               }
