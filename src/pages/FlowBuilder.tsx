@@ -66,6 +66,7 @@ import { v4 as uuidv4 } from 'uuid';
 import CustomNode from '../components/Flow/CustomNode';
 import GroupNode from '../components/Flow/GroupNode';
 import TestSimulator from '../components/Flow/TestSimulator';
+import FlowHelpModal from '../components/Flow/FlowHelpModal';
 import { parseTypebotToFlow } from '../utils/typebotParser';
 
 const initialNodes: Node[] = [];
@@ -118,10 +119,19 @@ function FlowBuilderContent() {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [isTesting, setIsTesting] = useState(false);
+    const [isHelpOpen, setIsHelpOpen] = useState(false);
     const [selectedNode, setSelectedNode] = useState<Node | null>(null);
     const [availableFlows, setAvailableFlows] = useState<any[]>([]);
 
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    const handleLoadTemplate = (newNodes: Node[], newEdges: Edge[], templateName: string) => {
+        setNodes(newNodes);
+        setEdges(newEdges);
+        setTimeout(() => {
+            fitView({ duration: 800, padding: 0.2 });
+        }, 150);
+    };
 
     const nodeTypes = useMemo(() => ({
         custom: CustomNode,
@@ -361,6 +371,40 @@ function FlowBuilderContent() {
         alert("Salvo e Publicado com sucesso!");
     };
 
+    const handleExportBackup = () => {
+        try {
+            const flowName = flowData?.name || 'fluxo';
+            const sanitizedName = flowName.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+            const fileName = `${sanitizedName}_backup.json`;
+
+            const backupData = {
+                version: 'chatboot-v1',
+                name: flowData?.name || 'Fluxo ChatBoot',
+                description: flowData?.description || '',
+                tenant_id: tenant_id,
+                exported_at: new Date().toISOString(),
+                trigger_rules: flowData?.trigger_rules || [],
+                nodes: nodes,
+                edges: edges,
+            };
+
+            const jsonString = JSON.stringify(backupData, null, 2);
+            const blob = new Blob([jsonString], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = fileName;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        } catch (error) {
+            console.error('Erro ao exportar backup do fluxo:', error);
+            alert('Não foi possível exportar o backup do fluxo.');
+        }
+    };
+
     const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
@@ -369,20 +413,39 @@ function FlowBuilderContent() {
         reader.onload = (evt) => {
             try {
                 const json = JSON.parse(evt.target?.result as string);
-                const { nodes: newNodes, edges: newEdges } = parseTypebotToFlow(json);
+                let newNodes: Node[] = [];
+                let newEdges: Edge[] = [];
 
-                if (window.confirm('Isto irá sobrescrever o fluxo no editor atual. Tem certeza?')) {
+                // 1. Caso seja backup gerado pelo ChatBoot (ou formato estruturado com nodes e edges)
+                if (json && Array.isArray(json.nodes) && Array.isArray(json.edges)) {
+                    newNodes = json.nodes;
+                    newEdges = json.edges;
+                }
+                // 2. Caso seja arquivo JSON exportado do Typebot nativo (groups, events, variables)
+                else if (json && (Array.isArray(json.groups) || Array.isArray(json.events))) {
+                    const parsed = parseTypebotToFlow(json);
+                    newNodes = parsed.nodes;
+                    newEdges = parsed.edges;
+                } else {
+                    throw new Error('Formato de arquivo não reconhecido. Use um backup do ChatBoot (.json) ou um arquivo exportado do Typebot (.json).');
+                }
+
+                if (newNodes.length === 0) {
+                    alert('Nenhum bloco ou nó foi encontrado no arquivo JSON importado.');
+                    return;
+                }
+
+                if (window.confirm(`Isto irá carregar ${newNodes.length} grupo(s)/bloco(s) e ${newEdges.length} conexão(ões) no editor atual. Tem certeza?`)) {
                     setNodes(newNodes);
                     setEdges(newEdges);
 
-                    // Aguarda o React Flow renderizar os nós e depois centraliza a câmera
                     setTimeout(() => {
                         fitView({ duration: 800, padding: 0.2 });
-                    }, 100);
+                    }, 150);
                 }
-            } catch (error) {
-                alert('Erro ao importar arquivo: JSON Typebot inválido ou corrompido');
-                console.error(error);
+            } catch (error: any) {
+                alert(`Erro ao importar arquivo: ${error?.message || 'JSON inválido ou corrompido'}`);
+                console.error('Erro no handleImport:', error);
             }
             if (fileInputRef.current) fileInputRef.current.value = '';
         };
@@ -446,8 +509,12 @@ function FlowBuilderContent() {
                         </h1>
                     </div>
 
-                    <button className="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-200 px-2 py-1 rounded-md hover:bg-zinc-800/60 transition-colors ml-1">
-                        <HelpCircle className="w-3.5 h-3.5" />
+                    <button 
+                        onClick={() => setIsHelpOpen(true)}
+                        className="flex items-center gap-1.5 text-xs text-zinc-300 hover:text-white px-2.5 py-1.5 rounded-lg hover:bg-zinc-800 transition-colors ml-1 border border-zinc-800/80 bg-[#202024] active:scale-95 shadow-sm"
+                        title="Abrir Central de Ajuda e Modelos Prontos"
+                    >
+                        <HelpCircle className="w-3.5 h-3.5 text-indigo-400" />
                         <span>Ajuda</span>
                     </button>
                 </div>
@@ -473,8 +540,12 @@ function FlowBuilderContent() {
                         Configurações
                     </button>
                     <button
-                        onClick={() => setActiveTab('share')}
+                        onClick={() => {
+                            setActiveTab('share');
+                            handleExportBackup();
+                        }}
                         className={`px-3 py-1 rounded-lg transition-all ${activeTab === 'share' ? 'bg-[#2b2b31] text-white shadow-sm font-semibold' : 'text-zinc-400 hover:text-zinc-200'}`}
+                        title="Exportar backup .json do fluxo"
                     >
                         Compartilhar
                     </button>
@@ -497,19 +568,17 @@ function FlowBuilderContent() {
                     />
                     <button
                         onClick={() => fileInputRef.current?.click()}
-                        className="bg-[#202024] hover:bg-zinc-800 text-zinc-300 hover:text-white px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all border border-zinc-800"
-                        title="Importar arquivo JSON do Typebot"
+                        className="bg-[#202024] hover:bg-zinc-800 text-zinc-300 hover:text-white px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all border border-zinc-800 shadow-sm active:scale-95"
+                        title="Importar fluxo a partir de arquivo .json (ChatBoot ou Typebot)"
                     >
                         <UploadCloud className="w-3.5 h-3.5" />
                         Importar
                     </button>
                     
                     <button
-                        onClick={() => {
-                            navigator.clipboard.writeText(window.location.href);
-                            alert('Link do fluxo copiado para a área de transferência!');
-                        }}
-                        className="bg-[#202024] hover:bg-zinc-800 text-zinc-300 hover:text-white px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all border border-zinc-800"
+                        onClick={handleExportBackup}
+                        className="bg-[#202024] hover:bg-zinc-800 text-zinc-300 hover:text-white px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all border border-zinc-800 shadow-sm active:scale-95"
+                        title="Salvar arquivo .json com todo este fluxo para backup"
                     >
                         <Share2 className="w-3.5 h-3.5" />
                         Compartilhar
@@ -517,16 +586,17 @@ function FlowBuilderContent() {
 
                     <button
                         onClick={() => setIsTesting(true)}
-                        className="bg-[#202024] hover:bg-zinc-800 text-zinc-300 hover:text-white px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all border border-zinc-800"
+                        className="bg-[#202024] hover:bg-zinc-800 text-zinc-300 hover:text-white px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all border border-zinc-800 shadow-sm active:scale-95"
+                        title="Abrir chat de teste em tempo real"
                     >
-                        <Play className="w-3.5 h-3.5 text-zinc-400 fill-zinc-400" />
+                        <Play className="w-3.5 h-3.5 text-emerald-400 fill-emerald-400" />
                         Visualizar
                     </button>
 
                     <button
                         onClick={saveFlow}
                         disabled={saving}
-                        className="bg-[#2563eb] hover:bg-[#1d4ed8] text-white px-4 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all shadow-md active:scale-95"
+                        className="bg-[#ff5722] hover:bg-[#f4511e] text-white px-4 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all shadow-md active:scale-95 border border-orange-500/30"
                     >
                         <Save className="w-3.5 h-3.5" />
                         {saving ? 'Publicando...' : 'Publicar'}
@@ -891,6 +961,12 @@ function FlowBuilderContent() {
                     onClose={() => setIsTesting(false)}
                 />
             )}
+
+            <FlowHelpModal 
+                isOpen={isHelpOpen}
+                onClose={() => setIsHelpOpen(false)}
+                onLoadTemplate={handleLoadTemplate}
+            />
         </div>
     );
 }

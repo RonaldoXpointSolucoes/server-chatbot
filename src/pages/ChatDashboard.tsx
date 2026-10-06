@@ -522,6 +522,12 @@ export default function ChatDashboard() {
     tenantLabels: state.tenantLabels,
   })));
 
+  const currentTenantId = typeof window !== 'undefined' ? (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')) : null;
+  const tenantInstances = React.useMemo(() => {
+    return availableInstancesList.filter(inst => !currentTenantId || inst.tenant_id === currentTenantId);
+  }, [availableInstancesList, currentTenantId]);
+  const hasMultipleInstances = tenantInstances.length > 1;
+
   useEffect(() => {
     const fetchCompanies = async () => {
       const tenantId = tenantInfo?.id || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
@@ -1559,12 +1565,6 @@ export default function ChatDashboard() {
       }, 1200);
     }
   };
-
-  const currentTenantId = typeof window !== 'undefined' ? (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')) : null;
-  const tenantInstances = React.useMemo(() => {
-    return availableInstancesList.filter(inst => !currentTenantId || inst.tenant_id === currentTenantId);
-  }, [availableInstancesList, currentTenantId]);
-  const hasMultipleInstances = tenantInstances.length > 1;
 
   const whatsappStatusMemo = React.useMemo(() => {
     const total = tenantInstances.length;

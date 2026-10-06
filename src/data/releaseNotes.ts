@@ -20,6 +20,37 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.7.5',
+    date: '2026-10-06',
+    summary: 'Estabilização da tela de conversas (/chat), eliminação de TDZ no React e Guardrail Automatizado de Build',
+    notes: [
+      {
+        id: '7.7.5-1',
+        category: 'fixes',
+        title: 'Correção de Renderização da Tela de Conversas (TDZ React)',
+        description: 'Corrigida ordem lexical de inicialização de tenantInstances e variáveis reativas no ChatDashboard, eliminando a tela vermelha e o erro ReferenceError (Cannot access Bt before initialization) ao abrir ou trocar conversas.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      },
+      {
+        id: '7.7.5-2',
+        category: 'improvements',
+        title: 'Guardrail Pré-Build de Prevenção a TDZ e Scope Leak',
+        description: 'Implementado script check-tdz.cjs integrado ao comando de build que inspeciona a AST do TypeScript impedindo que qualquer variável seja acessada em hooks ou dependências antes de sua declaração.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      },
+      {
+        id: '7.7.5-3',
+        category: 'features',
+        title: 'Simulador Interativo e Suporte a Blocos no FlowBuilder',
+        description: 'Aprimoramentos visuais no construtor de fluxos com suporte completo a nós de condição, jump, webhook, espera e templates prontos.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      }
+    ]
+  },
+  {
     version: '7.7.4',
     date: '2026-10-06',
     summary: 'Clonagem Oficial do Fluxo Hbi Pizza (Typebot), Canvas Fullscreen e 1-Clique no FlowManager',

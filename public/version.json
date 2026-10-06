@@ -1,5 +1,5 @@
 {
-  "version": "7.7.4",
-  "buildDate": "2026-10-06T18:40:00.000Z",
-  "summary": "Clonagem Oficial do Fluxo Hbi Pizza (Typebot), Canvas Fullscreen e 1-Clique no FlowManager"
+  "version": "7.7.5",
+  "buildDate": "2026-10-06T19:46:49.430Z",
+  "summary": "Estabilização da tela de conversas (/chat), eliminação de TDZ no React e Guardrail Automatizado de Build"
 }

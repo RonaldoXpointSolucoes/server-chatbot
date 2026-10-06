@@ -1,11 +1,11 @@
 {
   "name": "chatboot",
   "private": true,
-  "version": "7.7.4",
+  "version": "7.7.5",
   "type": "module",
   "scripts": {
     "dev": "vite --host",
-    "build": "vite build",
+    "build": "node scripts/check-tdz.cjs && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
     "deploy": "npx vercel --prod --force --yes",
