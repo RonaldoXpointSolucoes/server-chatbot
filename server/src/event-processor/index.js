@@ -1734,6 +1734,25 @@ class EventProcessor {
                               return;
                           }
 
+                          // 1. Prioridade do Flow Engine: se houver estado de conversa ativo no fluxo ou se a mensagem disparar um fluxo
+                          try {
+                              const handledByFlow = await FlowEngine.processIncomingMessage({
+                                  tenantId: b.tenantId,
+                                  instanceId: b.instanceId,
+                                  conversationId: b.conversationId,
+                                  jid: b.jid,
+                                  textMessage: b.textMessage,
+                                  rawPayload: b.rawMsg,
+                                  sock: b.sock
+                              });
+                              if (handledByFlow) {
+                                  console.log(`[EventProcessor] Mensagem de ${b.phone || b.jid} tratada com sucesso pelo FlowEngine. Silenciando IA para evitar double-talk.`);
+                                  return;
+                              }
+                          } catch (flowErr) {
+                              console.error("[EventProcessor] Erro ao executar FlowEngine:", flowErr);
+                          }
+
                           // Busca TODOS os bots do tenant para orquestração
                           const { data: allBotsData } = await supabase.from('bots').select('*').eq('tenant_id', b.tenantId);
                           const botsData = allBotsData || [];
