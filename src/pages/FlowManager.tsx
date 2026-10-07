@@ -16,7 +16,9 @@ import {
   UtensilsCrossed, 
   Check, 
   Sparkles,
-  ExternalLink
+  ExternalLink,
+  Play,
+  Pause
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
@@ -173,6 +175,85 @@ export default function FlowManager() {
       alert('Falha ao clonar o fluxo.');
     } finally {
       setIsCreating(false);
+    }
+  };
+
+  // Alternar Status Ativo / Pausado
+  const handleToggleFlowActive = async (flow: any) => {
+    try {
+      const isCurrentlyActive = Boolean(flow.active_version_id);
+      let newActiveVersionId: string | null = null;
+
+      if (!isCurrentlyActive) {
+        // Validação de Governança: Se houver robôs de IA ativos e o fluxo tiver gatilho amplo
+        try {
+          const { data: activeBots } = await supabase
+            .from('bots')
+            .select('id, name')
+            .eq('tenant_id', tenant_id)
+            .eq('status', 'active');
+
+          if (activeBots && activeBots.length > 0) {
+            const hasAllTrigger = Array.isArray(flow.trigger_rules) && flow.trigger_rules.some((r: any) => r.type === 'ALL');
+            const alertMsg = hasAllTrigger
+              ? `Atenção: A empresa possui ${activeBots.length} Robô(s) com I.A. ativo(s).\n\nComo este fluxo possui gatilho "Qualquer Mensagem", ele responderá no WhatsApp no lugar da I.A.\n\nDeseja realmente ativar este fluxo em produção?`
+              : `Atenção: A empresa possui ${activeBots.length} Robô(s) com I.A. ativo(s).\n\nDeseja ativar este fluxo para responder aos gatilhos configurados?`;
+
+            if (!window.confirm(alertMsg)) {
+              return;
+            }
+          }
+        } catch (botErr) {
+          console.warn('[FlowManager] Falha ao verificar bots:', botErr);
+        }
+
+        // Ativar: busca a versão mais recente
+        const { data: versions } = await supabase
+          .from('flow_versions')
+          .select('id')
+          .eq('flow_id', flow.id)
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+        if (versions && versions.length > 0) {
+          newActiveVersionId = versions[0].id;
+        } else {
+          // Cria versão inicial se não houver
+          const { data: newVer } = await supabase
+            .from('flow_versions')
+            .insert({
+              flow_id: flow.id,
+              status: 'PUBLISHED',
+              nodes: [],
+              edges: []
+            })
+            .select('id')
+            .single();
+          if (newVer) newActiveVersionId = newVer.id;
+        }
+      }
+
+      const { error: updErr } = await supabase
+        .from('flows')
+        .update({ 
+          active_version_id: newActiveVersionId,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', flow.id);
+
+      if (updErr) throw updErr;
+
+      setFlows(prev => prev.map(f => f.id === flow.id ? { ...f, active_version_id: newActiveVersionId } : f));
+      
+      window.dispatchEvent(new CustomEvent('toast', { 
+        detail: { 
+          message: newActiveVersionId ? 'Fluxo ativado em produção!' : 'Fluxo pausado com sucesso!', 
+          type: 'success' 
+        } 
+      }));
+    } catch (err: any) {
+      console.error('[FlowManager] Erro ao alternar status do fluxo:', err);
+      alert('Erro ao alterar status do fluxo: ' + (err.message || String(err)));
     }
   };
 
@@ -965,9 +1046,34 @@ export default function FlowManager() {
   const handleDelete = async (id: string) => {
     if (!window.confirm("Certeza que deseja deletar este fluxo?")) return;
     const flowBefore = flows.find(f => f.id === id);
-    await supabase.from('flows').delete().eq('id', id);
-    await useChatStore.getState().logOperation('DELETE', 'flows', id, flowBefore || null, null);
-    setFlows(flows.filter(f => f.id !== id));
+
+    try {
+      // 1. Desvincular active_version_id
+      await supabase.from('flows').update({ active_version_id: null }).eq('id', id);
+
+      // 2. Buscar versões do fluxo
+      const { data: versions } = await supabase.from('flow_versions').select('id').eq('flow_id', id);
+      const versionIds = (versions || []).map(v => v.id);
+
+      // 3. Limpar conversation_states e flow_versions
+      if (versionIds.length > 0) {
+        await supabase.from('conversation_states').delete().in('flow_version_id', versionIds);
+        await supabase.from('flow_versions').delete().eq('flow_id', id);
+      }
+
+      // 4. Deletar registro do fluxo
+      const { error: delErr } = await supabase.from('flows').delete().eq('id', id);
+      if (delErr) throw delErr;
+
+      await useChatStore.getState().logOperation('DELETE', 'flows', id, flowBefore || null, null);
+      setFlows(flows.filter(f => f.id !== id));
+      window.dispatchEvent(new CustomEvent('toast', { 
+        detail: { message: 'Fluxo excluído com sucesso!', type: 'success' } 
+      }));
+    } catch (err: any) {
+      console.error('Erro ao excluir fluxo:', err);
+      alert('Erro ao excluir fluxo: ' + (err.message || String(err)));
+    }
   };
 
   return (
@@ -1075,20 +1181,31 @@ export default function FlowManager() {
               >
                 {/* Top Row - Dots & Badge */}
                 <div className="flex justify-between items-center mb-4">
-                  <div className="flex items-center gap-1.5">
-                    {isLive ? (
-                      <span className="inline-flex items-center gap-1 bg-emerald-500/20 text-emerald-400 text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-full border border-emerald-500/30">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                        Live
-                      </span>
-                    ) : (
-                      <span className="bg-slate-700/40 text-slate-400 text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-full border border-slate-600/40">
-                        Rascunho
-                      </span>
-                    )}
+                  <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleFlowActive(flow)}
+                      title={isLive ? "Clique para pausar este fluxo" : "Clique para ativar este fluxo em produção"}
+                      className="group/badge transition-transform active:scale-95"
+                    >
+                      {isLive ? (
+                        <span className="inline-flex items-center gap-1.5 bg-emerald-500/15 hover:bg-amber-500/20 text-emerald-400 hover:text-amber-300 text-[10px] uppercase tracking-wider font-bold px-2.5 py-0.5 rounded-full border border-emerald-500/30 hover:border-amber-500/40 transition-colors">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse group-hover/badge:bg-amber-400" />
+                          <span className="group-hover/badge:hidden">Live</span>
+                          <span className="hidden group-hover/badge:inline">Pausar</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 bg-slate-800/80 hover:bg-emerald-500/20 text-slate-400 hover:text-emerald-300 text-[10px] uppercase tracking-wider font-bold px-2.5 py-0.5 rounded-full border border-slate-700/60 hover:border-emerald-500/40 transition-colors">
+                          <Pause size={10} className="text-slate-500 group-hover/badge:hidden" />
+                          <Play size={10} className="hidden group-hover/badge:inline text-emerald-400 fill-current" />
+                          <span className="group-hover/badge:hidden">Pausado</span>
+                          <span className="hidden group-hover/badge:inline">Ativar</span>
+                        </span>
+                      )}
+                    </button>
                   </div>
 
-                  {/* Menu de Ações (Editar, Clonar, Excluir) */}
+                  {/* Menu de Ações (Pausar/Ativar, Editar, Clonar, Excluir) */}
                   <div className="relative" onClick={(e) => e.stopPropagation()}>
                     <button 
                       onClick={() => setActiveMenuId(isMenuOpen ? null : flow.id)}
@@ -1100,7 +1217,28 @@ export default function FlowManager() {
 
                     {/* Popover Dropdown de Opções */}
                     {isMenuOpen && (
-                      <div className="absolute right-0 top-8 z-50 w-44 bg-[#18181b] border border-slate-700/70 rounded-2xl shadow-2xl p-1.5 flex flex-col gap-1 text-xs animate-in fade-in zoom-in-95">
+                      <div className="absolute right-0 top-8 z-50 w-48 bg-[#18181b] border border-slate-700/70 rounded-2xl shadow-2xl p-1.5 flex flex-col gap-1 text-xs animate-in fade-in zoom-in-95">
+                        {/* Opção de Pausar / Ativar Fluxo */}
+                        {isLive ? (
+                          <button
+                            onClick={() => { setActiveMenuId(null); handleToggleFlowActive(flow); }}
+                            className="flex items-center gap-2 px-3 py-2 text-amber-300 hover:text-amber-200 hover:bg-amber-500/15 rounded-xl transition-colors text-left font-medium"
+                          >
+                            <Pause size={14} className="text-amber-400" />
+                            <span>Pausar Fluxo</span>
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => { setActiveMenuId(null); handleToggleFlowActive(flow); }}
+                            className="flex items-center gap-2 px-3 py-2 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/15 rounded-xl transition-colors text-left font-medium"
+                          >
+                            <Play size={14} className="text-emerald-400 fill-current" />
+                            <span>Ativar Fluxo (No Ar)</span>
+                          </button>
+                        )}
+
+                        <div className="border-t border-slate-700/50 my-0.5" />
+
                         <button
                           onClick={() => { setActiveMenuId(null); navigate(`/flows/${flow.id}/edit`); }}
                           className="flex items-center gap-2 px-3 py-2 text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl transition-colors text-left"

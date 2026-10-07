@@ -180,12 +180,8 @@ export function TypebotFlowsManager() {
         .single();
 
       if (version) {
-        // Marca como versão ativa inicial
-        await supabase
-          .from('flows')
-          .update({ active_version_id: version.id })
-          .eq('id', newFlow.id);
-
+        // Novo fluxo nasce sempre como Rascunho / Pausado (active_version_id = null)
+        // para NUNCA interceptar mensagens indevidamente antes que o usuário configure e ative manualmente!
         setIsCreateModalOpen(false);
         setNewFlowName('');
         navigate(`/flows/${newFlow.id}/edit`);
@@ -204,6 +200,28 @@ export function TypebotFlowsManager() {
       let newActiveVersionId: string | null = null;
 
       if (!isCurrentlyActive) {
+        // Validação de Governança: Se houver robôs de IA ativos e o fluxo tiver gatilho amplo
+        try {
+          const { data: activeBots } = await supabase
+            .from('bots')
+            .select('id, name')
+            .eq('tenant_id', tenantId)
+            .eq('status', 'active');
+
+          if (activeBots && activeBots.length > 0) {
+            const hasAllTrigger = Array.isArray(flow.trigger_rules) && flow.trigger_rules.some((r: any) => r.type === 'ALL');
+            const alertMsg = hasAllTrigger
+              ? `Atenção: A empresa possui ${activeBots.length} Robô(s) com I.A. ativo(s).\n\nComo este fluxo possui gatilho "Qualquer Mensagem", ele assumirá 100% dos atendimentos e a I.A. não responderá.\n\nDeseja realmente ativar este fluxo em produção?`
+              : `Atenção: A empresa possui ${activeBots.length} Robô(s) com I.A. ativo(s).\n\nDeseja ativar este fluxo para responder aos gatilhos configurados?`;
+
+            if (!window.confirm(alertMsg)) {
+              return;
+            }
+          }
+        } catch (botErr) {
+          console.warn('[TypebotFlowsManager] Falha ao verificar bots:', botErr);
+        }
+
         // Ativar: busca a versão mais recente
         const { data: versions } = await supabase
           .from('flow_versions')
@@ -217,7 +235,7 @@ export function TypebotFlowsManager() {
         }
       }
 
-      await supabase
+      const { error: updErr } = await supabase
         .from('flows')
         .update({ 
           active_version_id: newActiveVersionId,
@@ -225,9 +243,12 @@ export function TypebotFlowsManager() {
         })
         .eq('id', flow.id);
 
+      if (updErr) throw updErr;
+
       setFlows(prev => prev.map(f => f.id === flow.id ? { ...f, active_version_id: newActiveVersionId } : f));
-    } catch (err) {
+    } catch (err: any) {
       console.error('[TypebotFlowsManager] Erro ao alternar status do fluxo:', err);
+      alert('Erro ao alterar status do fluxo: ' + (err.message || String(err)));
     }
   };
 
@@ -237,8 +258,41 @@ export function TypebotFlowsManager() {
     }
 
     try {
-      await supabase.from('flows').delete().eq('id', flowId);
+      // 1. Desvincular active_version_id no registro do fluxo para quebrar qualquer referência circular
+      await supabase.from('flows').update({ active_version_id: null }).eq('id', flowId);
+
+      // 2. Buscar todas as versões do fluxo para limpar dependências
+      const { data: versions } = await supabase
+        .from('flow_versions')
+        .select('id')
+        .eq('flow_id', flowId);
+      const versionIds = (versions || []).map(v => v.id);
+
+      // 3. Limpar estados de conversa (conversation_states) que apontam para essas versões
+      if (versionIds.length > 0) {
+        await supabase
+          .from('conversation_states')
+          .delete()
+          .in('flow_version_id', versionIds);
+
+        // 4. Deletar as versões do fluxo
+        await supabase
+          .from('flow_versions')
+          .delete()
+          .eq('flow_id', flowId);
+      }
+
+      // 5. Deletar o fluxo raiz
+      const { error: delError } = await supabase.from('flows').delete().eq('id', flowId);
+      if (delError) {
+        throw new Error(delError.message);
+      }
+
+      // 6. Atualizar estado local após exclusão confirmada no banco
       setFlows(prev => prev.filter(f => f.id !== flowId));
+      window.dispatchEvent(new CustomEvent('toast', { 
+        detail: { message: `Fluxo "${flowName}" excluído com sucesso!`, type: 'success' } 
+      }));
     } catch (err: any) {
       console.error('[TypebotFlowsManager] Erro ao deletar fluxo:', err);
       alert('Erro ao excluir fluxo: ' + (err.message || String(err)));
@@ -812,6 +866,11 @@ export function TypebotFlowsManager() {
                   </span>
                 </div>
               )}
+
+              <div className="p-3 rounded-xl bg-white/[0.02] border border-white/5 text-[11px] text-white/50 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
+                <span>O fluxo nasce como <strong>Rascunho (Pausado)</strong>. Ele nunca atende o WhatsApp até que você o ative manualmente no painel.</span>
+              </div>
 
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-white/10 mt-6">
                 <button

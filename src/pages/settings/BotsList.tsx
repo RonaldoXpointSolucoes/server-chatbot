@@ -239,6 +239,8 @@ export default function BotsList() {
 
   const [bots, setBots] = useState<any[]>([]);
   const [ragDocsCount, setRagDocsCount] = useState(0);
+  const [activeFlowsCount, setActiveFlowsCount] = useState<number>(0);
+  const [activeFlowName, setActiveFlowName] = useState<string>('');
 
   // Estados para o Treinamento Multimodal do Robô (Áudio e Imagem)
   const [isTrainingOpen, setIsTrainingOpen] = useState(false);
@@ -825,18 +827,44 @@ export default function BotsList() {
   const fetchBots = async () => {
     if (!tenantId) return;
     
-    // Buscar robôs
-    const { data, error } = await supabase
+    // 1. Buscar robôs de IA
+    const { data: botsData, error } = await supabase
       .from('bots')
       .select('*')
       .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false });
       
-    if (!error && data) {
-      setBots(data);
+    if (!error && botsData) {
+      setBots(botsData);
     }
 
-    // Buscar a contagem real e atualizada de documentos RAG
+    // 2. Buscar fluxos determinísticos (Typebot)
+    try {
+      const { data: flowsData } = await supabase
+        .from('flows')
+        .select('id, name, active_version_id')
+        .eq('tenant_id', tenantId);
+
+      const activeFlows = (flowsData || []).filter(f => Boolean(f.active_version_id));
+      setActiveFlowsCount(activeFlows.length);
+      if (activeFlows.length > 0) {
+        setActiveFlowName(activeFlows[0].name);
+      }
+
+      // Se o usuário não passou um parâmetro explícito na URL e tem fluxo ativo mas 0 robôs de IA ativos,
+      // pré-seleciona a aba 'typebot' para deixar em evidência o que está em uso!
+      const explicitTab = searchParams.get('tab') || searchParams.get('mode');
+      if (!explicitTab) {
+        const activeAiCount = (botsData || []).filter((b: any) => b.status === 'active').length;
+        if (activeFlows.length > 0 && activeAiCount === 0) {
+          setAutomationMode('typebot');
+        }
+      }
+    } catch (fErr) {
+      console.error("Erro ao buscar fluxos:", fErr);
+    }
+
+    // 3. Buscar a contagem real e atualizada de documentos RAG
     try {
       const { count, error: countError } = await supabase
         .from('knowledge_documents')
@@ -1504,7 +1532,15 @@ Instruções importantes:
               >
                 <BrainCircuit className="w-4 h-4 text-indigo-300" />
                 <span>Robôs com I.A. (Gemini / RAG)</span>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-white/90 font-mono">IA Ativa</span>
+                {activeBots.length > 0 ? (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/30 text-indigo-200 border border-indigo-400/40 font-mono font-bold animate-pulse">
+                    🟢 {activeBots.length} Ativo{activeBots.length > 1 ? 's' : ''}
+                  </span>
+                ) : (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-white/50 font-mono">
+                    ⚪ 0 Ativos
+                  </span>
+                )}
               </button>
 
               <button
@@ -1514,7 +1550,7 @@ Instruções importantes:
                   setSearchParams({ tab: 'typebot' });
                 }}
                 className={cn(
-                  "px-5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2.5 cursor-pointer",
+                  "px-5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2.5 cursor-pointer relative",
                   automationMode === 'typebot'
                     ? "bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-lg shadow-emerald-600/30 border border-emerald-400/40 scale-[1.02]"
                     : "text-white/50 hover:text-white/90 hover:bg-white/[0.04]"
@@ -1522,15 +1558,75 @@ Instruções importantes:
               >
                 <Waypoints className="w-4 h-4 text-emerald-300" />
                 <span>Fluxos de Bot (Estilo Typebot - Sem I.A.)</span>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono font-bold">0 Tokens</span>
+                {activeFlowsCount > 0 ? (
+                  <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/50 font-mono font-bold flex items-center gap-1 shadow-[0_0_12px_rgba(16,185,129,0.3)]">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping inline-block" />
+                    EM PRODUÇÃO ({activeFlowsCount})
+                  </span>
+                ) : (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-white/50 font-mono">
+                    0 Ativos
+                  </span>
+                )}
               </button>
             </div>
 
-            <div className="hidden sm:flex items-center gap-2 text-xs text-white/40 bg-white/[0.02] border border-white/5 px-3 py-1.5 rounded-xl">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span>Automação WhatsApp Pronta</span>
+            {/* Status em Evidência do WhatsApp */}
+            <div className="flex items-center gap-2 text-xs">
+              {activeFlowsCount > 0 ? (
+                <div className="flex items-center gap-2 text-xs font-semibold text-emerald-300 bg-emerald-950/50 border border-emerald-500/40 px-3.5 py-2 rounded-xl backdrop-blur-md shadow-lg shadow-emerald-950/50">
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                  </span>
+                  <span>WhatsApp: Fluxo <strong>"{activeFlowName || 'Atendimento'}"</strong> em Produção</span>
+                </div>
+              ) : activeBots.length > 0 ? (
+                <div className="flex items-center gap-2 text-xs font-semibold text-indigo-300 bg-indigo-950/50 border border-indigo-500/40 px-3.5 py-2 rounded-xl backdrop-blur-md shadow-lg shadow-indigo-950/50">
+                  <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />
+                  <span>WhatsApp: {activeBots.length} Robô(s) de I.A. em Produção</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 text-xs text-zinc-400 bg-white/[0.03] border border-white/10 px-3.5 py-2 rounded-xl">
+                  <span className="w-2 h-2 rounded-full bg-zinc-500" />
+                  <span>Nenhum robô ou fluxo ativo no WhatsApp</span>
+                </div>
+              )}
             </div>
           </div>
+
+          {/* Banner de Governança Explicativo em Evidência */}
+          {activeFlowsCount > 0 && automationMode === 'ai' && (
+            <div className="mb-6 p-3.5 rounded-2xl bg-gradient-to-r from-emerald-950/40 via-teal-950/30 to-indigo-950/40 border border-emerald-500/30 text-xs flex items-center justify-between gap-3 shadow-lg">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center shrink-0">
+                  <Waypoints className="w-4 h-4 text-emerald-400" />
+                </div>
+                <div>
+                  <p className="font-bold text-emerald-300 flex items-center gap-1.5">
+                    <span>Atenção: Seu WhatsApp está rodando o Fluxo Determinístico "{activeFlowName || 'Atendimento'}"</span>
+                    <span className="text-[10px] bg-emerald-500/20 text-emerald-200 border border-emerald-400/40 px-2 py-0.2 rounded-full font-mono">
+                      Prioritário
+                    </span>
+                  </p>
+                  <p className="text-zinc-400 text-[11px] mt-0.5">
+                    Enquanto houver um fluxo ativo no Typebot, ele atende os clientes no WhatsApp sem custo de tokens de IA. Para usar robôs com IA, desative o fluxo ou configure palavras-chave específicas.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setAutomationMode('typebot');
+                  setSearchParams({ tab: 'typebot' });
+                }}
+                className="shrink-0 px-3 py-1.5 rounded-lg bg-emerald-600/40 hover:bg-emerald-600/60 text-emerald-200 border border-emerald-500/40 font-semibold text-xs transition-colors flex items-center gap-1.5"
+              >
+                Ver Fluxo em Uso
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
 
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">

@@ -22,6 +22,7 @@ interface TestSimulatorProps {
   nodes: Node[];
   edges: Edge[];
   onClose: () => void;
+  startNodeId?: string;
 }
 
 interface Message {
@@ -45,7 +46,7 @@ const DEFAULT_SIMULATOR_VARS: Record<string, string> = {
   message: 'Olá, gostaria de fazer um pedido'
 };
 
-export default function TestSimulator({ nodes, edges, onClose }: TestSimulatorProps) {
+export default function TestSimulator({ nodes, edges, onClose, startNodeId }: TestSimulatorProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [currentBlock, setCurrentBlock] = useState<any>(null);
   const [variables, setVariables] = useState<Record<string, string>>(DEFAULT_SIMULATOR_VARS);
@@ -65,6 +66,22 @@ export default function TestSimulator({ nodes, edges, onClose }: TestSimulatorPr
   }, [messages, isAwaitingInput, activeButtonOptions]);
 
   const findStartBlock = (): any | null => {
+    // 0. Se foi especificado um nó inicial para teste focado (via botão Play do menu flutuante)
+    if (startNodeId) {
+      const targetNode = nodes.find(n => n.id === startNodeId);
+      if (targetNode) {
+        if (targetNode.data?.blocks && (targetNode.data.blocks as any[]).length > 0) {
+          return targetNode.data.blocks[0];
+        }
+        return {
+          id: targetNode.id,
+          flowType: targetNode.data?.type || 'send_message',
+          label: targetNode.data?.label || 'Início Focado',
+          text: targetNode.data?.message || targetNode.data?.label || ''
+        };
+      }
+    }
+
     // 1. Procura grupo com bloco de Início
     let startGroup = nodes.find(n => n.type === 'typebot_group' && (
       n.data?.label?.toLowerCase().includes('início') ||

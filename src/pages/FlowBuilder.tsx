@@ -44,7 +44,8 @@ import {
     MoreHorizontal,
     Code,
     Plus,
-    Minus
+    Minus,
+    Pause
 } from 'lucide-react';
 import {
     ReactFlow,
@@ -69,20 +70,21 @@ import TestSimulator from '../components/Flow/TestSimulator';
 import FlowHelpModal from '../components/Flow/FlowHelpModal';
 import { parseTypebotToFlow } from '../utils/typebotParser';
 import { normalizeUrlsInText, extractUrlsFromText } from '../utils/urlHelper';
+import { FlowActionsContext, getBlockTheme } from '../context/FlowActionsContext';
 
 const initialNodes: Node[] = [];
 const initialEdges: Edge[] = [];
 
 // Lista estrita com os mesmos rótulos e seções fiéis ao Typebot
 const NODE_TYPES = [
-    // Categoria: Bubbles
+    // Categoria: Bubbles (Laranja / Coral)
     { type: 'send_message', label: 'Texto', icon: MessageSquare, category: 'Bubbles' },
     { type: 'image', label: 'Imagem', icon: ImageIcon, category: 'Bubbles' },
     { type: 'video', label: 'Vídeo', icon: Video, category: 'Bubbles' },
     { type: 'embed', label: 'Incorporar', icon: Code2, category: 'Bubbles' },
     { type: 'audio', label: 'Áudio', icon: Headphones, category: 'Bubbles' },
 
-    // Categoria: Inputs
+    // Categoria: Inputs (Laranja / Coral)
     { type: 'ask', label: 'Texto', icon: Type, category: 'Inputs' },
     { type: 'number_input', label: 'Número', icon: Hash, category: 'Inputs' },
     { type: 'email_input', label: 'Email', icon: Mail, category: 'Inputs' },
@@ -95,7 +97,7 @@ const NODE_TYPES = [
     { type: 'rating', label: 'Avaliação', icon: Star, category: 'Inputs' },
     { type: 'file_input', label: 'Arquivo', icon: FileUp, category: 'Inputs' },
 
-    // Categoria: Condicionais
+    // Categoria: Condicionais (Roxo / Violeta)
     { type: 'set_variable', label: 'Variável', icon: PenTool, category: 'Condicionais' },
     { type: 'condition', label: 'Condição', icon: Filter, category: 'Condicionais' },
     { type: 'redirect', label: 'Redirecionar', icon: ExternalLink, category: 'Condicionais' },
@@ -103,7 +105,13 @@ const NODE_TYPES = [
     { type: 'typebot_link', label: 'Typebot', icon: Bot, category: 'Condicionais' },
     { type: 'wait', label: 'Espera', icon: Timer, category: 'Condicionais' },
     { type: 'jump', label: 'Pular', icon: FastForward, category: 'Condicionais' },
-    { type: 'ab_test', label: 'Teste AB', icon: GitBranch, category: 'Condicionais' }
+    { type: 'ab_test', label: 'Teste AB', icon: GitBranch, category: 'Condicionais' },
+    { type: 'webhook', label: 'Webhook', icon: Webhook, category: 'Condicionais' },
+
+    // Categoria: Eventos (Esmeralda / Ciano)
+    { type: 'start', label: 'Início', icon: Play, category: 'Eventos' },
+    { type: 'reply', label: 'Reply', icon: CornerUpLeft, category: 'Eventos' },
+    { type: 'command', label: 'Comando', icon: CodeSquare, category: 'Eventos' }
 ];
 
 function FlowBuilderContent() {
@@ -122,9 +130,186 @@ function FlowBuilderContent() {
     const [isTesting, setIsTesting] = useState(false);
     const [isHelpOpen, setIsHelpOpen] = useState(false);
     const [selectedNode, setSelectedNode] = useState<Node | null>(null);
+    const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
+    const [focusedStartNodeId, setFocusedStartNodeId] = useState<string | undefined>(undefined);
     const [availableFlows, setAvailableFlows] = useState<any[]>([]);
 
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    // Callbacks do FlowActionsContext para interação de Painéis e Itens Internos
+    const handleDuplicateGroup = useCallback((groupId: string) => {
+        setNodes((nds) => {
+            const targetNode = nds.find(n => n.id === groupId);
+            if (!targetNode) return nds;
+
+            const newGroupId = `group-${uuidv4().substring(0, 6)}`;
+            const clonedBlocks = (targetNode.data?.blocks || []).map((b: any) => ({
+                ...b,
+                id: `${b.flowType || 'block'}-${uuidv4().substring(0, 6)}`
+            }));
+
+            const newNode: Node = {
+                ...targetNode,
+                id: newGroupId,
+                selected: true,
+                position: {
+                    x: (targetNode.position?.x || 0) + 40,
+                    y: (targetNode.position?.y || 0) + 40
+                },
+                data: {
+                    ...targetNode.data,
+                    id: newGroupId,
+                    label: `${targetNode.data?.label || 'Grupo'} (Cópia)`,
+                    blocks: clonedBlocks
+                }
+            };
+
+            return nds.map(n => ({ ...n, selected: false })).concat(newNode);
+        });
+    }, [setNodes]);
+
+    const handleDeleteGroup = useCallback((groupId: string) => {
+        setNodes((nds) => nds.filter(n => n.id !== groupId));
+        setEdges((eds) => eds.filter(e => e.source !== groupId && e.target !== groupId && !e.sourceHandle?.startsWith(groupId) && !e.targetHandle?.startsWith(groupId)));
+        if (selectedNode?.id === groupId) {
+            setSelectedNode(null);
+        }
+    }, [setNodes, setEdges, selectedNode]);
+
+    const handleExecuteGroup = useCallback((groupId: string) => {
+        setFocusedStartNodeId(groupId);
+        setIsTesting(true);
+    }, []);
+
+    const handleUpdateGroupTitle = useCallback((groupId: string, newTitle: string) => {
+        setNodes((nds) => nds.map(n => {
+            if (n.id === groupId) {
+                return {
+                    ...n,
+                    data: {
+                        ...n.data,
+                        label: newTitle
+                    }
+                };
+            }
+            return n;
+        }));
+    }, [setNodes]);
+
+    const handleUpdateBlock = useCallback((groupId: string, blockIndex: number, updatedFields: Record<string, any>) => {
+        setNodes((nds) => nds.map(n => {
+            if (n.id === groupId) {
+                const currentBlocks = [...(n.data?.blocks || [])];
+                if (currentBlocks[blockIndex]) {
+                    currentBlocks[blockIndex] = {
+                        ...currentBlocks[blockIndex],
+                        ...updatedFields
+                    };
+                }
+                return {
+                    ...n,
+                    data: {
+                        ...n.data,
+                        blocks: currentBlocks
+                    }
+                };
+            }
+            return n;
+        }));
+    }, [setNodes]);
+
+    const handleDeleteBlock = useCallback((groupId: string, blockIndex: number) => {
+        setNodes((nds) => nds.map(n => {
+            if (n.id === groupId) {
+                const currentBlocks = [...(n.data?.blocks || [])];
+                currentBlocks.splice(blockIndex, 1);
+                return {
+                    ...n,
+                    data: {
+                        ...n.data,
+                        blocks: currentBlocks
+                    }
+                };
+            }
+            return n;
+        }));
+    }, [setNodes]);
+
+    const handleMoveBlockBetweenGroups = useCallback((sourceGroupId: string, blockIndex: number, targetGroupId: string, targetIndex?: number) => {
+        setNodes((nds) => {
+            if (sourceGroupId === targetGroupId) {
+                return nds.map(n => {
+                    if (n.id === sourceGroupId) {
+                        const currentBlocks = [...(n.data?.blocks || [])];
+                        const [removed] = currentBlocks.splice(blockIndex, 1);
+                        const insertAt = targetIndex !== undefined ? Math.min(targetIndex, currentBlocks.length) : currentBlocks.length;
+                        currentBlocks.splice(insertAt, 0, removed);
+                        return {
+                            ...n,
+                            data: {
+                                ...n.data,
+                                blocks: currentBlocks
+                            }
+                        };
+                    }
+                    return n;
+                });
+            }
+
+            let blockToMove: any = null;
+            const intermediate = nds.map(n => {
+                if (n.id === sourceGroupId) {
+                    const currentBlocks = [...(n.data?.blocks || [])];
+                    const [removed] = currentBlocks.splice(blockIndex, 1);
+                    blockToMove = removed;
+                    return {
+                        ...n,
+                        data: {
+                            ...n.data,
+                            blocks: currentBlocks
+                        }
+                    };
+                }
+                return n;
+            });
+
+            if (!blockToMove) return nds;
+
+            return intermediate.map(n => {
+                if (n.id === targetGroupId) {
+                    const currentBlocks = [...(n.data?.blocks || [])];
+                    const insertAt = targetIndex !== undefined ? Math.min(targetIndex, currentBlocks.length) : currentBlocks.length;
+                    currentBlocks.splice(insertAt, 0, blockToMove);
+                    return {
+                        ...n,
+                        data: {
+                            ...n.data,
+                            blocks: currentBlocks
+                        }
+                    };
+                }
+                return n;
+            });
+        });
+    }, [setNodes]);
+
+    const handleAddBlockToGroup = useCallback((groupId: string, blockData: any, targetIndex?: number) => {
+        setNodes((nds) => nds.map(n => {
+            if (n.id === groupId) {
+                const currentBlocks = [...(n.data?.blocks || [])];
+                const insertAt = targetIndex !== undefined ? Math.min(targetIndex, currentBlocks.length) : currentBlocks.length;
+                currentBlocks.splice(insertAt, 0, blockData);
+                return {
+                    ...n,
+                    data: {
+                        ...n.data,
+                        blocks: currentBlocks
+                    }
+                };
+            }
+            return n;
+        }));
+    }, [setNodes]);
 
     const handleLoadTemplate = (newNodes: Node[], newEdges: Edge[], templateName: string) => {
         setNodes(newNodes);
@@ -441,6 +626,29 @@ function FlowBuilderContent() {
         alert(`Salvo e Publicado com sucesso!${linkMsg}`);
     };
 
+    const handleTogglePauseFlow = async () => {
+        if (!flowData) return;
+        const isLive = Boolean(flowData.active_version_id);
+
+        try {
+            if (isLive) {
+                if (!window.confirm("Deseja realmente pausar este fluxo? Ele deixará de responder no WhatsApp.")) return;
+                const { error } = await supabase
+                    .from('flows')
+                    .update({ active_version_id: null, updated_at: new Date().toISOString() })
+                    .eq('id', flowData.id);
+                if (error) throw error;
+                setFlowData((prev: any) => ({ ...prev, active_version_id: null }));
+                alert('Fluxo pausado com sucesso!');
+            } else {
+                await saveFlow();
+            }
+        } catch (err: any) {
+            console.error('Erro ao pausar fluxo:', err);
+            alert('Falha ao alternar pausa do fluxo: ' + (err.message || String(err)));
+        }
+    };
+
     const handleExportBackup = () => {
         try {
             const flowName = flowData?.name || 'fluxo';
@@ -557,9 +765,23 @@ function FlowBuilderContent() {
     const categories = Array.from(new Set(filteredNodeTypes.map(n => n.category)));
 
     return (
-        <div className="flex flex-col h-full bg-[#0e0e11] text-zinc-200 select-none">
-            {/* Header Estilo Typebot */}
-            <header className="h-14 px-4 bg-[#18181b] border-b border-zinc-800/80 flex justify-between items-center z-20 shrink-0">
+        <FlowActionsContext.Provider
+            value={{
+                onDuplicateGroup: handleDuplicateGroup,
+                onDeleteGroup: handleDeleteGroup,
+                onExecuteGroup: handleExecuteGroup,
+                onUpdateGroupTitle: handleUpdateGroupTitle,
+                onUpdateBlock: handleUpdateBlock,
+                onDeleteBlock: handleDeleteBlock,
+                onMoveBlockBetweenGroups: handleMoveBlockBetweenGroups,
+                onAddBlockToGroup: handleAddBlockToGroup,
+                selectedBlockId,
+                setSelectedBlockId
+            }}
+        >
+            <div className="flex flex-col h-full bg-[#0e0e11] text-zinc-200 select-none">
+                {/* Header Estilo Typebot */}
+                <header className="h-14 px-4 bg-[#18181b] border-b border-zinc-800/80 flex justify-between items-center z-20 shrink-0">
                 {/* Esquerda: Logo + Título + Ajuda */}
                 <div className="flex items-center gap-3">
                     <button
@@ -663,6 +885,17 @@ function FlowBuilderContent() {
                         Visualizar
                     </button>
 
+                    {flowData?.active_version_id ? (
+                        <button
+                            onClick={handleTogglePauseFlow}
+                            className="bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/40 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm active:scale-95"
+                            title="Pausar este fluxo para que ele não responda no WhatsApp"
+                        >
+                            <Pause className="w-3.5 h-3.5 text-amber-400" />
+                            Pausar
+                        </button>
+                    ) : null}
+
                     <button
                         onClick={saveFlow}
                         disabled={saving}
@@ -697,17 +930,21 @@ function FlowBuilderContent() {
                             <div key={category}>
                                 <h3 className="text-xs font-semibold text-zinc-400 mb-2">{category}</h3>
                                 <div className="grid grid-cols-2 gap-1.5">
-                                    {filteredNodeTypes.filter(n => n.category === category).map((nt) => (
-                                        <div
-                                            key={nt.type}
-                                            onDragStart={(event) => onDragStart(event, nt.type, nt.label)}
-                                            draggable
-                                            className="flex items-center gap-2 p-2 bg-[#1c1c21] border border-zinc-800/80 rounded-lg cursor-grab hover:bg-[#25252b] hover:border-zinc-700 transition-all text-left group"
-                                        >
-                                            <nt.icon className="w-4 h-4 text-indigo-400 shrink-0 group-hover:scale-110 transition-transform" />
-                                            <span className="text-[11px] font-medium text-zinc-300 truncate">{nt.label}</span>
-                                        </div>
-                                    ))}
+                                    {filteredNodeTypes.filter(n => n.category === category).map((nt) => {
+                                        const theme = getBlockTheme(nt.type);
+                                        return (
+                                            <div
+                                                key={nt.type}
+                                                onDragStart={(event) => onDragStart(event, nt.type, nt.label)}
+                                                draggable
+                                                className="flex items-center gap-2 p-2 bg-[#1c1c21] border border-zinc-800/80 rounded-lg cursor-grab hover:bg-[#25252b] hover:border-zinc-700 transition-all text-left group"
+                                            >
+                                                {/* Cores fiéis da categoria: Laranja para Bubbles/Inputs, Roxo para Condicionais, Esmeralda para Eventos */}
+                                                <nt.icon className={`w-4 h-4 ${theme.iconColor} shrink-0 group-hover:scale-110 transition-transform`} />
+                                                <span className="text-[11px] font-medium text-zinc-300 truncate">{nt.label}</span>
+                                            </div>
+                                        );
+                                    })}
                                 </div>
                             </div>
                         ))}
@@ -851,10 +1088,34 @@ function FlowBuilderContent() {
                                                 </div>
 
                                                 {['send_message', 'ask', 'email_input', 'number_input', 'phone_input', 'website_input', 'date_input', 'time_input', 'payment', 'rating', 'file_input'].includes(block.flowType) && (
-                                                    <div>
-                                                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 block">Texto / Pergunta</label>
+                                                    <div className="space-y-2">
+                                                        <div className="flex items-center justify-between">
+                                                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Texto / Pergunta</label>
+                                                            <span className="text-[10px] text-zinc-500 font-mono">
+                                                                {(block.text || '').split('\n').length} linha(s) • {(block.text || '').length} carac.
+                                                            </span>
+                                                        </div>
+
+                                                        {/* Atalhos Rápidos de Variáveis com 1 clique */}
+                                                        <div className="flex items-center gap-1 overflow-x-auto pb-1 scrollbar-none">
+                                                            {['{{pushName}}', '{{saudacao}}', '{{cardapio}}', '{{NomeEmpresa}}', '{{GoogleMaps}}'].map((v) => (
+                                                                <button
+                                                                    key={v}
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        const cur = block.text || '';
+                                                                        updateBlock('text', cur ? `${cur} ${v}` : v);
+                                                                    }}
+                                                                    className="text-[9px] bg-slate-900 hover:bg-indigo-950 text-indigo-300 hover:text-indigo-200 border border-indigo-500/30 hover:border-indigo-400/50 px-1.5 py-0.5 rounded font-mono font-medium transition-colors shrink-0"
+                                                                    title={`Inserir variável ${v}`}
+                                                                >
+                                                                    + {v}
+                                                                </button>
+                                                            ))}
+                                                        </div>
+
                                                         <textarea
-                                                            rows={4}
+                                                            rows={Math.min(16, Math.max(7, (block.text || '').split('\n').length + 2))}
                                                             value={block.text || ''}
                                                             onChange={(e) => updateBlock('text', e.target.value)}
                                                             onBlur={(e) => {
@@ -863,8 +1124,8 @@ function FlowBuilderContent() {
                                                                     updateBlock('text', norm);
                                                                 }
                                                             }}
-                                                            placeholder="Digite a mensagem..."
-                                                            className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2 rounded-lg text-xs focus:ring-1 focus:ring-indigo-500 outline-none resize-none transition-all font-sans"
+                                                            placeholder="Digite a mensagem ou use as variáveis acima..."
+                                                            className="w-full bg-slate-900 border border-slate-700 text-slate-100 p-3 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 outline-none resize-y min-h-[180px] max-h-[480px] transition-all font-sans leading-relaxed shadow-inner"
                                                         />
                                                         {(() => {
                                                             const detected = extractUrlsFromText(block.text || '');
@@ -1013,6 +1274,68 @@ function FlowBuilderContent() {
                                                     </div>
                                                 )}
 
+                                                {block.flowType === 'payment' && (
+                                                    <div className="space-y-3 p-3 bg-amber-950/20 border border-amber-500/30 rounded-xl">
+                                                        <div className="flex items-center gap-1.5 text-amber-400">
+                                                            <CreditCard className="w-4 h-4" />
+                                                            <label className="text-[10px] font-bold uppercase tracking-wider">Configuração Pix WhatsApp</label>
+                                                        </div>
+                                                        <div>
+                                                            <label className="text-[10px] font-bold text-slate-400 block mb-1">Valor (R$ ou Variável)</label>
+                                                            <input
+                                                                type="text"
+                                                                value={block.amount || ''}
+                                                                onChange={(e) => updateBlock('amount', e.target.value)}
+                                                                placeholder="Ex: 59,90 ou {{total_pedido}}"
+                                                                className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2 rounded-lg text-xs focus:ring-1 focus:ring-amber-500 outline-none transition-all font-mono"
+                                                            />
+                                                        </div>
+                                                        <div>
+                                                            <label className="text-[10px] font-bold text-slate-400 block mb-1">Chave Pix</label>
+                                                            <input
+                                                                type="text"
+                                                                value={block.pix_key || ''}
+                                                                onChange={(e) => updateBlock('pix_key', e.target.value)}
+                                                                placeholder="Chave Pix ou {{chave_pix}}"
+                                                                className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2 rounded-lg text-xs focus:ring-1 focus:ring-amber-500 outline-none transition-all font-mono"
+                                                            />
+                                                        </div>
+                                                        <div>
+                                                            <label className="text-[10px] font-bold text-slate-400 block mb-1">Código Pix Copia e Cola (Opcional)</label>
+                                                            <input
+                                                                type="text"
+                                                                value={block.pix_code || ''}
+                                                                onChange={(e) => updateBlock('pix_code', e.target.value)}
+                                                                placeholder="Payload Pix ou {{pix_copia_e_cola}}"
+                                                                className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2 rounded-lg text-xs focus:ring-1 focus:ring-amber-500 outline-none transition-all font-mono"
+                                                            />
+                                                        </div>
+                                                        <div>
+                                                            <label className="text-[10px] font-bold text-slate-400 block mb-1">Link de Pagamento (Opcional)</label>
+                                                            <input
+                                                                type="text"
+                                                                value={block.payment_link || ''}
+                                                                onChange={(e) => updateBlock('payment_link', e.target.value)}
+                                                                placeholder="https://pagamento.com.br/..."
+                                                                className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2 rounded-lg text-xs focus:ring-1 focus:ring-amber-500 outline-none transition-all"
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {block.flowType === 'embed' && (
+                                                    <div className="space-y-2">
+                                                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Nome do Arquivo / PDF</label>
+                                                        <input
+                                                            type="text"
+                                                            value={block.fileName || block.label || ''}
+                                                            onChange={(e) => updateBlock('fileName', e.target.value)}
+                                                            placeholder="Ex: cardapio-completo.pdf"
+                                                            className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2 rounded-lg text-xs focus:ring-1 focus:ring-indigo-500 outline-none transition-all"
+                                                        />
+                                                    </div>
+                                                )}
+
                                                 {block.flowType === 'webhook' && (
                                                     <div className="space-y-3">
                                                         <div>
@@ -1076,7 +1399,11 @@ function FlowBuilderContent() {
                 <TestSimulator
                     nodes={nodes}
                     edges={edges}
-                    onClose={() => setIsTesting(false)}
+                    startNodeId={focusedStartNodeId}
+                    onClose={() => {
+                        setIsTesting(false);
+                        setFocusedStartNodeId(undefined);
+                    }}
                 />
             )}
 
@@ -1086,6 +1413,7 @@ function FlowBuilderContent() {
                 onLoadTemplate={handleLoadTemplate}
             />
         </div>
+        </FlowActionsContext.Provider>
     );
 }
 
