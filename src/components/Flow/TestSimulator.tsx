@@ -12,9 +12,11 @@ import {
   MessageSquare, 
   Sparkles,
   Smartphone,
-  ChevronDown
+  ChevronDown,
+  ExternalLink
 } from 'lucide-react';
 import { Node, Edge } from '@xyflow/react';
+import { parseTextToSegments } from '../../utils/urlHelper';
 
 interface TestSimulatorProps {
   nodes: Node[];
@@ -499,7 +501,17 @@ export default function TestSimulator({ nodes, edges, onClose }: TestSimulatorPr
                               ? 'bg-[#005c4b] text-white' 
                               : 'bg-blue-600 text-white'
                           }`}>
-                              {m.text}
+                              {parseTextToSegments(m.text).map((seg, i) => {
+                                if (seg.type === 'url') {
+                                  return (
+                                    <a key={i} href={seg.href} target="_blank" rel="noopener noreferrer" className="underline font-semibold text-emerald-200 hover:text-white inline-flex items-center gap-0.5">
+                                      <span className="truncate max-w-[200px]">{seg.content}</span>
+                                      <ExternalLink className="w-2.5 h-2.5 inline" />
+                                    </a>
+                                  );
+                                }
+                                return <span key={i}>{seg.content}</span>;
+                              })}
                           </div>
                       ) : (
                           <div className="flex gap-2 max-w-[88%]">
@@ -515,7 +527,17 @@ export default function TestSimulator({ nodes, edges, onClose }: TestSimulatorPr
                                   ? 'bg-[#202c33] border-zinc-800 text-zinc-100' 
                                   : 'bg-white border-zinc-200 text-zinc-800'
                               }`}>
-                                  {m.text}
+                                  {parseTextToSegments(m.text).map((seg, i) => {
+                                    if (seg.type === 'url') {
+                                      return (
+                                        <a key={i} href={seg.href} target="_blank" rel="noopener noreferrer" className="underline font-semibold text-sky-400 hover:text-sky-300 inline-flex items-center gap-0.5">
+                                          <span className="truncate max-w-[200px]">{seg.content}</span>
+                                          <ExternalLink className="w-2.5 h-2.5 inline" />
+                                        </a>
+                                      );
+                                    }
+                                    return <span key={i}>{seg.content}</span>;
+                                  })}
                               </div>
                           </div>
                       )}

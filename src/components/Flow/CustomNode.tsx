@@ -1,6 +1,7 @@
 import React from 'react';
 import { Handle, Position } from '@xyflow/react';
-import { MessageSquare, HelpCircle, Database, UserCheck } from 'lucide-react';
+import { MessageSquare, HelpCircle, Database, UserCheck, ExternalLink } from 'lucide-react';
+import { parseTextToSegments } from '../../utils/urlHelper';
 
 const icons = {
   send_message: MessageSquare,
@@ -32,7 +33,33 @@ export default function CustomNode({ data, selected }: any) {
       {/* Body */}
       <div className="px-4 py-4 text-sm text-slate-300">
         {data.text ? (
-          <p className="line-clamp-3 w-full text-slate-400 break-words">{data.text}</p>
+          <div className="line-clamp-3 w-full text-slate-400 break-words text-xs">
+            {parseTextToSegments(data.text).map((seg, i) => {
+              if (seg.type === 'variable') {
+                return (
+                  <span key={i} className="inline-flex bg-[#ea580c] text-white px-1 rounded text-[10px] mx-0.5 font-mono">
+                    {seg.content}
+                  </span>
+                );
+              }
+              if (seg.type === 'url') {
+                return (
+                  <a
+                    key={i}
+                    href={seg.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    className="text-sky-400 underline inline-flex items-center gap-0.5 mx-0.5"
+                  >
+                    <ExternalLink className="w-2.5 h-2.5 inline" />
+                    <span className="truncate max-w-[140px]">{seg.content}</span>
+                  </a>
+                );
+              }
+              return <span key={i}>{seg.content}</span>;
+            })}
+          </div>
         ) : data.flowType === 'set_variable' ? (
           <p className="italic opacity-60">Variável: {data.var_name || '?'}</p>
         ) : (

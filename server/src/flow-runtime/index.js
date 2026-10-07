@@ -1,4 +1,5 @@
 import { supabase } from '../supabase.js';
+import { normalizeUrlsInText } from './url-helper.js';
 
 class FlowEngine {
     constructor() {
@@ -443,7 +444,7 @@ class FlowEngine {
                 // 1. Mensagem de Texto ou Mídia
                 if (['send_message', 'message', 'text'].includes(flowType)) {
                     const rawText = block.text || block.data?.text || '';
-                    const parsedText = this.parseVariables(rawText, convState.variables);
+                    const parsedText = normalizeUrlsInText(this.parseVariables(rawText, convState.variables));
                     if (sock && parsedText) {
                         const msgResult = await sock.sendMessage(convState.remote_jid, { text: parsedText });
                         await this.persistOutboundMessage(tenantId, instanceId, conversationId, convState.remote_jid, parsedText, msgResult);
@@ -455,7 +456,7 @@ class FlowEngine {
                 // 2. Pergunta / Input de Texto
                 else if (['ask', 'number_input', 'email_input', 'website_input', 'phone_input', 'date_input', 'time_input'].includes(flowType)) {
                     const rawText = block.text || block.data?.text || 'Por favor, digite sua resposta:';
-                    const parsedText = this.parseVariables(rawText, convState.variables);
+                    const parsedText = normalizeUrlsInText(this.parseVariables(rawText, convState.variables));
                     if (sock && parsedText) {
                         const msgResult = await sock.sendMessage(convState.remote_jid, { text: parsedText });
                         await this.persistOutboundMessage(tenantId, instanceId, conversationId, convState.remote_jid, parsedText, msgResult);
@@ -467,7 +468,7 @@ class FlowEngine {
                     const prompt = block.label || block.text || 'Escolha uma das opções abaixo:';
                     const options = block.options || ['Opção 1', 'Opção 2'];
                     const formattedMenu = `${prompt}\n\n` + options.map((opt, i) => `*${i + 1}* - ${opt}`).join('\n');
-                    const parsedText = this.parseVariables(formattedMenu, convState.variables);
+                    const parsedText = normalizeUrlsInText(this.parseVariables(formattedMenu, convState.variables));
 
                     if (sock && parsedText) {
                         const msgResult = await sock.sendMessage(convState.remote_jid, { text: parsedText });
@@ -480,7 +481,7 @@ class FlowEngine {
                     const name = block.var_name || block.data?.name;
                     const value = block.text || block.data?.value || '';
                     if (name) {
-                        convState.variables[name] = this.parseVariables(value, convState.variables);
+                        convState.variables[name] = normalizeUrlsInText(this.parseVariables(value, convState.variables));
                         await supabase.from('conversation_states').update({ variables: convState.variables }).eq('id', convState.id);
                     }
                     currentPoint = this.resolveNextPoint(nodes, edges, parentGroup, block, '', convState.variables);

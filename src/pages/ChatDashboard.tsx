@@ -290,21 +290,23 @@ export function renderMessageText(text: string) {
     );
   }
 
-  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  const urlRegex = /(https?:\/\/[^\s<>'"]+|www\.[a-zA-Z0-9-]+\.[^\s<>'"]+)/gi;
   const parts = text.split(urlRegex);
 
   return parts.map((part, i) => {
     if (part.match(urlRegex)) {
+      const cleanUrl = part.replace(/[.,;:!?]+$/, '');
+      const href = cleanUrl.startsWith('http') ? cleanUrl : `https://${cleanUrl}`;
       return (
         <a 
           key={i} 
-          href={part} 
+          href={href} 
           target="_blank" 
           rel="noopener noreferrer" 
           className="text-[#00a884] dark:text-[#53bdeb] hover:underline font-semibold inline-flex items-center gap-0.5 align-middle mx-1 group"
           onClick={(e) => e.stopPropagation()}
         >
-          <span className="truncate block" style={{ maxWidth: 'min(100%, 250px)' }}>{part.replace(/^https?:\/\//, '')}</span>
+          <span className="truncate block" style={{ maxWidth: 'min(100%, 250px)' }}>{cleanUrl.replace(/^https?:\/\//, '')}</span>
           <ExternalLink size={12} className="inline opacity-80 shrink-0 group-hover:scale-110 transition-transform" />
         </a>
       );

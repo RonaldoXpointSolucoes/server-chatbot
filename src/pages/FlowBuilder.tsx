@@ -68,6 +68,7 @@ import GroupNode from '../components/Flow/GroupNode';
 import TestSimulator from '../components/Flow/TestSimulator';
 import FlowHelpModal from '../components/Flow/FlowHelpModal';
 import { parseTypebotToFlow } from '../utils/typebotParser';
+import { normalizeUrlsInText, extractUrlsFromText } from '../utils/urlHelper';
 
 const initialNodes: Node[] = [];
 const initialEdges: Edge[] = [];
@@ -346,12 +347,78 @@ function FlowBuilderContent() {
         if (!versionData || !flowData) return;
         setSaving(true);
 
+        // Identifica e normaliza URLs em todos os blocos e nós para compatibilidade com WhatsApp API
+        let detectedLinksCount = 0;
+        let normalizedLinksCount = 0;
+
+        const normalizedNodes = nodes.map((node) => {
+            if (node.type === 'typebot_group' && node.data?.blocks) {
+                const newBlocks = (node.data.blocks as any[]).map((block) => {
+                    let updatedBlock = { ...block };
+                    if (block.text && typeof block.text === 'string') {
+                        const original = block.text;
+                        const normalized = normalizeUrlsInText(original);
+                        const extracted = extractUrlsFromText(original);
+                        detectedLinksCount += extracted.length;
+                        if (original !== normalized) {
+                            normalizedLinksCount += extracted.filter(u => !u.hasHttps).length;
+                            updatedBlock.text = normalized;
+                        }
+                    }
+                    if (block.options && Array.isArray(block.options)) {
+                        updatedBlock.options = block.options.map((opt: string) => {
+                            if (typeof opt === 'string') {
+                                const norm = normalizeUrlsInText(opt);
+                                const extracted = extractUrlsFromText(opt);
+                                detectedLinksCount += extracted.length;
+                                if (opt !== norm) {
+                                    normalizedLinksCount += extracted.filter(u => !u.hasHttps).length;
+                                }
+                                return norm;
+                            }
+                            return opt;
+                        });
+                    }
+                    return updatedBlock;
+                });
+                return {
+                    ...node,
+                    data: {
+                        ...node.data,
+                        blocks: newBlocks
+                    }
+                };
+            }
+
+            if (node.data?.text && typeof node.data.text === 'string') {
+                const original = node.data.text;
+                const normalized = normalizeUrlsInText(original);
+                const extracted = extractUrlsFromText(original);
+                detectedLinksCount += extracted.length;
+                if (original !== normalized) {
+                    normalizedLinksCount += extracted.filter(u => !u.hasHttps).length;
+                }
+                return {
+                    ...node,
+                    data: {
+                        ...node.data,
+                        text: normalized
+                    }
+                };
+            }
+
+            return node;
+        });
+
+        // Atualiza nós locais na tela para refletir imediatamente
+        setNodes(normalizedNodes);
+
         // Captura o estado anterior para auditoria
         const { data: beforeVersion } = await supabase.from('flow_versions').select('*').eq('id', versionData.id).maybeSingle();
         const { data: beforeFlow } = await supabase.from('flows').select('*').eq('id', flowData.id).maybeSingle();
 
         await supabase.from('flow_versions').update({
-            nodes,
+            nodes: normalizedNodes,
             edges,
             status: 'PUBLISHED'
         }).eq('id', versionData.id);
@@ -361,14 +428,17 @@ function FlowBuilderContent() {
         }).eq('id', flowData.id);
 
         // Registrar logs de auditoria
-        const afterVersion = { ...beforeVersion, nodes, edges, status: 'PUBLISHED' };
+        const afterVersion = { ...beforeVersion, nodes: normalizedNodes, edges, status: 'PUBLISHED' };
         await useChatStore.getState().logOperation('UPDATE', 'flow_versions', versionData.id, beforeVersion || null, afterVersion);
 
         const afterFlow = { ...beforeFlow, active_version_id: versionData.id };
         await useChatStore.getState().logOperation('UPDATE', 'flows', flowData.id, beforeFlow || null, afterFlow);
 
         setSaving(false);
-        alert("Salvo e Publicado com sucesso!");
+        const linkMsg = detectedLinksCount > 0
+            ? `\n\n🔗 ${detectedLinksCount} link(s) identificado(s) no fluxo! ${normalizedLinksCount > 0 ? `(${normalizedLinksCount} formatado(s) com https:// para envio clicável no WhatsApp)` : '(Todos já validados com https://)'}`
+            : '';
+        alert(`Salvo e Publicado com sucesso!${linkMsg}`);
     };
 
     const handleExportBackup = () => {
@@ -729,7 +799,11 @@ function FlowBuilderContent() {
                                         rows={5}
                                         value={selectedNode.data?.text as string || ''}
                                         onChange={(e) => handleDataChange('text', e.target.value)}
-                                        className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2.5 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none resize-none transition-all shadow-inner"
+                                        onBlur={(e) => {
+                                            const norm = normalizeUrlsInText(e.target.value);
+                                            if (norm !== e.target.value) handleDataChange('text', norm);
+                                        }}
+                                        className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2.5 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none resize-none transition-all shadow-inner font-sans"
                                         placeholder="Use {{variavel}} para inserir dados dinâmicos."
                                     />
                                 </div>
@@ -780,12 +854,56 @@ function FlowBuilderContent() {
                                                     <div>
                                                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 block">Texto / Pergunta</label>
                                                         <textarea
-                                                            rows={3}
+                                                            rows={4}
                                                             value={block.text || ''}
                                                             onChange={(e) => updateBlock('text', e.target.value)}
+                                                            onBlur={(e) => {
+                                                                const norm = normalizeUrlsInText(e.target.value);
+                                                                if (norm !== e.target.value) {
+                                                                    updateBlock('text', norm);
+                                                                }
+                                                            }}
                                                             placeholder="Digite a mensagem..."
-                                                            className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2 rounded-lg text-xs focus:ring-1 focus:ring-indigo-500 outline-none resize-none transition-all"
+                                                            className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2 rounded-lg text-xs focus:ring-1 focus:ring-indigo-500 outline-none resize-none transition-all font-sans"
                                                         />
+                                                        {(() => {
+                                                            const detected = extractUrlsFromText(block.text || '');
+                                                            if (detected.length === 0) return null;
+                                                            const hasPendingHttps = detected.some(u => !u.hasHttps);
+                                                            return (
+                                                                <div className="mt-2 p-2.5 bg-sky-950/40 border border-sky-500/30 rounded-xl text-xs space-y-1.5 shadow-sm">
+                                                                    <div className="flex items-center justify-between">
+                                                                        <span className="text-[11px] font-semibold text-sky-300 flex items-center gap-1.5">
+                                                                            <ExternalLink className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                                                                            {detected.length} link(s) identificado(s)
+                                                                        </span>
+                                                                        {hasPendingHttps && (
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => {
+                                                                                    const norm = normalizeUrlsInText(block.text || '');
+                                                                                    updateBlock('text', norm);
+                                                                                }}
+                                                                                className="text-[10px] bg-sky-600/40 hover:bg-sky-600/60 text-sky-200 px-2 py-0.5 rounded-lg border border-sky-400/40 transition-colors font-medium active:scale-95"
+                                                                                title="Adicionar https:// automaticamente"
+                                                                            >
+                                                                                Ajustar https://
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                    <div className="space-y-1 max-h-32 overflow-y-auto">
+                                                                        {detected.map((item, idx) => (
+                                                                            <div key={idx} className="flex items-center gap-1.5 text-[10px] font-mono text-zinc-300 bg-slate-900/60 px-2 py-1 rounded border border-slate-800/80">
+                                                                                <span className={item.hasHttps ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>
+                                                                                    {item.hasHttps ? '✓ clicável' : '⚠ sem https'}
+                                                                                </span>
+                                                                                <span className="truncate flex-1" title={item.normalized}>{item.original}</span>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })()}
                                                     </div>
                                                 )}
 

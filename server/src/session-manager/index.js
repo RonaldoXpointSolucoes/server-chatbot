@@ -12,6 +12,7 @@ import eventProcessor from '../event-processor/index.js';
 import { addLog } from '../system-logger.js';
 import pino from 'pino';
 import { supabase, NODE_ID, retryWithBackoff, resolveTargetJid } from '../supabase.js';
+import { normalizeUrlsInText } from '../flow-runtime/url-helper.js';
 
 export const HOMOLOG_ALLOWED_INSTANCES = [
     'cc4efe36-f391-4b3d-a24c-ddcd8a293cf6', // FoodNext (11 94775-8860) - Caixa de testes
@@ -1688,6 +1689,18 @@ class SessionManager {
             sock.originalSendMessage = originalSendMessage;
             
             sock.sendMessage = async (jid, content, options) => {
+                // Garante que qualquer link em mensagem de texto ou legenda seja normalizado com https:// para ser clicável no WhatsApp
+                try {
+                    if (content && typeof content.text === 'string') {
+                        content.text = normalizeUrlsInText(content.text);
+                    }
+                    if (content && typeof content.caption === 'string') {
+                        content.caption = normalizeUrlsInText(content.caption);
+                    }
+                } catch (e) {
+                    console.warn('[SessionManager] Erro ao normalizar URLs da mensagem:', e.message);
+                }
+
                 // Obter ou inicializar a fila da instância
                 if (!this.queues.has(instanceId)) {
                     this.queues.set(instanceId, Promise.resolve());

@@ -49,26 +49,45 @@ const icons = {
   handoff: UserCheck
 };
 
-// Renderizador com realce de tags de variáveis no estilo alaranjado/roxo do Typebot
+import { parseTextToSegments } from '../../utils/urlHelper';
+
+// Renderizador com realce de tags de variáveis no estilo alaranjado/roxo do Typebot e links clicáveis
 function renderFormattedTypebotText(text: string) {
   if (!text) return null;
-  const parts = text.split(/(\{\{[^}]+\}\}|\{[^}]+\})/g);
+  const segments = parseTextToSegments(text);
+
   return (
     <span className="whitespace-pre-wrap leading-relaxed text-slate-200">
-      {parts.map((part, i) => {
-        const match = part.match(/^\{\{?([^}]+)\}?\}$/);
-        if (match) {
-          const varName = match[1].trim();
+      {segments.map((seg, i) => {
+        if (seg.type === 'variable') {
           return (
             <span
               key={i}
               className="inline-flex items-center bg-[#ea580c] hover:bg-[#c2410c] text-white font-semibold px-1.5 py-0.2 rounded text-[11px] mx-0.5 shadow-sm align-baseline tracking-tight font-mono"
             >
-              {varName}
+              {seg.content}
             </span>
           );
         }
-        return <span key={i}>{part}</span>;
+
+        if (seg.type === 'url') {
+          return (
+            <a
+              key={i}
+              href={seg.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              title={`Abrir link: ${seg.href}`}
+              className="inline-flex items-center gap-1 text-sky-400 hover:text-sky-300 underline font-medium bg-sky-950/50 hover:bg-sky-900/60 px-1.5 py-0.5 rounded border border-sky-500/40 transition-all text-[11px] mx-0.5 align-baseline break-all shadow-sm group/link"
+            >
+              <ExternalLink className="w-3 h-3 text-sky-400 group-hover/link:scale-110 shrink-0" />
+              <span className="truncate max-w-[220px]">{seg.content}</span>
+            </a>
+          );
+        }
+
+        return <span key={i}>{seg.content}</span>;
       })}
     </span>
   );
