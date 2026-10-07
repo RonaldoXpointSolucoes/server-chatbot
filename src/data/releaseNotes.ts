@@ -20,6 +20,45 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.7.6',
+    date: '2026-10-07',
+    summary: 'Opção de Pausar Fluxos, Governança de Robôs de IA e Compatibilidade Completa de Mídias e Pagamento no WhatsApp',
+    notes: [
+      {
+        id: '7.7.6-1',
+        category: 'features',
+        title: 'Opção Direta de Pausar e Ativar Fluxos',
+        description: 'Adicionada a opção Pausar Fluxo tanto no menu dropdown (3 pontinhos) quanto no badge clicável do card e no topo do FlowBuilder, permitindo suspender ou reativar o atendimento com 1 clique.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.7.6-2',
+        category: 'fixes',
+        title: 'Correção na Exclusão em Cascata de Fluxos',
+        description: 'Corrigido bloqueio por chave estrangeira em conversation_states que impedia a exclusão real no Supabase, fazendo o fluxo retornar ao atualizar a página.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      },
+      {
+        id: '7.7.6-3',
+        category: 'improvements',
+        title: 'Governança Inteligente entre FlowEngine e Robôs de IA',
+        description: 'Novos fluxos agora são criados sempre pausados (como Rascunho) com aviso preventivo ao ativar, impedindo a sobreposição acidental dos Robôs de IA da empresa.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      },
+      {
+        id: '7.7.6-4',
+        category: 'features',
+        title: 'Suporte a Imagens, Vídeos, Áudio (Voz PTT), PDF e Pix (WhatsApp Baileys)',
+        description: 'Integração completa no backend com a API Baileys para despacho de mídias ricas, simulação de presença digitando..., botões, cards e chave Copia e Cola Pix.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      }
+    ]
+  },
+  {
     version: '7.7.5',
     date: '2026-10-06',
     summary: 'Estabilização da tela de conversas (/chat), eliminação de TDZ no React e Guardrail Automatizado de Build',
