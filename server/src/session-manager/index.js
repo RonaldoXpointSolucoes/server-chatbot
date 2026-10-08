@@ -145,7 +145,7 @@ async function getCachedBaileysVersion() {
     }
     try {
         const fetchPromise = fetchLatestBaileysVersion();
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 4000));
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 12000));
         const res = await Promise.race([fetchPromise, timeoutPromise]);
         if (res && res.version) {
             cachedBaileysVersion = res;
@@ -153,7 +153,7 @@ async function getCachedBaileysVersion() {
             return res;
         }
     } catch (e) {
-        console.warn('[SessionManager] Usando versão fallback do Baileys:', e.message);
+        console.log('[SessionManager] Usando versão padrão estável do Baileys (2.3000.x):', e.message);
     }
     cachedBaileysVersion = { version: [2, 3000, 1043857760], isLatest: true };
     lastVersionFetchTime = now;
@@ -365,22 +365,32 @@ class SessionManager {
             }
         }, 15000);
 
-        // Watchdog de Conexão: Limpa instâncias presas em 'connecting' / 'reconnecting' há mais de 30s
+        // Watchdog de Conexão: Limpa instâncias presas em 'connecting' / 'reconnecting' sem socket ativo
         // Garante a regra: "Ou a instância está conectada, ou não está", liberando o botão para reconexão imediata
         setInterval(async () => {
             try {
                 const isLocalDev = process.env.DISABLE_AUTO_START_SESSIONS === 'true' || process.env.IS_LOCAL_DEV === 'true';
                 if (isLocalDev) return;
 
-                const staleThreshold = new Date(Date.now() - 30000).toISOString();
+                const staleThreshold = new Date(Date.now() - 75000).toISOString(); // 75s para dar tempo ao handshake Baileys
                 const { data: stuckInstances, error } = await supabase
                     .from('whatsapp_instances')
-                    .select('id, tenant_id, status, display_name, updated_at')
+                    .select('id, tenant_id, status, display_name, updated_at, assigned_node_id')
                     .in('status', ['connecting', 'reconnecting', 'connecting_local', 'reconnecting_local'])
                     .lt('updated_at', staleThreshold);
 
                 if (!error && stuckInstances && stuckInstances.length > 0) {
                     for (const stuck of stuckInstances) {
+                        // Isolamento: Se a instância não for permitida para este nó, ignora
+                        if (!isInstanceAllowedForNode(stuck.id, stuck.tenant_id)) {
+                            continue;
+                        }
+
+                        // Se a instância está atribuída a outro nó ativo diferente deste, não interfere
+                        if (stuck.assigned_node_id && stuck.assigned_node_id !== String(NODE_ID).trim()) {
+                            continue;
+                        }
+
                         const sessionData = this.sessions.get(stuck.id);
                         const sock = sessionData?.sock;
                         const isWsOpen = sock && isSocketOpen(sock);
@@ -388,19 +398,24 @@ class SessionManager {
 
                         // Se tiver socket aberto e autenticado, corrige o status para connected
                         if (isWsOpen && isAuth) {
-                            console.log(`[SessionManager/Watchdog] 🔄 Instância ${stuck.display_name || stuck.id} estava presa em connecting mas socket está aberto. Corrigindo para connected.`);
+                            console.log(`[SessionManager/Watchdog] 🔄 Instância ${stuck.display_name || stuck.id} estava em connecting mas socket está aberto. Corrigindo para connected.`);
                             await supabase.from('whatsapp_instances')
                                 .update({ status: 'connected', last_error: null, updated_at: new Date().toISOString() })
                                 .eq('id', stuck.id);
                             continue;
                         }
 
-                        // Se NÃO tiver socket aberto ou não conectou em 30s, força status 'disconnected'
-                        console.warn(`[SessionManager/Watchdog] ⚠️ Instância ${stuck.display_name || stuck.id} presa em status '${stuck.status}' há mais de 30s sem socket ativo. Forçando status 'disconnected' para liberar reconexão.`);
+                        // Se NÃO tiver socket aberto ou não conectou no tempo limite, força status 'disconnected'
+                        console.log(`[SessionManager/Watchdog] Instância ${stuck.display_name || stuck.id} sem socket ativo após 75s em '${stuck.status}'. Marcando 'disconnected' para liberar nova tentativa.`);
                         
                         this.destroyExistingSession(stuck.id, 'watchdog_connecting_timeout').catch(() => {});
                         this.connectingState?.delete?.(stuck.id);
                         this.connectingSessions?.delete?.(stuck.id);
+
+                        // Registra falha de auto-healing para impedir loop infinito de acordar a mesma instância
+                        const prevFails = this.autoHealingFailures.get(stuck.id) || 0;
+                        this.autoHealingFailures.set(stuck.id, prevFails + 1);
+                        this.autoHealingCooldowns.set(stuck.id, Date.now());
 
                         await supabase.from('whatsapp_instances')
                             .update({
@@ -596,6 +611,10 @@ class SessionManager {
                     .not('assigned_node_id', 'is', null);
             } catch (errClean) {}
         }, 60000);
+    }
+
+    isSocketOpen(sock) {
+        return isSocketOpen(sock);
     }
 
     async runWithInstanceMutex(instanceId, action) {

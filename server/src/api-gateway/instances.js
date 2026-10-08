@@ -1,5 +1,5 @@
 import express from 'express';
-import sessionManager from '../session-manager/index.js';
+import sessionManager, { isSocketOpen } from '../session-manager/index.js';
 import queueProcessor from '../session-manager/queue-processor.js';
 import { supabase, NODE_ID, resolveTargetJid } from '../supabase.js';
 import { activePairingAttempts } from '../event-processor/connection-notifier.js';
@@ -66,7 +66,7 @@ router.post('/instances/:instanceId/connect', requireTenant, async (req, res) =>
 
         // Se a sessão já estiver ativa/autenticada com socket realmente aberto e não houver pedido explícito de force_new, mantém a conexão
         const existingSock = sessionManager.getSocket(instanceId);
-        const isSocketHealthy = existingSock && sessionManager.isSocketOpen(existingSock);
+        const isSocketHealthy = existingSock && isSocketOpen(existingSock);
         const isAlreadyConnected = sessionManager.authenticatedSessions.has(instanceId) && sessionManager.sessions.has(instanceId) && isSocketHealthy;
         if (isAlreadyConnected && !forceNewQR) {
             console.log(`[API] /connect chamado para instância ${instanceId} que já está ativa e autenticada. Mantendo conexão existente.`);
@@ -1230,7 +1230,7 @@ router.get('/instances/:instanceId/status', requireTenant, async (req, res) => {
         const { instanceId } = req.params;
 
         const sock = sessionManager.getSocket(instanceId);
-        const isSocketOpen = sock ? sessionManager.isSocketOpen(sock) : false;
+        const isSocketOpenStatus = sock ? isSocketOpen(sock) : false;
         const isSessionAuth = sessionManager.authenticatedSessions.has(instanceId) && Boolean(sock?.user?.id);
 
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
@@ -1247,7 +1247,7 @@ router.get('/instances/:instanceId/status', requireTenant, async (req, res) => {
         
         if (data) {
             let finalStatus = data.status;
-            if (isSocketOpen && isSessionAuth) {
+            if (isSocketOpenStatus && isSessionAuth) {
                 const isLocalDev = process.env.DISABLE_AUTO_START_SESSIONS === 'true';
                 finalStatus = isLocalDev ? 'connected_local' : 'connected';
 
@@ -1272,7 +1272,7 @@ router.get('/instances/:instanceId/status', requireTenant, async (req, res) => {
                 data: {
                     ...data,
                     status: finalStatus,
-                    is_authenticated: isSocketOpen && isSessionAuth,
+                    is_authenticated: isSocketOpenStatus && isSessionAuth,
                     qr_code: qrCode,
                     qr_base64: qrCode,
                     pairing_code: pairingCode
