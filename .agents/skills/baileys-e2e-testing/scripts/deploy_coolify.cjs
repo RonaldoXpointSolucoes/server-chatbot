@@ -82,8 +82,21 @@ async function run() {
       await new Promise(r => setTimeout(r, 5000));
 
       if (deploymentUuid) {
-        const check = await requestCoolify('GET', `/api/v1/deployments/${deploymentUuid}`);
-        const status = check.data?.status || 'unknown';
+        let check = await requestCoolify('GET', `/api/v1/deployments/${deploymentUuid}`);
+        let status = check.data?.status;
+
+        // Se a rota individual não encontrar, busca na lista global de deployments
+        if (!status || status === 'unknown' || check.status === 404) {
+          const listRes = await requestCoolify('GET', `/api/v1/deployments`);
+          if (Array.isArray(listRes.data)) {
+            const found = listRes.data.find(d => d.deployment_uuid === deploymentUuid || d.application_name?.toLowerCase().includes(targetUuid === 'wh1ss8sy848ufj6zh8t492y7' ? 'alpha' : 'produção'));
+            if (found) {
+              status = found.status;
+            }
+          }
+        }
+
+        status = status || 'unknown';
         process.stdout.write(`\r[Coolify Deploy] Tentativa ${attempts}/${maxAttempts} - Status: ${status}        `);
 
         if (status === 'finished' || status === 'success') {
