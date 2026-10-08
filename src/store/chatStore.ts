@@ -2445,7 +2445,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                   fallback_reason: sendError?.diagnostic?.reason || sendError?.message || 'gateway_fallback'
                 },
                 timestamp: new Date().toISOString()
-              }, { onConflict: 'whatsapp_message_id' }).catch(() => {});
+              }, { onConflict: 'whatsapp_message_id' });
             }
 
             // Atualiza a mensagem na UI mantendo status 'pending' (com reloginho animado) e ID oficial do outbox
@@ -2498,7 +2498,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (err.message === 'whatsapp_offline' || diag?.code === 'INSTANCE_DISCONNECTED') {
         window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'A instância do WhatsApp está desconectada. Clique em Conectar para restaurar.', type: 'warning', duration: 7000 } }));
       } else if (diag?.code === 'TIMEOUT') {
-        window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Tempo limite esgotado: o servidor demorou mais de 12s para responder. Verifique sua conexão.', type: 'warning', duration: 7000 } }));
+        window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Tempo limite esgotado: o servidor demorou mais de 25s para responder. Verifique sua conexão.', type: 'warning', duration: 7000 } }));
       } else if (diag?.code === 'NETWORK_ERROR' || err.message === 'Failed to fetch') {
         window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Falha de comunicação com o servidor WhatsApp (VPS offline ou rede instável). O texto foi restaurado.', type: 'error', duration: 7000 } }));
       } else if (err.message && err.message.includes('Connection Closed')) {
