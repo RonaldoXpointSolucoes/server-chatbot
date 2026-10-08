@@ -620,7 +620,7 @@ export default function InstancesDashboard() {
           'x-tenant-id': tenantId!,
           'apikey': apiKey || ''
         },
-        body: JSON.stringify({ instanceId: id })
+        body: JSON.stringify({ instanceId: id, forceNew: true })
       });
       pollQrCode(id, apiKey);
     } catch(err) {
@@ -1577,13 +1577,13 @@ export default function InstancesDashboard() {
                 {/* Botões Bottom (Não exibir se estiver mostrando o QR inline) */}
                 {showQrModal !== inst.id && (
                   <div className="mt-auto pt-6 flex flex-wrap items-center gap-3 border-t border-gray-100 dark:border-white/5">
-                    {inst.status === 'offline' ? (
+                    {inst.status === 'offline' || inst.status === 'disconnected' ? (
                        <button onClick={() => handleConnect(inst.id, inst.api_key)} className="flex-1 bg-[#00a884] hover:bg-[#008f6f] text-white font-bold py-3.5 px-4 rounded-[14px] transition-all flex justify-center items-center gap-2">
                          Escanear QR Code Aqui
                        </button>
                     ) : inst.status === 'connecting' ? (
                        <button onClick={() => handleConnect(inst.id, inst.api_key)} className="flex-1 bg-[#00a884] hover:bg-[#008f6f] text-white font-bold py-3.5 px-4 rounded-[14px] transition-all flex justify-center items-center gap-2">
-                         <RefreshCcw size={18} className="animate-spin" /> Ver QR Code Aqui
+                         <RefreshCcw size={18} /> Reconectar / Ver QR Code
                        </button>
                     ) : (
                        <>

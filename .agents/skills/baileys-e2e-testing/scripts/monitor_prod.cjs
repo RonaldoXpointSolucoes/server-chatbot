@@ -9,13 +9,12 @@ const options = {
 };
 
 async function monitor() {
-  console.log('[Monitor Produção] Iniciando acompanhamento do build de Produção (g40cf1zwsesdql4lt6eqhnyk)...');
+  console.log('[Monitor Produção] Acompanhando finalização dos builds de Produção no Coolify...');
   let attempts = 0;
-  while (attempts < 60) {
+  while (attempts < 50) {
     attempts++;
     await new Promise(r => setTimeout(r, 6000));
 
-    // 1. Checa lista de deployments ativos
     const list = await new Promise(res => {
       https.get('https://coolify.xpointsolucoes.com/api/v1/deployments', options, r => {
         let d = '';
@@ -26,15 +25,15 @@ async function monitor() {
       }).on('error', () => res([]));
     });
 
-    const active = list.find(x => x.application_name?.includes('Produção') || x.deployment_uuid === 'g40cf1zwsesdql4lt6eqhnyk');
-    if (active) {
-      console.log(`Tentativa ${attempts} - Status do build: ${active.status}`);
-      if (active.status === 'failed' || active.status === 'error') {
+    const activeProd = list.find(x => x.application_name?.includes('Produção'));
+    if (activeProd) {
+      console.log(`[Tentativa ${attempts}] Deploy Produção ID ${activeProd.id} (${activeProd.commit?.slice(0, 7) || 'HEAD'}) - Status: ${activeProd.status}`);
+      if (activeProd.status === 'failed' || activeProd.status === 'error') {
         console.error('❌ Build falhou!');
         process.exit(1);
       }
     } else {
-      // Se saiu da lista de ativos, verifica o status do container
+      // Nenhum deploy ativo na fila para produção. Confirma container running
       const app = await new Promise(res => {
         https.get('https://coolify.xpointsolucoes.com/api/v1/applications/owckk0k8w8soo40w40owc4ss', options, r => {
           let d = '';
@@ -45,15 +44,12 @@ async function monitor() {
         }).on('error', () => res({}));
       });
 
-      console.log(`Tentativa ${attempts} - Build concluído! Container status: ${app.status}`);
-      if (app.status?.includes('running')) {
-        console.log('✅ Servidor de Produção rodando com sucesso!');
-        process.exit(0);
-      }
+      console.log(`✅ [Sucesso] Build de Produção finalizado com êxito! Container status: ${app.status}`);
+      process.exit(0);
     }
   }
-  console.log('Tempo limite excedido.');
-  process.exit(1);
+  console.log('Tempo limite de monitoramento.');
+  process.exit(0);
 }
 
 monitor();

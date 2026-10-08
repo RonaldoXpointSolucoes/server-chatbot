@@ -64,8 +64,10 @@ router.post('/instances/:instanceId/connect', requireTenant, async (req, res) =>
             });
         }
 
-        // Se a sessão já estiver ativa/autenticada e não houver pedido explícito de force_new, mantém a conexão
-        const isAlreadyConnected = sessionManager.authenticatedSessions.has(instanceId) && sessionManager.sessions.has(instanceId);
+        // Se a sessão já estiver ativa/autenticada com socket realmente aberto e não houver pedido explícito de force_new, mantém a conexão
+        const existingSock = sessionManager.getSocket(instanceId);
+        const isSocketHealthy = existingSock && sessionManager.isSocketOpen(existingSock);
+        const isAlreadyConnected = sessionManager.authenticatedSessions.has(instanceId) && sessionManager.sessions.has(instanceId) && isSocketHealthy;
         if (isAlreadyConnected && !forceNewQR) {
             console.log(`[API] /connect chamado para instância ${instanceId} que já está ativa e autenticada. Mantendo conexão existente.`);
             return res.json({
@@ -88,7 +90,7 @@ router.post('/instances/:instanceId/connect', requireTenant, async (req, res) =>
             console.log(`[API] /connect chamado, mas a sessão ${instanceId} já estava em memória. Forçando fechamento prévio.`);
             await sessionManager.closeSession(instanceId);
             if (sessionManager.connectingState.has(instanceId)) {
-                 sessionManager.connectingState.delete(instanceId);
+                sessionManager.connectingState.delete(instanceId);
             }
         }
         
@@ -107,8 +109,8 @@ router.post('/instances/:instanceId/connect', requireTenant, async (req, res) =>
 
         const hasValidCredsInDb = Boolean(authCreds?.creds_data?.me?.id || authCreds?.creds_data?.me?.jid);
         const currentStatus = dbInst?.status;
-        const isStaleDisconnect = ['disconnected', 'offline', 'paused', 'logged_out', 'bad_session'].includes(currentStatus);
-        const shouldResetCreds = forceNewQR || isStaleDisconnect || !hasValidCredsInDb;
+        const isStaleDisconnect = ['disconnected', 'offline', 'paused', 'logged_out', 'bad_session', 'connecting', 'reconnecting'].includes(currentStatus);
+        const shouldResetCreds = forceNewQR || !isSocketHealthy || isStaleDisconnect || !hasValidCredsInDb;
 
         // Limpa credenciais desatualizadas se for solicitado force_new=true, se a instância estava offline ou se ainda não possuía pareamento autenticado
         if (shouldResetCreds) {
@@ -552,6 +554,18 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                                 }
                             }
                         } catch (e) {}
+
+                        // Emite broadcast de baixa latência (<30ms) para refletir 'sent' na UI imediatamente
+                        try {
+                            const { default: realtime } = await import('../realtime-publisher/index.js');
+                            if (realtime && typeof realtime.publishInboxEvent === 'function') {
+                                realtime.publishInboxEvent(req.tenantId, 'message.update', {
+                                    whatsapp_message_id: sentResult?.key?.id,
+                                    status: 'sent',
+                                    chat_jid: targetJid
+                                }).catch(() => {});
+                            }
+                        } catch (rtErr) {}
 
                         return res.json({ 
                             ok: true, 
@@ -1216,14 +1230,8 @@ router.get('/instances/:instanceId/status', requireTenant, async (req, res) => {
         const { instanceId } = req.params;
 
         const sock = sessionManager.getSocket(instanceId);
-        const { data: authCreds } = await supabase
-            .from('wa_auth_credentials')
-            .select('creds_data')
-            .eq('instance_id', instanceId)
-            .maybeSingle();
-
-        const hasValidCredsInDb = Boolean(authCreds?.creds_data?.me?.id || authCreds?.creds_data?.me?.jid);
-        const isAuthInMemory = sessionManager.authenticatedSessions.has(instanceId) || hasValidCredsInDb;
+        const isSocketOpen = sock ? sessionManager.isSocketOpen(sock) : false;
+        const isSessionAuth = sessionManager.authenticatedSessions.has(instanceId) && Boolean(sock?.user?.id);
 
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
         res.setHeader('Pragma', 'no-cache');
@@ -1239,7 +1247,7 @@ router.get('/instances/:instanceId/status', requireTenant, async (req, res) => {
         
         if (data) {
             let finalStatus = data.status;
-            if (isAuthInMemory) {
+            if (isSocketOpen && isSessionAuth) {
                 const isLocalDev = process.env.DISABLE_AUTO_START_SESSIONS === 'true';
                 finalStatus = isLocalDev ? 'connected_local' : 'connected';
 
@@ -1249,9 +1257,9 @@ router.get('/instances/:instanceId/status', requireTenant, async (req, res) => {
                         .eq('id', instanceId);
                 }
             } else {
-                // Se a sessão NÃO possui credenciais nem autenticação em memória, o status não pode ser 'connected' ou 'connected_local'
+                // Se a sessão NÃO possui socket aberto ou não está autenticada, não pode ser 'connected' ou 'connected_local'
                 if (finalStatus === 'connected' || finalStatus === 'connected_local') {
-                    finalStatus = sessionManager.connectingState.has(instanceId) ? 'connecting' : 'offline';
+                    finalStatus = sessionManager.connectingState.has(instanceId) ? 'connecting' : 'disconnected';
                 }
             }
 
@@ -1264,7 +1272,7 @@ router.get('/instances/:instanceId/status', requireTenant, async (req, res) => {
                 data: {
                     ...data,
                     status: finalStatus,
-                    is_authenticated: isAuthInMemory,
+                    is_authenticated: isSocketOpen && isSessionAuth,
                     qr_code: qrCode,
                     qr_base64: qrCode,
                     pairing_code: pairingCode

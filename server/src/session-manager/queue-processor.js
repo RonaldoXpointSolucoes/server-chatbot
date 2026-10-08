@@ -427,6 +427,19 @@ class QueueProcessor {
                         .catch(() => {});
                 }
 
+                // Notifica imediatamente o Frontend via Broadcast de baixa latência (<30ms)
+                try {
+                    const { default: realtime } = await import('../realtime-publisher/index.js');
+                    if (realtime && typeof realtime.publishInboxEvent === 'function') {
+                        realtime.publishInboxEvent(tenantId, 'message.update', {
+                            mock_id: mockId,
+                            whatsapp_message_id: result?.key?.id,
+                            status: 'sent',
+                            chat_jid: targetJid
+                        }).catch(() => {});
+                    }
+                } catch (rtErr) {}
+
                 // 6. Sincroniza a mensagem enviada com a tabela clássica de mensagens para o Frontend refletir
                 try {
                     const { EventProcessor, default: eventProcessor } = await import('../event-processor/index.js');
@@ -434,7 +447,7 @@ class QueueProcessor {
                     const epClass = EventProcessor || processor?.constructor;
 
                     if (processor && result && result.key) {
-                        if (msg.priority < 5 || isOperator) {
+                        if (msg.priority < 5 || (typeof isOperator !== 'undefined' && isOperator)) {
                             if (epClass && !epClass.humanMessagesCache) epClass.humanMessagesCache = new Map();
                             if (epClass && epClass.humanMessagesCache) {
                                 epClass.humanMessagesCache.set(`${instanceId}_${result.key.id}`, true);
@@ -571,7 +584,7 @@ class QueueProcessor {
                                 console.log(`[QueueProcessor] Mensagem ${msg.id} com falha definitiva persistida na tabela 'messages' da conversa ${convId}.`);
 
                                 // Notifica a interface em tempo real
-                                const { default: realtime } = await import('../realtime.js');
+                                const { default: realtime } = await import('../realtime-publisher/index.js');
                                 if (realtime && typeof realtime.publishInboxEvent === 'function') {
                                     realtime.publishInboxEvent(msg.tenant_id, 'message.update', {
                                         whatsapp_message_id: mockId,

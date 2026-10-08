@@ -1039,14 +1039,28 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
                                   {inst.display_name || 'Sem nome'}
                                 </span>
                                 {!isConnected && !isConnecting && (
-                                  <span className="text-[9px] font-semibold text-gray-500 dark:text-gray-400 bg-gray-500/10 border border-gray-500/15 px-1 py-0.5 rounded tracking-wide shrink-0">
-                                    offline
-                                  </span>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      useChatStore.getState().openQRModal(inst.id);
+                                    }}
+                                    className="text-[9px] font-semibold text-gray-500 dark:text-gray-400 bg-gray-500/10 hover:bg-gray-500/25 border border-gray-500/20 px-1 py-0.5 rounded tracking-wide shrink-0 transition-colors cursor-pointer"
+                                    title="Clique para reconectar este canal"
+                                  >
+                                    offline ↺
+                                  </button>
                                 )}
                                 {isConnecting && (
-                                  <span className="text-[9px] font-semibold text-yellow-600 dark:text-yellow-500 bg-yellow-500/10 border border-yellow-500/20 px-1 py-0.5 rounded tracking-wide shrink-0 animate-pulse">
-                                    conectando
-                                  </span>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      useChatStore.getState().openQRModal(inst.id);
+                                    }}
+                                    className="text-[9px] font-semibold text-yellow-600 dark:text-yellow-500 bg-yellow-500/10 hover:bg-yellow-500/25 border border-yellow-500/25 px-1 py-0.5 rounded tracking-wide shrink-0 animate-pulse transition-colors cursor-pointer"
+                                    title="Clique para abrir tela de reconexão"
+                                  >
+                                    conectando ↺
+                                  </button>
                                 )}
                               </div>
                                {(() => {
@@ -1060,6 +1074,19 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
                                })()}
                              </div>
                           }
+                          actionNode={!isConnected ? (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                useChatStore.getState().openQRModal(inst.id);
+                              }}
+                              className="p-1 hover:bg-[#00a884]/20 text-[#00a884] rounded-md transition-colors"
+                              title="Reconectar / Ler QR Code"
+                            >
+                              <QrCode size={13} />
+                            </button>
+                          ) : undefined}
+                          alwaysShowAction={!isConnected}
                           isActive={activeChannelFilter === inst.id || activeChannelFilter === inst.display_name}
                           className={cn(!isConnected && !isConnecting ? "opacity-60 hover:opacity-100 hover:bg-gray-200/30 dark:hover:bg-[#202c33]/40" : isConnecting ? "opacity-90 hover:opacity-100 hover:bg-yellow-500/5" : "")}
                           onClick={() => {

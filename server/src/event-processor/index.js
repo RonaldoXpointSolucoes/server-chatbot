@@ -157,8 +157,8 @@ class EventProcessor {
             const toProcess = [];
             
             for (const [msgId, data] of this.statusUpdateQueue.entries()) {
-                 // Espera pelo menos 1.5s antes de bater no banco para dar tempo da flushQueue salvar a msg
-                 if (now - data.timestamp > 1500) { 
+                 // Espera pelo menos 400ms antes de bater no banco para dar tempo da flushQueue salvar a msg
+                 if (now - data.timestamp > 400) { 
                      toProcess.push({ msgId, ...data });
                  }
                  // Expira após 45 segundos (Não gera logs de aviso, apenas descarta pacificamente)
@@ -189,7 +189,7 @@ class EventProcessor {
                          const chunk = ids.slice(i, i + 200);
                          
                          const { data: existing } = await supabase.from('messages')
-                             .select('id, whatsapp_message_id, status')
+                             .select('id, whatsapp_message_id, status, tenant_id')
                              .in('whatsapp_message_id', chunk);
 
                          if (existing && existing.length > 0) {
@@ -202,6 +202,16 @@ class EventProcessor {
 
                              if (idsToUpdate.length > 0) {
                                  await supabase.from('messages').update({ status }).in('id', idsToUpdate);
+                                 for (const e of existing) {
+                                     const targetTenant = e.tenant_id || this.tenantId;
+                                     if (targetTenant) {
+                                         realtime.publishInboxEvent(targetTenant, 'message.update', {
+                                             id: e.id,
+                                             whatsapp_message_id: e.whatsapp_message_id,
+                                             status
+                                         }).catch(() => {});
+                                     }
+                                 }
                              }
 
                              // Remove da fila as mensagens que foram encontradas no banco
@@ -2072,6 +2082,12 @@ class EventProcessor {
                 this.updatePendingStatus(update.key.id, newStatus);
                 // Enfileira p/ reconciliation (mensagens já existentes)
                 this.queueStatusUpdate(tenantId, instanceId, update.key.id, newStatus);
+
+                // Notifica a interface em tempo real via Broadcast (<50ms de latência)
+                realtime.publishInboxEvent(tenantId, 'message.update', {
+                    whatsapp_message_id: update.key.id,
+                    status: newStatus
+                }).catch(() => {});
             }
 
         } catch (e) {
@@ -2099,6 +2115,12 @@ class EventProcessor {
                     this.updatePendingStatus(key.id, newStatus);
                     // Enfileira p/ reconciliation assíncrona
                     this.queueStatusUpdate(tenantId, instanceId, key.id, newStatus);
+
+                    // Notifica a interface em tempo real via Broadcast (<50ms de latência)
+                    realtime.publishInboxEvent(tenantId, 'message.update', {
+                        whatsapp_message_id: key.id,
+                        status: newStatus
+                    }).catch(() => {});
                 } else {
                     const is463Error = (update.messageStubParameters && update.messageStubParameters[0] === '463') || (update.error === '463') || (update.error && String(update.error).includes('463'));
                     if (is463Error && key?.id) {
@@ -2335,7 +2357,11 @@ class EventProcessor {
                         return;
                     }
                     await supabase.from('whatsapp_instances')
-                        .update({ status: 'connecting', last_error: `Reconnecting (Code: ${reason})` })
+                        .update({ 
+                            status: 'connecting', 
+                            last_error: `Reconectando (Código: ${reason || 'Oscilação'})...`,
+                            updated_at: new Date().toISOString()
+                        })
                         .eq('id', instanceId);
                     payload.status = 'connecting';
                     payload.reason = reason;

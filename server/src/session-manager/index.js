@@ -362,6 +362,66 @@ class SessionManager {
             }
         }, 15000);
 
+        // Watchdog de Conexão: Limpa instâncias presas em 'connecting' / 'reconnecting' há mais de 30s
+        // Garante a regra: "Ou a instância está conectada, ou não está", liberando o botão para reconexão imediata
+        setInterval(async () => {
+            try {
+                const isLocalDev = process.env.DISABLE_AUTO_START_SESSIONS === 'true' || process.env.IS_LOCAL_DEV === 'true';
+                if (isLocalDev) return;
+
+                const staleThreshold = new Date(Date.now() - 30000).toISOString();
+                const { data: stuckInstances, error } = await supabase
+                    .from('whatsapp_instances')
+                    .select('id, tenant_id, status, display_name, updated_at')
+                    .in('status', ['connecting', 'reconnecting', 'connecting_local', 'reconnecting_local'])
+                    .lt('updated_at', staleThreshold);
+
+                if (!error && stuckInstances && stuckInstances.length > 0) {
+                    for (const stuck of stuckInstances) {
+                        const sessionData = this.sessions.get(stuck.id);
+                        const sock = sessionData?.sock;
+                        const isWsOpen = sock && isSocketOpen(sock);
+                        const isAuth = this.authenticatedSessions.has(stuck.id);
+
+                        // Se tiver socket aberto e autenticado, corrige o status para connected
+                        if (isWsOpen && isAuth) {
+                            console.log(`[SessionManager/Watchdog] 🔄 Instância ${stuck.display_name || stuck.id} estava presa em connecting mas socket está aberto. Corrigindo para connected.`);
+                            await supabase.from('whatsapp_instances')
+                                .update({ status: 'connected', last_error: null, updated_at: new Date().toISOString() })
+                                .eq('id', stuck.id);
+                            continue;
+                        }
+
+                        // Se NÃO tiver socket aberto ou não conectou em 30s, força status 'disconnected'
+                        console.warn(`[SessionManager/Watchdog] ⚠️ Instância ${stuck.display_name || stuck.id} presa em status '${stuck.status}' há mais de 30s sem socket ativo. Forçando status 'disconnected' para liberar reconexão.`);
+                        
+                        this.destroyExistingSession(stuck.id, 'watchdog_connecting_timeout').catch(() => {});
+                        this.connectingState?.delete?.(stuck.id);
+                        this.connectingSessions?.delete?.(stuck.id);
+
+                        await supabase.from('whatsapp_instances')
+                            .update({
+                                status: 'disconnected',
+                                last_error: 'Desconectada (tempo limite de conexão esgotado. Clique em Reconectar para vincular novamente)',
+                                assigned_node_id: null,
+                                lease_until: null,
+                                updated_at: new Date().toISOString()
+                            })
+                            .eq('id', stuck.id);
+
+                        // Notifica frontend em tempo real
+                        eventProcessor.handleConnectionUpdate(stuck.tenant_id, stuck.id, {
+                            connection: 'close',
+                            status: 'disconnected',
+                            lastDisconnect: { error: { message: 'Tempo limite de reconexão esgotado' } }
+                        }).catch(() => {});
+                    }
+                }
+            } catch (err) {
+                console.error('[SessionManager/Watchdog] Erro ao varrer conexões travadas:', err.message);
+            }
+        }, 15000);
+
         // Supervisor de Auto-Healing Proativo (a cada 25 segundos)
         // Garante que nenhuma instância que deveria estar conectada permaneça offline/órfã
         setInterval(async () => {

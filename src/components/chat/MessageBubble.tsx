@@ -1136,7 +1136,7 @@ export const MessageBubble = memo(({
                  <AlertCircle size={12} className="text-rose-500 ml-0.5" />
                </span>
              ) :
-             msg.status === 'pending' || String(msg.id || '').startsWith('optimistic-') ? <Clock size={11} className="text-gray-400 ml-0.5 animate-pulse" title="Enviando..." /> :
+             (msg.status === 'pending' || (String(msg.id || '').startsWith('optimistic-') && (!msg.status || msg.status === 'pending'))) ? <Clock size={11} className="text-gray-400 ml-0.5 animate-pulse" title="Enviando..." /> :
              msg.status === 'READ' || msg.status === 'read' || msg.status === 'PLAYED' || msg.status === 'played' ? <CheckCheck size={12} className="text-[#53bdeb] ml-0.5" title="Lida" /> : 
              msg.status === 'DELIVERY_ACK' || msg.status === 'delivered' ? <CheckCheck size={12} className="text-gray-400 ml-0.5" title="Entregue" /> :
              msg.status === 'sent' || msg.status === 'SENT' ? <Check size={12} className="text-gray-400 ml-0.5" title="Enviada" /> :

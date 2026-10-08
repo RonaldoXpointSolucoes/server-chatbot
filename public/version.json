@@ -1,5 +1,5 @@
 {
-  "version": "7.7.7",
-  "buildDate": "2026-10-08T15:12:26.062Z",
-  "summary": "Estabilidade Crítica no Envio Baileys, Timeout Inteligente, Diagnóstico Detalhado e Fila Resiliente de Outbox"
+  "version": "7.7.9",
+  "buildDate": "2026-10-08T17:00:00.000Z",
+  "summary": "Eliminação Definitiva do 'Conectando' Infinito e Liberação Imediata de Reconexão de Canais"
 }

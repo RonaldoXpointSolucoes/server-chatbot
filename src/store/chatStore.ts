@@ -623,6 +623,8 @@ interface ChatState {
   // Local state updaters
   addMessageLocally: (contactId: string, msg: MessageType, options?: any) => void;
   removeMessageLocally: (contactId: string, messageId: string) => void;
+  updateMessageStatusLocally: (identifier: { whatsapp_id?: string; mock_id?: string; id?: string; text?: string }, newStatus: string, newWhatsappId?: string) => void;
+  scheduleStatusReconciliation: (contactId: string, waId: string, text: string) => void;
   upsertContactLocally: (contact: ContactRow) => void;
   sendPresenceUpdate: (contactId: string, presence: 'composing' | 'recording' | 'paused' | 'available' | 'unavailable', instanceName?: string) => Promise<void>;
   sendHumanMessage: (contactId: string, text: string, instanceName: string) => Promise<void>;
@@ -1022,19 +1024,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
         (window as any)[`_offline_checks_${id}`] = intervalId;
       } else {
         set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: status } }));
-        // Se o status for transitório (connecting/reconnecting) no boot inicial, agenda revalidação rápida
+        // Se o status for transitório (connecting/reconnecting), agenda revalidação e timeout de segurança
         if (status === 'connecting' || status === 'reconnecting' || status === 'reconnecting_local') {
-          if (!instanceStatusTimeouts[id]) {
-            instanceStatusTimeouts[id] = setTimeout(async () => {
-              delete instanceStatusTimeouts[id];
-              try {
-                const { data } = await supabase.from('whatsapp_instances').select('status').eq('id', id).maybeSingle();
-                if (data?.status && data.status !== status) {
-                  set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: data.status } }));
-                }
-              } catch (e) { }
-            }, 5000);
+          if (instanceStatusTimeouts[id]) {
+            clearTimeout(instanceStatusTimeouts[id]);
           }
+          instanceStatusTimeouts[id] = setTimeout(async () => {
+            delete instanceStatusTimeouts[id];
+            try {
+              const { data } = await supabase.from('whatsapp_instances').select('status').eq('id', id).maybeSingle();
+              if (data?.status && data.status !== 'connecting' && data.status !== 'reconnecting') {
+                set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: data.status } }));
+              } else {
+                // Se após 18 segundos a instância ainda não conectou, assume 'disconnected' localmente para liberar reconexão
+                console.warn(`[chatStore] Instância ${id} não confirmou conexão em 18s. Assumindo status 'disconnected' localmente.`);
+                set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: 'disconnected' } }));
+              }
+            } catch (e) {
+              set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: 'disconnected' } }));
+            }
+          }, 18000);
         }
       }
     }
@@ -2388,6 +2397,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
             return c;
           })
         }));
+
+        // Reconciliação reativa (<2.5s) para garantir transição imediata caso o receipt venha rápido
+        get().scheduleStatusReconciliation(contactId, officialMsgId, finalMessageText);
+
         return { success: true, messageId: officialMsgId };
       }
 
@@ -2448,7 +2461,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               }, { onConflict: 'whatsapp_message_id' });
             }
 
-            // Atualiza a mensagem na UI mantendo status 'pending' (com reloginho animado) e ID oficial do outbox
+            // Atualiza a mensagem na UI com ID do outbox e status 'sent' para dar feedback imediato positivo (1 check)
             set((s) => ({
               contacts: s.contacts.map(c => {
                 if (c.id === contactId || c.conv_id === contactId || (c.id && getRealContactId(c.id) === realContactId)) {
@@ -2458,13 +2471,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
                       ...m,
                       id: mockId,
                       whatsapp_id: mockId,
-                      status: 'pending'
+                      status: 'sent'
                     } : m)
                   };
                 }
                 return c;
               })
             }));
+
+            // Reconciliação reativa automática para capturar a entrega assim que o worker despachar
+            get().scheduleStatusReconciliation(contactId, mockId, finalMessageText);
 
             window.dispatchEvent(new CustomEvent('toast', { 
               detail: { 
@@ -3378,6 +3394,129 @@ export const useChatStore = create<ChatState>((set, get) => ({
         return c;
       })
     }));
+  },
+
+  updateMessageStatusLocally: (identifier, newStatus, newWhatsappId) => {
+    if (!newStatus) return;
+    const targetStatus = String(newStatus).toLowerCase();
+    const normalizedTargetText = identifier.text ? normalizeMessageTextForComparison(identifier.text) : '';
+
+    set((state) => {
+      let anyChanged = false;
+      const updatedContacts = state.contacts.map((c) => {
+        if (!c.messages || c.messages.length === 0) return c;
+
+        let contactChanged = false;
+        const newMsgs = c.messages.map((m) => {
+          let isMatch = false;
+
+          // 1. Match direto por whatsapp_id
+          if (identifier.whatsapp_id && (m.whatsapp_id === identifier.whatsapp_id || m.id === identifier.whatsapp_id)) {
+            isMatch = true;
+          }
+          // 2. Match direto por id do banco
+          else if (identifier.id && m.id === identifier.id) {
+            isMatch = true;
+          }
+          // 3. Match direto por mock_id (EDGE_...)
+          else if (identifier.mock_id && (m.id === identifier.mock_id || m.whatsapp_id === identifier.mock_id || m.pseudoId === identifier.mock_id)) {
+            isMatch = true;
+          }
+          // 4. Match por texto se a mensagem local estiver pendente/otimista/EDGE_
+          else if (normalizedTargetText && (m.status === 'pending' || String(m.id).startsWith('optimistic-') || String(m.id).startsWith('EDGE_'))) {
+            const mNorm = normalizeMessageTextForComparison(m.text);
+            if (mNorm && mNorm === normalizedTargetText) {
+              isMatch = true;
+            }
+          }
+
+          if (isMatch) {
+            // Evita regressão de status (ex: não regredir de read/delivered para sent)
+            const statusPriority: Record<string, number> = {
+              'pending': 1,
+              'sent': 2,
+              'server_ack': 2,
+              'delivered': 3,
+              'delivery_ack': 3,
+              'read': 4,
+              'played': 4
+            };
+            const currentPrio = statusPriority[String(m.status).toLowerCase()] || 0;
+            const newPrio = statusPriority[targetStatus] || 0;
+
+            const finalStatus = newPrio >= currentPrio ? newStatus : m.status;
+            const resolvedId = (String(m.id).startsWith('optimistic-') || String(m.id).startsWith('EDGE_')) && (newWhatsappId || identifier.whatsapp_id) 
+              ? (newWhatsappId || identifier.whatsapp_id) 
+              : m.id;
+            const resolvedWhatsappId = newWhatsappId || identifier.whatsapp_id || m.whatsapp_id;
+
+            if (m.status !== finalStatus || m.id !== resolvedId || m.whatsapp_id !== resolvedWhatsappId) {
+              contactChanged = true;
+              anyChanged = true;
+              return {
+                ...m,
+                id: resolvedId,
+                whatsapp_id: resolvedWhatsappId,
+                status: finalStatus
+              };
+            }
+          }
+          return m;
+        });
+
+        if (contactChanged) {
+          return { ...c, messages: newMsgs };
+        }
+        return c;
+      });
+
+      return anyChanged ? { contacts: updatedContacts } : state;
+    });
+  },
+
+  scheduleStatusReconciliation: (contactId, waId, text) => {
+    [2500, 6000].forEach((delay) => {
+      setTimeout(async () => {
+        try {
+          const currentContacts = get().contacts;
+          const contact = currentContacts.find(c => c.id === contactId || c.conv_id === contactId || (c.id && getRealContactId(c.id) === getRealContactId(contactId)));
+          if (!contact) return;
+
+          const msg = contact.messages?.find(m => 
+            (waId && (m.whatsapp_id === waId || m.id === waId)) ||
+            (m.status === 'pending' && normalizeMessageTextForComparison(m.text) === normalizeMessageTextForComparison(text))
+          );
+
+          if (msg && (msg.status === 'pending' || msg.status === 'sent')) {
+            const cleanText = (text || '').trim();
+            let query = supabase.from('messages').select('id, whatsapp_message_id, status');
+            if (waId && !waId.startsWith('EDGE_')) {
+              query = query.or(`whatsapp_message_id.eq.${waId},id.eq.${msg.id}`);
+            } else if (contact.conv_id) {
+              query = query.eq('conversation_id', contact.conv_id).order('timestamp', { ascending: false }).limit(5);
+            }
+
+            const { data: dbMsgs } = await query;
+            if (dbMsgs && dbMsgs.length > 0) {
+              const matched = dbMsgs.find(dm => 
+                (waId && dm.whatsapp_message_id === waId) || 
+                (dm.id === msg.id) ||
+                (waId && waId.startsWith('EDGE_') && dm.status !== 'pending')
+              );
+              if (matched && matched.status && matched.status !== msg.status) {
+                get().updateMessageStatusLocally(
+                  { whatsapp_id: matched.whatsapp_message_id, id: matched.id, mock_id: waId, text: cleanText },
+                  matched.status,
+                  matched.whatsapp_message_id
+                );
+              }
+            }
+          }
+        } catch (e) {
+          // Silencioso em caso de oscilação transitória
+        }
+      }, delay);
+    });
   },
 
   addMessageLocally: (contactId, msg, options) => {
@@ -6423,6 +6562,37 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     }
 
+    const inboxChannelName = `tenant:${tenantId}:inbox`;
+    try {
+      const existingInbox = supabase.getChannels().find(c => c.topic === `realtime:${inboxChannelName}`);
+      if (existingInbox) {
+        supabase.removeChannel(existingInbox);
+      }
+    } catch (e) {
+      console.warn('[Realtime] Erro ao limpar canal inbox anterior:', e);
+    }
+
+    const inboxChannel = supabase.channel(inboxChannelName);
+    inboxChannel
+      .on('broadcast', { event: 'message.update' }, (payload: any) => {
+        const data = payload?.payload;
+        if (!data) return;
+        console.log('[Realtime Broadcast] message.update recebido:', data);
+        get().updateMessageStatusLocally(
+          {
+            whatsapp_id: data.whatsapp_message_id,
+            mock_id: data.mock_id,
+            id: data.id,
+            text: data.text_content
+          },
+          data.status,
+          data.whatsapp_message_id
+        );
+      })
+      .subscribe((subStatus) => {
+        console.log('[Realtime Broadcast] Canal inbox status:', subStatus);
+      });
+
     const channelName = `realtime_chat_${tenantId}`;
     // HMR fallback: Remove o canal caso já exista no cache do Supabase Client para evitar "cannot add callback after subscribe"
     try {
@@ -6730,6 +6900,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages', filter: `tenant_id=eq.${tenantId}` }, async (payload) => {
         const m = payload.new as any;
 
+        // Disparo imediato via método dedicado de atualização de status (funciona mesmo com payload parcial do Postgres WAL)
+        if (m.status) {
+          get().updateMessageStatusLocally(
+            {
+              whatsapp_id: m.whatsapp_message_id,
+              id: m.id,
+              text: m.text_content
+            },
+            m.status,
+            m.whatsapp_message_id
+          );
+        }
+
         // BARREIRA DE INSTÂNCIA: Bloqueia UPDATEs irrelevantes
         const currentActiveFilter = get().activeChannelFilter;
         if (currentActiveFilter && currentActiveFilter !== 'default' && currentActiveFilter !== 'all') {
@@ -6750,7 +6933,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               if (msg.id === m.id) return true;
               if (m.whatsapp_message_id && (msg.whatsapp_id === m.whatsapp_message_id || msg.id === m.whatsapp_message_id)) return true;
               if (msg.pseudoId && (m.id === msg.pseudoId || m.whatsapp_message_id === msg.pseudoId)) return true;
-              if (String(msg.id).startsWith('optimistic-') || msg.status === 'pending') {
+              if (String(msg.id).startsWith('optimistic-') || String(msg.id).startsWith('EDGE_') || msg.status === 'pending') {
                 const normMsgText = normalizeMessageTextForComparison(msg.text);
                 if (normUpdateText && normMsgText && normUpdateText === normMsgText) {
                   return true;
@@ -6765,7 +6948,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 ...newMessages[msgIndex],
                 id: m.id,
                 whatsapp_id: m.whatsapp_message_id || newMessages[msgIndex].whatsapp_id,
-                status: m.status,
+                status: m.status || newMessages[msgIndex].status,
                 raw_payload: m.raw_payload || newMessages[msgIndex].raw_payload,
                 ...(m.text_content !== undefined && { text: advanced.text || m.text_content }),
                 ...(m.media_url !== undefined && { media_url: m.media_url }),

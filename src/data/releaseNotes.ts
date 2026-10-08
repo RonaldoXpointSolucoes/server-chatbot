@@ -20,6 +20,84 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.7.9',
+    date: '2026-10-08',
+    summary: 'Eliminação Definitiva do "Conectando" Infinito e Liberação Imediata de Reconexão de Canais',
+    notes: [
+      {
+        id: '7.7.9-1',
+        category: 'fixes',
+        title: 'Fim do Estado "Conectando" Infinito (Watchdog e Timeout)',
+        description: 'Implementado watchdog de segurança no servidor Node.js que detecta instâncias presas em "conectando" ou "reconnecting" há mais de 30s sem socket ativo e migra automaticamente para "disconnected", garantindo a regra "ou está conectada, ou não está".',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      },
+      {
+        id: '7.7.9-2',
+        category: 'features',
+        title: 'Reconexão Imediata Clicável na Sidebar e Dashboards',
+        description: 'As badges de "offline ↺" e "conectando ↺" na lista de conversas agora são botões clicáveis com atalho direto de QR Code, permitindo ao operador reconectar qualquer canal instantaneamente sem bloqueios de interface.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.7.9-3',
+        category: 'improvements',
+        title: 'Limpeza e Reset de Credenciais ao Reconectar',
+        description: 'O endpoint /instances/:id/connect agora descarta credenciais expiradas e reseta o pareamento ao receber solicitações de reconexão de canais inativos, gerando o QR Code imediatamente em vez de manter a sessão em loop de erro 408.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+      },
+      {
+        id: '7.7.9-4',
+        category: 'improvements',
+        title: 'Botão de Escape para Forçar Novo QR Code no Modal',
+        description: 'Adicionada ação de contingência "Forçar Novo QR Code / Resetar Conexão" no modal de pareamento, eliminando telas travadas em "Comunicando..." e assegurando autonomia total ao usuário.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
+      }
+    ]
+  },
+  {
+    version: '7.7.8',
+    date: '2026-10-08',
+    summary: 'Recepção Instantânea e Fluida de Recibos de Entrega do WhatsApp (Broadcast Realtime de Baixa Latência)',
+    notes: [
+      {
+        id: '7.7.8-1',
+        category: 'improvements',
+        title: 'Sincronização Instantânea via Broadcast Realtime (<30ms)',
+        description: 'O frontend agora se inscreve diretamente no canal de broadcast tenant:{tenantId}:inbox, eliminando qualquer atraso na transição do reloginho para os checks de enviado (✓) e entregue (✓✓).',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.7.8-2',
+        category: 'fixes',
+        title: 'Emissão Imediata no QueueProcessor de Outbox',
+        description: 'Notificação instantânea em tempo real via publishInboxEvent disparada ao despachar mensagens da fila, reconciliando o mock ID com o ID oficial do WhatsApp e entregando feedback visual imediato ao operador.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      },
+      {
+        id: '7.7.8-3',
+        category: 'improvements',
+        title: 'Reconciliação e Resiliência Ativa de Status',
+        description: 'Tratamento de fallback e verificação assíncrona inteligente agendada para 2.5s após o envio, prevenindo travamento do reloginho mesmo em momentos de oscilação transitória de conexão.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+      },
+      {
+        id: '7.7.8-4',
+        category: 'fixes',
+        title: 'Refinamento do Ícone de Status na Bolha de Mensagens',
+        description: 'O ícone de relógio pulsante agora é restrito estritamente a mensagens em estado pendente, garantindo a exibição imediata dos checks de entrega assim que a confirmação for recebida.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      }
+    ]
+  },
+  {
     version: '7.7.7',
     date: '2026-10-08',
     summary: 'Estabilidade Crítica no Envio Baileys, Timeout Inteligente, Diagnóstico Detalhado e Fila Resiliente de Outbox',

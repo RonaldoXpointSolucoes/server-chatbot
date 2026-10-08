@@ -261,7 +261,8 @@ export default function EvolutionModal({
   useEffect(() => {
     if (isOpen && targetInstanceName && !activePollingId) {
       const targetInst = existingInstances.find((i) => i.id === targetInstanceName || i.display_name === targetInstanceName) || { id: targetInstanceName };
-      handleConnectExisting(targetInst, false);
+      const isCurrentlyConnected = targetInst.status === 'connected' || targetInst.status === 'connected_local';
+      handleConnectExisting(targetInst, !isCurrentlyConnected);
     }
   }, [isOpen, targetInstanceName, activePollingId, existingInstances]);
 
@@ -3044,14 +3045,24 @@ export default function EvolutionModal({
                   </div>
                 </div>
               ) : loading ? (
-                <div className="flex flex-col items-center gap-4 animate-in fade-in duration-500 py-10">
+                <div className="flex flex-col items-center gap-4 animate-in fade-in duration-500 py-10 px-4 text-center">
                   <Loader2
                     className="animate-spin text-emerald-500"
                     size={48}
                   />
                   <span className="text-sm text-gray-600 dark:text-gray-400 font-medium tracking-wide">
-                    Comunicando...
+                    {connectionStatusMessage || "Comunicando com o servidor..."}
                   </span>
+                  <button
+                    onClick={() => {
+                      const curr = existingInstances.find(i => i.id === activePollingId) || { id: activePollingId };
+                      handleConnectExisting(curr, true);
+                    }}
+                    className="mt-3 text-xs bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded-lg transition-colors font-semibold flex items-center gap-1.5 cursor-pointer shadow-sm"
+                  >
+                    <RefreshCcw size={13} />
+                    Forçar Novo QR Code / Resetar Conexão
+                  </button>
                 </div>
               ) : successMsg ? (
                 <div className="animate-in fade-in zoom-in-95 duration-500 flex flex-col items-center justify-center w-full py-8 text-center">
