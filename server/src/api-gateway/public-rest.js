@@ -12,7 +12,7 @@ const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 500 * 1024 * 1024 } }); // 500MB
 
 // Helper de obtenção de socket com retry, auto-reconnect e backoff inteligente
-async function getSocketWithRetry(tenantId, instanceId, maxRetries = 3) {
+async function getSocketWithRetry(tenantId, instanceId, maxRetries = 1) {
     // 1. Verificação de fast-fail no banco de dados para evitar loops em instâncias desconectadas
     try {
         const { data: inst } = await supabase
@@ -34,24 +34,21 @@ async function getSocketWithRetry(tenantId, instanceId, maxRetries = 3) {
         if (checkErr.isDefinitive) throw checkErr;
     }
 
-    const delays = [0, 1000, 2000, 3000];
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-        if (delays[attempt] > 0) {
-            await new Promise(r => setTimeout(r, delays[attempt]));
-        }
-        const sock = await sessionManager.getSocketOrWake(tenantId, instanceId, true);
-        if (sock) return sock;
+    // 2. Fast-Path: Verifica se o socket já está ativo na RAM (latência < 1ms)
+    const { isSocketOpen } = await import('../session-manager/index.js');
+    const localSession = sessionManager.sessions.get(instanceId);
+    const localSock = localSession?.sock;
+    const hasCreds = Boolean(localSock?.authState?.creds?.me?.id || localSock?.user?.id);
+    if (localSock && isSocketOpen(localSock) && hasCreds) {
+        return localSock;
     }
 
-    // Se ainda assim o socket estiver offline na RAM, dispara tentativa de start ativa da sessão
+    // 3. Tentativa única de obtenção com timeout defensivo curto (não bloqueia a resposta externa)
     try {
-        console.warn(`[API Gateway] Socket da instância ${instanceId} offline na RAM. Tentando start ativo da sessão...`);
-        await sessionManager.startSession(tenantId, instanceId, false, true);
-        await new Promise(r => setTimeout(r, 1500));
-        const sock = sessionManager.getSocket(instanceId, true);
-        if (sock) return sock;
-    } catch (startErr) {
-        console.warn(`[API Gateway] Aviso ao tentar start ativo de ${instanceId}:`, startErr.message);
+        const sock = await sessionManager.getSocketOrWake(tenantId, instanceId, true);
+        if (sock && isSocketOpen(sock)) return sock;
+    } catch (e) {
+        console.warn(`[API Gateway] getSocketOrWake falhou para ${instanceId}:`, e.message);
     }
 
     return null;

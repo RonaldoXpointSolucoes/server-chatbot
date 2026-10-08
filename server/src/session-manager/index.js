@@ -2434,6 +2434,14 @@ class SessionManager {
                 // Só considera encerrado se o WebSocket estiver explicitamente fechado (isClosed: true ou rawState 2/3)
                 const isClosedOrClosing = ws.isClosed === true || ws.isClosing === true || rawState === 2 || rawState === 3;
                 if (isClosedOrClosing) {
+                    const attempts = this.reconnectAttempts.get(instanceId) || 0;
+                    if (attempts >= 5) {
+                        console.warn(`[SessionManager/Watchdog] Instância ${instanceId} com WebSocket encerrado e já atingiu limite de 5 tentativas. Suspendendo reconexão automática.`);
+                        this.clearWatchdog(instanceId);
+                        this.destroyExistingSession(instanceId, 'watchdog_max_retries').catch(() => {});
+                        return;
+                    }
+
                     console.log(`[SessionManager/Watchdog] Instância ${instanceId} com WebSocket encerrado (isOpen: ${ws.isOpen}, isClosed: ${ws.isClosed}, rawState: ${rawState}). Reciclando socket e reconectando...`);
                     this.clearWatchdog(instanceId);
                     this.destroyExistingSession(instanceId, 'watchdog_ws_closed').catch(() => {});

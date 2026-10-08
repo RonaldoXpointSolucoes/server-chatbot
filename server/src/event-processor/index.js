@@ -2341,15 +2341,42 @@ class EventProcessor {
                     return;
                 }
 
+                // Se o chamador (ex: Watchdog) forneceu explicitamente status 'disconnected' ou 'offline'
+                if (update.status === 'disconnected' || update.status === 'offline') {
+                    payload.status = update.status;
+                    payload.reason = reason;
+                    await supabase.from('whatsapp_instances')
+                        .update({
+                            status: update.status,
+                            last_error: update.lastDisconnect?.error?.message || 'Desconectado',
+                            assigned_node_id: null,
+                            lease_until: null,
+                            updated_at: new Date().toISOString()
+                        })
+                        .eq('id', instanceId);
+                    await realtime.publishInstanceEvent(tenantId, instanceId, 'instance.status', payload);
+                    return;
+                }
+
+                // Se a instância já estava disconnected ou offline no banco, não revive para connecting em connection: close
+                if (currentInst && ['disconnected', 'offline', 'logged_out'].includes(currentInst.status)) {
+                    console.log(`[EventProcessor] Instância ${instanceId} já está em '${currentInst.status}'. Mantendo status no close.`);
+                    payload.status = currentInst.status;
+                    payload.reason = reason;
+                    await realtime.publishInstanceEvent(tenantId, instanceId, 'instance.status', payload);
+                    return;
+                }
+
                 // Verifica se há pareamento pendente de sincronização para tratar o close como transiente
                 const { data: runtime } = await supabase.from('whatsapp_instance_runtime')
                     .select('pairing_code')
                     .eq('instance_id', instanceId)
                     .maybeSingle();
                 const isPairingPendingSync = runtime?.pairing_code === 'CONNECTED_PENDING_SYNC';
+                const reconnectAttempts = currentInst?.reconnect_attempts || 0;
 
-                // Trata como transiente qualquer erro que não seja um encerramento definitivo/manual ou logout
-                const isTransient = ![401, 403, 409, 410].includes(reason) || !reason || isPairingPendingSync;
+                // Trata como transiente se não for encerramento definitivo nem logout e não tiver excedido o limite de 5 tentativas
+                const isTransient = (![401, 403, 409, 410].includes(reason) || isPairingPendingSync) && reconnectAttempts < 5;
 
                 if (isTransient) {
                     if (isAlreadyConnected) {
@@ -2370,12 +2397,22 @@ class EventProcessor {
                         ? 'Desconectado por conflito: Outro dispositivo se conectou a esta conta de WhatsApp. O sistema suspendeu reconexões automáticas.'
                         : reason === 401
                         ? 'Sessão encerrada (Logout realizado pelo WhatsApp no celular).'
+                        : reconnectAttempts >= 5
+                        ? 'Limite de reconexões automáticas atingido. Clique em Reconectar para vincular novamente.'
                         : `Falha de conexão com o WhatsApp (Código: ${reason || 'N/A'})`;
 
+                    const finalStatus = (reason === 401 || reason === 409 || reconnectAttempts >= 5) ? 'disconnected' : 'offline';
+
                     await supabase.from('whatsapp_instances')
-                        .update({ status: 'offline', last_error: errMsg })
+                        .update({ 
+                            status: finalStatus, 
+                            last_error: errMsg,
+                            assigned_node_id: null,
+                            lease_until: null,
+                            updated_at: new Date().toISOString()
+                        })
                         .eq('id', instanceId);
-                    payload.status = 'offline';
+                    payload.status = finalStatus;
                     payload.reason = reason;
                     if(loggedOut) payload.loggedOut = true;
 
@@ -2384,7 +2421,7 @@ class EventProcessor {
                         tenantId,
                         instanceId,
                         eventType: 'connection_error',
-                        status: 'offline',
+                        status: finalStatus,
                         error: errMsg,
                         details: { reason, loggedOut, instanceName: currentInst?.display_name }
                     });
