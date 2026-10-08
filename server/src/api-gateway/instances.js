@@ -474,7 +474,8 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
 
                 // FAST-PATH: Se o socket da instância já estiver na memória e conectado, envia IMEDIATAMENTE (< 300ms)
                 const activeSock = sessionManager.sessions.get(instanceId)?.sock;
-                const isSockConnected = activeSock && (!activeSock.ws || activeSock.ws.isOpen || activeSock.ws.readyState === 1) && (activeSock.user?.id || activeSock.authState?.creds?.me?.id);
+                const hasCreds = Boolean(activeSock?.authState?.creds?.me?.id || activeSock?.user?.id);
+                const isSockConnected = activeSock && (!activeSock.ws || activeSock.ws.isOpen || activeSock.ws.readyState === 1) && hasCreds;
 
                 if (isSockConnected && messageType === 'text') {
                     let sentResult = null;
@@ -485,7 +486,13 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                         try {
                             const tSendStart = Date.now();
                             recordStructuredEvent({ event: 'BAILEYS_SEND_START', traceId, instanceId, direction: 'outbound', attempt });
-                            sentResult = await sendFn(targetJid, content);
+                            
+                            // Dispara com skipDelay e timeout de 4.0s para não prender a resposta HTTP do usuário
+                            const sendPromise = sendFn(targetJid, content, { skipDelay: true, isHuman: true });
+                            const timeoutPromise = new Promise((_, reject) => 
+                                setTimeout(() => reject(new Error('TIMEOUT_FASTPATH_SEND')), 4000)
+                            );
+                            sentResult = await Promise.race([sendPromise, timeoutPromise]);
                             const sendDuration = Date.now() - tSendStart;
 
                             recordStructuredEvent({

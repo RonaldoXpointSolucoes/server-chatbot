@@ -372,7 +372,7 @@ class SessionManager {
                 const isLocalDev = process.env.DISABLE_AUTO_START_SESSIONS === 'true' || process.env.IS_LOCAL_DEV === 'true';
                 if (isLocalDev) return;
 
-                const staleThreshold = new Date(Date.now() - 75000).toISOString(); // 75s para dar tempo ao handshake Baileys
+                const staleThreshold = new Date(Date.now() - 90000).toISOString(); // 90s para dar tempo ao handshake Baileys sob carga de rede
                 const { data: stuckInstances, error } = await supabase
                     .from('whatsapp_instances')
                     .select('id, tenant_id, status, display_name, updated_at, assigned_node_id')
@@ -406,15 +406,15 @@ class SessionManager {
                         }
 
                         // Se NÃO tiver socket aberto ou não conectou no tempo limite, força status 'disconnected'
-                        console.log(`[SessionManager/Watchdog] Instância ${stuck.display_name || stuck.id} sem socket ativo após 75s em '${stuck.status}'. Marcando 'disconnected' para liberar nova tentativa.`);
+                        console.log(`[SessionManager/Watchdog] Instância ${stuck.display_name || stuck.id} sem socket ativo após 90s em '${stuck.status}'. Marcando 'disconnected' para liberar nova tentativa.`);
                         
                         this.destroyExistingSession(stuck.id, 'watchdog_connecting_timeout').catch(() => {});
                         this.connectingState?.delete?.(stuck.id);
                         this.connectingSessions?.delete?.(stuck.id);
 
-                        // Registra falha de auto-healing para impedir loop infinito de acordar a mesma instância
+                        // Registra falha de auto-healing para impedir loop infinito de acordar a mesma instância (cooldown de 30 minutos)
                         const prevFails = this.autoHealingFailures.get(stuck.id) || 0;
-                        this.autoHealingFailures.set(stuck.id, prevFails + 1);
+                        this.autoHealingFailures.set(stuck.id, Math.max(prevFails + 1, 3));
                         this.autoHealingCooldowns.set(stuck.id, Date.now());
 
                         await supabase.from('whatsapp_instances')
@@ -438,7 +438,7 @@ class SessionManager {
             } catch (err) {
                 console.error('[SessionManager/Watchdog] Erro ao varrer conexões travadas:', err.message);
             }
-        }, 15000);
+        }, 45000);
 
         // Supervisor de Auto-Healing Proativo (a cada 25 segundos)
         // Garante que nenhuma instância que deveria estar conectada permaneça offline/órfã
@@ -475,9 +475,9 @@ class SessionManager {
                     const lastCooldown = this.reconnectingCoolingDown.get(inst.id) || 0;
                     const failCount = this.autoHealingFailures.get(inst.id) || 0;
 
-                    // Backoff defensivo: se falhou repetidamente (3+ vezes), respeita intervalo longo de 15 minutos
-                    const requiredHealInterval = failCount >= 3 ? 15 * 60000 : 60000;
-                    if (now - lastHeal < requiredHealInterval || now - lastCooldown < 45000) {
+                    // Backoff defensivo: se falhou repetidamente (2+ vezes), respeita intervalo longo de 30 minutos
+                    const requiredHealInterval = failCount >= 2 ? 30 * 60000 : 120000;
+                    if (now - lastHeal < requiredHealInterval || now - lastCooldown < 60000) {
                         continue;
                     }
 
@@ -593,7 +593,7 @@ class SessionManager {
             } catch (healErr) {
                 console.error('[SessionManager/AutoHealing] Erro no ciclo de auto-healing:', healErr.message);
             }
-        }, 25000);
+        }, 60000);
 
         // Limpeza periódica preventiva de locks órfãos/expirados no banco de dados (a cada 60s)
         setInterval(async () => {
@@ -1881,14 +1881,15 @@ class SessionManager {
                         // Ignoramos erros de mensagens anteriores para continuar a fila resiliente
                     }
                     
-                    // Delay humano aleatório entre 1.5s e 3.5s
-                    const delay = Math.floor(Math.random() * (3500 - 1500 + 1)) + 1500;
+                    // Delay inteligente: Envio imediato para mensagens diretas/humanas ou micro-delay para fila
+                    const isInstant = options?.skipDelay || options?.isHuman || options?.isDirect || options?.priority === 1;
+                    const delay = isInstant ? 0 : Math.floor(Math.random() * (300 - 100 + 1)) + 100;
                     
-                    // Simular o delay antes do envio
-                    setTimeout(async () => {
+                    // Simular o delay antes do envio (0ms para interações diretas/humanas)
+                    const executeSend = async () => {
                         try {
                             let attempts = 0;
-                            const maxAttempts = 4;
+                            const maxAttempts = 2; // Máximo 2 tentativas para falha rápida (<1.5s) e transição para outbox resiliente
                             let lastError;
                             
                             while (attempts < maxAttempts) {
@@ -1903,7 +1904,7 @@ class SessionManager {
                                             activeSock = latestSession.sock;
                                             sendFn = activeSock.originalSendMessage || originalSendMessage;
                                         } else {
-                                            // Se houver reconexão agendada via timer (ex: pós 515 ou oscilação), antecipa a reconexão imediatamente
+                                            // Se houver reconexão agendada via timer, antecipa a reconexão imediatamente
                                             if (this.reconnectingTimers.has(instanceId)) {
                                                 const timer = this.reconnectingTimers.get(instanceId);
                                                 clearTimeout(timer);
@@ -1924,9 +1925,8 @@ class SessionManager {
                                             }
 
                                             if (!isSocketOpen(activeSock)) {
-                                                console.warn(`[SessionManager - Antiban] Sem sessão ativa saudável para ${instanceId} (tentativa ${attempts + 1}/${maxAttempts}). Validando status e acordando conexão...`);
+                                                console.warn(`[SessionManager - Antiban] Sem sessão ativa saudável para ${instanceId} (tentativa ${attempts + 1}/${maxAttempts}). Validando status...`);
                                                 
-                                                // Validação de fast-fail no banco de dados para não gastar retentativas desnecessárias se estiver offline definitivamente
                                                 const { data: instStatus } = await retryWithBackoff(() => 
                                                     supabase.from('whatsapp_instances').select('status, last_error').eq('id', instanceId).maybeSingle()
                                                 ).catch(() => ({ data: null }));
@@ -1936,7 +1936,6 @@ class SessionManager {
                                                     throw new Error(`Instância ${instanceId} está ${instStatus.status} no banco de dados (${instStatus.last_error || 'desconectada'})`);
                                                 }
 
-                                                // Desperta a sessão sem forçar restart destrutivo
                                                 const wakedSock = await this.getSocketOrWake(tenantId, instanceId, true, false);
                                                 if (wakedSock) {
                                                     activeSock = wakedSock;
@@ -1948,14 +1947,11 @@ class SessionManager {
                                         }
                                     }
                                     
-                                    // Se o socket estiver inicializando/conectando, aguarda a abertura da conexão antes de prosseguir
+                                    // Se o socket estiver inicializando/conectando, aguarda brevemente abertura da conexão (máx 3.5s)
                                     if (activeSock && (!activeSock.ws || activeSock.ws.isConnecting || !isSocketOpen(activeSock))) {
-                                        console.log(`[SessionManager - Antiban] Socket de ${instanceId} está conectando. Aguardando abertura da conexão WebSocket...`);
                                         try {
-                                            await waitForSocketOpen(activeSock, 15000);
-                                        } catch (waitErr) {
-                                            console.warn(`[SessionManager - Antiban] Aviso ao aguardar abertura do socket: ${waitErr.message}`);
-                                        }
+                                            await waitForSocketOpen(activeSock, 3500);
+                                        } catch (waitErr) {}
                                     }
 
                                     // Atualiza a referência caso a sessão tenha sido recarregada em memória durante o wait
@@ -1965,10 +1961,11 @@ class SessionManager {
                                         sendFn = activeSock.originalSendMessage || originalSendMessage;
                                     }
 
-                                    // Validação final de integridade do socket autenticado
+                                    // Validação final de integridade do socket autenticado (evita crash do Baileys ao acessar me.id)
                                     const meJid = activeSock?.user?.id || activeSock?.authState?.creds?.me?.id || activeSock?.authState?.creds?.me?.jid;
-                                    if (!activeSock || !isSocketOpen(activeSock) || !meJid) {
-                                        throw new Error('Connection Closed (WebSocket não aberto ou autenticação pendente)');
+                                    const hasCredsMe = Boolean(activeSock?.authState?.creds?.me?.id || activeSock?.user?.id);
+                                    if (!activeSock || !isSocketOpen(activeSock) || !meJid || !hasCredsMe) {
+                                        throw new Error('Connection Closed (WebSocket não aberto ou autenticação pendente - authState.creds.me ausente)');
                                     }
                                     
                                     let targetJid = jid;
@@ -1977,16 +1974,19 @@ class SessionManager {
                                     }
 
                                     if (attempts > 0) {
-                                        console.log(`[SessionManager - Antiban] Retentando envio para ${targetJid} via instância ${instanceId} com socket restabelecido. Tentativa ${attempts + 1}/${maxAttempts}`);
+                                        console.log(`[SessionManager - Antiban] Retentando envio para ${targetJid} via instância ${instanceId}. Tentativa ${attempts + 1}/${maxAttempts}`);
                                     } else {
-                                        console.log(`[SessionManager - Antiban] Enviando mensagem na fila para ${targetJid} via instância ${instanceId} com delay de ${delay}ms`);
+                                        console.log(`[SessionManager - Antiban] Enviando mensagem para ${targetJid} via instância ${instanceId} (delay: ${delay}ms)`);
                                     }
                                     
-                                    const result = await sendFn(targetJid, content, options);
+                                    // Timeout de segurança no envio do Baileys para não travar a fila da instância
+                                    const sendPromise = sendFn(targetJid, content, options);
+                                    const timeoutPromise = new Promise((_, reject) => 
+                                        setTimeout(() => reject(new Error('TIMEOUT_BAILEYS_SOCKET_SEND')), 4500)
+                                    );
+                                    const result = await Promise.race([sendPromise, timeoutPromise]);
 
                                     // Auto-persiste e sincroniza imediatamente no EventProcessor
-                                    // (Garante que mensagens disparadas por APIs REST externas, workers ou integrações
-                                    // sejam gravadas no Supabase messages, vinculadas à conversa e emitidas via Realtime para a tela do chat)
                                     try {
                                         const { EventProcessor, default: eventProcessor } = await import('../event-processor/index.js');
                                         if (result && result.key && result.key.id) {
@@ -2024,8 +2024,17 @@ class SessionManager {
                                         error.message?.includes('está logged_out no banco') ||
                                         error.message?.includes('está paused no banco');
 
-                                    if (isPermanentlyClosed) {
-                                        console.warn(`[SessionManager - Antiban] Abortando retentativas para ${jid} via instância ${instanceId} (motivo definitivo): ${error.message}`);
+                                    const isUnrecoverable = isPermanentlyClosed ||
+                                        error.message?.includes('reading \'id\'') ||
+                                        error.message?.includes('reading "id"') ||
+                                        error.message?.includes('Cannot read properties of undefined') ||
+                                        error.message?.includes('TIMEOUT_BAILEYS_SOCKET_SEND') ||
+                                        error.message?.includes('desconectada') ||
+                                        error.message?.includes('not authenticated') ||
+                                        error.message?.includes('autenticação pendente');
+
+                                    if (isUnrecoverable) {
+                                        console.warn(`[SessionManager - Antiban] Abortando retentativas para ${jid} via instância ${instanceId} (motivo definitivo/não recuperável): ${error.message}`);
                                         break;
                                     }
 
@@ -2038,17 +2047,15 @@ class SessionManager {
                                         (error.message?.includes('401') && !jid.endsWith('@newsletter'));
 
                                     if (isCryptoOrSessionErr) {
-                                        console.warn(`[SessionManager - Antiban] Erro criptográfico de sessão/pre-key (${error.message}) detectado para ${jid} via instância ${instanceId}. Limpando chaves para forçar nova negociação de pre-keys...`);
+                                        console.warn(`[SessionManager - Antiban] Erro criptográfico de sessão/pre-key detectado para ${jid} via instância ${instanceId}. Limpando chaves...`);
                                         try {
                                             clearRecipientSession(instanceId, jid);
                                         } catch (e) {}
                                     }
 
                                     if (attempts < maxAttempts) {
-                                        const isConnectionClosed = error.message?.includes('Connection Closed') || error.message?.includes('reconectando');
-                                        const baseDelay = isConnectionClosed ? 3500 : 2000;
-                                        const retryDelay = Math.min(baseDelay * Math.pow(1.5, attempts - 1), 8500) + Math.floor(Math.random() * 500);
-                                        console.log(`[SessionManager - Antiban] Tentativa transitória ${attempts}/${maxAttempts} para ${jid} via instância ${instanceId}: ${error.message || error}. Aguardando ${Math.round(retryDelay)}ms para restabelecimento do socket...`);
+                                        const retryDelay = 800 + Math.floor(Math.random() * 400);
+                                        console.log(`[SessionManager - Antiban] Tentativa transitória ${attempts}/${maxAttempts} para ${jid} via instância ${instanceId}: ${error.message || error}. Aguardando ${retryDelay}ms...`);
                                         await new Promise(r => setTimeout(r, retryDelay));
                                     } else {
                                         console.error(`[SessionManager - Antiban] Todas as ${maxAttempts} tentativas falharam para ${jid} via instância ${instanceId}:`, error.message || error);
@@ -2056,15 +2063,18 @@ class SessionManager {
                                 }
                             }
                             
-                            if (attempts >= maxAttempts) {
-                                console.error(`[SessionManager - Antiban] Todas as ${maxAttempts} tentativas falharam para ${jid} via instância ${instanceId}. Mensagem será preservada na fila.`);
-                            }
                             reject(lastError);
                         } finally {
                             // Independente de sucesso ou falha, resolve a fila interna para permitir o próximo envio
                             resolveQueue();
                         }
-                    }, delay);
+                    };
+
+                    if (delay > 0) {
+                        setTimeout(executeSend, delay);
+                    } else {
+                        executeSend();
+                    }
                 });
             };
             
@@ -2301,14 +2311,20 @@ class SessionManager {
                 return savedMsg || { id: null, status: 'pending', instance_id: instanceId, chat_jid: targetJid };
             }
 
-            // Tenta obter socket ativo autenticado (requireAuthenticated = true)
-            const sock = await this.getSocketOrWake(tenantId, instanceId, true).catch(() => null);
-            const meId = sock?.user?.id || sock?.authState?.creds?.me?.id || sock?.authState?.creds?.me?.jid;
+            // Tenta obter socket ativo autenticado na memória local primeiro
+            const localSession = this.sessions.get(instanceId);
+            const sock = (localSession && isSocketOpen(localSession.sock))
+                ? localSession.sock
+                : await this.getSocketOrWake(tenantId, instanceId, true).catch(() => null);
 
-            if (sock && isSocketOpen(sock) && meId) {
+            const meId = sock?.user?.id || sock?.authState?.creds?.me?.id || sock?.authState?.creds?.me?.jid;
+            const hasAuthCreds = Boolean(sock?.authState?.creds?.me?.id || sock?.user?.id);
+
+            if (sock && isSocketOpen(sock) && meId && hasAuthCreds) {
                 try {
                     const sendFn = sock.originalSendMessage || sock.sendMessage;
-                    return await sendFn(targetJid, content, options);
+                    const directOptions = { ...(options || {}), skipDelay: true, isDirect: true };
+                    return await sendFn(targetJid, content, directOptions);
                 } catch (sendErr) {
                     console.warn(`[SessionManager] Falha no envio direto em enqueueMessage para ${instanceId} (${sendErr?.message || sendErr}). Redirecionando para wa_outgoing_messages...`);
                 }
@@ -2327,12 +2343,29 @@ class SessionManager {
                 message_type: type,
                 body: bodyText,
                 status: 'pending',
-                priority: 1
+                priority: options?.priority || 1
             }).select().maybeSingle();
+
             if (saveErr) {
                 console.error('[SessionManager] Erro ao gravar em wa_outgoing_messages:', saveErr.message);
             }
-            return savedMsg || { id: null, status: 'pending', instance_id: instanceId, chat_jid: targetJid };
+
+            const finalQueued = savedMsg || {
+                id: `EDGE_${Date.now()}`,
+                status: 'pending',
+                instance_id: instanceId,
+                chat_jid: targetJid
+            };
+
+            // Notifica o processador de outbox imediatamente para envio sem espera de loop
+            try {
+                const { default: queueProcessor } = await import('./queue-processor.js');
+                if (queueProcessor && typeof queueProcessor.trigger === 'function') {
+                    queueProcessor.trigger(tenantId, instanceId);
+                }
+            } catch (e) {}
+
+            return finalQueued;
         } catch (err) {
             console.error(`[SessionManager] Erro em enqueueMessage para ${instanceId}:`, err.message);
             throw err;

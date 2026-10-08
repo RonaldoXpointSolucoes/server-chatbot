@@ -493,8 +493,12 @@ router.post([
             throw sockErr;
         }
 
-        if (!sock) {
-            console.warn(`[API Gateway] [sendText] ⚠️ Socket Offline na RAM para ${id} ("${display_name}"). Enfileirando no outbox resiliente (wa_outgoing_messages)...`);
+        const { isSocketOpen } = await import('../session-manager/index.js');
+        const hasCredsMe = Boolean(sock?.authState?.creds?.me?.id || sock?.user?.id);
+        const isHealthy = sock && isSocketOpen(sock) && hasCredsMe;
+
+        if (!isHealthy) {
+            console.warn(`[API Gateway] [sendText] ⚠️ Socket Offline ou não autenticado na RAM para ${id} ("${display_name}"). Enfileirando no outbox resiliente (wa_outgoing_messages)...`);
             try {
                 const { default: sessionManager } = await import('../session-manager/index.js');
                 const cleanPhone = String(number).replace(/\D/g, '');
@@ -525,7 +529,7 @@ router.post([
         }
         
         const remoteJid = await resolveTargetJid(sock, number, tenant_id);
-        const msgResult = await sock.sendMessage(remoteJid, { text }, { isAutomation: true });
+        const msgResult = await sock.sendMessage(remoteJid, { text }, { isAutomation: true, skipDelay: true });
 
         try {
             const { EventProcessor } = await import('../event-processor/index.js');

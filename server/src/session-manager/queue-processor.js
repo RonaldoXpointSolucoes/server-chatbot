@@ -73,6 +73,24 @@ class QueueProcessor {
         }
     }
 
+    /**
+     * Dispara o processamento imediato da fila para uma instância específica (Fast-Trigger)
+     */
+    trigger(tenantId, instanceId) {
+        if (!instanceId || !this.running) return;
+        setImmediate(async () => {
+            try {
+                if (this.activeProcessors.has(instanceId)) return;
+                this.activeProcessors.add(instanceId);
+                await this.processInstanceQueue(tenantId, instanceId).finally(() => {
+                    this.activeProcessors.delete(instanceId);
+                });
+            } catch (err) {
+                console.warn(`[QueueProcessor/Trigger] Aviso ao processar trigger imediato para ${instanceId}:`, err.message);
+            }
+        });
+    }
+
     async loop() {
         if (!this.running) return;
 
@@ -316,8 +334,10 @@ class QueueProcessor {
                 let result;
                 const responseType = msg.response_type || msg.options?.responseType || 'STANDARD';
 
+                const sendOptions = { priority: msg.priority, isAutomation: (msg.priority || 1) >= 5, skipDelay: true };
+
                 if (msg.message_type === 'text') {
-                    result = await sendFn(targetJid, { text: msg.body });
+                    result = await sendFn(targetJid, { text: msg.body }, sendOptions);
                 } else if (msg.message_type === 'media' && msg.media_url) {
                     // Se for TUTORIAL, garante validação estrita e envio com gifPlayback: true
                     if (responseType === 'TUTORIAL') {
