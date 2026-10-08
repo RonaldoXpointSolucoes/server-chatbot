@@ -13,6 +13,7 @@ function requestCoolify(method, path, body = null) {
     const url = new URL(path, COOLIFY_URL);
     const options = {
       method,
+      rejectUnauthorized: false,
       headers: {
         'Authorization': `Bearer ${TOKEN}`,
         'Content-Type': 'application/json',
