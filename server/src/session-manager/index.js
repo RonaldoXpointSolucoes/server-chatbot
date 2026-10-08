@@ -1116,10 +1116,17 @@ class SessionManager {
                     );
                     await eventProcessor.handleConnectionUpdate(tenantId, instanceId, {
                         connection: 'connecting',
+                        syncingKeys: true,
                         pairingSuccess: true,
                         registered: true,
                         phone
                     });
+                } else if (!wasAuthenticatedOnBoot && (this.pairingPendingSync.has(instanceId) || state?.creds?.signalIdentities)) {
+                    // Pre-keys intermediárias sendo salvas durante o handshake de leitura de QR
+                    eventProcessor.handleConnectionUpdate(tenantId, instanceId, {
+                        connection: 'connecting',
+                        syncingKeys: true
+                    }).catch(() => {});
                 }
             });
 
@@ -1182,6 +1189,13 @@ class SessionManager {
                 const safeUpdate = { ...update };
                 if (update.connection === 'open' && !isRealAuthConnection) {
                     safeUpdate.connection = 'connecting';
+                }
+
+                // Detecta leitura de QR Code em tempo real (Baileys emite isNewLogin no pair-success)
+                if (update.isNewLogin) {
+                    console.log(`[SessionManager] 📲 Escaneamento do QR Code detectado na instância ${instanceId}!`);
+                    this.pairingPendingSync.set(instanceId, true);
+                    safeUpdate.scanningDetected = true;
                 }
 
                 // Se a instância já possui credenciais de usuário válidas (aparelho pareado),
@@ -1385,6 +1399,7 @@ class SessionManager {
                         isAckOrTransient401
                     );
 
+                    const isPairingPending = this.pairingPendingSync.has(instanceId);
                     const isRestartRequired = !isConflict && !isBadSession && (
                         status === 515 || 
                         status === 428 || 
@@ -1394,7 +1409,7 @@ class SessionManager {
                         reasonLower.includes('precondition required') || 
                         reasonLower.includes('connection closed') || 
                         (reasonLower.includes('stream errored') && !reasonLower.includes('conflict'))
-                    ) && isFullyAuthenticated;
+                    ) && (isFullyAuthenticated || isPairingPending || Boolean(state?.creds?.me?.id));
 
                     const isStreamOscillation = !isConflict && !isBadSession && (
                         status === 503 || 

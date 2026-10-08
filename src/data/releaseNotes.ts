@@ -20,6 +20,84 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.8.1',
+    date: '2026-10-08',
+    summary: 'Sincronização de Mídias e Vídeos do WhatsApp, DevLogger Otimizado e Tratamento de Edições',
+    notes: [
+      {
+        id: '7.8.1-1',
+        category: 'features',
+        title: 'Sincronização em Tempo Real de Mídias e Vídeos com Feedback Dinâmico',
+        description: 'Implementado ouvinte de eventos de UPDATE no Realtime do Supabase e suporte a atualização instantânea de mediaUrl na interface. Mensagens de mídia recentes em download exibem card animado com feedback de progresso ("Vídeo em processamento" e "Imagem em sincronização"), eliminando falsos alertas de limite excedido.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.8.1-2',
+        category: 'improvements',
+        title: 'Upload Direto Otimizado para Fotos e Áudios (<200ms)',
+        description: 'Mídias com até 6MB agora utilizam upload direto bufferizado no Supabase Storage, reduzindo o tempo de gravação em mais de 90% e eliminando a concorrência duplicada de stream no Baileys.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+      },
+      {
+        id: '7.8.1-3',
+        category: 'improvements',
+        title: 'DevLogger com Filtros de Ação Requerida e Migalhas',
+        description: 'Filtros unificados no seletor suspenso com tags dedicadas para eventos que exigem intervenção humana (🚨 Ação Requerida) e trilhas de migalhas (📍 Migalhas), com correlação instantânea por Tenant e Instância.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
+      },
+      {
+        id: '7.8.1-4',
+        category: 'fixes',
+        title: 'Tratamento Defensivo na Edição de Mensagens Otimistas',
+        description: 'Bloqueio preventivo de exceções não tratadas no Baileys ao editar mensagens ainda pendentes no outbox (EDGE_...), com atualização idempotente segura no chatStore e banco de dados.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      }
+    ]
+  },
+  {
+    version: '7.8.0',
+    date: '2026-10-08',
+    summary: 'Nova Experiência de Pareamento QR Code: Temporizador Ativo com Auto-Renovação, Trilha Interativa ao Vivo e Retorno Assertivo VIP',
+    notes: [
+      {
+        id: '7.8.0-1',
+        category: 'features',
+        title: 'Temporizador de QR Code (30s) e Auto-Renovação Inteligente',
+        description: 'Adicionada contagem regressiva animada de 30 segundos com barra de progresso em tempo real e auto-renovação antes da expiração. Elimina o erro do WhatsApp "Não foi possível conectar o dispositivo" por leitura de códigos expirados.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.8.0-2',
+        category: 'improvements',
+        title: 'Trilha de Migalhas Interativa em Tempo Real (Passos 5/7 e 6/7)',
+        description: 'Integração bidirecional entre o socket do Baileys, o servidor Node.js e a interface: ao escanear o QR no celular, o sistema detecta imediatamente a leitura ("📲 Celular detectado! Escaneamento realizado com sucesso") e a sincronização criptográfica de chaves Noise ("🔐 Sincronizando chaves e credenciais").',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+      },
+      {
+        id: '7.8.0-3',
+        category: 'improvements',
+        title: 'Retorno Assertivo e Celebratório VIP de Conexão',
+        description: 'Substituição da tela de espera estática por um cartão assertivo de confirmação que exibe o número de telefone conectado, crachá oficial da instância, status online pulsante e aviso sonoro de sucesso antes de fechar o modal com transição suave.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
+      },
+      {
+        id: '7.8.0-4',
+        category: 'fixes',
+        title: 'Correção de Handshake de Pareamento (Código 515 restartRequired)',
+        description: 'O SessionManager agora identifica sessões recém-pareadas e executa reinicialização relâmpago de 1.2s após o evento 515 da Baileys, impedindo que o WhatsApp no aparelho móvel caia por timeout de handshake.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      }
+    ]
+  },
+  {
     version: '7.7.9',
     date: '2026-10-08',
     summary: 'Eliminação Definitiva do "Conectando" Infinito e Liberação Imediata de Reconexão de Canais',

@@ -897,16 +897,52 @@ export const MessageBubble = memo(({
                   <VideoPlayerPremium src={msg.mediaUrl} />
                )}
                
-               {!msg.mediaUrl && msg.mediaType === 'video' && (
-                  <div className="flex items-center gap-3 bg-gradient-to-br from-[#f0f2f5] to-white dark:from-[#2a3942] dark:to-[#202c33] p-3 rounded-xl mb-1 border border-gray-200 dark:border-gray-700/50 group">
-                     <div className="bg-red-500/10 p-2 text-red-500 rounded-lg group-hover:scale-110 transition-transform">
-                       <VideoOff size={20} />
+               {!msg.mediaUrl && msg.mediaType === 'image' && (
+                  <div className="flex items-center gap-3 bg-gradient-to-br from-indigo-50/60 to-white dark:from-[#2a3942] dark:to-[#202c33] p-3 rounded-xl mb-1 border border-indigo-100/60 dark:border-indigo-900/30">
+                     <div className="bg-indigo-500/10 p-2 text-indigo-500 rounded-lg animate-pulse">
+                       <ImageIcon size={20} />
                      </div>
                      <div className="flex flex-col flex-1 overflow-hidden">
-                        <span className="text-[14px] font-medium text-gray-700 dark:text-gray-200">Vídeo Recebido</span>
-                        <span className="text-[11px] text-red-500 font-medium">Download indisponível (limite de 50MB excedido)</span>
+                        <span className="text-[13px] font-semibold text-gray-800 dark:text-gray-100 flex items-center gap-1.5">
+                          Imagem em sincronização
+                          <span className="inline-block w-2 h-2 rounded-full bg-indigo-500 animate-ping"></span>
+                        </span>
+                        <span className="text-[11px] text-indigo-600 dark:text-indigo-400 font-medium">Carregando imagem em alta resolução...</span>
                      </div>
                   </div>
+               )}
+
+               {!msg.mediaUrl && msg.mediaType === 'video' && (
+                  (() => {
+                     const msgDate = msg.timestamp ? new Date(msg.timestamp) : new Date();
+                     const diffMinutes = (Date.now() - msgDate.getTime()) / 60000;
+                     const isRecentOrPending = isNaN(diffMinutes) || diffMinutes < 4 || msg.status === 'pending';
+                     
+                     return isRecentOrPending ? (
+                       <div className="flex items-center gap-3 bg-gradient-to-br from-indigo-50/60 to-white dark:from-[#2a3942] dark:to-[#202c33] p-3 rounded-xl mb-1 border border-indigo-100/60 dark:border-indigo-900/30">
+                          <div className="bg-indigo-500/10 p-2 text-indigo-500 rounded-lg animate-pulse">
+                            <Video size={20} />
+                          </div>
+                          <div className="flex flex-col flex-1 overflow-hidden">
+                             <span className="text-[13px] font-semibold text-gray-800 dark:text-gray-100 flex items-center gap-1.5">
+                               Vídeo em processamento
+                               <span className="inline-block w-2 h-2 rounded-full bg-indigo-500 animate-ping"></span>
+                             </span>
+                             <span className="text-[11px] text-indigo-600 dark:text-indigo-400 font-medium">Sincronizando mídia com o chat...</span>
+                          </div>
+                       </div>
+                     ) : (
+                       <div className="flex items-center gap-3 bg-gradient-to-br from-[#f0f2f5] to-white dark:from-[#2a3942] dark:to-[#202c33] p-3 rounded-xl mb-1 border border-gray-200 dark:border-gray-700/50 group">
+                          <div className="bg-amber-500/10 p-2 text-amber-500 rounded-lg group-hover:scale-110 transition-transform">
+                            <VideoOff size={20} />
+                          </div>
+                          <div className="flex flex-col flex-1 overflow-hidden">
+                             <span className="text-[14px] font-medium text-gray-700 dark:text-gray-200">Vídeo Recebido</span>
+                             <span className="text-[11px] text-amber-600 dark:text-amber-400 font-medium">Mídia expirada ou não transferida pelo WhatsApp</span>
+                          </div>
+                       </div>
+                     );
+                  })()
                )}
                
                {msg.mediaUrl && msg.mediaType === 'audio' && (
@@ -972,6 +1008,8 @@ export const MessageBubble = memo(({
                {(!msg.mediaType || (msg.mediaType !== 'location' && msg.mediaType !== 'contact' && (!msg.mediaUrl || msg.text))) && (
                    (() => {
                      const t = msg.text || '';
+                      const isDefaultMediaPlaceholder = (t === '📸 Imagem / Foto' || t === '🎥 Vídeo' || t === '🎵 Áudio' || t === 'Imagem / Foto' || t === 'Vídeo' || t === 'Áudio') && Boolean(msg.mediaUrl || msg.mediaType);
+                      if (isDefaultMediaPlaceholder) return null;
                      const isEdited = Boolean(
                        msg.status === 'edited' ||
                        msg.raw_payload?.is_edited ||

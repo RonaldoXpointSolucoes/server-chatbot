@@ -1387,28 +1387,50 @@ class EventProcessor {
                              const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
                              const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-                             await new Promise((resolve, reject) => {
-                                 const fileStream = fs.createReadStream(tmpFilePath);
-                                 const upload = new tus.Upload(fileStream, {
-                                     endpoint: `${supabaseUrl}/storage/v1/upload/resumable`,
-                                     retryDelays: [0, 1000, 3000],
-                                     headers: {
-                                         Authorization: `Bearer ${supabaseKey}`,
-                                         'x-upsert': 'true'
-                                     },
-                                     uploadDataDuringCreation: true,
-                                     metadata: {
-                                         bucketName: 'chat_media',
-                                         objectName: storagePath,
-                                         contentType: mimeType
-                                     },
-                                     chunkSize: 6 * 1024 * 1024,
-                                     uploadSize: fileSize,
-                                     onError: (error) => reject(error),
-                                     onSuccess: () => resolve()
+                             // Otimização de Performance: Para arquivos comuns (<6MB como imagens, áudios e vídeos leves),
+                             // realiza upload direto buffer/multipart (<200ms) sem o overhead do protocolo TUS resumable.
+                             let directUploadSuccess = false;
+                             if (fileSize < 6 * 1024 * 1024) {
+                                 try {
+                                     const fileBuffer = fs.readFileSync(tmpFilePath);
+                                     const { error: directErr } = await supabase.storage
+                                         .from('chat_media')
+                                         .upload(storagePath, fileBuffer, {
+                                             contentType: mimeType,
+                                             upsert: true
+                                         });
+                                     if (!directErr) {
+                                         directUploadSuccess = true;
+                                     }
+                                 } catch (directExc) {
+                                     console.warn('[BatchProcessor] Upload direto falhou, usando TUS resumable fallback:', directExc.message);
+                                 }
+                             }
+
+                             if (!directUploadSuccess) {
+                                 await new Promise((resolve, reject) => {
+                                     const fileStream = fs.createReadStream(tmpFilePath);
+                                     const upload = new tus.Upload(fileStream, {
+                                         endpoint: `${supabaseUrl}/storage/v1/upload/resumable`,
+                                         retryDelays: [0, 1000, 3000],
+                                         headers: {
+                                             Authorization: `Bearer ${supabaseKey}`,
+                                             'x-upsert': 'true'
+                                         },
+                                         uploadDataDuringCreation: true,
+                                         metadata: {
+                                             bucketName: 'chat_media',
+                                             objectName: storagePath,
+                                             contentType: mimeType
+                                         },
+                                         chunkSize: 6 * 1024 * 1024,
+                                         uploadSize: fileSize,
+                                         onError: (error) => reject(error),
+                                         onSuccess: () => resolve()
+                                     });
+                                     upload.start();
                                  });
-                                 upload.start();
-                             });
+                             }
 
                              try { fs.unlinkSync(tmpFilePath); } catch(e){}
 
@@ -1423,17 +1445,20 @@ class EventProcessor {
                              return { mediaUrl, metadata };
                          };
 
-                         // Tenta upload rápido (<3.5s) para não atrasar mensagens de texto
-                         const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('MEDIA_BACKGROUND_DEFER')), 3500));
+                         // Inicia a promise de upload UMA ÚNICA VEZ para evitar colisões de stream
+                         const uploadPromise = doUpload();
+
+                         // Janela síncrona de 4.5s: imagens, áudios e vídeos leves concluem instantaneamente (<200ms)
+                         const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('MEDIA_BACKGROUND_DEFER')), 4500));
                          try {
-                             const res = await Promise.race([doUpload(), timeoutPromise]);
+                             const res = await Promise.race([uploadPromise, timeoutPromise]);
                              b.mediaUrl = res.mediaUrl;
                              b.mediaMetadata = res.metadata;
                          } catch (raceErr) {
                              if (raceErr.message === 'MEDIA_BACKGROUND_DEFER') {
                                  console.log(`[BatchProcessor] Upload de mídia diferido para background para não bloquear entrega imediata da mensagem. MsgId: ${b.rawMsg?.key?.id}`);
-                                 // Conclui em background assíncrono sem bloquear o batch
-                                 doUpload().then(async (bgRes) => {
+                                 // Conclui em background assíncrono REAPROVEITANDO A MESMA PROMISE ativa sem re-executar doUpload()
+                                 uploadPromise.then(async (bgRes) => {
                                      if (bgRes?.mediaUrl) {
                                          const msgId = b.rawMsg?.key?.id;
                                          if (msgId) {
@@ -2293,6 +2318,9 @@ class EventProcessor {
                     const qrBase64 = await toDataURL(qr);
                     payload.qr_code = qrBase64;
                     payload.status = 'qr_ready';
+                    payload.step = 4;
+                    payload.ttl = 30;
+                    payload.message = 'QR Code gerado e pronto para leitura no celular (30s de validade)';
                     eventName = 'instance.qr_updated';
 
                     await retryWithBackoff(() =>
@@ -2437,9 +2465,39 @@ class EventProcessor {
                     .update({ status: 'connecting', last_error: null })
                     .eq('id', instanceId);
                 payload.status = 'connecting';
-                if (update.pairingSuccess) {
+
+                if (update.scanningDetected || update.isNewLogin) {
+                    payload.scanningDetected = true;
+                    payload.isNewLogin = true;
+                    payload.step = 5;
+                    payload.message = '📲 Celular detectado! Escaneamento realizado com sucesso. Negociando chaves...';
+
+                    logAndNotifyConnectionEvent({
+                        tenantId,
+                        instanceId,
+                        eventType: 'scanning_detected',
+                        status: 'connecting',
+                        details: { instanceName: currentInst?.display_name }
+                    });
+                } else if (update.syncingKeys) {
+                    payload.syncingKeys = true;
+                    payload.step = 6;
+                    if (update.phone) payload.phone = update.phone;
+                    payload.message = '🔐 Sincronizando chaves e credenciais criptográficas (Noise Protocol)...';
+
+                    logAndNotifyConnectionEvent({
+                        tenantId,
+                        instanceId,
+                        eventType: 'syncing_keys',
+                        status: 'connecting',
+                        phone: update.phone,
+                        details: { instanceName: currentInst?.display_name }
+                    });
+                } else if (update.pairingSuccess) {
                     payload.pairingSuccess = true;
                     payload.phone = update.phone;
+                    payload.step = 6;
+                    payload.message = '🔐 Código aceito pelo celular! Vinculando dispositivo...';
 
                     logAndNotifyConnectionEvent({
                         tenantId,
@@ -2472,9 +2530,15 @@ class EventProcessor {
                         .insert({ instance_id: instanceId, tenant_id: tenantId, qr_code: null, pairing_code: null });
                 }
                 payload.status = statusVal;
+                payload.authenticated = true;
+                payload.is_authenticated = true;
+                payload.step = 7;
+                payload.message = '🎉 Instância conectada e autenticada com sucesso!';
 
                 // Log e disparo de notificação de SUCESSO via própria caixa conectada
                 const connectedPhone = currentInst?.phone_number || update?.phone || (authCreds?.creds_data?.me?.id ? authCreds.creds_data.me.id.split(':')[0].split('@')[0] : null);
+                if (connectedPhone) payload.phone = connectedPhone;
+
                 logAndNotifyConnectionEvent({
                     tenantId,
                     instanceId,
@@ -2487,6 +2551,11 @@ class EventProcessor {
 
             if (Object.keys(payload).length > 0) {
                await realtime.publishInstanceEvent(tenantId, instanceId, eventName, payload);
+               if (payload.scanningDetected) {
+                   await realtime.publishInstanceEvent(tenantId, instanceId, 'instance.scanning_detected', payload);
+               } else if (payload.syncingKeys) {
+                   await realtime.publishInstanceEvent(tenantId, instanceId, 'instance.syncing_keys', payload);
+               }
             }
         } catch (err) {
             console.error("Erro no event connectionHandler:", err);

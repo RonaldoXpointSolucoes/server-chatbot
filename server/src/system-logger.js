@@ -169,20 +169,48 @@ function interceptConsole() {
       logBuffer.shift(); // Mantem o buffer num tamanho aceitavel (Custo de RAM)
     }
 
+    const lowerText = text.toLowerCase();
+    const isTimeout = lowerText.includes('timeout') || lowerText.includes('3 minutos') || lowerText.includes('migalha erro timeout');
+    const isActionRequired = isTimeout ||
+      lowerText.includes('watchdog') ||
+      lowerText.includes('presa em status \'connecting\'') ||
+      lowerText.includes('gateway http lento ou inacessível') ||
+      lowerText.includes('erro ao editar mensagem') ||
+      lowerText.includes('ação requerida') ||
+      lowerText.includes('requires_action');
+
+    // Extração automática de tenantId e instanceId para rastreamento
+    const tenantMatch = text.match(/tenant[:\s=]+([a-f0-9\-]{36})/i) || text.match(/company[:\s=]+([a-f0-9\-]{36})/i);
+    const instanceMatch = text.match(/instância\s+([a-zA-Z0-9_\-\s]+?)(?:\s+presa|\s+desconectada|\s+offline|\:|\.|\,|$)/i) ||
+                          text.match(/instanceId[:\s=]+([a-zA-Z0-9_\-]+)/i) ||
+                          text.match(/instance[:\s=]+([a-zA-Z0-9_\-]+)/i);
+    const extractedTenant = tenantMatch ? tenantMatch[1] : null;
+    const extractedInstance = instanceMatch ? instanceMatch[1].trim() : null;
+
     if (level === 'error' || level === 'warn') {
-      errorBuffer.push(logEntry);
+      errorBuffer.push({
+        ...logEntry,
+        tenant_id: extractedTenant,
+        instance_id: extractedInstance,
+        requires_action: isActionRequired
+      });
       if (errorBuffer.length > MAX_ERRORS) errorBuffer.shift();
 
-      if (level === 'error') {
+      if (level === 'error' || isActionRequired) {
         const errorObj = args.find(a => a instanceof Error);
         persistSystemLog({
-          type: 'Backend Error',
+          type: isActionRequired ? 'Action Required Error' : 'Backend Error',
           message: text,
-          level: 'error',
+          level: isTimeout ? 'error' : level,
+          company_id: extractedTenant,
+          tenant_id: extractedTenant,
           payload: {
             stack_trace: errorObj ? errorObj.stack : null,
             environment: APP_ENV,
-            node: APP_NODE
+            node: APP_NODE,
+            requires_action: isActionRequired,
+            instance_id: extractedInstance,
+            is_timeout: isTimeout
           }
         });
       }

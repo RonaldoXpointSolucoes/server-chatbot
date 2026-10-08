@@ -119,6 +119,13 @@ export default function EvolutionModal({
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [engineUser, setEngineUser] = useState<any>(null);
 
+  // Estados de Ciclo de Vida do QR Code e Handshake Realtime
+  const [qrCountdown, setQrCountdown] = useState<number>(30);
+  const [isRenewingQr, setIsRenewingQr] = useState<boolean>(false);
+  const [qrScanned, setQrScanned] = useState<boolean>(false);
+  const [keysSynced, setKeysSynced] = useState<boolean>(false);
+  const [connectedSuccessInfo, setConnectedSuccessInfo] = useState<{ phone?: string; instanceName?: string } | null>(null);
+
   const [tab, setTab] = useState<"existing" | "new">("new");
   const [existingInstances, setExistingInstances] = useState<any[]>([]);
 
@@ -222,6 +229,61 @@ export default function EvolutionModal({
   useEffect(() => {
     pairingLoadingRef.current = pairingLoading;
   }, [pairingLoading]);
+
+  const qrBase64Ref = useRef(qrBase64);
+  const qrCountdownRef = useRef(qrCountdown);
+  const isRenewingQrRef = useRef(isRenewingQr);
+  const qrScannedRef = useRef(qrScanned);
+  const qrCountdownTimerRef = useRef<any>(null);
+
+  useEffect(() => {
+    qrBase64Ref.current = qrBase64;
+  }, [qrBase64]);
+
+  useEffect(() => {
+    qrCountdownRef.current = qrCountdown;
+  }, [qrCountdown]);
+
+  useEffect(() => {
+    isRenewingQrRef.current = isRenewingQr;
+  }, [isRenewingQr]);
+
+  useEffect(() => {
+    qrScannedRef.current = qrScanned;
+  }, [qrScanned]);
+
+  // Loop de contagem regressiva e renovação automática do QR Code (garante QR sempre válido)
+  useEffect(() => {
+    if (connectMode !== 'qr' || !qrBase64 || isTargetConnected || qrScanned || Boolean(successMsg)) {
+      if (qrCountdownTimerRef.current) {
+        clearInterval(qrCountdownTimerRef.current);
+        qrCountdownTimerRef.current = null;
+      }
+      return;
+    }
+
+    qrCountdownTimerRef.current = setInterval(() => {
+      setQrCountdown((prev) => {
+        if (prev <= 1) {
+          console.log("[EvolutionModal] QR Code expirando (TTL 30s). Renovando automaticamente...");
+          setIsRenewingQr(true);
+          const currentInst = existingInstancesRef.current.find(i => i.id === activePollingIdRef.current) || { id: activePollingIdRef.current };
+          if (activePollingIdRef.current) {
+            handleConnectExisting(currentInst, true);
+          }
+          return 30;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => {
+      if (qrCountdownTimerRef.current) {
+        clearInterval(qrCountdownTimerRef.current);
+        qrCountdownTimerRef.current = null;
+      }
+    };
+  }, [connectMode, qrBase64, isTargetConnected, qrScanned, successMsg]);
   // Pré-preenche o número de telefone de pareamento
   useEffect(() => {
     if (activePollingId) {
@@ -395,12 +457,14 @@ export default function EvolutionModal({
       await createInstance(cId, targetInst.id, targetInst.api_key || "", forceNew);
     } catch (err: any) {
       const msg = err?.message || "";
-      useDevStore.getState().addLog({
-        type: 'error',
-        message: `[MIGALHA ERRO 2/7] Falha ao comunicar com motor: ${msg}`,
-        source: 'EvolutionModal',
-        details: err
-      });
+      useDevStore.getState().addBreadcrumb(
+        2,
+        7,
+        `Falha ao comunicar com motor: ${msg}`,
+        'EvolutionModal',
+        { tenantId: cId, instanceId: targetInst.id, error: err },
+        'error'
+      );
       if (msg === "Failed to fetch" || msg.includes("network") || msg.includes("fetch")) {
         console.warn("[EvolutionModal] Oscilação temporária de rede ao acionar motor:", err);
       } else {
@@ -510,22 +574,36 @@ export default function EvolutionModal({
   };
 
   // AÇÃO DE SUCESSO COMPARTILHADA
-  const handleSuccess = (instanceIdToUse?: string | null) => {
+  const handleSuccess = (instanceIdToUse?: string | null, phoneParam?: string) => {
     const finalId = instanceIdToUse || activePollingId || targetInstanceName || useChatStore.getState().connectedInstanceName;
+    const phoneToDisplay = phoneParam || targetInstObj?.phone_number || '';
     setSuccessMsg("Conectado com sucesso! Preparando ambiente...");
+    setConnectedSuccessInfo({
+      phone: phoneToDisplay,
+      instanceName: targetInstObj?.display_name || 'Instância WhatsApp'
+    });
     setLoading(false);
     setQrBase64(null);
-    setActivePollingId(null);
-    setConnectionStatusMessage(null);
+    setIsRenewingQr(false);
+    setConnectionStatusMessage("🎉 Conexão estabelecida com sucesso!");
     setCodeEntered(false);
+    setQrScanned(false);
+    setKeysSynced(false);
+
+    try {
+      playNotificationSound('success');
+    } catch (e) {}
+
     if (finalId) {
       setEvolutionConnection(true, finalId);
       useChatStore.getState().syncEvolutionContacts(finalId);
     }
     setTimeout(() => {
       setSuccessMsg(null);
+      setConnectedSuccessInfo(null);
+      setActivePollingId(null);
       onClose();
-    }, 2500);
+    }, 3200);
   };
 
   // SUBSCRIPTION DO REALTIME DE CONEXÃO
@@ -544,11 +622,14 @@ export default function EvolutionModal({
     // Timeout de segurança contra loop infinito
     const timeoutId = setTimeout(() => {
       if (loadingRef.current || activePollingIdRef.current) {
-        useDevStore.getState().addLog({
-          type: 'error',
-          message: `[MIGALHA ERRO TIMEOUT] O motor demorou mais de 3 minutos para responder`,
-          source: 'EvolutionModal'
-        });
+        useDevStore.getState().addBreadcrumb(
+          4,
+          7,
+          `O motor demorou mais de 3 minutos para responder (Timeout Crítico)`,
+          'EvolutionModal',
+          { tenantId, instanceId: activePollingIdRef.current, forceReset: true },
+          'timeout'
+        );
         setError(
           "Erro: Timeout de Conexão. O Motor demorou muito para responder. Verifique se o seu celular tem acesso à internet ou reinicie a conexão.",
         );
@@ -564,21 +645,47 @@ export default function EvolutionModal({
     channel
       .on("broadcast", { event: "instance.qr_updated" }, (payload: any) => {
         if (payload.payload?.qr_code) {
-          useDevStore.getState().addBreadcrumb(4, 7, `QR Code recebido via Realtime e renderizado na tela`, 'EvolutionModal');
+          useDevStore.getState().addBreadcrumb(4, 7, `QR Code pronto para leitura no celular (30s de validade)`, 'EvolutionModal');
           setQrBase64(payload.payload.qr_code);
+          setQrCountdown(30);
+          setIsRenewingQr(false);
+          setQrScanned(false);
+          setKeysSynced(false);
           setLoading(false);
           if (pairingCodeRef.current) {
             setConnectionStatusMessage("Chave de acesso requerida! Escaneie o QR Code no celular...");
           } else {
-            setConnectionStatusMessage("QR Code pronto! Aguardando leitura no seu celular...");
+            setConnectionStatusMessage("QR Code pronto! Aponte a câmera do WhatsApp para escanear (30s)...");
           }
         }
+      })
+      .on("broadcast", { event: "instance.scanning_detected" }, (payload: any) => {
+        setQrScanned(true);
+        const scanMsg = payload.payload?.message || "📲 Celular detectado! Escaneamento realizado com sucesso. Negociando chaves...";
+        useDevStore.getState().addBreadcrumb(5, 7, scanMsg, 'EvolutionModal');
+        setConnectionStatusMessage("📲 Celular detectado! Escaneamento realizado com sucesso...");
+      })
+      .on("broadcast", { event: "instance.syncing_keys" }, (payload: any) => {
+        setKeysSynced(true);
+        const syncMsg = payload.payload?.message || "🔐 Sincronizando chaves e credenciais criptográficas (Noise Protocol)...";
+        useDevStore.getState().addBreadcrumb(6, 7, syncMsg, 'EvolutionModal');
+        setConnectionStatusMessage("🔐 Sincronizando chaves e credenciais criptográficas...");
       })
       .on("broadcast", { event: "instance.status" }, (payload: any) => {
         const st = payload.payload?.status;
         const lastError = payload.payload?.last_error;
 
-        useDevStore.getState().addBreadcrumb(5, 7, `Broadcast de status recebido: [${st}]`, 'EvolutionModal', payload.payload);
+        if (payload.payload?.scanningDetected || payload.payload?.isNewLogin) {
+          setQrScanned(true);
+          useDevStore.getState().addBreadcrumb(5, 7, `📲 Celular detectado! Escaneamento realizado com sucesso. Negociando chaves...`, 'EvolutionModal', payload.payload);
+          setConnectionStatusMessage("📲 Celular detectado! Escaneamento realizado com sucesso...");
+        } else if (payload.payload?.syncingKeys) {
+          setKeysSynced(true);
+          useDevStore.getState().addBreadcrumb(6, 7, `🔐 Sincronizando chaves e credenciais criptográficas (Noise Protocol)...`, 'EvolutionModal', payload.payload);
+          setConnectionStatusMessage("🔐 Sincronizando chaves e credenciais criptográficas...");
+        } else {
+          useDevStore.getState().addBreadcrumb(5, 7, `Broadcast de status recebido: [${st}]`, 'EvolutionModal', payload.payload);
+        }
 
         if (lastError && (lastError.includes("Chave de Acesso") || lastError.includes("Passkey") || lastError.includes("PASSKEY_BLOCKED"))) {
           useDevStore.getState().addLog({
@@ -625,13 +732,13 @@ export default function EvolutionModal({
                 setConnectionStatusMessage("Aguardando pareamento no celular...");
               }
             }
-          } else {
-            setConnectionStatusMessage("Escaneie o QR Code no seu WhatsApp.");
+          } else if (!qrScannedRef.current) {
+            setConnectionStatusMessage("Aponte a câmera do WhatsApp para o QR Code.");
           }
-        } else if ((st === "connected" || st === "connected_local") && (payload.payload?.authenticated === true || payload.payload?.is_authenticated === true) && !qrBase64Ref.current) {
+        } else if (st === "connected" || st === "connected_local") {
           useDevStore.getState().addBreadcrumb(6, 7, `Conexão efetuada no celular! Finalizando vínculo...`, 'EvolutionModal');
           useDevStore.getState().addBreadcrumb(7, 7, `Instância autenticada e operacional (${st})`, 'EvolutionModal');
-          handleSuccess();
+          handleSuccess(activePollingIdRef.current, payload.payload?.phone);
         }
       })
       .subscribe((status) => {
@@ -667,10 +774,10 @@ export default function EvolutionModal({
 
               const isAuth = st?.data?.is_authenticated === true || st?.data?.authenticated === true;
               const isPairingModeActive = pairingLoadingRef.current || Boolean(pairingCodeRef.current);
-              if ((st?.data?.status === "connected" || st?.data?.status === "connected_local") && isAuth && !runtimeQr && !isPairingModeActive) {
+              if ((st?.data?.status === "connected" || st?.data?.status === "connected_local") && isAuth && !isPairingModeActive) {
                 useDevStore.getState().addBreadcrumb(6, 7, `Conexão efetuada no celular! Finalizando vínculo...`, 'EvolutionModal');
                 useDevStore.getState().addBreadcrumb(7, 7, `Instância autenticada e operacional (${st?.data?.status})`, 'EvolutionModal');
-                handleSuccess();
+                handleSuccess(activePollingIdRef.current, st?.data?.phone_number);
                 clearInterval(pollInterval);
               } else if (st?.data?.status === "connecting" || st?.data?.status === "qr_ready" || runtimeQr) {
                 if (pairingCodeRef.current) {
@@ -2749,49 +2856,168 @@ export default function EvolutionModal({
                     {/* Conteúdo Principal baseado na Aba Selecionada */}
                     {connectMode === 'qr' ? (
                       <div className="w-full flex flex-col items-center animate-in fade-in zoom-in-95 duration-300">
-                        {/* Slot superior: QR Code com Glow ou Card de Sucesso */}
+                        {/* Slot superior: QR Code com Glow, Timer ou Card de Sucesso VIP */}
                         <div className="w-full flex justify-center items-center mb-5">
-                          {codeEntered ? (
-                            <div className="w-full max-w-sm flex flex-col items-center py-5 px-5 bg-emerald-500/10 border border-emerald-500/30 rounded-3xl shadow-[0_0_30px_rgba(0,168,132,0.18)] animate-in zoom-in duration-300 backdrop-blur-md">
-                              <div className="w-14 h-14 bg-emerald-500/20 rounded-full border-2 border-emerald-500/40 flex items-center justify-center mb-3 shadow-inner">
-                                <CheckCircle size={30} className="text-[#00a884] animate-bounce" />
+                          {isTargetConnected || successMsg || connectedSuccessInfo ? (
+                            /* Card de Sucesso VIP Assertivo */
+                            <div className="w-full max-w-sm flex flex-col items-center py-6 px-6 bg-gradient-to-b from-emerald-500/15 to-teal-900/20 border-2 border-emerald-500/50 rounded-3xl shadow-[0_0_50px_rgba(16,185,129,0.25)] animate-in zoom-in duration-300 backdrop-blur-xl relative overflow-hidden">
+                              <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none" />
+                              <div className="relative mb-3">
+                                <div className="w-16 h-16 bg-emerald-500/20 rounded-full border-2 border-emerald-400/50 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+                                  <ShieldCheck size={36} className="text-emerald-400 animate-bounce" />
+                                </div>
+                                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                  <span className="relative inline-flex rounded-full h-4 w-4 bg-emerald-500 border-2 border-white dark:border-[#0b141a]"></span>
+                                </span>
                               </div>
-                              <h4 className="text-base font-extrabold text-gray-900 dark:text-white text-center mb-1">
-                                QR Code Lido com Sucesso!
+
+                              <h4 className="text-lg font-black text-gray-900 dark:text-white text-center mb-1 tracking-tight">
+                                WhatsApp Conectado com Sucesso!
                               </h4>
                               <p className="text-xs text-gray-500 dark:text-[#8696a0] text-center mb-4 px-2 leading-relaxed">
-                                O WhatsApp iniciou o vínculo com seu celular. Clique abaixo para prosseguir:
+                                A sessão foi vinculada com sucesso. Criptografia de ponta a ponta ativa e verificada.
                               </p>
-                              <button
-                                onClick={() => handleSuccess()}
-                                className="w-full py-3 bg-gradient-to-r from-[#00a884] to-teal-600 hover:from-[#008f6f] hover:to-teal-700 text-white rounded-2xl font-bold transition-all text-xs flex items-center justify-center gap-2 shadow-lg cursor-pointer animate-pulse"
-                              >
-                                <CheckCircle size={16} /> Confirmar e Liberar Conexão
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="relative p-4 bg-white dark:bg-[#0b141a] rounded-3xl shadow-[0_20px_40px_rgba(0,0,0,0.25),0_0_30px_rgba(0,168,132,0.15)] border border-gray-200 dark:border-[#202c33] flex justify-center items-center transition-all duration-300 group">
-                              <div className="absolute -inset-1 bg-gradient-to-r from-[#00a884]/30 to-teal-500/30 rounded-3xl blur-md opacity-75 group-hover:opacity-100 transition duration-500"></div>
-                              <div className="relative bg-white p-3 rounded-2xl z-10 shadow-inner">
-                                {qrBase64 ? (
-                                  <div className="relative overflow-hidden rounded-xl">
-                                    <img
-                                      src={qrBase64}
-                                      alt="QR Code WhatsApp"
-                                      className="w-[200px] h-[200px] sm:w-[220px] sm:h-[220px] rounded-xl object-contain"
-                                    />
+
+                              {/* Chip de Informação do Aparelho Conectado */}
+                              <div className="w-full bg-black/20 dark:bg-black/40 border border-emerald-500/30 rounded-2xl p-3 flex items-center justify-between mb-4 shadow-sm">
+                                <div className="flex items-center gap-2.5 text-left">
+                                  <div className="w-8 h-8 rounded-xl bg-emerald-500/20 flex items-center justify-center text-emerald-400">
+                                    <Smartphone size={16} />
                                   </div>
-                                ) : (
-                                  <div className="w-[200px] h-[200px] sm:w-[220px] sm:h-[220px] rounded-xl bg-gray-50 dark:bg-[#111b21] flex flex-col items-center justify-center gap-3 border border-dashed border-gray-300 dark:border-white/10">
-                                    <div className="p-3.5 rounded-full bg-[#00a884]/10 dark:bg-[#00a884]/20 animate-pulse">
-                                      <Loader2 className="animate-spin text-[#00a884]" size={30} />
-                                    </div>
-                                    <span className="text-xs font-semibold text-gray-500 dark:text-[#8696a0]">
-                                      Gerando QR Code oficial...
+                                  <div className="flex flex-col">
+                                    <span className="text-[11px] font-bold text-gray-800 dark:text-white">
+                                      {targetInstObj?.display_name || 'Instância WhatsApp'}
+                                    </span>
+                                    <span className="text-[10px] font-mono text-emerald-400 font-semibold">
+                                      {formatPhoneNumber(connectedSuccessInfo?.phone || targetInstObj?.phone_number || '') || 'WhatsApp Conectado'}
                                     </span>
                                   </div>
-                                )}
+                                </div>
+                                <span className="px-2.5 py-1 rounded-full text-[9px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                                  Online
+                                </span>
                               </div>
+
+                              <button
+                                onClick={() => {
+                                  setSuccessMsg(null);
+                                  setConnectedSuccessInfo(null);
+                                  onClose();
+                                }}
+                                className="w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl font-bold transition-all text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 cursor-pointer active:scale-95"
+                              >
+                                <CheckCircle size={16} /> Concluir e Ir para o Chat
+                              </button>
+                            </div>
+                          ) : qrScanned ? (
+                            /* Card de Celular Detectado / Negociando Chaves */
+                            <div className="w-full max-w-sm flex flex-col items-center py-6 px-5 bg-gradient-to-b from-teal-500/10 to-emerald-900/10 border border-emerald-500/30 rounded-3xl shadow-[0_0_30px_rgba(0,168,132,0.18)] animate-in zoom-in duration-300 backdrop-blur-md">
+                              <div className="w-16 h-16 bg-teal-500/20 rounded-full border-2 border-teal-400/50 flex items-center justify-center mb-3 shadow-inner">
+                                <Loader2 size={32} className="animate-spin text-teal-400" />
+                              </div>
+                              <h4 className="text-base font-extrabold text-gray-900 dark:text-white text-center mb-1">
+                                Celular Detectado!
+                              </h4>
+                              <p className="text-xs text-gray-500 dark:text-[#8696a0] text-center mb-3 px-2 leading-relaxed">
+                                {keysSynced
+                                  ? "Sincronizando chaves de criptografia e credenciais..."
+                                  : "Escaneamento confirmado pelo WhatsApp. Finalizando handshake seguro..."}
+                              </p>
+                              <div className="w-full bg-emerald-500/10 border border-emerald-500/20 rounded-xl py-2 px-3 flex items-center justify-center gap-2">
+                                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                                <span className="text-[11px] font-mono font-bold text-emerald-300">
+                                  {keysSynced ? "Passo 6/7: Negociando Chaves" : "Passo 5/7: Handshake Ativo"}
+                                </span>
+                              </div>
+                            </div>
+                          ) : (
+                            /* Moldura do QR Code com Glow, Timer e Auto-Renovação */
+                            <div className="flex flex-col items-center">
+                              {/* Barra Superior de Validade e TTL */}
+                              {qrBase64 && (
+                                <div className="w-full max-w-[240px] mb-2.5 flex flex-col gap-1 animate-in fade-in duration-300">
+                                  <div className="flex items-center justify-between text-[10px] font-mono font-bold">
+                                    <span className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
+                                      <RefreshCcw size={11} className={isRenewingQr ? "animate-spin text-emerald-400" : "text-slate-400"} />
+                                      {isRenewingQr ? "Renovando QR Code..." : "Validade do QR Code:"}
+                                    </span>
+                                    <span className={cn(
+                                      "px-2 py-0.5 rounded-full text-[10px] font-black font-mono",
+                                      qrCountdown > 12 
+                                        ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" 
+                                        : qrCountdown > 5 
+                                        ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                                        : "bg-rose-500/20 text-rose-400 border border-rose-500/30 animate-pulse"
+                                    )}>
+                                      {qrCountdown}s
+                                    </span>
+                                  </div>
+                                  <div className="w-full h-1.5 bg-gray-200 dark:bg-white/10 rounded-full overflow-hidden shadow-inner">
+                                    <div 
+                                      className={cn(
+                                        "h-full transition-all duration-1000 ease-linear rounded-full",
+                                        qrCountdown > 12 
+                                          ? "bg-gradient-to-r from-emerald-500 to-teal-400" 
+                                          : qrCountdown > 5 
+                                          ? "bg-gradient-to-r from-amber-500 to-yellow-400"
+                                          : "bg-gradient-to-r from-rose-500 to-red-400"
+                                      )}
+                                      style={{ width: `${Math.max(0, Math.min(100, (qrCountdown / 30) * 100))}%` }}
+                                    />
+                                  </div>
+                                </div>
+                              )}
+
+                              <div className="relative p-4 bg-white dark:bg-[#0b141a] rounded-3xl shadow-[0_20px_40px_rgba(0,0,0,0.25),0_0_30px_rgba(0,168,132,0.15)] border border-gray-200 dark:border-[#202c33] flex justify-center items-center transition-all duration-300 group">
+                                <div className="absolute -inset-1 bg-gradient-to-r from-[#00a884]/30 to-teal-500/30 rounded-3xl blur-md opacity-75 group-hover:opacity-100 transition duration-500"></div>
+                                <div className="relative bg-white p-3 rounded-2xl z-10 shadow-inner">
+                                  {qrBase64 ? (
+                                    <div className="relative overflow-hidden rounded-xl">
+                                      {isRenewingQr && (
+                                        <div className="absolute inset-0 bg-white/80 backdrop-blur-xs z-20 flex flex-col items-center justify-center gap-2">
+                                          <Loader2 className="animate-spin text-emerald-600" size={26} />
+                                          <span className="text-[10px] font-bold text-gray-700">Atualizando QR...</span>
+                                        </div>
+                                      )}
+                                      <img
+                                        src={qrBase64}
+                                        alt="QR Code WhatsApp"
+                                        className="w-[200px] h-[200px] sm:w-[220px] sm:h-[220px] rounded-xl object-contain"
+                                      />
+                                    </div>
+                                  ) : (
+                                    <div className="w-[200px] h-[200px] sm:w-[220px] sm:h-[220px] rounded-xl bg-gray-50 dark:bg-[#111b21] flex flex-col items-center justify-center gap-3 border border-dashed border-gray-300 dark:border-white/10 p-3 text-center">
+                                      <div className="p-3.5 rounded-full bg-[#00a884]/10 dark:bg-[#00a884]/20 animate-pulse">
+                                        <Loader2 className="animate-spin text-[#00a884]" size={30} />
+                                      </div>
+                                      <span className="text-xs font-semibold text-gray-500 dark:text-[#8696a0]">
+                                        Gerando QR Code oficial...
+                                      </span>
+                                      <span className="text-[10px] text-gray-400 dark:text-gray-500 leading-tight">
+                                        Conectando ao motor WhatsApp
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Botão de Atualizar QR Code Manualmente */}
+                              {qrBase64 && (
+                                <button
+                                  onClick={() => {
+                                    setIsRenewingQr(true);
+                                    const currentInst = existingInstancesRef.current.find(i => i.id === activePollingIdRef.current) || { id: activePollingIdRef.current };
+                                    if (activePollingIdRef.current) {
+                                      handleConnectExisting(currentInst, true);
+                                    }
+                                  }}
+                                  className="mt-2.5 text-[11px] text-slate-500 hover:text-emerald-500 dark:text-slate-400 dark:hover:text-emerald-400 flex items-center gap-1.5 transition-colors font-medium py-1 px-3 rounded-lg hover:bg-emerald-500/10 cursor-pointer active:scale-95"
+                                >
+                                  <RefreshCcw size={12} className={isRenewingQr ? "animate-spin" : ""} />
+                                  <span>Atualizar QR Code manualmente</span>
+                                </button>
+                              )}
                             </div>
                           )}
                         </div>
@@ -3016,14 +3242,18 @@ export default function EvolutionModal({
                       <button
                         onClick={() => {
                           setQrBase64(null);
-                          setConnectionStatusMessage(null);
+                          setConnectionStatusMessage("Solicitando novo QR Code...");
                           setPairingCode(null);
                           setLoading(true);
+                          setIsRenewingQr(true);
+                          setQrCountdown(30);
+                          setQrScanned(false);
+                          setKeysSynced(false);
                           handleConnectExisting(existingInstances.find(i => i.id === activePollingId), true);
                         }}
                         className="flex-1 py-3 px-4 bg-gradient-to-r from-[#00a884] to-teal-600 hover:from-[#008f6f] hover:to-teal-700 text-white rounded-xl transition-all font-bold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-md active:scale-95"
                       >
-                        <RefreshCcw size={14} className="animate-spin-once" /> Atualizar QR / Código
+                        <RefreshCcw size={14} className={isRenewingQr ? "animate-spin" : "animate-spin-once"} /> Atualizar QR / Código
                       </button>
                       <button
                         onClick={() => {

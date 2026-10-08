@@ -120,6 +120,8 @@ router.post('/instances/:instanceId/connect', requireTenant, async (req, res) =>
                 sessionCaches.get(instanceId).clear();
                 sessionCaches.delete(instanceId);
             }
+            sessionManager.authenticatedSessions.delete(instanceId);
+            sessionManager.pairingPendingSync.delete(instanceId);
             await supabase.from('wa_auth_credentials').delete().eq('instance_id', instanceId);
             await supabase.from('wa_auth_keys').delete().eq('instance_id', instanceId);
             await supabase.from('whatsapp_instance_runtime').delete().eq('instance_id', instanceId);
@@ -394,8 +396,8 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                         content.edit.remoteJid = targetJid;
                     }
 
-                    // Se o ID for um ID temporário EDGE_... atualiza a wa_outgoing_messages se ainda pendente
-                    if (content.edit.id && String(content.edit.id).startsWith('EDGE_')) {
+                    // Se o ID for um ID temporário EDGE_... ou optimistic-... atualiza wa_outgoing_messages / messages diretamente sem acionar Baileys
+                    if (content.edit.id && (String(content.edit.id).startsWith('EDGE_') || String(content.edit.id).startsWith('optimistic-'))) {
                         const rawUuid = String(content.edit.id).replace('EDGE_', '');
                         const formattedUuid = rawUuid.length === 32 ? 
                             `${rawUuid.slice(0,8)}-${rawUuid.slice(8,12)}-${rawUuid.slice(12,16)}-${rawUuid.slice(16,20)}-${rawUuid.slice(20)}` : rawUuid;
@@ -412,9 +414,18 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                                     .from('wa_outgoing_messages')
                                     .update({ body: content.text })
                                     .eq('id', formattedUuid);
-                                console.log(`[Invoke Edit] Mensagem pendente na fila ${formattedUuid} atualizada para novo texto.`);
+                                console.log(`[Invoke Edit] Mensagem pendente na fila ${formattedUuid} atualizada para novo texto antes do envio.`);
                             }
+
+                            // Sincroniza também no Supabase messages
+                            await supabase
+                                .from('messages')
+                                .update({ text_content: content.text })
+                                .eq('whatsapp_message_id', content.edit.id);
+
                         } catch (e) {}
+
+                        return res.json({ ok: true, result: { key: content.edit }, updatedOutbox: true });
                     }
                 }
 
@@ -425,21 +436,30 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                     await new Promise(r => setTimeout(r, 1000));
                 }
 
-                const sendFn = sock.originalSendMessage || sock.sendMessage;
-                const sent = await sendFn(targetJid, content);
-                
-                // Se for exclusão de mensagem, atualiza o status na tabela messages do Supabase
-                if (content.delete && content.delete.id) {
-                    supabase.from('messages')
-                        .update({ status: 'deleted' })
-                        .eq('whatsapp_message_id', content.delete.id)
-                        .then(({ error }) => {
-                            if (error) console.error('[Invoke Delete] Erro ao atualizar status no banco:', error);
-                            else console.log('[Invoke Delete] Status da mensagem atualizado para deleted no banco:', content.delete.id);
-                        });
-                }
+                try {
+                    const sendFn = sock.originalSendMessage || sock.sendMessage;
+                    const sent = await sendFn(targetJid, content);
+                    
+                    // Se for exclusão de mensagem, atualiza o status na tabela messages do Supabase
+                    if (content.delete && content.delete.id) {
+                        supabase.from('messages')
+                            .update({ status: 'deleted' })
+                            .eq('whatsapp_message_id', content.delete.id)
+                            .then(({ error }) => {
+                                if (error) console.error('[Invoke Delete] Erro ao atualizar status no banco:', error);
+                                else console.log('[Invoke Delete] Status da mensagem atualizado para deleted no banco:', content.delete.id);
+                            });
+                    }
 
-                return res.json({ ok: true, result: sent, key: sent?.key });
+                    return res.json({ ok: true, result: sent, key: sent?.key });
+                } catch (actionErr) {
+                    console.warn(`[Invoke ${content.delete ? 'DELETE' : 'EDIT'}] Falha operacional no WhatsApp:`, actionErr.message);
+                    return res.status(400).json({
+                        ok: false,
+                        error: `O WhatsApp não permitiu ${content.delete ? 'apagar' : 'editar'} a mensagem: ${actionErr.message || 'Prazo limite expirado.'}`,
+                        code: 'ACTION_FAILED'
+                    });
+                }
             } else if (jid && content) {
                 let messageType = 'text';
                 let body = content.text || '';

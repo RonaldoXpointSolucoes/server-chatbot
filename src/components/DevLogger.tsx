@@ -176,7 +176,7 @@ export default function DevLogger() {
   
   // Estados para agrupamento de erros e filtragem avançada
   const [viewMode, setViewMode] = useState<'grouped' | 'timeline'>('grouped');
-  const [logFilter, setLogFilter] = useState<'all' | 'node' | 'error' | 'warn'>('all');
+  const [logFilter, setLogFilter] = useState<'all' | 'action' | 'error' | 'breadcrumbs' | 'node' | 'warn'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [timeFilter, setTimeFilter] = useState<'all' | '15m' | '1h' | 'today'>('all');
 
@@ -190,8 +190,12 @@ export default function DevLogger() {
   const groupedAndFilteredLogs = useMemo(() => {
     let filtered = logs;
     
-    // 1. Filtro de Origem / Nível
-    if (logFilter === 'node') {
+    // 1. Filtro de Origem / Nível / Ação
+    if (logFilter === 'action') {
+      filtered = filtered.filter(l => l.requiresAction);
+    } else if (logFilter === 'breadcrumbs') {
+      filtered = filtered.filter(l => l.step || (l.message || '').includes('[MIGALHA'));
+    } else if (logFilter === 'node') {
       filtered = filtered.filter(l => 
         l.source.toLowerCase().includes('server') || 
         l.source.toLowerCase().includes('node') ||
@@ -224,7 +228,9 @@ export default function DevLogger() {
         const msgMatch = (l.message || '').toLowerCase().includes(q);
         const srcMatch = (l.source || '').toLowerCase().includes(q);
         const detailsMatch = l.details ? JSON.stringify(l.details).toLowerCase().includes(q) : false;
-        return msgMatch || srcMatch || detailsMatch;
+        const tenantMatch = (l.tenantId || '').toLowerCase().includes(q);
+        const instanceMatch = (l.instanceId || '').toLowerCase().includes(q);
+        return msgMatch || srcMatch || detailsMatch || tenantMatch || instanceMatch;
       });
     }
 
@@ -251,6 +257,8 @@ export default function DevLogger() {
         if (new Date(log.timestamp) > new Date(group.latestTimestamp)) {
           group.latestTimestamp = log.timestamp;
           group.details = log.details || group.details;
+          if (log.requiresAction) group.requiresAction = true;
+          if (log.severity === 'critical') group.severity = 'critical';
         }
       } else {
         groupsMap.set(key, {
@@ -263,7 +271,12 @@ export default function DevLogger() {
           firstTimestamp: log.timestamp,
           count: 1,
           occurrences: [log],
-          isServerNode: log.source.toLowerCase().includes('server') || log.source.toLowerCase().includes('node')
+          isServerNode: log.source.toLowerCase().includes('server') || log.source.toLowerCase().includes('node'),
+          requiresAction: log.requiresAction,
+          severity: log.severity,
+          tenantId: log.tenantId,
+          instanceId: log.instanceId,
+          step: log.step
         });
       }
     });
@@ -271,6 +284,8 @@ export default function DevLogger() {
     return Array.from(groupsMap.values());
   }, [logs, viewMode, logFilter, searchQuery, timeFilter]);
 
+  const actionLogsCount = useMemo(() => logs.filter(l => l.requiresAction).length, [logs]);
+  const breadcrumbLogsCount = useMemo(() => logs.filter(l => l.step || (l.message || '').includes('[MIGALHA')).length, [logs]);
   const nodeLogsCount = useMemo(() => {
     return logs.filter(l => 
       l.source.toLowerCase().includes('server') || 
@@ -3862,13 +3877,15 @@ export default function DevLogger() {
                       </button>
                     </div>
 
-                    {/* Dropdown Unificado: Tipo de Log (Consolidação de Todos, Node, Erros, Alertas) */}
+                    {/* Dropdown Unificado: Tipo de Log (Consolidação de Todos, Ação Requerida, Erros, Migalhas, Node, Alertas) */}
                     <div className="relative shrink-0">
                       <select
                         value={logFilter}
                         onChange={(e) => setLogFilter(e.target.value as any)}
                         className={`appearance-none bg-[#0e161c] border border-white/10 rounded-xl pl-2.5 pr-7 py-1.5 text-[10px] font-mono font-black uppercase tracking-wider cursor-pointer transition-all focus:outline-none focus:border-indigo-500/60 ${
+                          logFilter === 'action' ? 'text-rose-300 border-rose-500/50 bg-rose-950/30' :
                           logFilter === 'error' ? 'text-rose-300 border-rose-500/40 bg-rose-950/20' :
+                          logFilter === 'breadcrumbs' ? 'text-cyan-300 border-cyan-500/40 bg-cyan-950/20' :
                           logFilter === 'warn' ? 'text-amber-300 border-amber-500/40 bg-amber-950/20' :
                           logFilter === 'node' ? 'text-purple-300 border-purple-500/40 bg-purple-950/20' :
                           'text-[#d1d7db] hover:text-white'
@@ -3876,8 +3893,10 @@ export default function DevLogger() {
                         title="Filtrar por tipo de log"
                       >
                         <option value="all" className="bg-[#0e161c] text-white">📋 Todos ({logs.length})</option>
+                        <option value="action" className="bg-[#0e161c] text-rose-300 font-bold">🚨 Ação Requerida ({actionLogsCount})</option>
+                        <option value="error" className="bg-[#0e161c] text-rose-400">🔴 Erros ({errorLogsCount})</option>
+                        <option value="breadcrumbs" className="bg-[#0e161c] text-cyan-300">📍 Migalhas ({breadcrumbLogsCount})</option>
                         <option value="node" className="bg-[#0e161c] text-purple-300">🖥️ Servidor Node ({nodeLogsCount})</option>
-                        <option value="error" className="bg-[#0e161c] text-rose-300">🔴 Erros ({errorLogsCount})</option>
                         <option value="warn" className="bg-[#0e161c] text-amber-300">🟡 Alertas ({warnLogsCount})</option>
                       </select>
                       <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-[#8696a0] pointer-events-none" />
@@ -4055,28 +4074,31 @@ export default function DevLogger() {
                       const isSucc = log.type === 'success';
                       const isInf = log.type === 'info';
                       const isNode = log.isServerNode || log.source?.toLowerCase().includes('server') || log.source?.toLowerCase().includes('node');
+                      const isAction = log.requiresAction || log.severity === 'critical';
                       const isExpanded = !!expandedLogs[log.id];
 
                       return (
                         <div 
                           key={log.id} 
                           className={`p-4 rounded-2xl border transition-all duration-300 flex flex-col gap-2.5 shadow-xl backdrop-blur-xl ${
-                            isNode && isErr
-                              ? 'bg-gradient-to-br from-rose-950/30 via-[#0e141a] to-[#121b22] border-l-4 border-l-rose-500 border-rose-500/30 text-rose-100 shadow-[0_8px_30px_rgba(244,63,94,0.12)]'
-                              : isErr 
-                                ? 'bg-gradient-to-br from-rose-950/20 via-[#0e141a] to-[#121b22] border-l-4 border-l-rose-500 border-rose-500/30 text-rose-100 shadow-[0_8px_30px_rgba(244,63,94,0.1)]' 
-                                : isWrn 
-                                  ? 'bg-gradient-to-br from-amber-950/20 via-[#0e141a] to-[#121b22] border-l-4 border-l-amber-400 border-amber-500/30 text-amber-100 shadow-[0_8px_30px_rgba(245,158,11,0.08)]' 
-                                  : isSucc 
-                                    ? 'bg-gradient-to-br from-emerald-950/20 via-[#0e141a] to-[#121b22] border-l-4 border-l-emerald-400 border-emerald-500/30 text-emerald-100 shadow-[0_8px_30px_rgba(16,185,129,0.08)]' 
-                                    : isInf 
-                                      ? 'bg-gradient-to-br from-blue-950/20 via-[#0e141a] to-[#121b22] border-l-4 border-l-blue-400 border-blue-500/30 text-blue-100 shadow-[0_8px_30px_rgba(59,130,246,0.08)]' 
-                                      : 'bg-[#10171d] border-white/10 text-[#d1d7db] hover:border-white/20'
+                            isAction
+                              ? 'bg-gradient-to-br from-rose-950/40 via-[#0e141a] to-[#121b22] border-l-4 border-l-rose-500 border-rose-500/40 text-rose-100 shadow-[0_8px_30px_rgba(244,63,94,0.18)] ring-1 ring-rose-500/20'
+                              : isNode && isErr
+                                ? 'bg-gradient-to-br from-rose-950/30 via-[#0e141a] to-[#121b22] border-l-4 border-l-rose-500 border-rose-500/30 text-rose-100 shadow-[0_8px_30px_rgba(244,63,94,0.12)]'
+                                : isErr 
+                                  ? 'bg-gradient-to-br from-rose-950/20 via-[#0e141a] to-[#121b22] border-l-4 border-l-rose-500 border-rose-500/30 text-rose-100 shadow-[0_8px_30px_rgba(244,63,94,0.1)]' 
+                                  : isWrn 
+                                    ? 'bg-gradient-to-br from-amber-950/20 via-[#0e141a] to-[#121b22] border-l-4 border-l-amber-400 border-amber-500/30 text-amber-100 shadow-[0_8px_30px_rgba(245,158,11,0.08)]' 
+                                    : isSucc 
+                                      ? 'bg-gradient-to-br from-emerald-950/20 via-[#0e141a] to-[#121b22] border-l-4 border-l-emerald-400 border-emerald-500/30 text-emerald-100 shadow-[0_8px_30px_rgba(16,185,129,0.08)]' 
+                                      : isInf 
+                                        ? 'bg-gradient-to-br from-blue-950/20 via-[#0e141a] to-[#121b22] border-l-4 border-l-blue-400 border-blue-500/30 text-blue-100 shadow-[0_8px_30px_rgba(59,130,246,0.08)]' 
+                                        : 'bg-[#10171d] border-white/10 text-[#d1d7db] hover:border-white/20'
                           }`}
                         >
                           {/* Cabeçalho do Card */}
                           <div className="flex justify-between items-center select-none gap-2 flex-wrap">
-                            <div className="flex items-center gap-2 font-mono text-[10px] font-black uppercase tracking-wider min-w-0">
+                            <div className="flex items-center gap-1.5 font-mono text-[10px] font-black uppercase tracking-wider min-w-0 flex-wrap">
                               
                               {/* Tag de Origem Unificada */}
                               {isNode ? (
@@ -4090,12 +4112,30 @@ export default function DevLogger() {
                               )}
 
                               {/* Badge de Nível / Severidade */}
-                              {isErr && (
+                              {isAction && (
+                                <span className="flex items-center gap-1 bg-rose-500/30 border border-rose-500/50 text-rose-200 px-2 py-0.5 rounded-lg text-[9px] font-black animate-pulse shadow-sm">
+                                  🚨 {log.severity === 'critical' ? 'CRÍTICO' : 'AÇÃO REQUERIDA'}
+                                </span>
+                              )}
+
+                              {log.step && (
+                                <span className={`flex items-center gap-1 px-2 py-0.5 rounded-lg text-[9px] font-bold border ${
+                                  log.step.status === 'timeout' || log.step.status === 'error'
+                                    ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                                    : log.step.status === 'success'
+                                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                                      : 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40'
+                                }`}>
+                                  📍 PASSO {log.step.current}/{log.step.total}
+                                </span>
+                              )}
+
+                              {isErr && !isAction && (
                                 <span className="flex items-center gap-1 bg-rose-500/20 border border-rose-500/40 text-rose-300 px-2 py-0.5 rounded-lg text-[9px] font-bold">
                                   <AlertTriangle size={11} className="text-rose-400 animate-pulse shrink-0" /> ERRO
                                 </span>
                               )}
-                              {isWrn && (
+                              {isWrn && !isAction && (
                                 <span className="flex items-center gap-1 bg-amber-500/20 border border-amber-500/40 text-amber-300 px-2 py-0.5 rounded-lg text-[9px] font-bold">
                                   <AlertTriangle size={11} className="text-amber-400 shrink-0" /> ALERTA
                                 </span>
@@ -4105,9 +4145,21 @@ export default function DevLogger() {
                                   <CheckCircle2 size={11} className="text-emerald-400 shrink-0" /> SUCESSO
                                 </span>
                               )}
-                              {isInf && (
+                              {isInf && !log.step && (
                                 <span className="flex items-center gap-1 bg-blue-500/20 border border-blue-500/40 text-blue-300 px-2 py-0.5 rounded-lg text-[9px] font-bold">
                                   <Info size={11} className="text-blue-400 shrink-0" /> INFO
+                                </span>
+                              )}
+
+                              {/* Chips de Correlação Tenant / Instância */}
+                              {log.tenantId && (
+                                <span className="text-[9px] bg-white/5 border border-white/10 text-[#8696a0] px-1.5 py-0.5 rounded font-mono" title={`Tenant ID: ${log.tenantId}`}>
+                                  🏢 {log.tenantId.substring(0, 8)}...
+                                </span>
+                              )}
+                              {log.instanceId && (
+                                <span className="text-[9px] bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 px-1.5 py-0.5 rounded font-mono font-bold" title={`Instância ID: ${log.instanceId}`}>
+                                  📱 {log.instanceId}
                                 </span>
                               )}
 

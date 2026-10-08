@@ -26,12 +26,17 @@ export function isLid(jid) {
 export function extractMessageContent(msg) {
     if (!msg || !msg.message) return null;
     let content = msg.message;
-    if (content.editedMessage) content = content.editedMessage.message || content.editedMessage;
-    if (content.viewOnceMessage) content = content.viewOnceMessage.message;
-    if (content.viewOnceMessageV2) content = content.viewOnceMessageV2.message;
-    if (content.viewOnceMessageV2Extension) content = content.viewOnceMessageV2Extension.message;
-    if (content.ephemeralMessage) content = content.ephemeralMessage.message;
-    if (content.documentWithCaptionMessage) content = content.documentWithCaptionMessage.message;
+    let iterations = 0;
+    while (content && iterations < 6) {
+        iterations++;
+        if (content.editedMessage) { content = content.editedMessage.message || content.editedMessage; continue; }
+        if (content.viewOnceMessage) { content = content.viewOnceMessage.message; continue; }
+        if (content.viewOnceMessageV2) { content = content.viewOnceMessageV2.message; continue; }
+        if (content.viewOnceMessageV2Extension) { content = content.viewOnceMessageV2Extension.message; continue; }
+        if (content.ephemeralMessage) { content = content.ephemeralMessage.message; continue; }
+        if (content.documentWithCaptionMessage) { content = content.documentWithCaptionMessage.message; continue; }
+        break;
+    }
     return content;
 }
 

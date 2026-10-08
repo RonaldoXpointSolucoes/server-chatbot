@@ -624,6 +624,7 @@ interface ChatState {
   addMessageLocally: (contactId: string, msg: MessageType, options?: any) => void;
   removeMessageLocally: (contactId: string, messageId: string) => void;
   updateMessageStatusLocally: (identifier: { whatsapp_id?: string; mock_id?: string; id?: string; text?: string }, newStatus: string, newWhatsappId?: string) => void;
+  updateMessageLocally: (identifier: { whatsapp_id?: string; mock_id?: string; id?: string }, updates: Partial<MessageType>) => void;
   scheduleStatusReconciliation: (contactId: string, waId: string, text: string) => void;
   upsertContactLocally: (contact: ContactRow) => void;
   sendPresenceUpdate: (contactId: string, presence: 'composing' | 'recording' | 'paused' | 'available' | 'unavailable', instanceName?: string) => Promise<void>;
@@ -2420,7 +2421,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       );
 
       if (isRecoverableViaOutbox) {
-        console.warn('[sendHumanMessage] Gateway HTTP lento ou inacessível. Ativando envio resiliente direto via Outbox do Supabase...');
+        console.log('[sendHumanMessage] Gateway HTTP ocupado/lento. Ativando envio resiliente direto via Outbox do Supabase...');
         try {
           const { data: outboxMsg, error: outboxErr } = await supabase
             .from('wa_outgoing_messages')
@@ -2662,7 +2663,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
         id: msgToEdit.whatsapp_id
       };
 
-      await editNativeMessage(state.tenantInfo.id, resolvedInstanceId, targetJid, newText, messageKey, apiKey);
+      const isUnconfirmed = String(msgToEdit.whatsapp_id).startsWith('EDGE_') || String(msgToEdit.whatsapp_id).startsWith('optimistic-');
+
+      try {
+        await editNativeMessage(state.tenantInfo.id, resolvedInstanceId, targetJid, newText, messageKey, apiKey);
+      } catch (nativeErr: any) {
+        if (!isUnconfirmed) {
+          throw nativeErr;
+        }
+        console.log('[chatStore] Mensagem pendente editada localmente antes da entrega oficial no WhatsApp.');
+      }
 
       // Update Database
       const finalNewText = newText.endsWith(' *(Editado)*') ? newText : newText + ' *(Editado)*';
@@ -2687,8 +2697,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }));
 
     } catch (err: any) {
-      console.error('Erro ao editar mensagem:', err);
-      window.dispatchEvent(new CustomEvent('toast', { detail: { message: `Falha ao editar a mensagem: ${err.message}`, type: 'error' } }));
+      console.warn('[chatStore] Aviso ao editar mensagem:', err?.message || err);
+      window.dispatchEvent(new CustomEvent('toast', { detail: { message: `Não foi possível editar no WhatsApp: ${err.message}`, type: 'warning' } }));
     }
   },
 
@@ -3460,6 +3470,49 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 status: finalStatus
               };
             }
+          }
+          return m;
+        });
+
+        if (contactChanged) {
+          return { ...c, messages: newMsgs };
+        }
+        return c;
+      });
+
+      return anyChanged ? { contacts: updatedContacts } : state;
+    });
+  },
+
+  updateMessageLocally: (identifier, updates) => {
+    if (!identifier || !updates) return;
+    set((state) => {
+      let anyChanged = false;
+      const updatedContacts = state.contacts.map((c) => {
+        if (!c.messages || c.messages.length === 0) return c;
+
+        let contactChanged = false;
+        const newMsgs = c.messages.map((m) => {
+          let isMatch = false;
+          if (identifier.whatsapp_id && (m.whatsapp_id === identifier.whatsapp_id || m.id === identifier.whatsapp_id)) {
+            isMatch = true;
+          } else if (identifier.id && (m.id === identifier.id || m.whatsapp_id === identifier.id)) {
+            isMatch = true;
+          } else if (identifier.mock_id && (m.id === identifier.mock_id || m.whatsapp_id === identifier.mock_id || m.pseudoId === identifier.mock_id)) {
+            isMatch = true;
+          }
+
+          if (isMatch) {
+            contactChanged = true;
+            anyChanged = true;
+            return {
+              ...m,
+              ...updates,
+              id: updates.id || m.id,
+              whatsapp_id: updates.whatsapp_id || m.whatsapp_id || identifier.whatsapp_id,
+              mediaUrl: updates.mediaUrl !== undefined ? updates.mediaUrl : m.mediaUrl,
+              mediaMetadata: updates.mediaMetadata ? { ...(m.mediaMetadata || {}), ...updates.mediaMetadata } : m.mediaMetadata
+            };
           }
           return m;
         });
@@ -6578,16 +6631,31 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const data = payload?.payload;
         if (!data) return;
         console.log('[Realtime Broadcast] message.update recebido:', data);
-        get().updateMessageStatusLocally(
-          {
-            whatsapp_id: data.whatsapp_message_id,
-            mock_id: data.mock_id,
-            id: data.id,
-            text: data.text_content
-          },
-          data.status,
-          data.whatsapp_message_id
-        );
+        if (data.status) {
+          get().updateMessageStatusLocally(
+            {
+              whatsapp_id: data.whatsapp_message_id,
+              mock_id: data.mock_id,
+              id: data.id,
+              text: data.text_content
+            },
+            data.status,
+            data.whatsapp_message_id
+          );
+        }
+        if (data.media_url || data.media_metadata) {
+          get().updateMessageLocally(
+            {
+              whatsapp_id: data.whatsapp_message_id,
+              id: data.id,
+              mock_id: data.mock_id
+            },
+            {
+              mediaUrl: data.media_url,
+              mediaMetadata: data.media_metadata
+            }
+          );
+        }
       })
       .subscribe((subStatus) => {
         console.log('[Realtime Broadcast] Canal inbox status:', subStatus);
@@ -6606,8 +6674,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     const channel = supabase.channel(channelName);
 
-    // Escuta novas mensagens
+    // Escuta novas mensagens e atualizações em tempo real (ex: término de upload de mídia em background)
     channel
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages', filter: `tenant_id=eq.${tenantId}` }, (payload) => {
+        const updated = payload.new as any;
+        if (!updated) return;
+        get().updateMessageLocally(
+          {
+            id: updated.id,
+            whatsapp_id: updated.whatsapp_message_id
+          },
+          {
+            mediaUrl: updated.media_url || undefined,
+            mediaMetadata: updated.media_metadata || undefined,
+            transcription: updated.transcription || undefined,
+            status: updated.status || undefined,
+            text: updated.text_content || undefined
+          }
+        );
+      })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `tenant_id=eq.${tenantId}` }, async (payload) => {
         const m = payload.new as any;
         // Allow system and automation messages to sync in realtime so they display on screen
