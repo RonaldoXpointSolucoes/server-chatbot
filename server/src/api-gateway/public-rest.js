@@ -48,7 +48,7 @@ async function getSocketWithRetry(tenantId, instanceId, maxRetries = 3) {
         console.warn(`[API Gateway] Socket da instância ${instanceId} offline na RAM. Tentando start ativo da sessão...`);
         await sessionManager.startSession(tenantId, instanceId, false, true);
         await new Promise(r => setTimeout(r, 1500));
-        const sock = sessionManager.getSocket(instanceId);
+        const sock = sessionManager.getSocket(instanceId, true);
         if (sock) return sock;
     } catch (startErr) {
         console.warn(`[API Gateway] Aviso ao tentar start ativo de ${instanceId}:`, startErr.message);
@@ -545,7 +545,13 @@ router.post([
         });
     } catch (e) {
         const errMessage = e?.message || (typeof e === 'string' ? e : (e ? JSON.stringify(e) : 'Erro interno desconhecido ao processar envio'));
-        const isConnClosed = errMessage.includes('Connection Closed') || errMessage.includes('WebSocket não aberto') || errMessage.includes('desconectada') || errMessage.includes('offline') || errMessage.includes('socket indisponível');
+        const isConnClosed = errMessage.includes('Connection Closed') || 
+            errMessage.includes('WebSocket não aberto') || 
+            errMessage.includes('desconectada') || 
+            errMessage.includes('offline') || 
+            errMessage.includes('socket indisponível') ||
+            errMessage.includes('reading \'id\'') ||
+            errMessage.includes('reading "id"');
 
         // Se a conexão fechou durante o envio, garante entrega salvando no outbox resiliente
         if (isConnClosed && id && number && text) {
@@ -569,6 +575,31 @@ router.post([
                 });
             } catch (qErr) {
                 console.error('[API Gateway] [sendText] Falha no fallback para outbox:', qErr?.message || qErr);
+                // Fallback emergencial direto no banco se o SessionManager falhar
+                try {
+                    const cleanPhone = String(number).replace(/\D/g, '');
+                    const targetJid = cleanPhone.includes('@') ? cleanPhone : `${cleanPhone}@s.whatsapp.net`;
+                    const { data: directSaved } = await supabase.from('wa_outgoing_messages').insert({
+                        tenant_id: tenant_id,
+                        instance_id: id,
+                        chat_jid: targetJid,
+                        message_type: 'text',
+                        body: text,
+                        status: 'pending',
+                        priority: 1
+                    }).select('id').maybeSingle();
+                    if (directSaved?.id) {
+                        return res.status(202).json({
+                            message: "Conexão com WhatsApp oscilou. Mensagem preservada com sucesso no outbox resiliente.",
+                            code: 'MESSAGE_QUEUED_RECONNECTING',
+                            instance_id: id,
+                            status: 'PENDING',
+                            queue_id: directSaved.id
+                        });
+                    }
+                } catch (dbErr) {
+                    console.error('[API Gateway] [sendText] Falha no fallback emergencial direto no banco:', dbErr.message);
+                }
             }
         }
 

@@ -41,21 +41,24 @@ export const isInstanceAllowedForNode = (instanceId, tenantId = null) => {
 export const isSocketOpen = (sock) => {
     if (!sock || !sock.ws) return false;
     const ws = sock.ws;
-    if (ws.isOpen === true) return true;
-    if (ws.socket && ws.socket.readyState === 1) return true; // WebSocket.OPEN
     if (ws.isClosed === true || ws.isClosing === true) return false;
     if (ws.socket && (ws.socket.readyState === 2 || ws.socket.readyState === 3)) return false;
     
-    // Se está em processo ativo de conexão/handshake, não considerar aberto ainda para envio imediato sem wait
+    // Se está em processo ativo de conexão/handshake, não considerar aberto ainda
     if (ws.isConnecting === true || (ws.socket && ws.socket.readyState === 0)) {
         return false;
     }
 
-    // Se possui credenciais de usuário autenticadas e ws não está explicitamente fechado nem fechando
+    // Para envio e tráfego de mensagens, o socket PRECISA estar autenticado com identificador do usuário (meId)
+    // Sem meId, o Baileys explode fatalmente com 'Cannot read properties of undefined (reading id)'
     const meId = sock.user?.id || sock.authState?.creds?.me?.id || sock.authState?.creds?.me?.jid;
-    if (meId && !ws.isClosed && !ws.isClosing && (!ws.socket || ws.socket.readyState === 1)) {
-        return true;
+    if (!meId) {
+        return false;
     }
+
+    if (ws.isOpen === true) return true;
+    if (ws.socket && ws.socket.readyState === 1) return true; // WebSocket.OPEN
+    
     return false;
 };
 
@@ -517,6 +520,31 @@ class SessionManager {
 
                     // Se a instância não está ativa na RAM deste nó e (está atribuída a este nó OU o lease expirou OU é Master Takeover)
                     if (isAssignedToThisNode || isLeaseExpired || isMasterTakeover) {
+                        // Se o status no banco for 'connecting' ou 'reconnecting', verifica se há credenciais salvas
+                        if (inst.status === 'connecting' || inst.status === 'reconnecting') {
+                            const { data: credsExist } = await retryWithBackoff(() =>
+                                supabase.from('wa_auth_credentials').select('instance_id').eq('instance_id', inst.id).maybeSingle()
+                            ).catch(() => ({ data: null }));
+
+                            if (!credsExist) {
+                                // Instância sem credenciais salvas está em processo inicial de pareamento manual (QR Code).
+                                // O AutoHealing em background NÃO deve recriar sessão repetidamente para não gerar loops de QR refs expirados.
+                                const timeSinceUpdate = inst.updated_at ? (now - new Date(inst.updated_at).getTime()) : Infinity;
+                                if (timeSinceUpdate > 60000 && !hasSessionInRam) {
+                                    console.log(`[SessionManager/AutoHealing] Instância ${inst.id} sem credenciais em '${inst.status}' há mais de 1m. Marcando como 'disconnected'.`);
+                                    await supabase.from('whatsapp_instances').update({
+                                        status: 'disconnected',
+                                        qr_code: null,
+                                        pairing_code: null,
+                                        assigned_node_id: null,
+                                        lease_until: null,
+                                        last_error: 'Aguardando leitura de QR Code. Clique em Conectar para iniciar.'
+                                    }).eq('id', inst.id).catch(() => {});
+                                }
+                                continue;
+                            }
+                        }
+
                         revivedInThisCycle++;
                         this.autoHealingCooldowns.set(inst.id, now);
                         this.reconnectingCoolingDown.set(inst.id, now);
@@ -764,7 +792,8 @@ class SessionManager {
 
                 // Atomicidade compare-and-swap: se não for force nem takeover de produção,
                 // assegura que o registro ainda tem a posse esperada (nó nulo ou nó que lemos)
-                if (!force && !isMasterTakeover) {
+                // Se já pertence ao mesmo nó/cluster (isSameNodeOwner), não restringe CAS desnecessariamente
+                if (!force && !isMasterTakeover && !isSameNodeOwner) {
                     if (assignedNodeId) {
                         updateQuery = updateQuery.eq('assigned_node_id', assignedNodeId);
                     } else {
@@ -780,7 +809,13 @@ class SessionManager {
                     console.log(`[SessionManager/Lock] ✅ Lock adquirido com sucesso para instância ${instanceId} no nó ${currentNodeId} (lease até ${leaseUntil}).`);
                     return updatedInst;
                 } else {
-                    console.warn(`[SessionManager/Lock] ⚠️ Disputa de lock detectada para instância ${instanceId}. Outro nó assumiu a posse concorrentemente. Recuando.`);
+                    // Valida se o nó detentor do lock já é o próprio currentNodeId (corrida intra-nó / concorrência paralela)
+                    const { data: currentOwner } = await supabase.from('whatsapp_instances').select('assigned_node_id, lease_until, status').eq('id', instanceId).maybeSingle().catch(() => ({ data: null }));
+                    if (currentOwner && currentOwner.assigned_node_id === currentNodeId) {
+                        console.log(`[SessionManager/Lock] ✅ Lock já assegurado no nó ${currentNodeId} por requisição concorrente para instância ${instanceId}.`);
+                        return currentOwner;
+                    }
+                    console.warn(`[SessionManager/Lock] ⚠️ Disputa de lock detectada para instância ${instanceId}. Nó '${currentOwner?.assigned_node_id || 'desconhecido'}' assumiu a posse concorrentemente. Recuando.`);
                 }
             }
 
@@ -1294,6 +1329,9 @@ class SessionManager {
                         this.connectingSessions?.delete?.(instanceId);
                         this.inProgressLocks?.delete?.(instanceId);
                         this.connectingState?.delete?.(instanceId);
+                        this.reconnectingCoolingDown.set(instanceId, Date.now() + 600000);
+                        this.autoHealingCooldowns.set(instanceId, Date.now() + 600000);
+                        this.autoHealingFailures.delete(instanceId);
                         return;
                     }
 
@@ -2203,9 +2241,13 @@ class SessionManager {
     /**
      * Enfileiramento resiliente de mensagens para envio via Baileys ou outbox table (wa_outgoing_messages)
      */
-    async enqueueMessage(instanceId, { targetJid, type = 'text', content, options = {} }) {
+    async enqueueMessage(instanceId, { targetJid, type = 'text', content, options = {} } = {}) {
         console.log(`[SessionManager] enqueueMessage chamado para instância ${instanceId} ➔ destino ${targetJid}`);
         try {
+            if (!instanceId) {
+                throw new Error('instanceId é obrigatório para enqueueMessage');
+            }
+
             const { data: inst } = await retryWithBackoff(() =>
                 supabase.from('whatsapp_instances').select('tenant_id, status, last_error').eq('id', instanceId).maybeSingle()
             ).catch(() => ({ data: null }));
@@ -2217,7 +2259,7 @@ class SessionManager {
             }
 
             const isDefinitiveOffline = inst && ['offline', 'logged_out', 'blocked_12h', 'disconnected', 'paused', 'close', 'closed'].includes(inst.status);
-            const bodyText = typeof content === 'string' ? content : (content?.text || '');
+            const bodyText = typeof content === 'string' ? content : (content?.text || content?.caption || '');
 
             if (isDefinitiveOffline) {
                 console.warn(`[SessionManager] enqueueMessage: Instância ${instanceId} está ${inst?.status}. Gravando mensagem em wa_outgoing_messages...`);
@@ -2237,34 +2279,41 @@ class SessionManager {
                 if (saveErr) {
                     console.error('[SessionManager] Erro ao gravar em wa_outgoing_messages:', saveErr.message);
                 }
-                return savedMsg;
+                return savedMsg || { id: null, status: 'pending', instance_id: instanceId, chat_jid: targetJid };
             }
 
-            // Tenta obter socket ativo ou acordar
-            const sock = await this.getSocketOrWake(tenantId, instanceId, false);
-            if (sock && isSocketOpen(sock)) {
-                const sendFn = sock.originalSendMessage || sock.sendMessage;
-                return await sendFn(targetJid, content, options);
-            } else {
-                console.warn(`[SessionManager] Socket indisponível no momento para ${instanceId}. Gravando em wa_outgoing_messages...`);
-                if (!tenantId) {
-                    console.error(`[SessionManager] enqueueMessage: Impossível enfileirar em wa_outgoing_messages sem tenantId para instância ${instanceId}`);
-                    throw new Error(`Instância ${instanceId} sem tenant_id identificado para enfileiramento.`);
+            // Tenta obter socket ativo autenticado (requireAuthenticated = true)
+            const sock = await this.getSocketOrWake(tenantId, instanceId, true).catch(() => null);
+            const meId = sock?.user?.id || sock?.authState?.creds?.me?.id || sock?.authState?.creds?.me?.jid;
+
+            if (sock && isSocketOpen(sock) && meId) {
+                try {
+                    const sendFn = sock.originalSendMessage || sock.sendMessage;
+                    return await sendFn(targetJid, content, options);
+                } catch (sendErr) {
+                    console.warn(`[SessionManager] Falha no envio direto em enqueueMessage para ${instanceId} (${sendErr?.message || sendErr}). Redirecionando para wa_outgoing_messages...`);
                 }
-                const { data: savedMsg, error: saveErr } = await supabase.from('wa_outgoing_messages').insert({
-                    tenant_id: tenantId,
-                    instance_id: instanceId,
-                    chat_jid: targetJid,
-                    message_type: type,
-                    body: bodyText,
-                    status: 'pending',
-                    priority: 1
-                }).select().maybeSingle();
-                if (saveErr) {
-                    console.error('[SessionManager] Erro ao gravar em wa_outgoing_messages:', saveErr.message);
-                }
-                return savedMsg;
             }
+
+            // Fallback resiliente para wa_outgoing_messages se o socket não estiver autenticado ou se o envio direto falhou
+            console.warn(`[SessionManager] Socket indisponível ou não autenticado no momento para ${instanceId}. Gravando em wa_outgoing_messages...`);
+            if (!tenantId) {
+                console.error(`[SessionManager] enqueueMessage: Impossível enfileirar em wa_outgoing_messages sem tenantId para instância ${instanceId}`);
+                throw new Error(`Instância ${instanceId} sem tenant_id identificado para enfileiramento.`);
+            }
+            const { data: savedMsg, error: saveErr } = await supabase.from('wa_outgoing_messages').insert({
+                tenant_id: tenantId,
+                instance_id: instanceId,
+                chat_jid: targetJid,
+                message_type: type,
+                body: bodyText,
+                status: 'pending',
+                priority: 1
+            }).select().maybeSingle();
+            if (saveErr) {
+                console.error('[SessionManager] Erro ao gravar em wa_outgoing_messages:', saveErr.message);
+            }
+            return savedMsg || { id: null, status: 'pending', instance_id: instanceId, chat_jid: targetJid };
         } catch (err) {
             console.error(`[SessionManager] Erro em enqueueMessage para ${instanceId}:`, err.message);
             throw err;
