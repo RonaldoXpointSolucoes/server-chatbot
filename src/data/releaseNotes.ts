@@ -20,6 +20,45 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.7.7',
+    date: '2026-10-08',
+    summary: 'Estabilidade Crítica no Envio Baileys, Timeout Inteligente, Diagnóstico Detalhado e Fila Resiliente de Outbox',
+    notes: [
+      {
+        id: '7.7.7-1',
+        category: 'fixes',
+        title: 'Throttling e Limite de AutoHealing no Backend Node.js',
+        description: 'Implementado controle estrito de no máximo 2 reconexões por ciclo e quarentena de 15 minutos (regra de 3 strikes) para instâncias sem lease, eliminando a sobrecarga de ECONNRESET e disjuntor aberto no Supabase.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      },
+      {
+        id: '7.7.7-2',
+        category: 'improvements',
+        title: 'Timeout Inteligente de 12s com AbortController',
+        description: 'A requisição direta via HTTP para o motor Baileys agora possui limite estrito de 12 segundos, impedindo travamento indefinido da tela e do relógio de envio na interface do operador.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      },
+      {
+        id: '7.7.7-3',
+        category: 'features',
+        title: 'Fallback Resiliente Automático via Outbox Queue',
+        description: 'Em caso de lentidão, oscilação de rede ou queda da VPS, a mensagem agora é salva diretamente na fila wa_outgoing_messages do Supabase com status pendente, garantindo entrega posterior sem perda de texto.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.7.7-4',
+        category: 'improvements',
+        title: 'Banner de Diagnóstico Técnico e Ações Rápidas',
+        description: 'Banner de erro redesenhado com tempo decorrido em segundos, classificação da falha, botão para inspecionar diagnóstico técnico detalhado e atalho para gravação forçada na fila do banco.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      }
+    ]
+  },
+  {
     version: '7.7.6',
     date: '2026-10-07',
     summary: 'Opção de Pausar Fluxos, Governança de Robôs de IA e Compatibilidade Completa de Mídias e Pagamento no WhatsApp',

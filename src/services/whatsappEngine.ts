@@ -26,37 +26,117 @@ export const createInstance = async (tenantId: string, instanceId: string, apiKe
   return res.json();
 };
 
-export const sendNativeMessage = async (tenantId: string, instanceId: string, number: string, text: string, apiKey: string) => {
-  const apiUrl = getApiUrl();
-  const res = await fetch(`${apiUrl}/api/v1/instances/${instanceId}/invoke`, {
-    method: 'POST',
-    headers: { 
-      'Content-Type': 'application/json',
-      'x-tenant-id': tenantId,
-      'apikey': apiKey
-    },
-    body: JSON.stringify({ method: 'sendMessage', args: [number, { text }] })
-  });
+export interface MessageSendDiagnostic {
+  code: 'TIMEOUT' | 'NETWORK_ERROR' | 'INSTANCE_DISCONNECTED' | 'SERVER_ERROR' | 'GATEWAY_ERROR' | 'UNKNOWN';
+  reason: string;
+  durationMs: number;
+  status?: number;
+  url: string;
+  instanceId: string;
+  targetNumber: string;
+  timestamp: string;
+}
+
+export class EngineMessageError extends Error {
+  diagnostic: MessageSendDiagnostic;
   
-  let resJson;
+  constructor(message: string, diagnostic: MessageSendDiagnostic) {
+    super(message);
+    this.name = 'EngineMessageError';
+    this.diagnostic = diagnostic;
+  }
+}
+
+export const sendNativeMessage = async (
+  tenantId: string, 
+  instanceId: string, 
+  number: string, 
+  text: string, 
+  apiKey: string,
+  timeoutMs = 12000
+) => {
+  const apiUrl = getApiUrl();
+  const startTime = Date.now();
+  const targetUrl = `${apiUrl}/api/v1/instances/${instanceId}/invoke`;
+
+  let res: Response;
+  const controller = new AbortController();
+  const timeoutTimer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    res = await fetch(targetUrl, {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'x-tenant-id': tenantId,
+        'apikey': apiKey
+      },
+      body: JSON.stringify({ method: 'sendMessage', args: [number, { text }] }),
+      signal: controller.signal
+    });
+  } catch (fetchErr: any) {
+    clearTimeout(timeoutTimer);
+    const durationMs = Date.now() - startTime;
+    const isTimeout = fetchErr?.name === 'AbortError' || fetchErr?.name === 'TimeoutError';
+
+    const diagnostic: MessageSendDiagnostic = {
+      code: isTimeout ? 'TIMEOUT' : 'NETWORK_ERROR',
+      reason: isTimeout 
+        ? `Tempo limite esgotado (${timeoutMs / 1000}s). O servidor Baileys demorou para responder à requisição.`
+        : `Falha de conexão com a VPS/Gateway (${fetchErr?.message || 'Failed to fetch'}). Verifique a conexão de rede ou status do servidor.`,
+      durationMs,
+      url: targetUrl,
+      instanceId,
+      targetNumber: number,
+      timestamp: new Date().toISOString()
+    };
+
+    throw new EngineMessageError(
+      isTimeout 
+        ? `Tempo limite excedido (${timeoutMs / 1000}s) ao comunicar com o servidor.`
+        : `Falha de rede ao conectar com o servidor WhatsApp: ${fetchErr?.message || 'Falha de conexão'}`,
+      diagnostic
+    );
+  } finally {
+    clearTimeout(timeoutTimer);
+  }
+
+  const durationMs = Date.now() - startTime;
+  let resJson: any = {};
   try {
     resJson = await res.json();
-  } catch(e) {
+  } catch (e) {
     resJson = {};
   }
 
   if (!res.ok || resJson.ok === false) {
-     if (resJson.code === 'INSTANCE_DISCONNECTED') {
-        const msg = resJson.error || 'A instância do WhatsApp está desconectada. Clique em Conectar para gerar um novo QR Code.';
-        throw new Error(msg);
-     }
-     let errorDetail = resJson.error || resJson.message || `Status: ${res.status}`;
-     if (errorDetail && typeof errorDetail === 'object') {
-        errorDetail = errorDetail.message || errorDetail.error || JSON.stringify(errorDetail);
-     }
-     throw new Error(`Falha ao injetar mensagem nativa: ${errorDetail}`);
+    const isDisconnected = resJson.code === 'INSTANCE_DISCONNECTED' || (res.status === 400 && typeof resJson.error === 'string' && resJson.error.includes('desconectada'));
+    let errorDetail = resJson.error || resJson.message || `Status HTTP ${res.status}`;
+    if (errorDetail && typeof errorDetail === 'object') {
+      errorDetail = errorDetail.message || errorDetail.error || JSON.stringify(errorDetail);
+    }
+
+    const diagnostic: MessageSendDiagnostic = {
+      code: isDisconnected ? 'INSTANCE_DISCONNECTED' : (res.status >= 500 ? 'SERVER_ERROR' : 'GATEWAY_ERROR'),
+      reason: isDisconnected 
+        ? 'A instância do WhatsApp está desconectada ou requer novo pareamento QR Code.' 
+        : `Servidor retornou erro: ${errorDetail}`,
+      durationMs,
+      status: res.status,
+      url: targetUrl,
+      instanceId,
+      targetNumber: number,
+      timestamp: new Date().toISOString()
+    };
+
+    throw new EngineMessageError(
+      isDisconnected
+        ? (typeof resJson.error === 'string' ? resJson.error : 'A instância do WhatsApp está desconectada. Clique em Conectar para gerar um novo QR Code.')
+        : `Falha ao injetar mensagem nativa: ${errorDetail}`,
+      diagnostic
+    );
   }
-  
+
   return resJson;
 };
 

@@ -2361,7 +2361,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
         throw new Error('Número de telefone do contato inválido ou incompleto.');
       }
 
-      const res = await sendTextMessage(state.tenantInfo.id, resolvedInstanceId, targetJid, finalMessageText, apiKey);
+      let res: any = null;
+      let sendError: any = null;
+
+      try {
+        res = await sendTextMessage(state.tenantInfo.id, resolvedInstanceId, targetJid, finalMessageText, apiKey);
+      } catch (callErr: any) {
+        sendError = callErr;
+      }
+
       if (res && (res.result?.key?.id || res.key?.id)) {
         const officialMsgId = res.result?.key?.id || res.key?.id;
         set((s) => ({
@@ -2381,10 +2389,101 @@ export const useChatStore = create<ChatState>((set, get) => ({
           })
         }));
         return { success: true, messageId: officialMsgId };
-      } else {
-        const errDetail = res?.error || res?.message || 'Servidor não confirmou o envio da mensagem.';
-        throw new Error(errDetail);
       }
+
+      // Se o envio direto pela API HTTP falhou (Timeout, Falha de Rede ou Servidor Ocupado 5xx),
+      // ativamos o Fallback Resiliente Automático via Outbox Queue do Supabase:
+      const isRecoverableViaOutbox = sendError && (
+        sendError?.diagnostic?.code === 'TIMEOUT' ||
+        sendError?.diagnostic?.code === 'NETWORK_ERROR' ||
+        sendError?.diagnostic?.code === 'SERVER_ERROR' ||
+        sendError?.diagnostic?.code === 'GATEWAY_ERROR' ||
+        sendError?.name === 'TimeoutError' ||
+        sendError?.name === 'EngineMessageError' ||
+        sendError?.message?.includes('Failed to fetch') ||
+        sendError?.message?.includes('Tempo limite') ||
+        sendError?.message?.includes('Connection Closed') ||
+        sendError?.message?.includes('Status: 5')
+      );
+
+      if (isRecoverableViaOutbox) {
+        console.warn('[sendHumanMessage] Gateway HTTP lento ou inacessível. Ativando envio resiliente direto via Outbox do Supabase...');
+        try {
+          const { data: outboxMsg, error: outboxErr } = await supabase
+            .from('wa_outgoing_messages')
+            .insert({
+              tenant_id: state.tenantInfo.id,
+              instance_id: resolvedInstanceId,
+              chat_jid: targetJid,
+              message_type: 'text',
+              body: finalMessageText,
+              status: 'pending',
+              priority: 1
+            })
+            .select()
+            .single();
+
+          if (!outboxErr && outboxMsg) {
+            const mockId = `EDGE_${outboxMsg.id.replace(/-/g, '')}`;
+
+            // Sincroniza em messages para histórico local consistente
+            const targetConvId = contact.conv_id || contactId;
+            if (targetConvId) {
+              supabase.from('messages').upsert({
+                conversation_id: targetConvId,
+                tenant_id: state.tenantInfo.id,
+                instance_id: resolvedInstanceId,
+                direction: 'outbound',
+                message_type: 'text',
+                text_content: finalMessageText,
+                sender_type: 'human',
+                status: 'pending',
+                whatsapp_message_id: mockId,
+                raw_payload: {
+                  outbox_id: outboxMsg.id,
+                  enqueued_at: new Date().toISOString(),
+                  fallback_reason: sendError?.diagnostic?.reason || sendError?.message || 'gateway_fallback'
+                },
+                timestamp: new Date().toISOString()
+              }, { onConflict: 'whatsapp_message_id' }).catch(() => {});
+            }
+
+            // Atualiza a mensagem na UI mantendo status 'pending' (com reloginho animado) e ID oficial do outbox
+            set((s) => ({
+              contacts: s.contacts.map(c => {
+                if (c.id === contactId || c.conv_id === contactId || (c.id && getRealContactId(c.id) === realContactId)) {
+                  return {
+                    ...c,
+                    messages: c.messages.map(m => (m.id === pseudoId || m.pseudoId === pseudoId) ? {
+                      ...m,
+                      id: mockId,
+                      whatsapp_id: mockId,
+                      status: 'pending'
+                    } : m)
+                  };
+                }
+                return c;
+              })
+            }));
+
+            window.dispatchEvent(new CustomEvent('toast', { 
+              detail: { 
+                message: 'Servidor sob alta carga: Mensagem gravada com segurança na fila de saída (Outbox). O envio será concluído automaticamente.', 
+                type: 'info', 
+                duration: 6500 
+              } 
+            }));
+
+            return { success: true, messageId: mockId, enqueued: true };
+          }
+        } catch (fallbackCatch) {
+          console.error('[sendHumanMessage] Fallback resiliente via Supabase também falhou:', fallbackCatch);
+        }
+      }
+
+      // Se não foi possível recuperar via Outbox, lança o erro final
+      const finalError = sendError || new Error(res?.error || res?.message || 'Servidor não confirmou o envio da mensagem.');
+      throw finalError;
 
     } catch (err: any) {
       console.error('[sendHumanMessage] Erro:', err);
@@ -2395,17 +2494,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // Remove a mensagem otimista que falhou do feed local para evitar estado fantasma e sumiço posterior
       state.removeMessageLocally(contactId, pseudoId);
 
-      if (err.message === 'whatsapp_offline') {
-        window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'A instância do WhatsApp está offline. O texto foi restaurado no campo.', type: 'warning', duration: 7000 } }));
-      } else if (err.message === 'Failed to fetch') {
-        window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Falha crítica de comunicação com o Motor Baileys. O texto foi restaurado no campo.', type: 'error', duration: 7000 } }));
+      const diag = err?.diagnostic;
+      if (err.message === 'whatsapp_offline' || diag?.code === 'INSTANCE_DISCONNECTED') {
+        window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'A instância do WhatsApp está desconectada. Clique em Conectar para restaurar.', type: 'warning', duration: 7000 } }));
+      } else if (diag?.code === 'TIMEOUT') {
+        window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Tempo limite esgotado: o servidor demorou mais de 12s para responder. Verifique sua conexão.', type: 'warning', duration: 7000 } }));
+      } else if (diag?.code === 'NETWORK_ERROR' || err.message === 'Failed to fetch') {
+        window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Falha de comunicação com o servidor WhatsApp (VPS offline ou rede instável). O texto foi restaurado.', type: 'error', duration: 7000 } }));
       } else if (err.message && err.message.includes('Connection Closed')) {
         window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Conexão instável com o WhatsApp (Connection Closed). O texto foi restaurado no campo.', type: 'warning', duration: 7000 } }));
       } else {
-        window.dispatchEvent(new CustomEvent('toast', { detail: { message: `Não foi possível enviar a mensagem: ${err.message}. O texto foi restaurado.`, type: 'error', duration: 7000 } }));
+        window.dispatchEvent(new CustomEvent('toast', { detail: { message: `Não foi possível enviar a mensagem: ${err.message || 'Erro desconhecido'}. O texto foi restaurado.`, type: 'error', duration: 7000 } }));
       }
 
-      // Re-lança o erro para o chamador (handleSendHuman) restaurar no textarea e exibir o banner
+      // Re-lança o erro para o chamador (handleSendHuman) restaurar no textarea e exibir o banner com diagnóstico
       throw err;
     }
   },
@@ -3004,33 +3106,43 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       console.log(`[sendMediaFromUrl] Disparando webhook para URL: ${mediaUrl} com nome: ${cleanFileName} e responseType: ${responseType || 'STANDARD'}`);
 
-      const res = await fetch(`${API_URL}/api/v1/instances/${resolvedInstanceId}/send-media-url`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-tenant-id': state.tenantInfo.id,
-          'apikey': apiKey
-        },
-        body: JSON.stringify({
-          jid: jid,
-          messageType: mediaType,
-          mimetype: mimetype,
-          caption: finalCaption,
-          mediaUrl: mediaUrl,
-          fileName: cleanFileName,
-          ptt: false,
-          responseType: responseType || 'STANDARD'
-        })
-      });
+      let data: any = null;
+      let mediaError: any = null;
+      const controller = new AbortController();
+      const mediaTimeout = setTimeout(() => controller.abort(), 20000);
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Erro ao processar mídia via URL no motor');
+      try {
+        const res = await fetch(`${API_URL}/api/v1/instances/${resolvedInstanceId}/send-media-url`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-tenant-id': state.tenantInfo.id,
+            'apikey': apiKey
+          },
+          body: JSON.stringify({
+            jid: jid,
+            messageType: mediaType,
+            mimetype: mimetype,
+            caption: finalCaption,
+            mediaUrl: mediaUrl,
+            fileName: cleanFileName,
+            ptt: false,
+            responseType: responseType || 'STANDARD'
+          }),
+          signal: controller.signal
+        });
+        clearTimeout(mediaTimeout);
+
+        data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || 'Erro ao processar mídia via URL no motor');
+        }
+      } catch (fErr: any) {
+        clearTimeout(mediaTimeout);
+        mediaError = fErr;
       }
 
-      console.log(`[sendMediaFromUrl] Retorno do webhook:`, data);
-
-      if (data.media_url || (data.result?.key?.id)) {
+      if (data && (data.media_url || (data.result?.key?.id))) {
         const officialMsgId = data.result?.key?.id;
         set((s) => ({
           contacts: s.contacts.map(c => c.id === contactId ? {
@@ -3045,7 +3157,51 @@ export const useChatStore = create<ChatState>((set, get) => ({
             } : m)
           } : c)
         }));
+        return;
       }
+
+      // Fallback para Outbox Queue do Supabase para mídias públicas
+      if (mediaError && mediaUrl && !mediaUrl.startsWith('blob:') && !mediaUrl.startsWith('data:')) {
+        console.warn('[sendMediaFromUrl] Gateway de mídia lento/inacessível. Salvando mídia na outbox queue...');
+        try {
+          const { data: outboxMsg, error: outboxErr } = await supabase
+            .from('wa_outgoing_messages')
+            .insert({
+              tenant_id: state.tenantInfo.id,
+              instance_id: resolvedInstanceId,
+              chat_jid: jid,
+              message_type: mediaType,
+              body: finalCaption,
+              media_url: mediaUrl,
+              status: 'pending',
+              priority: 1
+            })
+            .select()
+            .single();
+
+          if (!outboxErr && outboxMsg) {
+            const mockId = `EDGE_${outboxMsg.id.replace(/-/g, '')}`;
+            set((s) => ({
+              contacts: s.contacts.map(c => c.id === contactId ? {
+                ...c,
+                messages: c.messages.map(m => (m.id === pseudoId || m.pseudoId === pseudoId) ? {
+                  ...m,
+                  id: mockId,
+                  whatsapp_id: mockId,
+                  mediaUrl: mediaUrl,
+                  status: 'pending'
+                } : m)
+              } : c)
+            }));
+            window.dispatchEvent(new CustomEvent('toast', {
+              detail: { message: 'Mídia salva na fila de envio do banco com sucesso.', type: 'info', duration: 5000 }
+            }));
+            return;
+          }
+        } catch (eFallback) {}
+      }
+
+      if (mediaError) throw mediaError;
 
     } catch (err: any) {
       console.error('[sendMediaFromUrl] Falha:', err);

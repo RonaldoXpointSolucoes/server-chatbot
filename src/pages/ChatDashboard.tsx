@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react';
-import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, ChevronRight, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, Save, ShieldCheck, Smile, Briefcase, Flag, Clock, Calendar, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, AlertCircle, CheckSquare, MessageSquare, MessageSquareText, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList, UploadCloud, FolderCheck, Globe, Lock, Zap, Folder, FolderOpen, FolderTree, CornerDownRight, BookOpen, Layers } from 'lucide-react';
+import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, ChevronRight, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, Save, ShieldCheck, Smile, Briefcase, Flag, Clock, Calendar, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, AlertCircle, CheckSquare, MessageSquare, MessageSquareText, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList, UploadCloud, FolderCheck, Globe, Lock, Zap, Folder, FolderOpen, FolderTree, CornerDownRight, BookOpen, Layers, Info, Activity } from 'lucide-react';
 import { getCurrentEnvironment, setEnvironment, validateServerEnvironment, ENVIRONMENTS } from '../services/environmentService';
 import { useNavigate, useOutletContext, useLocation } from 'react-router-dom';
 import { useChatStore, QuickReplyCategory, instanceCache, resolveInstanceUuid, sortMessagesChronologically, getEffectiveContactTime, getRealContactId, getUniquePersonKey, normalizeMessageTextForComparison } from '../store/chatStore';
@@ -2233,7 +2233,10 @@ export default function ChatDashboard() {
     contactId: string;
     instanceName?: string;
     timestamp: number;
+    diagnostic?: any;
   } | null>(null);
+  const [showSendDiagnosticModal, setShowSendDiagnosticModal] = useState(false);
+  const [isSendingViaOutboxFallback, setIsSendingViaOutboxFallback] = useState(false);
 
   // Estados dos novos menus fluídos
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
@@ -4149,14 +4152,32 @@ export default function ChatDashboard() {
         }
       }
 
-      // Ativa o banner elegante de alerta e reenvio
-      const errorMsg = error?.message || 'Falha de comunicação com o WhatsApp';
+      // Ativa o banner elegante de alerta e reenvio com enriquecimento diagnóstico
+      const diag = error?.diagnostic;
+      let displayError = error?.message || 'Falha de comunicação com o WhatsApp';
+      if (diag?.code === 'TIMEOUT') {
+        displayError = 'Tempo limite esgotado: o servidor Baileys demorou mais de 12s para responder.';
+      } else if (diag?.code === 'NETWORK_ERROR' || error?.message === 'Failed to fetch') {
+        displayError = 'Servidor WhatsApp inacessível no momento (VPS offline ou rede oscilando).';
+      } else if (error?.message === 'whatsapp_offline' || diag?.code === 'INSTANCE_DISCONNECTED') {
+        displayError = `A instância "${properTargetInstance}" está desconectada. Reative o QR Code para enviar.`;
+      }
+
       setSendErrorBanner({
         text: savedTextToSend,
-        error: errorMsg,
+        error: displayError,
         contactId: activeChatId,
         instanceName: properTargetInstance as string,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        diagnostic: diag || {
+          code: error?.code || (error?.message === 'Failed to fetch' ? 'NETWORK_ERROR' : 'UNKNOWN'),
+          reason: displayError,
+          durationMs: error?.durationMs || 0,
+          url: error?.targetUrl || '',
+          instanceId: properTargetInstance,
+          targetNumber: activeChat?.phone || '',
+          timestamp: new Date().toISOString()
+        }
       });
     } finally {
       // Cooldown de proteção contra mouse bouncing e double click
@@ -4164,6 +4185,92 @@ export default function ChatDashboard() {
         isSendingRef.current = false;
         setIsSendingMessage(false);
       }, 400);
+    }
+  };
+
+  const handleSendViaOutboxDirect = async (textToQueue: string) => {
+    if (!activeChatId || !textToQueue) return;
+    setIsSendingViaOutboxFallback(true);
+    try {
+      const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
+      const { resolveInstanceUuid, getContactJid } = await import('../store/chatStore');
+      const resolvedInstanceId = await resolveInstanceUuid(tenantInfo?.id || '', properTargetInstance);
+      const targetJid = getContactJid(activeChat);
+
+      if (!resolvedInstanceId || !targetJid || !tenantInfo?.id) {
+        throw new Error('Instância ou contato não mapeados para envio via outbox.');
+      }
+
+      const { data: outboxMsg, error: outboxErr } = await supabase
+        .from('wa_outgoing_messages')
+        .insert({
+          tenant_id: tenantInfo.id,
+          instance_id: resolvedInstanceId,
+          chat_jid: targetJid,
+          message_type: 'text',
+          body: textToQueue,
+          status: 'pending',
+          priority: 1
+        })
+        .select()
+        .single();
+
+      if (outboxErr) throw outboxErr;
+
+      const mockId = `EDGE_${outboxMsg.id.replace(/-/g, '')}`;
+
+      // Registra em messages
+      const targetConvId = activeChat.conv_id || activeChatId;
+      if (targetConvId) {
+        supabase.from('messages').upsert({
+          conversation_id: targetConvId,
+          tenant_id: tenantInfo.id,
+          instance_id: resolvedInstanceId,
+          direction: 'outbound',
+          message_type: 'text',
+          text_content: textToQueue,
+          sender_type: 'human',
+          status: 'pending',
+          whatsapp_message_id: mockId,
+          raw_payload: {
+            outbox_id: outboxMsg.id,
+            enqueued_at: new Date().toISOString(),
+            manual_outbox_fallback: true
+          },
+          timestamp: new Date().toISOString()
+        }, { onConflict: 'whatsapp_message_id' }).catch(() => {});
+      }
+
+      // Adiciona localmente como 'pending'
+      useChatStore.getState().addMessageLocally(activeChatId, {
+        id: mockId,
+        whatsapp_id: mockId,
+        text: textToQueue,
+        sender: 'human',
+        status: 'pending',
+        timestamp: new Date()
+      });
+
+      // Limpa input e fecha banner
+      setInputText('');
+      if (textareaRef.current) {
+        textareaRef.current.value = '';
+        textareaRef.current.style.height = 'auto';
+      }
+      setSendErrorBanner(null);
+      setShowSendDiagnosticModal(false);
+
+      window.dispatchEvent(new CustomEvent('toast', {
+        detail: {
+          message: 'Mensagem inserida na fila de saída do banco com sucesso! O envio será processado automaticamente.',
+          type: 'success',
+          duration: 5000
+        }
+      }));
+    } catch (err: any) {
+      alert(`Erro ao enfileirar no banco: ${err?.message || err}`);
+    } finally {
+      setIsSendingViaOutboxFallback(false);
     }
   };
 
@@ -9269,52 +9376,176 @@ export default function ChatDashboard() {
                   </div>
                 )}
 
-                {/* Banner de Erro no Envio com Restauração Instantânea (Padrão ChatGPT) */}
+                {/* Banner de Erro no Envio com Restauração Instantânea e Diagnóstico Avançado */}
                 {sendErrorBanner && sendErrorBanner.contactId === activeChatId && (
-                  <div className="flex items-center justify-between gap-3 bg-rose-500/10 dark:bg-rose-950/40 border border-rose-500/30 rounded-xl p-3 mx-2 mt-2 shadow-sm backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 duration-300 relative z-20">
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <div className="w-8 h-8 rounded-xl bg-rose-500/20 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
-                        <AlertCircle size={18} className="animate-pulse" />
-                      </div>
-                      <div className="flex flex-col min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold text-rose-700 dark:text-rose-300">
-                            Não foi possível enviar a mensagem
-                          </span>
-                          <span className="text-[10px] font-semibold px-2 py-0.2 rounded-full bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-500/20">
-                            Texto restaurado no campo
+                  <div className="flex flex-col gap-2 bg-rose-500/10 dark:bg-rose-950/40 border border-rose-500/30 rounded-xl p-3 mx-2 mt-2 shadow-sm backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 duration-300 relative z-20">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
+                        <div className="w-8 h-8 rounded-xl bg-rose-500/20 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+                          <AlertCircle size={18} className="animate-pulse" />
+                        </div>
+                        <div className="flex flex-col min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-bold text-rose-700 dark:text-rose-300">
+                              {sendErrorBanner.diagnostic?.code === 'TIMEOUT' 
+                                ? 'Tempo Limite Esgotado' 
+                                : sendErrorBanner.diagnostic?.code === 'NETWORK_ERROR'
+                                ? 'Servidor Inacessível'
+                                : sendErrorBanner.diagnostic?.code === 'INSTANCE_DISCONNECTED'
+                                ? 'WhatsApp Desconectado'
+                                : 'Falha no Envio da Mensagem'}
+                            </span>
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-500/20">
+                              Texto restaurado no campo
+                            </span>
+                            {sendErrorBanner.diagnostic?.durationMs > 0 && (
+                              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-500/10 text-slate-600 dark:text-slate-300">
+                                {(sendErrorBanner.diagnostic.durationMs / 1000).toFixed(1)}s
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[11px] text-rose-600/90 dark:text-rose-300/80 truncate mt-0.5">
+                            {sendErrorBanner.error || 'Falha de comunicação com o WhatsApp. Verifique sua conexão e tente novamente.'}
                           </span>
                         </div>
-                        <span className="text-[11px] text-rose-600/90 dark:text-rose-300/80 truncate mt-0.5">
-                          {sendErrorBanner.error || 'Falha de comunicação com o WhatsApp. Verifique sua conexão e tente novamente.'}
-                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        {sendErrorBanner.diagnostic && (
+                          <button
+                            type="button"
+                            onClick={() => setShowSendDiagnosticModal(true)}
+                            className="px-2.5 py-1.5 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-semibold flex items-center gap-1 shadow-sm transition-all cursor-pointer"
+                            title="Ver detalhes técnicos do erro"
+                          >
+                            <Info size={13} />
+                            <span>Diagnóstico</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            if (!isSendingRef.current) {
+                              handleSendHuman(e);
+                            }
+                          }}
+                          disabled={isSendingMessage}
+                          className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all hover:scale-105 active:scale-95 disabled:opacity-50 cursor-pointer"
+                          title="Tentar enviar novamente"
+                        >
+                          <RefreshCw size={13} className={isSendingMessage ? "animate-spin" : ""} />
+                          <span>Tentar novamente</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleSendViaOutboxDirect(sendErrorBanner.text)}
+                          disabled={isSendingViaOutboxFallback}
+                          className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-sm transition-all cursor-pointer"
+                          title="Grava a mensagem na fila do banco Supabase para envio automático pelo servidor"
+                        >
+                          <Database size={13} />
+                          <span>Fila do Banco</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSendErrorBanner(null)}
+                          className="p-1.5 text-rose-500 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-200 hover:bg-rose-500/10 rounded-xl transition-colors cursor-pointer"
+                          title="Dispensar aviso"
+                        >
+                          <X size={15} />
+                        </button>
                       </div>
                     </div>
+                  </div>
+                )}
 
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          if (!isSendingRef.current) {
-                            handleSendHuman(e);
-                          }
-                        }}
-                        disabled={isSendingMessage}
-                        className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all hover:scale-105 active:scale-95 disabled:opacity-50 cursor-pointer"
-                        title="Tentar enviar novamente"
-                      >
-                        <RefreshCw size={13} className={isSendingMessage ? "animate-spin" : ""} />
-                        <span>Tentar novamente</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setSendErrorBanner(null)}
-                        className="p-1.5 text-rose-500 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-200 hover:bg-rose-500/10 rounded-xl transition-colors cursor-pointer"
-                        title="Dispensar aviso"
-                      >
-                        <X size={15} />
-                      </button>
+                {/* Modal de Diagnóstico Técnico de Falha de Envio */}
+                {showSendDiagnosticModal && sendErrorBanner && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-white dark:bg-[#111b21] border border-slate-200 dark:border-slate-800 rounded-2xl p-6 max-w-lg w-full shadow-2xl space-y-4">
+                      <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+                        <div className="flex items-center gap-2">
+                          <Activity size={20} className="text-amber-500" />
+                          <h3 className="text-base font-bold text-slate-800 dark:text-slate-100">
+                            Diagnóstico Técnico de Envio
+                          </h3>
+                        </div>
+                        <button
+                          onClick={() => setShowSendDiagnosticModal(false)}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+                        >
+                          <X size={18} />
+                        </button>
+                      </div>
+
+                      <div className="space-y-3 text-xs">
+                        <div className="bg-slate-50 dark:bg-slate-900/60 p-3 rounded-xl border border-slate-200/60 dark:border-slate-800/80 space-y-2">
+                          <div className="flex justify-between">
+                            <span className="text-slate-500 dark:text-slate-400 font-medium">Instância:</span>
+                            <span className="font-semibold text-slate-700 dark:text-slate-200">{sendErrorBanner.instanceName || 'Não definida'}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-slate-500 dark:text-slate-400 font-medium">Classificação:</span>
+                            <span className="font-bold text-amber-600 dark:text-amber-400">
+                              {sendErrorBanner.diagnostic?.code || 'UNKNOWN'}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-slate-500 dark:text-slate-400 font-medium">Tempo de Resposta:</span>
+                            <span className="font-mono text-slate-700 dark:text-slate-200">
+                              {sendErrorBanner.diagnostic?.durationMs ? `${sendErrorBanner.diagnostic.durationMs}ms` : 'N/A'}
+                            </span>
+                          </div>
+                          {sendErrorBanner.diagnostic?.status && (
+                            <div className="flex justify-between">
+                              <span className="text-slate-500 dark:text-slate-400 font-medium">Status HTTP:</span>
+                              <span className="font-mono text-slate-700 dark:text-slate-200">{sendErrorBanner.diagnostic.status}</span>
+                            </div>
+                          )}
+                          <div className="flex flex-col gap-1 pt-1 border-t border-slate-200 dark:border-slate-800">
+                            <span className="text-slate-500 dark:text-slate-400 font-medium">Endpoint:</span>
+                            <span className="font-mono text-[11px] text-slate-600 dark:text-slate-300 break-all bg-slate-100 dark:bg-slate-800/70 p-1.5 rounded">
+                              {sendErrorBanner.diagnostic?.url || 'N/A'}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="bg-amber-500/10 border border-amber-500/20 p-3 rounded-xl text-amber-800 dark:text-amber-300 space-y-1">
+                          <p className="font-bold">Causa Provável e Ação Recomendada:</p>
+                          <p className="text-[11px] leading-relaxed">
+                            {sendErrorBanner.diagnostic?.code === 'TIMEOUT' &&
+                              'O servidor Baileys levou mais de 12 segundos para processar a requisição. Isso costuma ocorrer quando várias instâncias de WhatsApp estão conectando simultaneamente ou há alto processamento no servidor Node.js. Você pode enviar via "Fila do Banco" para garantir entrega assíncrona.'}
+                            {sendErrorBanner.diagnostic?.code === 'NETWORK_ERROR' &&
+                              'Não foi possível estabelecer contato com a VPS ou o endereço do motor Baileys. Verifique se a sua conexão com a internet está ativa e se o servidor de produção no Coolify está online.'}
+                            {sendErrorBanner.diagnostic?.code === 'INSTANCE_DISCONNECTED' &&
+                              'O WhatsApp deste chip está desconectado ou teve a sessão fechada pelo aparelho celular. Abra o painel lateral de instâncias e conecte o QR Code novamente.'}
+                            {(!sendErrorBanner.diagnostic?.code || sendErrorBanner.diagnostic?.code === 'UNKNOWN' || sendErrorBanner.diagnostic?.code === 'SERVER_ERROR') &&
+                              (sendErrorBanner.error || 'Verifique se a sessão do WhatsApp está conectada e tente reenviar.')}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowSendDiagnosticModal(false);
+                            handleSendViaOutboxDirect(sendErrorBanner.text);
+                          }}
+                          className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Database size={14} />
+                          <span>Enviar via Fila do Banco</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowSendDiagnosticModal(false)}
+                          className="px-4 py-2 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
+                        >
+                          Fechar
+                        </button>
+                      </div>
                     </div>
                   </div>
                 )}

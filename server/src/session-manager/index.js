@@ -179,6 +179,7 @@ class SessionManager {
         this.inProgressLocks = new Map();
         this.instanceMutexes = new Map();
         this.autoHealingCooldowns = new Map();
+        this.autoHealingFailures = new Map();
         this.reconnectingCoolingDown = new Map();
         this.connectionLocks = new Set();
         this.connectingSessions = new Set();
@@ -379,7 +380,14 @@ class SessionManager {
                 const currentNodeId = String(NODE_ID).trim();
                 const isProductionMaster = currentNodeId === 'production-worker' || (process.env.APP_ENV || '').toLowerCase() === 'production';
 
+                let revivedInThisCycle = 0;
+                const MAX_HEAL_PER_CYCLE = 2; // Protege o pool de conexões HTTP/DB do Supabase
+
                 for (const inst of dbInstances) {
+                    if (revivedInThisCycle >= MAX_HEAL_PER_CYCLE) {
+                        break;
+                    }
+
                     // Isolamento de nó: Se este worker for Alpha, só pode auto-curar instâncias de homologação autorizadas
                     if (!isInstanceAllowedForNode(inst.id, inst.tenant_id)) {
                         continue;
@@ -387,7 +395,11 @@ class SessionManager {
 
                     const lastHeal = this.autoHealingCooldowns.get(inst.id) || 0;
                     const lastCooldown = this.reconnectingCoolingDown.get(inst.id) || 0;
-                    if (now - lastHeal < 60000 || now - lastCooldown < 45000) {
+                    const failCount = this.autoHealingFailures.get(inst.id) || 0;
+
+                    // Backoff defensivo: se falhou repetidamente (3+ vezes), respeita intervalo longo de 15 minutos
+                    const requiredHealInterval = failCount >= 3 ? 15 * 60000 : 60000;
+                    if (now - lastHeal < requiredHealInterval || now - lastCooldown < 45000) {
                         continue;
                     }
 
@@ -445,12 +457,34 @@ class SessionManager {
 
                     // Se a instância não está ativa na RAM deste nó e (está atribuída a este nó OU o lease expirou OU é Master Takeover)
                     if (isAssignedToThisNode || isLeaseExpired || isMasterTakeover) {
+                        revivedInThisCycle++;
                         this.autoHealingCooldowns.set(inst.id, now);
                         this.reconnectingCoolingDown.set(inst.id, now);
-                        console.log(`[SessionManager/AutoHealing] 🩺 Detectada instância ${inst.id} desincronizada no nó ${currentNodeId} (RAM: ${hasSessionInRam ? 'Reciclada' : 'Ausente'}, Lease Expirado: ${isLeaseExpired}). Revivendo conexão pacífica...`);
+                        console.log(`[SessionManager/AutoHealing] 🩺 Detectada instância ${inst.id} desincronizada no nó ${currentNodeId} (RAM: ${hasSessionInRam ? 'Reciclada' : 'Ausente'}, Lease Expirado: ${isLeaseExpired}, Tentativa: ${failCount + 1}). Revivendo conexão pacífica...`);
+
                         this.createSession(inst.tenant_id, inst.id, false).catch(err => {
-                            console.error(`[SessionManager/AutoHealing] Falha ao reviver instância ${inst.id}:`, err.message);
+                            const newFails = (this.autoHealingFailures.get(inst.id) || 0) + 1;
+                            this.autoHealingFailures.set(inst.id, newFails);
+                            console.error(`[SessionManager/AutoHealing] Falha ao reviver instância ${inst.id} (falhas consecutivas: ${newFails}):`, err.message);
+
+                            if (newFails >= 3) {
+                                console.warn(`[SessionManager/AutoHealing] ⚠️ Instância ${inst.id} falhou 3 vezes seguidas no auto-healing. Colocando em repouso por 15m e marcando offline no banco.`);
+                                supabase
+                                    .from('whatsapp_instances')
+                                    .update({
+                                        status: 'offline',
+                                        last_error: 'Desconectada (falha repetida na auto-recuperação da sessão)',
+                                        assigned_node_id: null,
+                                        lease_until: null,
+                                        updated_at: new Date().toISOString()
+                                    })
+                                    .eq('id', inst.id)
+                                    .then(() => {}).catch(() => {});
+                            }
                         });
+
+                        // Espaçamento defensivo entre inicializações no mesmo ciclo para evitar concorrência no gateway
+                        await new Promise(r => setTimeout(r, 2500));
                     }
                 }
             } catch (healErr) {
@@ -598,7 +632,10 @@ class SessionManager {
                     .single()
             );
 
-            if (error || !inst) {
+            if (error) {
+                throw new Error(`Falha de comunicação com o Supabase ao verificar lock da instância ${instanceId}: ${error.message || error}`);
+            }
+            if (!inst) {
                 throw new Error(`Instância ${instanceId} não encontrada no banco de dados.`);
             }
 
@@ -992,6 +1029,7 @@ class SessionManager {
                     this.conflictAttempts.delete(instanceId);
                     this.consecutiveForbiddenAttempts.delete(instanceId);
                     this.consecutiveBadSessionAttempts.delete(instanceId);
+                    this.autoHealingFailures?.delete(instanceId);
                     
                     // Atualiza status no banco e zera tentativas
                     const monitoringUntil = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
@@ -2112,13 +2150,21 @@ class SessionManager {
                 supabase.from('whatsapp_instances').select('tenant_id, status, last_error').eq('id', instanceId).maybeSingle()
             ).catch(() => ({ data: null }));
 
-            const tenantId = inst?.tenant_id;
-            const isDefinitiveOffline = inst && ['offline', 'logged_out', 'blocked_12h', 'disconnected', 'paused', 'close', 'closed'].includes(inst.status);
+            let tenantId = inst?.tenant_id || this.sessions.get(instanceId)?.tenantId || options?.tenantId;
+            if (!tenantId) {
+                const { data: dbTenant } = await supabase.from('whatsapp_instances').select('tenant_id').eq('id', instanceId).maybeSingle().catch(() => ({ data: null }));
+                tenantId = dbTenant?.tenant_id;
+            }
 
+            const isDefinitiveOffline = inst && ['offline', 'logged_out', 'blocked_12h', 'disconnected', 'paused', 'close', 'closed'].includes(inst.status);
             const bodyText = typeof content === 'string' ? content : (content?.text || '');
 
             if (isDefinitiveOffline) {
                 console.warn(`[SessionManager] enqueueMessage: Instância ${instanceId} está ${inst?.status}. Gravando mensagem em wa_outgoing_messages...`);
+                if (!tenantId) {
+                    console.error(`[SessionManager] enqueueMessage: Impossível enfileirar em wa_outgoing_messages sem tenantId para instância ${instanceId}`);
+                    throw new Error(`Instância ${instanceId} sem tenant_id identificado para enfileiramento.`);
+                }
                 const { data: savedMsg, error: saveErr } = await supabase.from('wa_outgoing_messages').insert({
                     tenant_id: tenantId,
                     instance_id: instanceId,
@@ -2141,6 +2187,10 @@ class SessionManager {
                 return await sendFn(targetJid, content, options);
             } else {
                 console.warn(`[SessionManager] Socket indisponível no momento para ${instanceId}. Gravando em wa_outgoing_messages...`);
+                if (!tenantId) {
+                    console.error(`[SessionManager] enqueueMessage: Impossível enfileirar em wa_outgoing_messages sem tenantId para instância ${instanceId}`);
+                    throw new Error(`Instância ${instanceId} sem tenant_id identificado para enfileiramento.`);
+                }
                 const { data: savedMsg, error: saveErr } = await supabase.from('wa_outgoing_messages').insert({
                     tenant_id: tenantId,
                     instance_id: instanceId,

@@ -1,5 +1,5 @@
 {
-  "version": "7.7.6",
-  "buildDate": "2026-10-07T14:57:41.249Z",
-  "summary": "Opção de Pausar Fluxos, Governança de Robôs de IA e Compatibilidade Completa de Mídias e Pagamento no WhatsApp"
+  "version": "7.7.7",
+  "buildDate": "2026-10-08T14:20:00.000Z",
+  "summary": "Estabilidade Crítica no Envio Baileys, Timeout Inteligente, Diagnóstico Detalhado e Fila Resiliente de Outbox"
 }
