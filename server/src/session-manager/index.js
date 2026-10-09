@@ -155,7 +155,7 @@ async function getCachedBaileysVersion() {
     } catch (e) {
         console.log('[SessionManager] Usando versão padrão estável do Baileys (2.3000.x):', e.message);
     }
-    cachedBaileysVersion = { version: [2, 3000, 1049232487], isLatest: true };
+    cachedBaileysVersion = { version: [2, 3000, 1043857760], isLatest: true };
     lastVersionFetchTime = now;
     return cachedBaileysVersion;
 }
@@ -1607,19 +1607,43 @@ class SessionManager {
                                 }
                             }, delay);
                             this.reconnectingTimers.set(instanceId, timer);
+                    } else if (isForbidden) {
+                        // 403 Forbidden: sinal claro de rejeição/bloqueio temporário pela Meta.
+                        // Para proteger o chip do cliente contra ban definitivo por loops de reconexão agressivos,
+                        // SUSPENDE IMEDIATAMENTE qualquer tentativa de auto-reconexão e limpa timers.
+                        console.error(`[SessionManager] 🛑 Acesso proibido/restrito pelo WhatsApp (403 Forbidden) na instância ${instanceId}. Suspendendo auto-reconexão para proteção rigorosa do chip.`);
+                        this.authenticatedSessions.delete(instanceId);
+                        this.reconnectAttempts.delete(instanceId);
+                        this.consecutiveForbiddenAttempts.delete(instanceId);
+                        
+                        if (this.reconnectTimeouts.has(instanceId)) {
+                            clearTimeout(this.reconnectTimeouts.get(instanceId));
+                            this.reconnectTimeouts.delete(instanceId);
                         }
-                    } else if ((isForbidden || isBadSession) && isFullyAuthenticated) {
-                        let consecutiveCount = 0;
-                        if (isForbidden) {
-                            consecutiveCount = (this.consecutiveForbiddenAttempts.get(instanceId) || 0) + 1;
-                            this.consecutiveForbiddenAttempts.set(instanceId, consecutiveCount);
-                        } else {
-                            consecutiveCount = (this.consecutiveBadSessionAttempts.get(instanceId) || 0) + 1;
-                            this.consecutiveBadSessionAttempts.set(instanceId, consecutiveCount);
+                        if (this.reconnectingTimers.has(instanceId)) {
+                            clearTimeout(this.reconnectingTimers.get(instanceId));
+                            this.reconnectingTimers.delete(instanceId);
                         }
+                        
+                        await this.releaseSessionLock(
+                            instanceId, 
+                            true, 
+                            'Acesso restrito ou temporariamente bloqueado pelo WhatsApp (Código 403). Conexão suspensa para proteger o chip. Gere novo QR Code para parear novamente.'
+                        );
+
+                        await this.logConnectionEvent(tenantId, instanceId, 'forbidden', 'close', reason, null, null);
+
+                        await eventProcessor.handleConnectionUpdate(tenantId, instanceId, { 
+                            connection: 'close', 
+                            lastDisconnect: { error: { output: { statusCode: 403 } } } 
+                        });
+                        return;
+                    } else if (isBadSession && isFullyAuthenticated) {
+                        const consecutiveCount = (this.consecutiveBadSessionAttempts.get(instanceId) || 0) + 1;
+                        this.consecutiveBadSessionAttempts.set(instanceId, consecutiveCount);
 
                         if (consecutiveCount < 3) {
-                            console.warn(`[SessionManager] Conexão falhou com erro crítico potencialmente temporário (${isForbidden ? 'forbidden' : 'badSession'}, tentativa ${consecutiveCount}/3) para a instância ${instanceId}. Tratando como transiente e tentando reconectar...`);
+                            console.warn(`[SessionManager] Conexão falhou com sessão corrompida temporária (badSession, tentativa ${consecutiveCount}/3) para a instância ${instanceId}. Tentando reconectar...`);
                             
                             const attempts = this.reconnectAttempts.get(instanceId) || 0;
                             const nextAttempt = attempts + 1;
@@ -1628,7 +1652,7 @@ class SessionManager {
                             if (nextAttempt <= 10) {
                                 const delays = [15000, 30000, 60000, 120000, 300000];
                                 const delay = delays[Math.min(nextAttempt - 1, delays.length - 1)];
-                                console.log(`[SessionManager] Agendando reconexão após erro crítico transiente para instância ${instanceId} em ${delay / 1000}s (Tentativa ${nextAttempt}/10)...`);
+                                console.log(`[SessionManager] Agendando reconexão após badSession para instância ${instanceId} em ${delay / 1000}s (Tentativa ${nextAttempt}/10)...`);
                                 
                                 const timer = setTimeout(() => {
                                     this.reconnectTimeouts.delete(instanceId);
@@ -1644,19 +1668,18 @@ class SessionManager {
                             return;
                         }
 
-                        console.error(`[SessionManager] Limite de tentativas consecutivas atingido para erro crítico (${isForbidden ? 'forbidden' : 'badSession'}) na instância ${instanceId}. Definindo status persistente final offline.`);
+                        console.error(`[SessionManager] Limite de tentativas consecutivas atingido para erro crítico (badSession) na instância ${instanceId}. Definindo status persistente final offline.`);
                         this.authenticatedSessions.delete(instanceId);
                         this.reconnectAttempts.delete(instanceId);
-                        this.consecutiveForbiddenAttempts.delete(instanceId);
                         this.consecutiveBadSessionAttempts.delete(instanceId);
                         
                         await this.releaseSessionLock(
                             instanceId, 
                             true, 
-                            isForbidden ? 'Acesso proibido ou restrito pelo WhatsApp.' : 'Sessão corrompida ou inválida.'
+                            'Sessão corrompida ou inválida.'
                         );
 
-                        await this.logConnectionEvent(tenantId, instanceId, isForbidden ? 'forbidden' : 'bad_session', 'close', reason, null, null);
+                        await this.logConnectionEvent(tenantId, instanceId, 'bad_session', 'close', reason, null, null);
 
                         await eventProcessor.handleConnectionUpdate(tenantId, instanceId, { 
                             connection: 'close', 

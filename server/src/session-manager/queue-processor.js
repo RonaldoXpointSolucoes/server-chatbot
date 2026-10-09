@@ -56,6 +56,14 @@ class QueueProcessor {
             if (expired && expired.length > 0) {
                 console.warn(`[QueueProcessor/TTL] ⏱️ Expiradas e canceladas ${expired.length} mensagens antigas (> 10min) da fila de outbox.`);
             }
+
+            // Limpeza preventiva de mensagens antigas finalizadas (> 7 dias) para manter a tabela leve
+            const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+            await supabase
+                .from('wa_outgoing_messages')
+                .delete()
+                .in('status', ['sent', 'failed'])
+                .lte('created_at', sevenDaysAgo);
         } catch (err) {
             console.warn(`[QueueProcessor/TTL] Aviso ao limpar mensagens expiradas:`, err.message);
         }
@@ -139,10 +147,11 @@ class QueueProcessor {
     async loop() {
         if (!this.running) return;
 
+        let instances = null;
         try {
             // 1. Busca instâncias que estão conectadas e são controladas especificamente por este worker
             const currentNodeId = String(NODE_ID).trim();
-            const instances = await retryWithBackoff(async () => {
+            instances = await retryWithBackoff(async () => {
                 const { data, error } = await supabase
                     .from('whatsapp_instances')
                     .select('id, tenant_id, assigned_node_id, lease_until')
@@ -373,16 +382,18 @@ class QueueProcessor {
                     break; // Não tenta enviar outras mensagens desta mesma instância enquanto o socket estiver offline
                 }
 
-                // 3. Rate Limit / Delay Humano Inteligente:
-                // Se priority for >= 5 (campanhas/automoto), aplicamos delay suave de 2.5s a 4s (evita congestionar a fila)
-                // Se priority for < 5 (operador manual), aplicamos um micro-delay defensivo de 50ms para vazão imediata
+                // 3. Rate Limit / Delay Humano Anti-Ban:
+                // Previne detecção de comportamento automatizado e disparos em rajada (burst) que causam bloqueios na Meta.
+                // Se priority for >= 5 (campanhas/automação), aplicamos delay de 3.5s a 6s
+                // Se priority for < 5 (operador manual em outbox), aplicamos delay humano de 1.2s a 2.2s com jitter
                 if (msg.priority >= 5) {
-                    const delay = Math.floor(Math.random() * (4000 - 2000 + 1)) + 2000;
-                    console.log(`[QueueProcessor] Aplicando delay de automação de ${delay / 1000}s antes do envio...`);
+                    const delay = Math.floor(Math.random() * (6000 - 3500 + 1)) + 3500;
+                    console.log(`[QueueProcessor] [Anti-Ban] Aplicando delay de automação de ${delay / 1000}s antes do envio...`);
                     await new Promise(resolve => setTimeout(resolve, delay));
                 } else {
-                    console.log(`[QueueProcessor] Mensagem de alta prioridade (operador). Micro-delay 50ms para vazão máxima.`);
-                    await new Promise(resolve => setTimeout(resolve, 50));
+                    const delay = Math.floor(Math.random() * (2200 - 1200 + 1)) + 1200;
+                    console.log(`[QueueProcessor] [Anti-Ban] Cadência humana anti-ban aplicada (${delay}ms) para instância ${instanceId}.`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
                 }
 
                 // 4. Dispara o envio real usando o Baileys originalSendMessage ou sendMessage
