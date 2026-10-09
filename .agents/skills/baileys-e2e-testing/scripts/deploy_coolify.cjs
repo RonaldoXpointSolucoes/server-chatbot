@@ -76,7 +76,7 @@ async function run() {
 
     // Monitor loop
     let attempts = 0;
-    const maxAttempts = 60; // 5 minutos (a cada 5s)
+    const maxAttempts = 120; // 10 minutos (a cada 5s)
     let finished = false;
 
     while (attempts < maxAttempts) {

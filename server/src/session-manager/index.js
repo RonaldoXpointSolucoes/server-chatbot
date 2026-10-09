@@ -1607,6 +1607,7 @@ class SessionManager {
                                 }
                             }, delay);
                             this.reconnectingTimers.set(instanceId, timer);
+                        }
                     } else if (isForbidden) {
                         // 403 Forbidden: sinal claro de rejeição/bloqueio temporário pela Meta.
                         // Para proteger o chip do cliente contra ban definitivo por loops de reconexão agressivos,
