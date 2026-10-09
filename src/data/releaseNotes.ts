@@ -20,6 +20,37 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.8.4',
+    date: '2026-10-09',
+    summary: 'Eliminação da Lentidão do Servidor, Otimização de Event Loop e Terminal de Logs Resiliente',
+    notes: [
+      {
+        id: '7.8.4-1',
+        category: 'fixes',
+        title: 'Throttling Sequencial de Boot e Eliminação de Congelamento de CPU',
+        description: 'Implementado espaçamento sequencial de 1500ms na inicialização de instâncias em produção, erradicando picos de CPU, concorrência desordenada de WebSockets Baileys e travamentos de 4.6s no Event Loop.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      },
+      {
+        id: '7.8.4-2',
+        category: 'improvements',
+        title: 'Console do Servidor (Server Logs) com Alta Resiliência e SSE',
+        description: 'Priorizadas as rotas /api/v1/system/logs/all e /api/v1/system/logs/stream no API Gateway com fallback no Supabase e tolerância aumentada na UI, mantendo o status ONLINE em tempo real sem falsos alarmes.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.8.4-3',
+        category: 'fixes',
+        title: 'Prevenção de Timeout em Cascata e Enfileiramento Resiliente Imediato',
+        description: 'Redução do timeout de envio Baileys para 8s com bypass instantâneo (<10ms) para wa_outgoing_messages, eliminando retenções de 30s a 60s em mensagens para instâncias instáveis.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      }
+    ]
+  },
+  {
     version: '7.8.3',
     date: '2026-10-09',
     summary: 'Resolução Definitiva de Duplicação e Latência no Envio de Mensagens do Chat CRM e Estabilização Baileys',

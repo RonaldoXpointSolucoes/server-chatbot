@@ -95,11 +95,13 @@ class QueueProcessor {
         if (!this.running) return;
 
         try {
-            // 1. Busca instâncias que estão conectadas e são controladas por este worker (assigned_node_id = NODE_ID)
+            // 1. Busca instâncias que estão conectadas e são controladas especificamente por este worker
+            const currentNodeId = String(NODE_ID).trim();
             const instances = await retryWithBackoff(async () => {
                 const { data, error } = await supabase
                     .from('whatsapp_instances')
                     .select('id, tenant_id, assigned_node_id, lease_until')
+                    .eq('assigned_node_id', currentNodeId)
                     .in('status', ['connected', 'connected_local']);
                 if (error) throw error;
                 return data;
@@ -107,7 +109,6 @@ class QueueProcessor {
 
             if (instances && instances.length > 0) {
                 const now = new Date();
-                const currentNodeId = String(NODE_ID).trim();
 
                 for (const inst of instances) {
                     const instanceId = inst.id;
@@ -143,8 +144,9 @@ class QueueProcessor {
             }
         }
 
-        // Agenda a próxima execução após 1.5 segundos para máxima agilidade
-        this.timer = setTimeout(() => this.loop(), 1500);
+        // Agenda a próxima execução com intervalo adaptativo suave (2.5s se houver instâncias, 3.5s em repouso)
+        const nextDelay = (instances && instances.length > 0) ? 2500 : 3500;
+        this.timer = setTimeout(() => this.loop(), nextDelay);
     }
 
     async processInstanceQueue(tenantId, instanceId) {

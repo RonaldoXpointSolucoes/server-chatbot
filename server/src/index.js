@@ -415,9 +415,11 @@ app.use('/', publicRestRoutes);
 app.use('/v1/crm', crmApiRoutes);
 app.use('/crm', crmApiRoutes);
 
-app.use('/api', apiGateway);
-app.use('/api/logs', systemLogger);
+// Rotas de logs e diagnóstico em tempo real do sistema (SSE e REST para ServerLogsTerminal)
 app.use('/api/v1/system/logs', systemLogger);
+app.use('/api/logs', systemLogger);
+
+app.use('/api', apiGateway);
 
 // Middleware explícito de captura e auditoria de rotas não encontradas (404 Handler)
 app.use((req, res, next) => {
@@ -950,9 +952,10 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
                     .in('status', ['connected', 'connecting', 'qr_ready', 'reconnecting', 'reconnecting_local']);
                     
                 if (activeLeases && activeLeases.length > 0) {
-                    console.log(`[Worker Boot/Produção] Retomando ${activeLeases.length} sockets em produção...`);
+                    console.log(`[Worker Boot/Produção] Retomando ${activeLeases.length} sockets em produção com throttling sequencial (1500ms)...`);
                     for (const instance of activeLeases) {
-                        if (HOMOLOG_ALLOWED_INSTANCES.includes(instance.id)) {
+                        const isHomolog = HOMOLOG_ALLOWED_INSTANCES.includes(instance.id);
+                        if (isHomolog) {
                             console.log(`[Worker Boot/Produção] Instância de homologação ${instance.id} reservada para nó Alpha. Ignorando.`);
                             continue;
                         }
@@ -972,6 +975,8 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
                             });
                         };
                         startSessionWithRetry();
+                        // Throttling sequencial para distribuir carga de CPU, PreKeys e tráfego de rede:
+                        await new Promise(r => setTimeout(r, 1500));
                     }
                 }
             }
@@ -1085,8 +1090,14 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
                   notifiedAiPausedConvs.delete(newConv.id);
               }
           })
-          .subscribe((status) => {
-              console.log(`[AutoRagTrainer] Assinatura Realtime de conversas resolvidas: ${status}`);
+          .subscribe((status, err) => {
+              if (status === 'SUBSCRIBED') {
+                  console.log(`[AutoRagTrainer] Assinatura Realtime de conversas resolvidas ativa: ${status}`);
+              } else if (status === 'CHANNEL_ERROR') {
+                  console.warn(`[AutoRagTrainer] Aviso temporário na assinatura Realtime (${status}): ${err?.message || 'reconectando em background...'}`);
+              } else {
+                  console.log(`[AutoRagTrainer] Status da assinatura Realtime: ${status}`);
+              }
           });
     } catch(err) {
         console.error("[Worker Boot] Erro ao assinar realtime conversations:", err.message);

@@ -1,10 +1,10 @@
 {
-  "version": "7.5.5",
+  "version": "7.7.3",
   "changelog": [
-    "🚀 API REST de Alto Nível para CRM: Automação completa para IAs e softwares externos",
-    "🔑 Autenticação individual por quadro CRM com tokens seguros (x-api-key) e status de ativação",
-    "🖼️ Pacote Multimodal Inteligente: Extração de imagens em alta resolução, vídeos, áudios e links externos",
-    "🔄 Movimentação entre colunas via API com relatório de entrega e atualização Realtime na UI",
-    "📝 Suporte a comentários técnicos e progresso de execução de IAs diretamente nos cards"
+    "⚡ Otimização do Event Loop: Throttling sequencial (1500ms) no boot de produção eliminando picos de CPU e congelamento",
+    "🛡️ Prevenção de Cascata de Timeouts: Bypass imediato para outbox resiliente (<10ms) em falhas de socket, evitando travamentos de 30s a 60s",
+    "📊 Console do Servidor Resiliente: Rotas de streaming SSE e histórico REST priorizadas e integradas no API Gateway",
+    "⏱️ Redução de Timeout Baileys: Timeout ajustado para 8s com detecção imediata de socket indisponível para entrega garantida",
+    "🔄 Polling Adaptativo no QueueProcessor: Redução drástica de consultas ao Supabase filtrando exclusivamente o nó atual"
   ]
 }

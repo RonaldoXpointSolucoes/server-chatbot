@@ -2001,7 +2001,7 @@ class SessionManager {
                                     // Timeout de segurança no envio do Baileys para não travar a fila da instância (15s resiliente)
                                     const sendPromise = sendFn(targetJid, content, options);
                                     const timeoutPromise = new Promise((_, reject) => 
-                                        setTimeout(() => reject(new Error('TIMEOUT_BAILEYS_SOCKET_SEND')), 15000)
+                                        setTimeout(() => reject(new Error('TIMEOUT_BAILEYS_SOCKET_SEND')), 8000)
                                     );
                                     const result = await Promise.race([sendPromise, timeoutPromise]);
 
@@ -2039,6 +2039,8 @@ class SessionManager {
                                         error.message?.includes('logged_out') ||
                                         error.message?.includes('blocked_12h') ||
                                         error.message?.includes('paused') ||
+                                        error.message?.includes('TIMEOUT_BAILEYS_SOCKET_SEND') ||
+                                        error.message?.includes('TIMEOUT_FASTPATH_SEND') ||
                                         error.message?.includes('está offline no banco') ||
                                         error.message?.includes('está logged_out no banco') ||
                                         error.message?.includes('está paused no banco');
@@ -2344,8 +2346,9 @@ class SessionManager {
 
             const meId = sock?.user?.id || sock?.authState?.creds?.me?.id || sock?.authState?.creds?.me?.jid;
             const hasAuthCreds = Boolean(sock?.authState?.creds?.me?.id || sock?.user?.id);
+            const shouldBypassDirect = Boolean(options?.forceQueue || options?.isFallback);
 
-            if (sock && isSocketOpen(sock) && meId && hasAuthCreds) {
+            if (!shouldBypassDirect && sock && isSocketOpen(sock) && meId && hasAuthCreds) {
                 directAttempted = true;
                 try {
                     const sendFn = sock.originalSendMessage || sock.sendMessage;

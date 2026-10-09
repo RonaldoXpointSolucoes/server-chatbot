@@ -310,7 +310,7 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
   const checkHealth = useCallback(async () => {
     try {
       const url = getEngineUrl();
-      const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(4000) });
+      const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(8000) });
       if (res.ok) {
         const data: ServerInfo = await res.json();
         if (data && (data.status === 'ok' || data.node || data.version)) {
@@ -369,7 +369,7 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
   const fetchLogsRest = useCallback(async () => {
     try {
       const url = getEngineUrl();
-      const res = await fetch(`${url}/api/v1/system/logs/all`, { signal: AbortSignal.timeout(5000) });
+      const res = await fetch(`${url}/api/v1/system/logs/all`, { signal: AbortSignal.timeout(8000) });
       if (res.ok) {
         const json = await res.json();
         if (json.success && Array.isArray(json.logs)) {
@@ -401,7 +401,9 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
       if (!restOk && (!logsRef.current || logsRef.current.length === 0)) {
         await loadLogsFromSupabase();
       }
-      if (!healthOk && !restOk) {
+      if (healthOk || restOk) {
+        setIsConnected(true);
+      } else {
         setIsConnected(false);
       }
     } finally {
@@ -436,10 +438,14 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
 
       sse.onerror = () => {
         if (isSubscribed) {
-          // Em caso de oscilação do SSE, testa o healthcheck antes de marcar offline
+          // Em caso de oscilação do SSE, testa o healthcheck e REST antes de marcar offline
           checkHealth().then(healthy => {
             if (!healthy && isSubscribed) {
-              setIsConnected(false);
+              fetchLogsRest().then(restHealthy => {
+                if (!restHealthy && isSubscribed) {
+                  setIsConnected(false);
+                }
+              });
             }
           });
         }

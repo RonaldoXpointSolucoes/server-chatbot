@@ -6,12 +6,17 @@ import wacallsRoutes from './wacalls.js';
 import voucherRoutes from './vouchers.js';
 import diagnosticsRoutes from './diagnostics.js';
 import crmApiRoutes from './crm-api.js';
+import systemLogger from '../system-logger.js';
 import { supabase } from '../supabase.js';
 import { getUrlInfo } from '@whiskeysockets/baileys';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import AutomationWorker from '../automation-worker/agent.js';
 
 const router = express.Router();
+
+// Rotas de logs e diagnóstico em tempo real do sistema (SSE e REST)
+router.use('/v1/system/logs', systemLogger);
+router.use('/system/logs', systemLogger);
 
 router.use('/v1', instanceRoutes);
 router.use('/v1', messageRoutes);

@@ -77,7 +77,16 @@ function interceptConsole() {
     try {
         text = args.map(a => {
             if (a instanceof Error) return a.stack || a.message;
-            return typeof a === 'object' ? JSON.stringify(a) : String(a);
+            if (typeof a === 'object' && a !== null) {
+                if (Buffer.isBuffer(a)) return `<Buffer ${a.length} bytes>`;
+                try {
+                    const str = JSON.stringify(a);
+                    return str.length > 2500 ? str.substring(0, 2500) + '... [truncated]' : str;
+                } catch (e) {
+                    return '[Unserializable Object]';
+                }
+            }
+            return String(a);
         }).join(' ');
     } catch(e) {
         text = '[Non-serializable Object Object]';
@@ -405,8 +414,36 @@ router.delete('/gastrofood', (req, res) => {
 });
 
 // Endpoint para obter todos os logs recentes (diagnóstico avançado)
-router.get('/all', (req, res) => {
+router.get('/all', async (req, res) => {
   try {
+    if (logBuffer.length >= 25) {
+      return res.json({ success: true, logs: logBuffer });
+    }
+    // Se o buffer local tiver poucos logs (ex: após reboot recente), complementa com logs do Supabase
+    if (supabase) {
+      try {
+        const { data: dbLogs } = await supabase
+          .from('system_logs')
+          .select('id, created_at, level, message, type')
+          .order('created_at', { ascending: false })
+          .limit(80);
+
+        if (dbLogs && dbLogs.length > 0) {
+          const dbFormatted = dbLogs.reverse().map(l => ({
+            id: String(l.id),
+            timestamp: l.created_at,
+            level: l.level || 'info',
+            message: l.type && l.type !== 'Backend Error' ? `[${l.type}] ${l.message}` : l.message,
+            source: 'supabase'
+          }));
+          const existingSigs = new Set(logBuffer.map(b => `${b.level}:${b.message}`));
+          const merged = [...dbFormatted.filter(d => !existingSigs.has(`${d.level}:${d.message}`)), ...logBuffer];
+          return res.json({ success: true, logs: merged.slice(-200) });
+        }
+      } catch (dbErr) {
+        // Fallback silencioso para logBuffer
+      }
+    }
     res.json({ success: true, logs: logBuffer });
   } catch (err) {
     res.status(500).json({ error: err.message });

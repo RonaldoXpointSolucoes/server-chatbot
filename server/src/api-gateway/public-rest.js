@@ -575,7 +575,7 @@ router.post([
                     targetJid,
                     type: 'text',
                     content: { text },
-                    options: { isAutomation: false }
+                    options: { isAutomation: false, forceQueue: true, isFallback: true }
                 });
                 return res.status(202).json({
                     message: "Conexão com WhatsApp oscilou durante o envio. A mensagem foi salva no outbox resiliente e será disparada automaticamente assim que a reconexão for restabelecida.",
