@@ -234,7 +234,11 @@ class SessionManager {
                         'Bad MAC',
                         'verifyMAC',
                         'Session error:Error: Bad MAC',
-                        'Failed to decrypt message with any known session'
+                        'Failed to decrypt message with any known session',
+                        'Unhandled mex newsletter notification',
+                        'Unhandled mex',
+                        'mex newsletter',
+                        'newsletter notification'
                     ];
                     
                     if (parsed.msg && ignoredLogs.some(text => parsed.msg.includes(text))) {
@@ -1994,10 +1998,10 @@ class SessionManager {
                                         console.log(`[SessionManager - Antiban] Enviando mensagem para ${targetJid} via instância ${instanceId} (delay: ${delay}ms)`);
                                     }
                                     
-                                    // Timeout de segurança no envio do Baileys para não travar a fila da instância
+                                    // Timeout de segurança no envio do Baileys para não travar a fila da instância (15s resiliente)
                                     const sendPromise = sendFn(targetJid, content, options);
                                     const timeoutPromise = new Promise((_, reject) => 
-                                        setTimeout(() => reject(new Error('TIMEOUT_BAILEYS_SOCKET_SEND')), 4500)
+                                        setTimeout(() => reject(new Error('TIMEOUT_BAILEYS_SOCKET_SEND')), 15000)
                                     );
                                     const result = await Promise.race([sendPromise, timeoutPromise]);
 
@@ -2043,7 +2047,6 @@ class SessionManager {
                                         error.message?.includes('reading \'id\'') ||
                                         error.message?.includes('reading "id"') ||
                                         error.message?.includes('Cannot read properties of undefined') ||
-                                        error.message?.includes('TIMEOUT_BAILEYS_SOCKET_SEND') ||
                                         error.message?.includes('desconectada') ||
                                         error.message?.includes('not authenticated') ||
                                         error.message?.includes('autenticação pendente');
@@ -2332,10 +2335,18 @@ class SessionManager {
                 ? localSession.sock
                 : await this.getSocketOrWake(tenantId, instanceId, true).catch(() => null);
 
+            let directAttempted = false;
+            if (sock && !isSocketOpen(sock) && sock.ws && (sock.ws.isConnecting || sock.ws.socket?.readyState === 0)) {
+                try {
+                    await waitForSocketOpen(sock, 3000);
+                } catch (e) {}
+            }
+
             const meId = sock?.user?.id || sock?.authState?.creds?.me?.id || sock?.authState?.creds?.me?.jid;
             const hasAuthCreds = Boolean(sock?.authState?.creds?.me?.id || sock?.user?.id);
 
             if (sock && isSocketOpen(sock) && meId && hasAuthCreds) {
+                directAttempted = true;
                 try {
                     const sendFn = sock.originalSendMessage || sock.sendMessage;
                     const directOptions = { ...(options || {}), skipDelay: true, isDirect: true };
@@ -2346,7 +2357,9 @@ class SessionManager {
             }
 
             // Fallback resiliente para wa_outgoing_messages se o socket não estiver autenticado ou se o envio direto falhou
-            console.warn(`[SessionManager] Socket indisponível ou não autenticado no momento para ${instanceId}. Gravando em wa_outgoing_messages...`);
+            if (!directAttempted) {
+                console.warn(`[SessionManager] Socket offline ou não autenticado na RAM para ${instanceId}. Gravando em wa_outgoing_messages...`);
+            }
             if (!tenantId) {
                 console.error(`[SessionManager] enqueueMessage: Impossível enfileirar em wa_outgoing_messages sem tenantId para instância ${instanceId}`);
                 throw new Error(`Instância ${instanceId} sem tenant_id identificado para enfileiramento.`);

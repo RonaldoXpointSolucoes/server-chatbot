@@ -437,6 +437,7 @@ class QueueProcessor {
                     .update({ 
                         status: 'sent',
                         sent_at: new Date().toISOString(),
+                        options: { ...(typeof msg.options === 'object' && msg.options !== null ? msg.options : {}), messageId: result?.key?.id },
                         last_error: null
                     })
                     .eq('id', msg.id);

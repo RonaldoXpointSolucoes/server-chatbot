@@ -96,6 +96,10 @@ class EventProcessor {
                     this.reconciliationAttempts.add(r.message_id);
                     return false;
                 }
+                if (r.chat_jid && (r.chat_jid.endsWith('@newsletter') || r.chat_jid.includes('newsletter'))) {
+                    this.reconciliationAttempts.add(r.message_id);
+                    return false;
+                }
                 return r.message_type !== 'protocolMessage' && 
                        r.message_type !== 'senderKeyDistributionMessage' && 
                        r.raw_payload;
@@ -117,9 +121,22 @@ class EventProcessor {
                 this.reconciliationAttempts.add(r.message_id);
             }
 
-            if (missingRaw.length > 0) {
-                console.log(`[EventProcessor] Self-Healing: Re-processando ${missingRaw.length} mensagens reais pendentes...`);
-                for (const r of missingRaw) {
+            // Filtra mensagens de grupos desabilitados que intencionalmente não vão para a tabela messages
+            const actionableMissing = [];
+            for (const r of missingRaw) {
+                if (this.isGroup(r.chat_jid)) {
+                    const cfg = await this.getInstanceConfig(r.instance_id);
+                    const allowedGroups = cfg.enabled_groups || cfg.allowed_groups || cfg.enabledGroups || cfg.allowedGroups || [];
+                    if (!allowedGroups.includes(r.chat_jid)) {
+                        continue;
+                    }
+                }
+                actionableMissing.push(r);
+            }
+
+            if (actionableMissing.length > 0) {
+                console.log(`[EventProcessor] Self-Healing: Re-processando ${actionableMissing.length} mensagens reais pendentes...`);
+                for (const r of actionableMissing) {
                     await this.handleMessageUpsert(r.tenant_id, r.instance_id, null, { messages: [r.raw_payload], type: 'reconcile' });
                 }
             }
@@ -406,7 +423,7 @@ class EventProcessor {
                 }
                 
                 if (!isDecryptionFailureStub && !isHistorySync && this.processedMessagesCache.has(cacheKey)) {
-                    console.log(`[EventProcessor] Mensagem Duplicada Detectada em Cache de Memória (Ignorando). ID: ${msgId}`);
+                    // Mensagem já processada recentemente no worker local. Descarte limpo e silencioso.
                     continue;
                 }
             }
@@ -1549,9 +1566,50 @@ class EventProcessor {
                       }
                   }
 
+                  // 4.2.1 Reconciliação atômica de placeholders outbound temporários (OUT_, EDGE_, optimistic-)
+                  const outboundMessages = messagesToInsert.filter(m => m.direction === 'outbound' && m.whatsapp_message_id && m.text_content);
+                  const placeholdersReconciled = new Set();
+
+                  if (outboundMessages.length > 0) {
+                      for (const m of outboundMessages) {
+                          try {
+                              const mTime = new Date(m.timestamp).getTime();
+                              const { data: placeholders } = await supabase
+                                  .from('messages')
+                                  .select('id, whatsapp_message_id')
+                                  .eq('conversation_id', m.conversation_id)
+                                  .eq('direction', 'outbound')
+                                  .eq('text_content', m.text_content)
+                                  .gte('timestamp', new Date(mTime - 90000).toISOString())
+                                  .lte('timestamp', new Date(mTime + 90000).toISOString())
+                                  .limit(2);
+
+                              const placeholder = (placeholders || []).find(p => 
+                                  p.whatsapp_message_id?.startsWith('OUT_') || 
+                                  p.whatsapp_message_id?.startsWith('EDGE_') || 
+                                  p.whatsapp_message_id?.startsWith('optimistic-')
+                              );
+
+                              if (placeholder) {
+                                  await supabase
+                                      .from('messages')
+                                      .update({
+                                          whatsapp_message_id: m.whatsapp_message_id,
+                                          raw_payload: m.raw_payload,
+                                          status: m.status || 'SERVER_ACK'
+                                      })
+                                      .eq('id', placeholder.id);
+                                  placeholdersReconciled.add(m.whatsapp_message_id);
+                                  console.log(`[BatchProcessor] 🔄 Mensagem temporária ${placeholder.whatsapp_message_id} reconciliada para ID oficial do WhatsApp ${m.whatsapp_message_id}`);
+                              }
+                          } catch (phErr) {}
+                      }
+                  }
+
                   // 4.3 Filtra somente as mensagens genuinamente inéditas
                   const trulyNewMessages = messagesToInsert.filter(m => {
                       const safeInst = m.instance_id || 'null_instance';
+                      if (placeholdersReconciled.has(m.whatsapp_message_id)) return false;
                       return !existingSet.has(`${m.tenant_id}_${safeInst}_${m.whatsapp_message_id}`);
                   });
 

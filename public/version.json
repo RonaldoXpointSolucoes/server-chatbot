@@ -1,5 +1,5 @@
 {
-  "version": "7.8.2",
-  "buildDate": "2026-10-09T00:32:05.089Z",
-  "summary": "Evolução do QR Code WhatsApp com Expiração Visual, Validação E2E e Deploy Integrado"
+  "version": "7.8.3",
+  "buildDate": "2026-10-09T13:42:00.000Z",
+  "summary": "Resolução Definitiva de Duplicação e Latência no Envio de Mensagens do Chat CRM e Estabilização Baileys"
 }

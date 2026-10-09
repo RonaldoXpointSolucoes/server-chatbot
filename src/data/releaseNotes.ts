@@ -20,6 +20,37 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.8.3',
+    date: '2026-10-09',
+    summary: 'Resolução Definitiva de Duplicação e Latência no Envio de Mensagens do Chat CRM e Estabilização Baileys',
+    notes: [
+      {
+        id: '7.8.3-1',
+        category: 'fixes',
+        title: 'Eliminação Definitiva de Mensagens Duplicadas no Chat CRM',
+        description: 'Corrigida concorrência entre o reconciliador em background e o processamento de lotes Baileys. Implementada reconciliação atômica in-place no EventProcessor e blindagem quádrupla na interface (ChatDashboard), erradicando duplicações visuais e registros sintéticos OUT_.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      },
+      {
+        id: '7.8.3-2',
+        category: 'improvements',
+        title: 'Estabilização de Conexão Baileys e Gestão de Sockets',
+        description: 'Timeouts de envio ampliados para 15s com tolerância a oscilações transitórias de buffer, roteamento inteligente de falhas diretamente para o outbox resiliente do Supabase e supressão de ruídos de newsletters da Meta.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+      },
+      {
+        id: '7.8.3-3',
+        category: 'improvements',
+        title: 'Reconciliação e Idempotência Robusta no Envio de Mensagens',
+        description: 'Janela de proteção do reconciliador ampliada de 10s para 60s, armazenamento explícito de messageId oficial do WhatsApp na fila de saída e verificação prévia no escopo da conversa.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      }
+    ]
+  },
+  {
     version: '7.8.2',
     date: '2026-10-08',
     summary: 'Evolução do QR Code WhatsApp com Expiração Visual, Validação E2E e Deploy Integrado',

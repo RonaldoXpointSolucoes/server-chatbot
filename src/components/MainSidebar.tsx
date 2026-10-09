@@ -521,13 +521,15 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
           .eq('id', tenantId)
           .maybeSingle();
           
-        if (currentError || !currentCompany) {
-           console.warn("[DEBUG] MainSidebar fetchCompanies não localizou empresa ou falhou temporariamente:", {
+        if (currentError) {
+           console.warn("[DEBUG] MainSidebar fetchCompanies erro ao buscar empresa:", {
              tenantId,
-             currentError,
-             currentCompany
+             currentError
            });
-           // Não executa signOut forçado por oscilações temporárias de rede ou RLS transiente
+           return null;
+        }
+
+        if (!currentCompany) {
            return null;
         }
         

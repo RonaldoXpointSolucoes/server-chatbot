@@ -698,7 +698,7 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
                                 continue;
                             }
 
-                            console.log(`[CardapioCache - Gastrofood] Cardápio retornou 0 produtos no ERP nuvem para tenant ${tenantId}. Ativando proteção e fallback resiliente.`);
+                            console.log(`[CardapioCache - Gastrofood] Cardápio retornou 0 produtos no ERP nuvem para tenant ${tenantId} (estado esperado para estabelecimento sem itens ativos no Gastrofood). Fallback mantido.`);
                             break;
                         } else {
                             const errText = await res.text();
@@ -4570,7 +4570,14 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
                             directErr.message.includes('Connection Closed') ||
                             directErr.message.includes('Connection was lost') ||
                             directErr.message.includes('not open') ||
-                            directErr.message.includes('closed')
+                            directErr.message.includes('closed') ||
+                            directErr.message.includes('TIMEOUT_BAILEYS_SOCKET_SEND') ||
+                            directErr.message.includes('TIMEOUT_FASTPATH_SEND') ||
+                            directErr.message.includes('timeout') ||
+                            directErr.message.includes('timed out') ||
+                            directErr.message.includes('ETIMEDOUT') ||
+                            directErr.message.includes('ECONNRESET') ||
+                            directErr.message.includes('reading \'id\'')
                         );
                         if (isConnClosed) {
                             // Tenta 1 reenvio rápido de 200ms com socket atualizado antes de desistir para o fallback

@@ -3286,17 +3286,29 @@ export default function ChatDashboard() {
       return true;
     });
 
-    // 2ª Camada: Ocultação de mensagens otimistas/pendentes se já existir mensagem confirmada equivalente
+    // 2ª Camada: Ocultação de mensagens otimistas/pendentes/sintéticas (OUT_, EDGE_, optimistic-) se já existir mensagem confirmada equivalente
     const confirmedOutbounds = uniqueById.filter(m => 
       !String(m.id).startsWith('optimistic-') && 
       !String(m.id).startsWith('EDGE_') && 
+      !String(m.id).startsWith('OUT_') && 
+      !String(m.whatsapp_id || '').startsWith('OUT_') && 
+      !String(m.whatsapp_id || '').startsWith('EDGE_') && 
+      !String(m.whatsapp_id || '').startsWith('optimistic-') && 
       m.status !== 'pending' &&
       ['human', 'agent', 'bot', 'automation'].includes(m.sender)
     );
 
     const nonOrphanMsgs = uniqueById.filter(m => {
-      const isPendingOrOptimistic = String(m.id).startsWith('optimistic-') || String(m.id).startsWith('EDGE_') || m.status === 'pending';
-      if (!isPendingOrOptimistic) return true;
+      const isSyntheticOrPending = 
+        String(m.id).startsWith('optimistic-') || 
+        String(m.id).startsWith('EDGE_') || 
+        String(m.id).startsWith('OUT_') || 
+        String(m.whatsapp_id || '').startsWith('OUT_') || 
+        String(m.whatsapp_id || '').startsWith('EDGE_') || 
+        String(m.whatsapp_id || '').startsWith('optimistic-') || 
+        m.status === 'pending';
+
+      if (!isSyntheticOrPending) return true;
 
       const mTime = m.timestamp instanceof Date ? m.timestamp.getTime() : new Date(m.timestamp || 0).getTime();
       const normText = normalizeMessageTextForComparison(m.text);
@@ -3305,8 +3317,8 @@ export default function ChatDashboard() {
         if (m.pseudoId && (conf.id === m.pseudoId || conf.pseudoId === m.pseudoId)) return true;
         if (m.whatsapp_id && conf.whatsapp_id === m.whatsapp_id) return true;
         const confTime = conf.timestamp instanceof Date ? conf.timestamp.getTime() : new Date(conf.timestamp || 0).getTime();
-        if (Math.abs(mTime - confTime) < 60000) {
-          // Se for mídia, NÃO comparar apenas mediaType! Comparar mediaUrl idêntica ou texto idêntico!
+        if (Math.abs(mTime - confTime) < 90000) {
+          // Se for mídia, comparar mediaUrl idêntica ou texto idêntico
           if (m.mediaType && conf.mediaType && m.mediaType === conf.mediaType) {
             if (m.mediaUrl && conf.mediaUrl && !m.mediaUrl.startsWith('blob:') && m.mediaUrl === conf.mediaUrl) return true;
             const confNorm = normalizeMessageTextForComparison(conf.text);
@@ -3324,7 +3336,7 @@ export default function ChatDashboard() {
       return !hasConfirmedMatch;
     });
 
-    // 3ª Camada: Desduplicação consecutiva (mensagens idênticas em <15s e mensagens consecutivas de sistema)
+    // 3ª Camada: Desduplicação consecutiva (mensagens idênticas em <45s e mensagens consecutivas de sistema)
     const deduped: typeof nonOrphanMsgs = [];
     for (let i = 0; i < nonOrphanMsgs.length; i++) {
       const current = nonOrphanMsgs[i];
@@ -3336,16 +3348,20 @@ export default function ChatDashboard() {
           continue;
         }
 
-        // Se uma mensagem for otimista residual consecutiva e já existir a equivalente confirmada
-        const isCurrentOpt = String(current.id).startsWith('optimistic-') || current.status === 'pending';
-        const isPrevOpt = String(prev.id).startsWith('optimistic-') || prev.status === 'pending';
-        if (isCurrentOpt && !isPrevOpt) {
+        // Se mensagens consecutivas do mesmo remetente tiverem o mesmo texto em menos de 45s (double click, race condition ou OUT_ duplicado)
+        if (current.sender === prev.sender && ['human', 'agent', 'bot', 'automation'].includes(current.sender)) {
           const currTime = current.timestamp instanceof Date ? current.timestamp.getTime() : new Date(current.timestamp || 0).getTime();
           const prevTime = prev.timestamp instanceof Date ? prev.timestamp.getTime() : new Date(prev.timestamp || 0).getTime();
-          if (Math.abs(currTime - prevTime) < 15000) {
+          if (Math.abs(currTime - prevTime) < 45000) {
             const normCurr = normalizeMessageTextForComparison(current.text);
             const normPrev = normalizeMessageTextForComparison(prev.text);
             if (normCurr && normPrev && normCurr === normPrev && current.mediaType === prev.mediaType) {
+              const isPrevSynthetic = String(prev.whatsapp_id || '').startsWith('OUT_') || String(prev.id).startsWith('OUT_') || String(prev.id).startsWith('EDGE_') || String(prev.id).startsWith('optimistic-');
+              const isCurrSynthetic = String(current.whatsapp_id || '').startsWith('OUT_') || String(current.id).startsWith('OUT_') || String(current.id).startsWith('EDGE_') || String(current.id).startsWith('optimistic-');
+              // Se a anterior for sintética e a atual for oficial do WhatsApp, substitui pela oficial
+              if (isPrevSynthetic && !isCurrSynthetic) {
+                deduped[deduped.length - 1] = current;
+              }
               continue;
             }
           }

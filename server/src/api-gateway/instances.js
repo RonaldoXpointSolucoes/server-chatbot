@@ -564,7 +564,7 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                     if (sentResult) {
                         console.log(`[API Gateway] [MSG_TRACE:FASTPATH_SENT] Instância: ${instanceId} | WhatsAppMsgId: ${sentResult?.key?.id} | JID: ${targetJid}`);
 
-                        // Grava no outbox já como 'sent' para histórico e auditoria
+                        // Grava no outbox já como 'sent' para histórico e auditoria com messageId oficial
                         supabase.from('wa_outgoing_messages').insert({
                             instance_id: instanceId,
                             tenant_id: req.tenantId,
@@ -574,6 +574,7 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                             media_url: mediaUrl,
                             status: 'sent',
                             sent_at: new Date().toISOString(),
+                            options: { messageId: sentResult?.key?.id },
                             priority: 1
                         }).then(() => {}).catch(() => {});
 

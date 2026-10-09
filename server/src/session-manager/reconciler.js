@@ -13,15 +13,15 @@ export async function runOutgoingReconciliation() {
 
     try {
         const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-        const tenSecondsAgo = new Date(Date.now() - 10 * 1000).toISOString();
+        const sixtySecondsAgo = new Date(Date.now() - 60 * 1000).toISOString();
 
-        // Busca mensagens enviadas recentemente (janela entre 10s e 5m atrás)
+        // Busca mensagens enviadas com mais de 60 segundos de janela (evita colidir com upserts ao vivo do Baileys)
         const { data: outMsgs, error: outErr } = await supabase
             .from('wa_outgoing_messages')
             .select('*')
             .eq('status', 'sent')
             .gte('sent_at', fiveMinutesAgo)
-            .lte('sent_at', tenSecondsAgo)
+            .lte('sent_at', sixtySecondsAgo)
             .order('sent_at', { ascending: true })
             .limit(20);
 
@@ -33,6 +33,23 @@ export async function runOutgoingReconciliation() {
             const rawBody = (msg.body || '').trim();
             if (!rawBody) continue;
 
+            const options = typeof msg.options === 'object' && msg.options !== null ? msg.options : {};
+            const realWaMsgId = options?.messageId;
+
+            // 1. Checagem direta por whatsapp_message_id oficial se já foi registrado
+            if (realWaMsgId) {
+                const { data: existingById } = await supabase
+                    .from('messages')
+                    .select('id')
+                    .eq('tenant_id', msg.tenant_id)
+                    .eq('whatsapp_message_id', realWaMsgId)
+                    .limit(1);
+
+                if (existingById && existingById.length > 0) {
+                    continue;
+                }
+            }
+
             const cleanPhone = String(msg.chat_jid || '')
                 .replace('@s.whatsapp.net', '')
                 .replace('@lid', '')
@@ -41,14 +58,15 @@ export async function runOutgoingReconciliation() {
                 .trim();
             if (!cleanPhone) continue;
 
-            // Verifica se a mensagem já está salva na tabela clássica messages
+            // 2. Verifica se a mensagem já está salva na tabela clássica messages (janela robusta de +-120s)
+            const msgTime = new Date(msg.sent_at || msg.created_at).getTime();
             const { data: existing } = await supabase
                 .from('messages')
                 .select('id')
                 .eq('tenant_id', msg.tenant_id)
                 .eq('text_content', rawBody)
-                .gte('timestamp', new Date(new Date(msg.sent_at || msg.created_at).getTime() - 15000).toISOString())
-                .lte('timestamp', new Date(new Date(msg.sent_at || msg.created_at).getTime() + 15000).toISOString())
+                .gte('timestamp', new Date(msgTime - 120000).toISOString())
+                .lte('timestamp', new Date(msgTime + 120000).toISOString())
                 .limit(1);
 
             if (existing && existing.length > 0) {
@@ -78,8 +96,22 @@ export async function runOutgoingReconciliation() {
             if (!convData || convData.length === 0) continue;
             const conv = convData[0];
 
-            const options = typeof msg.options === 'object' ? msg.options : {};
-            const waMsgId = options?.messageId || `OUT_${msg.id.substring(0, 18)}`;
+            // 3. Verificação final no escopo da conversa para evitar duplicata de outbound
+            const { data: convExisting } = await supabase
+                .from('messages')
+                .select('id')
+                .eq('conversation_id', conv.id)
+                .eq('direction', 'outbound')
+                .eq('text_content', rawBody)
+                .gte('timestamp', new Date(msgTime - 180000).toISOString())
+                .lte('timestamp', new Date(msgTime + 180000).toISOString())
+                .limit(1);
+
+            if (convExisting && convExisting.length > 0) {
+                continue;
+            }
+
+            const waMsgId = realWaMsgId || `OUT_${msg.id.substring(0, 18)}`;
             const isHuman = rawBody.startsWith('*') && rawBody.includes(':*');
             const senderType = isHuman ? 'human' : 'bot';
             const msgTimestamp = msg.sent_at || msg.created_at;

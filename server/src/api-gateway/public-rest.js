@@ -43,11 +43,11 @@ async function getSocketWithRetry(tenantId, instanceId, maxRetries = 1) {
         return localSock;
     }
 
-    // 3. Tentativa única de obtenção com timeout defensivo curto (máx 2.5s para não travar clientes externos)
+    // 3. Tentativa única de obtenção com timeout defensivo adequado (4000ms para permitir handshake suave)
     try {
         const wakePromise = sessionManager.getSocketOrWake(tenantId, instanceId, true);
         const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('TIMEOUT_SOCKET_WAKE_FASTFAIL')), 2500)
+            setTimeout(() => reject(new Error('TIMEOUT_SOCKET_WAKE_FASTFAIL')), 4000)
         );
         const sock = await Promise.race([wakePromise, timeoutPromise]);
         if (sock && isSocketOpen(sock)) return sock;
@@ -556,7 +556,13 @@ router.post([
             errMessage.includes('offline') || 
             errMessage.includes('socket indisponível') ||
             errMessage.includes('reading \'id\'') ||
-            errMessage.includes('reading "id"');
+            errMessage.includes('reading "id"') ||
+            errMessage.includes('TIMEOUT_BAILEYS_SOCKET_SEND') ||
+            errMessage.includes('TIMEOUT_FASTPATH_SEND') ||
+            errMessage.includes('timeout') ||
+            errMessage.includes('timed out') ||
+            errMessage.includes('ETIMEDOUT') ||
+            errMessage.includes('ECONNRESET');
 
         // Se a conexão fechou durante o envio, garante entrega salvando no outbox resiliente
         if (isConnClosed && id && number && text) {
