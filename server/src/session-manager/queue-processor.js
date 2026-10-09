@@ -220,8 +220,15 @@ class QueueProcessor {
                     attempts: msg.attempts 
                 }).catch(()=>{});
 
-                // 2. Obtém o socket da instância ativa ou desperta a sessão se necessário (Importação dinâmica)
-                const sock = await sessionManager.getSocketOrWake(tenantId, instanceId);
+                // 2. Obtém o socket da instância ativa ou desperta a sessão se necessário (com timeout defensivo de 3.5s para não travar outras instâncias)
+                let sock = null;
+                try {
+                    const wakePromise = sessionManager.getSocketOrWake(tenantId, instanceId);
+                    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT_QUEUE_WAKE')), 3500));
+                    sock = await Promise.race([wakePromise, timeoutPromise]);
+                } catch (wErr) {
+                    console.warn(`[QueueProcessor] Timeout ou falha rápida ao obter socket para ${instanceId}:`, wErr.message);
+                }
                 const isOperator = (msg.priority || 1) < 5;
 
                 let isSocketReady = sock && (!sock.ws || sock.ws.readyState === 1 || sock.ws.isOpen);
@@ -290,7 +297,7 @@ class QueueProcessor {
                         break; // Sai do processamento desta instância no momento para não travar outras instâncias
                     }
 
-                    const retryDelayMs = isOperator ? Math.min(2000 * Math.pow(1.5, currentAttempts), 15000) : Math.min(8000 * Math.pow(1.5, currentAttempts), 60000);
+                    const retryDelayMs = isOperator ? Math.min(800 * Math.pow(1.3, currentAttempts), 4000) : Math.min(6000 * Math.pow(1.5, currentAttempts), 45000);
                     console.log(`[QueueProcessor] [MSG_TRACE:OUTBOX_RETRY] Socket da instância ${instanceId} indisponível/reconectando (tentativa ${currentAttempts}/${maxSocketWaitAttempts}). Reagendando mensagem ${msg.id} em ${Math.round(retryDelayMs / 1000)}s...`);
                     await supabase
                         .from('wa_outgoing_messages')

@@ -1,18 +1,36 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { Terminal as TerminalIcon, X, Trash2, Pause, Play, Maximize2, Minimize2, Copy, Check, Bug, AlertCircle, AlertTriangle, CheckCircle2, Info, Clock, RotateCcw } from 'lucide-react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { Terminal as TerminalIcon, X, Trash2, Pause, Play, Maximize2, Minimize2, Copy, Check, Bug, AlertCircle, AlertTriangle, CheckCircle2, Info, Clock, RotateCcw, RefreshCw } from 'lucide-react';
 import clsx from 'clsx';
+import { supabase } from '../services/supabase';
 
 interface LogEntry {
   id: string;
   timestamp: string;
   level: 'log' | 'info' | 'warn' | 'error';
   message: string;
+  source?: 'sse' | 'rest' | 'supabase';
+}
+
+interface ServerInfo {
+  status?: string;
+  environment?: string;
+  node?: string;
+  version?: string;
+  time?: string;
 }
 
 interface ServerLogsTerminalProps {
   onClose: () => void;
   isOpen: boolean;
 }
+
+const getEngineUrl = (): string => {
+  const envUrl = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim();
+  if (envUrl && envUrl.startsWith('http')) {
+    return envUrl.replace(/\/+$/, '');
+  }
+  return 'https://owckk0k8w8soo40w40owc4ss.69.62.92.212.sslip.io';
+};
 
 const isSpamLog = (msg: string) => {
   if (!msg) return false;
@@ -29,6 +47,8 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
   const [isPaused, setIsPaused] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
+  const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const [showCopyOptions, setShowCopyOptions] = useState(false);
   const [isDebugMode, setIsDebugMode] = useState(false);
@@ -53,7 +73,7 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
   const handleResetCutoff = () => {
     setClearCutoffTimestamp(null);
     localStorage.removeItem('server_console_log_cutoff');
-    const url = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+    const url = getEngineUrl();
     fetch(`${url}/api/v1/system/logs/all`)
       .then(res => res.json())
       .then(json => {
@@ -70,7 +90,7 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
     const newMode = !isDebugMode;
     setIsDebugMode(newMode);
     try {
-      const url = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+      const url = getEngineUrl();
       await fetch(`${url}/api/v1/system/logs/level`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -287,51 +307,141 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
   const isPausedRef = useRef(isPaused);
   isPausedRef.current = isPaused;
 
+  const checkHealth = useCallback(async () => {
+    try {
+      const url = getEngineUrl();
+      const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(4000) });
+      if (res.ok) {
+        const data: ServerInfo = await res.json();
+        if (data && (data.status === 'ok' || data.node || data.version)) {
+          setIsConnected(true);
+          setServerInfo(data);
+          return true;
+        }
+      }
+    } catch {
+      // Ignora falha de timeout pontual
+    }
+    return false;
+  }, []);
+
+  const loadLogsFromSupabase = useCallback(async () => {
+    try {
+      const cutoff = clearCutoffRef.current;
+      let query = supabase
+        .from('system_logs')
+        .select('id, created_at, level, message, type')
+        .order('created_at', { ascending: false })
+        .limit(80);
+
+      if (cutoff) {
+        const isoCutoff = new Date(cutoff).toISOString();
+        query = query.gte('created_at', isoCutoff);
+      }
+
+      const { data, error } = await query;
+      if (!error && Array.isArray(data) && data.length > 0) {
+        const formatted: LogEntry[] = data
+          .reverse()
+          .filter(row => row.message && !isSpamLog(row.message))
+          .map(row => ({
+            id: String(row.id || Math.random()),
+            timestamp: row.created_at || new Date().toISOString(),
+            level: (row.level as any) || 'info',
+            message: row.type && row.type !== 'Backend Error' ? `[${row.type}] ${row.message}` : row.message,
+            source: 'supabase'
+          }));
+
+        setLogs(prev => {
+          if (prev.length === 0) return formatted;
+          const existingSignatures = new Set(prev.map(p => `${p.level}:${p.message}`));
+          const newEntries = formatted.filter(f => !existingSignatures.has(`${f.level}:${f.message}`));
+          return [...prev, ...newEntries].slice(-300);
+        });
+        return true;
+      }
+    } catch (err) {
+      console.debug('Falha ao carregar fallback do Supabase', err);
+    }
+    return false;
+  }, []);
+
+  const fetchLogsRest = useCallback(async () => {
+    try {
+      const url = getEngineUrl();
+      const res = await fetch(`${url}/api/v1/system/logs/all`, { signal: AbortSignal.timeout(5000) });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.logs)) {
+          setIsConnected(true);
+          const cutoff = clearCutoffRef.current;
+          const filteredLogs = json.logs.filter((log: LogEntry) => {
+            if (isSpamLog(log.message)) return false;
+            if (cutoff) {
+              const logTime = new Date(log.timestamp).getTime();
+              if (!isNaN(logTime) && logTime < cutoff) return false;
+            }
+            return true;
+          });
+          setLogs(filteredLogs);
+          return true;
+        }
+      }
+    } catch {
+      // Ignora erro de fetch
+    }
+    return false;
+  }, []);
+
+  const handleManualRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      const healthOk = await checkHealth();
+      const restOk = await fetchLogsRest();
+      if (!restOk && (!logsRef.current || logsRef.current.length === 0)) {
+        await loadLogsFromSupabase();
+      }
+      if (!healthOk && !restOk) {
+        setIsConnected(false);
+      }
+    } finally {
+      setTimeout(() => setIsRefreshing(false), 600);
+    }
+  };
+
   useEffect(() => {
     if (!isOpen) return;
 
-    const url = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
     let isSubscribed = true;
+    const url = getEngineUrl();
 
-    const fetchLogsRest = async () => {
-      try {
-        const res = await fetch(`${url}/api/v1/system/logs/all`);
-        if (res.ok) {
-          const json = await res.json();
-          if (json.success && Array.isArray(json.logs) && isSubscribed) {
-            const cutoff = clearCutoffRef.current;
-            const filteredLogs = json.logs.filter((log: LogEntry) => {
-              if (isSpamLog(log.message)) return false;
-              if (cutoff) {
-                const logTime = new Date(log.timestamp).getTime();
-                if (!isNaN(logTime) && logTime < cutoff) return false;
-              }
-              return true;
-            });
-            setLogs(filteredLogs);
-            setIsConnected(true);
-          }
-        }
-      } catch (err) {
-        // Silently swallow fetch errors
+    // 1. Verificação imediata de saúde e carga inicial
+    checkHealth();
+    fetchLogsRest().then(success => {
+      if (!success && isSubscribed) {
+        loadLogsFromSupabase();
       }
-    };
+    });
 
-    fetchLogsRest();
-
+    // 2. Conexão SSE para streaming em tempo real do Node
     let sse: EventSource | null = null;
-    let fallbackInterval: any = null;
-
     try {
       sse = new EventSource(`${url}/api/v1/system/logs/stream`);
       
       sse.onopen = () => {
-        if (isSubscribed) setIsConnected(true);
+        if (isSubscribed) {
+          setIsConnected(true);
+        }
       };
 
       sse.onerror = () => {
         if (isSubscribed) {
-          fetchLogsRest();
+          // Em caso de oscilação do SSE, testa o healthcheck antes de marcar offline
+          checkHealth().then(healthy => {
+            if (!healthy && isSubscribed) {
+              setIsConnected(false);
+            }
+          });
         }
       };
 
@@ -363,7 +473,7 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
             }
 
             setLogs(prev => {
-              const next = [...prev, data];
+              const next = [...prev, { ...data, source: 'sse' }];
               if (next.length > 300) return next.slice(next.length - 300);
               return next;
             });
@@ -373,23 +483,68 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
           console.error('SSE Parse Error', err);
         }
       };
-    } catch (err) {
+    } catch {
       // Fallback
     }
 
-    fallbackInterval = setInterval(() => {
+    // 3. Canal Realtime Supabase para espelhamento dos logs gravados em banco
+    const realtimeChannel = supabase
+      .channel('server_logs_terminal_realtime')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'system_logs' },
+        (payload) => {
+          if (isPausedRef.current || !isSubscribed) return;
+          const newRow: any = payload.new;
+          if (!newRow || !newRow.message || isSpamLog(newRow.message)) return;
+
+          const cutoff = clearCutoffRef.current;
+          if (cutoff) {
+            const logTime = new Date(newRow.created_at || Date.now()).getTime();
+            if (!isNaN(logTime) && logTime < cutoff) return;
+          }
+
+          const entry: LogEntry = {
+            id: String(newRow.id || Math.random()),
+            timestamp: newRow.created_at || new Date().toISOString(),
+            level: (newRow.level as any) || 'info',
+            message: newRow.type && newRow.type !== 'Backend Error' ? `[${newRow.type}] ${newRow.message}` : newRow.message,
+            source: 'supabase'
+          };
+
+          setLogs(prev => {
+            const isDuplicate = prev.some(p => 
+              p.id === entry.id || 
+              (p.message === entry.message && Math.abs(new Date(p.timestamp).getTime() - new Date(entry.timestamp).getTime()) < 3000)
+            );
+            if (isDuplicate) return prev;
+            const next = [...prev, entry];
+            return next.length > 300 ? next.slice(next.length - 300) : next;
+          });
+        }
+      )
+      .subscribe();
+
+    // 4. Polling periódico de saúde e sincronização a cada 5 segundos
+    const syncInterval = setInterval(() => {
       if (isSubscribed && !isPausedRef.current) {
-        fetchLogsRest();
+        checkHealth();
+        // Se ainda não houver logs carregados, tenta buscar
+        if (logsRef.current.length === 0) {
+          fetchLogsRest().then(success => {
+            if (!success && isSubscribed) loadLogsFromSupabase();
+          });
+        }
       }
-    }, 3000);
+    }, 5000);
 
     return () => {
       isSubscribed = false;
       if (sse) sse.close();
-      if (fallbackInterval) clearInterval(fallbackInterval);
-      setIsConnected(false);
+      if (syncInterval) clearInterval(syncInterval);
+      supabase.removeChannel(realtimeChannel);
     };
-  }, [isOpen]);
+  }, [isOpen, checkHealth, fetchLogsRest, loadLogsFromSupabase]);
 
   useEffect(() => {
     if (!isPaused && bottomRef.current) {
@@ -427,9 +582,18 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
                    isConnected ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]" : "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)]"
                 )}></span>
               </span>
-              <span className="text-[8px] text-gray-400 font-semibold font-mono tracking-widest uppercase">
+              <span className={clsx(
+                "text-[8px] font-semibold font-mono tracking-widest uppercase",
+                isConnected ? "text-emerald-400" : "text-red-400"
+              )}>
                 {isConnected ? "online" : "offline"}
               </span>
+
+              {serverInfo && (
+                <span className="text-[8px] font-mono px-1.5 py-0.5 bg-white/5 border border-white/10 rounded text-slate-300">
+                  {serverInfo.node || 'NODE'} • v{serverInfo.version || '7.7.0'}
+                </span>
+              )}
 
               {clearCutoffTimestamp && (
                 <div className="flex items-center gap-1 ml-1 px-1.5 py-0.5 bg-amber-500/10 border border-amber-500/20 rounded-md text-amber-300 text-[9px] font-mono select-none animate-in fade-in">
@@ -449,6 +613,18 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
         </div>
         
         <div className="flex items-center gap-1.5">
+          <button 
+            onClick={handleManualRefresh}
+            disabled={isRefreshing}
+            className={clsx(
+              "p-2 bg-white/5 border border-white/5 hover:border-white/10 rounded-lg text-gray-400 hover:text-white transition-all hover:scale-105 active:scale-95 duration-150 cursor-pointer",
+              isRefreshing && "opacity-50 cursor-not-allowed"
+            )}
+            title="Recarregar Logs e Sincronizar Conexão"
+          >
+            <RefreshCw className={clsx("w-3.5 h-3.5", isRefreshing && "animate-spin text-emerald-400")} />
+          </button>
+
           <button 
             onClick={toggleDebugMode}
             className={clsx(
@@ -530,15 +706,37 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
       {/* Logs Area */}
       <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-2.5 font-mono text-[10.5px] leading-relaxed custom-scrollbar bg-slate-950/40">
         {logs.length === 0 ? (
-          <div className="m-auto flex flex-col items-center justify-center text-gray-500 space-y-3 select-none animate-in fade-in duration-500">
-            <div className="w-12 h-12 rounded-2xl bg-white/5 border border-white/5 flex items-center justify-center text-gray-400 animate-pulse">
+          <div className="m-auto flex flex-col items-center justify-center text-gray-500 space-y-3 select-none animate-in fade-in duration-500 text-center px-4">
+            <div className={clsx(
+              "w-12 h-12 rounded-2xl border flex items-center justify-center transition-all",
+              isConnected 
+                ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400 animate-pulse" 
+                : "bg-red-500/10 border-red-500/20 text-red-400"
+            )}>
               <TerminalIcon className="w-6 h-6" />
             </div>
-            <p className="font-semibold text-xs tracking-wider uppercase">
-              {clearCutoffTimestamp 
-                ? `Aguardando novos logs a partir das ${new Date(clearCutoffTimestamp).toLocaleTimeString()}...`
-                : 'Aguardando logs do servidor...'}
-            </p>
+            <div className="space-y-1">
+              <p className="font-semibold text-xs tracking-wider uppercase text-gray-300">
+                {clearCutoffTimestamp 
+                  ? `Aguardando novos logs a partir das ${new Date(clearCutoffTimestamp).toLocaleTimeString()}...`
+                  : isConnected 
+                    ? 'Servidor Conectado • Aguardando novas atividades...' 
+                    : 'Aguardando logs do servidor...'}
+              </p>
+              <p className="text-[10px] text-gray-400 max-w-xs">
+                {isConnected 
+                  ? 'O motor do WhatsApp está ativo. Novos eventos serão exibidos automaticamente aqui.' 
+                  : 'Tentando sincronizar logs via streaming SSE, REST e canais Realtime.'}
+              </p>
+            </div>
+            <button
+              onClick={handleManualRefresh}
+              disabled={isRefreshing}
+              className="mt-2 flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[11px] font-mono text-gray-300 hover:text-white transition-colors cursor-pointer"
+            >
+              <RefreshCw className={clsx("w-3 h-3", isRefreshing && "animate-spin text-emerald-400")} />
+              <span>{isRefreshing ? 'Atualizando...' : 'Recarregar logs agora'}</span>
+            </button>
           </div>
         ) : (
           <div className="flex flex-col gap-2">

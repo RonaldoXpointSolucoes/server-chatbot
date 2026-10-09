@@ -925,10 +925,10 @@ class SessionManager {
                 if (ageMs < 25000 && isStillConnecting) {
                     console.log(`[SessionManager] Sessão ${instanceId} está em processo ativo de conexão/handshake (${ageMs}ms). Aguardando estabilização sem recriar socket.`);
                     try {
-                        await waitForSocketOpen(existingSock, 15000);
+                        await waitForSocketOpen(existingSock, 3500);
                         if (isSocketOpen(existingSock)) return existingSock;
                     } catch (e) {
-                        console.warn(`[SessionManager] Timeout ou oscilação ao aguardar socket em handshake para ${instanceId}:`, e.message);
+                        console.warn(`[SessionManager] Handshake transitório em andamento para ${instanceId} (${e.message}). Prosseguindo de forma não-bloqueante.`);
                     }
                 }
             }
@@ -2251,7 +2251,7 @@ class SessionManager {
                     if (!meId || !isSocketOpen(createdSock)) {
                         if (createdSock?.ws && (createdSock.ws.isConnecting || !isSocketOpen(createdSock))) {
                             try {
-                                await waitForSocketOpen(createdSock, 20000);
+                                await waitForSocketOpen(createdSock, 4000);
                             } catch (e) {
                                 const latest = this.sessions.get(instanceId)?.sock;
                                 if (latest && isSocketOpen(latest)) return latest;

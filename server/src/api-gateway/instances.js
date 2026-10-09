@@ -493,9 +493,26 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                 console.log(`[API Gateway] [MSG_TRACE:GATEWAY_RECEIVE] Instância: ${instanceId} | JID: ${targetJid} | Tipo: ${messageType} | TraceId: ${traceId || 'N/A'}`);
 
                 // FAST-PATH: Se o socket da instância já estiver na memória e conectado, envia IMEDIATAMENTE (< 300ms)
-                const activeSock = sessionManager.sessions.get(instanceId)?.sock;
-                const hasCreds = Boolean(activeSock?.authState?.creds?.me?.id || activeSock?.user?.id);
-                const isSockConnected = activeSock && (!activeSock.ws || activeSock.ws.isOpen || activeSock.ws.readyState === 1) && hasCreds;
+                let activeSock = sessionManager.sessions.get(instanceId)?.sock;
+                let hasCreds = Boolean(activeSock?.authState?.creds?.me?.id || activeSock?.user?.id);
+                let isSockConnected = activeSock && (!activeSock.ws || activeSock.ws.isOpen || activeSock.ws.readyState === 1) && hasCreds;
+
+                // Smart-Wake: se o socket estiver conectando na memória ou precisando de wake rápido, aguarda até 1.5s
+                if (!isSockConnected && messageType === 'text') {
+                    try {
+                        const { waitForSocketOpen } = await import('../session-manager/index.js');
+                        if (activeSock && activeSock.ws && !activeSock.ws.isClosed && !activeSock.ws.isClosing) {
+                            await waitForSocketOpen(activeSock, 1500);
+                        } else {
+                            const wakePromise = sessionManager.getSocketOrWake(req.tenantId, instanceId, true);
+                            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT_FAST_WAKE')), 1500));
+                            const waked = await Promise.race([wakePromise, timeoutPromise]);
+                            if (waked) activeSock = waked;
+                        }
+                    } catch (e) {}
+                    hasCreds = Boolean(activeSock?.authState?.creds?.me?.id || activeSock?.user?.id);
+                    isSockConnected = activeSock && (!activeSock.ws || activeSock.ws.isOpen || activeSock.ws.readyState === 1) && hasCreds;
+                }
 
                 if (isSockConnected && messageType === 'text') {
                     let sentResult = null;

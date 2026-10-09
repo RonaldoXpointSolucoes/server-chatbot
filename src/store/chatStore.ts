@@ -2485,9 +2485,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
             window.dispatchEvent(new CustomEvent('toast', { 
               detail: { 
-                message: 'Servidor sob alta carga: Mensagem gravada com segurança na fila de saída (Outbox). O envio será concluído automaticamente.', 
+                message: 'Mensagem na fila de envio prioritário. Concluindo disparo com o WhatsApp...', 
                 type: 'info', 
-                duration: 6500 
+                duration: 3500 
               } 
             }));
 

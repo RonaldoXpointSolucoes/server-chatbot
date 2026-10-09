@@ -303,20 +303,32 @@ interceptConsole();
 // Ponto de Entrada para o Frontend Ouvir em Tempo Real
 router.get('/stream', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Headers', '*');
   // Necessario para funcionar atras de um nginx/proxy sem bufferizar
   res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders && res.flushHeaders(); 
 
-  const clientId = Date.now();
+  const clientId = Date.now() + Math.random().toString(36).substr(2, 5);
   const newClient = { id: clientId, res };
   clients.push(newClient);
 
   // Envia logs velhos logo na conexão
   res.write(`data: ${JSON.stringify({ type: 'init', logs: logBuffer })}\n\n`);
 
+  // Heartbeat periódico (a cada 15 segundos) para manter conexão SSE viva atrás de proxies reversos (Traefik/Cloudflare/Nginx)
+  const keepAliveTimer = setInterval(() => {
+    try {
+      res.write(': keepalive\n\n');
+    } catch (e) {
+      clearInterval(keepAliveTimer);
+    }
+  }, 15000);
+
   req.on('close', () => {
+    clearInterval(keepAliveTimer);
     clients = clients.filter(c => c.id !== clientId);
   });
 });

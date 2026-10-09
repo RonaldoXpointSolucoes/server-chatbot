@@ -43,12 +43,16 @@ async function getSocketWithRetry(tenantId, instanceId, maxRetries = 1) {
         return localSock;
     }
 
-    // 3. Tentativa única de obtenção com timeout defensivo curto (não bloqueia a resposta externa)
+    // 3. Tentativa única de obtenção com timeout defensivo curto (máx 2.5s para não travar clientes externos)
     try {
-        const sock = await sessionManager.getSocketOrWake(tenantId, instanceId, true);
+        const wakePromise = sessionManager.getSocketOrWake(tenantId, instanceId, true);
+        const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('TIMEOUT_SOCKET_WAKE_FASTFAIL')), 2500)
+        );
+        const sock = await Promise.race([wakePromise, timeoutPromise]);
         if (sock && isSocketOpen(sock)) return sock;
     } catch (e) {
-        console.warn(`[API Gateway] getSocketOrWake falhou para ${instanceId}:`, e.message);
+        console.warn(`[API Gateway] getSocketOrWake rápido para ${instanceId}: ${e.message}. Delegando para outbox resiliente.`);
     }
 
     return null;
