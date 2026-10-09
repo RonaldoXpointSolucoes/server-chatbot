@@ -14,6 +14,7 @@ function requestCoolify(method, path, body = null) {
     const options = {
       method,
       rejectUnauthorized: false,
+      timeout: 60000,
       headers: {
         'Authorization': `Bearer ${TOKEN}`,
         'Content-Type': 'application/json',
@@ -35,6 +36,7 @@ function requestCoolify(method, path, body = null) {
     });
 
     req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('Timeout na requisição ao Coolify')); });
     if (body) req.write(JSON.stringify(body));
     req.end();
   });
