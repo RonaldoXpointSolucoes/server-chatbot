@@ -20,6 +20,37 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.8.5',
+    date: '2026-10-09',
+    summary: 'Plano de Contingência de Fila Outbox, TTL Estrito de 10min e Atualização Baileys v7.0.0-rc14',
+    notes: [
+      {
+        id: '7.8.5-1',
+        category: 'features',
+        title: 'TTL Estrito de 10 Minutos na Fila de Saída (wa_outgoing_messages)',
+        description: 'Implementado descarte automático e contingência para mensagens retidas na fila por mais de 10 minutos, impedindo loops, acúmulos e disparos tardios fora de contexto aos clientes.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.8.5-2',
+        category: 'fixes',
+        title: 'Eliminação de Bloqueio por Mensagens Antigas e Represamento de Outbox',
+        description: 'Auto-limpeza preventiva a cada 45 segundos e expurgo de mensagens zumbis. Otimização de vazão com priorização imediata e micro-delay defensivo (50ms) para operadores.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      },
+      {
+        id: '7.8.5-3',
+        category: 'improvements',
+        title: 'Motor Baileys v7.0.0-rc14 e Desbloqueio da Fila Offline',
+        description: 'Atualização do motor WhatsApp com WA Web 2.3000.1049232487, ack sem NACK para status broadcast (PR #2779), eliminação de erro 479 em LID 1:1 (PR #2839) e captura proativa de tc-token (PR #2752).',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+      }
+    ]
+  },
+  {
     version: '7.8.4',
     date: '2026-10-09',
     summary: 'Eliminação da Lentidão do Servidor, Otimização de Event Loop e Terminal de Logs Resiliente',
