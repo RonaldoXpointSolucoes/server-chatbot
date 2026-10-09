@@ -20,6 +20,37 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.8.2',
+    date: '2026-10-08',
+    summary: 'Evolução do QR Code WhatsApp com Expiração Visual, Validação E2E e Deploy Integrado',
+    notes: [
+      {
+        id: '7.8.2-1',
+        category: 'features',
+        title: 'Ciclo de Vida do QR Code com Expiração e Atualização Dinâmica',
+        description: 'Implementado temporizador com contagem regressiva visual, auto-refresh inteligente de QR codes expirados e feedback de pareamento passo a passo com trilha de migalhas no modal de conexão.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.8.2-2',
+        category: 'improvements',
+        title: 'Quality Gate E2E Baileys com 100% de Aprovação no Coolify',
+        description: 'Bateria automatizada de 3 ciclos bidirecionais de envio e recebimento entre as instâncias FoodNext e Ronaldo-Web homologada com sucesso absoluto antes da liberação em produção.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+      },
+      {
+        id: '7.8.2-3',
+        category: 'fixes',
+        title: 'Estabilização de Deploy e Tolerância a Timeouts no Orquestrador',
+        description: 'Aprimoramento dos scripts de telemetria e orquestração do Coolify com tratamento defensivo contra latências de rede e sincronização atômica do version.json.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      }
+    ]
+  },
+  {
     version: '7.8.1',
     date: '2026-10-08',
     summary: 'Sincronização de Mídias e Vídeos do WhatsApp, DevLogger Otimizado e Tratamento de Edições',
