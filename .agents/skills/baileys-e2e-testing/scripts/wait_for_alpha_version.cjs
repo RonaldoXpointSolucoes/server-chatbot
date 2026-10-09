@@ -30,33 +30,23 @@ function checkHealth() {
   });
 }
 
+const targetVersion = process.argv[2] || '7.7.5';
+
 async function main() {
-  console.log('[Monitor Alpha] Aguardando conclusão do build e ativação da versão 7.7.1...');
-  for (let i = 1; i <= 45; i++) {
-    const list = await get('/api/v1/deployments');
-    const d1606 = Array.isArray(list) ? list.find(d => d.id === 1606) : null;
+  console.log(`[Monitor Alpha] Aguardando conclusão do build e ativação da versão ${targetVersion}...`);
+  for (let i = 1; i <= 60; i++) {
     const health = await checkHealth();
     
-    console.log(`[${i}/45] Deployment 1606: ${d1606?.status || 'unknown'} | Versão em /health: ${health?.version || 'aguardando'}`);
+    console.log(`[${i}/60] Versão atual em Alpha /health: ${health?.version || 'aguardando resposta...'}`);
     
-    if (health?.version === '7.7.1') {
-      console.log('✅ [Monitor Alpha] Versão 7.7.1 ativa e em execução no ambiente Alpha!');
+    if (health?.version === targetVersion) {
+      console.log(`✅ [Monitor Alpha] Versão ${targetVersion} ativa e em execução no ambiente Alpha!`);
       process.exit(0);
     }
     
-    if (d1606?.status === 'finished' && health?.version === '7.7.1') {
-      console.log('✅ [Monitor Alpha] Build 1606 finalizado com sucesso e versão 7.7.1 ativa!');
-      process.exit(0);
-    }
-    
-    if (d1606?.status === 'failed' || d1606?.status === 'error') {
-      console.log('❌ [Monitor Alpha] Build 1606 falhou:', d1606.status);
-      process.exit(1);
-    }
-    
-    await new Promise(r => setTimeout(r, 10000));
+    await new Promise(r => setTimeout(r, 6000));
   }
-  console.log('⚠️ [Monitor Alpha] Timeout aguardando versão 7.7.1');
+  console.log(`⚠️ [Monitor Alpha] Timeout aguardando versão ${targetVersion}`);
   process.exit(1);
 }
 

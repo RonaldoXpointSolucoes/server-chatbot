@@ -1,3 +1,4 @@
+import { Boom } from '@hapi/boom'
 import { proto } from '../../WAProto/index.js'
 import type {
 	AuthenticationCreds,
@@ -33,6 +34,7 @@ import { aesDecryptGCM, hmacSign } from './crypto'
 import { getKeyAuthor, toNumber } from './generics'
 import { downloadAndProcessHistorySyncNotification } from './history'
 import type { ILogger } from './logger'
+import { buildMergedTcTokenIndexWrite, resolveTcTokenJid } from './tc-token-utils'
 
 type ProcessMessageContext = {
 	shouldProcessHistoryMsg: boolean
@@ -54,6 +56,64 @@ const REAL_MSG_STUB_TYPES = new Set([
 ])
 
 const REAL_MSG_REQ_ME_STUB_TYPES = new Set([WAMessageStubType.GROUP_PARTICIPANT_ADD])
+
+async function storeTcTokensFromHistorySync(
+	chats: Chat[],
+	signalRepository: SignalRepositoryWithLIDStore,
+	keyStore: SignalKeyStoreWithTransaction,
+	logger?: ILogger
+) {
+	const getLIDForPN = signalRepository.lidMapping.getLIDForPN.bind(signalRepository.lidMapping)
+
+	const candidates: { storageJid: string; token: Buffer; ts: number; senderTs?: number }[] = []
+	for (const chat of chats) {
+		const ts = chat.tcTokenTimestamp ? toNumber(chat.tcTokenTimestamp) : 0
+		if (chat.tcToken?.length && ts > 0) {
+			const jid = jidNormalizedUser(chat.id!)
+			const storageJid = await resolveTcTokenJid(jid, getLIDForPN)
+			candidates.push({
+				storageJid,
+				token: Buffer.from(chat.tcToken),
+				ts,
+				senderTs: chat.tcTokenSenderTimestamp ? toNumber(chat.tcTokenSenderTimestamp) : undefined
+			})
+		}
+	}
+
+	if (!candidates.length) {
+		return
+	}
+
+	const jids = candidates.map(c => c.storageJid)
+	const existing = await keyStore.get('tctoken', jids)
+	const entries: Record<string, { token: Buffer; timestamp?: string; senderTimestamp?: number }> = {}
+
+	for (const c of candidates) {
+		const existingEntry = existing[c.storageJid]
+		const existingTs = existingEntry?.timestamp ? Number(existingEntry.timestamp) : 0
+		if (existingTs > 0 && existingTs >= c.ts) {
+			continue
+		}
+
+		entries[c.storageJid] = {
+			...existingEntry,
+			token: c.token,
+			timestamp: String(c.ts),
+			...(c.senderTs !== undefined ? { senderTimestamp: c.senderTs } : {})
+		}
+	}
+
+	if (Object.keys(entries).length) {
+		logger?.debug({ count: Object.keys(entries).length }, 'storing tctokens from history sync')
+		try {
+			// Include updated __index so cross-session pruning picks these JIDs up.
+			const indexWrite = await buildMergedTcTokenIndexWrite(keyStore, Object.keys(entries))
+			await keyStore.set({ tctoken: { ...entries, ...indexWrite } })
+		} catch (err) {
+			logger?.warn({ err }, 'failed to store tctokens from history sync')
+		}
+	}
+}
 
 /** Cleans a received message to further processing */
 export const cleanMessage = (message: WAMessage, meId: string, meLid: string) => {
@@ -128,12 +188,24 @@ export const shouldIncrementChatUnread = (message: WAMessage) => !message.key.fr
  * Get the ID of the chat from the given key.
  * Typically -- that'll be the remoteJid, but for broadcasts, it'll be the participant
  */
-export const getChatId = ({ remoteJid, participant, fromMe }: WAMessageKey) => {
-	if (isJidBroadcast(remoteJid!) && !isJidStatusBroadcast(remoteJid!) && !fromMe) {
-		return participant!
+export const getChatId = ({ remoteJid, participant, fromMe }: WAMessageKey): string => {
+	if (!remoteJid) {
+		throw new Boom('Cannot derive chat id: message key is missing remoteJid', {
+			data: { remoteJid, participant, fromMe }
+		})
 	}
 
-	return remoteJid!
+	if (isJidBroadcast(remoteJid) && !isJidStatusBroadcast(remoteJid) && !fromMe) {
+		if (!participant) {
+			throw new Boom('Cannot derive chat id: broadcast message key is missing participant', {
+				data: { remoteJid, fromMe }
+			})
+		}
+
+		return participant
+	}
+
+	return remoteJid
 }
 
 type PollContext = {
@@ -258,6 +330,45 @@ const processMessage = async (
 
 	const protocolMsg = content?.protocolMessage
 	if (protocolMsg) {
+		// Mirror whatsmeow's `handleProtocolMessage` guard, but applied only to
+		// the protocol message types that originate from our own device — an
+		// attacker could otherwise spoof any of these to manipulate local state.
+		//
+		// Self-only types (drop if `!fromMe`):
+		//   - HISTORY_SYNC_NOTIFICATION                 (our phone driving history sync)
+		//   - APP_STATE_SYNC_KEY_SHARE                  (key share between our devices)
+		//   - LID_MIGRATION_MAPPING_SYNC                (server-initiated via our phone)
+		//   - PEER_DATA_OPERATION_REQUEST_RESPONSE_MESSAGE (response from our phone to our PDO request)
+		//
+		// Cross-user types (must NOT be dropped — legitimately arrive from others):
+		//   - REVOKE
+		//   - MESSAGE_EDIT
+		//   - EPHEMERAL_SETTING
+		//   - GROUP_MEMBER_LABEL_CHANGE
+		//
+		// See https://github.com/tulir/whatsmeow/blob/8d3700152a/message.go#L842-L845
+		// for the reference architecture — whatsmeow's `handleProtocolMessage`
+		// only contains self-only types because edits are unwrapped from
+		// `EditedMessage` BEFORE this dispatch and revokes aren't routed here.
+		const SELF_ONLY_TYPES = new Set<proto.Message.ProtocolMessage.Type>([
+			proto.Message.ProtocolMessage.Type.HISTORY_SYNC_NOTIFICATION,
+			proto.Message.ProtocolMessage.Type.APP_STATE_SYNC_KEY_SHARE,
+			proto.Message.ProtocolMessage.Type.LID_MIGRATION_MAPPING_SYNC,
+			proto.Message.ProtocolMessage.Type.PEER_DATA_OPERATION_REQUEST_RESPONSE_MESSAGE
+		])
+		if (
+			protocolMsg.type !== null &&
+			protocolMsg.type !== undefined &&
+			SELF_ONLY_TYPES.has(protocolMsg.type) &&
+			!message.key.fromMe
+		) {
+			logger?.warn(
+				{ msgId: message.key.id, type: protocolMsg.type, from: message.key.participant || message.key.remoteJid },
+				'dropping spoofed self-only protocolMessage from non-self origin'
+			)
+			return
+		}
+
 		switch (protocolMsg.type) {
 			case proto.Message.ProtocolMessage.Type.HISTORY_SYNC_NOTIFICATION:
 				const histNotification = protocolMsg.historySyncNotification!
@@ -294,9 +405,12 @@ const processMessage = async (
 							.catch(err => logger?.warn({ err }, 'failed to store LID-PN mappings from history sync'))
 					}
 
+					await storeTcTokensFromHistorySync(data.chats, signalRepository, keyStore, logger)
+
 					ev.emit('messaging-history.set', {
 						...data,
 						isLatest: histNotification.syncType !== proto.HistorySync.HistorySyncType.ON_DEMAND ? isLatest : undefined,
+						chunkOrder: histNotification.chunkOrder,
 						peerDataRequestSessionId: histNotification.peerDataRequestSessionId
 					})
 				}
@@ -513,36 +627,25 @@ const processMessage = async (
 	} else if (message.messageStubType) {
 		const jid = message.key?.remoteJid!
 		//let actor = whatsappID (message.participant)
-		const safeParseParticipant = (a: any): any => {
-			if (typeof a !== 'string') return a
-			try {
-				const parsed = JSON.parse(a)
-				if (typeof parsed === 'string') {
-					return { id: parsed }
-				}
-				if (parsed && typeof parsed === 'object') {
-					if (!parsed.id && parsed.lid) {
-						parsed.id = parsed.lid
-					}
-					return parsed
-				}
-				return { id: a }
-			} catch (e) {
-				return { id: a }
-			}
-		}
 		let participants: GroupParticipant[]
 		const emitParticipantsUpdate = (action: ParticipantAction) =>
 			ev.emit('group-participants.update', {
 				id: jid,
 				author: message.key.participant!,
 				authorPn: message.key.participantAlt!,
+				authorUsername: message.key.participantUsername!,
 				participants,
 				action
 			})
 		const emitGroupUpdate = (update: Partial<GroupMetadata>) => {
 			ev.emit('groups.update', [
-				{ id: jid, ...update, author: message.key.participant ?? undefined, authorPn: message.key.participantAlt }
+				{
+					id: jid,
+					...update,
+					author: message.key.participant ?? undefined,
+					authorPn: message.key.participantAlt,
+					authorUsername: message.key.participantUsername
+				}
 			])
 		}
 
@@ -551,6 +654,7 @@ const processMessage = async (
 				id: jid,
 				author: message.key.participant!,
 				authorPn: message.key.participantAlt!,
+				authorUsername: message.key.participantUsername!,
 				participant: participant.lid,
 				participantPn: participant.pn,
 				action,
@@ -562,12 +666,12 @@ const processMessage = async (
 
 		switch (message.messageStubType) {
 			case WAMessageStubType.GROUP_PARTICIPANT_CHANGE_NUMBER:
-				participants = message.messageStubParameters.map((a: any) => safeParseParticipant(a)) || []
+				participants = message.messageStubParameters.map((a: any) => JSON.parse(a as string)) || []
 				emitParticipantsUpdate('modify')
 				break
 			case WAMessageStubType.GROUP_PARTICIPANT_LEAVE:
 			case WAMessageStubType.GROUP_PARTICIPANT_REMOVE:
-				participants = message.messageStubParameters.map((a: any) => safeParseParticipant(a)) || []
+				participants = message.messageStubParameters.map((a: any) => JSON.parse(a as string)) || []
 				emitParticipantsUpdate('remove')
 				// mark the chat read only if you left the group
 				if (participantsIncludesMe()) {
@@ -578,7 +682,7 @@ const processMessage = async (
 			case WAMessageStubType.GROUP_PARTICIPANT_ADD:
 			case WAMessageStubType.GROUP_PARTICIPANT_INVITE:
 			case WAMessageStubType.GROUP_PARTICIPANT_ADD_REQUEST_JOIN:
-				participants = message.messageStubParameters.map((a: any) => safeParseParticipant(a)) || []
+				participants = message.messageStubParameters.map((a: any) => JSON.parse(a as string)) || []
 				if (participantsIncludesMe()) {
 					chat.readOnly = false
 				}
@@ -586,11 +690,11 @@ const processMessage = async (
 				emitParticipantsUpdate('add')
 				break
 			case WAMessageStubType.GROUP_PARTICIPANT_DEMOTE:
-				participants = message.messageStubParameters.map((a: any) => safeParseParticipant(a)) || []
+				participants = message.messageStubParameters.map((a: any) => JSON.parse(a as string)) || []
 				emitParticipantsUpdate('demote')
 				break
 			case WAMessageStubType.GROUP_PARTICIPANT_PROMOTE:
-				participants = message.messageStubParameters.map((a: any) => safeParseParticipant(a)) || []
+				participants = message.messageStubParameters.map((a: any) => JSON.parse(a as string)) || []
 				emitParticipantsUpdate('promote')
 				break
 			case WAMessageStubType.GROUP_CHANGE_ANNOUNCE:
@@ -624,7 +728,7 @@ const processMessage = async (
 				emitGroupUpdate({ joinApprovalMode: approvalMode === 'on' })
 				break
 			case WAMessageStubType.GROUP_MEMBERSHIP_JOIN_APPROVAL_REQUEST_NON_ADMIN_ADD: // TODO: Add other events
-				const participant = safeParseParticipant(message.messageStubParameters?.[0]) as LIDMapping
+				const participant = JSON.parse(message.messageStubParameters?.[0]) as LIDMapping
 				const action = message.messageStubParameters?.[1] as RequestJoinAction
 				const method = message.messageStubParameters?.[2] as RequestJoinMethod
 				emitGroupRequestJoin(participant, action, method)

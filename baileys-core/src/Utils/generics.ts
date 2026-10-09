@@ -1,7 +1,8 @@
 import { Boom } from '@hapi/boom'
 import { createHash, randomBytes } from 'crypto'
+import type Long from 'long'
 import { proto } from '../../WAProto/index.js'
-const baileysVersion = [2, 3000, 1035194821]
+const baileysVersion = [2, 3000, 1049232487]
 import type {
 	BaileysEventEmitter,
 	BaileysEventMap,
@@ -241,29 +242,35 @@ export const fetchLatestBaileysVersion = async (options: RequestInit = {}) => {
 		const response = await fetch(URL, {
 			dispatcher: options.dispatcher,
 			method: 'GET',
-			headers: options.headers
+			headers: options.headers,
+			signal: options.signal
 		})
 		if (!response.ok) {
 			throw new Boom(`Failed to fetch latest Baileys version: ${response.statusText}`, { statusCode: response.status })
 		}
 
 		const text = await response.text()
-		// Extract version from line 7 (const version = [...])
-		const lines = text.split('\n')
-		const versionLine = lines[6] // Line 7 (0-indexed)
-		const versionMatch = versionLine!.match(/const version = \[(\d+),\s*(\d+),\s*(\d+)\]/)
-
-		if (versionMatch) {
-			const version = [parseInt(versionMatch[1]!), parseInt(versionMatch[2]!), parseInt(versionMatch[3]!)] as WAVersion
-
-			return {
-				version,
-				isLatest: true
-			}
-		} else {
+		// Extract version from Defaults/index.ts (const version = [...]) allowing flexible whitespace
+		const versionMatch = text.match(/const\s+version(?:\s*:[^=]+)?\s*=\s*\[\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\]/)
+		if (!versionMatch) {
 			throw new Error('Could not parse version from Defaults/index.ts')
 		}
+
+		const version = [parseInt(versionMatch[1]!), parseInt(versionMatch[2]!), parseInt(versionMatch[3]!)] as WAVersion
+
+		return {
+			version,
+			isLatest: true
+		}
 	} catch (error) {
+		const waWebVersion = await fetchLatestWaWebVersion({
+			dispatcher: options.dispatcher,
+			signal: options.signal
+		})
+		if (waWebVersion.isLatest) {
+			return waWebVersion
+		}
+
 		return {
 			version: baileysVersion as WAVersion,
 			isLatest: false,
@@ -391,6 +398,15 @@ export const getCallStatusFromNode = ({ tag, attrs }: BinaryNode) => {
 			}
 
 			break
+		case 'preaccept':
+			status = 'preaccept'
+			break
+		case 'transport':
+			status = 'transport'
+			break
+		case 'relaylatency':
+			status = 'relaylatency'
+			break
 		case 'reject':
 			status = 'reject'
 			break
@@ -408,7 +424,7 @@ export const getCallStatusFromNode = ({ tag, attrs }: BinaryNode) => {
 const UNEXPECTED_SERVER_CODE_TEXT = 'Unexpected server response: '
 
 export const getCodeFromWSError = (error: Error) => {
-	let statusCode = DisconnectReason.connectionClosed // 428 default instead of 500 for generic transport errors
+	let statusCode = 500
 	if (error?.message?.includes(UNEXPECTED_SERVER_CODE_TEXT)) {
 		const code = +error?.message.slice(UNEXPECTED_SERVER_CODE_TEXT.length)
 		if (!Number.isNaN(code) && code >= 400) {
@@ -417,15 +433,10 @@ export const getCodeFromWSError = (error: Error) => {
 	} else if (
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		(error as any)?.code?.startsWith('E') ||
-		(error as any)?.code === 1006 ||
-		error?.message?.includes('timed out') ||
-		error?.message?.includes('timeout') ||
-		error?.message?.includes('reset') ||
-		error?.message?.includes('closed') ||
-		error?.message?.includes('connection')
+		error?.message?.includes('timed out')
 	) {
-		// handle ETIMEOUT, ENOTFOUND, ECONNRESET, code 1006 abnormal closure etc
-		statusCode = DisconnectReason.connectionLost // 408
+		// handle ETIMEOUT, ENOTFOUND etc
+		statusCode = 408
 	}
 
 	return statusCode

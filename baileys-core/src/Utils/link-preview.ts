@@ -52,11 +52,22 @@ export const getUrlInfo = async (
 			...opts.fetchOpts,
 			followRedirects: 'follow',
 			handleRedirects: (baseURL: string, forwardedURL: string) => {
+				const urlObj = new URL(baseURL)
+				const forwardedURLObj = new URL(forwardedURL)
 				if (retries >= maxRetry) {
 					return false
 				}
-				retries += 1
-				return true
+
+				if (
+					forwardedURLObj.hostname === urlObj.hostname ||
+					forwardedURLObj.hostname === 'www.' + urlObj.hostname ||
+					'www.' + forwardedURLObj.hostname === urlObj.hostname
+				) {
+					retries += 1
+					return true
+				} else {
+					return false
+				}
 			},
 			headers: opts.fetchOpts?.headers as {}
 		})

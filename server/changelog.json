@@ -1,10 +1,11 @@
 {
-  "version": "7.7.3",
+  "version": "7.7.5",
   "changelog": [
-    "⚡ Otimização do Event Loop: Throttling sequencial (1500ms) no boot de produção eliminando picos de CPU e congelamento",
-    "🛡️ Prevenção de Cascata de Timeouts: Bypass imediato para outbox resiliente (<10ms) em falhas de socket, evitando travamentos de 30s a 60s",
-    "📊 Console do Servidor Resiliente: Rotas de streaming SSE e histórico REST priorizadas e integradas no API Gateway",
-    "⏱️ Redução de Timeout Baileys: Timeout ajustado para 8s com detecção imediata de socket indisponível para entrega garantida",
-    "🔄 Polling Adaptativo no QueueProcessor: Redução drástica de consultas ao Supabase filtrando exclusivamente o nó atual"
+    "🚀 Atualização Baileys v7.0.0-rc14 & WA Web 2.3000.1049232487: Motor atualizado com a última versão estável oficial",
+    "⚡ Desbloqueio da Fila Offline (Anti-Lentidão): Ack sem NACK para falhas de status@broadcast, eliminando o congelamento da entrega de mensagens (PR #2779)",
+    "🟢 Realtime Online sem Atraso: Correção de isOfflineNode (offline='0' tratado como online), eliminando enfileiramento forçado no buffer offline e latência de recebimento (PR #2840)",
+    "🛡️ Prevenção de Erro 479 (smax-invalid): Eliminação de encriptação duplicada no retry resend de mensagens 1:1 LID (PR #2839)",
+    "🔑 Captura Proativa de TC-Token: Extração antecipada de tctoken nas mensagens recebidas, eliminando atrasos de 2s e erros 463 em respostas (PR #2752)",
+    "🏎️ Cache de JID em Memória (resolveTargetJid): Resolução instantânea (0ms) sem chamadas redundantes de onWhatsApp no socket"
   ]
 }

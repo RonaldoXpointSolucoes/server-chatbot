@@ -212,6 +212,10 @@ export async function retryWithBackoff(fn, retries = 4, delay = 800) {
   }
 }
 
+// Cache em memória para JIDs já resolvidos (evita roundtrips redundantes de rede no socket onWhatsApp)
+const resolvedJidCache = new Map();
+const JID_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hora
+
 /**
  * Resolve e normaliza o JID real do destinatário WhatsApp para o Brasil (+55).
  * Trata nativamente a variação de 8 vs 9 dígitos para DDDs fora de SP (ex: DDD 34, 31, etc)
@@ -220,6 +224,12 @@ export async function retryWithBackoff(fn, retries = 4, delay = 800) {
 export async function resolveTargetJid(sock, jid, tenantId) {
   if (!jid || typeof jid !== 'string') return jid;
   if (jid.endsWith('@g.us') || jid.endsWith('@lid')) return jid;
+
+  const cacheKey = `${tenantId || 'global'}_${jid}`;
+  const cached = resolvedJidCache.get(cacheKey);
+  if (cached && (Date.now() - cached.timestamp < JID_CACHE_TTL_MS)) {
+    return cached.result;
+  }
 
   let clean = jid.split('@')[0].replace(/\D/g, '');
   if (!clean) return jid;
@@ -258,9 +268,20 @@ export async function resolveTargetJid(sock, jid, tenantId) {
       }
     }
 
+    const saveAndReturn = (finalJid) => {
+      if (finalJid) {
+        resolvedJidCache.set(cacheKey, { result: finalJid, timestamp: Date.now() });
+        if (resolvedJidCache.size > 5000) {
+          const oldestKey = resolvedJidCache.keys().next().value;
+          resolvedJidCache.delete(oldestKey);
+        }
+      }
+      return finalJid;
+    };
+
     // A) SE FOR TELEFONE FIXO (ex: 551141351987): Retorna imediatamente sem adicionar 9!
     if (isLandline) {
-      return `${phone8}@s.whatsapp.net`;
+      return saveAndReturn(`${phone8}@s.whatsapp.net`);
     }
 
     // B) SE FOR CELULAR:
@@ -273,7 +294,7 @@ export async function resolveTargetJid(sock, jid, tenantId) {
           // Se a Meta informar que existe um JID ativo no servidor (seja de 12 ou 13 dígitos), retorna o JID validado!
           const valid = results.find(r => r && r.exists && r.jid);
           if (valid && valid.jid) {
-            return valid.jid;
+            return saveAndReturn(valid.jid);
           }
         }
       } catch (e) {
@@ -293,7 +314,7 @@ export async function resolveTargetJid(sock, jid, tenantId) {
           .maybeSingle();
 
         if (contact && contact.whatsapp_jid && contact.whatsapp_jid.includes('@s.whatsapp.net')) {
-          return contact.whatsapp_jid;
+          return saveAndReturn(contact.whatsapp_jid);
         }
       } catch (e) {
         // Silenciado
@@ -305,12 +326,14 @@ export async function resolveTargetJid(sock, jid, tenantId) {
     // E o DDD for >= 31 (ex: DDD 66 - Mato Grosso, MG, etc), mantém phone8 (12 dígitos).
     // Caso contrário (ex: DDD 11 a 28, ou se veio com 13 dígitos), utiliza phone9 (13 dígitos).
     if (clean.length === 12 && ddd >= 31) {
-      return `${phone8}@s.whatsapp.net`;
+      return saveAndReturn(`${phone8}@s.whatsapp.net`);
     }
-    return `${phone9}@s.whatsapp.net`;
+    return saveAndReturn(`${phone9}@s.whatsapp.net`);
   }
 
-  return `${clean}@s.whatsapp.net`;
+  const finalJid = `${clean}@s.whatsapp.net`;
+  resolvedJidCache.set(cacheKey, { result: finalJid, timestamp: Date.now() });
+  return finalJid;
 }
 
 

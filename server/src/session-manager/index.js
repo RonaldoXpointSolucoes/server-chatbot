@@ -155,7 +155,7 @@ async function getCachedBaileysVersion() {
     } catch (e) {
         console.log('[SessionManager] Usando versão padrão estável do Baileys (2.3000.x):', e.message);
     }
-    cachedBaileysVersion = { version: [2, 3000, 1043857760], isLatest: true };
+    cachedBaileysVersion = { version: [2, 3000, 1049232487], isLatest: true };
     lastVersionFetchTime = now;
     return cachedBaileysVersion;
 }

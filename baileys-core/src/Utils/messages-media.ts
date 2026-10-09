@@ -1,5 +1,5 @@
 import { Boom } from '@hapi/boom'
-import { execFile } from 'child_process'
+import { exec } from 'child_process'
 import * as Crypto from 'crypto'
 import { once } from 'events'
 import { createReadStream, createWriteStream, promises as fs, WriteStream } from 'fs'
@@ -33,9 +33,7 @@ const getTmpFilesDirectory = () => tmpdir()
 
 const getImageProcessingLibrary = async () => {
 	//@ts-ignore
-	const jimp = await import('jimp').catch(() => {})
-	//@ts-ignore
-	const sharp = await import('sharp').catch(() => {})
+	const [jimp, sharp] = await Promise.all([import('jimp').catch(() => {}), import('sharp').catch(() => {})])
 
 	if (sharp) {
 		return { sharp }
@@ -45,7 +43,7 @@ const getImageProcessingLibrary = async () => {
 		return { jimp }
 	}
 
-	return {}
+	throw new Boom('No image processing library available')
 }
 
 export const hkdfInfoKey = (type: MediaType) => {
@@ -124,7 +122,8 @@ const extractVideoThumb = async (
 	size: { width: number; height: number }
 ) =>
 	new Promise<void>((resolve, reject) => {
-		execFile('ffmpeg', ['-ss', time, '-i', path, '-y', '-vf', `scale=${size.width}:-1`, '-vframes', '1', '-f', 'image2', destPath], err => {
+		const cmd = `ffmpeg -ss ${time} -i ${path} -y -vf scale=${size.width}:-1 -vframes 1 -f image2 ${destPath}`
+		exec(cmd, err => {
 			if (err) {
 				reject(err)
 			} else {
@@ -134,6 +133,8 @@ const extractVideoThumb = async (
 	})
 
 export const extractImageThumb = async (bufferOrFilePath: Readable | Buffer | string, width = 32) => {
+	// TODO: Move entirely to sharp, removing jimp as it supports readable streams
+	// This will have positive speed and performance impacts as well as minimizing RAM usage.
 	if (bufferOrFilePath instanceof Readable) {
 		bufferOrFilePath = await toBuffer(bufferOrFilePath)
 	}
@@ -200,7 +201,7 @@ export const generateProfilePicture = async (
 
 	try {
 		const lib = await getImageProcessingLibrary()
-		const sharpFn = ('sharp' in lib && (lib.sharp?.default || lib.sharp))
+		const sharpFn = ('sharp' in lib && ((lib as any).sharp?.default || (lib as any).sharp))
 		if (typeof sharpFn === 'function') {
 			const img = await sharpFn(buffer)
 				.resize(w, h)
@@ -217,7 +218,7 @@ export const generateProfilePicture = async (
 			const resizeMode = (lib as any).jimp?.ResizeStrategy?.BILINEAR || 'bilinear'
 			const imgBuffer = typeof cropped.getBufferAsync === 'function'
 				? await cropped.resize(w, h).getBufferAsync('image/jpeg')
-				: await cropped.resize({ w, h, mode: resizeMode }).getBuffer('image/jpeg', { quality: 50 })
+				: await cropped.resize({ w: h, mode: resizeMode }).getBuffer('image/jpeg', { quality: 50 })
 			return { img: imgBuffer }
 		}
 	} catch (e) {}
@@ -512,7 +513,8 @@ export const encryptedStream = async (
 	}
 }
 
-const DEF_HOST = 'mmg.whatsapp.net'
+export const DEF_MEDIA_HOST = 'mmg.whatsapp.net'
+
 const AES_CHUNK_SIZE = 16
 
 const toSmallestChunkSize = (num: number) => {
@@ -523,17 +525,31 @@ export type MediaDownloadOptions = {
 	startByte?: number
 	endByte?: number
 	options?: RequestInit
+	/** Optional media host override; falls back to DEF_MEDIA_HOST when not provided. */
+	host?: string
 }
 
-export const getUrlFromDirectPath = (directPath: string) => `https://${DEF_HOST}${directPath}`
+export const getUrlFromDirectPath = (directPath: string, host: string = DEF_MEDIA_HOST) =>
+	`https://${host}${directPath}`
+
+const extractHost = (url: string | null | undefined): string | undefined => {
+	if (!url) return undefined
+	try {
+		return new URL(url).host
+	} catch {
+		return undefined
+	}
+}
 
 export const downloadContentFromMessage = async (
 	{ mediaKey, directPath, url }: DownloadableMessage,
 	type: MediaType,
 	opts: MediaDownloadOptions = {}
 ) => {
-	const isValidMediaUrl = url?.startsWith('https://mmg.whatsapp.net/')
-	const downloadUrl = isValidMediaUrl ? url : getUrlFromDirectPath(directPath!)
+	// Fallback host: explicit opt > host parsed from `url` > DEF_MEDIA_HOST.
+	// Lets us honor a non-default host carried by the proto without forcing callers to thread it through.
+	const fallbackHost = opts.host ?? extractHost(url)
+	const downloadUrl = directPath ? getUrlFromDirectPath(directPath, fallbackHost) : url
 	if (!downloadUrl) {
 		throw new Boom('No valid media URL or directPath present in message', { statusCode: 400 })
 	}
@@ -609,7 +625,7 @@ export const downloadEncryptedContent = async (
 
 	const output = new Transform({
 		transform(chunk, _, callback) {
-			let data = Buffer.concat([remainingBytes, chunk])
+			let data = remainingBytes.length ? Buffer.concat([remainingBytes, chunk]) : chunk
 
 			const decryptLength = toSmallestChunkSize(data.length)
 			remainingBytes = data.slice(decryptLength)
@@ -774,9 +790,11 @@ const uploadWithFetch = async ({
 	// Convert Node.js Readable to Web ReadableStream
 	const nodeStream = createReadStream(filePath)
 	const webStream = Readable.toWeb(nodeStream) as ReadableStream
+	// Native fetch only accepts Undici-style dispatchers, not generic https Agents.
+	const dispatcher = typeof (agent as { dispatch?: unknown } | undefined)?.dispatch === 'function' ? agent : undefined
 
 	const response = await fetch(url, {
-		dispatcher: agent,
+		...(dispatcher ? { dispatcher } : {}),
 		method: 'POST',
 		body: webStream,
 		headers,

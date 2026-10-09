@@ -220,8 +220,8 @@ app.get('/api/v1/admin/diagnostics', async (req, res) => {
 });
 
 // Metadata da Versão do Baileys rodando no servidor
-let baileysVersion = '7.0.0-rc.9';
-let baileysDate = '29/07/2026';
+let baileysVersion = '7.0.0-rc14';
+let baileysDate = '09/10/2026';
 try {
     const bPkgPath = path.join(__dirname, '../../baileys-core/package.json');
     if (fs.existsSync(bPkgPath)) {
@@ -237,17 +237,18 @@ const baileysHistory = [
         tag: 'v7.0.0-rc14',
         version: '7.0.0-rc14',
         name: 'v7.0.0-rc14 (Latest)',
-        date: '2026-08-01',
+        date: '2026-10-09',
         isLatest: true,
         isCurrent: true,
         repoUrl: 'https://github.com/WhiskeySockets/Baileys/releases/tag/v7.0.0-rc14',
         commit: '7e7b075',
         highlights: [
-            'fix: advertise WIN_HYBRID instead of retired WIN32 web sub-platform (substitui WIN32 aposentado pela Meta por WIN_HYBRID)',
-            'ci: pin npm to 11.x, last line that still runs on node 20',
-            'example: fix logging of contact upserts',
-            'WAProto: perf: optimize history sync memory and CPU usage (#2333)',
-            'Resiliência aprimorada no processamento de lotes de mensagens e Bad MAC retry'
+            'Desbloqueio Crítico da Fila Offline: ack sem NACK para status@broadcast undecryptable, eliminando o congelamento da fila do WhatsApp (PR #2779)',
+            'Classificação Realtime Online vs Offline: isOfflineNode trata offline="0" como online, eliminando atrasos e enfileiramento indevido no offlineNodeProcessor (PR #2840)',
+            'Prevenção de Dupla Criptografia no Retry Resend: eliminação do erro 479 (smax-invalid) em 1:1 LID retries (PR #2839)',
+            'Captura Proativa de TC-Token: extração oportunista do nó tctoken em mensagens recebidas, mitigando erro 463 e delays de handshake (PR #2752)',
+            'Compatibilidade Nativa WIN_HYBRID: substitui WIN32 aposentado pela Meta prevenindo erro 428 (Commit 0af2386 / PR #2741)',
+            'Versão Estável WhatsApp Web: atualização para 2.3000.1049232487 e fallback resiliente no fetchLatestBaileysVersion (PR #2773 e #2844)'
         ]
     },
     {
