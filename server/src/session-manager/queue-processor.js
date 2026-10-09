@@ -2,6 +2,8 @@ import { supabase, NODE_ID, retryWithBackoff, resolveTargetJid } from '../supaba
 import { buildWhatsAppMessage } from './message-builder.js';
 import { runOutgoingReconciliation } from './reconciler.js';
 
+const OUTBOX_TTL_MS = 10 * 60 * 1000; // TTL estrito de 10 minutos: mensagens mais antigas são descartadas da fila
+
 class QueueProcessor {
     constructor() {
         this.activeProcessors = new Set();
@@ -13,21 +15,50 @@ class QueueProcessor {
     start() {
         if (this.running) return;
         this.running = true;
-        console.log(`[QueueProcessor] Iniciado processador de filas de outbox para o NODE_ID: ${NODE_ID}`);
+        console.log(`[QueueProcessor] Iniciado processador de filas de outbox para o NODE_ID: ${NODE_ID} (TTL: 10min)`);
         
+        // Limpeza de contingência inicial: expira mensagens com mais de 10 minutos
+        this.cleanupExpiredMessages().catch(() => {});
+
         // Auto-recuperação inicial de mensagens presas
         this.reconcileStuckProcessingMessages().catch(() => {});
 
         // Inicia o loop de processamento
         this.loop();
 
-        // Reconciliação preventiva periódica e auto-recuperação de mensagens presas a cada 45 segundos
+        // Limpeza periódica de contingência (TTL 10min) e reconciliação a cada 45 segundos
         setInterval(() => {
             if (this.running) {
+                this.cleanupExpiredMessages().catch(() => {});
                 this.reconcileStuckProcessingMessages().catch(() => {});
                 runOutgoingReconciliation().catch(() => {});
             }
         }, 45000);
+    }
+
+    /**
+     * Limpa e expira automaticamente mensagens acumuladas na fila há mais de 10 minutos.
+     * Impede loops, acúmulo infinito e envio tardio fora de contexto aos clientes.
+     */
+    async cleanupExpiredMessages() {
+        try {
+            const tenMinutesAgo = new Date(Date.now() - OUTBOX_TTL_MS).toISOString();
+            const { data: expired, error } = await supabase
+                .from('wa_outgoing_messages')
+                .update({
+                    status: 'failed',
+                    last_error: 'Expirada por tempo limite de contingência (> 10min) - Envio tardio cancelado'
+                })
+                .in('status', ['pending', 'processing'])
+                .lte('created_at', tenMinutesAgo)
+                .select('id, instance_id, chat_jid');
+
+            if (expired && expired.length > 0) {
+                console.warn(`[QueueProcessor/TTL] ⏱️ Expiradas e canceladas ${expired.length} mensagens antigas (> 10min) da fila de outbox.`);
+            }
+        } catch (err) {
+            console.warn(`[QueueProcessor/TTL] Aviso ao limpar mensagens expiradas:`, err.message);
+        }
     }
 
     /**
@@ -36,11 +67,25 @@ class QueueProcessor {
      */
     async reconcileStuckProcessingMessages() {
         try {
+            const tenMinutesAgo = new Date(Date.now() - OUTBOX_TTL_MS).toISOString();
             const threeMinutesAgo = new Date(Date.now() - 3 * 60 * 1000).toISOString();
+
+            // Mensagens presas em processing com mais de 10 minutos expiram imediatamente
+            await supabase
+                .from('wa_outgoing_messages')
+                .update({
+                    status: 'failed',
+                    last_error: 'Expirada em processamento órfão (> 10min)'
+                })
+                .eq('status', 'processing')
+                .lte('created_at', tenMinutesAgo);
+
+            // Mensagens recentes entre 3 e 10 minutos são recuperadas se attempts < 4
             const { data: stuckMsgs, error } = await supabase
                 .from('wa_outgoing_messages')
                 .select('id, attempts, last_error, created_at')
                 .eq('status', 'processing')
+                .gt('created_at', tenMinutesAgo)
                 .lte('created_at', threeMinutesAgo)
                 .limit(50);
 
@@ -49,13 +94,13 @@ class QueueProcessor {
             console.log(`[QueueProcessor/SelfHealing] 🩹 Auto-recuperando ${stuckMsgs.length} mensagens presas em status 'processing'...`);
             for (const s of stuckMsgs) {
                 const currentAttempts = s.attempts || 0;
-                const newStatus = currentAttempts >= 6 ? 'failed' : 'pending';
+                const newStatus = currentAttempts >= 4 ? 'failed' : 'pending';
                 await supabase
                     .from('wa_outgoing_messages')
                     .update({
                         status: newStatus,
                         scheduled_at: new Date().toISOString(),
-                        last_error: currentAttempts >= 6 ? (s.last_error || 'Limite de tentativas atingido (Presa em processing)') : 'Recuperado de processamento órfão por auto-cura'
+                        last_error: currentAttempts >= 4 ? (s.last_error || 'Limite de tentativas atingido (Presa em processing)') : 'Recuperado de processamento órfão por auto-cura'
                     })
                     .eq('id', s.id)
                     .eq('status', 'processing');
@@ -176,13 +221,15 @@ class QueueProcessor {
         while (this.running) {
             let msg = null;
             try {
-                // Busca a próxima mensagem pendente da fila para esta instância
+                // Busca a próxima mensagem pendente da fila para esta instância (com TTL estrito de 10 minutos)
+                const tenMinutesAgo = new Date(Date.now() - OUTBOX_TTL_MS).toISOString();
                 const messages = await retryWithBackoff(async () => {
                     const { data, error } = await supabase
                         .from('wa_outgoing_messages')
                         .select('*')
                         .eq('instance_id', instanceId)
                         .eq('status', 'pending')
+                        .gte('created_at', tenMinutesAgo) // TTL estrito de 10 minutos: mensagens mais antigas nunca são processadas
                         .lte('scheduled_at', new Date().toISOString())
                         .order('priority', { ascending: true })
                         .order('created_at', { ascending: true })
@@ -195,6 +242,20 @@ class QueueProcessor {
                 }
 
                 msg = messages[0];
+
+                // Contingência: validação defensiva de idade da mensagem (> 10 minutos é descartada imediatamente)
+                const msgAgeMs = Date.now() - new Date(msg.created_at).getTime();
+                if (msgAgeMs > OUTBOX_TTL_MS) {
+                    console.warn(`[QueueProcessor/TTL] Mensagem ${msg.id} expirou na fila (${Math.round(msgAgeMs / 1000)}s > 600s). Descartando envio para não entregar mensagem tardia.`);
+                    await supabase
+                        .from('wa_outgoing_messages')
+                        .update({ 
+                            status: 'failed',
+                            last_error: 'Expirada por tempo limite de contingência de fila (> 10min)'
+                        })
+                        .eq('id', msg.id);
+                    continue;
+                }
 
                 // 1. Marca a mensagem como em processamento
                 const { data: updatedMsg, error: updateErr } = await supabase
@@ -285,21 +346,21 @@ class QueueProcessor {
 
                 if (!sock || !isSocketReady || !meId) {
                     const currentAttempts = (msg.attempts || 0);
-                    const maxSocketWaitAttempts = 6;
+                    const maxSocketWaitAttempts = 3;
                     
-                    if (currentAttempts >= maxSocketWaitAttempts) {
-                        console.warn(`[QueueProcessor] [MSG_TRACE:OUTBOX_FAIL] Mensagem ${msg.id} atingiu limite de ${maxSocketWaitAttempts} tentativas com socket offline da instância ${instanceId}. Marcando como failed.`);
+                    if (currentAttempts >= maxSocketWaitAttempts || msgAgeMs > (8 * 60 * 1000)) {
+                        console.warn(`[QueueProcessor] [MSG_TRACE:OUTBOX_FAIL] Mensagem ${msg.id} atingiu limite de tentativas (${currentAttempts}/${maxSocketWaitAttempts}) ou tempo com socket offline da instância ${instanceId}. Marcando como failed.`);
                         await supabase
                             .from('wa_outgoing_messages')
                             .update({ 
                                 status: 'failed',
-                                last_error: 'Instância do WhatsApp desconectada ou indisponível após 6 tentativas de envio.'
+                                last_error: 'Instância do WhatsApp desconectada ou tempo de contingência de envio atingido.'
                             })
                             .eq('id', msg.id);
                         break; // Sai do processamento desta instância no momento para não travar outras instâncias
                     }
 
-                    const retryDelayMs = isOperator ? Math.min(800 * Math.pow(1.3, currentAttempts), 4000) : Math.min(6000 * Math.pow(1.5, currentAttempts), 45000);
+                    const retryDelayMs = isOperator ? Math.min(800 * Math.pow(1.3, currentAttempts), 2500) : Math.min(3000 * Math.pow(1.3, currentAttempts), 15000);
                     console.log(`[QueueProcessor] [MSG_TRACE:OUTBOX_RETRY] Socket da instância ${instanceId} indisponível/reconectando (tentativa ${currentAttempts}/${maxSocketWaitAttempts}). Reagendando mensagem ${msg.id} em ${Math.round(retryDelayMs / 1000)}s...`);
                     await supabase
                         .from('wa_outgoing_messages')
@@ -313,15 +374,15 @@ class QueueProcessor {
                 }
 
                 // 3. Rate Limit / Delay Humano Inteligente:
-                // Se priority for >= 5 (campanhas/automoto), aplicamos delay humano estrito (6 a 12s)
-                // Se priority for < 5 (operador manual), aplicamos um micro-delay de 100ms para evitar concorrência de rede
+                // Se priority for >= 5 (campanhas/automoto), aplicamos delay suave de 2.5s a 4s (evita congestionar a fila)
+                // Se priority for < 5 (operador manual), aplicamos um micro-delay defensivo de 50ms para vazão imediata
                 if (msg.priority >= 5) {
-                    const delay = Math.floor(Math.random() * (12000 - 6000 + 1)) + 6000;
-                    console.log(`[QueueProcessor] Aplicando delay humano de ${delay / 1000}s antes do envio...`);
+                    const delay = Math.floor(Math.random() * (4000 - 2000 + 1)) + 2000;
+                    console.log(`[QueueProcessor] Aplicando delay de automação de ${delay / 1000}s antes do envio...`);
                     await new Promise(resolve => setTimeout(resolve, delay));
                 } else {
-                    console.log(`[QueueProcessor] Mensagem de alta prioridade (operador). Pulando delay de campanha (micro-delay 100ms).`);
-                    await new Promise(resolve => setTimeout(resolve, 100));
+                    console.log(`[QueueProcessor] Mensagem de alta prioridade (operador). Micro-delay 50ms para vazão máxima.`);
+                    await new Promise(resolve => setTimeout(resolve, 50));
                 }
 
                 // 4. Dispara o envio real usando o Baileys originalSendMessage ou sendMessage
@@ -539,26 +600,32 @@ class QueueProcessor {
 
                     const newAttempts = (msg.attempts || 0) + 1;
                     const maxAttempts = 3;
-                    const newStatus = newAttempts >= maxAttempts ? 'failed' : 'pending';
+                    const isExpired = (Date.now() - new Date(msg.created_at).getTime()) > OUTBOX_TTL_MS;
+                    const newStatus = (newAttempts >= maxAttempts || isExpired) ? 'failed' : 'pending';
                     const isOperator = (msg.priority || 1) < 5;
-                    const retryDelayMs = isOperator ? (isCryptoErr ? 1500 : 2000) : 12000;
+                    const retryDelayMs = isOperator ? (isCryptoErr ? 1000 : 1500) : 4000;
 
                     try {
                         const { default: sManager } = await import('./index.js');
                         sManager.logMonitoringEvent(instanceId, 'message_sent_failed', { 
                             msg_id: msg.id, 
-                            chat_jid: msg.chat_jid,
+                            chat_jid: msg.chat_jid, 
                             error: errMsg,
-                            attempts: newAttempts
+                            attempts: newAttempts,
+                            expired: isExpired
                         }).catch(()=>{});
                     } catch (logErr) {}
+
+                    const finalError = isExpired 
+                        ? `Expirada por tempo limite de contingência (> 10min): ${errMsg || 'Tentativa cancelada'}`
+                        : (errMsg || 'Erro de conexão/envio');
 
                     await supabase
                         .from('wa_outgoing_messages')
                         .update({ 
                             status: newStatus,
                             attempts: newAttempts,
-                            last_error: errMsg || 'Erro de conexão/envio',
+                            last_error: finalError,
                             scheduled_at: new Date(Date.now() + retryDelayMs).toISOString()
                         })
                         .eq('id', msg.id);

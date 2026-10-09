@@ -1,6 +1,10 @@
 {
-  "version": "7.7.5",
+  "version": "7.7.6",
   "changelog": [
+    "⏱️ Contingência & TTL Estrito de Fila (10 min): Descarte automático de mensagens acumuladas há mais de 10 minutos, impedindo loops, acúmulos e disparos tardios para clientes fora de contexto",
+    "🧹 Limpeza Preventiva Periódica: Expurgo em lote a cada 45 segundos de mensagens pendentes/órfãs expiradas da tabela wa_outgoing_messages",
+    "🛡️ Proteção Anti-Loop de Fila em Memória: TTL de 10 minutos no encadeamento de envio de mensagens do SessionManager",
+    "⚡ Otimização de Vazão de Fila: Redução de delays artificiais de automação e prioridade instantânea com micro-delay defensivo para operadores",
     "🚀 Atualização Baileys v7.0.0-rc14 & WA Web 2.3000.1049232487: Motor atualizado com a última versão estável oficial",
     "⚡ Desbloqueio da Fila Offline (Anti-Lentidão): Ack sem NACK para falhas de status@broadcast, eliminando o congelamento da entrega de mensagens (PR #2779)",
     "🟢 Realtime Online sem Atraso: Correção de isOfflineNode (offline='0' tratado como online), eliminando enfileiramento forçado no buffer offline e latência de recebimento (PR #2840)",

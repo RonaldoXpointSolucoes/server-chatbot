@@ -1892,12 +1892,20 @@ class SessionManager {
                 this.queues.set(instanceId, nextQueuePromise);
                 
                 // Retornamos ao chamador original o resultado real
+                const queueEnqueueTime = Date.now();
                 return new Promise(async (resolve, reject) => {
                     try {
                         // Aguarda a fila atual (mensagens anteriores) terminar
                         await currentQueue;
                     } catch (e) {
                         // Ignoramos erros de mensagens anteriores para continuar a fila resiliente
+                    }
+
+                    // Plano de contingência: se a mensagem ficou retida na fila por mais de 10 minutos, cancela
+                    if (Date.now() - queueEnqueueTime > 10 * 60 * 1000) {
+                        resolveQueue();
+                        console.warn(`[SessionManager] Mensagem para ${jid} expirou na fila em memória (> 10min). Descartando envio para não entregar tardiamente.`);
+                        return reject(new Error('Mensagem expirada por tempo limite na fila em memória (> 10min)'));
                     }
                     
                     // Delay inteligente: Envio imediato para mensagens diretas/humanas ou micro-delay para fila
