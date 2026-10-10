@@ -253,10 +253,13 @@ export async function useSupabaseAuthState(tenantId, instanceId, forceCleanState
                         if (memCache.has(name)) {
                             // Restaura cópia serializada
                             let cv = memCache.get(name);
-                            if (type === 'app-state-sync-key' && cv && cv.target) {
-                                cv = { ...cv, target: Buffer.from(cv.target, 'base64') };
+                            if (cv !== null && cv !== undefined) {
+                                if (type === 'app-state-sync-key' && cv && cv.target) {
+                                    cv = { ...cv, target: Buffer.from(cv.target, 'base64') };
+                                }
+                                data[id] = cv;
                             }
-                            data[id] = cv;
+                            // Se cv for null, significa que já sabemos que a chave não existe no DB (cache negativo)
                         } else {
                             missingKeys.push(name);
                             missingIdMap.set(name, id);
@@ -279,17 +282,32 @@ export async function useSupabaseAuthState(tenantId, instanceId, forceCleanState
                                 
                                 if (error) {
                                     console.error(`[SessionManager] Erro no DB Fallback para ${chunk.length} chaves Signal:`, error.message);
-                                } else if (dbKeys && dbKeys.length > 0) {
-                                    for (const row of dbKeys) {
-                                        const parsed = JSON.parse(JSON.stringify(row.key_data), BufferJSON.reviver);
-                                        memCache.set(row.key_name, parsed);
-                                        const origId = missingIdMap.get(row.key_name);
-                                        if (origId) {
-                                            let cv = parsed;
-                                            if (type === 'app-state-sync-key' && cv && cv.target) {
-                                                cv = { ...cv, target: Buffer.from(cv.target, 'base64') };
+                                } else {
+                                    const foundNames = new Set();
+                                    if (dbKeys && dbKeys.length > 0) {
+                                        for (const row of dbKeys) {
+                                            foundNames.add(row.key_name);
+                                            try {
+                                                const parsed = JSON.parse(JSON.stringify(row.key_data), BufferJSON.reviver);
+                                                memCache.set(row.key_name, parsed);
+                                                const origId = missingIdMap.get(row.key_name);
+                                                if (origId) {
+                                                    let cv = parsed;
+                                                    if (type === 'app-state-sync-key' && cv && cv.target) {
+                                                        cv = { ...cv, target: Buffer.from(cv.target, 'base64') };
+                                                    }
+                                                    data[origId] = cv;
+                                                }
+                                            } catch (pErr) {
+                                                console.warn(`[SessionManager] Erro ao deserializar chave ${row.key_name}:`, pErr.message);
                                             }
-                                            data[origId] = cv;
+                                        }
+                                    }
+                                    // Negative Caching: Chaves que foram buscadas e NÃO existem no DB são salvas como null na RAM
+                                    // Isso impede tempestades de SELECTs repetidos para chaves inexistentes no Baileys
+                                    for (const kName of chunk) {
+                                        if (!foundNames.has(kName)) {
+                                            memCache.set(kName, null);
                                         }
                                     }
                                 }

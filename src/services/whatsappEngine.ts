@@ -53,7 +53,7 @@ export const sendNativeMessage = async (
   number: string, 
   text: string, 
   apiKey: string,
-  timeoutMs = 25000
+  timeoutMs = 12000
 ) => {
   const apiUrl = getApiUrl();
   const startTime = Date.now();

@@ -433,14 +433,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
           }
 
           if (data && data.length > 0) {
-            data.forEach(inst => {
-              if (inst.tenant_id !== tenantId) {
-                supabase.from('whatsapp_instances').update({
-                  tenant_id: tenantId,
-                  settings: { ...(inst.settings || {}), chat_enabled: true, is_api_only: false }
-                }).eq('id', inst.id).then();
-              }
-            });
+            // Instâncias carregadas com sucesso de forma read-only (sem disparar mutations que ativam loop de Realtime)
           }
 
           if ((!data || data.length === 0) && comp?.email) {
@@ -461,15 +454,6 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
 
                   if (siblingInsts && siblingInsts.length > 0) {
                     data = siblingInsts;
-                    siblingInsts.forEach(si => {
-                      supabase.from('whatsapp_instances').update({
-                        tenant_id: tenantId,
-                        settings: { ...(si.settings || {}), chat_enabled: true, is_api_only: false }
-                      }).eq('id', si.id).then();
-                      supabase.from('companies').update({
-                        evolution_api_instance: si.id
-                      }).eq('id', tenantId).then();
-                    });
                   }
                 }
               }
@@ -602,7 +586,14 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
     };
 
     const channel = supabase.channel(sidebarChannelName)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'whatsapp_instances', filter: `tenant_id=eq.${tenantId}` }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'whatsapp_instances', filter: `tenant_id=eq.${tenantId}` }, (payload: any) => {
+         if (payload?.eventType === 'UPDATE' && payload?.old && payload?.new) {
+           const oldRec = payload.old;
+           const newRec = payload.new;
+           if (oldRec.status === newRec.status && oldRec.display_name === newRec.display_name && oldRec.color === newRec.color) {
+             return; // Ignora batimentos de coração e leases rotineiros do servidor
+           }
+         }
          debouncedFetchInstances();
       })
       .subscribe();

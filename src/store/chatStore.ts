@@ -366,6 +366,8 @@ export const messagesMemoryCache = new Map<string, any[]>();
 export const inFlightMessagesLoad = new Map<string, Promise<void>>();
 // Cache de mapeamento de telefone / realId -> UUID do contato no banco
 export const contactUuidCache = new Map<string, string>();
+// Cache de mapeamento de conversation_id -> { contact_id, instance_id } para Realtime instantâneo (0ms)
+export const conversationMetadataCache = new Map<string, { contact_id: string; instance_id: string }>();
 
 export const getOrFetchApiKey = async (instanceId: string | null | undefined): Promise<string> => {
   if (!instanceId) return '';
@@ -6702,6 +6704,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
         const currentState = get();
 
+        // 0. Cache em memória para resolução instantânea (0ms) sem bater no Supabase
+        if (m.conversation_id && conversationMetadataCache.has(m.conversation_id)) {
+          const cachedConv = conversationMetadataCache.get(m.conversation_id)!;
+          targetContactId = cachedConv.contact_id;
+          convInstanceId = m.instance_id || cachedConv.instance_id;
+        }
+
         // 1. Tenta achar o contato localmente pelo conv_id
         let targetContactLocally = m.conversation_id
           ? currentState.contacts.find((c: any) => c.conv_id === m.conversation_id)
@@ -6710,6 +6719,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (targetContactLocally) {
           targetContactId = targetContactLocally.id.split('_')[0];
           convInstanceId = m.instance_id || targetContactLocally.instance_id;
+          if (m.conversation_id && targetContactId) {
+            conversationMetadataCache.set(m.conversation_id, { contact_id: targetContactId, instance_id: convInstanceId });
+          }
         }
 
         // 2. Se não achou localmente, busca o contact_id na tabela conversations
@@ -6723,15 +6735,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
             if (conv) {
               targetContactId = conv.contact_id;
               convInstanceId = conv.instance_id;
+              conversationMetadataCache.set(m.conversation_id, { contact_id: conv.contact_id, instance_id: conv.instance_id });
             }
           } catch (err) {
             console.error('[Realtime] Erro ao buscar conversa:', err);
           }
         }
 
-        // 3. Concorrência: se ainda não achou a conversa, aguarda 500ms e tenta novamente
+        // 3. Concorrência: se ainda não achou a conversa, aguarda 300ms e tenta novamente
         if (!targetContactId && m.conversation_id) {
-          await new Promise(resolve => setTimeout(resolve, 500));
+          await new Promise(resolve => setTimeout(resolve, 300));
           try {
             const { data: conv } = await supabase
               .from('conversations')
@@ -6741,6 +6754,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             if (conv) {
               targetContactId = conv.contact_id;
               convInstanceId = conv.instance_id;
+              conversationMetadataCache.set(m.conversation_id, { contact_id: conv.contact_id, instance_id: conv.instance_id });
             }
           } catch (err) {
             console.error('[Realtime Retry] Erro ao buscar conversa:', err);

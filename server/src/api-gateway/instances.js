@@ -524,10 +524,10 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                             const tSendStart = Date.now();
                             recordStructuredEvent({ event: 'BAILEYS_SEND_START', traceId, instanceId, direction: 'outbound', attempt });
                             
-                            // Dispara com skipDelay e timeout de 4.0s para não prender a resposta HTTP do usuário
+                            // Dispara com skipDelay e timeout resiliente de 8.0s para garantir envio direto pelo socket Baileys
                             const sendPromise = sendFn(targetJid, content, { skipDelay: true, isHuman: true });
                             const timeoutPromise = new Promise((_, reject) => 
-                                setTimeout(() => reject(new Error('TIMEOUT_FASTPATH_SEND')), 4000)
+                                setTimeout(() => reject(new Error('TIMEOUT_FASTPATH_SEND')), 8000)
                             );
                             sentResult = await Promise.race([sendPromise, timeoutPromise]);
                             const sendDuration = Date.now() - tSendStart;

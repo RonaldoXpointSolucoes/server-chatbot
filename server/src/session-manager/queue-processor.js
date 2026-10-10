@@ -382,18 +382,17 @@ class QueueProcessor {
                     break; // Não tenta enviar outras mensagens desta mesma instância enquanto o socket estiver offline
                 }
 
-                // 3. Rate Limit / Delay Humano Anti-Ban:
-                // Previne detecção de comportamento automatizado e disparos em rajada (burst) que causam bloqueios na Meta.
-                // Se priority for >= 5 (campanhas/automação), aplicamos delay de 3.5s a 6s
-                // Se priority for < 5 (operador manual em outbox), aplicamos delay humano de 1.2s a 2.2s com jitter
+                // 3. Rate Limit / Delay Anti-Ban:
+                // Previne detecção de comportamento automatizado e disparos em rajada (burst) para campanhas/automações.
+                // Se priority for >= 5 (campanhas/automação), aplicamos delay anti-ban de 3.5s a 6s.
+                // Se priority for < 5 (operador manual humano no chat ao vivo), envio imediato sem atrasos artificiais!
                 if (msg.priority >= 5) {
                     const delay = Math.floor(Math.random() * (6000 - 3500 + 1)) + 3500;
                     console.log(`[QueueProcessor] [Anti-Ban] Aplicando delay de automação de ${delay / 1000}s antes do envio...`);
                     await new Promise(resolve => setTimeout(resolve, delay));
                 } else {
-                    const delay = Math.floor(Math.random() * (2200 - 1200 + 1)) + 1200;
-                    console.log(`[QueueProcessor] [Anti-Ban] Cadência humana anti-ban aplicada (${delay}ms) para instância ${instanceId}.`);
-                    await new Promise(resolve => setTimeout(resolve, delay));
+                    // Mensagem manual prioritária de operador humano: envio imediato com yield mínimo de event loop
+                    await new Promise(resolve => setImmediate(resolve));
                 }
 
                 // 4. Dispara o envio real usando o Baileys originalSendMessage ou sendMessage

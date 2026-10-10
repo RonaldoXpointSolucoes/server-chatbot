@@ -1465,8 +1465,8 @@ class EventProcessor {
                          // Inicia a promise de upload UMA ÚNICA VEZ para evitar colisões de stream
                          const uploadPromise = doUpload();
 
-                         // Janela síncrona de 4.5s: imagens, áudios e vídeos leves concluem instantaneamente (<200ms)
-                         const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('MEDIA_BACKGROUND_DEFER')), 4500));
+                         // Janela síncrona ágil de 1.2s: imagens, áudios e vídeos leves concluem instantaneamente (<200ms)
+                         const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('MEDIA_BACKGROUND_DEFER')), 1200));
                          try {
                              const res = await Promise.race([uploadPromise, timeoutPromise]);
                              b.mediaUrl = res.mediaUrl;

@@ -37,7 +37,7 @@ class NodeSupabaseCircuitBreaker {
     this.consecutiveFailures = 0;
     this.lastStateChange = Date.now();
     this.failureThreshold = 5;
-    this.cooldownMs = 10000;
+    this.cooldownMs = 8000;
   }
 
   canRequest() {
@@ -63,16 +63,30 @@ class NodeSupabaseCircuitBreaker {
   }
 
   recordFailure() {
+    // Se o disjuntor já está ABERTO, requisições bloqueadas não devem empurrar o cooldown para o futuro
+    if (this.state === 'OPEN') {
+      return;
+    }
+
     this.consecutiveFailures++;
-    this.lastStateChange = Date.now();
-    if (this.consecutiveFailures >= this.failureThreshold && this.state !== 'OPEN') {
+    if (this.consecutiveFailures >= this.failureThreshold) {
       this.state = 'OPEN';
+      this.lastStateChange = Date.now();
       console.warn(`[Supabase Node CircuitBreaker] ⚡ Disjuntor ABERTO após ${this.consecutiveFailures} falhas consecutivas. Pausando retentativas ativas por ${this.cooldownMs / 1000}s para alívio do gateway.`);
     }
   }
 
   isCircuitOpen() {
-    return this.state === 'OPEN' && (Date.now() - this.lastStateChange <= this.cooldownMs);
+    if (this.state === 'OPEN') {
+      if (Date.now() - this.lastStateChange > this.cooldownMs) {
+        this.state = 'HALF_OPEN';
+        this.lastStateChange = Date.now();
+        console.info('[Supabase Node CircuitBreaker] Período de cooldown expirado. Transicionando para HALF_OPEN (permitindo requisições piloto)...');
+        return false;
+      }
+      return true;
+    }
+    return false;
   }
 }
 
@@ -113,6 +127,11 @@ async function resilientFetch(url, options = {}, retries = 4, delay = 800) {
     const errorCode = error?.code || '';
     const errorName = error?.name || '';
     
+    // Se o erro foi gerado pelo próprio CircuitBreaker, NÃO grava como nova falha da rede Supabase!
+    if (errorMsg.includes('CircuitBreaker')) {
+      throw error;
+    }
+
     const isTransientNetworkError = 
       errorMsg.includes('fetch failed') ||
       errorMsg.includes('Timeout') ||
@@ -144,7 +163,9 @@ async function resilientFetch(url, options = {}, retries = 4, delay = 800) {
       return resilientFetch(url, options, retries - 1, Math.min(Math.round(delay * 1.5), 6000));
     }
     
-    nodeSupabaseCircuitBreaker.recordFailure();
+    if (retries === 0) {
+      nodeSupabaseCircuitBreaker.recordFailure();
+    }
     throw error;
   }
 }
@@ -284,25 +305,17 @@ export async function resolveTargetJid(sock, jid, tenantId) {
       return saveAndReturn(`${phone8}@s.whatsapp.net`);
     }
 
-    // B) SE FOR CELULAR:
-    // 1. Tentar consultar via socket Baileys onWhatsApp (Fonte Primária de Verdade Nível Meta)
-    if (sock && typeof sock.onWhatsApp === 'function') {
-      try {
-        const queryList = Array.from(new Set([phone9, phone8]));
-        const results = await sock.onWhatsApp(...queryList);
-        if (Array.isArray(results)) {
-          // Se a Meta informar que existe um JID ativo no servidor (seja de 12 ou 13 dígitos), retorna o JID validado!
-          const valid = results.find(r => r && r.exists && r.jid);
-          if (valid && valid.jid) {
-            return saveAndReturn(valid.jid);
-          }
-        }
-      } catch (e) {
-        // Silenciado
+    // B) OTIMIZAÇÃO CRÍTICA (Fast Path Zero-Latency):
+    // Se o número já tem 13 dígitos com o 9º dígito (padrão absoluto para SP/RJ/ES DDDs 11 a 28, ou se já veio formatado)
+    // retorna IMEDIATAMENTE sem gastar 2 a 5 segundos de rede no socket onWhatsApp ou roundtrip no Supabase!
+    if (clean.length === 13 && numberPart.startsWith('9')) {
+      if (ddd < 31) {
+        return saveAndReturn(`${phone9}@s.whatsapp.net`);
       }
     }
 
-    // 2. Tentar consultar na tabela 'contacts' do Supabase se já existe whatsapp_jid validado no passado
+    // C) SE HOUVER AMBIGUIDADE (ex: 12 dígitos em DDD >= 31 ou sem certeza do 9º dígito):
+    // 1. Tentar consultar na tabela 'contacts' do Supabase primeiro (rápido com índice idx_contacts_whatsapp_jid)
     if (tenantId) {
       try {
         const { data: contact } = await supabase
@@ -318,6 +331,24 @@ export async function resolveTargetJid(sock, jid, tenantId) {
         }
       } catch (e) {
         // Silenciado
+      }
+    }
+
+    // 2. Consulta via socket Baileys onWhatsApp apenas se não encontrado no cache/banco, com timeout estrito de 1.2s
+    if (sock && typeof sock.onWhatsApp === 'function') {
+      try {
+        const queryList = Array.from(new Set([phone9, phone8]));
+        const onWhatsAppPromise = sock.onWhatsApp(...queryList);
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT_ONWHATSAPP')), 1200));
+        const results = await Promise.race([onWhatsAppPromise, timeoutPromise]);
+        if (Array.isArray(results)) {
+          const valid = results.find(r => r && r.exists && r.jid);
+          if (valid && valid.jid) {
+            return saveAndReturn(valid.jid);
+          }
+        }
+      } catch (e) {
+        // Silenciado para prosseguir com fallback
       }
     }
 
