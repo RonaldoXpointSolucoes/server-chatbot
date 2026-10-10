@@ -2500,7 +2500,12 @@ class EventProcessor {
                         .eq('id', instanceId);
                     payload.status = finalStatus;
                     payload.reason = reason;
+                    payload.statusCode = reason;
+                    payload.last_error = errMsg;
+                    payload.error = errMsg;
                     if(loggedOut) payload.loggedOut = true;
+                    if(reason === 408) payload.isQrTimeout = true;
+                    if(reason === 409) payload.isConflict = true;
 
                     // Log e disparo de alerta via FoodNext para erros definitivos
                     logAndNotifyConnectionEvent({

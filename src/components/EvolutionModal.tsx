@@ -9,6 +9,7 @@ import {
   CheckCircle,
   Loader2,
   AlertCircle,
+  AlertTriangle,
   Signal,
   Link as LinkIcon,
   PlusCircle,
@@ -29,6 +30,9 @@ import {
   Activity,
   X,
   Volume2,
+  KeyRound,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 import {
   createInstance,
@@ -95,6 +99,104 @@ function formatPhoneNumber(jidOrNum: string) {
   return `+${cleaned}`;
 }
 
+export interface BaileysDiagnostic {
+  title: string;
+  code: string | number;
+  message: string;
+  recommendation: string;
+  severity: 'error' | 'warning' | 'info';
+  actionType: 'retry' | 'reset_all' | 'pairing_code' | 'wait';
+}
+
+export function parseBaileysError(rawError: any, statusCode?: any): BaileysDiagnostic | null {
+  if (!rawError && !statusCode) return null;
+  const errStr = typeof rawError === 'string' ? rawError : (rawError?.message || JSON.stringify(rawError || ''));
+  const code = statusCode || rawError?.statusCode || rawError?.code || '';
+  const errLower = (errStr + ' ' + code).toLowerCase();
+
+  // 1. Chave de acesso / Passkey
+  if (errLower.includes('passkey') || errLower.includes('chave de acesso') || errLower.includes('passkey_blocked')) {
+    return {
+      title: 'Chave de Acesso (Passkey) Ativa',
+      code: 'PASSKEY_BLOCKED',
+      message: 'A vinculação automatizada foi bloqueada porque há uma Chave de Acesso biométrica ou Google/iCloud ativa nesta conta do WhatsApp.',
+      recommendation: 'Desative a Chave de Acesso no app do celular (WhatsApp ➔ Configurações ➔ Conta ➔ Chaves de Acesso) ou utilize a conexão por Código de Pareamento.',
+      severity: 'error',
+      actionType: 'pairing_code'
+    };
+  }
+
+  // 2. Conflito de sessão (409, 440, conflict, replaced)
+  if (code === 409 || code === 440 || errLower.includes('conflict') || errLower.includes('replaced') || errLower.includes('stream errored (conflict)')) {
+    return {
+      title: 'Conflito de Conexão (WhatsApp Web / Outro Worker)',
+      code: '409 / 440 CONFLICT',
+      message: 'Este número de WhatsApp foi conectado em outro dispositivo, navegador ou instância concorrente.',
+      recommendation: 'O WhatsApp restringe a apenas 1 sessão ativa simultânea. Clique em "Assumir Conexão & Limpar" para conectar com exclusividade nesta caixa.',
+      severity: 'warning',
+      actionType: 'reset_all'
+    };
+  }
+
+  // 3. Timeout do QR Code (408, qr refs ended)
+  if (code === 408 || errLower.includes('qr refs') || errLower.includes('tempo limite') || errLower.includes('timeout')) {
+    return {
+      title: 'Validade do QR Code Expirou',
+      code: '408 / QR_EXPIRED',
+      message: 'O tempo limite de leitura expirou sem que a câmera do WhatsApp realizasse a captura do código.',
+      recommendation: 'Abra a tela "Aparelhos Conectados" no seu WhatsApp antes de gerar um novo QR Code para escanear imediatamente.',
+      severity: 'warning',
+      actionType: 'retry'
+    };
+  }
+
+  // 4. Logout / Desconectado pelo celular (401)
+  if (code === 401 || errLower.includes('logged out') || errLower.includes('logout')) {
+    return {
+      title: 'Sessão Encerrada pelo Celular',
+      code: '401 / LOGGED_OUT',
+      message: 'A sessão anterior do WhatsApp foi desconectada diretamente pelo aparelho celular ou desvinculada pela Meta.',
+      recommendation: 'Clique em "Gerar Novo QR Code" para vincular novamente esta caixa com o WhatsApp.',
+      severity: 'info',
+      actionType: 'retry'
+    };
+  }
+
+  // 5. Proibido / Restrito pela Meta (403)
+  if (code === 403 || errLower.includes('forbidden')) {
+    return {
+      title: 'Acesso Temporariamente Restrito pelo WhatsApp',
+      code: '403 / FORBIDDEN',
+      message: 'O WhatsApp pausou temporariamente as tentativas de conexão para proteção de segurança do seu chip.',
+      recommendation: 'Aguarde 10 a 15 minutos ou utilize a alternativa do Código de Pareamento por telefone.',
+      severity: 'error',
+      actionType: 'pairing_code'
+    };
+  }
+
+  // 6. Bad Session / Chaves corrompidas
+  if (errLower.includes('bad session') || errLower.includes('bad mac') || errLower.includes('decrypt') || errLower.includes('corromp')) {
+    return {
+      title: 'Chaves Criptográficas Dessincronizadas',
+      code: 'BAD_SESSION',
+      message: 'As credenciais locais de criptografia (Noise Protocol) dessincronizaram dos servidores da Meta.',
+      recommendation: 'Clique em "Limpar Sessão e Reconectar do Zero" para descartar dados residuais e restabelecer a conexão.',
+      severity: 'error',
+      actionType: 'reset_all'
+    };
+  }
+
+  // 7. Genérico / Outros erros de socket
+  return {
+    title: 'Falha no Handshake do WhatsApp',
+    code: code || 'BAILEYS_DISCONNECT',
+    message: errStr || 'A conexão foi interrompida ou não respondeu a tempo.',
+    recommendation: 'Certifique-se de que o aparelho celular tem acesso estável à internet e tente novamente.',
+    severity: 'warning',
+    actionType: 'retry'
+  };
+}
+
 export default function EvolutionModal({
   isOpen,
   onClose,
@@ -109,6 +211,9 @@ export default function EvolutionModal({
   const [loading, setLoading] = useState(false);
   const [qrBase64, setQrBase64] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [baileysDiagnosticError, setBaileysDiagnosticError] = useState<BaileysDiagnostic | null>(null);
+  const [serverConnectionState, setServerConnectionState] = useState<'idle' | 'starting' | 'qr_ready' | 'scanning_detected' | 'syncing_keys' | 'connected' | 'error' | 'expired'>('idle');
+  const [isQrExpired, setIsQrExpired] = useState<boolean>(false);
   const [connectMode, setConnectMode] = useState<'qr' | 'pairing'>('qr');
   const [copiedCode, setCopiedCode] = useState(false);
   const [pairingPhone, setPairingPhone] = useState('');
@@ -252,9 +357,9 @@ export default function EvolutionModal({
     qrScannedRef.current = qrScanned;
   }, [qrScanned]);
 
-  // Loop de contagem regressiva e renovação automática do QR Code (garante QR sempre válido)
+  // Loop de contagem regressiva e renovação inteligente do QR Code (garante QR sempre válido sem destruir sessão a cada 30s)
   useEffect(() => {
-    if (connectMode !== 'qr' || !qrBase64 || isTargetConnected || qrScanned || Boolean(successMsg)) {
+    if (connectMode !== 'qr' || !qrBase64 || isTargetConnected || qrScanned || Boolean(successMsg) || Boolean(baileysDiagnosticError)) {
       if (qrCountdownTimerRef.current) {
         clearInterval(qrCountdownTimerRef.current);
         qrCountdownTimerRef.current = null;
@@ -265,12 +370,9 @@ export default function EvolutionModal({
     qrCountdownTimerRef.current = setInterval(() => {
       setQrCountdown((prev) => {
         if (prev <= 1) {
-          console.log("[EvolutionModal] QR Code expirando (TTL 30s). Renovando automaticamente...");
+          // A cada 30 segundos, marca que está atualizando a referência do QR suavemente
+          // SEM destruir a sessão do Baileys e SEM apagar o QR da tela
           setIsRenewingQr(true);
-          const currentInst = existingInstancesRef.current.find(i => i.id === activePollingIdRef.current) || { id: activePollingIdRef.current };
-          if (activePollingIdRef.current) {
-            handleConnectExisting(currentInst, true);
-          }
           return 30;
         }
         return prev - 1;
@@ -283,7 +385,7 @@ export default function EvolutionModal({
         qrCountdownTimerRef.current = null;
       }
     };
-  }, [connectMode, qrBase64, isTargetConnected, qrScanned, successMsg]);
+  }, [connectMode, qrBase64, isTargetConnected, qrScanned, successMsg, baileysDiagnosticError]);
   // Pré-preenche o número de telefone de pareamento
   useEffect(() => {
     if (activePollingId) {
@@ -386,9 +488,16 @@ export default function EvolutionModal({
   const handleConnectExisting = async (inst: any, forceNew = false) => {
     setLoading(true);
     setError(null);
+    setBaileysDiagnosticError(null);
+    setIsQrExpired(false);
     setSuccessMsg(null);
-    setQrBase64(null);
-    setConnectionStatusMessage("Iniciando gerador de QR Code...");
+    if (forceNew || !qrBase64) {
+      setQrBase64(null);
+    } else {
+      setIsRenewingQr(true);
+    }
+    setServerConnectionState('starting');
+    setConnectionStatusMessage("Iniciando motor e solicitando QR Code...");
     setCodeEntered(false);
     setActivePollingId(inst.id);
 
@@ -649,9 +758,12 @@ export default function EvolutionModal({
           setQrBase64(payload.payload.qr_code);
           setQrCountdown(30);
           setIsRenewingQr(false);
+          setIsQrExpired(false);
           setQrScanned(false);
           setKeysSynced(false);
           setLoading(false);
+          setBaileysDiagnosticError(null);
+          setServerConnectionState('qr_ready');
           if (pairingCodeRef.current) {
             setConnectionStatusMessage("Chave de acesso requerida! Escaneie o QR Code no celular...");
           } else {
@@ -661,46 +773,54 @@ export default function EvolutionModal({
       })
       .on("broadcast", { event: "instance.scanning_detected" }, (payload: any) => {
         setQrScanned(true);
+        setServerConnectionState('scanning_detected');
         const scanMsg = payload.payload?.message || "📲 Celular detectado! Escaneamento realizado com sucesso. Negociando chaves...";
         useDevStore.getState().addBreadcrumb(5, 7, scanMsg, 'EvolutionModal');
         setConnectionStatusMessage("📲 Celular detectado! Escaneamento realizado com sucesso...");
       })
       .on("broadcast", { event: "instance.syncing_keys" }, (payload: any) => {
         setKeysSynced(true);
+        setServerConnectionState('syncing_keys');
         const syncMsg = payload.payload?.message || "🔐 Sincronizando chaves e credenciais criptográficas (Noise Protocol)...";
         useDevStore.getState().addBreadcrumb(6, 7, syncMsg, 'EvolutionModal');
         setConnectionStatusMessage("🔐 Sincronizando chaves e credenciais criptográficas...");
       })
       .on("broadcast", { event: "instance.status" }, (payload: any) => {
         const st = payload.payload?.status;
-        const lastError = payload.payload?.last_error;
+        const lastError = payload.payload?.last_error || payload.payload?.error;
+        const statusCode = payload.payload?.statusCode || payload.payload?.reason;
 
         if (payload.payload?.scanningDetected || payload.payload?.isNewLogin) {
           setQrScanned(true);
+          setServerConnectionState('scanning_detected');
           useDevStore.getState().addBreadcrumb(5, 7, `📲 Celular detectado! Escaneamento realizado com sucesso. Negociando chaves...`, 'EvolutionModal', payload.payload);
           setConnectionStatusMessage("📲 Celular detectado! Escaneamento realizado com sucesso...");
         } else if (payload.payload?.syncingKeys) {
           setKeysSynced(true);
+          setServerConnectionState('syncing_keys');
           useDevStore.getState().addBreadcrumb(6, 7, `🔐 Sincronizando chaves e credenciais criptográficas (Noise Protocol)...`, 'EvolutionModal', payload.payload);
           setConnectionStatusMessage("🔐 Sincronizando chaves e credenciais criptográficas...");
         } else {
           useDevStore.getState().addBreadcrumb(5, 7, `Broadcast de status recebido: [${st}]`, 'EvolutionModal', payload.payload);
         }
 
-        if (lastError && (lastError.includes("Chave de Acesso") || lastError.includes("Passkey") || lastError.includes("PASSKEY_BLOCKED"))) {
-          useDevStore.getState().addLog({
-            type: 'error',
-            message: `[MIGALHA ERRO PASSKEY] ${lastError}`,
-            source: 'EvolutionModal'
-          });
-          setError(lastError);
-          setLoading(false);
-          setQrBase64(null);
-          setActivePollingId(null);
-          setPairingCode(null);
-          setConnectionStatusMessage(null);
-          setCodeEntered(false);
-          return;
+        // Diagnóstico real da Baileys para falhas ou encerramento
+        if (lastError || (st === 'offline' && statusCode) || payload.payload?.isQrTimeout || payload.payload?.isConflict) {
+          const diag = parseBaileysError(lastError || payload.payload?.reason, statusCode);
+          if (diag) {
+            useDevStore.getState().addLog({
+              type: 'error',
+              message: `[MIGALHA ERRO BAILEYS] [${diag.code}] ${diag.message}`,
+              source: 'EvolutionModal'
+            });
+            setBaileysDiagnosticError(diag);
+            setServerConnectionState(diag.code === '408 / QR_EXPIRED' ? 'expired' : 'error');
+            setLoading(false);
+            if (diag.actionType === 'reset_all' || diag.code === '408 / QR_EXPIRED') {
+              setIsQrExpired(true);
+            }
+            return;
+          }
         }
 
         if (st === "offline") {
@@ -708,21 +828,16 @@ export default function EvolutionModal({
             console.log("[Realtime] Ignorando status offline na conexão via Pairing Code (transição esperada)");
             return;
           }
-          useDevStore.getState().addLog({
-            type: 'error',
-            message: `[MIGALHA ERRO OFFLINE] Instância declarou status offline: ${payload.payload?.reason || 'sem motivo informado'}`,
-            source: 'EvolutionModal'
-          });
-          setError(
-            payload.payload?.reason
-              ? `Falha com código: ${payload.payload.reason}`
-              : "A conexão caiu ou foi rejeitada.",
-          );
+          const diag = parseBaileysError(lastError || payload.payload?.reason || 'A conexão caiu ou foi rejeitada.', statusCode);
+          if (diag) {
+            setBaileysDiagnosticError(diag);
+            setServerConnectionState(diag.code === '408 / QR_EXPIRED' ? 'expired' : 'error');
+          } else {
+            setError(payload.payload?.reason ? `Falha com código: ${payload.payload.reason}` : "A conexão caiu ou foi rejeitada.");
+          }
           setLoading(false);
-          setQrBase64(null);
-          setActivePollingId(null);
-          setConnectionStatusMessage(null);
         } else if (st === "connecting" || st === "qr_ready") {
+          setServerConnectionState('qr_ready');
           if (pairingCodeRef.current) {
             if (pairingCodeRef.current && !pairingLoadingRef.current) {
               if (payload.payload?.pairingSuccess && (payload.payload?.registered === true || payload.payload?.authenticated === true)) {
@@ -736,6 +851,9 @@ export default function EvolutionModal({
             setConnectionStatusMessage("Aponte a câmera do WhatsApp para o QR Code.");
           }
         } else if (st === "connected" || st === "connected_local") {
+          setServerConnectionState('connected');
+          setBaileysDiagnosticError(null);
+          setIsQrExpired(false);
           useDevStore.getState().addBreadcrumb(6, 7, `Conexão efetuada no celular! Finalizando vínculo...`, 'EvolutionModal');
           useDevStore.getState().addBreadcrumb(7, 7, `Instância autenticada e operacional (${st})`, 'EvolutionModal');
           handleSuccess(activePollingIdRef.current, payload.payload?.phone);
@@ -753,21 +871,28 @@ export default function EvolutionModal({
               const st = await fetchEngineStatus(tenantId, activePollingIdRef.current, currInst.api_key || "");
               const lastError = st?.data?.last_error || st?.data?.whatsapp_instance_runtime?.last_error;
 
-              if (lastError && (lastError.includes("Chave de Acesso") || lastError.includes("Passkey") || lastError.includes("PASSKEY_BLOCKED"))) {
-                setError(lastError);
-                setLoading(false);
-                setQrBase64(null);
-                setActivePollingId(null);
-                setPairingCode(null);
-                setConnectionStatusMessage(null);
-                setCodeEntered(false);
-                clearInterval(pollInterval);
-                return;
+              if (lastError && !baileysDiagnosticError) {
+                const diag = parseBaileysError(lastError);
+                if (diag) {
+                  setBaileysDiagnosticError(diag);
+                  setServerConnectionState(diag.code === '408 / QR_EXPIRED' ? 'expired' : 'error');
+                  setLoading(false);
+                  if (diag.actionType === 'reset_all' || diag.code === '408 / QR_EXPIRED') {
+                    setIsQrExpired(true);
+                  }
+                }
               }
 
               const runtimeQr = st?.data?.whatsapp_instance_runtime?.qr_code || st?.data?.qr_code || st?.qr_code || st?.qr_base64;
               if (runtimeQr) {
-                setQrBase64(runtimeQr);
+                if (runtimeQr !== qrBase64Ref.current) {
+                  setQrBase64(runtimeQr);
+                  setQrCountdown(30);
+                  setIsRenewingQr(false);
+                  setIsQrExpired(false);
+                  setBaileysDiagnosticError(null);
+                  setServerConnectionState('qr_ready');
+                }
                 setLoading(false);
                 setError(null);
               }
@@ -775,6 +900,9 @@ export default function EvolutionModal({
               const isAuth = st?.data?.is_authenticated === true || st?.data?.authenticated === true;
               const isPairingModeActive = pairingLoadingRef.current || Boolean(pairingCodeRef.current);
               if ((st?.data?.status === "connected" || st?.data?.status === "connected_local") && isAuth && !isPairingModeActive) {
+                setServerConnectionState('connected');
+                setBaileysDiagnosticError(null);
+                setIsQrExpired(false);
                 useDevStore.getState().addBreadcrumb(6, 7, `Conexão efetuada no celular! Finalizando vínculo...`, 'EvolutionModal');
                 useDevStore.getState().addBreadcrumb(7, 7, `Instância autenticada e operacional (${st?.data?.status})`, 'EvolutionModal');
                 handleSuccess(activePollingIdRef.current, st?.data?.phone_number);
@@ -792,7 +920,7 @@ export default function EvolutionModal({
                       setConnectionStatusMessage("Aguardando pareamento no celular...");
                     }
                   }
-                } else {
+                } else if (!qrScannedRef.current) {
                   setConnectionStatusMessage("Escaneie o QR Code no seu WhatsApp.");
                 }
               }
@@ -2856,8 +2984,64 @@ export default function EvolutionModal({
                     {/* Conteúdo Principal baseado na Aba Selecionada */}
                     {connectMode === 'qr' ? (
                       <div className="w-full flex flex-col items-center animate-in fade-in zoom-in-95 duration-300">
-                        {/* Slot superior: QR Code com Glow, Timer ou Card de Sucesso VIP */}
-                        <div className="w-full flex justify-center items-center mb-5">
+                        {/* Status do Servidor Baileys em Tempo Real (Live Pulse) */}
+                        <div className="w-full max-w-sm mb-4 px-3.5 py-2.5 rounded-2xl bg-white/80 dark:bg-[#111b21]/90 border border-gray-200/80 dark:border-white/10 shadow-sm backdrop-blur-xl flex items-center justify-between transition-all duration-300">
+                          <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                            {serverConnectionState === 'starting' || loading ? (
+                              <div className="w-6 h-6 rounded-full bg-emerald-500/15 flex items-center justify-center flex-shrink-0">
+                                <Loader2 size={13} className="animate-spin text-emerald-500" />
+                              </div>
+                            ) : serverConnectionState === 'scanning_detected' ? (
+                              <div className="w-6 h-6 rounded-full bg-amber-500/15 flex items-center justify-center flex-shrink-0">
+                                <Smartphone size={13} className="animate-bounce text-amber-500" />
+                              </div>
+                            ) : serverConnectionState === 'syncing_keys' ? (
+                              <div className="w-6 h-6 rounded-full bg-teal-500/15 flex items-center justify-center flex-shrink-0">
+                                <Activity size={13} className="animate-pulse text-teal-400" />
+                              </div>
+                            ) : serverConnectionState === 'connected' ? (
+                              <div className="w-6 h-6 rounded-full bg-emerald-500/20 flex items-center justify-center flex-shrink-0">
+                                <CheckCircle size={13} className="text-emerald-400" />
+                              </div>
+                            ) : baileysDiagnosticError ? (
+                              <div className="w-6 h-6 rounded-full bg-rose-500/15 flex items-center justify-center flex-shrink-0">
+                                <AlertTriangle size={13} className="text-rose-500 animate-pulse" />
+                              </div>
+                            ) : (
+                              <div className="relative flex h-3 w-3 items-center justify-center flex-shrink-0">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#00a884] opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-2 w-2 bg-[#00a884]"></span>
+                              </div>
+                            )}
+                            <div className="flex flex-col text-left min-w-0">
+                              <span className="text-[10px] font-mono uppercase font-extrabold tracking-wider text-slate-400 dark:text-slate-400 leading-none">
+                                Status no Servidor
+                              </span>
+                              <span className="text-xs font-bold text-slate-800 dark:text-white truncate mt-0.5">
+                                {baileysDiagnosticError ? baileysDiagnosticError.title : (
+                                  serverConnectionState === 'scanning_detected' ? 'Celular detectado! Negociando...' :
+                                  serverConnectionState === 'syncing_keys' ? 'Sincronizando criptografia...' :
+                                  serverConnectionState === 'connected' ? 'WhatsApp Online' :
+                                  serverConnectionState === 'qr_ready' ? 'Aguardando leitura do QR Code' :
+                                  connectionStatusMessage || 'Conectando ao motor WhatsApp...'
+                                )}
+                              </span>
+                            </div>
+                          </div>
+                          <span className={cn(
+                            "text-[10px] font-mono font-black px-2.5 py-1 rounded-full border shadow-xs flex-shrink-0",
+                            baileysDiagnosticError
+                              ? "bg-rose-500/15 text-rose-400 border-rose-500/30"
+                              : serverConnectionState === 'connected'
+                              ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
+                              : "bg-[#00a884]/15 text-[#00a884] dark:text-emerald-400 border-[#00a884]/30"
+                          )}>
+                            {breadcrumbsLogs.length > 0 ? `Passo ${breadcrumbsLogs[breadcrumbsLogs.length - 1]?.step || 1}/7` : 'Passo 1/7'}
+                          </span>
+                        </div>
+
+                        {/* Slot principal: Diagnóstico de Erro Baileys vs Sucesso vs QR Code Fluido */}
+                        <div className="w-full flex justify-center items-center mb-4">
                           {isTargetConnected || successMsg || connectedSuccessInfo ? (
                             /* Card de Sucesso VIP Assertivo */
                             <div className="w-full max-w-sm flex flex-col items-center py-6 px-6 bg-gradient-to-b from-emerald-500/15 to-teal-900/20 border-2 border-emerald-500/50 rounded-3xl shadow-[0_0_50px_rgba(16,185,129,0.25)] animate-in zoom-in duration-300 backdrop-blur-xl relative overflow-hidden">
@@ -2910,6 +3094,92 @@ export default function EvolutionModal({
                                 <CheckCircle size={16} /> Concluir e Ir para o Chat
                               </button>
                             </div>
+                          ) : baileysDiagnosticError ? (
+                            /* Card de Diagnóstico Real da Baileys (Erros & Falhas com Ação Contextual) */
+                            <div className={cn(
+                              "w-full max-w-sm flex flex-col items-center p-5 rounded-3xl border-2 shadow-xl animate-in zoom-in duration-300 backdrop-blur-xl relative overflow-hidden text-left",
+                              baileysDiagnosticError.severity === 'error'
+                                ? "bg-gradient-to-b from-rose-500/10 to-red-950/20 border-rose-500/40 text-slate-800 dark:text-white"
+                                : "bg-gradient-to-b from-amber-500/10 to-orange-950/20 border-amber-500/40 text-slate-800 dark:text-white"
+                            )}>
+                              <div className="w-full flex items-center justify-between mb-3 border-b border-white/10 pb-2.5">
+                                <div className="flex items-center gap-2">
+                                  <div className={cn(
+                                    "w-8 h-8 rounded-xl flex items-center justify-center",
+                                    baileysDiagnosticError.severity === 'error' ? "bg-rose-500/20 text-rose-400" : "bg-amber-500/20 text-amber-400"
+                                  )}>
+                                    {baileysDiagnosticError.severity === 'error' ? <AlertTriangle size={18} /> : <AlertCircle size={18} />}
+                                  </div>
+                                  <div>
+                                    <h4 className="text-xs font-black tracking-tight leading-tight">
+                                      {baileysDiagnosticError.title}
+                                    </h4>
+                                    <span className="text-[10px] font-mono text-slate-500 dark:text-slate-400">
+                                      Código: {baileysDiagnosticError.code}
+                                    </span>
+                                  </div>
+                                </div>
+                                <span className={cn(
+                                  "px-2 py-0.5 rounded-full text-[9px] font-mono font-bold uppercase",
+                                  baileysDiagnosticError.severity === 'error' ? "bg-rose-500/20 text-rose-300 border border-rose-500/30" : "bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                                )}>
+                                  Baileys Return
+                                </span>
+                              </div>
+
+                              <p className="text-xs text-slate-600 dark:text-slate-300 mb-3 leading-relaxed">
+                                {baileysDiagnosticError.message}
+                              </p>
+
+                              {/* Caixa de Recomendação Prática */}
+                              <div className="w-full p-3 rounded-2xl bg-black/20 dark:bg-black/40 border border-white/10 mb-4">
+                                <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-400 flex items-center gap-1 mb-1">
+                                  💡 Solução Recomendada:
+                                </span>
+                                <p className="text-[11px] text-slate-400 dark:text-slate-300 leading-snug">
+                                  {baileysDiagnosticError.recommendation}
+                                </p>
+                              </div>
+
+                              {/* Botões de Ação do Diagnóstico */}
+                              <div className="flex flex-col gap-2 w-full">
+                                {baileysDiagnosticError.actionType === 'pairing_code' ? (
+                                  <button
+                                    onClick={() => {
+                                      setBaileysDiagnosticError(null);
+                                      setConnectMode('pairing');
+                                    }}
+                                    className="w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 text-white rounded-2xl font-bold text-xs flex items-center justify-center gap-2 shadow-md cursor-pointer active:scale-95"
+                                  >
+                                    <Smartphone size={16} /> Conectar por Código de Telefone
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={() => {
+                                      setBaileysDiagnosticError(null);
+                                      setIsQrExpired(false);
+                                      const currentInst = existingInstancesRef.current.find(i => i.id === activePollingIdRef.current) || { id: activePollingIdRef.current };
+                                      handleConnectExisting(currentInst, false);
+                                    }}
+                                    className="w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 text-white rounded-2xl font-bold text-xs flex items-center justify-center gap-2 shadow-md cursor-pointer active:scale-95"
+                                  >
+                                    <RefreshCcw size={15} /> Gerar Novo QR Code
+                                  </button>
+                                )}
+
+                                <button
+                                  onClick={() => {
+                                    setBaileysDiagnosticError(null);
+                                    setIsQrExpired(false);
+                                    const currentInst = existingInstancesRef.current.find(i => i.id === activePollingIdRef.current) || { id: activePollingIdRef.current };
+                                    handleConnectExisting(currentInst, true);
+                                  }}
+                                  className="w-full py-2.5 bg-gray-200/80 dark:bg-white/10 hover:bg-gray-300 dark:hover:bg-white/15 text-slate-700 dark:text-slate-200 rounded-2xl font-semibold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-95"
+                                >
+                                  <Trash2 size={13} /> Limpar Sessão e Resetar do Zero
+                                </button>
+                              </div>
+                            </div>
                           ) : qrScanned ? (
                             /* Card de Celular Detectado / Negociando Chaves */
                             <div className="w-full max-w-sm flex flex-col items-center py-6 px-5 bg-gradient-to-b from-teal-500/10 to-emerald-900/10 border border-emerald-500/30 rounded-3xl shadow-[0_0_30px_rgba(0,168,132,0.18)] animate-in zoom-in duration-300 backdrop-blur-md">
@@ -2932,18 +3202,18 @@ export default function EvolutionModal({
                               </div>
                             </div>
                           ) : (
-                            /* Moldura do QR Code com Glow, Timer e Auto-Renovação */
-                            <div className="flex flex-col items-center">
+                            /* Moldura do QR Code com Glow, Timer e Renovação Fluida sem Piscar */
+                            <div className="flex flex-col items-center w-full max-w-sm">
                               {/* Barra Superior de Validade e TTL */}
                               {qrBase64 && (
-                                <div className="w-full max-w-[240px] mb-2.5 flex flex-col gap-1 animate-in fade-in duration-300">
+                                <div className="w-full max-w-[240px] mb-3 flex flex-col gap-1.5 animate-in fade-in duration-300">
                                   <div className="flex items-center justify-between text-[10px] font-mono font-bold">
                                     <span className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
                                       <RefreshCcw size={11} className={isRenewingQr ? "animate-spin text-emerald-400" : "text-slate-400"} />
-                                      {isRenewingQr ? "Renovando QR Code..." : "Validade do QR Code:"}
+                                      {isRenewingQr ? "Sincronizando QR..." : "Validade do QR Code:"}
                                     </span>
                                     <span className={cn(
-                                      "px-2 py-0.5 rounded-full text-[10px] font-black font-mono",
+                                      "px-2 py-0.5 rounded-full text-[10px] font-black font-mono transition-colors",
                                       qrCountdown > 12 
                                         ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" 
                                         : qrCountdown > 5 
@@ -2969,21 +3239,24 @@ export default function EvolutionModal({
                                 </div>
                               )}
 
-                              <div className="relative p-4 bg-white dark:bg-[#0b141a] rounded-3xl shadow-[0_20px_40px_rgba(0,0,0,0.25),0_0_30px_rgba(0,168,132,0.15)] border border-gray-200 dark:border-[#202c33] flex justify-center items-center transition-all duration-300 group">
+                              <div className="relative p-4 bg-white dark:bg-[#0b141a] rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.2),0_0_30px_rgba(0,168,132,0.15)] border border-gray-200/80 dark:border-white/10 flex justify-center items-center transition-all duration-300 group">
                                 <div className="absolute -inset-1 bg-gradient-to-r from-[#00a884]/30 to-teal-500/30 rounded-3xl blur-md opacity-75 group-hover:opacity-100 transition duration-500"></div>
                                 <div className="relative bg-white p-3 rounded-2xl z-10 shadow-inner">
                                   {qrBase64 ? (
                                     <div className="relative overflow-hidden rounded-xl">
+                                      {/* Overlay Suave de Renovação - Nunca apaga a imagem da tela */}
                                       {isRenewingQr && (
-                                        <div className="absolute inset-0 bg-white/80 backdrop-blur-xs z-20 flex flex-col items-center justify-center gap-2">
-                                          <Loader2 className="animate-spin text-emerald-600" size={26} />
-                                          <span className="text-[10px] font-bold text-gray-700">Atualizando QR...</span>
+                                        <div className="absolute inset-0 bg-white/75 dark:bg-[#0b141a]/75 backdrop-blur-xs z-20 flex flex-col items-center justify-center gap-2 animate-in fade-in duration-200">
+                                          <Loader2 className="animate-spin text-emerald-600 dark:text-emerald-400" size={28} />
+                                          <span className="text-[11px] font-extrabold text-gray-800 dark:text-white tracking-wide">
+                                            Atualizando QR Code...
+                                          </span>
                                         </div>
                                       )}
                                       <img
                                         src={qrBase64}
                                         alt="QR Code WhatsApp"
-                                        className="w-[200px] h-[200px] sm:w-[220px] sm:h-[220px] rounded-xl object-contain"
+                                        className="w-[200px] h-[200px] sm:w-[220px] sm:h-[220px] rounded-xl object-contain transition-opacity duration-300"
                                       />
                                     </div>
                                   ) : (
@@ -3002,22 +3275,38 @@ export default function EvolutionModal({
                                 </div>
                               </div>
 
-                              {/* Botão de Atualizar QR Code Manualmente */}
-                              {qrBase64 && (
+                              {/* Ações Rápidas de Atualização do QR Code */}
+                              <div className="flex items-center gap-3 mt-3">
+                                {qrBase64 && (
+                                  <button
+                                    onClick={() => {
+                                      setIsRenewingQr(true);
+                                      const currentInst = existingInstancesRef.current.find(i => i.id === activePollingIdRef.current) || { id: activePollingIdRef.current };
+                                      if (activePollingIdRef.current) {
+                                        handleConnectExisting(currentInst, false);
+                                      }
+                                    }}
+                                    className="text-[11px] text-slate-500 hover:text-emerald-500 dark:text-slate-400 dark:hover:text-emerald-400 flex items-center gap-1.5 transition-colors font-semibold py-1.5 px-3 rounded-xl hover:bg-emerald-500/10 cursor-pointer active:scale-95"
+                                  >
+                                    <RefreshCcw size={12} className={isRenewingQr ? "animate-spin" : ""} />
+                                    <span>Atualizar QR Code</span>
+                                  </button>
+                                )}
+
                                 <button
                                   onClick={() => {
-                                    setIsRenewingQr(true);
                                     const currentInst = existingInstancesRef.current.find(i => i.id === activePollingIdRef.current) || { id: activePollingIdRef.current };
                                     if (activePollingIdRef.current) {
                                       handleConnectExisting(currentInst, true);
                                     }
                                   }}
-                                  className="mt-2.5 text-[11px] text-slate-500 hover:text-emerald-500 dark:text-slate-400 dark:hover:text-emerald-400 flex items-center gap-1.5 transition-colors font-medium py-1 px-3 rounded-lg hover:bg-emerald-500/10 cursor-pointer active:scale-95"
+                                  className="text-[11px] text-slate-400 hover:text-amber-500 dark:text-slate-500 dark:hover:text-amber-400 flex items-center gap-1.5 transition-colors font-medium py-1.5 px-2.5 rounded-xl hover:bg-amber-500/10 cursor-pointer active:scale-95"
+                                  title="Forçar reset completo de credenciais e socket"
                                 >
-                                  <RefreshCcw size={12} className={isRenewingQr ? "animate-spin" : ""} />
-                                  <span>Atualizar QR Code manualmente</span>
+                                  <Trash2 size={12} />
+                                  <span>Resetar Sessão</span>
                                 </button>
-                              )}
+                              </div>
                             </div>
                           )}
                         </div>
