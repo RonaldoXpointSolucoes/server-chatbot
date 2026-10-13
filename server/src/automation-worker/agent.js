@@ -1,6 +1,6 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { supabase, NODE_ID } from '../supabase.js';
-import { pipeline } from '@xenova/transformers';
+import { pipeline } from '../embeddings/pipeline.js';
 import { AsyncLocalStorage } from 'async_hooks';
 import { getBrPhoneVariations, getCanonicalBrPhone } from '../event-processor/helpers.js';
 import { gastrofoodCache } from './gastrofood-cache.js';
@@ -2380,7 +2380,7 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
 
             // 1. Busca contexto no RAG
             const transformer = await LocalEmbeddingsPipeline.getInstance();
-            const output = await transformer(expandedQueryText, { pooling: 'mean', normalize: true });
+            const output = await transformer(expandedQueryText, { pooling: 'mean', normalize: true, priority: 1 });
             const queryEmbedding = Array.from(output.data);
 
             const { data: semanticMatches } = await supabase.rpc('match_knowledge_chunks', {

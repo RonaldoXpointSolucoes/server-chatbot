@@ -1,6 +1,6 @@
 import express from 'express';
 import multer from 'multer';
-import { pipeline } from '@xenova/transformers';
+import { pipeline } from '../embeddings/pipeline.js';
 import { supabase } from '../supabase.js';
 import { PDFParse } from 'pdf-parse';
 import { GoogleGenerativeAI } from '@google/generative-ai';
@@ -423,7 +423,7 @@ router.post('/match', async (req, res) => {
 
         // 1. Vetoriza a frase da pergunta
         const transformer = await EmbeddingsPipeline.getInstance();
-        const output = await transformer(query, { pooling: 'mean', normalize: true });
+        const output = await transformer(query, { pooling: 'mean', normalize: true, priority: 1 });
         const queryEmbedding = Array.from(output.data);
 
         // 2. Busca Semântica (IA) com Assertividade Elevada (match_threshold 0.45)
@@ -661,7 +661,7 @@ router.post('/corrections', async (req, res) => {
  
         // 1. Vetoriza o texto da pergunta
         const transformer = await EmbeddingsPipeline.getInstance();
-        const output = await transformer(user_query, { pooling: 'mean', normalize: true });
+        const output = await transformer(user_query, { pooling: 'mean', normalize: true, priority: 1 });
         const embedding = Array.from(output.data);
  
         // 2. Grava na tabela ai_reasoning_adjustments (se já existir para essa exata query, atualiza)

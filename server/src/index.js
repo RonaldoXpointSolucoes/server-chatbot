@@ -1129,6 +1129,8 @@ const gracefulShutdown = async (signal) => {
             
         const { flushAllPendingWrites } = await import('./session-manager/auth.js');
         await flushAllPendingWrites();
+        const { stopEmbeddingWorker } = await import('./embeddings/pipeline.js');
+        await stopEmbeddingWorker();
         console.log(`[Antigravity Boot] Sincronização de chaves e encerramento de sockets concluídos com sucesso.`);
     } catch (err) {
         console.error(`[Antigravity Boot] Erro durante o desligamento gracioso:`, err.message || err);

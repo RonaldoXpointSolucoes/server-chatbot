@@ -1,6 +1,6 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { supabase } from '../supabase.js';
-import { pipeline } from '@xenova/transformers';
+import { pipeline } from '../embeddings/pipeline.js';
 
 class LocalEmbeddingsPipeline {
   static task = 'feature-extraction';

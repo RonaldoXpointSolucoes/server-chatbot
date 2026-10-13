@@ -1,6 +1,8 @@
 {
-  "version": "7.8.1",
+  "version": "7.8.2",
   "changelog": [
+    "Embeddings RAG isolados em worker thread compartilhado: carregamento e calculo de vetores deixam de bloquear a API e os sockets WhatsApp",
+    "Inferencia serializada com prioridade para consultas interativas e preservacao dos vetores normalizados de 384 dimensoes",
     "Corrigido vazamento de AsyncLocalStorage em reconexões Baileys que acumulava hooks, consumia CPU e atrasava as filas de envio e recebimento",
     "Contexto de transação compartilhado com isolamento por socket; testes de concorrência, rollback e 200 recriações de sessão",
     "Telemetria de contextos assíncronos e recibos reais de entrega para validação E2E por messageId",

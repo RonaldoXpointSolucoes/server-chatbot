@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { pipeline } from '@xenova/transformers';
+import { pipeline } from './embeddings/pipeline.js';
 import fs from 'fs';
 import path from 'path';
 
