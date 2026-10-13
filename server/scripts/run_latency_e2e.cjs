@@ -80,7 +80,9 @@ async function sendAndVerify(source, receiver, cycle, direction) {
       const result = {
         traceId, cycle, direction, source: source.id, receiver: receiver.id,
         messageId: key.id, remoteJid: key.remoteJid, fromMe: key.fromMe,
-        apiMs, inboundMs: realtime - started, verifiedMs: Date.now() - started,
+        apiMs, inboundMs: Math.max(0, Date.parse(socketEvent.timestamp) - started),
+        realtimeMs: realtime.at - started, realtimeTransport: realtime.transport,
+        verifiedMs: Date.now() - started,
         outbound: true, inbound: true, socketReceived: true, realtimeReceived: true,
         realWhatsAppValidated: true, receiptSource: receipt.details.source,
         conversations: [outbound[0].conversation_id, incoming[0].conversation_id], frontendValidated: false
@@ -100,12 +102,16 @@ async function run() {
   if (!source || !receiver || source.id === receiver.id || source.tenant_id !== receiver.tenant_id) throw new Error('Invalid test inbox pair');
   if ((targetEnv === 'alpha') !== String(source.assigned_node_id).includes('alpha')) throw new Error('Test source belongs to the wrong environment');
   console.log(JSON.stringify({ runId, environment: targetEnv, health: await checkSocket(source) }));
-  channel = db.channel(`tenant:${source.tenant_id}:inbox`).on('broadcast', { event: 'message.new' }, ({ payload }) => {
-    const msg = payload?.message || payload;
+  const observe = (msg, transport) => {
     const id = msg.whatsapp_message_id || msg.whatsapp_id;
-    const instance = msg.instance_id || payload?.instance_id;
-    if (id && instance) observed.set(`${instance}:${id}`, Date.now());
-  });
+    const instance = msg.instance_id;
+    const key = `${instance}:${id}`;
+    if (id && instance && !observed.has(key)) observed.set(key, { at: Date.now(), transport });
+  };
+  channel = db.channel(`tenant:${source.tenant_id}:inbox`)
+    .on('broadcast', { event: 'message.new' }, ({ payload }) => observe(payload?.message || payload, 'broadcast'))
+    // Match chatStore: messages also arrive through Postgres INSERT notifications.
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `tenant_id=eq.${source.tenant_id}` }, payload => observe(payload.new, 'postgres_changes'));
   await new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('Realtime subscription timeout')), 15000);
     channel.subscribe(status => {
