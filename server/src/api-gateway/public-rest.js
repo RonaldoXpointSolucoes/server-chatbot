@@ -1,6 +1,7 @@
 import express from 'express';
-import { supabase, resolveTargetJid } from '../supabase.js';
-import sessionManager from '../session-manager/index.js';
+import { supabase, resolveTargetJid, NODE_ID } from '../supabase.js';
+import sessionManager, { isInstanceAllowedForNode } from '../session-manager/index.js';
+import { createExternalMessageRouting } from './external-message-routing.js';
 import multer from 'multer';
 import crypto from 'crypto';
 import fs from 'fs';
@@ -9,6 +10,7 @@ import os from 'os';
 import ffmpeg from 'fluent-ffmpeg';
 
 const router = express.Router();
+const routeExternalMessage = createExternalMessageRouting({ nodeId: NODE_ID, isInstanceAllowed: isInstanceAllowedForNode, alphaUrl: process.env.BAILEYS_ALPHA_API_URL || process.env.ALPHA_API_URL });
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 500 * 1024 * 1024 } }); // 500MB
 
 // Helper de obtenção de socket com retry, auto-reconnect e backoff inteligente
@@ -179,14 +181,34 @@ const requireApiKey = async (req, res, next) => {
     }
 
     // Nas rotas Evolution-like, a identificação é pelo :name ou :instance no path, ou "instance" no body
-    const instanceName = req.params.instance || req.params.name || req.body.instance;
+    const instanceName = req.params.instance || req.params.name || req.body?.instance;
+    let data;
     if (!instanceName) {
+        // Multipart fields are unavailable before multer. An instance key uniquely
+        // identifies its inbox, so authenticate before accepting the upload.
+        const keyed = await supabase.from('whatsapp_instances')
+            .select('id, tenant_id, display_name, phone_number, status, api_key')
+            .eq('api_key', apiKey).maybeSingle();
+        data = keyed.data;
+        if (!data && String(req.headers['content-type'] || '').startsWith('multipart/form-data') && !req.readableEnded) {
+            const { data: company } = await supabase.from('companies')
+                .select('id').eq('global_api_key', apiKey).maybeSingle();
+            if (company) {
+                // The global key is authenticated now; requireApiKey runs again
+                // after parsing to verify that the chosen inbox belongs to it.
+                req.authenticatedGlobalTenant = company.id;
+                return next();
+            }
+            return res.status(401).json({ error: 'Unauthorized ApiKey.' });
+        }
+    }
+    if (!instanceName && !data) {
         console.info(`[API Gateway] [Auth] Falha 400: Nome da instância ausente no path ou body ("instance") | Rota: ${req.method} ${req.originalUrl} | IP: ${originIp}`);
         return res.status(400).json({ error: 'Instance name is missing in URL path or body ("instance").' });
     }
 
     // Validação resiliente no Banco com busca inteligente por Nome, Slug Normalizado, Telefone ou UUID
-    const data = await resolveInstanceSmart(instanceName);
+    data = data || await resolveInstanceSmart(instanceName);
 
     if (!data) {
         const targetSlug = normalizeInstanceSlug(instanceName);
@@ -465,7 +487,7 @@ router.post([
     '/api/messages/:instance',
     '/api/message/sendText',
     '/api/message/sendText/:instance'
-], requireApiKey, async (req, res) => {
+], requireApiKey, routeExternalMessage, async (req, res) => {
     const { number, text } = req.body;
     const { id, tenant_id, display_name } = req.instanceData;
     const originIp = req.originIp || 'N/A';
@@ -669,7 +691,7 @@ router.post([
  *       500:
  *         description: Erros de armazenamento ou ffmpeg.
  */
-router.post(['/message/sendMedia', '/message/sendMedia/:instance'], requireApiKey, upload.single('file'), async (req, res) => {
+router.post(['/message/sendMedia', '/message/sendMedia/:instance'], requireApiKey, routeExternalMessage, upload.single('file'), requireApiKey, routeExternalMessage, async (req, res) => {
     const { number, mediatype } = req.body;
     const instance = req.params.instance || req.body.instance || req.instanceData?.display_name;
     const { id, tenant_id, display_name } = req.instanceData;
@@ -749,7 +771,7 @@ router.post(['/message/sendMedia', '/message/sendMedia/:instance'], requireApiKe
         const fileName = `${tenant_id}/${id}/${timestamp}_${crypto.randomBytes(4).toString('hex')}.${fileExt}`;
         
         const { error: uploadError } = await supabase.storage
-            .from('media')
+            .from('chat_media')
             .upload(fileName, file.buffer, {
                 contentType: file.mimetype,
                 upsert: true
@@ -760,7 +782,7 @@ router.post(['/message/sendMedia', '/message/sendMedia/:instance'], requireApiKe
             return res.status(500).json({ error: 'Failed to upload media to storage', details: uploadError.message });
         }
 
-        const { data: publicUrlData } = supabase.storage.from('media').getPublicUrl(fileName);
+        const { data: publicUrlData } = supabase.storage.from('chat_media').getPublicUrl(fileName);
         const mediaUrl = publicUrlData.publicUrl;
 
         // Disparo Baileys de acordo com o mediatype

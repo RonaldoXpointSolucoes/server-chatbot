@@ -1,6 +1,8 @@
 {
-  "version": "7.8.5",
+  "version": "7.8.6",
   "changelog": [
+    "API externa texto/mídia restaurada: validação antes do upload, bucket chat_media e encaminhamento seguro às instâncias Alpha",
+    "Broadcasts com concorrência limitada, prioridade para mensagens e redução de ACKs repetidos sem perda de IDs",
     "Gateway preserva o socket de QR aberto antes de existir identidade: force_new legado não substitui a tentativa",
     "Consultas de status preservam o socket para processar o reinício 515 após leitura do QR",
     "Supervisores distinguem transporte aberto de autenticação e preservam QR/handshake ativos",

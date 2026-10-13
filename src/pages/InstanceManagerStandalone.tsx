@@ -48,6 +48,7 @@ import {
 
 import { migrateInstanceHistory } from '../services/whatsappEngine';
 import { InstanceLogsModal } from '../components/InstanceLogsModal';
+import { InstanceApiPanel } from '../components/InstanceApiPanel';
 import { supabase, masterSupabase } from '../services/supabase';
 
 const ENGINE_CANDIDATES = [
@@ -158,6 +159,7 @@ export default function InstanceManagerStandalone() {
 
   // Modal de Logs Exclusivos do Servidor em Tempo Real
   const [logTargetInstance, setLogTargetInstance] = useState<WhatsAppInstance | null>(null);
+  const [apiTargetInstance, setApiTargetInstance] = useState<WhatsAppInstance | null>(null);
 
   // Suite de Diagnóstico & Testes da Instância (Tela Inteira)
   const [testTargetInstance, setTestTargetInstance] = useState<WhatsAppInstance | null>(null);
@@ -673,10 +675,12 @@ export default function InstanceManagerStandalone() {
   const handleGenerateApiKey = async (instId: string) => {
     try {
       const newKey = `sk_inst_${crypto.randomUUID().replace(/-/g, '')}`;
-      await supabase.from('whatsapp_instances').update({ api_key: newKey }).eq('id', instId);
-      fetchInstances();
+      const { error } = await (masterSupabase || supabase).from('whatsapp_instances').update({ api_key: newKey }).eq('id', instId);
+      if (error) throw error;
+      await fetchInstances();
     } catch (err) {
       console.error('Erro ao gerar chave de API:', err);
+      alert('Não foi possível gerar a chave de API desta instância. Tente novamente.');
     }
   };
 
@@ -1500,7 +1504,7 @@ export default function InstanceManagerStandalone() {
                   </div>
 
                   {/* Ações da Instância */}
-                  <div className="flex items-center gap-2 pt-5 mt-4 border-t border-slate-800/80">
+                  <div className="flex flex-wrap items-center gap-2 pt-5 mt-4 border-t border-slate-800/80">
                     {!isConnected ? (
                       <button
                         onClick={() => handleConnectInstance(inst)}
@@ -1532,6 +1536,15 @@ export default function InstanceManagerStandalone() {
                     >
                       <ExternalLink className="w-4 h-4 text-emerald-400" />
                       <span>ConectaZap</span>
+                    </button>
+
+                    <button
+                      onClick={() => setApiTargetInstance(inst)}
+                      className="p-3 bg-violet-500/10 hover:bg-violet-500/20 border border-violet-500/30 text-violet-300 rounded-xl transition flex items-center gap-1.5 font-bold text-xs"
+                      title={`Credenciais, exemplos e teste da API de ${inst.display_name}`}
+                    >
+                      <Key className="w-4 h-4" />
+                      <span>API</span>
                     </button>
 
                     <button
@@ -2211,6 +2224,14 @@ export default function InstanceManagerStandalone() {
       )}
 
       {/* MODAL DE LOGS EXCLUSIVOS DO SERVIDOR EM TEMPO REAL */}
+      {apiTargetInstance && (
+        <InstanceApiPanel
+          key={apiTargetInstance.id}
+          instance={instances.find(inst => inst.id === apiTargetInstance.id) || apiTargetInstance}
+          onClose={() => setApiTargetInstance(null)}
+          onGenerateKey={() => handleGenerateApiKey(apiTargetInstance.id)}
+        />
+      )}
       <InstanceLogsModal
         instance={logTargetInstance}
         isOpen={Boolean(logTargetInstance)}

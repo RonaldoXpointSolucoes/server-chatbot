@@ -20,6 +20,13 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.8.8', date: '2026-10-13', summary: 'API externa por instância com credenciais e testes no painel central',
+    notes: [
+      { id: '7.8.8-1', category: 'features', title: 'Painel API no Gerenciador de Instâncias', description: 'Cada caixa oferece credenciais, exemplos completos e teste de texto ou mídia pela API externa, com resposta HTTP e identificador do WhatsApp.', tag: 'NOVO', badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' },
+      { id: '7.8.8-2', category: 'fixes', title: 'Exemplos e envio externo de mídia corrigidos', description: 'Os exemplos respeitam o servidor da instância e o formato do arquivo; envio aceito ou enfileirado é apresentado sem afirmar entrega.', tag: 'CORREÇÃO', badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30' }
+    ]
+  },
+  {
     version: '7.8.7',
     date: '2026-10-13',
     summary: 'Recuperação da conexão após falha de autenticação',

@@ -36,8 +36,9 @@ import {
 import { supabase } from '../../services/supabase';
 import { useChatStore } from '../../store/chatStore';
 import { geminiService } from '../../services/geminiService';
+import { instanceApiSnippet, PRODUCTION_API_URL } from '../../utils/instanceApi.mjs';
 
-const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || PRODUCTION_API_URL;
 
 interface Instance {
   id: string;
@@ -249,7 +250,7 @@ export default function Integrations() {
       // 2. Carregar Instâncias
       const { data: waInstances, error: instError } = await supabase
         .from('whatsapp_instances')
-        .select('id, display_name, status, api_key, color')
+        .select('id, display_name, status, api_key, color, assigned_node_id')
         .eq('tenant_id', tenantId)
         .order('created_at', { ascending: false });
 
@@ -577,81 +578,18 @@ export default function Integrations() {
 
   // Obter instância selecionada para os exemplos de código
   const activeInstance = instances.find(inst => inst.id === selectedInstanceId);
-  const exampleInstanceName = activeInstance?.display_name || 'instancia_teste';
   const exampleApiKey = activeInstance?.api_key || 'SUA_API_KEY_DA_CAIXA';
 
-  // Gerar Snippet de Código baseado nas abas selecionadas
-  const getCodeSnippet = () => {
-    if (activeLangTab === 'curl') {
-      if (activeEndpointTab === 'text') {
-        return `curl --request POST \\
-  --url "${ENGINE_URL}/message/sendText" \\
-  --header "Content-Type: application/json" \\
-  --header "apikey: ${exampleApiKey}" \\
-  --data '{
-    "number": "5511975960999",
-    "text": "Olá! Esta é uma mensagem de teste enviada pela API 🚀",
-    "instance": "${exampleInstanceName}"
-  }'`;
-      } else {
-        return `curl --request POST \\
-  --url "${ENGINE_URL}/message/sendMedia" \\
-  --header "apikey: ${exampleApiKey}" \\
-  --header "Content-Type: multipart/form-data" \\
-  --form "number=5511975960999" \\
-  --form "mediatype=image" \\
-  --form "instance=${exampleInstanceName}" \\
-  --form "file=@/caminho/para/sua/imagem.png"`;
-      }
-    } else {
-      // Node.js (fetch)
-      if (activeEndpointTab === 'text') {
-        return `const myHeaders = new Headers();
-myHeaders.append("Content-Type", "application/json");
-myHeaders.append("apikey", "${exampleApiKey}");
-
-const raw = JSON.stringify({
-  "number": "5511975960999",
-  "text": "Olá! Esta é uma mensagem de teste enviada pela API 🚀",
-  "instance": "${exampleInstanceName}"
-});
-
-const requestOptions = {
-  method: 'POST',
-  headers: myHeaders,
-  body: raw,
-  redirect: 'follow'
-};
-
-fetch("${ENGINE_URL}/message/sendText", requestOptions)
-  .then(response => response.json())
-  .then(result => console.log(result))
-  .catch(error => console.error('Erro ao enviar mensagem:', error));`;
-      } else {
-        return `const myHeaders = new Headers();
-myHeaders.append("apikey", "${exampleApiKey}");
-
-const formdata = new FormData();
-formdata.append("number", "5511975960999");
-formdata.append("mediatype", "image");
-formdata.append("instance", "${exampleInstanceName}");
-// file deve ser um Blob/File do NodeJS (ou buffer)
-formdata.append("file", fileInput.files[0], "imagem.png");
-
-const requestOptions = {
-  method: 'POST',
-  headers: myHeaders,
-  body: formdata,
-  redirect: 'follow'
-};
-
-fetch("${ENGINE_URL}/message/sendMedia", requestOptions)
-  .then(response => response.json())
-  .then(result => console.log(result))
-  .catch(error => console.error('Erro ao enviar mídia:', error));`;
-      }
-    }
-  };
+  // Mesmo contrato público usado pelo painel API do Gerenciador de Instâncias.
+  const getCodeSnippet = () => instanceApiSnippet({
+    instance: activeInstance || { id: 'ID_DA_INSTANCIA' },
+    kind: activeEndpointTab === 'text' ? 'text' : 'media',
+    language: activeLangTab === 'curl' ? 'curl' : 'node',
+    apiKey: exampleApiKey,
+    number: '5511975960999',
+    text: 'Olá! Esta é uma mensagem de teste enviada pela API 🚀',
+    productionUrl: ENGINE_URL
+  });
 
   const handleCopyCode = () => {
     navigator.clipboard.writeText(getCodeSnippet());
