@@ -14,3 +14,12 @@ test('valid Node status is unwrapped for the connection monitor',async()=>{
 test('a persisted QR from a stopped socket stays hidden while a new attempt starts',()=>{
   for(const phase of ['idle','starting']) assert.equal(connectionView({status:'connecting',qr_base64:'obsolete-runtime-qr',diagnostic:{phase,authenticated:false}}).qr,null);
 });
+
+test('live terminal or idle diagnostics outrank a persisted pending-sync marker', () => {
+  for (const phase of ['idle', 'error', 'expired']) {
+    const view = connectionView({ status: 'disconnected', pairing_code: 'CONNECTED_PENDING_SYNC', diagnostic: { phase, authenticated: false, retryAllowed: true } });
+    assert.equal(view.authenticating, false);
+    assert.equal(view.canStart, true);
+    assert.equal(view.qr, null);
+  }
+});

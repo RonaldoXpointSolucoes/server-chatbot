@@ -34,3 +34,5 @@ Na tentativa `d01e4690-195c-4b70-be41-e8c625d8a589`, o celular entregou credenci
 Em 7.8.4, `getSocket` é uma leitura sem remoções. O listener nativo continua responsável pelo encerramento e pela recuperação 515. Os supervisores distinguem transporte aberto de autenticação, respeitam atividade recente de handshake e registram o timeout como falha recuperável. Os testes reproduzem status polling antes do close, QR sem identidade e timeout depois da margem de autenticação. Credenciais e chaves não são apagadas.
 
 O ReconectaZap 1.0.2 mantém um painel lateral visível de eventos, com assinatura de inserções e consulta de segurança a cada 2,5 segundos, identificação da fonte e horário da última atualização. Falhas de consulta mantêm os eventos anteriores e indicam indisponibilidade. O painel aparece abaixo da conexão em telas estreitas.
+
+Um diagnóstico explícito `idle`, `error` ou `expired` prevalece sobre `CONNECTED_PENDING_SYNC` persistido. Essa proteção é compartilhada pelas telas de conexão em 1.0.3 / 7.8.7.

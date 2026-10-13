@@ -2,8 +2,8 @@ export function connectionView(data = {}) {
   const d = data.diagnostic || {};
   const status = data.status || data.sessionStatus || 'disconnected';
   const connected = data.is_authenticated === true || d.authenticated === true || (d.authenticated !== false && ['connected','connected_local','open'].includes(status));
-  const authenticating = !connected && (d.handshakeProtected || ['authenticating','reconnecting'].includes(d.phase) || data.pairingSuccess || data.syncingKeys || data.scanningDetected || data.pairing_code === 'CONNECTED_PENDING_SYNC');
   const terminal = !connected && ['error','expired'].includes(d.phase);
+  const authenticating = !connected && !terminal && (d.handshakeProtected || ['authenticating','reconnecting'].includes(d.phase) || (!d.phase && (data.pairingSuccess || data.syncingKeys || data.scanningDetected || data.pairing_code === 'CONNECTED_PENDING_SYNC')));
   const qr = !connected && !authenticating && !terminal && (!d.phase || d.phase === 'qr_ready') ? data.qrBase64 || data.qr_base64 || data.base64 || data.qrCode || data.qr_code || null : null;
   return {
     status: connected ? 'connected' : authenticating ? 'connecting' : status,

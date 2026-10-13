@@ -20,6 +20,14 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.8.7',
+    date: '2026-10-13',
+    summary: 'Recuperação da conexão após falha de autenticação',
+    notes: [
+      { id: '7.8.7-1', category: 'fixes', title: 'Nova tentativa após falha de autenticação', description: 'O diagnóstico atual do servidor prevalece sobre marcadores antigos de sincronização, liberando a recuperação quando a tentativa encerra.', tag: 'CORREÇÃO', badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30' }
+    ]
+  },
+  {
     version: '7.8.6',
     date: '2026-10-13',
     summary: 'Conexão WhatsApp preservada durante a leitura do QR e diagnósticos por tentativa',
