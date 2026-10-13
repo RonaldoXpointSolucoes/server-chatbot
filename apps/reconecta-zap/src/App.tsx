@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import QRCode from 'react-qr-code';
 import { createClient } from '@supabase/supabase-js';
-import { connectionView, qrSeconds } from './connection-state.mjs';
+import { connectionView, qrSeconds, readEngineResponse } from './connection-state.mjs';
 import {
   QrCode,
   Smartphone,
@@ -304,13 +304,7 @@ export default function App() {
       ...options, cache: 'no-store', signal: AbortSignal.timeout(15000),
       headers: { 'Content-Type': 'application/json', 'x-tenant-id': inst.tenant_id || '', apikey: inst.api_key || '', 'x-trace-id': requestId, ...options.headers }
     });
-    const json = await response.json();
-    const data = json.data || json;
-    if (!response.ok) {
-      const failure: any = new Error(data.error || data.message || `Servidor respondeu HTTP ${response.status}`);
-      failure.status = response.status;
-      throw failure;
-    }
+    const data = await readEngineResponse(response);
     return { ...data, http: { status: response.status, ms: Date.now()-started, requestId } };
   }, []);
 
@@ -327,7 +321,7 @@ export default function App() {
       setServerIssue(null);
       return connectionView(data);
     } catch (e: any) {
-      const message = e.name === 'TimeoutError' ? 'O servidor não respondeu em 15 segundos. Tentando novamente.' : e.message || 'Não foi possível consultar o servidor.';
+      const message = e.name === 'TimeoutError' ? 'O servidor não respondeu em 15 segundos. Tentando novamente.' : e instanceof TypeError ? 'Não foi possível alcançar o servidor Node. A sessão foi preservada; tentando novamente.' : e.message || 'Não foi possível consultar o servidor.';
       setServerIssue(message);
       setEngineDiagnostic((prev:any)=>({...prev, httpError:message, httpStatus:e.status || null}));
       return null;
