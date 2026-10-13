@@ -1,6 +1,9 @@
 {
-  "version": "7.7.7",
+  "version": "7.8.1",
   "changelog": [
+    "Corrigido vazamento de AsyncLocalStorage em reconexões Baileys que acumulava hooks, consumia CPU e atrasava as filas de envio e recebimento",
+    "Contexto de transação compartilhado com isolamento por socket; testes de concorrência, rollback e 200 recriações de sessão",
+    "Telemetria de contextos assíncronos e recibos reais de entrega para validação E2E por messageId",
     "🛑 Proteção Anti-Ban Rigorosa: Suspensão imediata de loops de auto-reconexão em erro 403 Forbidden, protegendo a integridade do chip do WhatsApp contra bloqueios permanentes",
     "🛡️ Restauração do Handshake Seguro de Plataforma Baileys: Reversão para WebSubPlatform.WIN32 e Platform.WEB oficial, eliminando incompatibilidade criptográfica nos servidores da Meta",
     "⏱️ Cadência Humana Anti-Burst no Outbox: Substituição de micro-delays de 50ms por cadência humana natural (1.2s - 2.2s com jitter), impedindo detecção de disparos em rajada/spam pelo WhatsApp",

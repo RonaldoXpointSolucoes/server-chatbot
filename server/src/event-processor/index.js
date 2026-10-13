@@ -2161,6 +2161,12 @@ class EventProcessor {
                     newStatus = 'read';
                 }
 
+                recordStructuredEvent({
+                    event: 'BAILEYS_MESSAGE_RECEIPT', instanceId,
+                    whatsappMessageId: update.key.id, direction: 'outbound',
+                    details: { status: newStatus, source: 'message-receipt.update' }
+                });
+
                 // Salva na memória p/ flushQueue (novas mensagens)
                 this.updatePendingStatus(update.key.id, newStatus);
                 // Enfileira p/ reconciliation (mensagens já existentes)
@@ -2194,6 +2200,11 @@ class EventProcessor {
                 if (update.status === 4 || update.status === 5) newStatus = 'read';
 
                 if (newStatus) {
+                    recordStructuredEvent({
+                        event: 'BAILEYS_MESSAGE_RECEIPT', instanceId,
+                        whatsappMessageId: key.id, direction: 'outbound',
+                        details: { status: newStatus, source: 'messages.update' }
+                    });
                     // Salva na memória p/ flushQueue
                     this.updatePendingStatus(key.id, newStatus);
                     // Enfileira p/ reconciliation assíncrona

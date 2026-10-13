@@ -28,6 +28,11 @@ interface TransactionContext {
 	dbQueries: number
 }
 
+// One storage for the process: per-socket AsyncLocalStorage instances stay registered
+// with Node's async hooks after reconnects unless disabled. Scope each transaction by
+// a unique owner so nested work on another socket never reuses its keys or mutations.
+const transactionStorage = new AsyncLocalStorage<ReadonlyMap<symbol, TransactionContext>>()
+
 /**
  * Adds caching capability to a SignalKeyStore
  * @param store the store to add caching to
@@ -118,7 +123,8 @@ export const addTransactionCapability = (
 	logger: ILogger,
 	{ maxCommitRetries, delayBetweenTriesMs }: TransactionCapabilityOptions
 ): SignalKeyStoreWithTransaction => {
-	const txStorage = new AsyncLocalStorage<TransactionContext>()
+	const transactionOwner = Symbol('signal-key-store')
+	const getTransactionContext = () => transactionStorage.getStore()?.get(transactionOwner)
 
 	// Queues for concurrency control (keyed by signal data type - bounded set)
 	const keyQueues = new Map<string, PQueue>()
@@ -182,7 +188,7 @@ export const addTransactionCapability = (
 	 * Check if currently in a transaction
 	 */
 	function isInTransaction(): boolean {
-		return !!txStorage.getStore()
+		return !!getTransactionContext()
 	}
 
 	/**
@@ -216,7 +222,7 @@ export const addTransactionCapability = (
 
 	return {
 		get: async (type, ids) => {
-			const ctx = txStorage.getStore()
+			const ctx = getTransactionContext()
 
 			if (!ctx) {
 				// No transaction - direct read without exclusive lock for concurrency
@@ -251,7 +257,7 @@ export const addTransactionCapability = (
 		},
 
 		set: async data => {
-			const ctx = txStorage.getStore()
+			const ctx = getTransactionContext()
 
 			if (!ctx) {
 				// No transaction - direct write with queue protection
@@ -301,7 +307,7 @@ export const addTransactionCapability = (
 		isInTransaction,
 
 		transaction: async (work, key) => {
-			const existing = txStorage.getStore()
+			const existing = getTransactionContext()
 
 			// Nested transaction - reuse existing context
 			if (existing) {
@@ -324,7 +330,9 @@ export const addTransactionCapability = (
 					logger.trace('entering transaction')
 
 					try {
-						const result = await txStorage.run(ctx, work)
+						const contexts = new Map(transactionStorage.getStore())
+						contexts.set(transactionOwner, ctx)
+						const result = await transactionStorage.run(contexts, work)
 
 						// Commit mutations
 						await commitWithRetry(ctx.mutations)

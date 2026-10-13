@@ -169,6 +169,7 @@ export function getSystemTelemetry() {
 
             instances.push({
                 instanceId,
+                authenticated: Boolean(sock?.user?.id || sock?.authState?.creds?.me?.id),
                 status: session?.status || (sock?.ws?.isOpen ? 'connected' : 'disconnected'),
                 wsOpen: !!sock?.ws?.isOpen,
                 wsReadyState: sock?.ws?.readyState ?? null,
@@ -210,7 +211,11 @@ export function getSystemTelemetry() {
         eventLoop,
         process: {
             activeHandles: activeHandlesCount,
-            activeRequests: activeRequestsCount
+            activeRequests: activeRequestsCount,
+            // Node 20 puts one symbol on each resource for every enabled ALS.
+            // Count the hooks without exposing any session context or key data.
+            asyncLocalStorageContexts: Object.getOwnPropertySymbols(Promise.resolve())
+                .filter(symbol => symbol.description === 'kResourceStore').length
         },
         baileys: {
             activeSessionsCount: instances.length,
