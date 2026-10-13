@@ -433,7 +433,7 @@ class EventProcessor {
             } catch(e){}
 
             // Rastreabilidade E2E com Trace ID
-            const msgText = extractTextFromMessage(msg.message);
+            const msgText = extractTextFromMessage(msg);
             const traceMatch = (msgText || '').match(/E2E-[A-Za-z0-9-_]+/);
             const traceId = traceMatch ? traceMatch[0] : null;
 

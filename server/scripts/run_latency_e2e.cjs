@@ -62,6 +62,7 @@ async function sendAndVerify(source, receiver, cycle, direction) {
     throw new Error(`${traceId}: API did not return the expected official WhatsApp key`);
   }
   const deadline = Date.now() + 60000;
+  let lastState;
   while (Date.now() < deadline) {
     const [inbound, saved] = await Promise.all([
       query('wa_incoming_messages', 'instance_id,message_id,from_me,body,created_at', { instance_id: receiver.id, message_id: key.id, from_me: false }),
@@ -74,6 +75,7 @@ async function sendAndVerify(source, receiver, cycle, direction) {
     const outbound = saved.filter(m => m.instance_id === source.id && m.direction === 'outbound' && m.text_content === text);
     const incoming = saved.filter(m => m.instance_id === receiver.id && m.direction === 'inbound' && m.text_content === text);
     const realtime = observed.get(`${receiver.id}:${key.id}`);
+    lastState = { rawInbound: inbound.length, socketEvent: !!socketEvent, outbound: outbound.length, incoming: incoming.length, realtime: !!realtime, receipt: !!receipt };
     if (inbound.length === 1 && inbound[0].body === text && socketEvent && outbound.length === 1 && incoming.length === 1 && realtime && receipt) {
       const result = {
         traceId, cycle, direction, source: source.id, receiver: receiver.id,
@@ -89,7 +91,7 @@ async function sendAndVerify(source, receiver, cycle, direction) {
     }
     await sleep(400);
   }
-  throw new Error(`${traceId}: timeout waiting for socket, database, realtime or real delivery receipt for ${key.id}`);
+  throw new Error(`${traceId}: timeout for ${key.id}: ${JSON.stringify(lastState)}`);
 }
 async function run() {
   const instances = await query('whatsapp_instances', 'id,tenant_id,display_name,phone_number,status,assigned_node_id,api_key', {});
