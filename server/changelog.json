@@ -1,6 +1,9 @@
 {
-  "version": "7.8.2",
+  "version": "7.8.3",
   "changelog": [
+    "ReconectaZap: atualização de QR idempotente, sem encerrar socket ou apagar credenciais durante autenticação",
+    "Diagnóstico correlacionado de conexão: tentativa, fase Baileys, prazo real do QR, tempo decorrido, servidor e código de encerramento",
+    "Proteção contra regressão de estado após conexão e contra eventos tardios de sockets substituídos",
     "Embeddings RAG isolados em worker thread compartilhado: carregamento e calculo de vetores deixam de bloquear a API e os sockets WhatsApp",
     "Inferencia serializada com prioridade para consultas interativas e preservacao dos vetores normalizados de 384 dimensoes",
     "Corrigido vazamento de AsyncLocalStorage em reconexões Baileys que acumulava hooks, consumia CPU e atrasava as filas de envio e recebimento",

@@ -1,3 +1,4 @@
+import { connectionView } from '../../apps/reconecta-zap/src/connection-state.mjs';
 import React, { useEffect, useState } from 'react';
 import QRCode from 'react-qr-code';
 import {
@@ -147,6 +148,7 @@ export default function InstanceManagerStandalone() {
   const [pairingPhone, setPairingPhone] = useState('');
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [connectLoading, setConnectLoading] = useState(false);
+  const [connectDiagnostic, setConnectDiagnostic] = useState<any>(null);
   const [connectError, setConnectError] = useState<string | null>(null);
   const pollIntervalRef = React.useRef<any>(null);
 
@@ -254,17 +256,17 @@ export default function InstanceManagerStandalone() {
       const data = respJson.data || respJson;
 
       if (res.ok) {
-        const isAlive = data.status === 'connected' || data.status === 'connected_local' || data.status === 'connecting' || data.status === 'open';
+        const isAlive = connectionView(data).connected;
         setTestResults((prev) => ({
           ...prev,
           baileys: {
             status: isAlive ? 'success' : 'warning',
-            message: `Socket em memória RAM com estado: ${String(data.status).toUpperCase()}`,
+            message: data.diagnostic ? `Node ${data.diagnostic.serverVersion} • Baileys ${data.diagnostic.phase} • ${data.diagnostic.message}` : `Estado informado: ${String(data.status).toUpperCase()}`,
             latency,
             details: data
           }
         }));
-        addTestLog(`✅ [Teste 3/4] Engine Baileys validada em ${latency}ms! Estado RAM: ${data.status}`);
+        addTestLog(`${isAlive ? '✅' : '⚠️'} [Teste 3/4] Node respondeu em ${latency}ms. WhatsApp ${isAlive ? 'autenticado' : 'ainda não autenticado'}. ${data.diagnostic?.nextAction || data.status}`);
       } else {
         setTestResults((prev) => ({ ...prev, baileys: { status: 'error', message: `Erro ao obter status da instância (HTTP ${res.status})`, latency, details: data } }));
         addTestLog(`❌ [Teste 3/4] Falha na inspeção do socket em memória (${latency}ms)`);
@@ -364,12 +366,13 @@ export default function InstanceManagerStandalone() {
     try {
       const res = await fetchEngineApi('/health', { method: 'GET' }).catch(() => null);
       if (res) {
-        setEngineOnline(true);
+        const data = res.ok ? await res.json() : null;
+        setEngineOnline(Boolean(res.ok && data?.status === 'ok'));
       } else {
-        setEngineOnline(true);
+        setEngineOnline(false);
       }
     } catch (e) {
-      setEngineOnline(true);
+      setEngineOnline(false);
     }
   };
 
@@ -529,6 +532,7 @@ export default function InstanceManagerStandalone() {
       fetchInstances(true);
       fetchCompanies();
       checkEngineHealth();
+      const healthTimer = setInterval(checkEngineHealth, 15000);
 
       // Assinar alterações em tempo real via Supabase Realtime (atualiza sem piscar a UI com debounce)
       let masterDebounceTimer: any = null;
@@ -551,6 +555,7 @@ export default function InstanceManagerStandalone() {
         .subscribe();
 
       return () => {
+        clearInterval(healthTimer);
         if (masterDebounceTimer) clearTimeout(masterDebounceTimer);
         supabase.removeChannel(channel);
       };
@@ -732,10 +737,11 @@ export default function InstanceManagerStandalone() {
       clearInterval(pollIntervalRef.current);
     }
 
-    let secondsElapsed = 0;
+    let polling = false;
     pollIntervalRef.current = setInterval(async () => {
       try {
-        secondsElapsed += 2;
+        if(polling) return;
+        polling=true;
         const res = await fetchEngineApi(`/api/v1/instances/${inst.id}/status`, {
           headers: {
             'x-tenant-id': inst.tenant_id,
@@ -743,13 +749,16 @@ export default function InstanceManagerStandalone() {
           }
         });
 
-        if (!res.ok) return;
+        if (!res.ok) { setConnectError(`Servidor respondeu HTTP ${res.status}. Consulte os logs no ConectaZap.`); return; }
 
         const respJson = await res.json();
         const data = respJson.data || respJson;
 
+        const view=connectionView(data);
+        setConnectDiagnostic(data.diagnostic || null);
+        if(!view.qr) { setQrCodeData(null); setQrBase64(null); }
         // 1. Caso a instância já tenha se conectado
-        if (data && (data.status === 'connected' || data.status === 'connected_local' || data.status === 'open')) {
+        if (view.connected) {
           setConnectLoading(false);
           closeConnectModal();
           fetchInstances();
@@ -769,33 +778,23 @@ export default function InstanceManagerStandalone() {
           setConnectLoading(false);
         }
 
-        if (pairing) {
+        if (pairing && pairing !== 'CONNECTED_PENDING_SYNC') {
           setPairingCode(pairing);
           setConnectLoading(false);
         }
 
-        // 3. Se passarem 30 segundos sem leitura, renova a ignição na engine
-        if (secondsElapsed >= 30) {
-          secondsElapsed = 0;
-          fetchEngineApi(`/api/v1/instances/${inst.id}/connect`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-tenant-id': inst.tenant_id,
-              'apikey': inst.api_key || ''
-            },
-            body: JSON.stringify({ forceNew: true })
-          }).catch(() => null);
-        }
+        if(view.authenticating) setConnectLoading(false);
+
       } catch (e) {
-        console.error('[QR Poll] Erro no polling:', e);
-      }
+        setConnectError('Sem resposta do servidor. A sessão foi preservada.');
+      } finally { polling=false; }
     }, 2000);
   };
 
   // Conectar Instância (QR Code ou Código)
   const handleConnectInstance = async (inst: WhatsAppInstance) => {
     setConnectInstance(inst);
+    setConnectDiagnostic(null);
     setConnectError(null);
     setQrCodeData(null);
     setQrBase64(null);
@@ -805,17 +804,19 @@ export default function InstanceManagerStandalone() {
 
     try {
       // 1. Iniciar ignição do motor Baileys via endpoint resiliente com fallback
-      const res = await fetchEngineApi(`/api/v1/instances/${inst.id}/connect?force_new=true`, {
+      const res = await fetchEngineApi(`/api/v1/instances/${inst.id}/connect`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'x-tenant-id': inst.tenant_id,
           'apikey': inst.api_key || ''
         },
-        body: JSON.stringify({ forceNew: true })
+        body: JSON.stringify({ source: 'instance_manager' })
       });
 
       const data = await res.json();
+      if(!res.ok) throw new Error(data.error || `Servidor respondeu HTTP ${res.status}`);
+      setConnectDiagnostic(data.diagnostic || null);
       if (data.qr_base64) {
         setQrBase64(data.qr_base64);
         setConnectLoading(false);
@@ -1782,6 +1783,12 @@ export default function InstanceManagerStandalone() {
               </div>
             </div>
 
+            {connectDiagnostic && <div className="rounded-xl border border-emerald-500/25 bg-slate-950 p-3 text-left text-xs space-y-1">
+              <p className="text-emerald-300 font-bold">{connectDiagnostic.message}</p>
+              <p className="text-slate-400">Node {connectDiagnostic.serverVersion} • {connectDiagnostic.nodeId} • Baileys: {connectDiagnostic.phase}</p>
+              <p className="text-slate-400">Socket {connectDiagnostic.wsOpen ? 'aberto' : 'fechado'} • {Math.round((connectDiagnostic.elapsedMs || 0)/1000)}s • QR #{connectDiagnostic.qrSequence || 0}</p>
+              {connectDiagnostic.lastDisconnect && <p className="text-amber-300">{connectDiagnostic.lastDisconnect.code}: {connectDiagnostic.lastDisconnect.reason}</p>}
+            </div>}
             {/* Alternar Abas */}
             <div className="flex bg-slate-950 p-1 rounded-2xl border border-slate-800/80">
               <button
@@ -1840,11 +1847,11 @@ export default function InstanceManagerStandalone() {
 
                 <button
                   onClick={() => handleConnectInstance(connectInstance)}
-                  disabled={connectLoading}
+                  disabled={connectLoading || connectDiagnostic?.handshakeProtected}
                   className="py-3 px-5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 font-bold rounded-xl text-xs flex items-center gap-2 transition disabled:opacity-50"
                 >
                   <RefreshCw className={`w-4 h-4 ${connectLoading ? 'animate-spin' : ''}`} />
-                  <span>Gerar Novo QR Code</span>
+                  <span>Atualizar QR sem reiniciar</span>
                 </button>
               </div>
             ) : (

@@ -20,6 +20,15 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.8.6',
+    date: '2026-10-13',
+    summary: 'Conexão WhatsApp preservada durante a leitura do QR e diagnósticos por tentativa',
+    notes: [
+      { id: '7.8.6-1', category: 'fixes', title: 'Renovação do QR sem interromper o pareamento', description: 'O QR acompanha o prazo do WhatsApp e deixa de reiniciar a sessão automaticamente. A leitura no celular suspende a atualização do QR enquanto a autenticação termina.', tag: 'CORREÇÃO', badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30' },
+      { id: '7.8.6-2', category: 'improvements', title: 'Respostas do Node e Baileys no diagnóstico', description: 'Logs mostram etapa, servidor, tentativa, tempo decorrido e motivo do encerramento. Socket aberto e WhatsApp autenticado aparecem como estados distintos.', tag: 'MELHORIA', badgeColor: 'bg-blue-500/20 text-blue-300 border-blue-500/30' }
+    ]
+  },
+  {
     version: '7.8.5',
     date: '2026-10-09',
     summary: 'Plano de Contingência de Fila Outbox, TTL Estrito de 10min e Atualização Baileys v7.0.0-rc14',

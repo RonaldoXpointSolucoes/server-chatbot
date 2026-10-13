@@ -13,6 +13,7 @@ import { addLog } from '../system-logger.js';
 import pino from 'pino';
 import { supabase, NODE_ID, retryWithBackoff, resolveTargetJid } from '../supabase.js';
 import { normalizeUrlsInText } from '../flow-runtime/url-helper.js';
+import { connectionProgress, getConnectionDiagnostics } from './connection-lifecycle.js';
 
 export const HOMOLOG_ALLOWED_INSTANCES = [
     'cc4efe36-f391-4b3d-a24c-ddcd8a293cf6', // FoodNext (11 94775-8860) - Caixa de testes
@@ -1082,13 +1083,17 @@ class SessionManager {
             }
 
             sock.ev.on('creds.update', async () => {
-                await saveCreds();
+                if (this.sessions.get(instanceId)?.sock !== sock) return;
                 const meId = sock.user?.id || state?.creds?.me?.id || state?.creds?.me?.jid;
                 const hasValidMeId = Boolean(meId && (String(meId).length > 5 || String(meId).includes('@s.whatsapp.net')));
                 
                 if (hasValidMeId && state?.creds?.pairingCode) {
                     delete state.creds.pairingCode;
                 }
+
+                const alreadyOpen = getConnectionDiagnostics(instanceId).phase === 'connected';
+                if (!wasAuthenticatedOnBoot && hasValidMeId && !alreadyOpen) connectionProgress(instanceId, { syncingKeys: true }, { hasIdentity: true, tenantId });
+                await saveCreds();
 
                 if (hasValidMeId) {
                     this.authenticatedSessions.add(instanceId);
@@ -1104,7 +1109,7 @@ class SessionManager {
                 // Só dispara a atualização de pareamento se a sessão NÃO estava autenticada no boot
                 // e concluiu a autenticação no celular (tem meId válido agora) e NÃO está em fase inicial de geração de código
                 const isCurrentlyPairing = this.pairingInProgress.has(instanceId);
-                if (!wasAuthenticatedOnBoot && hasValidMeId && !isCurrentlyPairing) {
+                if (!wasAuthenticatedOnBoot && !alreadyOpen && hasValidMeId && !isCurrentlyPairing) {
                     const phone = String(meId).split('@')[0].split(':')[0];
                     console.log(`[SessionManager] Credenciais de pareamento registradas no celular com telefone: ${phone}. Sincronizando com o banco e o frontend.`);
                     await retryWithBackoff(() => 
@@ -1125,7 +1130,7 @@ class SessionManager {
                         registered: true,
                         phone
                     });
-                } else if (!wasAuthenticatedOnBoot && (this.pairingPendingSync.has(instanceId) || state?.creds?.signalIdentities)) {
+                } else if (!wasAuthenticatedOnBoot && !alreadyOpen && (this.pairingPendingSync.has(instanceId) || state?.creds?.signalIdentities)) {
                     // Pre-keys intermediárias sendo salvas durante o handshake de leitura de QR
                     eventProcessor.handleConnectionUpdate(tenantId, instanceId, {
                         connection: 'connecting',
@@ -1135,8 +1140,10 @@ class SessionManager {
             });
 
             sock.ev.on('connection.update', async (update) => {
+                if (this.sessions.get(instanceId)?.sock !== sock) return;
                 const meId = sock.user?.id || state?.creds?.me?.id || state?.creds?.me?.jid;
                 const hasValidMeId = Boolean(meId && (String(meId).length > 5 || String(meId).includes('@s.whatsapp.net')));
+                connectionProgress(instanceId, update, { hasIdentity: hasValidMeId, tenantId });
                 
                 if (hasValidMeId && state?.creds?.pairingCode) {
                     delete state.creds.pairingCode;

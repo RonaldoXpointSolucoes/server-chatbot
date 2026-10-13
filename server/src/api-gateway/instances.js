@@ -1,8 +1,9 @@
 import express from 'express';
-import sessionManager, { isSocketOpen } from '../session-manager/index.js';
+import sessionManager, { isSocketOpen, isInstanceAllowedForNode } from '../session-manager/index.js';
 import queueProcessor from '../session-manager/queue-processor.js';
 import { supabase, NODE_ID, resolveTargetJid } from '../supabase.js';
-import { activePairingAttempts } from '../event-processor/connection-notifier.js';
+import { activePairingAttempts, logAndNotifyConnectionEvent } from '../event-processor/connection-notifier.js';
+import { beginConnectionAttempt, getConnectionDiagnostics, connectDecision, shouldClearCredentials, connectionProgress, diagnosticLogDetails } from '../session-manager/connection-lifecycle.js';
 import { recordStructuredEvent } from '../diagnostics/telemetry.js';
 import multer from 'multer';
 import fs from 'fs';
@@ -15,6 +16,14 @@ ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 500 * 1024 * 1024 } }); // 500MB
 const router = express.Router();
+const pendingConnectionStarts = new Set();
+const connectionSnapshot = instanceId => {
+    const sock = sessionManager.sessions.get(instanceId)?.sock;
+    const wsOpen = Boolean(sock && isSocketOpen(sock));
+    const hasIdentity = Boolean(sock?.user?.id || sock?.authState?.creds?.me?.id);
+    const authenticated = wsOpen && hasIdentity && sessionManager.authenticatedSessions.has(instanceId) && !sessionManager.pairingPendingSync.has(instanceId) && getConnectionDiagnostics(instanceId).phase === 'connected';
+    return getConnectionDiagnostics(instanceId, { wsOpen, authenticated, hasIdentity });
+};
 
 const requireTenant = async (req, res, next) => {
     const tenantId = req.headers['x-tenant-id'];
@@ -51,106 +60,73 @@ const requireTenant = async (req, res, next) => {
 };
 
 router.post('/instances/:instanceId/connect', requireTenant, async (req, res) => {
+    const { instanceId } = req.params;
+    const tenantId = req.tenantId;
+    let handedOff = false;
+    let ownsStart = false;
     try {
-        const { instanceId } = req.params;
-        const tenantId = req.tenantId;
-
-        const forceNewQR = req.query.force_new === 'true' || req.body?.forceNew === true;        // Se /pairing-code estiver gerando o código ativamente para esta instância, não destrua a sessão!
-        if (sessionManager.pairingInProgress.has(instanceId)) {
-            console.log(`[API] /connect ignorado para instância ${instanceId} pois a geração de código de pareamento está em andamento.`);
-            return res.json({
-                status: 'connecting',
-                message: 'Geração de código de pareamento em andamento.'
-            });
+        res.setHeader('Cache-Control', 'no-store');
+        const requestId = String(req.headers['x-trace-id'] || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0,80) || undefined;
+        const diagnostic = connectionSnapshot(instanceId);
+        const sock = sessionManager.sessions.get(instanceId)?.sock;
+        // A QR refresh must be idempotent, including old clients using force_new=true.
+        const decision = connectDecision({
+            ...diagnostic, hasSession: Boolean(sock),
+            starting: pendingConnectionStarts.has(instanceId) || sessionManager.connectingState.has(instanceId),
+            reconnecting: sessionManager.reconnectingTimers.has(instanceId),
+            pairingInProgress: sessionManager.pairingInProgress.has(instanceId),
+            resetSession: req.body?.resetSession === true
+        });
+        if (decision !== 'start') {
+            if (req.query.force_new === 'true' || req.body?.forceNew) {
+                logAndNotifyConnectionEvent({ tenantId, instanceId, eventType: 'qr_refresh_preserved', status: diagnostic.authenticated ? 'connected' : 'connecting', details: { requestId, decision } }).catch(() => {});
+            }
+            return res.json({ ok: true, status: diagnostic.authenticated ? 'connected' : 'connecting', instanceId, sessionReused: true, diagnostic, message: diagnostic.message });
         }
-
-        // Se a sessão já estiver ativa/autenticada com socket realmente aberto e não houver pedido explícito de force_new, mantém a conexão
-        const existingSock = sessionManager.getSocket(instanceId);
-        const isSocketHealthy = existingSock && isSocketOpen(existingSock);
-        const isAlreadyConnected = sessionManager.authenticatedSessions.has(instanceId) && sessionManager.sessions.has(instanceId) && isSocketHealthy;
-        if (isAlreadyConnected && !forceNewQR) {
-            console.log(`[API] /connect chamado para instância ${instanceId} que já está ativa e autenticada. Mantendo conexão existente.`);
-            return res.json({
-                status: 'connected',
-                message: 'Instância já está conectada e ativa em memória.'
-            });
+        if (!isInstanceAllowedForNode(instanceId, tenantId)) {
+            return res.status(409).json({ ok: false, code: 'WRONG_NODE', error: 'Esta instância deve ser conectada no servidor responsável por ela.', diagnostic });
         }
-
-        // Reset total de tentativas e timers de reconexão antigos em memória
+        pendingConnectionStarts.add(instanceId);
+        ownsStart = true;
+        beginConnectionAttempt(instanceId, tenantId, requestId);
+        await logAndNotifyConnectionEvent({ tenantId, instanceId, eventType: 'connection_request', status: 'connecting', details: { requestId, source: req.body?.source || 'api', resetRequested: req.body?.resetSession === true } });
+        if (sock) await sessionManager.closeSession(instanceId);
+        const { data: authCreds, error: authError } = await supabase.from('wa_auth_credentials').select('creds_data').eq('instance_id', instanceId).maybeSingle();
+        if (authError) throw authError;
+        const hasStoredIdentity = Boolean(authCreds?.creds_data?.me?.id || authCreds?.creds_data?.me?.jid);
+        if (shouldClearCredentials({ resetSession: req.body?.resetSession === true, hasStoredIdentity })) {
+            const { clearInstanceMemoryCache, flushPendingWrites } = await import('../session-manager/auth.js');
+            await flushPendingWrites(instanceId);
+            clearInstanceMemoryCache(instanceId);
+            for (const table of ['wa_auth_credentials', 'wa_auth_keys', 'whatsapp_instance_runtime']) {
+                const { error } = await supabase.from(table).delete().eq('instance_id', instanceId);
+                if (error) throw error;
+            }
+        }
+        const { error: stateError } = await supabase.from('whatsapp_instances').update({ status: 'connecting', reconnect_attempts: 0, last_error: null, assigned_node_id: NODE_ID }).eq('id', instanceId).eq('tenant_id', tenantId);
+        if (stateError) throw stateError;
+        activePairingAttempts.set(instanceId, { timestamp: Date.now(), source: 'api_connect_request', tenantId });
         sessionManager.reconnectAttempts.delete(instanceId);
         sessionManager.conflictAttempts.delete(instanceId);
-        sessionManager.authenticatedSessions.delete(instanceId);
-        sessionManager.pairingPendingSync.delete(instanceId);
-        if (sessionManager.reconnectingTimers.has(instanceId)) {
-            clearTimeout(sessionManager.reconnectingTimers.get(instanceId));
-            sessionManager.reconnectingTimers.delete(instanceId);
-        }
-
-        if (sessionManager.sessions.has(instanceId)) {
-            console.log(`[API] /connect chamado, mas a sessão ${instanceId} já estava em memória. Forçando fechamento prévio.`);
-            await sessionManager.closeSession(instanceId);
-            if (sessionManager.connectingState.has(instanceId)) {
-                sessionManager.connectingState.delete(instanceId);
-            }
-        }
-        
-        // Verifica status atual e credenciais no banco para determinar se deve reiniciar o estado
-        const { data: dbInst } = await supabase
-            .from('whatsapp_instances')
-            .select('status')
-            .eq('id', instanceId)
-            .single();
-
-        const { data: authCreds } = await supabase
-            .from('wa_auth_credentials')
-            .select('creds_data')
-            .eq('instance_id', instanceId)
-            .maybeSingle();
-
-        const hasValidCredsInDb = Boolean(authCreds?.creds_data?.me?.id || authCreds?.creds_data?.me?.jid);
-        const currentStatus = dbInst?.status;
-        const isStaleDisconnect = ['disconnected', 'offline', 'paused', 'logged_out', 'bad_session', 'connecting', 'reconnecting'].includes(currentStatus);
-        const shouldResetCreds = forceNewQR || !isSocketHealthy || isStaleDisconnect || !hasValidCredsInDb;
-
-        // Limpa credenciais desatualizadas se for solicitado force_new=true, se a instância estava offline ou se ainda não possuía pareamento autenticado
-        if (shouldResetCreds) {
-            console.log(`[API] Limpeza de credenciais executada para a instância ${instanceId} (status: ${currentStatus}, forceNew: ${forceNewQR}, hasValidCreds: ${hasValidCredsInDb})...`);
-            const { sessionCaches } = await import('../session-manager/auth.js');
-            if (sessionCaches && sessionCaches.has(instanceId)) {
-                sessionCaches.get(instanceId).clear();
-                sessionCaches.delete(instanceId);
-            }
-            sessionManager.authenticatedSessions.delete(instanceId);
-            sessionManager.pairingPendingSync.delete(instanceId);
-            await supabase.from('wa_auth_credentials').delete().eq('instance_id', instanceId);
-            await supabase.from('wa_auth_keys').delete().eq('instance_id', instanceId);
-            await supabase.from('whatsapp_instance_runtime').delete().eq('instance_id', instanceId);
-        }
-
-        await supabase.from('whatsapp_instances')
-            .update({ status: 'connecting', reconnect_attempts: 0, last_error: null, assigned_node_id: NODE_ID })
-            .eq('id', instanceId)
-            .eq('tenant_id', tenantId);
-
-        // Marca que esta instância está em processo ATIVO de conexão pelo usuário
-        activePairingAttempts.set(instanceId, {
-            timestamp: Date.now(),
-            source: 'api_connect_request',
-            tenantId
-        });
-
-        sessionManager.createSession(tenantId, instanceId, true).catch(console.error);
-
-        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
-        res.setHeader('Pragma', 'no-cache');
-        res.setHeader('Expires', '0');
-        res.json({ ok: true, status: 'connecting', instanceId });
-    } catch (e) {
-        res.status(500).json({ error: e.message });
+        sessionManager.createSession(tenantId, instanceId, true).then(sock => {
+            if (!sock) throw new Error('O servidor não inicializou o socket desta instância.');
+        }).catch(error => {
+            connectionProgress(instanceId, { connection: 'close', lastDisconnect: { error: { message: error.message, output: { statusCode: 500 } } } });
+            logAndNotifyConnectionEvent({ tenantId, instanceId, eventType: 'connection_error', status: 'offline', error: error.message, details: { source: 'node_session_start' } }).catch(() => {});
+        }).finally(() => pendingConnectionStarts.delete(instanceId));
+        handedOff = true;
+        const diagnosticNow = connectionSnapshot(instanceId);
+        return res.status(202).json({ ok: true, status: 'connecting', instanceId, sessionReused: false, diagnostic: diagnosticNow, message: 'Solicitação aceita. Aguarde a geração do QR e a autenticação pelo WhatsApp.' });
+    } catch (error) {
+        connectionProgress(instanceId, { connection: 'close', lastDisconnect: { error: { message: error.message, output: { statusCode: 500 } } } });
+        return res.status(500).json({ ok: false, code: 'CONNECTION_START_FAILED', error: error.message, diagnostic: connectionSnapshot(instanceId) });
+    } finally {
+        if (ownsStart && !handedOff) pendingConnectionStarts.delete(instanceId);
     }
 });
 
 router.post('/instances/:instanceId/pairing-code', requireTenant, async (req, res) => {
+    let ownsPairing = false;
     try {
         const { instanceId } = req.params;
         const { phoneNumber } = req.body;
@@ -158,16 +134,20 @@ router.post('/instances/:instanceId/pairing-code', requireTenant, async (req, re
 
         if (!phoneNumber) return res.status(400).json({ error: 'Número de telefone obrigatório' });
         const cleanPhone = phoneNumber.replace(/\D/g, '');
+        const diagnostic = connectionSnapshot(instanceId);
+        if (diagnostic.authenticated || diagnostic.handshakeProtected || sessionManager.pairingInProgress.has(instanceId)) {
+            return res.status(409).json({ ok: false, code: 'PAIRING_PROTECTED', error: diagnostic.authenticated ? 'Esta instância já está conectada. O dispositivo foi preservado.' : 'O pareamento está em andamento. Aguarde a confirmação do WhatsApp.', diagnostic });
+        }
 
         const forceNew = req.query.force === 'true' || req.query.force_new === 'true' || req.body?.force === true || req.body?.force_new === true;
 
         // Marca que o pareamento está em progresso para que /connect não feche o socket prematuramente
         sessionManager.pairingInProgress.add(instanceId);
+        ownsPairing = true;
         sessionManager.authenticatedSessions.delete(instanceId);
         sessionManager.pairingPendingSync.delete(instanceId);
-        setTimeout(() => sessionManager.pairingInProgress.delete(instanceId), 45000);
 
-        let activeSock = sessionManager.sessions.get(instanceId);
+        let activeSock = sessionManager.sessions.get(instanceId)?.sock;
         const isSocketReadyForPairing = activeSock && activeSock.ws && (activeSock.ws.isOpen || activeSock.ws.readyState === 1) && !activeSock.authState?.creds?.me?.id;
 
         if (!isSocketReadyForPairing) {
@@ -214,7 +194,7 @@ router.post('/instances/:instanceId/pairing-code', requireTenant, async (req, re
                 try {
                     code = await activeSock.requestPairingCode(cleanPhone);
                     if (code) {
-                        console.log(`[API] Pairing Code gerado com sucesso para ${cleanPhone}:`, code);
+                        console.log(`[API] Pairing Code gerado para instância ${instanceId}; código omitido dos logs.`);
                         break;
                     }
                 } catch (err) {
@@ -243,10 +223,12 @@ router.post('/instances/:instanceId/pairing-code', requireTenant, async (req, re
             tenantId
         });
 
-        res.json({ ok: true, code, instanceId });
+        res.json({ ok: true, code, instanceId, diagnostic: connectionSnapshot(instanceId) });
     } catch (e) {
         console.error('[API/pairing-code] Erro ao gerar pairing code:', e.message);
-        res.status(500).json({ error: e.message });
+        res.status(500).json({ ok: false, code: 'PAIRING_CODE_FAILED', error: e.message, diagnostic: connectionSnapshot(req.params.instanceId) });
+    } finally {
+        if (ownsPairing) sessionManager.pairingInProgress.delete(req.params.instanceId);
     }
 });
 
@@ -273,7 +255,7 @@ router.post('/instances/:instanceId/disconnect', requireTenant, async (req, res)
 router.get('/instances/:instanceId/connection-logs', async (req, res) => {
     try {
         const { instanceId } = req.params;
-        const limit = parseInt(req.query.limit || '30', 10);
+        const limit = Math.max(1, Math.min(80, parseInt(req.query.limit || '30', 10) || 30));
 
         const { data: logs, error } = await supabase
             .from('system_logs')
@@ -287,7 +269,8 @@ router.get('/instances/:instanceId/connection-logs', async (req, res) => {
             throw error;
         }
 
-        res.json({ ok: true, logs: logs || [] });
+        res.setHeader('Cache-Control', 'no-store');
+        res.json({ ok: true, diagnostic: connectionSnapshot(instanceId), logs: logs || [] });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
@@ -303,13 +286,14 @@ router.get('/instances/:instanceId/ping-whatsapp', requireTenant, async (req, re
         const sock = sessionManager.getSocket(instanceId);
 
         const isMemoryActive = Boolean(sessionManager.sessions.has(instanceId));
-        const isAuthenticated = Boolean(sessionManager.authenticatedSessions.has(instanceId));
+        const isAuthenticated = connectionSnapshot(instanceId).authenticated;
         const isWsOpen = Boolean(sock?.ws && (sock.ws.isOpen || sock.ws.readyState === 1));
 
         let metaPingMs = null;
-        let metaStatus = isWsOpen ? 'connected' : 'disconnected';
+        let metaStatus = isAuthenticated && isWsOpen ? 'connected' : isWsOpen ? 'connecting' : 'disconnected';
+        let metaPingError = null;
 
-        if (isWsOpen && sock) {
+        if (isWsOpen && isAuthenticated && sock) {
             const pingStart = Date.now();
             try {
                 if (typeof sock.sendPresenceUpdate === 'function') {
@@ -318,6 +302,8 @@ router.get('/instances/:instanceId/ping-whatsapp', requireTenant, async (req, re
                 metaPingMs = Date.now() - pingStart;
             } catch (pErr) {
                 metaPingMs = Date.now() - pingStart;
+                metaStatus = 'error';
+                metaPingError = pErr.message;
             }
         }
 
@@ -332,7 +318,9 @@ router.get('/instances/:instanceId/ping-whatsapp', requireTenant, async (req, re
             authenticated: isAuthenticated,
             wsOpen: isWsOpen,
             wsReadyState: sock?.ws ? sock.ws.readyState : null,
-            metaPingMs: metaPingMs !== null ? metaPingMs : 0,
+            metaPingMs,
+            metaPingError,
+            diagnostic: connectionSnapshot(instanceId),
             serverLatencyMs: totalLatencyMs,
             nodeId: NODE_ID,
             timestamp: new Date().toISOString()
@@ -1276,7 +1264,7 @@ router.get('/instances/:instanceId/status', requireTenant, async (req, res) => {
 
         const sock = sessionManager.getSocket(instanceId);
         const isSocketOpenStatus = sock ? isSocketOpen(sock) : false;
-        const isSessionAuth = sessionManager.authenticatedSessions.has(instanceId) && Boolean(sock?.user?.id);
+        const isSessionAuth = connectionSnapshot(instanceId).authenticated;
 
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
         res.setHeader('Pragma', 'no-cache');
@@ -1313,14 +1301,20 @@ router.get('/instances/:instanceId/status', requireTenant, async (req, res) => {
                 : data.whatsapp_instance_runtime;
             const qrCode = runtimeData?.qr_code || null;
             const pairingCode = runtimeData?.pairing_code || null;
+            const diagnostic = connectionSnapshot(instanceId);
+            const showQr = !diagnostic.authenticated && !diagnostic.handshakeProtected && !['error','expired','waiting_qr'].includes(diagnostic.phase);
             return res.json({
                 data: {
                     ...data,
+                    whatsapp_instance_runtime: undefined,
                     status: finalStatus,
                     is_authenticated: isSocketOpenStatus && isSessionAuth,
-                    qr_code: qrCode,
-                    qr_base64: qrCode,
-                    pairing_code: pairingCode
+                    qr_code: showQr ? qrCode : null,
+                    qr_base64: showQr ? qrCode : null,
+                    pairing_code: pairingCode,
+                    diagnostic,
+                    message: diagnostic.message,
+                    nodeId: NODE_ID
                 }
             });
         }

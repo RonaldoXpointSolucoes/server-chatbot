@@ -1,5 +1,6 @@
 import { monitorEventLoopDelay } from 'perf_hooks';
 import sessionManager from '../session-manager/index.js';
+import { getConnectionDiagnostics } from '../session-manager/connection-lifecycle.js';
 
 // Monitor nativo de Event Loop do Node.js (resolução de 10ms)
 let eldMonitor = null;
@@ -167,10 +168,11 @@ export function getSystemTelemetry() {
             const isReconnectStorm = reconnectsLastMin >= 3;
             if (isReconnectStorm) anyReconnectStorm = true;
 
+            const authenticated = Boolean((sock?.user?.id || sock?.authState?.creds?.me?.id) && sessionManager.authenticatedSessions.has(instanceId) && !sessionManager.pairingPendingSync.has(instanceId) && getConnectionDiagnostics(instanceId).phase === 'connected');
             instances.push({
                 instanceId,
-                authenticated: Boolean(sock?.user?.id || sock?.authState?.creds?.me?.id),
-                status: session?.status || (sock?.ws?.isOpen ? 'connected' : 'disconnected'),
+                authenticated,
+                status: sock?.ws?.isOpen ? authenticated ? 'connected' : 'connecting' : 'disconnected',
                 wsOpen: !!sock?.ws?.isOpen,
                 wsReadyState: sock?.ws?.readyState ?? null,
                 listeners,

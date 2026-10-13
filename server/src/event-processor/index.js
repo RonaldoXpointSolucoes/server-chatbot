@@ -2426,6 +2426,7 @@ class EventProcessor {
             if (connection === 'close') {
                 const reason = lastDisconnect?.error?.output?.statusCode;
                 const loggedOut = reason === 401;
+                logAndNotifyConnectionEvent({ tenantId, instanceId, eventType: 'connection_closed', status: 'connecting', error: lastDisconnect?.error?.message || 'Conexão encerrada', details: { reason, instanceName: currentInst?.display_name, source: 'baileys.connection.update' } }).catch(() => {});
 
                 const isPausedOrBlocked = currentInst && ['paused', 'blocked_12h', 'forbidden', 'bad_session'].includes(currentInst.status);
 

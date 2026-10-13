@@ -34,6 +34,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { getActiveEngineUrl } from '../services/environmentService';
+import { connectionView, qrSeconds } from '../../apps/reconecta-zap/src/connection-state.mjs';
 
 interface InstanceData {
   id: string;
@@ -43,6 +44,7 @@ interface InstanceData {
   created_at: string;
   api_key?: string;
   tenant_id?: string;
+  assigned_node_id?: string;
   tenant_name?: string;
 }
 
@@ -61,7 +63,7 @@ interface ConnectionLogItem {
   };
 }
 
-const QR_RENEWAL_INTERVAL = 25; // Segundos para auto-renovação do QR Code Baileys
+const QR_RENEWAL_INTERVAL = 0; // O prazo real vem do servidor Baileys
 
 export default function ConnectInstanceStandalone() {
   const { id: paramId } = useParams<{ id: string }>();
@@ -101,6 +103,10 @@ export default function ConnectInstanceStandalone() {
   const [showLogsModal, setShowLogsModal] = useState<boolean>(false);
   const [connectionLogs, setConnectionLogs] = useState<ConnectionLogItem[]>([]);
   const [loadingLogs, setLoadingLogs] = useState<boolean>(false);
+  const [engineDiagnostic, setEngineDiagnostic] = useState<any>(null);
+  const [serverIssue, setServerIssue] = useState<string | null>(null);
+  const lastViewRef = useRef<any>(null);
+  const statusRequestRef = useRef(false);
 
   // Contador de Auto-Renovação do QR Code
   const [qrCountdown, setQrCountdown] = useState<number>(QR_RENEWAL_INTERVAL);
@@ -111,7 +117,6 @@ export default function ConnectInstanceStandalone() {
   const [statusMessage, setStatusMessage] = useState<string>('Inicializando comunicação com o servidor...');
 
   const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const renewTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isAutoGeneratingRef = useRef<boolean>(false);
 
   const isConnected = connectionStatus === 'connected' || connectionStatus === 'connected_local' || connectionStatus === 'open';
@@ -227,191 +232,80 @@ export default function ConnectInstanceStandalone() {
     };
   }, [instance, instanceId]);
 
-  // 3. Consulta o status em tempo real no motor Node/Baileys com fallback no Supabase
+  const engineUrl = (inst: InstanceData) => inst.assigned_node_id?.includes('alpha')
+    ? 'https://wh1ss8sy848ufj6zh8t492y7.69.62.92.212.sslip.io' : getActiveEngineUrl();
+
+  const applyServerState = useCallback((data: any) => {
+    const view = connectionView(data);
+    lastViewRef.current = view;
+    setConnectionStatus(view.status);
+    setStatusStep(view.step);
+    setStatusMessage(view.message);
+    setEngineDiagnostic(data.diagnostic ? {...data.diagnostic,http:data.http} : null);
+    if (view.qr) {
+      if (view.qr.startsWith('data:image')) { setQrBase64(view.qr); setQrCodeData(null); }
+      else { setQrCodeData(view.qr); setQrBase64(null); }
+      setQrCountdown(qrSeconds(view.expiresAt));
+    } else { setQrCodeData(null); setQrBase64(null); }
+    if (view.connected || view.authenticating || view.qr) setActionLoading(false);
+    if (data.phone_number || data.phoneNumber || data.phone) setConnectedNumber(data.phone_number || data.phoneNumber || data.phone);
+  }, []);
+
+  const requestEngine = useCallback(async (inst: InstanceData, path: string, options: RequestInit = {}) => {
+    const requestId = `CZ-${crypto.randomUUID()}`;
+    const started = Date.now();
+    const response = await fetch(`${engineUrl(inst)}/api/v1/instances/${inst.id}${path}`, {
+      ...options, cache: 'no-store', signal: AbortSignal.timeout(15000),
+      headers: { 'Content-Type': 'application/json', 'x-tenant-id': inst.tenant_id || '', apikey: inst.api_key || '', 'x-trace-id': requestId, ...options.headers }
+    });
+    const json = await response.json();
+    const data = json.data || json;
+    if (!response.ok) {
+      const failure: any = new Error(data.error || data.message || `Servidor respondeu HTTP ${response.status}`);
+      failure.status = response.status;
+      throw failure;
+    }
+    return { ...data, http: { status: response.status, ms: Date.now()-started, requestId } };
+  }, []);
+
+  // One status request at a time. A QR in the database never outranks the live handshake.
   const checkEngineStatus = useCallback(async (targetInst?: InstanceData | null) => {
     const inst = targetInst || instanceRef.current;
-    const currentInstanceId = instanceId;
-    if (!currentInstanceId) return;
-
-    const tenantId = inst?.tenant_id || '00000000-0000-0000-0000-000000000000';
-    const apiKey = inst?.api_key || 'chatboot-secret-key';
-
+    if (!inst?.id) return;
+    if(statusRequestRef.current) return lastViewRef.current;
+    statusRequestRef.current = true;
     try {
-      const baseUrl = getActiveEngineUrl();
-      const res = await fetch(`${baseUrl}/api/v1/instances/${currentInstanceId}/status?_t=${Date.now()}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-tenant-id': tenantId,
-          'apikey': apiKey
-        },
-        cache: 'no-store'
-      });
-
-      let data: any = null;
-      if (res.ok) {
-        const rawJson = await res.json();
-        data = rawJson.data || rawJson;
-      }
-
-      let qrFromRt: string | null = null;
-      if (!data?.qr_code && !data?.qrBase64 && !data?.qr_base64) {
-        const { data: rt } = await supabase
-          .from('whatsapp_instance_runtime')
-          .select('qr_code, pairing_code')
-          .eq('instance_id', currentInstanceId)
-          .maybeSingle();
-        if (rt?.qr_code) {
-          qrFromRt = rt.qr_code;
-        }
-      }
-
-      const st = data?.status || data?.sessionStatus || inst?.status || 'disconnected';
-      const phone = data?.phoneNumber || data?.phone || data?.user_jid?.split('@')[0];
-
-      setConnectionStatus(st);
-      if (phone) setConnectedNumber(phone);
-
-      const isConn = st === 'connected' || st === 'connected_local' || st === 'open';
-
-      if (isConn) {
-        setStatusStep(4);
-        setStatusMessage('WhatsApp conectado e sincronizado com sucesso!');
-        setQrCodeData(null);
-        setQrBase64(null);
-        setActionLoading(false);
-      } else {
-        const rawQr = data?.qrBase64 || data?.qr_base64 || data?.base64 || data?.qrCode || data?.qr_code || 
-          (Array.isArray(data?.whatsapp_instance_runtime) ? data.whatsapp_instance_runtime[0]?.qr_code : data?.whatsapp_instance_runtime?.qr_code) ||
-          qrFromRt;
-
-        if (rawQr) {
-          if (rawQr.startsWith('data:image') || rawQr.length > 500) {
-            setQrBase64(rawQr.startsWith('data:image') ? rawQr : `data:image/png;base64,${rawQr}`);
-            setQrCodeData(null);
-          } else {
-            setQrCodeData(rawQr);
-            setQrBase64(null);
-          }
-          setStatusStep(2);
-          setStatusMessage('Aguardando leitura do QR Code pelo celular...');
-          setActionLoading(false);
-        } else if (data?.is_authenticated || data?.pairingSuccess || phone) {
-          setStatusStep(3);
-          setStatusMessage('QR Code lido no celular! Autenticando com o WhatsApp...');
-        } else if (st === 'connecting' || st === 'pairing' || st === 'reconnecting') {
-          setStatusStep(1);
-          setStatusMessage(actionLoading ? 'Gerando QR Code oficial... Aguarde alguns instantes.' : 'Conectando ao motor WhatsApp para gerar o QR Code...');
-        } else {
-          setStatusStep(1);
-          setStatusMessage('Instância pronta para geração de QR Code.');
-        }
-      }
-    } catch (e) {
-      console.warn('[ConnectStandalone] Erro ao consultar engine:', e);
-    }
-  }, [instanceId, actionLoading]);
-
-  // 4. Dispara a geração ou auto-renovação de QR Code com polling ativo
-  const handleGenerateQr = useCallback(async (forceNew = false, isAuto = false) => {
-    const inst = instanceRef.current;
-    if (!instanceId || isConnected) return;
-
-    if (isAutoGeneratingRef.current && isAuto) return;
-    isAutoGeneratingRef.current = true;
-
-    const tenantId = inst?.tenant_id || '00000000-0000-0000-0000-000000000000';
-    const apiKey = inst?.api_key || 'chatboot-secret-key';
-
-    try {
-      if (isAuto) {
-        setIsRenewingAuto(true);
-      } else {
-        setActionLoading(true);
-        setStatusStep(1);
-        setStatusMessage('Gerando QR Code oficial... Conectando ao WhatsApp.');
-      }
-      setError(null);
-
-      const baseUrl = getActiveEngineUrl();
-      const endpoint = `${baseUrl}/api/v1/instances/${instanceId}/connect${forceNew ? '?force_new=true' : ''}`;
-
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-tenant-id': tenantId,
-          'apikey': apiKey
-        },
-        body: JSON.stringify({ forceNew }),
-        cache: 'no-store'
-      });
-
-      const rawJson = await res.json();
-      const data = rawJson.data || rawJson;
-
-      if (!res.ok) {
-        throw new Error(data.error || data.message || 'Falha ao acionar servidor.');
-      }
-
-      setQrCountdown(QR_RENEWAL_INTERVAL);
-
-      if (data.qrBase64 || data.qr_base64 || data.base64) {
-        const b64 = data.qrBase64 || data.qr_base64 || data.base64;
-        setQrBase64(b64.startsWith('data:image') ? b64 : `data:image/png;base64,${b64}`);
-        setQrCodeData(null);
-        setStatusStep(2);
-        setStatusMessage('QR Code gerado e ativo! Aponte a câmera do WhatsApp.');
-        setActionLoading(false);
-      } else if (data.qrCode || data.qr_code) {
-        setQrCodeData(data.qrCode || data.qr_code);
-        setQrBase64(null);
-        setStatusStep(2);
-        setStatusMessage('QR Code gerado e ativo! Aponte a câmera do WhatsApp.');
-        setActionLoading(false);
-      } else {
-        let found = false;
-        for (let attempt = 0; attempt < 8; attempt++) {
-          await new Promise((resolve) => setTimeout(resolve, 800));
-          const { data: rt } = await supabase
-            .from('whatsapp_instance_runtime')
-            .select('qr_code')
-            .eq('instance_id', instanceId)
-            .maybeSingle();
-
-          if (rt?.qr_code) {
-            const raw = rt.qr_code;
-            if (raw.startsWith('data:image') || raw.length > 500) {
-              setQrBase64(raw.startsWith('data:image') ? raw : `data:image/png;base64,${raw}`);
-              setQrCodeData(null);
-            } else {
-              setQrCodeData(raw);
-              setQrBase64(null);
-            }
-            setStatusStep(2);
-            setStatusMessage('QR Code gerado e ativo! Aponte a câmera do WhatsApp.');
-            setActionLoading(false);
-            found = true;
-            break;
-          }
-        }
-        if (!found) {
-          checkEngineStatus(inst);
-        }
-      }
+      const data = await requestEngine(inst, `/status?_t=${Date.now()}`);
+      if(instanceRef.current?.id !== inst.id) return null;
+      applyServerState(data);
+      setServerIssue(null);
+      return connectionView(data);
     } catch (e: any) {
-      if (!isAuto) {
-        setError(e.message || 'Erro ao gerar QR Code.');
-        setStatusStep(1);
-        setStatusMessage('Erro na inicialização. Tente novamente.');
-      }
-    } finally {
-      if (isAuto) {
-        setIsRenewingAuto(false);
-      }
-      isAutoGeneratingRef.current = false;
-    }
-  }, [instanceId, isConnected, checkEngineStatus]);
+      const message = e.name === 'TimeoutError' ? 'O servidor não respondeu em 15 segundos. Tentando novamente.' : e.message || 'Não foi possível consultar o servidor.';
+      setServerIssue(message);
+      setEngineDiagnostic((prev:any)=>({...prev, httpError:message, httpStatus:e.status || null}));
+      return null;
+    } finally { statusRequestRef.current = false; }
+  }, [requestEngine, applyServerState]);
+
+  // QR renewal is owned by Baileys. Even a manual refresh first reads the current state.
+  const handleGenerateQr = useCallback(async (_forceNew = false, isAuto = false) => {
+    const inst = instanceRef.current;
+    if (!inst?.id || isAutoGeneratingRef.current) return;
+    isAutoGeneratingRef.current = true;
+    setIsRenewingAuto(isAuto);
+    if (!isAuto) setActionLoading(true);
+    setError(null);
+    try {
+      const view = await checkEngineStatus(inst);
+      if (!view) throw new Error('Sem resposta do servidor. A sessão foi preservada; consulte os logs.');
+      if (!view.canStart) return;
+      const data = await requestEngine(inst, '/connect', { method:'POST', body:JSON.stringify({source:'reconecta_zap'}) });
+      applyServerState(data);
+    } catch(e:any) {
+      setError(e.message || 'Falha ao solicitar conexão.');
+    } finally { setActionLoading(false); setIsRenewingAuto(false); isAutoGeneratingRef.current=false; }
+  }, [checkEngineStatus, requestEngine, applyServerState]);
 
   // 5. Carrega dados básicos da instância no Supabase
   const loadInstanceMetadata = useCallback(async () => {
@@ -458,27 +352,8 @@ export default function ConnectInstanceStandalone() {
       setConnectedNumber(instData.phone_number || null);
       setConnectionStatus(instData.status || 'disconnected');
 
-      const isAlreadyConn = instData.status === 'connected' || instData.status === 'connected_local';
-      const runtime = Array.isArray((instData as any).whatsapp_instance_runtime)
-        ? (instData as any).whatsapp_instance_runtime[0]
-        : (instData as any).whatsapp_instance_runtime;
-
-      if (!isAlreadyConn && runtime?.qr_code) {
-        const b64 = runtime.qr_code;
-        if (b64.startsWith('data:image') || b64.length > 500) {
-          setQrBase64(b64.startsWith('data:image') ? b64 : `data:image/png;base64,${b64}`);
-          setQrCodeData(null);
-        } else {
-          setQrCodeData(b64);
-          setQrBase64(null);
-        }
-        setStatusStep(2);
-        setStatusMessage('QR Code ativo! Aponte a câmera do WhatsApp no celular.');
-      } else if (!isAlreadyConn) {
-        handleGenerateQr(false, false);
-      }
-
-      checkEngineStatus(instData);
+      const current = await checkEngineStatus(instData);
+      if(current?.canStart) await handleGenerateQr(false,false);
     } catch (e: any) {
       setError(`Erro ao carregar instância: ${e.message}`);
     } finally {
@@ -650,11 +525,10 @@ export default function ConnectInstanceStandalone() {
               instanceRef.current = merged;
               return merged;
             });
-            setConnectionStatus(updated.status);
+            checkEngineStatus();
             if (updated.phone_number) setConnectedNumber(updated.phone_number);
             if (updated.status === 'connected' || updated.status === 'connected_local') {
-              setStatusStep(4);
-              setStatusMessage('WhatsApp conectado e operacional!');
+              checkEngineStatus();
             }
           }
         )
@@ -667,14 +541,7 @@ export default function ConnectInstanceStandalone() {
           { event: '*', schema: 'public', table: 'whatsapp_instance_runtime', filter: `instance_id=eq.${instanceId}` },
           (payload: any) => {
             const newRuntime = payload.new;
-            if (newRuntime && newRuntime.qr_code) {
-              const b64 = newRuntime.qr_code;
-              setQrBase64(b64.startsWith('data:image') ? b64 : `data:image/png;base64,${b64}`);
-              setQrCodeData(null);
-              setStatusStep(2);
-              setQrCountdown(QR_RENEWAL_INTERVAL);
-              setStatusMessage('QR Code atualizado pelo servidor! Aponte a câmera do WhatsApp.');
-            }
+            if(newRuntime) checkEngineStatus();
           }
         )
         .subscribe();
@@ -689,28 +556,12 @@ export default function ConnectInstanceStandalone() {
     return () => {
       if (pollTimerRef.current) clearInterval(pollTimerRef.current);
     };
-  }, [instanceId, loadInstanceMetadata, checkEngineStatus]);
+  }, [instanceId]);
 
-  // Loop de Auto-Renovação Contínua do QR Code
   useEffect(() => {
-    if (isConnected || connectMode !== 'qr' || (!qrCodeData && !qrBase64)) {
-      return;
-    }
-
-    renewTimerRef.current = setInterval(() => {
-      setQrCountdown((prev) => {
-        if (prev <= 1) {
-          handleGenerateQr(true, true);
-          return QR_RENEWAL_INTERVAL;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => {
-      if (renewTimerRef.current) clearInterval(renewTimerRef.current);
-    };
-  }, [isConnected, connectMode, qrCodeData, qrBase64, handleGenerateQr]);
+    const timer=setInterval(()=>setQrCountdown(qrSeconds(lastViewRef.current?.expiresAt)),1000);
+    return ()=>clearInterval(timer);
+  }, [instanceId]);
 
   const copyDirectLink = () => {
     navigator.clipboard.writeText(window.location.href);
@@ -988,7 +839,7 @@ export default function ConnectInstanceStandalone() {
             <div className="pt-2 border-t border-white/[0.08] flex items-center justify-between text-[10.5px] text-slate-500 font-bold">
               <span className="flex items-center gap-1.5">
                 <Shield size={12} className="text-emerald-400/70" />
-                <span>Powered by Baileys V6 Engine</span>
+                <span>Conexão WhatsApp • Baileys</span>
               </span>
               <span className="flex items-center gap-1 text-slate-400">
                 <Sparkles className="w-3 h-3 text-emerald-400" />
@@ -1082,7 +933,7 @@ export default function ConnectInstanceStandalone() {
                 {(qrBase64 || qrCodeData) && (
                   <div className="inline-flex items-center gap-2 px-3.5 py-1 bg-[#111b21] border border-emerald-500/30 rounded-full text-[10px] font-black text-emerald-300 shadow-sm">
                     <RotateCw className={`w-3 h-3 text-emerald-400 ${isRenewingAuto ? 'animate-spin' : ''}`} />
-                    <span>Auto-renovação em {qrCountdown}s</span>
+                    <span>{qrCountdown > 0 ? `Próximo QR do WhatsApp em até ${qrCountdown}s` : 'Aguardando atualização do servidor'}</span>
                     <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-ping" />
                   </div>
                 )}
@@ -1090,11 +941,11 @@ export default function ConnectInstanceStandalone() {
                 {/* Botão Gerar / Renovar QR Code Manualmente */}
                 <button
                   onClick={() => handleGenerateQr(true, false)}
-                  disabled={actionLoading}
+                  disabled={actionLoading || statusStep === 3}
                   className="w-full max-w-xs py-3.5 bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black rounded-2xl text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-[0_8px_25px_rgba(16,185,129,0.35)] hover:shadow-[0_12px_30px_rgba(16,185,129,0.45)] active:scale-95 cursor-pointer disabled:opacity-50"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${actionLoading ? 'animate-spin' : ''}`} />
-                  <span>{qrCodeData || qrBase64 ? 'Renovar QR Code Agora' : 'Gerar QR Code de Conexão'}</span>
+                  <span>{qrCodeData || qrBase64 ? 'Atualizar QR sem reiniciar' : 'Iniciar conexão'}</span>
                 </button>
 
               </div>

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import QRCode from 'react-qr-code';
 import { createClient } from '@supabase/supabase-js';
+import { connectionView, qrSeconds } from './connection-state.mjs';
 import {
   QrCode,
   Smartphone,
@@ -40,7 +41,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const ENGINE_URL = 'https://owckk0k8w8soo40w40owc4ss.69.62.92.212.sslip.io';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-const QR_RENEWAL_INTERVAL = 25; // Segundos para auto-renovação do QR Code Baileys
+const QR_RENEWAL_INTERVAL = 0; // O prazo real vem do servidor Baileys
 
 interface InstanceData {
   id: string;
@@ -50,6 +51,7 @@ interface InstanceData {
   created_at: string;
   api_key?: string;
   tenant_id?: string;
+  assigned_node_id?: string;
 }
 
 interface ConnectionLogItem {
@@ -64,6 +66,9 @@ interface ConnectionLogItem {
     phone?: string;
     status?: string;
     instance_name?: string;
+    node?: string;
+    environment?: string;
+    details?: { attemptId?: string; requestId?: string; phase?: string; elapsedMs?: number; reason?: number; serverVersion?: string; source?: string };
   };
 }
 
@@ -122,6 +127,10 @@ export default function App() {
   const [showLogsModal, setShowLogsModal] = useState<boolean>(false);
   const [connectionLogs, setConnectionLogs] = useState<ConnectionLogItem[]>([]);
   const [loadingLogs, setLoadingLogs] = useState<boolean>(false);
+  const [engineDiagnostic, setEngineDiagnostic] = useState<any>(null);
+  const [serverIssue, setServerIssue] = useState<string | null>(null);
+  const lastViewRef = useRef<any>(null);
+  const statusRequestRef = useRef(false);
 
   // Contador de Auto-Renovação do QR Code
   const [qrCountdown, setQrCountdown] = useState<number>(QR_RENEWAL_INTERVAL);
@@ -132,7 +141,6 @@ export default function App() {
   const [statusMessage, setStatusMessage] = useState<string>('Inicializando comunicação com o servidor...');
 
   const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const renewTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isAutoGeneratingRef = useRef<boolean>(false);
 
   const isConnected = connectionStatus === 'connected' || connectionStatus === 'connected_local' || connectionStatus === 'open';
@@ -270,186 +278,80 @@ export default function App() {
     }
   }, [instance, urlParamId]);
 
-  // 3. Consulta status no motor Baileys / Supabase
+  const engineUrl = (inst: InstanceData) => inst.assigned_node_id?.includes('alpha')
+    ? 'https://wh1ss8sy848ufj6zh8t492y7.69.62.92.212.sslip.io' : ENGINE_URL;
+
+  const applyServerState = useCallback((data: any) => {
+    const view = connectionView(data);
+    lastViewRef.current = view;
+    setConnectionStatus(view.status);
+    setStatusStep(view.step);
+    setStatusMessage(view.message);
+    setEngineDiagnostic(data.diagnostic ? {...data.diagnostic,http:data.http} : null);
+    if (view.qr) {
+      if (view.qr.startsWith('data:image')) { setQrBase64(view.qr); setQrCodeData(null); }
+      else { setQrCodeData(view.qr); setQrBase64(null); }
+      setQrCountdown(qrSeconds(view.expiresAt));
+    } else { setQrCodeData(null); setQrBase64(null); }
+    if (view.connected || view.authenticating || view.qr) setActionLoading(false);
+    if (data.phone_number || data.phoneNumber || data.phone) setConnectedNumber(data.phone_number || data.phoneNumber || data.phone);
+  }, []);
+
+  const requestEngine = useCallback(async (inst: InstanceData, path: string, options: RequestInit = {}) => {
+    const requestId = `CZ-${crypto.randomUUID()}`;
+    const started = Date.now();
+    const response = await fetch(`${engineUrl(inst)}/api/v1/instances/${inst.id}${path}`, {
+      ...options, cache: 'no-store', signal: AbortSignal.timeout(15000),
+      headers: { 'Content-Type': 'application/json', 'x-tenant-id': inst.tenant_id || '', apikey: inst.api_key || '', 'x-trace-id': requestId, ...options.headers }
+    });
+    const json = await response.json();
+    const data = json.data || json;
+    if (!response.ok) {
+      const failure: any = new Error(data.error || data.message || `Servidor respondeu HTTP ${response.status}`);
+      failure.status = response.status;
+      throw failure;
+    }
+    return { ...data, http: { status: response.status, ms: Date.now()-started, requestId } };
+  }, []);
+
+  // One status request at a time. A QR in the database never outranks the live handshake.
   const checkEngineStatus = useCallback(async (targetInst?: InstanceData | null) => {
     const inst = targetInst || instanceRef.current;
     if (!inst?.id) return;
-
-    const tenantId = inst?.tenant_id || '00000000-0000-0000-0000-000000000000';
-    const apiKey = inst?.api_key || 'chatboot-secret-key';
-
+    if(statusRequestRef.current) return lastViewRef.current;
+    statusRequestRef.current = true;
     try {
-      const res = await fetch(`${ENGINE_URL}/api/v1/instances/${inst.id}/status?_t=${Date.now()}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-tenant-id': tenantId,
-          'apikey': apiKey
-        },
-        cache: 'no-store'
-      });
-
-      let data: any = null;
-      if (res.ok) {
-        const rawJson = await res.json();
-        data = rawJson.data || rawJson;
-      }
-
-      let qrFromRt: string | null = null;
-      if (!data?.qr_code && !data?.qrBase64 && !data?.qr_base64) {
-        const { data: rt } = await supabase
-          .from('whatsapp_instance_runtime')
-          .select('qr_code, pairing_code')
-          .eq('instance_id', inst.id)
-          .maybeSingle();
-        if (rt?.qr_code) {
-          qrFromRt = rt.qr_code;
-        }
-      }
-
-      const st = data?.status || data?.sessionStatus || inst?.status || 'disconnected';
-      const phone = data?.phoneNumber || data?.phone || data?.user_jid?.split('@')[0];
-
-      setConnectionStatus(st);
-      if (phone) setConnectedNumber(phone);
-
-      const isConn = st === 'connected' || st === 'connected_local' || st === 'open';
-
-      if (isConn) {
-        setStatusStep(4);
-        setStatusMessage('WhatsApp conectado e sincronizado com sucesso!');
-        setQrCodeData(null);
-        setQrBase64(null);
-        setActionLoading(false);
-      } else {
-        const rawQr = data?.qrBase64 || data?.qr_base64 || data?.base64 || data?.qrCode || data?.qr_code || qrFromRt;
-
-        if (rawQr) {
-          if (rawQr.startsWith('data:image') || rawQr.length > 500) {
-            setQrBase64(rawQr.startsWith('data:image') ? rawQr : `data:image/png;base64,${rawQr}`);
-            setQrCodeData(null);
-          } else {
-            setQrCodeData(rawQr);
-            setQrBase64(null);
-          }
-          setStatusStep(2);
-          setStatusMessage('Aguardando leitura do QR Code pelo celular...');
-          setActionLoading(false);
-        } else if (data?.is_authenticated || data?.pairingSuccess || phone) {
-          setStatusStep(3);
-          setStatusMessage('QR Code lido no celular! Autenticando com o WhatsApp...');
-        } else if (st === 'connecting' || st === 'pairing' || st === 'reconnecting') {
-          setStatusStep(1);
-          setStatusMessage(actionLoading ? 'Gerando QR Code oficial... Aguarde alguns instantes.' : 'Conectando ao motor WhatsApp...');
-        } else {
-          setStatusStep(1);
-          setStatusMessage('Instância pronta para geração de QR Code.');
-        }
-      }
-    } catch (e) {
-      console.warn('[ConectaZap] Erro ao consultar engine:', e);
-    }
-  }, [actionLoading]);
-
-  // 4. Dispara a geração ou auto-renovação de QR Code
-  const handleGenerateQr = useCallback(async (forceNew = false, isAuto = false) => {
-    const inst = instanceRef.current;
-    if (!inst?.id || isConnected) return;
-
-    if (isAutoGeneratingRef.current && isAuto) return;
-    isAutoGeneratingRef.current = true;
-
-    const tenantId = inst?.tenant_id || '00000000-0000-0000-0000-000000000000';
-    const apiKey = inst?.api_key || 'chatboot-secret-key';
-
-    try {
-      if (isAuto) {
-        setIsRenewingAuto(true);
-      } else {
-        setActionLoading(true);
-        setStatusStep(1);
-        setStatusMessage('Gerando QR Code oficial... Conectando ao WhatsApp.');
-      }
-      setError(null);
-
-      const endpoint = `${ENGINE_URL}/api/v1/instances/${inst.id}/connect${forceNew ? '?force_new=true' : ''}`;
-
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-tenant-id': tenantId,
-          'apikey': apiKey
-        },
-        body: JSON.stringify({ forceNew }),
-        cache: 'no-store'
-      });
-
-      const rawJson = await res.json();
-      const data = rawJson.data || rawJson;
-
-      if (!res.ok) {
-        throw new Error(data.error || data.message || 'Falha ao acionar servidor.');
-      }
-
-      setQrCountdown(QR_RENEWAL_INTERVAL);
-
-      if (data.qrBase64 || data.qr_base64 || data.base64) {
-        const b64 = data.qrBase64 || data.qr_base64 || data.base64;
-        setQrBase64(b64.startsWith('data:image') ? b64 : `data:image/png;base64,${b64}`);
-        setQrCodeData(null);
-        setStatusStep(2);
-        setStatusMessage('QR Code gerado e ativo! Aponte a câmera do WhatsApp.');
-        setActionLoading(false);
-      } else if (data.qrCode || data.qr_code) {
-        setQrCodeData(data.qrCode || data.qr_code);
-        setQrBase64(null);
-        setStatusStep(2);
-        setStatusMessage('QR Code gerado e ativo! Aponte a câmera do WhatsApp.');
-        setActionLoading(false);
-      } else {
-        let found = false;
-        for (let attempt = 0; attempt < 8; attempt++) {
-          await new Promise((resolve) => setTimeout(resolve, 800));
-          const { data: rt } = await supabase
-            .from('whatsapp_instance_runtime')
-            .select('qr_code')
-            .eq('instance_id', inst.id)
-            .maybeSingle();
-
-          if (rt?.qr_code) {
-            const raw = rt.qr_code;
-            if (raw.startsWith('data:image') || raw.length > 500) {
-              setQrBase64(raw.startsWith('data:image') ? raw : `data:image/png;base64,${raw}`);
-              setQrCodeData(null);
-            } else {
-              setQrCodeData(raw);
-              setQrBase64(null);
-            }
-            setStatusStep(2);
-            setStatusMessage('QR Code gerado e ativo! Aponte a câmera do WhatsApp.');
-            setActionLoading(false);
-            found = true;
-            break;
-          }
-        }
-        if (!found) {
-          checkEngineStatus(inst);
-        }
-      }
+      const data = await requestEngine(inst, `/status?_t=${Date.now()}`);
+      if(instanceRef.current?.id !== inst.id) return null;
+      applyServerState(data);
+      setServerIssue(null);
+      return connectionView(data);
     } catch (e: any) {
-      if (!isAuto) {
-        setError(e.message || 'Erro ao gerar QR Code.');
-        setStatusStep(1);
-        setStatusMessage('Erro na inicialização. Tente novamente.');
-      }
-    } finally {
-      if (isAuto) {
-        setIsRenewingAuto(false);
-      }
-      isAutoGeneratingRef.current = false;
-    }
-  }, [isConnected, checkEngineStatus]);
+      const message = e.name === 'TimeoutError' ? 'O servidor não respondeu em 15 segundos. Tentando novamente.' : e.message || 'Não foi possível consultar o servidor.';
+      setServerIssue(message);
+      setEngineDiagnostic((prev:any)=>({...prev, httpError:message, httpStatus:e.status || null}));
+      return null;
+    } finally { statusRequestRef.current = false; }
+  }, [requestEngine, applyServerState]);
+
+  // QR renewal is owned by Baileys. Even a manual refresh first reads the current state.
+  const handleGenerateQr = useCallback(async (_forceNew = false, isAuto = false) => {
+    const inst = instanceRef.current;
+    if (!inst?.id || isAutoGeneratingRef.current) return;
+    isAutoGeneratingRef.current = true;
+    setIsRenewingAuto(isAuto);
+    if (!isAuto) setActionLoading(true);
+    setError(null);
+    try {
+      const view = await checkEngineStatus(inst);
+      if (!view) throw new Error('Sem resposta do servidor. A sessão foi preservada; consulte os logs.');
+      if (!view.canStart) return;
+      const data = await requestEngine(inst, '/connect', { method:'POST', body:JSON.stringify({source:'reconecta_zap'}) });
+      applyServerState(data);
+    } catch(e:any) {
+      setError(e.message || 'Falha ao solicitar conexão.');
+    } finally { setActionLoading(false); setIsRenewingAuto(false); isAutoGeneratingRef.current=false; }
+  }, [checkEngineStatus, requestEngine, applyServerState]);
 
   // 5. Carrega dados básicos da instância no Supabase
   const loadInstanceMetadata = useCallback(async (targetIdToLoad?: string) => {
@@ -497,27 +399,8 @@ export default function App() {
       setConnectedNumber(instData.phone_number || null);
       setConnectionStatus(instData.status || 'disconnected');
 
-      const isAlreadyConn = instData.status === 'connected' || instData.status === 'connected_local';
-      const runtime = Array.isArray((instData as any).whatsapp_instance_runtime)
-        ? (instData as any).whatsapp_instance_runtime[0]
-        : (instData as any).whatsapp_instance_runtime;
-
-      if (!isAlreadyConn && runtime?.qr_code) {
-        const b64 = runtime.qr_code;
-        if (b64.startsWith('data:image') || b64.length > 500) {
-          setQrBase64(b64.startsWith('data:image') ? b64 : `data:image/png;base64,${b64}`);
-          setQrCodeData(null);
-        } else {
-          setQrCodeData(b64);
-          setQrBase64(null);
-        }
-        setStatusStep(2);
-        setStatusMessage('QR Code ativo! Aponte a câmera do WhatsApp no celular.');
-      } else if (!isAlreadyConn) {
-        handleGenerateQr(false, false);
-      }
-
-      checkEngineStatus(instData);
+      const current = await checkEngineStatus(instData);
+      if (current?.canStart) await handleGenerateQr(false, false);
     } catch (e: any) {
       setError(`Erro ao carregar instância: ${e.message}`);
     } finally {
@@ -531,11 +414,12 @@ export default function App() {
     if (!inst?.id) return;
     setLoadingLogs(true);
     try {
-      const res = await fetch(`${ENGINE_URL}/api/v1/instances/${inst.id}/connection-logs?limit=40&_t=${Date.now()}`);
+      const res = await fetch(`${engineUrl(inst)}/api/v1/instances/${inst.id}/connection-logs?limit=60&_t=${Date.now()}`, {signal:AbortSignal.timeout(15000),headers:{'x-tenant-id':inst.tenant_id || '',apikey:inst.api_key || ''},cache:'no-store'});
       if (res.ok) {
         const data = await res.json();
         if (data?.logs && Array.isArray(data.logs)) {
           setConnectionLogs(data.logs);
+          if(data.diagnostic) setEngineDiagnostic((prev:any)=>({...prev,...data.diagnostic}));
           setLoadingLogs(false);
           return;
         }
@@ -644,7 +528,7 @@ export default function App() {
       setStatusMessage('Solicitando Código de Pareamento de 8 dígitos ao WhatsApp...');
 
       const cleanPhone = pairingPhone.replace(/\D/g, '');
-      const endpoint = `${ENGINE_URL}/api/v1/instances/${inst.id}/pairing-code?force_new=true`;
+      const endpoint = `${engineUrl(inst)}/api/v1/instances/${inst.id}/pairing-code`;
 
       const res = await fetch(endpoint, {
         method: 'POST',
@@ -663,6 +547,7 @@ export default function App() {
         throw new Error(data.error || data.message || 'Falha ao gerar código de pareamento.');
       }
 
+      if(data.diagnostic) setEngineDiagnostic(data.diagnostic);
       const code = data.code || data.pairingCode || data.pairing_code;
       if (code) {
         setPairingCode(code);
@@ -727,11 +612,10 @@ export default function App() {
               instanceRef.current = merged;
               return merged;
             });
-            setConnectionStatus(updated.status);
+            checkEngineStatus();
             if (updated.phone_number) setConnectedNumber(updated.phone_number);
             if (updated.status === 'connected' || updated.status === 'connected_local') {
-              setStatusStep(4);
-              setStatusMessage('WhatsApp conectado e operacional!');
+              checkEngineStatus();
             }
           }
         )
@@ -744,14 +628,7 @@ export default function App() {
           { event: '*', schema: 'public', table: 'whatsapp_instance_runtime', filter: `instance_id=eq.${activeInstanceId}` },
           (payload: any) => {
             const newRuntime = payload.new;
-            if (newRuntime && newRuntime.qr_code) {
-              const b64 = newRuntime.qr_code;
-              setQrBase64(b64.startsWith('data:image') ? b64 : `data:image/png;base64,${b64}`);
-              setQrCodeData(null);
-              setStatusStep(2);
-              setQrCountdown(QR_RENEWAL_INTERVAL);
-              setStatusMessage('QR Code atualizado pelo servidor! Aponte a câmera do WhatsApp.');
-            }
+            if (newRuntime) checkEngineStatus();
           }
         )
         .subscribe();
@@ -764,28 +641,19 @@ export default function App() {
     } else {
       setLoading(false);
     }
-  }, [activeInstanceId, loadInstanceMetadata, checkEngineStatus]);
+  }, [activeInstanceId]);
 
-  // Loop de Auto-Renovação Contínua
+  // Display the server deadline. Never POST connect from a countdown callback.
   useEffect(() => {
-    if (isConnected || connectMode !== 'qr' || (!qrCodeData && !qrBase64)) {
-      return;
-    }
+    const timer=setInterval(()=>setQrCountdown(qrSeconds(lastViewRef.current?.expiresAt)),1000);
+    return ()=>clearInterval(timer);
+  }, [activeInstanceId]);
 
-    renewTimerRef.current = setInterval(() => {
-      setQrCountdown((prev) => {
-        if (prev <= 1) {
-          handleGenerateQr(true, true);
-          return QR_RENEWAL_INTERVAL;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => {
-      if (renewTimerRef.current) clearInterval(renewTimerRef.current);
-    };
-  }, [isConnected, connectMode, qrCodeData, qrBase64, handleGenerateQr]);
+  useEffect(() => {
+    if(!showLogsModal) return;
+    const timer=setInterval(fetchConnectionLogs,5000);
+    return ()=>clearInterval(timer);
+  }, [showLogsModal, fetchConnectionLogs]);
 
   const copyDirectLink = () => {
     const url = window.location.origin + (instance ? `/${instance.id}` : window.location.pathname);
@@ -1032,7 +900,7 @@ export default function App() {
                   ) : (
                     <Wifi className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                   )}
-                  <span className="truncate">{statusMessage}</span>
+                  <span className="leading-relaxed">{serverIssue || statusMessage}</span>
                 </p>
               </div>
 
@@ -1124,7 +992,7 @@ export default function App() {
             <div className="pt-2 border-t border-white/[0.08] flex items-center justify-between text-[10.5px] text-slate-500 font-bold">
               <span className="flex items-center gap-1.5">
                 <Shield size={12} className="text-emerald-400/70" />
-                <span>Powered by Baileys V6 Engine</span>
+                <span>Conexão WhatsApp • Baileys</span>
               </span>
               <span className="flex items-center gap-1 text-slate-400">
                 <Sparkles className="w-3 h-3 text-emerald-400" />
@@ -1245,18 +1113,18 @@ export default function App() {
                 {(qrBase64 || qrCodeData) && (
                   <div className="inline-flex items-center gap-2 px-3.5 py-1 bg-[#111b21] border border-emerald-500/30 rounded-full text-[10px] font-black text-emerald-300 shadow-sm">
                     <RotateCw className={`w-3 h-3 text-emerald-400 ${isRenewingAuto ? 'animate-spin' : ''}`} />
-                    <span>Auto-renovação em {qrCountdown}s</span>
+                    <span>{qrCountdown > 0 ? `Próximo QR do WhatsApp em até ${qrCountdown}s` : 'Aguardando atualização do servidor'}</span>
                     <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-ping" />
                   </div>
                 )}
 
                 <button
                   onClick={() => handleGenerateQr(true, false)}
-                  disabled={actionLoading}
+                  disabled={actionLoading || statusStep === 3}
                   className="w-full max-w-xs py-3.5 bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black rounded-2xl text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-[0_8px_25px_rgba(16,185,129,0.35)] hover:shadow-[0_12px_30px_rgba(16,185,129,0.45)] active:scale-95 cursor-pointer disabled:opacity-50"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${actionLoading ? 'animate-spin' : ''}`} />
-                  <span>{qrCodeData || qrBase64 ? 'Renovar QR Code Agora' : 'Gerar QR Code de Conexão'}</span>
+                  <span>{qrCodeData || qrBase64 ? 'Atualizar QR sem reiniciar' : 'Iniciar conexão'}</span>
                 </button>
 
               </div>
@@ -1349,6 +1217,20 @@ export default function App() {
               </button>
             </div>
 
+            {engineDiagnostic && (
+              <div className="rounded-xl border border-emerald-500/25 bg-[#0c1317] p-3 text-xs space-y-1 break-words">
+                <p className="font-bold text-emerald-300">Node {engineDiagnostic.serverVersion || '—'} • {engineDiagnostic.nodeId || '—'}</p>
+                <p>Baileys: {engineDiagnostic.phase || 'sem resposta'} • Socket {engineDiagnostic.wsOpen ? 'aberto' : 'fechado'} • {engineDiagnostic.authenticated ? 'autenticado' : 'aguardando autenticação'}</p>
+                <p>{engineDiagnostic.message || serverIssue}</p>
+                <p className="text-slate-400">Tempo da tentativa: {Math.round((engineDiagnostic.elapsedMs || 0)/1000)}s • QR #{engineDiagnostic.qrSequence || 0}</p>
+                {engineDiagnostic.http && <p>HTTP {engineDiagnostic.http.status} • {engineDiagnostic.http.ms}ms</p>}
+                {engineDiagnostic.lastDisconnect && <p className="text-amber-300">Último encerramento: {engineDiagnostic.lastDisconnect.code || 'sem código'} • {engineDiagnostic.lastDisconnect.reason}</p>}
+                {engineDiagnostic.httpError && <p className="text-rose-300">{engineDiagnostic.httpError}</p>}
+                <p className="text-[10px] text-slate-500 font-mono">Tentativa: {engineDiagnostic.attemptId || '—'}</p>
+                <p className="text-slate-300">{engineDiagnostic.nextAction}</p>
+              </div>
+            )}
+
             <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2.5 pr-1 min-h-[220px]">
               {loadingLogs && connectionLogs.length === 0 ? (
                 <div className="py-12 flex flex-col items-center justify-center gap-2 text-slate-400 text-xs font-bold">
@@ -1392,7 +1274,7 @@ export default function App() {
                             : 'bg-white/10 text-slate-300'
                         }`}>
                           <span className={`w-1.5 h-1.5 rounded-full ${isSucc ? 'bg-emerald-400' : isErr ? 'bg-rose-400' : 'bg-slate-400'}`} />
-                          {isSucc ? 'Conectado' : isErr ? 'Falha / Erro' : 'Tentativa'}
+                          {isSucc ? 'Conectado' : isErr ? 'Falha / Erro' : log.payload?.event_type || 'Evento'}
                         </span>
                         <span className="text-[10px] text-slate-400 font-mono flex items-center gap-1">
                           <Clock className="w-3 h-3" />
@@ -1402,6 +1284,7 @@ export default function App() {
                       <p className="text-[11px] font-medium leading-relaxed pt-0.5">
                         {log.message}
                       </p>
+                      {log.payload?.details && <p className="text-[10px] text-slate-400 font-mono break-words">{log.payload.node || 'Node'} • {log.payload.details.phase || log.payload.status} • {Math.round((log.payload.details.elapsedMs || 0)/1000)}s {log.payload.details.reason ? `• código ${log.payload.details.reason}` : ''}<br/>Tentativa: {log.payload.details.attemptId || 'log anterior'} • Req: {log.payload.details.requestId || '—'}</p>}
                       {log.payload?.error && (
                         <p className="text-[10px] text-rose-400 font-mono bg-black/30 p-1.5 rounded-lg">
                           Detalhes: {log.payload.error}

@@ -1,5 +1,6 @@
 import { supabase, retryWithBackoff } from '../supabase.js';
 import sessionManager, { isSocketOpen } from '../session-manager/index.js';
+import { diagnosticLogDetails, getConnectionDiagnostics } from '../session-manager/connection-lifecycle.js';
 
 // Cache para prevenção estrita de loops e spam (TTL de 2 minutos por evento/instância)
 const notificationCooldownMap = new Map();
@@ -76,13 +77,30 @@ export async function logAndNotifyConnectionEvent({
 
         switch (eventType) {
             case 'qr_ready':
-                logMessage = `[${instName}] Tentativa de conexão iniciada. QR Code gerado no servidor e aguardando leitura no celular.`;
+                logMessage = `[${instName}] QR #${getConnectionDiagnostics(instanceId).qrSequence || 1} gerado pelo WhatsApp; aguardando leitura na mesma tentativa.`;
                 logLevel = 'info';
                 break;
 
             case 'handshake_start':
                 logMessage = `[${instName}] QR Code lido pelo celular. Iniciando handshake e autenticação de chaves de segurança.`;
                 logLevel = 'info';
+                break;
+
+            case 'connection_request':
+                logMessage = `[${instName}] Node aceitou a solicitação de conexão. Inicializando o socket Baileys.`;
+                break;
+            case 'qr_refresh_preserved':
+                logMessage = `[${instName}] Atualização de QR solicitada. Socket e credenciais preservados para não interromper a conexão.`;
+                break;
+            case 'scanning_detected':
+                logMessage = `[${instName}] Baileys confirmou a leitura do QR pelo celular. Aguardando autenticação.`;
+                break;
+            case 'syncing_keys':
+                logMessage = `[${instName}] Credenciais recebidas do celular. Sincronizando chaves; renovação do QR suspensa.`;
+                break;
+            case 'connection_closed':
+                logMessage = `[${instName}] Socket encerrado pelo WhatsApp: ${error || 'sem motivo informado'}. ${getConnectionDiagnostics(instanceId).message}`;
+                logLevel = 'warn';
                 break;
 
             case 'connection_success':
@@ -108,7 +126,7 @@ export async function logAndNotifyConnectionEvent({
             status,
             phone: finalPhone || null,
             error: error || null,
-            details: details || {},
+            details: diagnosticLogDetails(instanceId, details || {}),
             source: 'whatsapp_connection_engine',
             environment: process.env.APP_ENV || 'production',
             node: process.env.APP_NODE || 'PROD-C'
