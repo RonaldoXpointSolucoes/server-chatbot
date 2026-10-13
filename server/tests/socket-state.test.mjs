@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isTransportOpen, getSessionSocket } from '../src/session-manager/socket-state.js';
-import { beginConnectionAttempt, connectionProgress, getConnectionDiagnostics, connectionNeedsProtection } from '../src/session-manager/connection-lifecycle.js';
+import { isTransportOpen, getSessionSocket, sessionConnectionDiagnostics } from '../src/session-manager/socket-state.js';
+import { beginConnectionAttempt, connectionProgress, getConnectionDiagnostics, connectionNeedsProtection, connectDecision } from '../src/session-manager/connection-lifecycle.js';
 
 test('status polling retains the closing socket so its 515 event still owns the session', () => {
     const sock = { ws: { isClosed: true }, user: { id: 'test@s.whatsapp.net' } };
@@ -27,6 +27,32 @@ test('a live anonymous QR transport is protected without claiming authentication
     assert.equal(isTransportOpen(sock), true);
     assert.equal(getSessionSocket(sessions, 'qr-protect', true), null);
     assert.equal(connectionNeedsProtection(getConnectionDiagnostics('qr-protect'), { hasSession: true, wsOpen: true, now: Date.now() + 200000 }), true);
+});
+
+test('gateway QR diagnostics preserve a live anonymous socket on legacy refresh', () => {
+    const id = 'gateway-qr';
+    const sock = { ws: { isOpen: true, socket: { readyState: 1 } } };
+    const manager = { sessions: new Map([[id, { sock }]]), authenticatedSessions: new Set(), pairingPendingSync: new Map() };
+    const a = beginConnectionAttempt(id, 'tenant');
+    connectionProgress(id, { qr: 'private' });
+    const d = sessionConnectionDiagnostics(manager, id);
+    assert.equal(d.wsOpen, true);
+    assert.equal(d.authenticated, false);
+    assert.equal(d.attemptId, a.attemptId);
+    assert.equal(connectDecision({ ...d, hasSession: true, forceNew: true }), 'preserve');
+    sock.ws.isClosed = true;
+    assert.equal(sessionConnectionDiagnostics(manager, id).wsOpen, false);
+});
+
+test('gateway identity and transport alone do not confirm the pending handshake', () => {
+    const id = 'gateway-handshake';
+    const manager = { sessions: new Map([[id, { sock: { ws: { isOpen: true }, user: { id: 'test@s.whatsapp.net' } } }]]), authenticatedSessions: new Set([id]), pairingPendingSync: new Map([[id, true]]) };
+    beginConnectionAttempt(id, 'tenant');
+    connectionProgress(id, { syncingKeys: true }, { hasIdentity: true });
+    assert.equal(sessionConnectionDiagnostics(manager, id).authenticated, false);
+    connectionProgress(id, { connection: 'open' }, { hasIdentity: true });
+    manager.pairingPendingSync.delete(id);
+    assert.equal(sessionConnectionDiagnostics(manager, id).authenticated, true);
 });
 
 test('watchdog waits for recent scan/restart activity, then reports a recoverable failure', () => {

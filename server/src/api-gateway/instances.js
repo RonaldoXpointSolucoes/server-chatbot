@@ -5,6 +5,7 @@ import { supabase, NODE_ID, resolveTargetJid } from '../supabase.js';
 import { activePairingAttempts, logAndNotifyConnectionEvent } from '../event-processor/connection-notifier.js';
 import { beginConnectionAttempt, getConnectionDiagnostics, connectDecision, shouldClearCredentials, connectionProgress, diagnosticLogDetails } from '../session-manager/connection-lifecycle.js';
 import { recordStructuredEvent } from '../diagnostics/telemetry.js';
+import { sessionConnectionDiagnostics } from '../session-manager/socket-state.js';
 import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
@@ -17,13 +18,7 @@ ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 500 * 1024 * 1024 } }); // 500MB
 const router = express.Router();
 const pendingConnectionStarts = new Set();
-const connectionSnapshot = instanceId => {
-    const sock = sessionManager.sessions.get(instanceId)?.sock;
-    const wsOpen = Boolean(sock && isSocketOpen(sock));
-    const hasIdentity = Boolean(sock?.user?.id || sock?.authState?.creds?.me?.id);
-    const authenticated = wsOpen && hasIdentity && sessionManager.authenticatedSessions.has(instanceId) && !sessionManager.pairingPendingSync.has(instanceId) && getConnectionDiagnostics(instanceId).phase === 'connected';
-    return getConnectionDiagnostics(instanceId, { wsOpen, authenticated, hasIdentity });
-};
+const connectionSnapshot = instanceId => sessionConnectionDiagnostics(sessionManager, instanceId);
 
 const requireTenant = async (req, res, next) => {
     const tenantId = req.headers['x-tenant-id'];

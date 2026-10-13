@@ -36,3 +36,5 @@ Em 7.8.4, `getSocket` é uma leitura sem remoções. O listener nativo continua 
 O ReconectaZap 1.0.2 mantém um painel lateral visível de eventos, com assinatura de inserções e consulta de segurança a cada 2,5 segundos, identificação da fonte e horário da última atualização. Falhas de consulta mantêm os eventos anteriores e indicam indisponibilidade. O painel aparece abaixo da conexão em telas estreitas.
 
 Um diagnóstico explícito `idle`, `error` ou `expired` prevalece sobre `CONNECTED_PENDING_SYNC` persistido. Essa proteção é compartilhada pelas telas de conexão em 1.0.3 / 7.8.7.
+
+O teste em produção com QR ativo revelou que o snapshot do gateway ainda utilizava uma verificação que exigia identidade. Em 7.8.5 o gateway compartilha `sessionConnectionDiagnostics`, que usa transporte para `wsOpen` e confirma autenticação separadamente. Validar `force_new` durante QR ativo, além do teste com sessão autenticada.

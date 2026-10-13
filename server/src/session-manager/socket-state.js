@@ -17,3 +17,13 @@ export function getSessionSocket(sessions, instanceId, requireAuthenticated = fa
     // A status read must retain ownership until the close listener handles 515.
     return sock;
 }
+import { getConnectionDiagnostics } from './connection-lifecycle.js';
+
+
+export function sessionConnectionDiagnostics(manager, instanceId) {
+    const sock = manager.sessions.get(instanceId)?.sock;
+    const wsOpen = isTransportOpen(sock);
+    const hasIdentity = Boolean(sock?.user?.id || sock?.authState?.creds?.me?.id || sock?.authState?.creds?.me?.jid);
+    const authenticated = wsOpen && hasIdentity && manager.authenticatedSessions.has(instanceId) && !manager.pairingPendingSync.has(instanceId) && getConnectionDiagnostics(instanceId).phase === 'connected';
+    return getConnectionDiagnostics(instanceId, { wsOpen, authenticated, hasIdentity });
+}
