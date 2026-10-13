@@ -1,6 +1,9 @@
 {
-  "version": "7.8.3",
+  "version": "7.8.4",
   "changelog": [
+    "Consultas de status preservam o socket para processar o reinício 515 após leitura do QR",
+    "Supervisores distinguem transporte aberto de autenticação e preservam QR/handshake ativos",
+    "Timeout de autenticação encerra o diagnóstico e libera reconexão com credenciais preservadas",
     "ReconectaZap: atualização de QR idempotente, sem encerrar socket ou apagar credenciais durante autenticação",
     "Diagnóstico correlacionado de conexão: tentativa, fase Baileys, prazo real do QR, tempo decorrido, servidor e código de encerramento",
     "Proteção contra regressão de estado após conexão e contra eventos tardios de sockets substituídos",

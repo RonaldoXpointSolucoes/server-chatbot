@@ -26,3 +26,11 @@ Os logs de encerramento incluem também os transitórios. `515` indica reinício
 ## Validação
 
 Executar `node --test server/tests/connection-lifecycle.test.mjs`, os builds das duas telas e o Quality Gate E2E de homologação antes de promover o backend. Em produção, a leitura pelo celular é necessária para comprovar um novo pareamento; QR exibido sozinho não comprova conexão. Confirmar a mesma tentativa durante a leitura, autenticação real e status convergente no painel central e ReconectaZap.
+
+## Continuação do diagnóstico: reinício após leitura
+
+Na tentativa `d01e4690-195c-4b70-be41-e8c625d8a589`, o celular entregou credenciais às 20:46:40 UTC. Uma consulta de status removeu da RAM o socket fechado antes do evento nativo de reinício; o guard de propriedade descartou sua continuação. O watchdog encerrou a tentativa às 20:47:16, mas o diagnóstico continuou em autenticação. O supervisor também reciclava sockets de QR abertos porque sua verificação exigia identidade antes de ela existir.
+
+Em 7.8.4, `getSocket` é uma leitura sem remoções. O listener nativo continua responsável pelo encerramento e pela recuperação 515. Os supervisores distinguem transporte aberto de autenticação, respeitam atividade recente de handshake e registram o timeout como falha recuperável. Os testes reproduzem status polling antes do close, QR sem identidade e timeout depois da margem de autenticação. Credenciais e chaves não são apagadas.
+
+O ReconectaZap 1.0.2 mantém um painel lateral visível de eventos, com assinatura de inserções e consulta de segurança a cada 2,5 segundos, identificação da fonte e horário da última atualização. Falhas de consulta mantêm os eventos anteriores e indicam indisponibilidade. O painel aparece abaixo da conexão em telas estreitas.

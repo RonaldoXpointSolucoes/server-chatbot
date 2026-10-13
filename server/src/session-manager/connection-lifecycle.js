@@ -27,7 +27,7 @@ export function connectionProgress(instanceId, update, { hasIdentity = false, te
         const code = update.lastDisconnect?.error?.output?.statusCode;
         const reason = String(update.lastDisconnect?.error?.message || 'Conexão encerrada').slice(0,250);
         a.lastDisconnect = { code: code || null, reason, at: new Date(now).toISOString() };
-        a.phase = code === 515 || (hasIdentity && ![401,403,409,410,411,440,500].includes(code)) ? 'reconnecting' : code === 408 ? 'expired' : 'error';
+        a.phase = update.recoveryStopped ? 'error' : code === 515 || (hasIdentity && ![401,403,409,410,411,440,500].includes(code)) ? 'reconnecting' : code === 408 ? 'expired' : 'error';
         a.qrExpiresAt = null;
     } else if (update.connection === 'open' && hasIdentity) {
         a.phase = 'connected';
@@ -79,6 +79,13 @@ export function connectDecision({ authenticated, hasIdentity, wsOpen, hasSession
 
 export function shouldClearCredentials({ resetSession, hasStoredIdentity }) {
     return resetSession === true && !hasStoredIdentity;
+}
+
+export function connectionNeedsProtection(diagnostic, { hasSession = false, wsOpen = false, starting = false, reconnecting = false, now = Date.now() } = {}) {
+    if (starting || reconnecting) return true;
+    if (hasSession && wsOpen && ['qr_ready', 'waiting_qr'].includes(diagnostic.phase)) return true;
+    const activityAge = now - Date.parse(diagnostic.updatedAt || '');
+    return hasSession && ['authenticating', 'reconnecting'].includes(diagnostic.phase) && activityAge < 90000;
 }
 
 export function diagnosticLogDetails(instanceId, extras = {}) {

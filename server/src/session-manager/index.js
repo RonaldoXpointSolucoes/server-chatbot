@@ -13,7 +13,8 @@ import { addLog } from '../system-logger.js';
 import pino from 'pino';
 import { supabase, NODE_ID, retryWithBackoff, resolveTargetJid } from '../supabase.js';
 import { normalizeUrlsInText } from '../flow-runtime/url-helper.js';
-import { connectionProgress, getConnectionDiagnostics } from './connection-lifecycle.js';
+import { connectionProgress, getConnectionDiagnostics, connectionNeedsProtection } from './connection-lifecycle.js';
+import { isTransportOpen, getSessionSocket } from './socket-state.js';
 
 export const HOMOLOG_ALLOWED_INSTANCES = [
     'cc4efe36-f391-4b3d-a24c-ddcd8a293cf6', // FoodNext (11 94775-8860) - Caixa de testes
@@ -40,27 +41,8 @@ export const isInstanceAllowedForNode = (instanceId, tenantId = null) => {
 };
 
 export const isSocketOpen = (sock) => {
-    if (!sock || !sock.ws) return false;
-    const ws = sock.ws;
-    if (ws.isClosed === true || ws.isClosing === true) return false;
-    if (ws.socket && (ws.socket.readyState === 2 || ws.socket.readyState === 3)) return false;
-    
-    // Se está em processo ativo de conexão/handshake, não considerar aberto ainda
-    if (ws.isConnecting === true || (ws.socket && ws.socket.readyState === 0)) {
-        return false;
-    }
-
-    // Para envio e tráfego de mensagens, o socket PRECISA estar autenticado com identificador do usuário (meId)
-    // Sem meId, o Baileys explode fatalmente com 'Cannot read properties of undefined (reading id)'
-    const meId = sock.user?.id || sock.authState?.creds?.me?.id || sock.authState?.creds?.me?.jid;
-    if (!meId) {
-        return false;
-    }
-
-    if (ws.isOpen === true) return true;
-    if (ws.socket && ws.socket.readyState === 1) return true; // WebSocket.OPEN
-    
-    return false;
+    const identity = sock?.user?.id || sock?.authState?.creds?.me?.id || sock?.authState?.creds?.me?.jid;
+    return Boolean(identity) && isTransportOpen(sock);
 };
 
 // Mapa para compartilhar e deduplicar chamadas concorrentes de espera por socket
@@ -399,7 +381,7 @@ class SessionManager {
                         const sessionData = this.sessions.get(stuck.id);
                         const sock = sessionData?.sock;
                         const isWsOpen = sock && isSocketOpen(sock);
-                        const isAuth = this.authenticatedSessions.has(stuck.id);
+                        const isAuth = this.authenticatedSessions.has(stuck.id) && !this.pairingPendingSync.has(stuck.id) && getConnectionDiagnostics(stuck.id).phase === 'connected';
 
                         // Se tiver socket aberto e autenticado, corrige o status para connected
                         if (isWsOpen && isAuth) {
@@ -410,10 +392,21 @@ class SessionManager {
                             continue;
                         }
 
+                        if (connectionNeedsProtection(getConnectionDiagnostics(stuck.id), {
+                            hasSession: Boolean(sock), wsOpen: isTransportOpen(sock),
+                            starting: this.connectingState.has(stuck.id),
+                            reconnecting: this.reconnectingTimers.has(stuck.id) || this.reconnectTimeouts.has(stuck.id)
+                        })) continue;
+
                         // Se NÃO tiver socket aberto ou não conectou no tempo limite, força status 'disconnected'
                         console.log(`[SessionManager/Watchdog] Instância ${stuck.display_name || stuck.id} sem socket ativo após 90s em '${stuck.status}'. Marcando 'disconnected' para liberar nova tentativa.`);
                         
-                        this.destroyExistingSession(stuck.id, 'watchdog_connecting_timeout').catch(() => {});
+                        const timeoutUpdate = {
+                            connection: 'close', status: 'disconnected', recoveryStopped: true,
+                            lastDisconnect: { error: { message: 'Tempo limite de autenticação esgotado. Credenciais preservadas; tente reconectar.', output: { statusCode: 408 } } }
+                        };
+                        connectionProgress(stuck.id, timeoutUpdate, { tenantId: stuck.tenant_id });
+                        await this.destroyExistingSession(stuck.id, 'watchdog_connecting_timeout');
                         this.connectingState?.delete?.(stuck.id);
                         this.connectingSessions?.delete?.(stuck.id);
 
@@ -433,11 +426,7 @@ class SessionManager {
                             .eq('id', stuck.id);
 
                         // Notifica frontend em tempo real
-                        eventProcessor.handleConnectionUpdate(stuck.tenant_id, stuck.id, {
-                            connection: 'close',
-                            status: 'disconnected',
-                            lastDisconnect: { error: { message: 'Tempo limite de reconexão esgotado' } }
-                        }).catch(() => {});
+                        eventProcessor.handleConnectionUpdate(stuck.tenant_id, stuck.id, timeoutUpdate).catch(() => {});
                     }
                 }
             } catch (err) {
@@ -502,7 +491,11 @@ class SessionManager {
                         continue;
                     }
 
-                    const isWsOpen = isSocketOpen(sock);
+                    const isWsOpen = isTransportOpen(sock);
+                    if (connectionNeedsProtection(getConnectionDiagnostics(inst.id), {
+                        hasSession: hasSessionInRam, wsOpen: isWsOpen,
+                        starting: isConnecting, reconnecting: hasActiveTimer
+                    })) continue;
 
                     if (hasSessionInRam && isWsOpen) {
                         continue;
@@ -2168,28 +2161,7 @@ class SessionManager {
     }
 
     getSocket(instanceId, requireAuthenticated = false) {
-        const data = this.sessions.get(instanceId);
-        if (!data || !data.sock) return null;
-
-        const sock = data.sock;
-        // Valida se o WebSocket está saudável (não está CLOSING nem CLOSED)
-        if (sock.ws && (sock.ws.isClosing || sock.ws.isClosed)) {
-            const isReconnectingActive = this.connectingState.has(instanceId) || this.reconnectingTimers.has(instanceId);
-            if (!isReconnectingActive) {
-                console.log(`[SessionManager] Limpeza de socket inativo para ${instanceId} (WebSocket fechado).`);
-                this.sessions.delete(instanceId);
-            }
-            return null;
-        }
-
-        if (requireAuthenticated) {
-            const meId = sock?.user?.id || sock?.authState?.creds?.me?.id;
-            if (!meId || !isSocketOpen(sock)) {
-                return null;
-            }
-        }
-
-        return sock;
+        return getSessionSocket(this.sessions, instanceId, requireAuthenticated);
     }
 
     async getSocketOrWake(tenantId, instanceId, requireAuthenticated = false, force = false) {

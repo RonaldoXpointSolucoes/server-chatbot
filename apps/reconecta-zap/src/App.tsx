@@ -124,7 +124,11 @@ export default function App() {
   const [installPlatform, setInstallPlatform] = useState<'ios' | 'android' | 'desktop'>('android');
 
   // Estados de Logs de Conexão
-  const [showLogsModal, setShowLogsModal] = useState<boolean>(false);
+  const [logsUpdatedAt, setLogsUpdatedAt] = useState<string | null>(null);
+  const [logsSource, setLogsSource] = useState<string>('Node');
+  const [logSyncError, setLogSyncError] = useState<string | null>(null);
+  const [liveLogs, setLiveLogs] = useState(false);
+  const logsRequestRef = useRef(false);
   const [connectionLogs, setConnectionLogs] = useState<ConnectionLogItem[]>([]);
   const [loadingLogs, setLoadingLogs] = useState<boolean>(false);
   const [engineDiagnostic, setEngineDiagnostic] = useState<any>(null);
@@ -405,7 +409,8 @@ export default function App() {
   // 6. Carrega os logs de conexão da instância
   const fetchConnectionLogs = useCallback(async () => {
     const inst = instanceRef.current;
-    if (!inst?.id) return;
+    if (!inst?.id || logsRequestRef.current) return;
+    logsRequestRef.current = true;
     setLoadingLogs(true);
     try {
       const res = await fetch(`${engineUrl(inst)}/api/v1/instances/${inst.id}/connection-logs?limit=60&_t=${Date.now()}`, {signal:AbortSignal.timeout(15000),headers:{'x-tenant-id':inst.tenant_id || '',apikey:inst.api_key || ''},cache:'no-store'});
@@ -413,6 +418,9 @@ export default function App() {
         const data = await res.json();
         if (data?.logs && Array.isArray(data.logs)) {
           setConnectionLogs(data.logs);
+          setLogsUpdatedAt(new Date().toISOString());
+          setLogsSource('Node');
+          setLogSyncError(null);
           if(data.diagnostic) setEngineDiagnostic((prev:any)=>({...prev,...data.diagnostic}));
           setLoadingLogs(false);
           return;
@@ -430,10 +438,14 @@ export default function App() {
 
       if (dbLogs) {
         setConnectionLogs(dbLogs as ConnectionLogItem[]);
+        setLogsUpdatedAt(new Date().toISOString());
+        setLogsSource('Supabase (alternativo)');
+        setLogSyncError('Servidor indisponível. Exibindo os eventos persistidos.');
       }
     } catch (err) {
-      console.warn('[ConectaZap] Erro ao carregar logs:', err);
+      setLogSyncError('Não foi possível atualizar os eventos. Nova consulta automática em instantes.');
     } finally {
+      logsRequestRef.current = false;
       setLoadingLogs(false);
     }
   }, []);
@@ -644,10 +656,19 @@ export default function App() {
   }, [activeInstanceId]);
 
   useEffect(() => {
-    if(!showLogsModal) return;
-    const timer=setInterval(fetchConnectionLogs,5000);
-    return ()=>clearInterval(timer);
-  }, [showLogsModal, fetchConnectionLogs]);
+    if (!activeInstanceId || loading) return;
+    fetchConnectionLogs();
+    const timer = setInterval(fetchConnectionLogs, 2500);
+    const channel = supabase.channel(`connection-logs:${activeInstanceId}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'system_logs', filter: 'type=eq.WhatsApp Connection' }, ({ new: row }) => {
+        if (row.payload?.instance_id !== activeInstanceId) return;
+        setConnectionLogs(previous => [row as ConnectionLogItem, ...previous.filter(log => log.id !== row.id)].slice(0, 60));
+        setLogsUpdatedAt(new Date().toISOString());
+        fetchConnectionLogs();
+      })
+      .subscribe(status => setLiveLogs(status === 'SUBSCRIBED'));
+    return () => { clearInterval(timer); supabase.removeChannel(channel); };
+  }, [activeInstanceId, loading, fetchConnectionLogs]);
 
   const copyDirectLink = () => {
     const url = window.location.origin + (instance ? `/${instance.id}` : window.location.pathname);
@@ -769,8 +790,9 @@ export default function App() {
       <div className="fixed -bottom-32 -right-32 w-96 h-96 bg-teal-500/15 rounded-full blur-[100px] pointer-events-none" />
       <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-indigo-500/5 rounded-full blur-[140px] pointer-events-none" />
 
+      <div className="w-full max-w-[1560px] grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_390px] gap-5 items-start relative z-10">
       {/* Card Principal Widescreen */}
-      <div className="w-full max-w-4xl lg:max-w-5xl bg-[#111b21]/95 border border-white/10 rounded-[32px] p-5 sm:p-7 md:p-8 shadow-[0_25px_80px_rgba(0,0,0,0.7)] backdrop-blur-2xl relative z-10 space-y-5 my-auto shrink-0">
+      <div className="w-full min-w-0 bg-[#111b21]/95 border border-white/10 rounded-[32px] p-5 sm:p-7 md:p-8 shadow-[0_25px_80px_rgba(0,0,0,0.7)] backdrop-blur-2xl relative z-10 space-y-5 my-auto shrink-0">
         
         {/* ========================================================= */}
         {/* HEADER SUPERIOR COM LOGO EMBUTIDO HARMONIOSO */}
@@ -814,7 +836,7 @@ export default function App() {
             <button
               onClick={() => {
                 fetchConnectionLogs();
-                setShowLogsModal(true);
+                document.getElementById('connection-live-logs')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
               }}
               className="px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 hover:text-white rounded-2xl text-[11px] font-black uppercase tracking-wider transition-all flex items-center gap-1.5 active:scale-95 cursor-pointer shadow-sm"
               title="Visualizar histórico e logs de conexão desta instância"
@@ -1173,25 +1195,14 @@ export default function App() {
 
       </div>
 
-      {/* MODAL DE LOGS */}
-      {showLogsModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 select-none animate-in fade-in duration-200">
-          <div className="w-full max-w-xl bg-[#111b21] border border-white/15 rounded-[32px] p-5 sm:p-6 shadow-2xl space-y-4 text-left relative overflow-hidden flex flex-col max-h-[85vh]">
-            
-            <button
-              onClick={() => setShowLogsModal(false)}
-              className="absolute top-5 right-5 w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-slate-400 hover:text-white transition-all cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
-
+      <aside id="connection-live-logs" aria-label="Logs de conexão em tempo real" className="w-full min-w-0 bg-[#111b21] border border-white/15 rounded-[28px] p-5 shadow-2xl space-y-4 text-left flex flex-col xl:sticky xl:top-6 max-h-[800px] select-text">
             <div className="flex items-center gap-3 pr-8">
               <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center text-white shadow-lg shadow-emerald-500/25 border border-white/20 shrink-0">
                 <Activity className="w-5 h-5" />
               </div>
               <div className="min-w-0">
                 <h3 className="text-base font-black text-white leading-tight">
-                  Logs de Tentativas de Conexão
+                  Conexão em tempo real
                 </h3>
                 <p className="text-xs text-emerald-400 font-bold truncate">
                   Instância: {instance?.display_name || activeInstanceId}
@@ -1200,7 +1211,7 @@ export default function App() {
             </div>
 
             <div className="flex items-center justify-between bg-[#0c1317] px-3.5 py-2 rounded-xl border border-white/10 text-xs">
-              <span className="text-slate-400 font-medium">Eventos registrados no servidor:</span>
+              <span className="text-emerald-300 font-medium flex items-center gap-1.5"><span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />{liveLogs ? 'Ao vivo + consulta a cada 2,5s' : 'Consulta automática a cada 2,5s'}</span>
               <button
                 onClick={fetchConnectionLogs}
                 disabled={loadingLogs}
@@ -1211,10 +1222,12 @@ export default function App() {
               </button>
             </div>
 
+            <p className="text-[10px] text-slate-400">Fonte: {logsSource} • Atualizado: {logsUpdatedAt ? new Date(logsUpdatedAt).toLocaleTimeString('pt-BR') : 'aguardando'}</p>
+            {logSyncError && <p role="status" className="text-xs text-amber-300">{logSyncError}</p>}
             {engineDiagnostic && (
               <div className="rounded-xl border border-emerald-500/25 bg-[#0c1317] p-3 text-xs space-y-1 break-words">
                 <p className="font-bold text-emerald-300">Node {engineDiagnostic.serverVersion || '—'} • {engineDiagnostic.nodeId || '—'}</p>
-                <p>Baileys: {engineDiagnostic.phase || 'sem resposta'} • Socket {engineDiagnostic.wsOpen ? 'aberto' : 'fechado'} • {engineDiagnostic.authenticated ? 'autenticado' : 'aguardando autenticação'}</p>
+                <p>WhatsApp: {engineDiagnostic.authenticated ? 'autenticado' : engineDiagnostic.handshakeProtected ? 'autenticando' : engineDiagnostic.retryAllowed ? 'tentativa encerrada' : 'aguardando leitura'} • Socket {engineDiagnostic.wsOpen ? 'aberto' : 'fechado'}</p>
                 <p>{engineDiagnostic.message || serverIssue}</p>
                 <p className="text-slate-400">Tempo da tentativa: {Math.round((engineDiagnostic.elapsedMs || 0)/1000)}s • QR #{engineDiagnostic.qrSequence || 0}</p>
                 {engineDiagnostic.http && <p>HTTP {engineDiagnostic.http.status} • {engineDiagnostic.http.ms}ms</p>}
@@ -1238,7 +1251,7 @@ export default function App() {
                 </div>
               ) : (
                 connectionLogs.map((log) => {
-                  const isErr = log.level === 'error' || log.payload?.event_type === 'connection_error';
+                  const isErr = log.level === 'error' || log.payload?.event_type === 'connection_error' || (log.payload?.event_type === 'connection_closed' && ['error', 'expired'].includes(log.payload?.details?.phase || ''));
                   const isSucc = log.payload?.event_type === 'connection_success' || log.message.includes('sucesso');
                   const logDate = new Date(log.created_at).toLocaleTimeString('pt-BR', {
                     hour: '2-digit',
@@ -1268,7 +1281,7 @@ export default function App() {
                             : 'bg-white/10 text-slate-300'
                         }`}>
                           <span className={`w-1.5 h-1.5 rounded-full ${isSucc ? 'bg-emerald-400' : isErr ? 'bg-rose-400' : 'bg-slate-400'}`} />
-                          {isSucc ? 'Conectado' : isErr ? 'Falha / Erro' : log.payload?.event_type || 'Evento'}
+                          {isSucc ? 'Conectado' : isErr ? 'Falha / Erro' : ({ connection_request: 'Solicitação recebida', qr_ready: 'QR disponível', scanning_detected: 'Leitura detectada', syncing_keys: 'Sincronizando chaves', connection_closed: 'Socket encerrado', qr_refresh_preserved: 'Sessão preservada' } as Record<string, string>)[log.payload?.event_type || ''] || 'Evento'}
                         </span>
                         <span className="text-[10px] text-slate-400 font-mono flex items-center gap-1">
                           <Clock className="w-3 h-3" />
@@ -1290,16 +1303,8 @@ export default function App() {
               )}
             </div>
 
-            <button
-              onClick={() => setShowLogsModal(false)}
-              className="w-full py-3 bg-white/10 hover:bg-white/15 text-slate-200 font-black rounded-2xl text-xs uppercase tracking-wider transition-all cursor-pointer border border-white/10"
-            >
-              Fechar Painel de Logs
-            </button>
-
-          </div>
-        </div>
-      )}
+      </aside>
+      </div>
 
       {/* MODAL DE INSTALAÇÃO */}
       {showInstallModal && (
