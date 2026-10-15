@@ -1241,10 +1241,9 @@ export default function DevLogger() {
         const isSpammyUrl = urlStr.includes('/debug/healthz') || urlStr.includes('/debug/metrics') || urlStr.includes('/debug/recent-errors') || urlStr.includes('/realtime/') || urlStr.includes('system_logs') || urlStr.includes('/wacalls/') || isLocalFrontend || isInternalDevLogger;
         
         if (!isSpammyUrl && !isAstsTest) {
-          const isAbort = err.name === 'AbortError';
-          const isAvatarFetch = urlStr.includes('/invoke') && typeof requestOptions?.body === 'string' && requestOptions.body.includes('profilePictureUrl');
-          if (isAbort && isAvatarFetch) {
-            // Silencia requisições normais de avatar canceladas por timeout ou ausência de foto
+          const isAbort = err.name === 'AbortError' || (typeof err.message === 'string' && err.message.includes('signal is aborted'));
+          if (isAbort) {
+            // Silencia requisições canceladas intencionalmente via AbortController (ex: timeout de avatar, invoke ou navegação)
             throw err;
           }
 
@@ -1359,6 +1358,12 @@ export default function DevLogger() {
         msg.includes('Connection was lost') ||
         msg.includes('socket zumbi') ||
         msg.includes('[History Sync]') ||
+        msg.includes('[AutoRagTrainer]') ||
+        msg.includes('[Process Safe Guard]') ||
+        msg.includes('[QueueProcessor/TTL]') ||
+        msg.includes('Handshake transitório') ||
+        msg.includes('TIMEOUT_SOCKET_WAKE_FASTFAIL') ||
+        msg.includes('wa_outgoing_messages') ||
         msg.includes('gastrofood') ||
         msg.includes('Gastrofood') ||
         msg.includes('GetCardapioCompleto') ||
@@ -1525,6 +1530,12 @@ export default function DevLogger() {
                     msg.includes('SessionManager - Antiban') ||
                     msg.includes('não retornou novas mensagens') ||
                     msg.includes('[History Sync]') ||
+                    msg.includes('[AutoRagTrainer]') ||
+                    msg.includes('[Process Safe Guard]') ||
+                    msg.includes('[QueueProcessor/TTL]') ||
+                    msg.includes('Handshake transitório') ||
+                    msg.includes('TIMEOUT_SOCKET_WAKE_FASTFAIL') ||
+                    msg.includes('wa_outgoing_messages') ||
                     msg.includes('History sync is disabled') ||
                     msg.includes('identity changed') ||
                     msg.includes('GetCardapioCompleto') ||

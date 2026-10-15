@@ -15,28 +15,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 500
 
 // Helper de obtenção de socket com retry, auto-reconnect e backoff inteligente
 async function getSocketWithRetry(tenantId, instanceId, maxRetries = 1) {
-    // 1. Verificação de fast-fail no banco de dados para evitar loops em instâncias desconectadas
-    try {
-        const { data: inst } = await supabase
-            .from('whatsapp_instances')
-            .select('status, last_error, display_name')
-            .eq('id', instanceId)
-            .maybeSingle();
-
-        const isDisconnected = inst && 
-            ['offline', 'logged_out', 'blocked_12h', 'disconnected', 'paused', 'close', 'closed'].includes(inst.status);
-
-        if (isDisconnected) {
-            const err = new Error(`Instância WhatsApp "${inst?.display_name || instanceId}" está desconectada (${inst?.last_error || 'requer nova conexão/pareamento'}).`);
-            err.isDefinitive = true;
-            err.instanceStatus = inst?.status || 'disconnected';
-            throw err;
-        }
-    } catch (checkErr) {
-        if (checkErr.isDefinitive) throw checkErr;
-    }
-
-    // 2. Fast-Path: Verifica se o socket já está ativo na RAM (latência < 1ms)
+    // 1. Fast-Path: Verifica se o socket já está ativo e autenticado na RAM (latência < 1ms, zero queries no DB)
     const { isSocketOpen } = await import('../session-manager/index.js');
     const localSession = sessionManager.sessions.get(instanceId);
     const localSock = localSession?.sock;
@@ -45,16 +24,43 @@ async function getSocketWithRetry(tenantId, instanceId, maxRetries = 1) {
         return localSock;
     }
 
+    // 2. Verificação de fast-fail no banco de dados e credenciais autenticadas para evitar loops em instâncias desconectadas
+    try {
+        const [{ data: inst }, hasValidSavedCreds] = await Promise.all([
+            supabase
+                .from('whatsapp_instances')
+                .select('status, last_error, display_name')
+                .eq('id', instanceId)
+                .maybeSingle(),
+            typeof sessionManager.hasValidSavedCredentials === 'function'
+                ? sessionManager.hasValidSavedCredentials(instanceId)
+                : Promise.resolve(true)
+        ]);
+
+        const isDisconnected = !inst ||
+            ['offline', 'logged_out', 'blocked_12h', 'disconnected', 'paused', 'close', 'closed', 'qr_ready'].includes(inst.status) ||
+            !hasValidSavedCreds;
+
+        if (isDisconnected) {
+            const err = new Error(`Instância WhatsApp "${inst?.display_name || instanceId}" está desconectada (${inst?.last_error || 'requer leitura de QR Code / pareamento'}).`);
+            err.isDefinitive = true;
+            err.instanceStatus = inst?.status || 'disconnected';
+            throw err;
+        }
+    } catch (checkErr) {
+        if (checkErr.isDefinitive) throw checkErr;
+    }
+
     // 3. Tentativa única de obtenção com timeout defensivo adequado (4000ms para permitir handshake suave)
     try {
-        const wakePromise = sessionManager.getSocketOrWake(tenantId, instanceId, true);
+        const wakePromise = sessionManager.getSocketOrWake(tenantId, instanceId, false, true);
         const timeoutPromise = new Promise((_, reject) => 
             setTimeout(() => reject(new Error('TIMEOUT_SOCKET_WAKE_FASTFAIL')), 4000)
         );
         const sock = await Promise.race([wakePromise, timeoutPromise]);
         if (sock && isSocketOpen(sock)) return sock;
     } catch (e) {
-        console.warn(`[API Gateway] getSocketOrWake rápido para ${instanceId}: ${e.message}. Delegando para outbox resiliente.`);
+        console.log(`[API Gateway] getSocketOrWake rápido para ${instanceId}: ${e.message}. Delegando para outbox resiliente.`);
     }
 
     return null;
@@ -521,7 +527,7 @@ router.post([
         const isHealthy = sock && isSocketOpen(sock) && hasCredsMe;
 
         if (!isHealthy) {
-            console.warn(`[API Gateway] [sendText] ⚠️ Socket Offline ou não autenticado na RAM para ${id} ("${display_name}"). Enfileirando no outbox resiliente (wa_outgoing_messages)...`);
+            console.log(`[API Gateway] [sendText] 🔄 Socket em reconexão na RAM para ${id} ("${display_name}"). Enfileirando no outbox resiliente (wa_outgoing_messages)...`);
             try {
                 const { default: sessionManager } = await import('../session-manager/index.js');
                 const cleanPhone = String(number).replace(/\D/g, '');

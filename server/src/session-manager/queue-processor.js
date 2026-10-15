@@ -54,7 +54,7 @@ class QueueProcessor {
                 .select('id, instance_id, chat_jid');
 
             if (expired && expired.length > 0) {
-                console.warn(`[QueueProcessor/TTL] ⏱️ Expiradas e canceladas ${expired.length} mensagens antigas (> 10min) da fila de outbox.`);
+                console.log(`[QueueProcessor/TTL] ⏱️ Expiradas e canceladas ${expired.length} mensagens antigas (> 10min) da fila de outbox.`);
             }
 
             // Limpeza preventiva de mensagens antigas finalizadas (> 7 dias) para manter a tabela leve

@@ -112,6 +112,12 @@ function interceptConsole() {
         text.includes('socket zumbi') ||
         text.includes('[History Sync] O WhatsApp não retornou') ||
         text.includes('[QueueProcessor] Falha de rede temporária ao carregar fila de mensagens') ||
+        text.includes('[QueueProcessor/TTL]') ||
+        text.includes('[Process Safe Guard]') ||
+        text.includes('[AutoRagTrainer]') ||
+        text.includes('Handshake transitório') ||
+        text.includes('TIMEOUT_SOCKET_WAKE_FASTFAIL') ||
+        text.includes('wa_outgoing_messages') ||
         text.includes('[SnoozeManager] Conexão com o Supabase indisponível temporariamente') ||
         text.includes('USync fetch yielded no results') ||
         text.includes('pending PNs') ||

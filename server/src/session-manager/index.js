@@ -533,18 +533,16 @@ class SessionManager {
 
                     // Se a instância não está ativa na RAM deste nó e (está atribuída a este nó OU o lease expirou OU é Master Takeover)
                     if (isAssignedToThisNode || isLeaseExpired || isMasterTakeover) {
-                        // Se o status no banco for 'connecting' ou 'reconnecting', verifica se há credenciais salvas
+                        // Se o status no banco for 'connecting' ou 'reconnecting', verifica se há credenciais autenticadas reais salvas
                         if (inst.status === 'connecting' || inst.status === 'reconnecting') {
-                            const { data: credsExist } = await retryWithBackoff(() =>
-                                supabase.from('wa_auth_credentials').select('instance_id').eq('instance_id', inst.id).maybeSingle()
-                            ).catch(() => ({ data: null }));
+                            const credsExist = await this.hasValidSavedCredentials(inst.id);
 
                             if (!credsExist) {
-                                // Instância sem credenciais salvas está em processo inicial de pareamento manual (QR Code).
+                                // Instância sem credenciais autenticadas está em processo inicial de pareamento manual (QR Code).
                                 // O AutoHealing em background NÃO deve recriar sessão repetidamente para não gerar loops de QR refs expirados.
                                 const timeSinceUpdate = inst.updated_at ? (now - new Date(inst.updated_at).getTime()) : Infinity;
                                 if (timeSinceUpdate > 60000 && !hasSessionInRam) {
-                                    console.log(`[SessionManager/AutoHealing] Instância ${inst.id} sem credenciais em '${inst.status}' há mais de 1m. Marcando como 'disconnected'.`);
+                                    console.log(`[SessionManager/AutoHealing] Instância ${inst.id} sem credenciais autenticadas em '${inst.status}' há mais de 1m. Marcando como 'disconnected'.`);
                                     await supabase.from('whatsapp_instances').update({
                                         status: 'disconnected',
                                         qr_code: null,
@@ -926,7 +924,7 @@ class SessionManager {
                         await waitForSocketOpen(existingSock, 3500);
                         if (isSocketOpen(existingSock)) return existingSock;
                     } catch (e) {
-                        console.warn(`[SessionManager] Handshake transitório em andamento para ${instanceId} (${e.message}). Prosseguindo de forma não-bloqueante.`);
+                        console.log(`[SessionManager] Handshake transitório em andamento para ${instanceId} (${e.message}). Prosseguindo de forma não-bloqueante.`);
                     }
                 }
             }
@@ -1347,8 +1345,12 @@ class SessionManager {
                     const isQrTimeout = (status === 408 || reason.toLowerCase().includes('qr refs attempts ended')) && !isFullyAuthenticated;
 
                     if (isQrTimeout) {
-                        console.log(`[SessionManager] QR Code ou pareamento expirou por falta de leitura na instância ${instanceId}. Interrompendo loop de reconexão.`);
+                        console.log(`[SessionManager] QR Code ou pareamento expirou por falta de leitura na instância ${instanceId}. Interrompendo loop de reconexão e limpando credenciais parciais.`);
                         await this.destroyExistingSession(instanceId, 'qr_timeout');
+                        await Promise.all([
+                            supabase.from('wa_auth_credentials').delete().eq('instance_id', instanceId),
+                            supabase.from('wa_instances_keys').delete().eq('instance_id', instanceId)
+                        ]).catch(() => {});
 
                         await retryWithBackoff(() =>
                             supabase.from('whatsapp_instances')
@@ -2228,11 +2230,10 @@ class SessionManager {
                 : ['connected', 'connecting', 'qr_ready', 'connected_local', 'reconnecting', 'disconnected'];
 
             if (data && allowedStatuses.includes(data.status)) {
-                // Se o status for disconnected, verifica se existem credenciais salvas antes de acordar
-                if (data.status === 'disconnected') {
-                    const { data: credsExist } = await retryWithBackoff(() =>
-                        supabase.from('wa_auth_credentials').select('instance_id').eq('instance_id', instanceId).maybeSingle()
-                    ).catch(() => ({ data: null }));
+                // Se o status for disconnected (ou se exigir sessão autenticada em connecting/reconnecting),
+                // verifica se existem credenciais autenticadas reais (me.id) antes de acordar
+                if (data.status === 'disconnected' || (requireAuthenticated && (data.status === 'connecting' || data.status === 'reconnecting'))) {
+                    const credsExist = await this.hasValidSavedCredentials(instanceId);
                     if (!credsExist) {
                         return null;
                     }
@@ -2279,11 +2280,38 @@ class SessionManager {
                 return createdSock;
             }
         } catch (err) {
-            console.warn(`[SessionManager] Não foi possível acordar a instância ${instanceId}:`, err.message);
+            console.log(`[SessionManager] Não foi possível acordar a instância ${instanceId}:`, err.message);
             return null;
         }
         
         return null;
+    }
+
+    /**
+     * Verifica se a instância possui credenciais autenticadas reais (me.id / me.jid) em wa_auth_credentials.
+     * Remove automaticamente credenciais fantasmas (geradas por QR Code nunca escaneado) de instâncias inativas.
+     */
+    async hasValidSavedCredentials(instanceId) {
+        if (!instanceId) return false;
+        try {
+            const { data: credRow } = await retryWithBackoff(() =>
+                supabase.from('wa_auth_credentials').select('instance_id, creds_data').eq('instance_id', instanceId).maybeSingle()
+            ).catch(() => ({ data: null }));
+
+            if (!credRow || !credRow.creds_data) return false;
+            const parsed = typeof credRow.creds_data === 'string' ? JSON.parse(credRow.creds_data) : credRow.creds_data;
+            const hasMe = Boolean(parsed?.me?.id || parsed?.me?.jid || parsed?.registered);
+            if (!hasMe) {
+                const isActivelyPairing = this.pairingInProgress?.has(instanceId) || this.pairingPendingSync?.has(instanceId) || this.sessions.has(instanceId);
+                if (!isActivelyPairing) {
+                    await supabase.from('wa_auth_credentials').delete().eq('instance_id', instanceId).catch(() => {});
+                }
+                return false;
+            }
+            return true;
+        } catch {
+            return false;
+        }
     }
 
     async forceReleaseLock(instanceId) {
@@ -2322,7 +2350,7 @@ class SessionManager {
             const bodyText = typeof content === 'string' ? content : (content?.text || content?.caption || '');
 
             if (isDefinitiveOffline) {
-                console.warn(`[SessionManager] enqueueMessage: Instância ${instanceId} está ${inst?.status}. Gravando mensagem em wa_outgoing_messages...`);
+                console.log(`[SessionManager] enqueueMessage: Instância ${instanceId} está ${inst?.status}. Gravando mensagem em wa_outgoing_messages...`);
                 if (!tenantId) {
                     console.error(`[SessionManager] enqueueMessage: Impossível enfileirar em wa_outgoing_messages sem tenantId para instância ${instanceId}`);
                     throw new Error(`Instância ${instanceId} sem tenant_id identificado para enfileiramento.`);
@@ -2366,13 +2394,13 @@ class SessionManager {
                     const directOptions = { ...(options || {}), skipDelay: true, isDirect: true };
                     return await sendFn(targetJid, content, directOptions);
                 } catch (sendErr) {
-                    console.warn(`[SessionManager] Falha no envio direto em enqueueMessage para ${instanceId} (${sendErr?.message || sendErr}). Redirecionando para wa_outgoing_messages...`);
+                    console.log(`[SessionManager] Falha no envio direto em enqueueMessage para ${instanceId} (${sendErr?.message || sendErr}). Redirecionando para wa_outgoing_messages...`);
                 }
             }
 
             // Fallback resiliente para wa_outgoing_messages se o socket não estiver autenticado ou se o envio direto falhou
             if (!directAttempted) {
-                console.warn(`[SessionManager] Socket offline ou não autenticado na RAM para ${instanceId}. Gravando em wa_outgoing_messages...`);
+                console.log(`[SessionManager] Socket offline ou não autenticado na RAM para ${instanceId}. Gravando em wa_outgoing_messages...`);
             }
             if (!tenantId) {
                 console.error(`[SessionManager] enqueueMessage: Impossível enfileirar em wa_outgoing_messages sem tenantId para instância ${instanceId}`);
