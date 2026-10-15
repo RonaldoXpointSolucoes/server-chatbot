@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Building, CreditCard, ScrollText, LogOut, Search, Plus, Activity, Lock, CheckCircle2, Shield, X, Loader2, Smartphone, Trash2, FolderTree, AlertTriangle, Pencil, Mail } from 'lucide-react';
+import { LayoutDashboard, Building, CreditCard, ScrollText, LogOut, Search, Plus, Activity, Lock, CheckCircle2, Shield, X, Loader2, Smartphone, Trash2, FolderTree, AlertTriangle, Pencil, Mail, Filter, SlidersHorizontal } from 'lucide-react';
 import { cn } from './ChatDashboard';
 import { Navigate } from 'react-router-dom';
 import { supabase, masterSupabase } from '../services/supabase';
@@ -15,6 +15,9 @@ export default function AdminDashboard() {
   const [economicGroups, setEconomicGroups] = useState<any[]>([]);
   const [instances, setInstances] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'trial' | 'suspended'>('all');
+  const [planFilter, setPlanFilter] = useState<string>('all');
   const [showNewCompany, setShowNewCompany] = useState(false);
   const [newCompany, setNewCompany] = useState({ name: '', plan_id: '', instance: '', email: '', password: '', economic_group_id: '', google_email: '' });
   
@@ -83,6 +86,54 @@ export default function AdminDashboard() {
       setLoading(false);
     }
   };
+
+
+  // Filtro Inteligente Multi-Campos (Nome, Plano, Instância, Telefone, E-mail, ID e Grupo)
+  const filteredCompanies = useMemo(() => {
+    return companies.filter(comp => {
+      // 1. Filtro por Status
+      if (statusFilter !== 'all' && comp.status !== statusFilter) {
+        return false;
+      }
+
+      // 2. Filtro por Plano
+      const planName = comp.plans?.name || plans.find(p => p.id === comp.plan_id)?.name || '';
+      if (planFilter !== 'all') {
+        const matchesPlan = comp.plan_id === planFilter || planName.toLowerCase() === planFilter.toLowerCase();
+        if (!matchesPlan) return false;
+      }
+
+      // 3. Busca Global por Termo
+      if (!searchTerm.trim()) return true;
+      const term = searchTerm.toLowerCase().trim();
+
+      // Instância
+      const rawInst = comp.evolution_api_instance || '';
+      const matchedInst = instances.find(i => i.id === rawInst || i.display_name === rawInst || i.tenant_id === comp.id);
+      const instName = (matchedInst?.display_name || rawInst || '').toLowerCase();
+      const instPhone = (matchedInst?.phone_number || '').toLowerCase();
+
+      // Grupo Econômico
+      const groupName = (economicGroups.find(g => g.id === comp.economic_group_id)?.name || '').toLowerCase();
+
+      const name = (comp.name || '').toLowerCase();
+      const email = (comp.email || '').toLowerCase();
+      const googleEmail = (comp.settings?.google_email || '').toLowerCase();
+      const id = (comp.id || '').toLowerCase();
+      const pName = planName.toLowerCase();
+
+      return (
+        name.includes(term) ||
+        email.includes(term) ||
+        googleEmail.includes(term) ||
+        pName.includes(term) ||
+        instName.includes(term) ||
+        instPhone.includes(term) ||
+        groupName.includes(term) ||
+        id.includes(term)
+      );
+    });
+  }, [companies, plans, instances, economicGroups, searchTerm, statusFilter, planFilter]);
 
   const handleCreateGroup = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -468,7 +519,18 @@ export default function AdminDashboard() {
               <ThemeToggle />
               <div className="flex items-center bg-white dark:bg-[#202c33] border border-black/5 dark:border-white/10 rounded-full px-4 py-1.5 shadow-sm focus-within:ring-2 focus-within:ring-[#00a884] transition-all">
                 <Search size={16} className="text-[#aebac1]" />
-                <input type="text" placeholder="Buscar ID ou Empresa..." className="bg-transparent border-none outline-none text-sm ml-2 w-48 dark:text-white" />
+                <input 
+                  type="text" 
+                  value={searchTerm}
+                  onChange={e => setSearchTerm(e.target.value)}
+                  placeholder="Buscar nome, plano, instância..." 
+                  className="bg-transparent border-none outline-none text-sm ml-2 w-48 sm:w-64 dark:text-white" 
+                />
+                {searchTerm && (
+                  <button onClick={() => setSearchTerm('')} className="p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-white rounded-full">
+                    <X size={14} />
+                  </button>
+                )}
               </div>
             </div>
          </header>
@@ -521,7 +583,7 @@ export default function AdminDashboard() {
                    </tr>
                  </thead>
                  <tbody className="divide-y divide-black/5 dark:divide-white/5">
-                   {companies.map(comp => (
+                   {filteredCompanies.map(comp => (
                      <tr key={comp.id} className="hover:bg-black/5 dark:hover:bg-white/5 transition-colors group">
                        <td className="p-3">
                          {comp.status === 'active' && <span className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-green-500/10 text-green-500 rounded-full font-bold text-[11px] uppercase tracking-wide leading-none h-6"><CheckCircle2 size={12} /> Ativo</span>}
