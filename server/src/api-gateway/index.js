@@ -344,7 +344,6 @@ router.put('/v1/admin/companies/:id', async (req, res) => {
             try {
                 await supabase.from('whatsapp_instances').update({ tenant_id: companyId }).eq('id', instUuid);
                 await supabase.from('conversations').update({ tenant_id: companyId }).eq('instance_id', instUuid);
-                await supabase.from('messages').update({ tenant_id: companyId }).eq('instance_id', instUuid);
             } catch (ignoreErr) {}
         }
 

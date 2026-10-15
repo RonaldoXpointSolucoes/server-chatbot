@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Building2, ArrowRight, Loader2, AlertCircle, Terminal, X, ChevronRight, Eye, EyeOff, Camera, ShieldCheck, KeyRound, UserCheck, RefreshCw, Activity } from 'lucide-react';
-import { supabase } from '../services/supabase';
+import { Building2, ArrowRight, Loader2, AlertCircle, Terminal, X, ChevronRight, Eye, EyeOff, Camera, ShieldCheck, KeyRound, UserCheck, RefreshCw, Activity, Sparkles, Link2, PlusCircle, Check } from 'lucide-react';
+import { supabase, masterSupabase } from '../services/supabase';
 import ThemeToggle from '../components/ThemeToggle';
 import { useChatStore } from '../store/chatStore';
 import { geminiService } from '../services/geminiService';
@@ -45,6 +45,31 @@ export default function ClientLogin() {
   const [faceRegisterModal, setFaceRegisterModal] = useState<{ email: string, pwdPlain: string } | null>(null);
   const [showFaceSuccess, setShowFaceSuccess] = useState(false);
   const [faceVerifyError, setFaceVerifyError] = useState('');
+
+  // Estados do Login com o Google e Vínculo Inteligente de Empresas
+  const [googleLinkModal, setGoogleLinkModal] = useState<{
+    open: boolean;
+    email: string;
+    name: string;
+    authUserId: string;
+    mode: 'link' | 'create';
+    linkEmail: string;
+    linkPass: string;
+    newCompanyName: string;
+    error: string;
+    loading: boolean;
+  }>({
+    open: false,
+    email: '',
+    name: '',
+    authUserId: '',
+    mode: 'link',
+    linkEmail: '',
+    linkPass: '',
+    newCompanyName: '',
+    error: '',
+    loading: false
+  });
 
   // Novos estados para fluxo de vínculo inteligente (Zero Cliques)
   const [faceLinkingStep, setFaceLinkingStep] = useState(false);
@@ -513,18 +538,273 @@ export default function ClientLogin() {
 
   const navigate = useNavigate();
 
+
+  const saveUserSessionAndRedirect = (
+    tenantData: any,
+    userName: string,
+    userRole: string,
+    userEmail: string,
+    userId: string,
+    allowedInstances: any[],
+    allowedCompanies: any[]
+  ) => {
+    localStorage.setItem('keep_logged', 'true');
+    localStorage.setItem('current_tenant_id', tenantData.id);
+    localStorage.setItem('current_tenant_name', tenantData.name);
+    localStorage.setItem('current_user_name', userName);
+    localStorage.setItem('current_user_role', userRole);
+    localStorage.setItem('current_user_email', userEmail);
+    if (userId) {
+      localStorage.setItem('current_user_id', userId);
+    }
+    localStorage.setItem('allowed_instances', JSON.stringify(allowedInstances || []));
+    localStorage.setItem('allowed_companies', JSON.stringify(allowedCompanies || []));
+    navigate('/chat', { replace: true });
+  };
+
+  const handleGoogleLogin = async () => {
+    setIsLoading(true);
+    setErrorMsg('');
+    setLoginError(null);
+    try {
+      const origin = window.location.origin;
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: origin,
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'select_account'
+          }
+        }
+      });
+      if (error) throw error;
+    } catch (err: any) {
+      console.error('Google OAuth error:', err);
+      setIsLoading(false);
+      setErrorMsg(err.message || 'Falha ao autenticar com a conta Google.');
+    }
+  };
+
+  // Efetua o vínculo de uma conta Google à empresa existente
+  const handleLinkGoogleToCompany = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!googleLinkModal.linkEmail.trim() || !googleLinkModal.linkPass.trim()) return;
+
+    setGoogleLinkModal(prev => ({ ...prev, loading: true, error: '' }));
+    try {
+      const { data: authResult, error: authError } = await supabase.rpc('check_login', {
+        p_email: googleLinkModal.linkEmail.trim().toLowerCase(),
+        p_password: googleLinkModal.linkPass.trim()
+      });
+
+      if (authError || !authResult) {
+        setGoogleLinkModal(prev => ({
+          ...prev,
+          loading: false,
+          error: 'E-mail corporativo ou senha incorretos para validação da empresa.'
+        }));
+        return;
+      }
+
+      if (authResult.type === 'admin') {
+        const comp = authResult.user;
+        const currentSettings = comp.settings || {};
+        const updatedSettings = {
+          ...currentSettings,
+          google_email: googleLinkModal.email
+        };
+
+        await masterSupabase
+          .from('companies')
+          .update({ settings: updatedSettings })
+          .eq('id', comp.id);
+
+        saveUserSessionAndRedirect(
+          comp,
+          comp.name,
+          'admin',
+          googleLinkModal.email,
+          googleLinkModal.authUserId,
+          [comp.evolution_api_instance],
+          [comp.id]
+        );
+      } else if (authResult.type === 'agent') {
+        const agent = authResult.user;
+        const parentComp = authResult.parent;
+        const currentSettings = agent.settings || {};
+        const updatedSettings = {
+          ...currentSettings,
+          google_email: googleLinkModal.email
+        };
+
+        await masterSupabase
+          .from('tenant_users')
+          .update({ settings: updatedSettings })
+          .eq('id', agent.id);
+
+        saveUserSessionAndRedirect(
+          parentComp,
+          agent.full_name,
+          agent.role || 'agent',
+          googleLinkModal.email,
+          googleLinkModal.authUserId,
+          agent.allowed_instances || [],
+          agent.allowed_companies || []
+        );
+      }
+    } catch (err: any) {
+      console.error('Erro ao vincular Google:', err);
+      setGoogleLinkModal(prev => ({
+        ...prev,
+        loading: false,
+        error: err.message || 'Erro inesperado ao vincular empresa.'
+      }));
+    }
+  };
+
+  // Cria uma nova empresa vinculada a esta conta Google
+  const handleCreateCompanyWithGoogle = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!googleLinkModal.newCompanyName.trim()) return;
+
+    setGoogleLinkModal(prev => ({ ...prev, loading: true, error: '' }));
+    try {
+      const newCompanyId = crypto.randomUUID();
+      const payload = {
+        id: newCompanyId,
+        name: googleLinkModal.newCompanyName.trim(),
+        email: googleLinkModal.email,
+        password: crypto.randomUUID().slice(0, 12),
+        status: 'active',
+        settings: { google_email: googleLinkModal.email },
+        current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+      };
+
+      const { data: createdComp, error: compErr } = await masterSupabase
+        .from('companies')
+        .insert(payload)
+        .select()
+        .single();
+
+      if (compErr || !createdComp) {
+        throw new Error(compErr?.message || 'Falha ao criar nova empresa.');
+      }
+
+      // Cria o usuário de administração em tenant_users
+      await masterSupabase.from('tenant_users').insert({
+        tenant_id: newCompanyId,
+        user_id: googleLinkModal.authUserId || crypto.randomUUID(),
+        email: googleLinkModal.email,
+        full_name: googleLinkModal.name || `Admin - ${createdComp.name}`,
+        role: 'admin',
+        allowed_instances: [],
+        allowed_companies: [newCompanyId]
+      });
+
+      saveUserSessionAndRedirect(
+        createdComp,
+        googleLinkModal.name || createdComp.name,
+        'admin',
+        googleLinkModal.email,
+        googleLinkModal.authUserId,
+        [],
+        [newCompanyId]
+      );
+    } catch (err: any) {
+      console.error('Erro ao cadastrar empresa com Google:', err);
+      setGoogleLinkModal(prev => ({
+        ...prev,
+        loading: false,
+        error: err.message || 'Falha ao cadastrar nova empresa com o Google.'
+      }));
+    }
+  };
+
+
   // Redireciona automaticamente se já estiver logado (e com todos os dados essenciais)
   useEffect(() => {
-    const tenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
-    const tenantName = localStorage.getItem('current_tenant_name') || sessionStorage.getItem('current_tenant_name');
-    
-    if (tenantId && tenantId !== 'undefined' && tenantName && tenantName !== 'undefined') {
-      navigate('/chat', { replace: true });
-    } else if (tenantId) {
-      // Limpa dados parciais para evitar loop de redirecionamento com ProtectedRoute
-      localStorage.removeItem('current_tenant_id');
-      sessionStorage.removeItem('current_tenant_id');
-    }
+    const checkAuthAndOAuthReturn = async () => {
+      const tenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+      const tenantName = localStorage.getItem('current_tenant_name') || sessionStorage.getItem('current_tenant_name');
+      
+      if (tenantId && tenantId !== 'undefined' && tenantName && tenantName !== 'undefined') {
+        navigate('/chat', { replace: true });
+        return;
+      } else if (tenantId) {
+        localStorage.removeItem('current_tenant_id');
+        sessionStorage.removeItem('current_tenant_id');
+      }
+
+      // Verifica se há retorno de autenticação OAuth (Google) ativa
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user?.email) {
+          const gEmail = session.user.email.trim().toLowerCase();
+          const gName = session.user.user_metadata?.full_name || session.user.user_metadata?.name || gEmail.split('@')[0];
+          const authId = session.user.id;
+
+          setIsLoading(true);
+
+          // 1. Procura em companies (por email ou google_email)
+          const { data: compList } = await masterSupabase
+            .from('companies')
+            .select('*')
+            .or(`email.eq.${gEmail},settings->>google_email.eq.${gEmail}`)
+            .limit(1);
+
+          if (compList && compList.length > 0) {
+            const comp = compList[0];
+            saveUserSessionAndRedirect(comp, gName, 'admin', gEmail, authId, [comp.evolution_api_instance], [comp.id]);
+            return;
+          }
+
+          // 2. Procura em tenant_users
+          const { data: agentList } = await masterSupabase
+            .from('tenant_users')
+            .select('*, companies:tenant_id(*)')
+            .or(`email.eq.${gEmail},settings->>google_email.eq.${gEmail}`)
+            .limit(1);
+
+          if (agentList && agentList.length > 0) {
+            const agent = agentList[0];
+            const parentComp = agent.companies;
+            if (parentComp) {
+              saveUserSessionAndRedirect(
+                parentComp,
+                agent.full_name || gName,
+                agent.role || 'agent',
+                gEmail,
+                authId,
+                agent.allowed_instances || [parentComp.evolution_api_instance],
+                agent.allowed_companies || [parentComp.id]
+              );
+              return;
+            }
+          }
+
+          // 3. Caso não possua empresa vinculada, abre o modal de onboarding inteligente
+          setIsLoading(false);
+          setGoogleLinkModal({
+            open: true,
+            email: gEmail,
+            name: gName,
+            authUserId: authId,
+            mode: 'link',
+            linkEmail: '',
+            linkPass: '',
+            newCompanyName: '',
+            error: '',
+            loading: false
+          });
+        }
+      } catch (err) {
+        console.warn('Erro ao processar retorno OAuth:', err);
+        setIsLoading(false);
+      }
+    };
+
+    checkAuthAndOAuthReturn();
   }, [navigate]);
 
   // Controle reativo robusto para iniciar/parar a câmera baseado no estado ativo do modal
@@ -800,21 +1080,40 @@ export default function ClientLogin() {
             <div className="flex-grow border-t border-gray-200 dark:border-white/10"></div>
           </div>
 
-          <button 
-            type="button"
-            onClick={() => {
-              setFaceIdActive(true);
-              setFaceEmailStep(false);
-              setCameraActive(true);
-              setFaceVerifyError('');
-              setFaceLinkingStep(false);
-              setCapturedPhotoForLink(null);
-            }}
-            className="w-full bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-600 dark:text-emerald-400 font-semibold py-3 px-4 rounded-xl border border-emerald-500/20 hover:border-emerald-500/30 transition-all hover:-translate-y-0.5 flex items-center justify-center gap-2"
-          >
-            <Camera size={18} className="text-emerald-500" />
-            Entrar com Face ID
-          </button>
+          <div className="space-y-3">
+            {/* Botão Oficial do Google */}
+            <button 
+              type="button"
+              onClick={handleGoogleLogin}
+              disabled={isLoading}
+              className="w-full bg-white dark:bg-[#182229] hover:bg-gray-50 dark:hover:bg-[#202c33] text-gray-700 dark:text-[#e9edef] font-semibold py-3 px-4 rounded-xl border border-gray-200 dark:border-white/10 transition-all hover:-translate-y-0.5 flex items-center justify-center gap-3 shadow-sm hover:shadow active:scale-[0.99] disabled:opacity-50"
+            >
+              <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
+                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+              </svg>
+              <span>Continuar com o Google</span>
+            </button>
+
+            {/* Botão Oficial Face ID */}
+            <button 
+              type="button"
+              onClick={() => {
+                setFaceIdActive(true);
+                setFaceEmailStep(false);
+                setCameraActive(true);
+                setFaceVerifyError('');
+                setFaceLinkingStep(false);
+                setCapturedPhotoForLink(null);
+              }}
+              className="w-full bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-600 dark:text-emerald-400 font-semibold py-3 px-4 rounded-xl border border-emerald-500/20 hover:border-emerald-500/30 transition-all hover:-translate-y-0.5 flex items-center justify-center gap-2"
+            >
+              <Camera size={18} className="text-emerald-500" />
+              Entrar com Face ID
+            </button>
+          </div>
           
           {/* Card de Alerta Rico com Diagnóstico Real do Erro */}
           <LoginErrorAlert

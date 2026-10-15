@@ -16,7 +16,7 @@ export default function AdminDashboard() {
   const [instances, setInstances] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNewCompany, setShowNewCompany] = useState(false);
-  const [newCompany, setNewCompany] = useState({ name: '', plan_id: '', instance: '', email: '', password: '', economic_group_id: '' });
+  const [newCompany, setNewCompany] = useState({ name: '', plan_id: '', instance: '', email: '', password: '', economic_group_id: '', google_email: '' });
   
   const [showNewGroup, setShowNewGroup] = useState(false);
   const [showEditGroup, setShowEditGroup] = useState<any>(null);
@@ -52,48 +52,36 @@ export default function AdminDashboard() {
   const fetchData = async () => {
     setLoading(true);
     try {
+      // Prioriza consultas diretas e paralelas via masterSupabase (Service Role) com máxima performance
       const [compRes, plansRes, groupsRes, instRes] = await Promise.all([
-        fetch(`${apiUrl}/api/v1/admin/companies`).catch(() => null),
-        fetch(`${apiUrl}/api/v1/admin/plans`).catch(() => null),
-        fetch(`${apiUrl}/api/v1/admin/economic-groups`).catch(() => null),
+        masterSupabase.from('companies').select('*, plans(name)').order('created_at', { ascending: false }),
+        masterSupabase.from('plans').select('*'),
+        masterSupabase.from('economic_groups').select('*'),
         masterSupabase.from('whatsapp_instances').select('id, display_name, phone_number, status, tenant_id').order('display_name', { ascending: true })
       ]);
-      
-      const companiesData = compRes && compRes.ok ? await compRes.json() : null;
-      const plansData = plansRes && plansRes.ok ? await plansRes.json() : null;
-      const groupsData = groupsRes && groupsRes.ok ? await groupsRes.json() : null;
-      
-      if (companiesData && Array.isArray(companiesData)) {
-        setCompanies(companiesData);
-      } else {
-        const { data: sbCompanies } = await masterSupabase.from('companies').select('*').order('created_at', { ascending: false });
-        if (sbCompanies) setCompanies(sbCompanies);
-      }
 
-      if (plansData && Array.isArray(plansData)) {
-        setPlans(plansData);
-      } else {
-        const { data: sbPlans } = await masterSupabase.from('plans').select('*');
-        if (sbPlans) setPlans(sbPlans);
-      }
-
-      if (groupsData && Array.isArray(groupsData)) {
-        setEconomicGroups(groupsData);
-      } else {
-        const { data: sbGroups } = await masterSupabase.from('economic_groups').select('*');
-        if (sbGroups) setEconomicGroups(sbGroups);
-      }
-
-      if (instRes && instRes.data) {
-        setInstances(instRes.data);
-      }
+      if (compRes?.data) setCompanies(compRes.data);
+      if (plansRes?.data) setPlans(plansRes.data);
+      if (groupsRes?.data) setEconomicGroups(groupsRes.data);
+      if (instRes?.data) setInstances(instRes.data);
     } catch (e) {
-      console.error('Error fetching admin data:', e);
-      // Supabase fallback
-      const { data: sbCompanies } = await masterSupabase.from('companies').select('*').order('created_at', { ascending: false });
-      if (sbCompanies) setCompanies(sbCompanies);
+      console.error('Error fetching admin data via masterSupabase:', e);
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 4000);
+        const [compRes, plansRes] = await Promise.all([
+          fetch(`${apiUrl}/api/v1/admin/companies`, { signal: controller.signal }).then(r => r.ok ? r.json() : null).catch(() => null),
+          fetch(`${apiUrl}/api/v1/admin/plans`, { signal: controller.signal }).then(r => r.ok ? r.json() : null).catch(() => null)
+        ]);
+        clearTimeout(timeoutId);
+        if (compRes && Array.isArray(compRes)) setCompanies(compRes);
+        if (plansRes && Array.isArray(plansRes)) setPlans(plansRes);
+      } catch (fallbackErr) {
+        console.warn('Fallback API error:', fallbackErr);
+      }
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleCreateGroup = async (e: React.FormEvent) => {
@@ -208,6 +196,7 @@ export default function AdminDashboard() {
       password: newCompany.password,
       economic_group_id: newCompany.economic_group_id || null,
       status: 'active',
+      settings: newCompany.google_email?.trim() ? { google_email: newCompany.google_email.trim().toLowerCase() } : {},
       current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
     };
 
@@ -289,10 +278,6 @@ export default function AdminDashboard() {
           await masterSupabase.from('conversations')
             .update({ tenant_id: createdCompanyId })
             .eq('instance_id', instUuid);
-
-          await masterSupabase.from('messages')
-            .update({ tenant_id: createdCompanyId })
-            .eq('instance_id', instUuid);
         } catch (instErr) {
           console.error('Erro ao associar instância à empresa:', instErr);
         }
@@ -300,7 +285,7 @@ export default function AdminDashboard() {
     }
     
     setShowNewCompany(false);
-    setNewCompany({ name: '', plan_id: '', instance: '', email: '', password: '', economic_group_id: '' });
+    setNewCompany({ name: '', plan_id: '', instance: '', email: '', password: '', economic_group_id: '', google_email: '' });
     fetchData();
   };
 
@@ -333,6 +318,11 @@ export default function AdminDashboard() {
         })
       }).catch(() => null);
 
+      const updatedSettings = {
+        ...(showEditCompany.settings || {}),
+        google_email: showEditCompany.google_email?.trim() ? showEditCompany.google_email.trim().toLowerCase() : (showEditCompany.settings?.google_email || null)
+      };
+
       await masterSupabase.from('companies').update({
         name: showEditCompany.name,
         plan_id: showEditCompany.plan_id,
@@ -341,6 +331,7 @@ export default function AdminDashboard() {
         password: showEditCompany.password,
         status: showEditCompany.status,
         economic_group_id: showEditCompany.economic_group_id || null,
+        settings: updatedSettings,
         current_period_end: new Date(showEditCompany.current_period_end)
       }).eq('id', companyId);
 
@@ -367,10 +358,6 @@ export default function AdminDashboard() {
           .eq('id', instUuid);
 
         await masterSupabase.from('conversations')
-          .update({ tenant_id: companyId })
-          .eq('instance_id', instUuid);
-
-        await masterSupabase.from('messages')
           .update({ tenant_id: companyId })
           .eq('instance_id', instUuid);
       }
