@@ -1,5 +1,5 @@
 {
-  "version": "7.8.8",
-  "buildDate": "2026-10-13T22:00:41.310Z",
-  "summary": "API externa por instância com credenciais e testes no painel central"
+  "version": "7.8.9",
+  "buildDate": "2026-10-15T19:10:59.234Z",
+  "summary": "Login com Google OAuth + Vínculo Empresarial, Filtro Multi-Campos no /admin e Eliminação de Credenciais Fantasmas"
 }

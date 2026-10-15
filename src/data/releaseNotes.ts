@@ -20,6 +20,37 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.8.9',
+    date: '2026-10-15',
+    summary: 'Login com Google OAuth + Vínculo Empresarial, Filtro Multi-Campos no /admin e Eliminação de Credenciais Fantasmas',
+    notes: [
+      {
+        id: '7.8.9-1',
+        category: 'features',
+        title: 'Login com Google OAuth e Vínculo Inteligente para Empresas',
+        description: 'Operação híbrida (login tradicional + Google 1-clique) na tela de entrada e modal inteligente para vincular contas Google a empresas existentes ou criar novas empresas automaticamente.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.8.9-2',
+        category: 'improvements',
+        title: 'Filtro Multi-Campos Inteligente no Painel Master (/admin)',
+        description: 'Busca instantânea sem acentos por Nome da Empresa, Plano, Instância WhatsApp (nome, telefone e UUID), E-mail Corporativo/Google, Grupo Econômico e Status.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+      },
+      {
+        id: '7.8.9-3',
+        category: 'fixes',
+        title: 'Correção do Loop 500 ao Criar Empresa e Limpeza de Credenciais Fantasmas',
+        description: 'Removido PATCH síncrono massivo em messages que abria o Circuit Breaker ao criar/editar empresas e eliminados wakes de instâncias desconectadas sem aparelho pareado.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      }
+    ]
+  },
+  {
     version: '7.8.8', date: '2026-10-13', summary: 'API externa por instância com credenciais e testes no painel central',
     notes: [
       { id: '7.8.8-1', category: 'features', title: 'Painel API no Gerenciador de Instâncias', description: 'Cada caixa oferece credenciais, exemplos completos e teste de texto ou mídia pela API externa, com resposta HTTP e identificador do WhatsApp.', tag: 'NOVO', badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' },
