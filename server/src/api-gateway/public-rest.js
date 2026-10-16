@@ -578,8 +578,18 @@ router.post([
         });
     } catch (e) {
         const errMessage = e?.message || (typeof e === 'string' ? e : (e ? JSON.stringify(e) : 'Erro interno desconhecido ao processar envio'));
+        const statusCodeNum = Number(e?.output?.statusCode || e?.statusCode || 0);
         const isConnClosed = errMessage.includes('Connection Closed') || 
-            errMessage.includes('WebSocket não aberto') || 
+            errMessage.includes('Connection Terminated') ||
+            errMessage.includes('Connection lost') ||
+            errMessage.includes('Stream Errored') ||
+            errMessage.includes('stream errored') ||
+            errMessage.includes('1006') ||
+            errMessage.includes('428') ||
+            errMessage.includes('515') ||
+            errMessage.includes('408') ||
+            errMessage.includes('WebSocket') || 
+            errMessage.includes('not open') ||
             errMessage.includes('desconectada') || 
             errMessage.includes('offline') || 
             errMessage.includes('socket indisponível') ||
@@ -590,15 +600,16 @@ router.post([
             errMessage.includes('timeout') ||
             errMessage.includes('timed out') ||
             errMessage.includes('ETIMEDOUT') ||
-            errMessage.includes('ECONNRESET');
+            errMessage.includes('ECONNRESET') ||
+            [1006, 408, 428, 500, 503, 515].includes(statusCodeNum);
 
-        // Se a conexão fechou durante o envio, garante entrega salvando no outbox resiliente
-        if (isConnClosed && id && number && text) {
+        // Sempre que id, number e text existirem, preserva o envio no outbox resiliente em vez de perder a mensagem com erro 500
+        if ((isConnClosed || !e?.isDefinitive) && id && number && text) {
             try {
                 const { default: sessionManager } = await import('../session-manager/index.js');
                 const cleanPhone = String(number).replace(/\D/g, '');
                 const targetJid = cleanPhone.includes('@') ? cleanPhone : `${cleanPhone}@s.whatsapp.net`;
-                console.log(`[API Gateway] [sendText] 🔄 Enfileirando mensagem via outbox resiliente após falha de conexão (Instância: ${id}, Destino: ${targetJid})...`);
+                console.log(`[API Gateway] [sendText] 🔄 Enfileirando mensagem via outbox resiliente após oscilação de socket (${errMessage.substring(0, 60)}) | Instância: ${id} | Destino: ${targetJid}...`);
                 const queued = await sessionManager.enqueueMessage(id, {
                     targetJid,
                     type: 'text',
@@ -613,7 +624,7 @@ router.post([
                     queue_id: queued?.id || null
                 });
             } catch (qErr) {
-                console.error('[API Gateway] [sendText] Falha no fallback para outbox:', qErr?.message || qErr);
+                console.warn('[API Gateway] [sendText] Aviso no fallback primário para outbox:', qErr?.message || qErr);
                 // Fallback emergencial direto no banco se o SessionManager falhar
                 try {
                     const cleanPhone = String(number).replace(/\D/g, '');
@@ -819,8 +830,53 @@ router.post(['/message/sendMedia', '/message/sendMedia/:instance'], requireApiKe
             console.warn(`[API Gateway] [sendMedia] Aviso na 1ª tentativa (${sendErr.message}). Retentando com socket renovado...`);
             const retrySock = await getSocketWithRetry(tenant_id, id, 2);
             if (retrySock) {
-                msgResult = await retrySock.sendMessage(remoteJid, messagePayload, { isAutomation: true });
+                try {
+                    msgResult = await retrySock.sendMessage(remoteJid, messagePayload, { isAutomation: true });
+                } catch (retryErr) {
+                    console.warn(`[API Gateway] [sendMedia] 🔄 Enfileirando mídia no Outbox Resiliente após oscilação (${retryErr.message})...`);
+                    const { data: queuedMedia } = await supabase.from('wa_outgoing_messages').insert({
+                        tenant_id,
+                        instance_id: id,
+                        chat_jid: remoteJid,
+                        message_type: mediatype,
+                        body: req.body.caption || file.originalname || '',
+                        media_url: mediaUrl,
+                        status: 'pending',
+                        priority: 1
+                    }).select('id').maybeSingle();
+                    if (queuedMedia?.id) {
+                        return res.status(202).json({
+                            message: "Conexão oscilou durante o envio da mídia. Preservada no outbox resiliente.",
+                            code: 'MEDIA_QUEUED_RECONNECTING',
+                            instance_id: id,
+                            mediaUrl,
+                            status: 'PENDING',
+                            queue_id: queuedMedia.id
+                        });
+                    }
+                    throw retryErr;
+                }
             } else {
+                const { data: queuedMedia } = await supabase.from('wa_outgoing_messages').insert({
+                    tenant_id,
+                    instance_id: id,
+                    chat_jid: remoteJid,
+                    message_type: mediatype,
+                    body: req.body.caption || file.originalname || '',
+                    media_url: mediaUrl,
+                    status: 'pending',
+                    priority: 1
+                }).select('id').maybeSingle();
+                if (queuedMedia?.id) {
+                    return res.status(202).json({
+                        message: "Conexão oscilou durante o envio da mídia. Preservada no outbox resiliente.",
+                        code: 'MEDIA_QUEUED_RECONNECTING',
+                        instance_id: id,
+                        mediaUrl,
+                        status: 'PENDING',
+                        queue_id: queuedMedia.id
+                    });
+                }
                 throw sendErr;
             }
         }

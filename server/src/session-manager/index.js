@@ -708,11 +708,22 @@ class SessionManager {
             } catch (e) {}
         }
 
-        clearInstanceMemoryCache(instanceId);
-
         try {
             await flushPendingWrites(instanceId);
         } catch (e) {}
+
+        const reasonStr = String(reason || '').toLowerCase();
+        const shouldWipeKeyCache =
+            reasonStr === 'explicit_logout' ||
+            reasonStr === 'qr_timeout' ||
+            reasonStr === 'closesession' ||
+            reasonStr.includes('bad_session') ||
+            reasonStr.includes('bad session') ||
+            reasonStr.includes('401');
+
+        if (shouldWipeKeyCache) {
+            clearInstanceMemoryCache(instanceId);
+        }
     }
 
     async acquireSessionLock(instanceId, force = false) {
@@ -1001,9 +1012,13 @@ class SessionManager {
                 maxMsgRetryCount: 5, // Ativado (5 retentativas) com busca no DB e controle de cache para garantir 100% das entregas
                 msgRetryCounterCache,
                 shouldSyncHistoryMessage: (histNotification) => {
-                    // Sempre permite boot inicial e mapeamentos LID essenciais para estabilidade da sessão
+                    // Sempre permite mapeamentos LID essenciais (PUSH_NAME) e sync sob demanda
                     const syncType = histNotification?.syncType;
-                    if (syncType === 0 || syncType === 'INITIAL_BOOT' || syncType === 4 || syncType === 'PUSH_NAME' || syncType === 'ON_DEMAND') {
+                    if (syncType === 4 || syncType === 'PUSH_NAME' || syncType === 'ON_DEMAND') {
+                        return true;
+                    }
+                    // Em novo pareamento QR (!wasAuthenticatedOnBoot), permite INITIAL_BOOT
+                    if (!wasAuthenticatedOnBoot && (syncType === 0 || syncType === 'INITIAL_BOOT')) {
                         return true;
                     }
                     const instSettings = currentInstance?.settings || {};
@@ -2066,39 +2081,78 @@ class SessionManager {
                                     resolve(result);
                                     return; // Sucesso, interrompe o loop
                                 } catch (error) {
-                                    lastError = error;
+                                    const rawErrStr = error?.message || (typeof error === 'string' ? error : String(error || 'Unknown error'));
+                                    const statusCode = error?.output?.statusCode || error?.statusCode;
+                                    const isWsAbnormalDrop =
+                                        rawErrStr === '1006' ||
+                                        rawErrStr.includes('1006') ||
+                                        statusCode === 1006 ||
+                                        statusCode === 428 ||
+                                        statusCode === 515 ||
+                                        rawErrStr.includes('Connection Terminated') ||
+                                        rawErrStr.includes('Connection Closed') ||
+                                        rawErrStr.includes('Connection lost') ||
+                                        rawErrStr.includes('Stream Errored') ||
+                                        rawErrStr.includes('stream errored') ||
+                                        rawErrStr.includes('WebSocket') ||
+                                        rawErrStr.includes('not open') ||
+                                        rawErrStr.includes('ECONNRESET') ||
+                                        rawErrStr.includes('ETIMEDOUT');
+
+                                    if (isWsAbnormalDrop) {
+                                        lastError = new Error(rawErrStr.includes('Connection Closed') ? rawErrStr : `Connection Closed (${rawErrStr})`);
+                                    } else {
+                                        lastError = error;
+                                    }
                                     attempts++;
 
                                     const isPermanentlyClosed = 
-                                        error.message?.includes('logged_out') ||
-                                        error.message?.includes('blocked_12h') ||
-                                        error.message?.includes('paused') ||
-                                        error.message?.includes('TIMEOUT_BAILEYS_SOCKET_SEND') ||
-                                        error.message?.includes('TIMEOUT_FASTPATH_SEND') ||
-                                        error.message?.includes('está offline no banco') ||
-                                        error.message?.includes('está logged_out no banco') ||
-                                        error.message?.includes('está paused no banco');
+                                        rawErrStr.includes('logged_out') ||
+                                        rawErrStr.includes('blocked_12h') ||
+                                        rawErrStr.includes('paused') ||
+                                        rawErrStr.includes('TIMEOUT_BAILEYS_SOCKET_SEND') ||
+                                        rawErrStr.includes('TIMEOUT_FASTPATH_SEND') ||
+                                        rawErrStr.includes('está offline no banco') ||
+                                        rawErrStr.includes('está logged_out no banco') ||
+                                        rawErrStr.includes('está paused no banco');
 
                                     const isUnrecoverable = isPermanentlyClosed ||
-                                        error.message?.includes('reading \'id\'') ||
-                                        error.message?.includes('reading "id"') ||
-                                        error.message?.includes('Cannot read properties of undefined') ||
-                                        error.message?.includes('desconectada') ||
-                                        error.message?.includes('not authenticated') ||
-                                        error.message?.includes('autenticação pendente');
+                                        rawErrStr.includes('reading \'id\'') ||
+                                        rawErrStr.includes('reading "id"') ||
+                                        rawErrStr.includes('Cannot read properties of undefined') ||
+                                        rawErrStr.includes('desconectada') ||
+                                        rawErrStr.includes('not authenticated') ||
+                                        rawErrStr.includes('autenticação pendente');
 
                                     if (isUnrecoverable) {
-                                        console.warn(`[SessionManager - Antiban] Abortando retentativas para ${jid} via instância ${instanceId} (motivo definitivo/não recuperável): ${error.message}`);
+                                        console.warn(`[SessionManager - Antiban] Abortando retentativas para ${jid} via instância ${instanceId} (motivo definitivo/não recuperável): ${rawErrStr}`);
+                                        break;
+                                    }
+
+                                    // Se o WebSocket caiu com 1006 / Connection Terminated, aciona reconexão imediata em background
+                                    // e delega rapidamente para o Outbox Resiliente sem bloquear na fila em memória
+                                    if (isWsAbnormalDrop) {
+                                        const currentSess = this.sessions.get(instanceId);
+                                        if (currentSess?.sock === sock && (!isSocketOpen(sock) || rawErrStr === '1006' || rawErrStr.includes('Connection Terminated'))) {
+                                            if (!this.connectingState.has(instanceId)) {
+                                                if (this.reconnectingTimers.has(instanceId)) {
+                                                    clearTimeout(this.reconnectingTimers.get(instanceId));
+                                                    this.reconnectingTimers.delete(instanceId);
+                                                }
+                                                this.createSession(tenantId, instanceId, true).catch(() => {});
+                                            }
+                                        }
+                                        console.warn(`[SessionManager - Antiban] Oscilação transitória de socket (${rawErrStr}) ao enviar para ${jid} via instância ${instanceId}. Delegando imediatamente para o Outbox Resiliente...`);
                                         break;
                                     }
 
                                     const isCryptoOrSessionErr = 
-                                        error.message?.includes('No sessions') || 
-                                        error.message?.includes('SessionError') || 
-                                        error.message?.includes('479') || 
-                                        error.message?.includes('PreKey') || 
-                                        error.message?.includes('Bad MAC') ||
-                                        (error.message?.includes('401') && !jid.endsWith('@newsletter'));
+                                        rawErrStr.includes('No sessions') || 
+                                        rawErrStr.includes('SessionError') || 
+                                        rawErrStr.includes('479') || 
+                                        rawErrStr.includes('PreKey') || 
+                                        rawErrStr.includes('Bad MAC') ||
+                                        (rawErrStr.includes('401') && !jid.endsWith('@newsletter'));
 
                                     if (isCryptoOrSessionErr) {
                                         console.warn(`[SessionManager - Antiban] Erro criptográfico de sessão/pre-key detectado para ${jid} via instância ${instanceId}. Limpando chaves...`);
@@ -2109,10 +2163,10 @@ class SessionManager {
 
                                     if (attempts < maxAttempts) {
                                         const retryDelay = 800 + Math.floor(Math.random() * 400);
-                                        console.log(`[SessionManager - Antiban] Tentativa transitória ${attempts}/${maxAttempts} para ${jid} via instância ${instanceId}: ${error.message || error}. Aguardando ${retryDelay}ms...`);
+                                        console.log(`[SessionManager - Antiban] Tentativa transitória ${attempts}/${maxAttempts} para ${jid} via instância ${instanceId}: ${rawErrStr}. Aguardando ${retryDelay}ms...`);
                                         await new Promise(r => setTimeout(r, retryDelay));
                                     } else {
-                                        console.error(`[SessionManager - Antiban] Todas as ${maxAttempts} tentativas falharam para ${jid} via instância ${instanceId}:`, error.message || error);
+                                        console.warn(`[SessionManager - Antiban] Envio direto não concluído após ${maxAttempts} tentativas para ${jid} via instância ${instanceId}: ${rawErrStr}`);
                                     }
                                 }
                             }
@@ -2167,6 +2221,10 @@ class SessionManager {
     }
 
     async getSocketOrWake(tenantId, instanceId, requireAuthenticated = false, force = false) {
+        if (!isInstanceAllowedForNode(instanceId, tenantId)) {
+            return null;
+        }
+
         let sock = this.getSocket(instanceId, requireAuthenticated);
         if (sock && !force) return sock;
 
@@ -2255,7 +2313,6 @@ class SessionManager {
                         const lastUpdated = data.updated_at ? new Date(data.updated_at) : null;
                         const isStale = !lastUpdated || (now.getTime() - lastUpdated.getTime() > 35000);
                         if (!isStale && (data.status === 'connected' || data.status === 'connected_local')) {
-                            console.log(`[SessionManager] Instância ${instanceId} está sob lock ativo do worker ${assignedNodeId} (lease até ${data.lease_until}). Ignorando wake local.`);
                             return null;
                         }
                     }

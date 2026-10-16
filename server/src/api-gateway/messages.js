@@ -1,8 +1,9 @@
 import express from 'express';
-import sessionManager from '../session-manager/index.js';
+import sessionManager, { isInstanceAllowedForNode } from '../session-manager/index.js';
 import { supabase, resolveTargetJid } from '../supabase.js';
 import realtime from '../realtime-publisher/index.js';
 import AutomationWorker from '../automation-worker/agent.js';
+import { forwardInternalInstanceRequest } from './external-message-routing.js';
 
 const router = express.Router();
 
@@ -28,10 +29,16 @@ router.post(['/', '/send', '/messages/send', '/sendText', '/send-text'], require
             return res.status(400).json({ error: 'Missing required parameters' });
         }
 
-        let sock = sessionManager.getSocket(instanceId, true);
+        // Encaminha ao worker detentor caso a instância pertença a outro nó (alpha-worker vs production-worker)
+        if (await forwardInternalInstanceRequest(req, res, instanceId)) {
+            return;
+        }
+
+        const isAllowedOnThisNode = isInstanceAllowedForNode(instanceId, tenantId);
+        let sock = isAllowedOnThisNode ? sessionManager.getSocket(instanceId, true) : null;
         
         // Anti-Bug: Se o socket estiver no meio do boot (deploy/restart), aguarda
-        if (!sock && sessionManager.connectingState.has(instanceId)) {
+        if (isAllowedOnThisNode && !sock && sessionManager.connectingState.has(instanceId)) {
             console.log(`[API Gateway] [messages/send] Segurando req de envio. Aguardando socket conectar: ${instanceId}`);
             try {
                 sock = await sessionManager.connectingState.get(instanceId);
@@ -60,73 +67,60 @@ router.post(['/', '/send', '/messages/send', '/sendText', '/send-text'], require
             });
         }
 
-        // Se o socket não existe na memória, tenta acordar com até 3 tentativas
-        if (!sock) {
-            const delays = [0, 1000, 2000];
-            for (let attempt = 0; attempt < 3; attempt++) {
+        // Se o socket não existe na memória e pertence a este nó, tenta acordar rapidamente
+        if (!sock && isAllowedOnThisNode) {
+            const delays = [0, 800];
+            for (let attempt = 0; attempt < delays.length; attempt++) {
                 if (delays[attempt] > 0) {
                     await new Promise(r => setTimeout(r, delays[attempt]));
                 }
                 sock = await sessionManager.getSocketOrWake(tenantId, instanceId, true);
                 if (sock) break;
             }
+        }
 
-            if (!sock) {
-                const { data: instCheck } = await supabase
-                    .from('whatsapp_instances')
-                    .select('id, status, last_error, display_name')
-                    .eq('id', instanceId)
-                    .maybeSingle();
+        if (!sock) {
+            // Enfileira no outbox resiliente (wa_outgoing_messages) para envio assíncrono pelo nó responsável
+            const cleanPhone = String(contactPhone).replace(/\D/g, '');
+            const targetJid = cleanPhone.includes('@') ? cleanPhone : `${cleanPhone}@s.whatsapp.net`;
+            const queued = await sessionManager.enqueueMessage(instanceId, {
+                targetJid,
+                type: 'text',
+                content: { text },
+                options: { isAutomation: isAuto }
+            });
 
-                const isDisconnected = !instCheck || 
-                    ['offline', 'logged_out', 'blocked_12h', 'disconnected', 'paused', 'close', 'closed'].includes(instCheck.status);
-
-                if (isDisconnected) {
-                    if (isAuto) console.error(`[API Gateway] [messages/send] ❌ Falha 400: Instância ${instanceId} desconectada | Destino: ${contactPhone}`);
-                    return res.status(400).json({ error: `Instância WhatsApp "${instCheck?.display_name || instanceId}" está desconectada. Por favor, reconecte-a para enviar mensagens.` });
-                }
-
-                // Enfileira no outbox resiliente (wa_outgoing_messages) para envio assíncrono pelo nó responsável
-                const cleanPhone = String(contactPhone).replace(/\D/g, '');
-                const targetJid = cleanPhone.includes('@') ? cleanPhone : `${cleanPhone}@s.whatsapp.net`;
-                const queued = await sessionManager.enqueueMessage(instanceId, {
-                    targetJid,
-                    type: 'text',
-                    content: { text },
-                    options: { isAutomation: isAuto }
-                });
-
-                return res.json({
-                    ok: true,
-                    data: {
-                        key: { remoteJid: targetJid, fromMe: true, id: `EDGE_${queued?.id?.replace(/-/g, '') || Date.now()}` },
-                        messageTimestamp: Math.floor(Date.now() / 1000)
-                    },
-                    status: 'PENDING'
-                });
-            }
+            return res.json({
+                ok: true,
+                data: {
+                    key: { remoteJid: targetJid, fromMe: true, id: `EDGE_${queued?.id?.replace(/-/g, '') || Date.now()}` },
+                    messageTimestamp: Math.floor(Date.now() / 1000)
+                },
+                status: 'PENDING'
+            });
         }
         
         const remoteJid = await resolveTargetJid(sock, contactPhone, tenantId);
+        const dbSenderType = isAuto ? 'automation' : 'human';
 
-        let msgResult;
+        let msgResult = null;
+        let queuedFallbackId = null;
         try {
             msgResult = await sock.sendMessage(remoteJid, { text });
         } catch (sendErr) {
-            console.warn(`[API Gateway] [messages/send] Falha na 1ª tentativa (${sendErr.message}). Tentando obter socket renovado...`);
-            const retrySock = await sessionManager.getSocketOrWake(tenantId, instanceId, true);
-            if (retrySock) {
-                msgResult = await retrySock.sendMessage(remoteJid, { text });
-            } else {
-                throw sendErr;
-            }
+            console.warn(`[API Gateway] [messages/send] Aviso na 1ª tentativa (${sendErr.message}). Delegando ao Outbox Resiliente...`);
+            const queued = await sessionManager.enqueueMessage(instanceId, {
+                targetJid: remoteJid,
+                type: 'text',
+                content: { text },
+                options: { isAutomation: isAuto, forceQueue: true, isFallback: true }
+            });
+            queuedFallbackId = `EDGE_${queued?.id?.replace(/-/g, '') || Date.now()}`;
         }
 
-        if (isAuto) {
+        if (isAuto && msgResult?.key?.id) {
             console.log(`[API Gateway] [messages/send] ✅ Sucesso no Envio de Automação | Instância: ${instanceId} | Destino: ${remoteJid} | MsgID: ${msgResult?.key?.id}`);
         }
-
-        const dbSenderType = isAuto ? 'automation' : 'human';
 
         try {
             const { EventProcessor } = await import('../event-processor/index.js');
@@ -149,11 +143,11 @@ router.post(['/', '/send', '/messages/send', '/sendText', '/send-text'], require
             conversation_id: conversationId,
             direction: 'outbound',
             message_type: 'text',
-            status: 'sent',
+            status: msgResult?.key?.id ? 'sent' : 'pending',
             text_content: text,
-            whatsapp_message_id: msgResult?.key?.id,
+            whatsapp_message_id: msgResult?.key?.id || queuedFallbackId,
             sender_type: dbSenderType,
-            raw_payload: msgResult
+            raw_payload: msgResult || { fallback_outbox: true, enqueued_at: new Date().toISOString() }
         }).select('*').single();
 
         if (dbError) throw dbError;

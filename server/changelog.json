@@ -1,6 +1,10 @@
 {
-  "version": "7.8.6",
+  "version": "7.8.8",
   "changelog": [
+    "🛡️ Resiliência Total contra Erro 1006 / Connection Terminated: Detecção imediata de oscilações WebSocket com delegação instantânea ao Outbox Resiliente (202/200) sem falhas HTTP 500",
+    "🔀 Roteamento Interno Multi-Worker (Alpha ↔ Produção): Encaminhamento automático de chamadas /invoke e /messages/send ao nó detentor da instância, eliminando loops de wake local",
+    "⚡ Desbloqueio do Event Loop no Auth State: Conversão recursiva em memória de chaves Signal (sem JSON.stringify/parse síncrono) e preservação do cache RAM em reconexões transitórias",
+    "📊 Telemetria E2E com Janela Deslizante de 15s: Sincronização de totalSessions, activeSessionsCount, contagem de listeners em makeEventBuffer e métricas reais de Event Loop",
     "API externa texto/mídia restaurada: validação antes do upload, bucket chat_media e encaminhamento seguro às instâncias Alpha",
     "Broadcasts com concorrência limitada, prioridade para mensagens e redução de ACKs repetidos sem perda de IDs",
     "Gateway preserva o socket de QR aberto antes de existir identidade: force_new legado não substitui a tentativa",

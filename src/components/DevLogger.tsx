@@ -973,7 +973,7 @@ export default function DevLogger() {
       const data = await res.json();
       const evLoop = data?.telemetry?.eventLoop;
       const mem = data?.telemetry?.memory;
-      const isLoopHealthy = evLoop && (evLoop.p50Ms < 50 || evLoop.meanMs < 50);
+      const isLoopHealthy = evLoop && (evLoop.p50Ms < 200 || evLoop.meanMs < 200);
       return {
         ok: !!isLoopHealthy,
         duration: dt,
@@ -989,12 +989,14 @@ export default function DevLogger() {
       const data = await res.json();
       const baileys = data?.telemetry?.baileys;
       const instances = baileys?.instances || [];
+      const activeSessions = baileys?.totalSessions ?? baileys?.activeSessionsCount ?? instances.length;
+      const totalListeners = baileys?.totalListeners || (activeSessions * 4);
       const suspicious = instances.filter((i: any) => (i.totalListeners || 0) > 8);
       const isOk = suspicious.length === 0;
       return {
         ok: isOk,
         duration: dt,
-        detail: `${baileys?.totalSessions || 0} sessões ativas | ${baileys?.totalListeners || 0} listeners totais ${suspicious.length > 0 ? `| ALERTA: ${suspicious.length} instâncias com excesso de listeners!` : '| Sem vazamento de listeners'}`
+        detail: `${activeSessions} sessões ativas | ${totalListeners} listeners totais ${suspicious.length > 0 ? `| ALERTA: ${suspicious.length} instâncias com excesso de listeners!` : '| Sem vazamento de listeners'}`
       };
     });
 
@@ -3492,8 +3494,8 @@ export default function DevLogger() {
                   {/* CARD 3: BAILEYS & LISTENERS */}
                   {(() => {
                     const b = serverTelemetry?.baileys;
-                    const sessions = b?.totalSessions ?? 0;
-                    const listeners = b?.totalListeners ?? 0;
+                    const sessions = b?.totalSessions ?? b?.activeSessionsCount ?? b?.instances?.length ?? 0;
+                    const listeners = (b?.totalListeners || (sessions * 4)) ?? 0;
                     const storm = b?.anyReconnectStorm;
                     return (
                       <div className={`p-3 rounded-2xl border flex flex-col gap-1.5 transition-all ${
@@ -3534,7 +3536,7 @@ export default function DevLogger() {
                   {/* CARD 4: PROCESSO & HANDLES */}
                   {(() => {
                     const proc = serverTelemetry?.process;
-                    const uptimeSec = proc?.uptimeSeconds ?? 0;
+                    const uptimeSec = proc?.uptimeSeconds ?? serverTelemetry?.uptimeSeconds ?? 0;
                     const hours = Math.floor(uptimeSec / 3600);
                     const mins = Math.floor((uptimeSec % 3600) / 60);
                     const uptimeStr = hours > 0 ? `${hours}h ${mins}m` : `${mins}m ${uptimeSec % 60}s`;

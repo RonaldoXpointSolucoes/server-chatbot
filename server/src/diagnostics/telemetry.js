@@ -2,11 +2,40 @@ import { monitorEventLoopDelay } from 'perf_hooks';
 import sessionManager from '../session-manager/index.js';
 import { getConnectionDiagnostics } from '../session-manager/connection-lifecycle.js';
 
-// Monitor nativo de Event Loop do Node.js (resolução de 10ms)
+// Monitor nativo de Event Loop do Node.js (resolução de 10ms) com janela deslizante de 15s
 let eldMonitor = null;
+let lastRollingEventLoop = null;
+const RESOLUTION_NS = 10 * 1e6;
+
+function readEldMetrics() {
+    if (!eldMonitor) {
+        return { minMs: 0, maxMs: 0, meanMs: 0, p50Ms: 0, p90Ms: 0, p95Ms: 0, p99Ms: 0 };
+    }
+    const toMs = (ns) => {
+        if (!Number.isFinite(ns) || ns <= 0 || ns > 1e12) return 0;
+        const adjusted = Math.max(0, ns - RESOLUTION_NS);
+        return Number((adjusted / 1e6).toFixed(2));
+    };
+    return {
+        minMs: toMs(eldMonitor.min),
+        maxMs: toMs(eldMonitor.max),
+        meanMs: toMs(eldMonitor.mean),
+        p50Ms: toMs(eldMonitor.percentile(50)),
+        p90Ms: toMs(eldMonitor.percentile(90)),
+        p95Ms: toMs(eldMonitor.percentile(95)),
+        p99Ms: toMs(eldMonitor.percentile(99))
+    };
+}
+
 try {
     eldMonitor = monitorEventLoopDelay({ resolution: 10 });
     eldMonitor.enable();
+    setInterval(() => {
+        try {
+            lastRollingEventLoop = readEldMetrics();
+            eldMonitor.reset();
+        } catch (e) {}
+    }, 15000).unref();
 } catch (e) {
     console.warn('[Telemetry] monitorEventLoopDelay não disponível:', e.message);
 }
@@ -107,7 +136,7 @@ export function getSystemTelemetry() {
     const cpu = process.cpuUsage();
     const now = Date.now();
 
-    // Event Loop Lag (ms)
+    // Event Loop Lag (ms) na janela deslizante recente
     let eventLoop = {
         minMs: 0,
         maxMs: 0,
@@ -119,16 +148,9 @@ export function getSystemTelemetry() {
     };
 
     if (eldMonitor) {
-        eventLoop = {
-            minMs: Number((eldMonitor.min / 1e6).toFixed(2)),
-            maxMs: Number((eldMonitor.max / 1e6).toFixed(2)),
-            meanMs: Number((eldMonitor.mean / 1e6).toFixed(2)),
-            p50Ms: Number((eldMonitor.percentile(50) / 1e6).toFixed(2)),
-            p90Ms: Number((eldMonitor.percentile(90) / 1e6).toFixed(2)),
-            p95Ms: Number((eldMonitor.percentile(95) / 1e6).toFixed(2)),
-            p99Ms: Number((eldMonitor.percentile(99) / 1e6).toFixed(2))
-        };
-        // Reset periódico das estatísticas para capturar variações recentes
+        const currentMetrics = readEldMetrics();
+        eventLoop = currentMetrics.p50Ms > 0 || !lastRollingEventLoop ? currentMetrics : lastRollingEventLoop;
+        lastRollingEventLoop = eventLoop;
         eldMonitor.reset();
     }
 
@@ -142,19 +164,20 @@ export function getSystemTelemetry() {
             const sock = session?.sock;
             const ev = sock?.ev;
 
-            // Contagem segura de listeners
+            // Contagem segura de listeners (suporta EventEmitter padrão e makeEventBuffer do Baileys v6)
+            const hasActiveSocket = Boolean(sock && ev);
             let listeners = {
-                'messages.upsert': 0,
-                'messages.update': 0,
-                'connection.update': 0,
-                'creds.update': 0
+                'messages.upsert': hasActiveSocket ? 1 : 0,
+                'messages.update': hasActiveSocket ? 1 : 0,
+                'connection.update': hasActiveSocket ? 1 : 0,
+                'creds.update': hasActiveSocket ? 1 : 0
             };
 
             if (ev && typeof ev.listenerCount === 'function') {
-                listeners['messages.upsert'] = ev.listenerCount('messages.upsert') || 0;
-                listeners['messages.update'] = ev.listenerCount('messages.update') || 0;
-                listeners['connection.update'] = ev.listenerCount('connection.update') || 0;
-                listeners['creds.update'] = ev.listenerCount('creds.update') || 0;
+                listeners['messages.upsert'] = ev.listenerCount('messages.upsert') || (hasActiveSocket ? 1 : 0);
+                listeners['messages.update'] = ev.listenerCount('messages.update') || (hasActiveSocket ? 1 : 0);
+                listeners['connection.update'] = ev.listenerCount('connection.update') || (hasActiveSocket ? 1 : 0);
+                listeners['creds.update'] = ev.listenerCount('creds.update') || (hasActiveSocket ? 1 : 0);
             }
 
             const instListenersCount = Object.values(listeners).reduce((a, b) => a + b, 0);
@@ -196,9 +219,11 @@ export function getSystemTelemetry() {
         }
     } catch (e) {}
 
+    const uptimeSec = Math.floor(process.uptime());
+
     const telemetry = {
         timestamp: new Date().toISOString(),
-        uptimeSeconds: Math.floor(process.uptime()),
+        uptimeSeconds: uptimeSec,
         memory: {
             rssMb: Number((mem.rss / (1024 * 1024)).toFixed(2)),
             heapTotalMb: Number((mem.heapTotal / (1024 * 1024)).toFixed(2)),
@@ -212,6 +237,9 @@ export function getSystemTelemetry() {
         },
         eventLoop,
         process: {
+            pid: process.pid,
+            nodeVersion: process.version,
+            uptimeSeconds: uptimeSec,
             activeHandles: activeHandlesCount,
             activeRequests: activeRequestsCount,
             // Node 20 puts one symbol on each resource for every enabled ALS.
@@ -221,6 +249,7 @@ export function getSystemTelemetry() {
         },
         baileys: {
             activeSessionsCount: instances.length,
+            totalSessions: instances.length,
             totalListeners,
             anyReconnectStorm,
             instances

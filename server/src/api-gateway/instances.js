@@ -6,6 +6,7 @@ import { activePairingAttempts, logAndNotifyConnectionEvent } from '../event-pro
 import { beginConnectionAttempt, getConnectionDiagnostics, connectDecision, shouldClearCredentials, connectionProgress, diagnosticLogDetails } from '../session-manager/connection-lifecycle.js';
 import { recordStructuredEvent } from '../diagnostics/telemetry.js';
 import { sessionConnectionDiagnostics } from '../session-manager/socket-state.js';
+import { forwardInternalInstanceRequest } from './external-message-routing.js';
 import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
@@ -329,6 +330,13 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
     try {
         const { instanceId } = req.params;
         const { method, args } = req.body;
+
+        // Se a instância pertence a outro worker (ex: alpha-worker vs production-worker), encaminha a requisição diretamente ao nó detentor do socket
+        if (await forwardInternalInstanceRequest(req, res, instanceId)) {
+            return;
+        }
+
+        const isAllowedOnThisNode = isInstanceAllowedForNode(instanceId, req.tenantId);
         
         // Intercepta envio de mensagens de texto/mídia para enfileirar no outbox resiliente (wa_outgoing_messages)
         if (method === 'sendMessage') {
@@ -475,20 +483,20 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
 
                 console.log(`[API Gateway] [MSG_TRACE:GATEWAY_RECEIVE] Instância: ${instanceId} | JID: ${targetJid} | Tipo: ${messageType} | TraceId: ${traceId || 'N/A'}`);
 
-                // FAST-PATH: Se o socket da instância já estiver na memória e conectado, envia IMEDIATAMENTE (< 300ms)
-                let activeSock = sessionManager.sessions.get(instanceId)?.sock;
+                // FAST-PATH: Se a instância pertence a este nó e o socket estiver na memória e conectado, envia IMEDIATAMENTE (< 300ms)
+                let activeSock = isAllowedOnThisNode ? sessionManager.sessions.get(instanceId)?.sock : null;
                 let hasCreds = Boolean(activeSock?.authState?.creds?.me?.id || activeSock?.user?.id);
-                let isSockConnected = activeSock && (!activeSock.ws || activeSock.ws.isOpen || activeSock.ws.readyState === 1) && hasCreds;
+                let isSockConnected = isAllowedOnThisNode && activeSock && (!activeSock.ws || activeSock.ws.isOpen || activeSock.ws.readyState === 1) && hasCreds;
 
-                // Smart-Wake: se o socket estiver conectando na memória ou precisando de wake rápido, aguarda até 1.5s
-                if (!isSockConnected && messageType === 'text') {
+                // Smart-Wake: se o socket pertencer a este nó e estiver conectando, aguarda no máximo 1.2s
+                if (isAllowedOnThisNode && !isSockConnected && messageType === 'text') {
                     try {
                         const { waitForSocketOpen } = await import('../session-manager/index.js');
                         if (activeSock && activeSock.ws && !activeSock.ws.isClosed && !activeSock.ws.isClosing) {
-                            await waitForSocketOpen(activeSock, 1500);
+                            await waitForSocketOpen(activeSock, 1200);
                         } else {
                             const wakePromise = sessionManager.getSocketOrWake(req.tenantId, instanceId, true);
-                            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT_FAST_WAKE')), 1500));
+                            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT_FAST_WAKE')), 1200));
                             const waked = await Promise.race([wakePromise, timeoutPromise]);
                             if (waked) activeSock = waked;
                         }
@@ -502,46 +510,29 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                     let lastFastErr = null;
                     const sendFn = activeSock.originalSendMessage || activeSock.sendMessage;
 
-                    for (let attempt = 1; attempt <= 2; attempt++) {
-                        try {
-                            const tSendStart = Date.now();
-                            recordStructuredEvent({ event: 'BAILEYS_SEND_START', traceId, instanceId, direction: 'outbound', attempt });
-                            
-                            // Dispara com skipDelay e timeout resiliente de 8.0s para garantir envio direto pelo socket Baileys
-                            const sendPromise = sendFn(targetJid, content, { skipDelay: true, isHuman: true });
-                            const timeoutPromise = new Promise((_, reject) => 
-                                setTimeout(() => reject(new Error('TIMEOUT_FASTPATH_SEND')), 8000)
-                            );
-                            sentResult = await Promise.race([sendPromise, timeoutPromise]);
-                            const sendDuration = Date.now() - tSendStart;
+                    try {
+                        const tSendStart = Date.now();
+                        recordStructuredEvent({ event: 'BAILEYS_SEND_START', traceId, instanceId, direction: 'outbound', attempt: 1 });
+                        
+                        // Dispara com skipDelay e timeout de 8.0s (tentativa única) para cobrir handshakes Signal a frio sem estourar o timeout HTTP do cliente (18s)
+                        const sendPromise = sendFn(targetJid, content, { skipDelay: true, isHuman: true });
+                        const timeoutPromise = new Promise((_, reject) => 
+                            setTimeout(() => reject(new Error('TIMEOUT_FASTPATH_SEND')), 8000)
+                        );
+                        sentResult = await Promise.race([sendPromise, timeoutPromise]);
+                        const sendDuration = Date.now() - tSendStart;
 
-                            recordStructuredEvent({
-                                event: 'BAILEYS_SEND_SUCCESS',
-                                traceId,
-                                instanceId,
-                                whatsappMessageId: sentResult?.key?.id,
-                                durationMs: sendDuration,
-                                direction: 'outbound',
-                                attempt
-                            });
-                            break;
-                        } catch (attemptErr) {
-                            lastFastErr = attemptErr;
-                            const isConnClosed = attemptErr?.message && (
-                                attemptErr.message.includes('Connection Closed') ||
-                                attemptErr.message.includes('Connection was lost') ||
-                                attemptErr.message.includes('output buffer') ||
-                                attemptErr.message.includes('not open')
-                            );
-                            if (attempt === 1 && isConnClosed) {
-                                await new Promise(resolve => setTimeout(resolve, 150));
-                                const freshSock = sessionManager.sessions.get(instanceId)?.sock;
-                                if (freshSock && (!freshSock.ws || freshSock.ws.isOpen || freshSock.ws.readyState === 1)) {
-                                    continue;
-                                }
-                            }
-                            break;
-                        }
+                        recordStructuredEvent({
+                            event: 'BAILEYS_SEND_SUCCESS',
+                            traceId,
+                            instanceId,
+                            whatsappMessageId: sentResult?.key?.id,
+                            durationMs: sendDuration,
+                            direction: 'outbound',
+                            attempt: 1
+                        });
+                    } catch (attemptErr) {
+                        lastFastErr = attemptErr;
                     }
 
                     if (sentResult) {
@@ -660,7 +651,7 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                                                 status: 'pending',
                                                 whatsapp_message_id: mockId,
                                                 raw_payload: {
-                                                    outbox_id: newOutbox.id,
+                                                    outbox_id: newOutbox?.id || outboxId,
                                                     enqueued_at: new Date().toISOString()
                                                 },
                                                 timestamp: new Date().toISOString()
@@ -673,9 +664,11 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                     console.warn('[API Gateway] Aviso ao sincronizar outbox pendente em messages:', e.message);
                 }
 
-                // Tenta acordar o socket em segundo plano e engatilha o QueueProcessor de imediato
-                sessionManager.getSocketOrWake(req.tenantId, instanceId).catch(() => {});
-                queueProcessor.trigger(req.tenantId, instanceId);
+                // Tenta acordar o socket em segundo plano apenas se pertencer a este nó e engatilha o QueueProcessor
+                if (isAllowedOnThisNode) {
+                    sessionManager.getSocketOrWake(req.tenantId, instanceId).catch(() => {});
+                    queueProcessor.trigger(req.tenantId, instanceId);
+                }
 
                 return res.json({ 
                     ok: true, 
@@ -761,9 +754,14 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
 router.post('/instances/:instanceId/send-media-url', requireTenant, express.json(), async (req, res) => {
     try {
         const { instanceId } = req.params;
+
+        if (await forwardInternalInstanceRequest(req, res, instanceId)) {
+            return;
+        }
+        const isAllowedOnThisNode = isInstanceAllowedForNode(instanceId, req.tenantId);
         
         // 1. Verificação prévia de integridade no banco / memória para suportar cluster multi-nó
-        const localSock = sessionManager.getSocket(instanceId);
+        const localSock = isAllowedOnThisNode ? sessionManager.getSocket(instanceId) : null;
         if (!localSock) {
             const { data: instCheck } = await supabase
                 .from('whatsapp_instances')
@@ -785,7 +783,9 @@ router.post('/instances/:instanceId/send-media-url', requireTenant, express.json
                 });
             }
 
-            sessionManager.getSocketOrWake(req.tenantId, instanceId).catch(() => {});
+            if (isAllowedOnThisNode) {
+                sessionManager.getSocketOrWake(req.tenantId, instanceId).catch(() => {});
+            }
         }
 
         const { mediaUrl, mimetype, fileName, jid, caption, messageType, ptt, responseType } = req.body;
@@ -822,8 +822,10 @@ router.post('/instances/:instanceId/send-media-url', requireTenant, express.json
 
         if (outboxErr) throw outboxErr;
 
-        // Despacha a mensagem instantaneamente acordando o QueueProcessor
-        queueProcessor.trigger(req.tenantId, instanceId);
+        // Despacha a mensagem instantaneamente acordando o QueueProcessor apenas se pertencer a este nó
+        if (isAllowedOnThisNode) {
+            queueProcessor.trigger(req.tenantId, instanceId);
+        }
 
         res.json({ 
             ok: true, 
