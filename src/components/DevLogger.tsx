@@ -1238,7 +1238,7 @@ export default function DevLogger() {
         const isLocalFrontend = urlStr.includes(window.location.host) || (!urlStr.startsWith('http://') && !urlStr.startsWith('https://'));
         const isInternalDevLogger = urlStr.includes('/diagnostics/') || 
           (requestOptions?.headers && ((requestOptions.headers as any)['x-e2e-source'] === 'DevLogger' || (typeof (requestOptions.headers as any).get === 'function' && (requestOptions.headers as any).get('x-e2e-source') === 'DevLogger')));
-        const isSpammyUrl = urlStr.includes('/debug/healthz') || urlStr.includes('/debug/metrics') || urlStr.includes('/debug/recent-errors') || urlStr.includes('/realtime/') || urlStr.includes('system_logs') || urlStr.includes('/wacalls/') || isLocalFrontend || isInternalDevLogger;
+        const isSpammyUrl = urlStr.includes('/debug/healthz') || urlStr.includes('/debug/metrics') || urlStr.includes('/debug/recent-errors') || urlStr.includes('/realtime/') || urlStr.includes('system_logs') || urlStr.includes('/wacalls/') || urlStr.includes('generativelanguage.googleapis.com') || isLocalFrontend || isInternalDevLogger;
         
         if (!isSpammyUrl && !isAstsTest) {
           const isAbort = err.name === 'AbortError' || (typeof err.message === 'string' && err.message.includes('signal is aborted'));

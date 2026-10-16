@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useChatStore } from '../store/chatStore';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { geminiService } from '../services/geminiService';
 
 interface GastrofoodAPIDocumentationModalProps {
   isOpen: boolean;
@@ -273,14 +273,13 @@ ${ragContext}`;
 
       if (rawApiKey && rawApiKey.length > 10) {
         try {
-          const genAI = new GoogleGenerativeAI(rawApiKey);
-          const model = genAI.getGenerativeModel({ 
-            model: "gemini-2.0-flash",
+          const model = geminiService.getGenerativeModel({ 
+            model: "gemini-2.5-flash",
             systemInstruction: {
               role: "system",
               parts: [{ text: systemPrompt }]
             }
-          });
+          }, rawApiKey);
 
           const result = await model.generateContent(question);
           finalResponse = (await result.response).text().trim();

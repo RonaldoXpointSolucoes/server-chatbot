@@ -1,4 +1,3 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import { supabase } from './supabase';
 import { geminiService } from './geminiService';
 
@@ -331,8 +330,10 @@ export async function runAiHealthCheck(tenantId: string): Promise<AiDiagnosticsR
       try {
         const pingStart = Date.now();
         const primaryBot = activeBots[0];
-        const client = new GoogleGenerativeAI(apiKey.trim());
-        const model = client.getGenerativeModel({ model: primaryBot.model || 'gemini-2.5-flash' });
+        const model = geminiService.getGenerativeModel(
+          { model: primaryBot.model || 'gemini-2.5-flash' },
+          apiKey.trim()
+        );
         const result = await model.generateContent({
           contents: [{ role: 'user', parts: [{ text: 'Você é o robô de validação do sistema. Responda apenas "OPERACIONAL".' }] }],
           generationConfig: { maxOutputTokens: 10, temperature: 0.1 }

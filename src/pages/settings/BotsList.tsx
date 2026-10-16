@@ -1471,22 +1471,10 @@ Instruções importantes:
 - As regras devem instruir os robôs a serem extremamente rápidos, simpáticos e assertivos.
       `;
 
-      // 4. Chamar o Gemini
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${geminiApiKey}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: promptText }] }]
-        })
-      });
-
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.error?.message || "Falha na chamada ao Gemini API.");
-      }
-
-      const data = await response.json();
-      let generatedText = data.candidates[0].content.parts[0].text;
+      // 4. Chamar o Gemini via motor resiliente (CORS-Simple + Proxy Fallback)
+      const model = geminiService.getGenerativeModel({ model: 'gemini-2.5-flash' }, geminiApiKey);
+      const result = await model.generateContent(promptText);
+      let generatedText = (await result.response).text();
       
       // Limpeza robusta se o modelo insistir em colocar blocos de markdown
       if (generatedText.includes('```')) {

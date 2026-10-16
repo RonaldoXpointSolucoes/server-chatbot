@@ -20,6 +20,37 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.9.0',
+    date: '2026-10-16',
+    summary: 'Motor Resiliente em 4 Camadas para Magia da IA, Proxy Serverless Same-Origin e Fallback Automático de Modelos Gemini',
+    notes: [
+      {
+        id: '7.9.0-1',
+        category: 'fixes',
+        title: 'Correção Definitiva do Erro "Failed to fetch" nas Opções de Responder com IA (Magia da IA)',
+        description: 'Substituído o transporte rígido do SDK no navegador por requisições CORS-Simple (sem preflight OPTIONS) combinadas com rotação de chaves e fallback automático entre gemini-2.5-flash e gemini-2.0-flash.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      },
+      {
+        id: '7.9.0-2',
+        category: 'features',
+        title: 'Proxy Serverless Same-Origin (/api/gemini) e Contingência via Backend',
+        description: 'Adicionada camada serverless de mesma origem na Vercel e integração transparente com o endpoint /api/v1/knowledge/corrections/helper do motor para garantir funcionamento mesmo sob bloqueios de rede, firewall ou extensões do navegador.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.9.0-3',
+        category: 'improvements',
+        title: 'Padronização do Assistente IA em Todo o Painel (Chat, Diagnóstico E2E e Gerador RAG)',
+        description: 'Unificadas as chamadas de IA das ações Corrigir Gramática, Focar em Vendas, Encantar Cliente, Melhorar Suporte, Analisar Conversa, Responder com IA e Super Prompt RAG sob o novo motor resiliente.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+      }
+    ]
+  },
+  {
     version: '7.8.9',
     date: '2026-10-15',
     summary: 'Login com Google OAuth + Vínculo Empresarial, Filtro Multi-Campos no /admin e Eliminação de Credenciais Fantasmas',

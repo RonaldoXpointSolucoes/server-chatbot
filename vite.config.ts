@@ -42,6 +42,48 @@ function generateVersionFilePlugin() {
   };
 }
 
+function localApiGeminiPlugin() {
+  return {
+    name: 'local-api-gemini-proxy',
+    configureServer(server: any) {
+      server.middlewares.use('/api/gemini', async (req: any, res: any, next: any) => {
+        if (req.method !== 'POST' && req.method !== 'OPTIONS') {
+          return next();
+        }
+        try {
+          const chunks: Buffer[] = [];
+          for await (const chunk of req) {
+            chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+          }
+          const rawBody = Buffer.concat(chunks).toString('utf-8');
+          req.body = rawBody ? JSON.parse(rawBody) : {};
+
+          res.status = (code: number) => {
+            res.statusCode = code;
+            return res;
+          };
+          res.json = (payload: any) => {
+            if (!res.headersSent) {
+              res.setHeader('Content-Type', 'application/json; charset=utf-8');
+            }
+            res.end(JSON.stringify(payload));
+            return res;
+          };
+
+          // @ts-ignore
+          const handlerModule = await import('./api/gemini.js');
+          const handler = handlerModule.default || handlerModule;
+          await handler(req, res);
+        } catch (err: any) {
+          res.statusCode = 500;
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
+          res.end(JSON.stringify({ error: { message: err?.message || 'Internal Vite API proxy error' } }));
+        }
+      });
+    }
+  };
+}
+
 // https://vite.dev/config/
 export default defineConfig({
   define: {
@@ -50,6 +92,7 @@ export default defineConfig({
   },
   plugins: [
     generateVersionFilePlugin(),
+    localApiGeminiPlugin(),
     react(),
     basicSsl(),
     VitePWA({
