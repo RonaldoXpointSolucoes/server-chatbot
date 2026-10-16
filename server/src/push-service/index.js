@@ -21,19 +21,23 @@ class PushService {
         }
 
         try {
-            // Detalhes da conversa para capturar a caixa (instance_id) e operador atribuído (assigned_to)
-            let instanceId = null;
+            // Detalhes da conversa para capturar a caixa (instance_id), contato (contact_id) e operador atribuído (assigned_to)
+            let instanceId = message.instance_id || null;
             let conversationAssignedTo = null;
+            let contactId = message.contact_id || null;
+            let convStatus = null;
 
             if (conversationId) {
                 const { data: conv } = await supabase
                     .from("conversations")
-                    .select("instance_id, assigned_to")
+                    .select("instance_id, assigned_to, contact_id, status")
                     .eq("id", conversationId)
-                    .single();
+                    .maybeSingle();
                 if (conv) {
-                    instanceId = conv.instance_id;
+                    instanceId = conv.instance_id || instanceId;
                     conversationAssignedTo = conv.assigned_to;
+                    contactId = conv.contact_id || contactId;
+                    convStatus = conv.status || null;
                 }
             }
 
@@ -64,7 +68,7 @@ class PushService {
             const agentsList = agents || [];
 
             // Identificar o tipo de evento (atribuição de ticket vs menção vs mensagem comum)
-            const textContent = message.text_content || '';
+            const textContent = (message.text_content || message.text || message.body || '').trim();
             const isAssignmentEvent = textContent.includes('Atribuído para') || message.is_system;
             const isMentionEvent = textContent.includes('@');
 
@@ -138,42 +142,120 @@ class PushService {
                 return;
             }
 
-            // Buscar nome do contato para exibição no título da notificação
+            // Buscar detalhes do contato e da Caixa de Entrada (whatsapp_instances) em paralelo
             let contactName = 'Novo Contato';
             let contactAvatar = undefined;
-            
-            if (contactPhone) {
-                const { data: contact } = await supabase
-                    .from("contacts")
-                    .select("name, custom_name, profile_picture_url")
-                    .eq("tenant_id", tenantId)
-                    .eq("phone", contactPhone)
-                    .single();
-                    
-                if (contact) {
-                    contactName = contact.custom_name || contact.name || `+${contactPhone}`;
-                    if (contact.profile_picture_url) {
-                        contactAvatar = contact.profile_picture_url;
-                    }
+            let instanceName = null;
+
+            const [contactRes, instanceRes] = await Promise.all([
+                contactId
+                    ? supabase.from("contacts").select("id, name, custom_name, push_name, phone, profile_picture_url").eq("id", contactId).maybeSingle()
+                    : contactPhone
+                        ? supabase.from("contacts").select("id, name, custom_name, push_name, phone, profile_picture_url").eq("tenant_id", tenantId).eq("phone", contactPhone).limit(1).maybeSingle()
+                        : Promise.resolve({ data: null }),
+                instanceId
+                    ? supabase.from("whatsapp_instances").select("display_name, phone_number").eq("id", instanceId).maybeSingle()
+                    : Promise.resolve({ data: null })
+            ]);
+
+            const contact = contactRes?.data;
+            if (contact) {
+                contactId = contact.id || contactId;
+                contactName = contact.custom_name || contact.name || contact.push_name || (contactPhone ? `+${contactPhone}` : 'Novo Contato');
+                if (contact.profile_picture_url) {
+                    contactAvatar = contact.profile_picture_url;
                 }
+            } else if (contactPhone) {
+                contactName = `+${contactPhone}`;
             }
 
-            let messageBody = textContent 
-                ? `${textContent.substring(0, 100)}${textContent.length > 100 ? '...' : ''}` 
-                : 'Nova mídia recebida';
-                
-            if (message.message_type === 'image') messageBody = '📷 Enviou uma imagem';
-            if (message.message_type === 'audio') messageBody = '🎤 Enviou um áudio';
-            if (message.message_type === 'document') messageBody = '📄 Enviou um documento';
+            if (instanceRes?.data?.display_name) {
+                instanceName = instanceRes.data.display_name;
+            }
+
+            // Formatar telefone para exibição amigável nos detalhes da notificação
+            const rawDigits = String(contact?.phone || contactPhone || '').replace(/\D/g, '');
+            let formattedPhone = '';
+            if (rawDigits.length >= 12 && rawDigits.startsWith('55')) {
+                const ddd = rawDigits.slice(2, 4);
+                const rest = rawDigits.slice(4);
+                formattedPhone = rest.length === 9
+                    ? `(${ddd}) ${rest.slice(0, 5)}-${rest.slice(5)}`
+                    : `(${ddd}) ${rest.slice(0, 4)}-${rest.slice(4)}`;
+            } else if (rawDigits.length >= 10) {
+                formattedPhone = `+${rawDigits}`;
+            }
+
+            // Construir corpo rico da mensagem com ícone de tipo, legenda/transcrição e texto expandido (até 260 caracteres)
+            const msgType = (message.message_type || message.media_type || 'text').toLowerCase();
+            const cleanPreview = textContent
+                ? `${textContent.substring(0, 260)}${textContent.length > 260 ? '…' : ''}`
+                : '';
+
+            let primaryLine = cleanPreview || 'Nova mensagem recebida';
+            let notificationImage = undefined;
+
+            if (msgType === 'image') {
+                primaryLine = cleanPreview && !['[imagem]', 'imagem', 'image'].includes(cleanPreview.toLowerCase())
+                    ? `📷 Foto: ${cleanPreview}`
+                    : '📷 Enviou uma foto';
+                if (message.media_url && String(message.media_url).startsWith('http')) {
+                    notificationImage = message.media_url;
+                }
+            } else if (msgType === 'audio' || msgType === 'ptt' || msgType === 'voice') {
+                const transcription = (message.transcription || '').trim();
+                primaryLine = transcription
+                    ? `🎤 Áudio: "${transcription.substring(0, 220)}${transcription.length > 220 ? '…' : ''}"`
+                    : '🎤 Enviou uma mensagem de voz';
+            } else if (msgType === 'video') {
+                primaryLine = cleanPreview && !['[vídeo]', '[video]', 'video'].includes(cleanPreview.toLowerCase())
+                    ? `🎥 Vídeo: ${cleanPreview}`
+                    : '🎥 Enviou um vídeo';
+            } else if (msgType === 'document') {
+                primaryLine = cleanPreview
+                    ? `📄 Documento: ${cleanPreview}`
+                    : '📄 Enviou um documento';
+            } else if (msgType === 'sticker') {
+                primaryLine = '💟 Enviou uma figurinha';
+            } else if (msgType === 'location') {
+                primaryLine = `📍 Localização compartilhada${cleanPreview ? `: ${cleanPreview}` : ''}`;
+            } else if (msgType === 'vcard' || msgType === 'contact') {
+                primaryLine = `👤 Cartão de contato${cleanPreview ? `: ${cleanPreview}` : ''}`;
+            }
+
+            // Linha de contexto da Caixa e Contato
+            const metaParts = [];
+            if (instanceName) metaParts.push(`📦 Caixa: ${instanceName}`);
+            if (formattedPhone && !contactName.includes(rawDigits.slice(-4))) metaParts.push(`📱 ${formattedPhone}`);
+            if (convStatus === 'open' && conversationAssignedTo) metaParts.push(`👤 Em atendimento`);
+
+            const messageBody = metaParts.length > 0
+                ? `${primaryLine}\n${metaParts.join(' • ')}`
+                : primaryLine;
+
+            const notificationTitle = instanceName
+                ? `${contactName} • 📥 ${instanceName}`
+                : contactName;
+
+            const deepLinkUrl = `/chat?conversation=${encodeURIComponent(conversationId || '')}&instance=${encodeURIComponent(instanceId || '')}&contactId=${encodeURIComponent(contactId || '')}&phone=${encodeURIComponent(rawDigits || contactPhone || '')}`;
 
             // Payload da notificação
             const payload = JSON.stringify({
-                title: contactName,
+                title: notificationTitle,
                 body: messageBody,
                 icon: contactAvatar,
+                image: notificationImage,
+                tag: conversationId ? `conv_${conversationId}` : `inst_${instanceId || 'default'}_${rawDigits || contactName}`,
                 data: {
-                    url: `/?conversation=${conversationId}`,
-                    instanceId: instanceId,
+                    url: deepLinkUrl,
+                    conversationId: conversationId || null,
+                    instanceId: instanceId || null,
+                    instanceName: instanceName || null,
+                    contactId: contactId || null,
+                    contactPhone: rawDigits || contactPhone || null,
+                    contactName: contactName,
+                    mediaUrl: notificationImage || null,
+                    messageType: msgType,
                     createdAt: new Date().toISOString()
                 }
             });

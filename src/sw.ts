@@ -126,7 +126,26 @@ async function saveConfigToDB(config: any) {
   }
 }
 
-async function getConfigFromDB(): Promise<{ role?: string, allowedInstances?: string[], isLoggedIn?: boolean } | null> {
+async function savePendingNotificationTarget(target: any) {
+  try {
+    const db = await openDB();
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    tx.objectStore(STORE_NAME).put(target, 'pendingNotificationTarget');
+    return new Promise((resolve) => {
+      tx.oncomplete = resolve;
+    });
+  } catch (e) {
+    console.error('[SW] Erro ao salvar pendingNotificationTarget no IndexedDB:', e);
+  }
+}
+
+async function getConfigFromDB(): Promise<{
+  role?: string;
+  allowedInstances?: string[];
+  isLoggedIn?: boolean;
+  notifPrefs?: Record<string, any>;
+  instancesMap?: Record<string, { name: string; phone?: string }>;
+} | null> {
   try {
     const db = await openDB();
     const tx = db.transaction(STORE_NAME, 'readonly');
@@ -139,12 +158,25 @@ async function getConfigFromDB(): Promise<{ role?: string, allowedInstances?: st
     return null;
   }
 }
+
+function extractQueryParam(urlStr: string | undefined, param: string): string | null {
+  if (!urlStr) return null;
+  try {
+    const parsed = new URL(urlStr, self.location.origin);
+    return parsed.searchParams.get(param);
+  } catch {
+    const match = urlStr.match(new RegExp(`[?&]${param}=([^&#]*)`));
+    return match ? decodeURIComponent(match[1]) : null;
+  }
+}
 // --- FIM INDEXEDDB RBAC CONFIG ---
 
 self.addEventListener('message', async (event) => {
   if (event.data && event.data.type === 'SYNC_USER_CONFIG') {
     await saveConfigToDB(event.data.config);
     console.log('[SW] User config persistido no IndexedDB:', event.data.config);
+  } else if (event.data && event.data.type === 'CLEAR_PENDING_NOTIFICATION_TARGET') {
+    await savePendingNotificationTarget(null);
   }
 });
 
@@ -172,8 +204,13 @@ self.addEventListener('push', (event) => {
       }
     }
 
+    const rawUrl = data.data?.url || '/';
+    const instanceId = data.data?.instanceId || extractQueryParam(rawUrl, 'instance') || null;
+    const conversationId = data.data?.conversationId || extractQueryParam(rawUrl, 'conversation') || null;
+    const contactId = data.data?.contactId || extractQueryParam(rawUrl, 'contactId') || null;
+    const contactPhone = data.data?.contactPhone || extractQueryParam(rawUrl, 'phone') || null;
+
     // Filtro RBAC e Preferências por Caixa de Entrada
-    const instanceId = data.data?.instanceId;
     const userConfig = await getConfigFromDB();
     
     if (userConfig && userConfig.isLoggedIn === false) {
@@ -182,8 +219,8 @@ self.addEventListener('push', (event) => {
     }
 
     // Se as notificações desta caixa especificamente foram silenciadas pelo usuário
-    if (instanceId && (userConfig as any)?.notifPrefs && (userConfig as any).notifPrefs[instanceId]) {
-        const pref = (userConfig as any).notifPrefs[instanceId];
+    if (instanceId && userConfig?.notifPrefs && userConfig.notifPrefs[instanceId]) {
+        const pref = userConfig.notifPrefs[instanceId];
         if (pref.is_enabled === false) {
             console.log(`[SW] Push abortado (Background): Caixa ${instanceId} silenciada pelo usuário.`);
             return; // Cancela a exibição
@@ -201,45 +238,132 @@ self.addEventListener('push', (event) => {
         }
     }
 
-  const title = data.title || 'ChatBoot CRM';
-  const options = {
-    body: data.body || 'Você tem uma nova mensagem',
-    icon: data.icon || '/pwa-192x192.png',
-    badge: data.badge || '/pwa-192x192.png',
-    vibrate: [200, 100, 200],
-    data: data.data || { url: '/' },
-    actions: [
-      {
-        action: 'open',
-        title: 'Abrir Chat',
-      }
-    ]
-  };
+    // Enriquecimento automático do Nome da Caixa via instancesMap sincronizado no IndexedDB
+    const mappedInstance = (instanceId && userConfig?.instancesMap) ? userConfig.instancesMap[instanceId] : null;
+    const instanceName = data.data?.instanceName || mappedInstance?.name || null;
 
-  await self.registration.showNotification(title, options);
+    const rawTitle = (data.title || 'ChatBoot CRM').trim();
+    const cleanContactName = data.data?.contactName || rawTitle.split(' • 📥 ')[0].trim();
+
+    // Título exibe claramente o Nome do Contato + Caixa de Entrada
+    const title = (instanceName && !rawTitle.includes(instanceName))
+      ? `${rawTitle} • 📥 ${instanceName}`
+      : rawTitle;
+
+    // Corpo enriquecido com detalhes da mensagem + rodapé da Caixa e Telefone
+    let bodyText = (data.body || 'Você recebeu uma nova mensagem').trim();
+    if (instanceName && !bodyText.includes('📦') && !bodyText.includes('Caixa:')) {
+      const metaParts: string[] = [`📦 Caixa: ${instanceName}`];
+      if (contactPhone) {
+        const digits = String(contactPhone).replace(/\D/g, '');
+        if (digits.length >= 12 && digits.startsWith('55')) {
+          const ddd = digits.slice(2, 4);
+          const rest = digits.slice(4);
+          const fmt = rest.length === 9 ? `(${ddd}) ${rest.slice(0, 5)}-${rest.slice(5)}` : `(${ddd}) ${rest.slice(0, 4)}-${rest.slice(4)}`;
+          metaParts.push(`📱 ${fmt}`);
+        }
+      }
+      bodyText = `${bodyText}\n${metaParts.join(' • ')}`;
+    }
+
+    const deepLinkUrl = `/chat?conversation=${encodeURIComponent(conversationId || '')}&instance=${encodeURIComponent(instanceId || '')}&contactId=${encodeURIComponent(contactId || '')}&phone=${encodeURIComponent(contactPhone || '')}&contactName=${encodeURIComponent(cleanContactName || '')}`;
+
+    const notifTag = data.tag || (conversationId ? `conv_${conversationId}` : `inst_${instanceId || 'default'}_${cleanContactName}`);
+    const notifImage = data.image || data.data?.mediaUrl || undefined;
+
+    const options: any = {
+      body: bodyText,
+      icon: data.icon || '/pwa-192x192.png',
+      badge: data.badge || '/pwa-192x192.png',
+      tag: notifTag,
+      renotify: true,
+      vibrate: [200, 100, 200],
+      timestamp: createdAt ? new Date(createdAt).getTime() : Date.now(),
+      data: {
+        ...(data.data || {}),
+        url: deepLinkUrl,
+        conversationId,
+        instanceId,
+        instanceName,
+        contactId,
+        contactPhone,
+        contactName: cleanContactName
+      },
+      actions: [
+        {
+          action: 'open',
+          title: instanceName ? `Abrir na caixa ${instanceName}` : 'Abrir Conversa',
+        }
+      ]
+    };
+
+    if (notifImage) {
+      options.image = notifImage;
+    }
+
+    await self.registration.showNotification(title, options);
   })());
 });
 
-// Handle notification click
+// Handle notification click: Direciona exatamente para a Caixa e Conversa da notificação
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
 
-  const urlToOpen = event.notification.data?.url || '/';
+  const notifData = event.notification.data || {};
+  const rawUrl = notifData.url || '/';
 
-  event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
-      // Check if there is already a window/tab open with the target URL
-      for (let i = 0; i < windowClients.length; i++) {
-        const client = windowClients[i];
-        // If so, just focus it.
-        if (client.url.includes(urlToOpen) && 'focus' in client) {
-          return client.focus();
+  const conversationId = notifData.conversationId || extractQueryParam(rawUrl, 'conversation') || null;
+  const instanceId = notifData.instanceId || extractQueryParam(rawUrl, 'instance') || null;
+  const contactId = notifData.contactId || extractQueryParam(rawUrl, 'contactId') || null;
+  const contactPhone = notifData.contactPhone || extractQueryParam(rawUrl, 'phone') || null;
+  const rawTitle = (event.notification.title || '').split(' • 📥 ')[0].trim();
+  const contactName = notifData.contactName || extractQueryParam(rawUrl, 'contactName') || rawTitle || null;
+  const instanceName = notifData.instanceName || null;
+
+  const targetUrl = `/chat?conversation=${encodeURIComponent(conversationId || '')}&instance=${encodeURIComponent(instanceId || '')}&contactId=${encodeURIComponent(contactId || '')}&phone=${encodeURIComponent(contactPhone || '')}&contactName=${encodeURIComponent(contactName || '')}`;
+
+  const clickPayload = {
+    conversationId,
+    instanceId,
+    instanceName,
+    contactId,
+    contactPhone,
+    contactName,
+    url: targetUrl,
+    timestamp: Date.now()
+  };
+
+  event.waitUntil((async () => {
+    // 1. Salva no IndexedDB para garantir que mesmo se a janela recarregar ou abrir do zero, o app saiba qual conversa abrir
+    await savePendingNotificationTarget(clickPayload);
+
+    // 2. Procura janelas/abas abertas do aplicativo
+    const windowClients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    let focusedClient: WindowClient | null = null;
+
+    for (const client of windowClients) {
+      try {
+        const clientUrl = new URL(client.url);
+        if (clientUrl.origin === self.location.origin && !clientUrl.pathname.startsWith('/admin')) {
+          client.postMessage({
+            type: 'NOTIFICATION_CLICK',
+            payload: clickPayload
+          });
+          if (!focusedClient && 'focus' in client) {
+            focusedClient = await client.focus();
+          }
         }
-      }
-      // If not, then open the target URL in a new window/tab.
-      if (self.clients.openWindow) {
-        return self.clients.openWindow(urlToOpen);
-      }
-    })
-  );
+      } catch (e) {}
+    }
+
+    if (focusedClient) {
+      return focusedClient;
+    }
+
+    // 3. Se não houver janela aberta do app, abre diretamente na URL com os parâmetros da caixa e conversa
+    if (self.clients.openWindow) {
+      return self.clients.openWindow(targetUrl);
+    }
+  })());
 });
+

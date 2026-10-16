@@ -1,5 +1,7 @@
 import { useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../services/supabase';
+import { useChatStore } from '../store/chatStore';
 
 
 // Public VAPID key generated previously
@@ -21,7 +23,30 @@ function urlBase64ToUint8Array(base64String: string) {
 }
 
 export function usePushNotifications() {
+  const navigate = useNavigate();
+  const location = useLocation();
   const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
+
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+
+    const handleGlobalSWClick = (event: MessageEvent) => {
+      if (event.data && event.data.type === 'NOTIFICATION_CLICK' && event.data.payload) {
+        const p = event.data.payload;
+        if (!location.pathname.startsWith('/chat')) {
+          navigate('/chat');
+          setTimeout(() => {
+            useChatStore.getState().openConversationFromNotification(p);
+          }, 150);
+        }
+      }
+    };
+
+    navigator.serviceWorker.addEventListener('message', handleGlobalSWClick);
+    return () => {
+      navigator.serviceWorker.removeEventListener('message', handleGlobalSWClick);
+    };
+  }, [location.pathname, navigate]);
 
   useEffect(() => {
     if (!tenantId || !('serviceWorker' in navigator) || !('PushManager' in window)) {
@@ -92,37 +117,53 @@ export function usePushNotifications() {
 
         await saveSubscriptionWithRetry();
 
-        // --- INÍCIO SINCRONIZAÇÃO RBAC ---
-        const syncConfigToSW = () => {
+        // --- INÍCIO SINCRONIZAÇÃO RBAC & MAPA DE CAIXAS ---
+        const syncConfigToSW = async () => {
           if (navigator.serviceWorker.controller) {
             const role = localStorage.getItem('current_user_role') || sessionStorage.getItem('current_user_role');
             const allowedStr = localStorage.getItem('allowed_instances') || sessionStorage.getItem('allowed_instances');
-            
             const isLoggedIn = !!(localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
 
             let allowedInstances = [];
             if (allowedStr) {
-                try { allowedInstances = JSON.parse(allowedStr); } catch (e) {}
+              try { allowedInstances = JSON.parse(allowedStr); } catch (e) {}
             }
 
             const notifPrefsStr = localStorage.getItem('user_inbox_notif_prefs_v1') || sessionStorage.getItem('user_inbox_notif_prefs_v1');
             let notifPrefs = {};
             if (notifPrefsStr) {
-                try { notifPrefs = JSON.parse(notifPrefsStr); } catch (e) {}
+              try { notifPrefs = JSON.parse(notifPrefsStr); } catch (e) {}
             }
 
+            // Mapa de caixas (instanceId -> { name, phone }) para enriquecer notificações no Service Worker
+            const instancesMap: Record<string, { name: string; phone?: string }> = {};
+            try {
+              const { data: instRows } = await supabase
+                .from('whatsapp_instances')
+                .select('id, display_name, phone_number')
+                .eq('tenant_id', tenantId);
+              if (instRows) {
+                for (const row of instRows) {
+                  if (row.id && row.display_name) {
+                    instancesMap[row.id] = { name: row.display_name, phone: row.phone_number || undefined };
+                  }
+                }
+              }
+            } catch (e) {}
+
             navigator.serviceWorker.controller.postMessage({
-                type: 'SYNC_USER_CONFIG',
-                config: { role, allowedInstances, isLoggedIn, notifPrefs }
+              type: 'SYNC_USER_CONFIG',
+              config: { role, allowedInstances, isLoggedIn, notifPrefs, instancesMap }
             });
           }
         };
 
         // Sincroniza imediatamente ao carregar e depois a cada 2 minutos
         syncConfigToSW();
-        setInterval(syncConfigToSW, 2 * 60 * 1000);
-        // --- FIM SINCRONIZAÇÃO RBAC ---
+        const syncInterval = setInterval(syncConfigToSW, 2 * 60 * 1000);
+        // --- FIM SINCRONIZAÇÃO RBAC & MAPA DE CAIXAS ---
 
+        return () => clearInterval(syncInterval);
       } catch (error) {
         console.error('Erro ao inicializar push notifications:', error);
       }
@@ -131,3 +172,4 @@ export function usePushNotifications() {
     initPush();
   }, [tenantId]);
 }
+

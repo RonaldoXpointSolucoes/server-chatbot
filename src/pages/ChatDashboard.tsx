@@ -450,6 +450,10 @@ export default function ChatDashboard() {
     undoLastBatchResolve,
     reopenedTicketToast,
     setReopenedTicketToast,
+    isOpeningNotificationChat,
+    notificationJumpToast,
+    setNotificationJumpToast,
+    openConversationFromNotification,
     historySyncError,
     setHistorySyncError,
     realtimeStatus,
@@ -519,9 +523,14 @@ export default function ChatDashboard() {
     undoLastBatchResolve: state.undoLastBatchResolve,
     reopenedTicketToast: state.reopenedTicketToast,
     setReopenedTicketToast: state.setReopenedTicketToast,
+    isOpeningNotificationChat: state.isOpeningNotificationChat,
+    notificationJumpToast: state.notificationJumpToast,
+    setNotificationJumpToast: state.setNotificationJumpToast,
+    openConversationFromNotification: state.openConversationFromNotification,
     historySyncError: state.historySyncError,
     setHistorySyncError: state.setHistorySyncError,
     tenantLabels: state.tenantLabels,
+    fetchTenantLabels: state.fetchTenantLabels,
   })));
 
   const currentTenantId = typeof window !== 'undefined' ? (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')) : null;
@@ -3245,10 +3254,113 @@ export default function ChatDashboard() {
 
   // Efeito protetor: se activeChatId foi definido mas não pertence à caixa atual, limpa a seleção para evitar resíduo fantasma
   useEffect(() => {
-    if (activeChatId && !activeChat && !draftNewChat) {
+    if (activeChatId && !activeChat && !draftNewChat && !isOpeningNotificationChat && !useChatStore.getState().isOpeningNotificationChat) {
       useChatStore.setState({ activeChatId: null, activeTicket: null });
     }
-  }, [activeChatId, activeChat, draftNewChat]);
+  }, [activeChatId, activeChat, draftNewChat, isOpeningNotificationChat]);
+
+  // Deep-link e clique em Notificações Web Push / Background: seleciona a Caixa exata e abre a Conversa apontada
+  const lastHandledNotifRef = useRef<string | null>(null);
+  useEffect(() => {
+    const consumePendingTargetFromIndexedDB = () => {
+      try {
+        if (typeof indexedDB === 'undefined') return;
+        const req = indexedDB.open('ChatBootSWConfig', 1);
+        req.onsuccess = () => {
+          const db = req.result;
+          if (!db.objectStoreNames.contains('userConfig')) return;
+          const tx = db.transaction('userConfig', 'readwrite');
+          const store = tx.objectStore('userConfig');
+          const getReq = store.get('pendingNotificationTarget');
+          getReq.onsuccess = () => {
+            const pending = getReq.result;
+            if (pending && (pending.conversationId || pending.contactId || pending.contactPhone)) {
+              const ageMs = Date.now() - (pending.timestamp || 0);
+              store.delete('pendingNotificationTarget');
+              if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+                navigator.serviceWorker.controller.postMessage({ type: 'CLEAR_PENDING_NOTIFICATION_TARGET' });
+              }
+              if (ageMs < 90000) {
+                const dedupKey = `${pending.conversationId || ''}_${pending.instanceId || ''}_${pending.contactId || ''}_${Math.floor((pending.timestamp || Date.now()) / 2000)}`;
+                if (lastHandledNotifRef.current !== dedupKey) {
+                  lastHandledNotifRef.current = dedupKey;
+                  useChatStore.getState().openConversationFromNotification(pending);
+                }
+              }
+            }
+          };
+        };
+      } catch (e) {
+        console.warn('[Notification DeepLink] Erro ao ler IndexedDB:', e);
+      }
+    };
+
+    const checkUrlNotificationParams = () => {
+      if (typeof window === 'undefined') return;
+      const params = new URLSearchParams(window.location.search);
+      const conversationId = params.get('conversation');
+      const instanceId = params.get('instance');
+      const contactId = params.get('contactId');
+      const contactPhone = params.get('phone');
+      const contactName = params.get('contactName');
+
+      if (conversationId || contactId || contactPhone) {
+        const dedupKey = `url_${conversationId || ''}_${instanceId || ''}_${contactId || ''}_${contactPhone || ''}`;
+        // Limpa os parâmetros da URL imediatamente para não reexecutar em reloads futuros
+        const cleanUrl = window.location.pathname;
+        window.history.replaceState({}, document.title, cleanUrl);
+
+        if (lastHandledNotifRef.current !== dedupKey) {
+          lastHandledNotifRef.current = dedupKey;
+          useChatStore.getState().openConversationFromNotification({
+            conversationId,
+            instanceId,
+            contactId,
+            contactPhone,
+            contactName
+          });
+        }
+      }
+    };
+
+    const handleServiceWorkerMessage = (event: MessageEvent) => {
+      if (event.data && event.data.type === 'NOTIFICATION_CLICK' && event.data.payload) {
+        const p = event.data.payload;
+        const dedupKey = `sw_${p.conversationId || ''}_${p.instanceId || ''}_${p.contactId || ''}_${Math.floor((p.timestamp || Date.now()) / 2000)}`;
+        if (lastHandledNotifRef.current !== dedupKey) {
+          lastHandledNotifRef.current = dedupKey;
+          if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+            navigator.serviceWorker.controller.postMessage({ type: 'CLEAR_PENDING_NOTIFICATION_TARGET' });
+          }
+          useChatStore.getState().openConversationFromNotification(p);
+        }
+      }
+    };
+
+    checkUrlNotificationParams();
+    consumePendingTargetFromIndexedDB();
+
+    const onVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        checkUrlNotificationParams();
+        consumePendingTargetFromIndexedDB();
+      }
+    };
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', handleServiceWorkerMessage);
+    }
+    window.addEventListener('focus', onVisibilityOrFocus);
+    document.addEventListener('visibilitychange', onVisibilityOrFocus);
+
+    return () => {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.removeEventListener('message', handleServiceWorkerMessage);
+      }
+      window.removeEventListener('focus', onVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', onVisibilityOrFocus);
+    };
+  }, [location.search]);
 
   // Memoização de alta performance das mensagens do chat ativo com tripla blindagem de desduplicação
   const { sortedRawMsgs, dedupedMsgs } = useMemo(() => {
@@ -5053,7 +5165,27 @@ export default function ChatDashboard() {
 
   return (
     <div className="flex w-full h-[100dvh] min-w-0 bg-[#f0f2f5] dark:bg-[#111b21] overflow-hidden font-sans relative">
-      
+      {notificationJumpToast && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9500] flex items-center gap-3 px-4 py-2.5 rounded-2xl bg-[#00a884] text-white shadow-xl border border-white/20 animate-in fade-in slide-in-from-top-3 duration-300 max-w-[92vw]">
+          <span className="text-base shrink-0">📥</span>
+          <div className="flex flex-col min-w-0 text-left">
+            <span className="text-xs font-extrabold leading-tight truncate">
+              Caixa: {notificationJumpToast.instanceName}
+            </span>
+            <span className="text-[11px] font-medium text-white/90 truncate">
+              Conversa aberta: {notificationJumpToast.contactName}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setNotificationJumpToast(null)}
+            className="ml-1 p-1 rounded-lg hover:bg-white/15 transition-colors shrink-0"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
       {/* Modal de Alarme de Compromisso Vencido */}
       {activeAlarmAppointment && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in duration-300">

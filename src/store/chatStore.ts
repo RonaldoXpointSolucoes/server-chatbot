@@ -607,6 +607,17 @@ interface ChatState {
   setActiveChannelFilter: (channelId: string | null, channelName?: string) => void;
   setEvolutionConnection: (status: boolean, instanceName?: string | null) => void;
   setActiveChat: (id: string | null) => void;
+  isOpeningNotificationChat: boolean;
+  notificationJumpToast: { contactName: string; instanceName: string; timestamp: number } | null;
+  setNotificationJumpToast: (toast: { contactName: string; instanceName: string; timestamp: number } | null) => void;
+  openConversationFromNotification: (payload: {
+    conversationId?: string | null;
+    instanceId?: string | null;
+    instanceName?: string | null;
+    contactId?: string | null;
+    contactPhone?: string | null;
+    contactName?: string | null;
+  }) => Promise<boolean>;
   setBotStatus: (contactId: string, status: 'active' | 'paused') => Promise<void>;
 
   // Real DB actions
@@ -1100,6 +1111,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
   contactTickets: [],
   reopenedTicketToast: null,
   setReopenedTicketToast: (toast) => set({ reopenedTicketToast: toast }),
+  isOpeningNotificationChat: false,
+  notificationJumpToast: null,
+  setNotificationJumpToast: (toast) => set({ notificationJumpToast: toast }),
   historySyncError: null,
   setHistorySyncError: (error) => set({ historySyncError: error }),
   isOffline: typeof navigator !== 'undefined' ? !navigator.onLine : false,
@@ -2129,6 +2143,263 @@ export const useChatStore = create<ChatState>((set, get) => ({
       get().loadTicketsForContact(id);
     } else {
       set({ activeTicket: null, contactTickets: [] });
+    }
+  },
+
+  openConversationFromNotification: async (payload) => {
+    const {
+      conversationId,
+      instanceId: rawInstanceId,
+      contactId: rawContactId,
+      contactPhone,
+      contactName
+    } = payload || {};
+
+    if (!conversationId && !rawContactId && !contactPhone) return false;
+
+    set({ isOpeningNotificationChat: true });
+
+    try {
+      const state = get();
+      let resolvedConv: any = null;
+      let resolvedContact: any = null;
+      let targetInstanceId: string | null = rawInstanceId || null;
+      let targetContactId: string | null = rawContactId ? getRealContactId(rawContactId) : null;
+
+      // 1. Se temos conversationId, buscamos a conversa no Supabase junto com o contato
+      if (conversationId) {
+        const { data: convData } = await supabase
+          .from('conversations')
+          .select('*, conversation_labels(tenant_labels(*)), contact:contacts(*)')
+          .eq('id', conversationId)
+          .maybeSingle();
+
+        if (convData) {
+          resolvedConv = convData;
+          targetInstanceId = convData.instance_id || targetInstanceId;
+          targetContactId = convData.contact_id || targetContactId;
+          if (convData.contact) {
+            resolvedContact = Array.isArray(convData.contact) ? convData.contact[0] : convData.contact;
+          }
+        }
+      }
+
+      // 2. Se ainda não temos o contato completo do banco, buscamos por targetContactId ou contactPhone
+      const tenantId = state.tenantInfo?.id || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+      if (!resolvedContact && targetContactId) {
+        const { data: cData } = await supabase
+          .from('contacts')
+          .select('*')
+          .eq('id', targetContactId)
+          .maybeSingle();
+        if (cData) {
+          resolvedContact = cData;
+          targetInstanceId = targetInstanceId || cData.instance_id || null;
+        }
+      }
+
+      if (!resolvedContact && contactPhone && tenantId) {
+        const cleanDigits = contactPhone.replace(/\D/g, '');
+        if (cleanDigits.length >= 8) {
+          const last8 = cleanDigits.slice(-8);
+          const { data: cList } = await supabase
+            .from('contacts')
+            .select('*')
+            .eq('tenant_id', tenantId)
+            .ilike('phone', `%${last8}%`)
+            .limit(5);
+          if (cList && cList.length > 0) {
+            resolvedContact = cList.find((c: any) => !targetInstanceId || c.instance_id === targetInstanceId) || cList[0];
+            targetContactId = resolvedContact.id;
+            targetInstanceId = targetInstanceId || resolvedContact.instance_id || null;
+          }
+        }
+      }
+
+      // 3. Se tínhamos contato mas não tínhamos a conversa, busca a conversa mais recente
+      if (!resolvedConv && targetContactId) {
+        let convQ = supabase
+          .from('conversations')
+          .select('*, conversation_labels(tenant_labels(*))')
+          .eq('contact_id', targetContactId)
+          .order('last_message_at', { ascending: false })
+          .limit(1);
+        if (targetInstanceId) {
+          convQ = convQ.eq('instance_id', targetInstanceId);
+        }
+        const { data: convFallback } = await convQ.maybeSingle();
+        if (convFallback) {
+          resolvedConv = convFallback;
+          targetInstanceId = convFallback.instance_id || targetInstanceId;
+        }
+      }
+
+      // Fallback local caso offline ou falha de rede
+      if (!targetContactId && conversationId) {
+        const localMatch = get().contacts.find(c => c.conv_id === conversationId || c.id === conversationId);
+        if (localMatch) {
+          targetContactId = getRealContactId(localMatch.id);
+          targetInstanceId = targetInstanceId || localMatch.instance_id || getInstanceIdFromContact(localMatch.id);
+        }
+      }
+
+      if (!targetContactId) {
+        set({ isOpeningNotificationChat: false });
+        return false;
+      }
+
+      // 4. Resolve o nome e UUID da Caixa (whatsapp_instances)
+      let resolvedInstanceUuid = targetInstanceId ? (instanceCache.getId(targetInstanceId) || targetInstanceId) : null;
+      let resolvedInstanceName = resolvedInstanceUuid ? (instanceCache.getName(resolvedInstanceUuid) || null) : null;
+
+      if (resolvedInstanceUuid && !resolvedInstanceName) {
+        const rawInst = (get().rawInstances || []).find((i: any) => i.id === resolvedInstanceUuid || i.display_name === resolvedInstanceUuid);
+        if (rawInst) {
+          resolvedInstanceUuid = rawInst.id;
+          resolvedInstanceName = rawInst.display_name || rawInst.whatsapp_name || null;
+        } else {
+          const { data: instDb } = await supabase
+            .from('whatsapp_instances')
+            .select('id, display_name, api_key, phone_number, settings')
+            .eq('id', resolvedInstanceUuid)
+            .maybeSingle();
+          if (instDb) {
+            resolvedInstanceUuid = instDb.id;
+            resolvedInstanceName = instDb.display_name || null;
+            instanceCache.set(instDb.id, instDb.display_name || '', instDb.api_key || '', instDb.phone_number || '', instDb.settings || {});
+          }
+        }
+      }
+
+      const finalInstanceId = resolvedInstanceUuid || targetInstanceId || 'default';
+      const compositeId = `${targetContactId}_${finalInstanceId}`;
+
+      // 5. Atualiza o filtro de Caixa (activeChannelFilter & selectedChannelFilters) no storage
+      if (finalInstanceId && finalInstanceId !== 'default') {
+        try {
+          localStorage.setItem('activeChannelFilter', finalInstanceId);
+          if (resolvedInstanceName) {
+            localStorage.setItem('activeChannelName', resolvedInstanceName);
+          }
+          localStorage.setItem('selectedChannelFilters', JSON.stringify([finalInstanceId]));
+        } catch (e) {}
+      }
+
+      // 6. Injeta ou atualiza o contato imediatamente no estado para que activeChat resolva no mesmo frame (0ms)
+      const tname = get().tenantInfo?.name || '';
+      const phoneMatch = resolvedContact?.phone || (resolvedContact?.whatsapp_jid ? resolvedContact.whatsapp_jid.split('@')[0] : contactPhone || '');
+      const displayContactName = resolvedContact?.custom_name || resolvedContact?.name || resolvedContact?.push_name || contactName || phoneMatch || 'Contato';
+      const sanitizedName = resolvedContact?.custom_name
+        ? resolvedContact.custom_name
+        : (sanitizeContactName(displayContactName, phoneMatch, tname) || displayContactName);
+      const fallbackAvatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(sanitizedName)}&background=random&color=fff`;
+      const ts = resolvedConv?.last_message_at
+        ? new Date(resolvedConv.last_message_at).getTime()
+        : (resolvedContact?.created_at ? new Date(resolvedContact.created_at).getTime() : Date.now());
+
+      set((s) => {
+        const existingContacts = [...s.contacts];
+        const idx = existingContacts.findIndex(c =>
+          c.id === compositeId ||
+          (resolvedConv?.id && c.conv_id === resolvedConv.id) ||
+          (getRealContactId(c.id) === targetContactId && (c.instance_id === finalInstanceId || finalInstanceId === 'default'))
+        );
+
+        const baseContact: any = idx !== -1 ? existingContacts[idx] : {};
+        const mergedContact: ContactType = {
+          ...baseContact,
+          ...(resolvedContact || {}),
+          id: compositeId,
+          custom_name: resolvedContact?.custom_name ?? baseContact.custom_name,
+          name: sanitizedName,
+          phone: resolvedContact?.phone || baseContact.phone || phoneMatch,
+          whatsapp_jid: resolvedContact?.whatsapp_jid || baseContact.whatsapp_jid || (phoneMatch ? `${phoneMatch.replace(/\D/g, '')}@s.whatsapp.net` : ''),
+          avatar: resolvedContact?.profile_picture_url || baseContact.avatar || fallbackAvatar,
+          messages: baseContact.messages && baseContact.messages.length > 0
+            ? baseContact.messages
+            : (resolvedConv?.last_message_preview ? [{
+                id: 'preview-' + (resolvedConv.id || compositeId),
+                text: resolvedConv.last_message_preview,
+                sender: 'client',
+                timestamp: new Date(ts)
+              }] : []),
+          unread: resolvedConv?.unread_count ?? baseContact.unread ?? 0,
+          is_favorite: resolvedConv?.is_favorite ?? baseContact.is_favorite ?? false,
+          is_pinned: resolvedConv?.is_pinned ?? baseContact.is_pinned ?? false,
+          lastMsgTimestamp: Math.max(ts, baseContact.lastMsgTimestamp || 0),
+          conv_status: resolvedConv?.status || baseContact.conv_status || 'open',
+          snoozed_until: resolvedConv?.snoozed_until ?? baseContact.snoozed_until,
+          snoozed_at: resolvedConv?.snoozed_at ?? baseContact.snoozed_at,
+          snoozed_by: resolvedConv?.snoozed_by ?? baseContact.snoozed_by,
+          priority: resolvedConv?.priority ?? baseContact.priority,
+          assigned_to: resolvedConv?.assigned_to ?? baseContact.assigned_to,
+          conv_labels: resolvedConv?.conversation_labels
+            ? resolvedConv.conversation_labels.map((cl: any) => cl.tenant_labels).filter(Boolean)
+            : (baseContact.conv_labels || []),
+          instance_id: finalInstanceId !== 'default' ? finalInstanceId : (baseContact.instance_id || null),
+          conv_id: resolvedConv?.id || baseContact.conv_id || conversationId,
+          ai_paused: resolvedContact?.bot_status === 'paused' ? true : (resolvedConv?.ai_paused ?? baseContact.ai_paused ?? false),
+          ai_paused_manually: resolvedContact?.bot_status === 'paused' ? true : (resolvedConv?.ai_paused_manually ?? baseContact.ai_paused_manually ?? false),
+          bot_status: resolvedContact?.bot_status || (resolvedConv?.ai_paused ? 'paused' : (baseContact.bot_status || 'active')),
+          bot_paused_until: resolvedContact?.bot_paused_until ?? baseContact.bot_paused_until ?? null
+        };
+
+        if (idx !== -1) {
+          existingContacts[idx] = mergedContact;
+        } else {
+          existingContacts.unshift(mergedContact);
+        }
+
+        const nextFilterType = ['resolved', 'snoozed', 'unread', 'mine', 'favorites', 'bot'].includes(s.filterType)
+          ? 'all'
+          : s.filterType;
+        if (nextFilterType !== s.filterType) {
+          try { localStorage.setItem('chat_filter_preference', nextFilterType); } catch (e) {}
+        }
+
+        return {
+          contacts: existingContacts,
+          ...(finalInstanceId !== 'default' ? {
+            activeChannelFilter: finalInstanceId,
+            activeChannelName: resolvedInstanceName || s.activeChannelName,
+            selectedChannelFilters: [finalInstanceId]
+          } : {}),
+          filterType: nextFilterType,
+          activeChatId: compositeId
+        };
+      });
+
+      // 7. Exibe o toast indicando a Caixa e o Contato abertos via notificação
+      const toastConvId = resolvedConv?.id || conversationId || compositeId;
+      set({
+        notificationJumpToast: {
+          contactName: sanitizedName,
+          instanceName: resolvedInstanceName || 'Caixa Principal',
+          conversationId: toastConvId
+        }
+      });
+      setTimeout(() => {
+        if (get().notificationJumpToast?.conversationId === toastConvId) {
+          set({ notificationJumpToast: null });
+        }
+      }, 4500);
+
+      // 8. Carrega o histórico completo da conversa, tickets e marca como lida
+      get().loadTicketsForContact(compositeId);
+      await get().loadHistoricalMessages(compositeId, resolvedInstanceName || finalInstanceId, true);
+      get().markAsRead(compositeId);
+
+      // Recarrega a lista da caixa em background
+      get().fetchInitialData();
+
+      return true;
+    } catch (err) {
+      console.error('[openConversationFromNotification] Erro ao abrir conversa da notificação:', err);
+      return false;
+    } finally {
+      setTimeout(() => {
+        set({ isOpeningNotificationChat: false });
+      }, 1000);
     }
   },
 
@@ -6980,6 +7251,111 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         });
                     } else {
                       playNotificationSound('default');
+                    }
+                  }
+
+                  if (!isFocused && shouldNotifyForEvent(effectiveInstanceId, evType, 'push') && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+                    try {
+                      const instName = (effectiveInstanceId ? instanceCache.getName(effectiveInstanceId) : null)
+                        || (s.rawInstances || []).find((inst: any) => inst.id === effectiveInstanceId)?.display_name
+                        || s.activeChannelName
+                        || '';
+                      const contactDisplayName = updatedContact.custom_name || updatedContact.name || updatedContact.push_name || updatedContact.phone || 'Novo Contato';
+                      const notifTitle = instName ? `${contactDisplayName} • 📥 ${instName}` : contactDisplayName;
+
+                      const rawText = (advanced.text || m.text_content || '').trim();
+                      const mType = (advanced.mediaType || m.message_type || 'text').toLowerCase();
+                      let msgLine = '';
+
+                      if (mType === 'image') {
+                        msgLine = rawText && !['[image]', '[imagem]', '📷 imagem', '📷 foto'].includes(rawText.toLowerCase())
+                          ? `📷 Foto: ${rawText}`
+                          : '📷 Enviou uma foto';
+                      } else if (mType === 'audio' || mType === 'ptt' || mType === 'voice') {
+                        msgLine = m.transcription
+                          ? `🎤 Áudio: "${m.transcription}"`
+                          : '🎤 Mensagem de voz recebida';
+                      } else if (mType === 'video') {
+                        msgLine = rawText && !['[video]', '[vídeo]'].includes(rawText.toLowerCase())
+                          ? `🎥 Vídeo: ${rawText}`
+                          : '🎥 Enviou um vídeo';
+                      } else if (mType === 'document') {
+                        msgLine = rawText ? `📄 Documento: ${rawText}` : '📄 Enviou um documento';
+                      } else if (mType === 'sticker') {
+                        msgLine = '💟 Enviou uma figurinha';
+                      } else if (mType === 'location') {
+                        msgLine = '📍 Compartilhou localização';
+                      } else if (mType === 'vcard' || mType === 'contact') {
+                        msgLine = `👤 Cartão de contato${rawText ? `: ${rawText}` : ''}`;
+                      } else {
+                        msgLine = rawText || '💬 Nova mensagem recebida';
+                      }
+
+                      if (msgLine.length > 260) {
+                        msgLine = msgLine.substring(0, 257) + '...';
+                      }
+
+                      const rawPhoneDigits = String(updatedContact.phone || '').replace(/\D/g, '');
+                      let formattedPhone = '';
+                      if (rawPhoneDigits.length >= 10 && rawPhoneDigits.length <= 15) {
+                        const local = rawPhoneDigits.startsWith('55') && rawPhoneDigits.length >= 12 ? rawPhoneDigits.slice(2) : rawPhoneDigits;
+                        if (local.length === 11) {
+                          formattedPhone = `(${local.slice(0, 2)}) ${local.slice(2, 7)}-${local.slice(7)}`;
+                        } else if (local.length === 10) {
+                          formattedPhone = `(${local.slice(0, 2)}) ${local.slice(2, 6)}-${local.slice(6)}`;
+                        } else {
+                          formattedPhone = `+${rawPhoneDigits}`;
+                        }
+                      }
+
+                      const metaParts: string[] = [];
+                      if (instName) metaParts.push(`📦 Caixa: ${instName}`);
+                      if (formattedPhone) metaParts.push(`📱 ${formattedPhone}`);
+                      const notifBody = metaParts.length > 0 ? `${msgLine}\n${metaParts.join(' • ')}` : msgLine;
+
+                      const deepParams = new URLSearchParams();
+                      if (m.conversation_id) deepParams.set('conversation', m.conversation_id);
+                      if (effectiveInstanceId) deepParams.set('instance', effectiveInstanceId);
+                      if (targetContactId) deepParams.set('contactId', targetContactId);
+                      if (rawPhoneDigits) deepParams.set('phone', rawPhoneDigits);
+                      if (contactDisplayName) deepParams.set('contactName', contactDisplayName);
+                      const deepUrl = `/?${deepParams.toString()}`;
+
+                      const notifData = {
+                        url: deepUrl,
+                        conversationId: m.conversation_id,
+                        instanceId: effectiveInstanceId,
+                        instanceName: instName || null,
+                        contactId: targetContactId,
+                        contactPhone: rawPhoneDigits || null,
+                        contactName: contactDisplayName
+                      };
+
+                      const notifIcon = updatedContact.profile_picture_url || updatedContact.avatar || '/pwa-192x192.png';
+                      const notifOptions: any = {
+                        body: notifBody,
+                        icon: notifIcon,
+                        badge: '/pwa-192x192.png',
+                        tag: m.conversation_id ? `conv_${m.conversation_id}` : `chat_${cid}`,
+                        renotify: true,
+                        vibrate: [200, 100, 200],
+                        data: notifData,
+                        actions: [
+                          { action: 'open_chat', title: instName ? `Abrir ${instName}` : 'Abrir Conversa' }
+                        ]
+                      };
+
+                      if (mType === 'image' && m.media_url && String(m.media_url).startsWith('http')) {
+                        notifOptions.image = m.media_url;
+                      }
+
+                      if ('serviceWorker' in navigator) {
+                        navigator.serviceWorker.ready.then((reg) => {
+                          reg.showNotification(notifTitle, notifOptions).catch(() => {});
+                        }).catch(() => {});
+                      }
+                    } catch (notifErr) {
+                      console.warn('[Realtime Notification] Falha ao exibir notificação rica:', notifErr);
                     }
                   }
                 }

@@ -559,7 +559,8 @@ export default function ClientLogin() {
     }
     localStorage.setItem('allowed_instances', JSON.stringify(allowedInstances || []));
     localStorage.setItem('allowed_companies', JSON.stringify(allowedCompanies || []));
-    navigate('/chat', { replace: true });
+    const searchStr = typeof window !== 'undefined' ? (window.location.search || '') : '';
+    navigate(`/chat${searchStr}`, { replace: true });
   };
 
   const handleGoogleLogin = async () => {
@@ -729,7 +730,7 @@ export default function ClientLogin() {
       const tenantName = localStorage.getItem('current_tenant_name') || sessionStorage.getItem('current_tenant_name');
       
       if (tenantId && tenantId !== 'undefined' && tenantName && tenantName !== 'undefined') {
-        navigate('/chat', { replace: true });
+        navigate(`/chat${window.location.search || ''}`, { replace: true });
         return;
       } else if (tenantId) {
         localStorage.removeItem('current_tenant_id');
