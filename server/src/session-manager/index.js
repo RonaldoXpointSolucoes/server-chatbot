@@ -2047,12 +2047,18 @@ class SessionManager {
                                         console.log(`[SessionManager - Antiban] Enviando mensagem para ${targetJid} via instância ${instanceId} (delay: ${delay}ms)`);
                                     }
                                     
-                                    // Timeout de segurança no envio do Baileys para não travar a fila da instância (15s resiliente)
+                                    // Timeout de segurança no envio do Baileys para não travar a fila da instância (12s resiliente)
                                     const sendPromise = sendFn(targetJid, content, options);
-                                    const timeoutPromise = new Promise((_, reject) => 
-                                        setTimeout(() => reject(new Error('TIMEOUT_BAILEYS_SOCKET_SEND')), 8000)
-                                    );
-                                    const result = await Promise.race([sendPromise, timeoutPromise]);
+                                    let sendTimeoutHandle = null;
+                                    const timeoutPromise = new Promise((_, reject) => {
+                                        sendTimeoutHandle = setTimeout(() => reject(new Error('TIMEOUT_BAILEYS_SOCKET_SEND')), 12000);
+                                    });
+                                    let result;
+                                    try {
+                                        result = await Promise.race([sendPromise, timeoutPromise]);
+                                    } finally {
+                                        if (sendTimeoutHandle) clearTimeout(sendTimeoutHandle);
+                                    }
 
                                     // Auto-persiste e sincroniza imediatamente no EventProcessor
                                     try {
@@ -2089,6 +2095,8 @@ class SessionManager {
                                         statusCode === 1006 ||
                                         statusCode === 428 ||
                                         statusCode === 515 ||
+                                        rawErrStr.includes('TIMEOUT_BAILEYS_SOCKET_SEND') ||
+                                        rawErrStr.includes('TIMEOUT_FASTPATH_SEND') ||
                                         rawErrStr.includes('Connection Terminated') ||
                                         rawErrStr.includes('Connection Closed') ||
                                         rawErrStr.includes('Connection lost') ||
@@ -2100,7 +2108,7 @@ class SessionManager {
                                         rawErrStr.includes('ETIMEDOUT');
 
                                     if (isWsAbnormalDrop) {
-                                        lastError = new Error(rawErrStr.includes('Connection Closed') ? rawErrStr : `Connection Closed (${rawErrStr})`);
+                                        lastError = new Error(rawErrStr.includes('Connection Closed') || rawErrStr.includes('TIMEOUT_') ? rawErrStr : `Connection Closed (${rawErrStr})`);
                                     } else {
                                         lastError = error;
                                     }
@@ -2110,8 +2118,6 @@ class SessionManager {
                                         rawErrStr.includes('logged_out') ||
                                         rawErrStr.includes('blocked_12h') ||
                                         rawErrStr.includes('paused') ||
-                                        rawErrStr.includes('TIMEOUT_BAILEYS_SOCKET_SEND') ||
-                                        rawErrStr.includes('TIMEOUT_FASTPATH_SEND') ||
                                         rawErrStr.includes('está offline no banco') ||
                                         rawErrStr.includes('está logged_out no banco') ||
                                         rawErrStr.includes('está paused no banco');
@@ -2129,11 +2135,11 @@ class SessionManager {
                                         break;
                                     }
 
-                                    // Se o WebSocket caiu com 1006 / Connection Terminated, aciona reconexão imediata em background
+                                    // Se o WebSocket caiu com 1006 / Connection Terminated / TIMEOUT_BAILEYS_SOCKET_SEND, aciona reconexão imediata em background
                                     // e delega rapidamente para o Outbox Resiliente sem bloquear na fila em memória
                                     if (isWsAbnormalDrop) {
                                         const currentSess = this.sessions.get(instanceId);
-                                        if (currentSess?.sock === sock && (!isSocketOpen(sock) || rawErrStr === '1006' || rawErrStr.includes('Connection Terminated'))) {
+                                        if (currentSess?.sock === sock && (!isSocketOpen(sock) || rawErrStr === '1006' || rawErrStr.includes('Connection Terminated') || rawErrStr.includes('TIMEOUT_BAILEYS_SOCKET_SEND'))) {
                                             if (!this.connectingState.has(instanceId)) {
                                                 if (this.reconnectingTimers.has(instanceId)) {
                                                     clearTimeout(this.reconnectingTimers.get(instanceId));
@@ -2405,6 +2411,8 @@ class SessionManager {
 
             const isDefinitiveOffline = inst && ['offline', 'logged_out', 'blocked_12h', 'disconnected', 'paused', 'close', 'closed'].includes(inst.status);
             const bodyText = typeof content === 'string' ? content : (content?.text || content?.caption || '');
+            const resolvedMediaUrl = options?.mediaUrl || content?.image?.url || content?.video?.url || content?.audio?.url || content?.document?.url || null;
+            const resolvedMessageType = resolvedMediaUrl ? 'media' : (type || 'text');
 
             if (isDefinitiveOffline) {
                 console.log(`[SessionManager] enqueueMessage: Instância ${instanceId} está ${inst?.status}. Gravando mensagem em wa_outgoing_messages...`);
@@ -2416,7 +2424,8 @@ class SessionManager {
                     tenant_id: tenantId,
                     instance_id: instanceId,
                     chat_jid: targetJid,
-                    message_type: type,
+                    message_type: resolvedMessageType,
+                    ...(resolvedMediaUrl ? { media_url: resolvedMediaUrl } : {}),
                     body: bodyText,
                     status: 'pending',
                     priority: 1
@@ -2467,7 +2476,8 @@ class SessionManager {
                 tenant_id: tenantId,
                 instance_id: instanceId,
                 chat_jid: targetJid,
-                message_type: type,
+                message_type: resolvedMessageType,
+                ...(resolvedMediaUrl ? { media_url: resolvedMediaUrl } : {}),
                 body: bodyText,
                 status: 'pending',
                 priority: options?.priority || 1

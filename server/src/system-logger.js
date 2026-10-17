@@ -115,6 +115,9 @@ function interceptConsole() {
         text.includes('[QueueProcessor/TTL]') ||
         text.includes('[Process Safe Guard]') ||
         text.includes('[AutoRagTrainer]') ||
+        text.includes('[InternalRouting]') ||
+        text.includes('Aviso no upload background de mídia') ||
+        text.includes('mmg.whatsapp.net') ||
         text.includes('Handshake transitório') ||
         text.includes('TIMEOUT_SOCKET_WAKE_FASTFAIL') ||
         text.includes('wa_outgoing_messages') ||

@@ -1385,7 +1385,23 @@ class EventProcessor {
                          }
                          
                          const doUpload = async () => {
-                             const stream = await downloadContentFromMessage(mediaMeta, b.msgType.replace('Message', ''));
+                             let stream;
+                             try {
+                                 stream = await downloadContentFromMessage(mediaMeta, b.msgType.replace('Message', ''));
+                             } catch (dlErr) {
+                                 const dlMsg = dlErr?.message || String(dlErr || '');
+                                 if (dlMsg.includes('Failed to fetch stream') && typeof sock?.updateMediaMessage === 'function' && b.rawMsg?.key) {
+                                     try {
+                                         const updatedMsg = await sock.updateMediaMessage(b.rawMsg);
+                                         const refreshedMeta = this.extractMediaMeta(updatedMsg || b.rawMsg, b.msgType) || mediaMeta;
+                                         stream = await downloadContentFromMessage(refreshedMeta, b.msgType.replace('Message', ''));
+                                     } catch (refreshErr) {
+                                         throw dlErr;
+                                     }
+                                 } else {
+                                     throw dlErr;
+                                 }
+                             }
                              const mimeType = mediaMeta.mimetype || 'application/octet-stream';
                              const fileName = mediaMeta.fileName || 'media_' + Date.now();
                              const safeName = fileName.replace(/[^a-zA-Z0-9.\-]/g, '_');
@@ -1420,7 +1436,7 @@ class EventProcessor {
                                          directUploadSuccess = true;
                                      }
                                  } catch (directExc) {
-                                     console.warn('[BatchProcessor] Upload direto falhou, usando TUS resumable fallback:', directExc.message);
+                                     console.log('[BatchProcessor] Upload direto falhou, usando TUS resumable fallback:', directExc.message);
                                  }
                              }
 
@@ -1490,7 +1506,7 @@ class EventProcessor {
                                              }).catch(() => {});
                                          }
                                      }
-                                 }).catch(bgErr => console.warn('[BatchProcessor] Aviso no upload background de mídia:', bgErr.message));
+                                 }).catch(bgErr => console.log('[BatchProcessor] Aviso: Mídia expirada/inacessível no upload background:', bgErr?.message || bgErr));
                              } else {
                                  const isMutedMediaErr = raceErr.message?.includes('empty media key') || raceErr.message?.includes('Bad MAC');
                                  if (isMutedMediaErr) {

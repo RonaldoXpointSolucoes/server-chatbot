@@ -5,11 +5,11 @@ const ALPHA_INSTANCES = new Set([
     'cc4efe36-f391-4b3d-a24c-ddcd8a293cf6',
     '5c78d358-d449-41c4-b396-a04ab20a39e4'
 ]);
-const DEFAULT_ALPHA_URL = 'http://wh1ss8sy848ufj6zh8t492y7.69.62.92.212.sslip.io';
+const DEFAULT_ALPHA_URL = 'https://wh1ss8sy848ufj6zh8t492y7.69.62.92.212.sslip.io';
 
 export { ALPHA_INSTANCES, DEFAULT_ALPHA_URL };
 
-const DEFAULT_PROD_URL = 'http://owckk0k8w8soo40w40owc4ss.69.62.92.212.sslip.io';
+const DEFAULT_PROD_URL = 'https://owckk0k8w8soo40w40owc4ss.69.62.92.212.sslip.io';
 
 export function externalMessageOwner(instanceId, nodeId, alphaUrl = DEFAULT_ALPHA_URL) {
     if (!ALPHA_INSTANCES.has(instanceId) || String(nodeId).includes('alpha')) return null;
@@ -63,7 +63,7 @@ export async function forwardInternalInstanceRequest(req, res, instanceId, optio
             headers,
             body: JSON.stringify(req.body || {}),
             signal: controller.signal,
-            redirect: 'error'
+            redirect: 'follow'
         });
 
         if (response.ok) {
@@ -75,10 +75,10 @@ export async function forwardInternalInstanceRequest(req, res, instanceId, optio
             return true;
         }
 
-        console.warn(`[InternalRouting] Worker proprietário (${targetOrigin}) retornou HTTP ${response.status} para instância ${instanceId}. Aplicando fallback Outbox local.`);
+        console.log(`[InternalRouting] Worker proprietário (${targetOrigin}) retornou HTTP ${response.status} para instância ${instanceId}. Aplicando fallback Outbox local.`);
         return false;
     } catch (err) {
-        console.warn(`[InternalRouting] Falha ao encaminhar requisição da instância ${instanceId} para ${targetOrigin} (${err?.message || err?.name}). Aplicando fallback Outbox local.`);
+        console.log(`[InternalRouting] Falha ao encaminhar requisição da instância ${instanceId} para ${targetOrigin} (${err?.message || err?.name}). Aplicando fallback Outbox local.`);
         return false;
     } finally {
         clearTimeout(timer);

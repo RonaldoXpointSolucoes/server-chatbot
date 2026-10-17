@@ -1363,6 +1363,9 @@ export default function DevLogger() {
         msg.includes('[AutoRagTrainer]') ||
         msg.includes('[Process Safe Guard]') ||
         msg.includes('[QueueProcessor/TTL]') ||
+        msg.includes('[InternalRouting]') ||
+        msg.includes('Aviso no upload background de mídia') ||
+        msg.includes('mmg.whatsapp.net') ||
         msg.includes('Handshake transitório') ||
         msg.includes('TIMEOUT_SOCKET_WAKE_FASTFAIL') ||
         msg.includes('wa_outgoing_messages') ||
@@ -1535,6 +1538,9 @@ export default function DevLogger() {
                     msg.includes('[AutoRagTrainer]') ||
                     msg.includes('[Process Safe Guard]') ||
                     msg.includes('[QueueProcessor/TTL]') ||
+                    msg.includes('[InternalRouting]') ||
+                    msg.includes('Aviso no upload background de mídia') ||
+                    msg.includes('mmg.whatsapp.net') ||
                     msg.includes('Handshake transitório') ||
                     msg.includes('TIMEOUT_SOCKET_WAKE_FASTFAIL') ||
                     msg.includes('wa_outgoing_messages') ||
@@ -1819,7 +1825,26 @@ export default function DevLogger() {
         // Fallback
       }
 
-      // Consolidar erros de backend
+      const isSuppressedHistoricalNoise = (msg?: string) => {
+        if (!msg) return true;
+        return (
+          msg.includes('[AutoRagTrainer]') ||
+          msg.includes('[Process Safe Guard]') ||
+          msg.includes('[QueueProcessor/TTL]') ||
+          msg.includes('[InternalRouting]') ||
+          msg.includes('Aviso no upload background de mídia') ||
+          msg.includes('mmg.whatsapp.net') ||
+          msg.includes('Handshake transitório') ||
+          msg.includes('TIMEOUT_SOCKET_WAKE_FASTFAIL') ||
+          msg.includes('wa_outgoing_messages') ||
+          msg.includes('Connection Terminated') ||
+          msg.includes('Connection Closed') ||
+          msg.includes('Bad MAC') ||
+          msg.includes('USync fetch yielded no results')
+        );
+      };
+
+      // Consolidar erros de backend (excluindo ruídos transitórios históricos já tratados)
       const combinedServerErrors = [
         ...fetchedServerErrors,
         ...supabaseSystemLogs.map(l => ({
@@ -1830,7 +1855,7 @@ export default function DevLogger() {
           details: l.details || l.metadata
         })),
         ...currentLogs.filter(l => l.source?.toLowerCase().includes('server') || l.source?.toLowerCase().includes('node'))
-      ];
+      ].filter(item => !isSuppressedHistoricalNoise(item?.message));
 
       setAiAnalysisStep('3/5 🧠 Processando diagnóstico profundo e causa raiz com Gemini...');
 

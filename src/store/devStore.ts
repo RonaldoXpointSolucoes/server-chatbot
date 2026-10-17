@@ -65,7 +65,18 @@ export const useDevStore = create<DevStore>()(
           lowerMsg.includes('não pertence ao escopo deste nó') ||
           lowerMsg.includes('sent retry receipt') ||
           lowerMsg.includes('error in sending keep alive') ||
-          lowerMsg.includes('keep alive called when ws not open');
+          lowerMsg.includes('keep alive called when ws not open') ||
+          lowerMsg.includes('[autoragtrainer]') ||
+          lowerMsg.includes('[process safe guard]') ||
+          lowerMsg.includes('[queueprocessor/ttl]') ||
+          lowerMsg.includes('[internalrouting]') ||
+          lowerMsg.includes('aviso no upload background de mídia') ||
+          lowerMsg.includes('mmg.whatsapp.net') ||
+          lowerMsg.includes('handshake transitório') ||
+          lowerMsg.includes('timeout_socket_wake_fastfail') ||
+          lowerMsg.includes('wa_outgoing_messages') ||
+          lowerMsg.includes('sessionmanager - antiban') ||
+          lowerMsg.includes('signal is aborted without reason');
 
         if (isIrrelevantNoise && log.type !== 'error') {
           return; // Suprime avisos cosméticos e irrelevantes

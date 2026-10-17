@@ -495,9 +495,17 @@ class FlowEngine {
                 if (['send_message', 'message', 'text'].includes(flowType)) {
                     const rawText = block.text || block.data?.text || '';
                     const parsedText = normalizeUrlsInText(this.parseVariables(rawText, convState.variables));
-                    if (sock && parsedText) {
-                        const msgResult = await sock.sendMessage(convState.remote_jid, { text: parsedText });
-                        await this.persistOutboundMessage(tenantId, instanceId, conversationId, convState.remote_jid, parsedText, msgResult, 'text');
+                    if (parsedText) {
+                        await this.sendFlowMessageResilient({
+                            tenantId,
+                            instanceId,
+                            conversationId,
+                            jid: convState.remote_jid,
+                            sock,
+                            payload: { text: parsedText },
+                            textContent: parsedText,
+                            messageType: 'text'
+                        });
                         // Delay humanizado entre mensagens (1.5s)
                         await this.sleep(1500);
                     }
@@ -507,12 +515,21 @@ class FlowEngine {
                 else if (flowType === 'image') {
                     const imgUrl = block.url || block.image_url || block.data?.url;
                     const caption = normalizeUrlsInText(this.parseVariables(block.caption || block.text || '', convState.variables));
-                    if (sock && imgUrl) {
-                        const msgResult = await sock.sendMessage(convState.remote_jid, {
-                            image: { url: imgUrl },
-                            caption: caption || undefined
+                    if (imgUrl) {
+                        await this.sendFlowMessageResilient({
+                            tenantId,
+                            instanceId,
+                            conversationId,
+                            jid: convState.remote_jid,
+                            sock,
+                            payload: {
+                                image: { url: imgUrl },
+                                caption: caption || undefined
+                            },
+                            textContent: caption || '[Foto/Imagem]',
+                            messageType: 'image',
+                            mediaUrl: imgUrl
                         });
-                        await this.persistOutboundMessage(tenantId, instanceId, conversationId, convState.remote_jid, caption || '[Foto/Imagem]', msgResult, 'image', imgUrl);
                         await this.sleep(1500);
                     }
                     currentPoint = this.resolveNextPoint(nodes, edges, parentGroup, block, '', convState.variables);
@@ -521,12 +538,21 @@ class FlowEngine {
                 else if (flowType === 'video') {
                     const vidUrl = block.url || block.video_url || block.data?.url;
                     const caption = normalizeUrlsInText(this.parseVariables(block.caption || block.text || '', convState.variables));
-                    if (sock && vidUrl) {
-                        const msgResult = await sock.sendMessage(convState.remote_jid, {
-                            video: { url: vidUrl },
-                            caption: caption || undefined
+                    if (vidUrl) {
+                        await this.sendFlowMessageResilient({
+                            tenantId,
+                            instanceId,
+                            conversationId,
+                            jid: convState.remote_jid,
+                            sock,
+                            payload: {
+                                video: { url: vidUrl },
+                                caption: caption || undefined
+                            },
+                            textContent: caption || '[Vídeo]',
+                            messageType: 'video',
+                            mediaUrl: vidUrl
                         });
-                        await this.persistOutboundMessage(tenantId, instanceId, conversationId, convState.remote_jid, caption || '[Vídeo]', msgResult, 'video', vidUrl);
                         await this.sleep(1500);
                     }
                     currentPoint = this.resolveNextPoint(nodes, edges, parentGroup, block, '', convState.variables);
@@ -534,13 +560,22 @@ class FlowEngine {
                 // 1.3 Mídia: Áudio Gravado (Nota de Voz PTT)
                 else if (flowType === 'audio') {
                     const audioUrl = block.url || block.audio_url || block.data?.url;
-                    if (sock && audioUrl) {
-                        const msgResult = await sock.sendMessage(convState.remote_jid, {
-                            audio: { url: audioUrl },
-                            mimetype: 'audio/mp4',
-                            ptt: true
+                    if (audioUrl) {
+                        await this.sendFlowMessageResilient({
+                            tenantId,
+                            instanceId,
+                            conversationId,
+                            jid: convState.remote_jid,
+                            sock,
+                            payload: {
+                                audio: { url: audioUrl },
+                                mimetype: 'audio/mp4',
+                                ptt: true
+                            },
+                            textContent: '[Mensagem de Voz]',
+                            messageType: 'audio',
+                            mediaUrl: audioUrl
                         });
-                        await this.persistOutboundMessage(tenantId, instanceId, conversationId, convState.remote_jid, '[Mensagem de Voz]', msgResult, 'audio', audioUrl);
                         await this.sleep(1500);
                     }
                     currentPoint = this.resolveNextPoint(nodes, edges, parentGroup, block, '', convState.variables);
@@ -549,13 +584,22 @@ class FlowEngine {
                 else if (flowType === 'embed') {
                     const docUrl = block.url || block.data?.url;
                     const fileName = block.fileName || block.label || 'documento.pdf';
-                    if (sock && docUrl) {
-                        const msgResult = await sock.sendMessage(convState.remote_jid, {
-                            document: { url: docUrl },
-                            fileName: fileName,
-                            mimetype: 'application/pdf'
+                    if (docUrl) {
+                        await this.sendFlowMessageResilient({
+                            tenantId,
+                            instanceId,
+                            conversationId,
+                            jid: convState.remote_jid,
+                            sock,
+                            payload: {
+                                document: { url: docUrl },
+                                fileName: fileName,
+                                mimetype: 'application/pdf'
+                            },
+                            textContent: `[Arquivo: ${fileName}]`,
+                            messageType: 'document',
+                            mediaUrl: docUrl
                         });
-                        await this.persistOutboundMessage(tenantId, instanceId, conversationId, convState.remote_jid, `[Arquivo: ${fileName}]`, msgResult, 'document', docUrl);
                         await this.sleep(1500);
                     }
                     currentPoint = this.resolveNextPoint(nodes, edges, parentGroup, block, '', convState.variables);
@@ -564,9 +608,17 @@ class FlowEngine {
                 else if (['ask', 'number_input', 'email_input', 'website_input', 'phone_input', 'date_input', 'time_input'].includes(flowType)) {
                     const rawText = block.text || block.data?.text || 'Por favor, digite sua resposta:';
                     const parsedText = normalizeUrlsInText(this.parseVariables(rawText, convState.variables));
-                    if (sock && parsedText) {
-                        const msgResult = await sock.sendMessage(convState.remote_jid, { text: parsedText });
-                        await this.persistOutboundMessage(tenantId, instanceId, conversationId, convState.remote_jid, parsedText, msgResult, 'text');
+                    if (parsedText) {
+                        await this.sendFlowMessageResilient({
+                            tenantId,
+                            instanceId,
+                            conversationId,
+                            jid: convState.remote_jid,
+                            sock,
+                            payload: { text: parsedText },
+                            textContent: parsedText,
+                            messageType: 'text'
+                        });
                     }
                     isPaused = true; // Aguarda input
                 }
@@ -574,9 +626,17 @@ class FlowEngine {
                 else if (flowType === 'file_input') {
                     const rawPrompt = block.text || 'Por favor, envie o arquivo, foto ou comprovante por aqui:';
                     const parsedPrompt = normalizeUrlsInText(this.parseVariables(rawPrompt, convState.variables));
-                    if (sock && parsedPrompt) {
-                        const msgResult = await sock.sendMessage(convState.remote_jid, { text: parsedPrompt });
-                        await this.persistOutboundMessage(tenantId, instanceId, conversationId, convState.remote_jid, parsedPrompt, msgResult, 'text');
+                    if (parsedPrompt) {
+                        await this.sendFlowMessageResilient({
+                            tenantId,
+                            instanceId,
+                            conversationId,
+                            jid: convState.remote_jid,
+                            sock,
+                            payload: { text: parsedPrompt },
+                            textContent: parsedPrompt,
+                            messageType: 'text'
+                        });
                     }
                     isPaused = true; // Aguarda o cliente anexar o arquivo
                 }
@@ -600,9 +660,17 @@ class FlowEngine {
                         if (payLink) paymentText += `🔗 *Link de Pagamento:* ${payLink}\n`;
                     }
                     const parsedPayment = normalizeUrlsInText(paymentText);
-                    if (sock && parsedPayment) {
-                        const msgResult = await sock.sendMessage(convState.remote_jid, { text: parsedPayment });
-                        await this.persistOutboundMessage(tenantId, instanceId, conversationId, convState.remote_jid, parsedPayment, msgResult, 'text');
+                    if (parsedPayment) {
+                        await this.sendFlowMessageResilient({
+                            tenantId,
+                            instanceId,
+                            conversationId,
+                            jid: convState.remote_jid,
+                            sock,
+                            payload: { text: parsedPayment },
+                            textContent: parsedPayment,
+                            messageType: 'text'
+                        });
                     }
                     isPaused = true;
                 }
@@ -617,9 +685,17 @@ class FlowEngine {
                         `*5* - 🤩 Excelente\n\n` +
                         `_Por favor, responda com o número da sua nota (1 a 5)._`;
                     const parsedRating = this.parseVariables(ratingMsg, convState.variables);
-                    if (sock && parsedRating) {
-                        const msgResult = await sock.sendMessage(convState.remote_jid, { text: parsedRating });
-                        await this.persistOutboundMessage(tenantId, instanceId, conversationId, convState.remote_jid, parsedRating, msgResult, 'text');
+                    if (parsedRating) {
+                        await this.sendFlowMessageResilient({
+                            tenantId,
+                            instanceId,
+                            conversationId,
+                            jid: convState.remote_jid,
+                            sock,
+                            payload: { text: parsedRating },
+                            textContent: parsedRating,
+                            messageType: 'text'
+                        });
                     }
                     isPaused = true;
                 }
@@ -630,9 +706,17 @@ class FlowEngine {
                     const formattedMenu = `${prompt}\n\n` + options.map((opt, i) => `*${i + 1}* - ${opt}`).join('\n');
                     const parsedText = normalizeUrlsInText(this.parseVariables(formattedMenu, convState.variables));
 
-                    if (sock && parsedText) {
-                        const msgResult = await sock.sendMessage(convState.remote_jid, { text: parsedText });
-                        await this.persistOutboundMessage(tenantId, instanceId, conversationId, convState.remote_jid, parsedText, msgResult, 'text');
+                    if (parsedText) {
+                        await this.sendFlowMessageResilient({
+                            tenantId,
+                            instanceId,
+                            conversationId,
+                            jid: convState.remote_jid,
+                            sock,
+                            payload: { text: parsedText },
+                            textContent: parsedText,
+                            messageType: 'text'
+                        });
                     }
                     isPaused = true; // Aguarda escolha do cliente
                 }
@@ -766,8 +850,9 @@ class FlowEngine {
                     currentPoint = this.resolveNextPoint(nodes, edges, parentGroup, block, '', convState.variables);
                 }
             } catch (err) {
-                console.error('[FlowEngine] Erro ao executar bloco:', err);
-                await this.logExecution(convState.id, stateRef, 'ERRO', err.message);
+                const errMsg = err?.message || String(err || '');
+                console.error('[FlowEngine] Erro ao executar bloco:', errMsg);
+                await this.logExecution(convState.id, stateRef, 'ERRO', errMsg);
                 isPaused = true;
             }
         }
@@ -791,7 +876,95 @@ class FlowEngine {
         await this.logExecution(stateId, null, 'Fluxo finalizado');
     }
 
-    async persistOutboundMessage(tenantId, instanceId, conversationId, jid, textContent, msgResult, messageType = 'text', mediaUrl = null) {
+    /**
+     * Envia mensagem de bloco do FlowEngine de forma resiliente:
+     * 1. Tenta o envio direto pelo socket ativo (ou recupera socket atualizado do SessionManager).
+     * 2. Caso o socket oscile ou atinja TIMEOUT_BAILEYS_SOCKET_SEND / Connection Closed,
+     *    delega imediatamente para o Outbox Resiliente (wa_outgoing_messages) sem quebrar o bloco do fluxo.
+     */
+    async sendFlowMessageResilient({ tenantId, instanceId, conversationId, jid, sock, payload, textContent = '', messageType = 'text', mediaUrl = null }) {
+        let activeSock = sock;
+        try {
+            const { default: sManager } = await import('../session-manager/index.js');
+            const latestSock = sManager?.sessions?.get(instanceId)?.sock;
+            if (latestSock) {
+                activeSock = latestSock;
+            }
+        } catch (e) {}
+
+        const isSocketReady = activeSock && (!activeSock.ws || activeSock.ws.isOpen || activeSock.ws.readyState === 1 || activeSock.ws?.socket?.readyState === 1);
+
+        const enqueueFallback = async (reason) => {
+            console.log(`[FlowEngine] ${reason}. Enfileirando bloco (${messageType}) no Outbox Resiliente para ${jid}...`);
+            const bodyText = textContent || payload?.text || payload?.caption || '';
+            try {
+                const { default: sManager } = await import('../session-manager/index.js');
+                if (sManager && typeof sManager.enqueueMessage === 'function') {
+                    await sManager.enqueueMessage(instanceId, {
+                        targetJid: jid,
+                        type: mediaUrl ? 'media' : 'text',
+                        content: payload,
+                        options: { isAutomation: true, isFallback: true, forceQueue: true, tenantId, mediaUrl }
+                    });
+                } else {
+                    await supabase.from('wa_outgoing_messages').insert({
+                        tenant_id: tenantId,
+                        instance_id: instanceId,
+                        chat_jid: jid,
+                        message_type: mediaUrl ? 'media' : 'text',
+                        media_url: mediaUrl || null,
+                        body: bodyText,
+                        status: 'pending',
+                        priority: 1
+                    });
+                }
+            } catch (enqErr) {
+                console.warn('[FlowEngine] Aviso ao enfileirar mensagem no Outbox Resiliente:', enqErr.message);
+            }
+
+            const fallbackResult = {
+                key: { id: `flow_outbox_${Date.now()}_${Math.random().toString(36).substring(2, 8)}` },
+                fallback: true
+            };
+            await this.persistOutboundMessage(tenantId, instanceId, conversationId, jid, bodyText, fallbackResult, messageType, mediaUrl, 'pending');
+            return fallbackResult;
+        };
+
+        if (!isSocketReady) {
+            return await enqueueFallback(`Socket da instância ${instanceId} em reconexão ou ausente`);
+        }
+
+        try {
+            const msgResult = await activeSock.sendMessage(jid, payload, { isAutomation: true });
+            await this.persistOutboundMessage(tenantId, instanceId, conversationId, jid, textContent, msgResult, messageType, mediaUrl, 'sent');
+            return msgResult;
+        } catch (sendErr) {
+            const errStr = sendErr?.message || String(sendErr || '');
+            const isTransientSocketError =
+                errStr.includes('TIMEOUT_BAILEYS_SOCKET_SEND') ||
+                errStr.includes('TIMEOUT_FASTPATH_SEND') ||
+                errStr.includes('Connection Closed') ||
+                errStr.includes('Connection Terminated') ||
+                errStr.includes('Connection was lost') ||
+                errStr.includes('not open') ||
+                errStr.includes('closed') ||
+                errStr.includes('timeout') ||
+                errStr.includes('timed out') ||
+                errStr.includes('ETIMEDOUT') ||
+                errStr.includes('ECONNRESET') ||
+                errStr.includes('1006') ||
+                errStr.includes('428') ||
+                errStr.includes('515') ||
+                errStr.includes('reading \'id\'');
+
+            if (isTransientSocketError) {
+                return await enqueueFallback(`Oscilação transitória no envio direto (${errStr})`);
+            }
+            throw sendErr;
+        }
+    }
+
+    async persistOutboundMessage(tenantId, instanceId, conversationId, jid, textContent, msgResult, messageType = 'text', mediaUrl = null, status = 'sent') {
         if (!msgResult || !msgResult.key) return;
         
         try {
@@ -802,7 +975,7 @@ class FlowEngine {
                 direction: 'outbound',
                 message_type: messageType,
                 media_url: mediaUrl,
-                status: 'sent',
+                status: status,
                 text_content: textContent,
                 whatsapp_message_id: msgResult.key.id,
                 sender_type: 'bot',
@@ -816,7 +989,7 @@ class FlowEngine {
                 await supabase.from('conversations').update({
                     updated_at: new Date().toISOString(),
                     last_message_at: new Date().toISOString(),
-                    last_message_preview: textContent.substring(0, 50)
+                    last_message_preview: (textContent || '').substring(0, 50)
                 }).eq('id', conversationId);
             }
 
