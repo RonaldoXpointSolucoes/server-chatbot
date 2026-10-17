@@ -20,6 +20,37 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.9.2',
+    date: '2026-10-17',
+    summary: 'Proteção Anti-Quebra de GUID/UUID em Links de WhatsApp (iFood/Cardápios) e Link Preview Resiliente Anti-Cloudflare',
+    notes: [
+      {
+        id: '7.9.2-1',
+        category: 'fixes',
+        title: 'Blindagem Anti-Fatiamento de GUIDs/UUIDs em Links no WhatsApp Mobile (%2D RFC 3986)',
+        description: 'Corrigido o problema em que o detector nativo de Chave Pix Aleatória (EVP) e números de telefone do WhatsApp Mobile (iOS/Android) separava o GUID final de links do iFood e cardápios digitais em um link separado de "Copiar Chave". Os hifens internos do GUID na URL agora são codificados via RFC 3986 (%2D), mantendo o link 100% único e clicável em qualquer aparelho.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      },
+      {
+        id: '7.9.2-2',
+        category: 'improvements',
+        title: 'Link Preview Resiliente com Metadados Inteligentes para Links iFood e Gastrofood',
+        description: 'Adicionado fallback automático de metadados (canonical-url, matched-text, nome da loja e cidade) quando portais com proteção anti-bot (como Cloudflare no iFood) bloqueiam o scraper padrão, garantindo que a Baileys envie sempre o objeto ExtendedTextMessage completo no protocolo do WhatsApp.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+      },
+      {
+        id: '7.9.2-3',
+        category: 'features',
+        title: 'Normalização Unificada na IA, Typebot (FlowEngine), Outbox e Chat Web',
+        description: 'Integração transparente da blindagem de URLs com GUID em todas as rotas de disparo (Agente IA, Motor de Fluxos Typebot, Fila Outbox e Atendimento Manual), com exibição amigável decodificada no painel de chat.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      }
+    ]
+  },
+  {
     version: '7.9.1',
     date: '2026-10-16',
     summary: 'Higiene Inteligente do DevLogger, Resiliência de Outbox no Motor de Fluxos e Renovação Automática de Mídia CDN',

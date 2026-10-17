@@ -1,5 +1,5 @@
 {
-  "version": "7.9.1",
-  "buildDate": "2026-10-17T00:50:08.119Z",
-  "summary": "Higiene Inteligente do DevLogger, Resiliência de Outbox no Motor de Fluxos e Renovação Automática de Mídia CDN"
+  "version": "7.9.2",
+  "buildDate": "2026-10-17T16:02:03.254Z",
+  "summary": "Proteção Anti-Quebra de GUID/UUID em Links de WhatsApp (iFood/Cardápios) e Link Preview Resiliente Anti-Cloudflare"
 }

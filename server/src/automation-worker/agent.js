@@ -4,6 +4,7 @@ import { pipeline } from '../embeddings/pipeline.js';
 import { AsyncLocalStorage } from 'async_hooks';
 import { getBrPhoneVariations, getCanonicalBrPhone } from '../event-processor/helpers.js';
 import { gastrofoodCache } from './gastrofood-cache.js';
+import { normalizeUrlsInText } from '../flow-runtime/url-helper.js';
 
 const tenantStorage = new AsyncLocalStorage();
 
@@ -230,6 +231,9 @@ function formatAiMessageForWhatsApp(text) {
 
     // 5. Normaliza quebras de linha excessivas (mais de 2 \n seguidos viram exatamente 2 \n)
     formatted = formatted.replace(/\n{3,}/g, '\n\n');
+
+    // 6. Normaliza URLs e protege chaves GUID (%2D) para evitar quebra de link no WhatsApp Mobile
+    formatted = normalizeUrlsInText(formatted);
 
     return formatted.trim();
 }

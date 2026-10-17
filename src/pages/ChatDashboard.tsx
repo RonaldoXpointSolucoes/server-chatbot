@@ -296,7 +296,9 @@ export function renderMessageText(text: string) {
   return parts.map((part, i) => {
     if (part.match(urlRegex)) {
       const cleanUrl = part.replace(/[.,;:!?]+$/, '');
-      const href = cleanUrl.startsWith('http') ? cleanUrl : `https://${cleanUrl}`;
+      const rawHref = cleanUrl.startsWith('http') ? cleanUrl : `https://${cleanUrl}`;
+      const href = rawHref.replace(/([0-9a-fA-F]{8})-([0-9a-fA-F]{4})-([0-9a-fA-F]{4})-([0-9a-fA-F]{4})-([0-9a-fA-F]{12})/g, '$1%2D$2%2D$3%2D$4%2D$5');
+      const displayUrl = cleanUrl.replace(/^https?:\/\//, '').replace(/%2D/gi, '-');
       return (
         <a 
           key={i} 
@@ -306,7 +308,7 @@ export function renderMessageText(text: string) {
           className="text-[#00a884] dark:text-[#53bdeb] hover:underline font-semibold inline-flex items-center gap-0.5 align-middle mx-1 group"
           onClick={(e) => e.stopPropagation()}
         >
-          <span className="truncate block" style={{ maxWidth: 'min(100%, 250px)' }}>{cleanUrl.replace(/^https?:\/\//, '')}</span>
+          <span className="truncate block" style={{ maxWidth: 'min(100%, 250px)' }}>{displayUrl}</span>
           <ExternalLink size={12} className="inline opacity-80 shrink-0 group-hover:scale-110 transition-transform" />
         </a>
       );

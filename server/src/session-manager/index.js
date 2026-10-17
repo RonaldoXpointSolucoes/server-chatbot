@@ -6,13 +6,13 @@ try {
 
 const instanceMutexStorage = new AsyncLocalStorage();
 
-import { makeWASocket, DisconnectReason, fetchLatestBaileysVersion, Browsers } from '@whiskeysockets/baileys';
+import { makeWASocket, DisconnectReason, fetchLatestBaileysVersion, Browsers, getUrlInfo } from '@whiskeysockets/baileys';
 import { useSupabaseAuthState, flushPendingWrites, sessionCaches, clearInstanceMemoryCache, clearRecipientSession } from './auth.js';
 import eventProcessor from '../event-processor/index.js';
 import { addLog } from '../system-logger.js';
 import pino from 'pino';
 import { supabase, NODE_ID, retryWithBackoff, resolveTargetJid } from '../supabase.js';
-import { normalizeUrlsInText } from '../flow-runtime/url-helper.js';
+import { normalizeUrlsInText, ensureResilientUrlInfo } from '../flow-runtime/url-helper.js';
 import { connectionProgress, getConnectionDiagnostics, connectionNeedsProtection } from './connection-lifecycle.js';
 import { isTransportOpen, getSessionSocket } from './socket-state.js';
 
@@ -1904,13 +1904,30 @@ class SessionManager {
             sock.originalSendMessage = originalSendMessage;
             
             sock.sendMessage = async (jid, content, options) => {
-                // Garante que qualquer link em mensagem de texto ou legenda seja normalizado com https:// para ser clicável no WhatsApp
+                // Garante que qualquer link em mensagem de texto ou legenda seja normalizado com https:// e GUID protegido (%2D)
                 try {
                     if (content && typeof content.text === 'string') {
                         content.text = normalizeUrlsInText(content.text);
                     }
                     if (content && typeof content.caption === 'string') {
                         content.caption = normalizeUrlsInText(content.caption);
+                    }
+                    if (content && typeof content.text === 'string' && (!options || !options.getUrlInfo)) {
+                        options = {
+                            ...(options || {}),
+                            getUrlInfo: async (textUrl) => {
+                                try {
+                                    const rawInfo = await getUrlInfo(textUrl, {
+                                        thumbnailWidth: 192,
+                                        fetchOpts: { timeout: 2500 },
+                                        logger: this.logger
+                                    });
+                                    return ensureResilientUrlInfo(textUrl, rawInfo);
+                                } catch {
+                                    return ensureResilientUrlInfo(textUrl, undefined);
+                                }
+                            }
+                        };
                     }
                 } catch (e) {
                     console.warn('[SessionManager] Erro ao normalizar URLs da mensagem:', e.message);
@@ -2409,8 +2426,21 @@ class SessionManager {
                 tenantId = dbTenant?.tenant_id;
             }
 
+            try {
+                if (typeof content === 'string') {
+                    content = normalizeUrlsInText(content);
+                } else if (content && typeof content === 'object') {
+                    if (typeof content.text === 'string') {
+                        content.text = normalizeUrlsInText(content.text);
+                    }
+                    if (typeof content.caption === 'string') {
+                        content.caption = normalizeUrlsInText(content.caption);
+                    }
+                }
+            } catch (e) {}
+
             const isDefinitiveOffline = inst && ['offline', 'logged_out', 'blocked_12h', 'disconnected', 'paused', 'close', 'closed'].includes(inst.status);
-            const bodyText = typeof content === 'string' ? content : (content?.text || content?.caption || '');
+            const bodyText = normalizeUrlsInText(typeof content === 'string' ? content : (content?.text || content?.caption || ''));
             const resolvedMediaUrl = options?.mediaUrl || content?.image?.url || content?.video?.url || content?.audio?.url || content?.document?.url || null;
             const resolvedMessageType = resolvedMediaUrl ? 'media' : (type || 'text');
 
@@ -2457,7 +2487,23 @@ class SessionManager {
                 directAttempted = true;
                 try {
                     const sendFn = sock.originalSendMessage || sock.sendMessage;
-                    const directOptions = { ...(options || {}), skipDelay: true, isDirect: true };
+                    const directOptions = {
+                        ...(options || {}),
+                        skipDelay: true,
+                        isDirect: true,
+                        getUrlInfo: options?.getUrlInfo || (async (textUrl) => {
+                            try {
+                                const rawInfo = await getUrlInfo(textUrl, {
+                                    thumbnailWidth: 192,
+                                    fetchOpts: { timeout: 2500 },
+                                    logger: this.logger
+                                });
+                                return ensureResilientUrlInfo(textUrl, rawInfo);
+                            } catch {
+                                return ensureResilientUrlInfo(textUrl, undefined);
+                            }
+                        })
+                    };
                     return await sendFn(targetJid, content, directOptions);
                 } catch (sendErr) {
                     console.log(`[SessionManager] Falha no envio direto em enqueueMessage para ${instanceId} (${sendErr?.message || sendErr}). Redirecionando para wa_outgoing_messages...`);

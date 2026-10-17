@@ -9,6 +9,7 @@ import crmApiRoutes from './crm-api.js';
 import systemLogger from '../system-logger.js';
 import { supabase } from '../supabase.js';
 import { getUrlInfo } from '@whiskeysockets/baileys';
+import { ensureResilientUrlInfo } from '../flow-runtime/url-helper.js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import AutomationWorker from '../automation-worker/agent.js';
 
@@ -36,8 +37,13 @@ router.get('/v1/utils/link-preview', async (req, res) => {
         const { url } = req.query;
         if (!url) return res.status(400).json({ error: 'Missing url parameter' });
 
-        const info = await getUrlInfo(url);
-        if (!info) return res.status(404).json({ error: 'No preview found for this URL' });
+        let rawInfo;
+        try {
+            rawInfo = await getUrlInfo(String(url));
+        } catch {
+            rawInfo = undefined;
+        }
+        const info = ensureResilientUrlInfo(String(url), rawInfo);
 
         res.json({
             title: info.title || null,
