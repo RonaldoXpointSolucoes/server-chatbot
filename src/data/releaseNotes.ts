@@ -20,6 +20,37 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.9.1',
+    date: '2026-10-16',
+    summary: 'Higiene Inteligente do DevLogger, Resiliência de Outbox no Motor de Fluxos e Renovação Automática de Mídia CDN',
+    notes: [
+      {
+        id: '7.9.1-1',
+        category: 'improvements',
+        title: 'Filtragem Avançada de Ruídos Transitórios e Históricos no DevLogger',
+        description: 'Suprimidos avisos operacionais benignos de reconexão em background (Socket Offline transitório, Handshake WebSocket, QueueProcessor TTL e Process Safe Guard) tanto na coleta em tempo real quanto na listagem histórica do Supabase.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+      },
+      {
+        id: '7.9.1-2',
+        category: 'features',
+        title: 'Envio Resiliente com Outbox Automático no FlowEngine (wa_outgoing_messages)',
+        description: 'Mensagens de texto e mídia disparadas por fluxos de chatbot e menus interativos agora são enfileiradas automaticamente no outbox resiliente caso o socket Baileys esteja em reconexão momentânea.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.9.1-3',
+        category: 'fixes',
+        title: 'Renovação Automática de Credenciais CDN (mmg.whatsapp.net) e Upgrade HTTPS em Mídias',
+        description: 'Adicionado refresh automático via updateMediaMessage quando o download de mídia do WhatsApp falha por expiração de URL e conversão automática de links HTTP para HTTPS no roteamento externo.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      }
+    ]
+  },
+  {
     version: '7.9.0',
     date: '2026-10-16',
     summary: 'Motor Resiliente em 4 Camadas para Magia da IA, Proxy Serverless Same-Origin e Fallback Automático de Modelos Gemini',

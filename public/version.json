@@ -1,5 +1,5 @@
 {
-  "version": "7.9.0",
-  "buildDate": "2026-10-16T13:20:22.460Z",
-  "summary": "Motor Resiliente em 4 Camadas para Magia da IA, Proxy Serverless Same-Origin e Fallback Automático de Modelos Gemini"
+  "version": "7.9.1",
+  "buildDate": "2026-10-17T00:50:08.119Z",
+  "summary": "Higiene Inteligente do DevLogger, Resiliência de Outbox no Motor de Fluxos e Renovação Automática de Mídia CDN"
 }
