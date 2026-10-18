@@ -68,7 +68,7 @@ export interface ActiveContactRemoteContext {
   companyName: string | null;
 }
 
-export type XPointDrawerWidthMode = 'compact' | 'expanded';
+export type XPointDrawerWidthMode = 'fullscreen' | 'expanded' | 'compact';
 
 export interface XPointRemoteToast {
   id: string;
@@ -315,7 +315,7 @@ export function sendXPointRemotePing(): boolean {
 export const useXPointRemoteStore = create<XPointRemoteStoreState>((set, get) => ({
   isOpen: false,
   hasMountedOnce: true, // Mantém o iframe montado em background para conexão instantânea
-  widthMode: 'compact',
+  widthMode: 'fullscreen',
   customWidthPx: null,
   bridgeReady: false,
   bridgeVersion: 'v1.4.8',

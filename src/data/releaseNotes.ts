@@ -20,6 +20,29 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.9.4',
+    date: '2026-10-18',
+    summary: 'Modo Tela Cheia Imersivo no XPoint Remote com Barra Superior Unificada e Retorno Rápido ao Chat',
+    notes: [
+      {
+        id: '7.9.4-1',
+        category: 'improvements',
+        title: 'Abertura em Tela Cheia por Padrão (100% da Viewport) no XPoint Remote',
+        description: 'O painel do XPoint Remote agora abre nativamente ocupando a tela inteira (100vw x 100vh), proporcionando máximo aproveitamento visual para a listagem de computadores, filtros e gestão por CNPJ, mantendo a opção de alternar para Dividir Tela ou Modo Compacto.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+      },
+      {
+        id: '7.9.4-2',
+        category: 'features',
+        title: 'Botão de Destaque "Voltar para o Chat" no Topo Esquerdo e Barra Unificada',
+        description: 'Adicionado botão rápido de retorno ao chat no canto superior esquerdo (com indicação da conversa ativa e suporte à tecla ESC) integrado em uma barra superior única e enxuta que preserva a sessão remota ativa em segundo plano (Zero Reload).',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      }
+    ]
+  },
+  {
     version: '7.9.3',
     date: '2026-10-18',
     summary: 'Integração Nativa XPoint Remote (AppRemoto v1.4.8) na Gaveta Lateral com Bridge Bidirecional por CNPJ',
