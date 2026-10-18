@@ -1,5 +1,5 @@
 {
-  "version": "7.9.2",
-  "buildDate": "2026-10-17T16:02:03.254Z",
-  "summary": "Proteção Anti-Quebra de GUID/UUID em Links de WhatsApp (iFood/Cardápios) e Link Preview Resiliente Anti-Cloudflare"
+  "version": "7.9.3",
+  "buildDate": "2026-10-18T17:39:01.300Z",
+  "summary": "Integração Nativa XPoint Remote (AppRemoto v1.4.8) na Gaveta Lateral com Bridge Bidirecional por CNPJ"
 }

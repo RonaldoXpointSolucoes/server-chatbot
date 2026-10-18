@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react';
-import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, ChevronRight, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, Save, ShieldCheck, Smile, Briefcase, Flag, Clock, Calendar, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, AlertCircle, CheckSquare, MessageSquare, MessageSquareText, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList, UploadCloud, FolderCheck, Globe, Lock, Zap, Folder, FolderOpen, FolderTree, CornerDownRight, BookOpen, Layers, Info, Activity } from 'lucide-react';
+import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, ChevronRight, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, Save, ShieldCheck, Smile, Briefcase, Flag, Clock, Calendar, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, AlertCircle, CheckSquare, MessageSquare, MessageSquareText, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList, UploadCloud, FolderCheck, Globe, Lock, Zap, Folder, FolderOpen, FolderTree, CornerDownRight, BookOpen, Layers, Info, Activity, Monitor, Radio } from 'lucide-react';
 import { getCurrentEnvironment, setEnvironment, validateServerEnvironment, ENVIRONMENTS } from '../services/environmentService';
 import { useNavigate, useOutletContext, useLocation } from 'react-router-dom';
 import { useChatStore, QuickReplyCategory, instanceCache, resolveInstanceUuid, sortMessagesChronologically, getEffectiveContactTime, getRealContactId, getUniquePersonKey, normalizeMessageTextForComparison } from '../store/chatStore';
@@ -28,6 +28,7 @@ import { twMerge } from 'tailwind-merge';
 import { supabase } from '../services/supabase';
 import { geminiService } from '../services/geminiService';
 import { useScheduleMonitor } from '../hooks/useScheduleMonitor';
+import { useXPointRemoteBridge, resolveContactRemoteContext } from '../hooks/useXPointRemoteBridge';
 
 export function cn(...inputs: (string | undefined | null | false)[]) {
   return twMerge(clsx(inputs));
@@ -597,6 +598,13 @@ export default function ChatDashboard() {
       }
     };
     fetchCompanies();
+    const handleRemoteContactUpdated = () => {
+      fetchCompanies();
+    };
+    window.addEventListener('xpoint-remote-contact-updated', handleRemoteContactUpdated);
+    return () => {
+      window.removeEventListener('xpoint-remote-contact-updated', handleRemoteContactUpdated);
+    };
   }, [tenantInfo?.id]);
 
   const [editingMessage, setEditingMessage] = useState<{ id: string, text: string } | null>(null);
@@ -3260,6 +3268,34 @@ export default function ChatDashboard() {
       useChatStore.setState({ activeChatId: null, activeTicket: null });
     }
   }, [activeChatId, activeChat, draftNewChat, isOpeningNotificationChat]);
+
+  // Sincronização em tempo real do contato ativo com a ponte bidirecional XPoint Remote (AppRemoto v1.4.8)
+  const {
+    isOpen: isXPointRemoteOpen,
+    togglePanel: toggleXPointRemotePanel,
+    setActiveContext: setXPointRemoteActiveContext,
+    activeContext: xpointRemoteActiveContext,
+    activeResolvedInfo: xpointRemoteResolvedInfo,
+    activeContactSession: xpointRemoteActiveSession,
+  } = useXPointRemoteBridge();
+
+  useEffect(() => {
+    const remoteCtx = resolveContactRemoteContext(activeChat, allCompanies, contacts);
+    setXPointRemoteActiveContext(remoteCtx);
+  }, [
+    activeChat?.id,
+    activeChat?.conv_id,
+    activeChat?.document_number,
+    activeChat?.document_type,
+    activeChat?.fantasy_name,
+    activeChat?.custom_name,
+    activeChat?.name,
+    activeChat?.phone,
+    activeChat?.company_ids,
+    allCompanies,
+    contacts,
+    setXPointRemoteActiveContext,
+  ]);
 
   // Deep-link e clique em Notificações Web Push / Background: seleciona a Caixa exata e abre a Conversa apontada
   const lastHandledNotifRef = useRef<string | null>(null);
@@ -8654,8 +8690,81 @@ export default function ChatDashboard() {
             </div>
 
             {/* Right Header Area */}
-            <div className="flex items-center gap-2 sm:gap-4">
+            <div className="flex items-center gap-2 sm:gap-3">
               
+              {/* Botão de Acesso Remoto (XPoint Remote v1.4.8) */}
+              {activeChat && (
+                <button
+                  onClick={() => {
+                    const ctx = resolveContactRemoteContext(activeChat, allCompanies, contacts);
+                    toggleXPointRemotePanel(ctx);
+                  }}
+                  className={cn(
+                    "relative flex items-center justify-center gap-1.5 h-8 px-2.5 xl:px-3 rounded-full transition-all duration-300 text-xs font-semibold border shadow-sm hover:scale-105 active:scale-95 whitespace-nowrap shrink-0",
+                    xpointRemoteActiveSession
+                      ? "bg-amber-500/15 hover:bg-amber-500/25 border-amber-500/40 text-amber-600 dark:text-amber-300 shadow-[0_0_15px_rgba(245,158,11,0.25)]"
+                      : isXPointRemoteOpen
+                      ? "bg-cyan-500/15 hover:bg-cyan-500/25 border-cyan-500/40 text-cyan-600 dark:text-cyan-300 shadow-[0_0_15px_rgba(6,182,212,0.2)]"
+                      : xpointRemoteResolvedInfo && xpointRemoteResolvedInfo.onlineDevices > 0
+                      ? "bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-500/30 text-emerald-600 dark:text-emerald-400"
+                      : xpointRemoteActiveContext?.cnpj
+                      ? "bg-cyan-500/10 hover:bg-cyan-500/20 border-cyan-500/25 text-cyan-600 dark:text-cyan-400"
+                      : "bg-slate-500/10 hover:bg-slate-500/20 border-slate-500/20 text-[#54656f] dark:text-[#aebac1]"
+                  )}
+                  title={
+                    xpointRemoteActiveSession
+                      ? `Em Atendimento Remoto (${xpointRemoteActiveSession.protocolNumber}) — Máquina: ${xpointRemoteActiveSession.displayName || xpointRemoteActiveSession.rustdeskId}`
+                      : xpointRemoteResolvedInfo
+                      ? `XPoint Remote • ${xpointRemoteResolvedInfo.companyName || xpointRemoteActiveContext?.companyName || 'Cliente'} (${xpointRemoteResolvedInfo.onlineDevices} online / ${xpointRemoteResolvedInfo.totalDevices} PCs) — CNPJ: ${xpointRemoteResolvedInfo.formattedCnpj || xpointRemoteActiveContext?.formattedCnpj}`
+                      : xpointRemoteActiveContext?.cnpj
+                      ? `Abrir Acesso Remoto (XPoint Remote) — CNPJ vinculado: ${xpointRemoteActiveContext.formattedCnpj || xpointRemoteActiveContext.cnpj}`
+                      : "Abrir Acesso Remoto (XPoint Remote) — Contato sem CNPJ vinculado (clique para vincular em 1 clique)"
+                  }
+                >
+                  <div className="relative flex items-center justify-center">
+                    {xpointRemoteActiveSession ? (
+                      <Radio size={14} className="text-amber-500 animate-pulse" />
+                    ) : (
+                      <Monitor size={14} className={cn(isXPointRemoteOpen && "text-cyan-500")} />
+                    )}
+                    {xpointRemoteActiveContext?.cnpj && !xpointRemoteResolvedInfo && !xpointRemoteActiveSession && (
+                      <span className="absolute -top-1 -right-1 flex h-2 w-2" title="CNPJ vinculado ao contato">
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
+                      </span>
+                    )}
+                  </div>
+
+                  {xpointRemoteActiveSession ? (
+                    <span className="hidden md:inline font-bold">
+                      Em Atendimento Remoto ({xpointRemoteActiveSession.protocolNumber})
+                    </span>
+                  ) : (
+                    <span className="hidden xl:inline">Acesso Remoto</span>
+                  )}
+
+                  {xpointRemoteResolvedInfo && (
+                    <span
+                      className={cn(
+                        "inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold leading-none border",
+                        xpointRemoteResolvedInfo.onlineDevices > 0
+                          ? "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-500/30"
+                          : "bg-slate-500/20 text-slate-600 dark:text-slate-300 border-slate-500/30"
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          "w-1.5 h-1.5 rounded-full",
+                          xpointRemoteResolvedInfo.onlineDevices > 0 ? "bg-emerald-500 animate-pulse" : "bg-slate-400"
+                        )}
+                      />
+                      <span>
+                        {xpointRemoteResolvedInfo.onlineDevices} online / {xpointRemoteResolvedInfo.totalDevices} PCs
+                      </span>
+                    </span>
+                  )}
+                </button>
+              )}
+
               {/* Botão de Chamada de Voz WaCalls */}
               {activeChat && activeChat.phone && isCurrentBoxVoipReady && (
                 <button
@@ -8902,6 +9011,25 @@ export default function ChatDashboard() {
                 </button>
                 {mobileHeaderMenuOpen && (
                    <div className="absolute right-0 top-12 w-[260px] bg-white dark:bg-[#233138] rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-gray-100 dark:border-[#304046] p-3 z-[100] animate-in fade-in zoom-in-95 duration-200 flex flex-col gap-3">
+                      <button
+                        onClick={() => {
+                          const ctx = resolveContactRemoteContext(activeChat, allCompanies, contacts);
+                          toggleXPointRemotePanel(ctx);
+                          setMobileHeaderMenuOpen(false);
+                        }}
+                        className="flex items-center justify-between gap-2 px-3 py-2.5 bg-cyan-50 text-cyan-700 dark:bg-cyan-500/10 dark:text-cyan-300 hover:bg-cyan-100 dark:hover:bg-cyan-500/20 rounded-xl transition-all text-sm font-semibold border border-cyan-200 dark:border-cyan-500/20 w-full shadow-sm hover:scale-[1.02]"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Monitor size={16} />
+                          <span>Acesso Remoto</span>
+                        </div>
+                        {xpointRemoteResolvedInfo && (
+                          <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-600 dark:text-emerald-300">
+                            {xpointRemoteResolvedInfo.onlineDevices} ON
+                          </span>
+                        )}
+                      </button>
+
                       {activeChat.conv_status === 'resolved' ? (
                         <button 
                           onClick={() => {

@@ -20,6 +20,37 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.9.3',
+    date: '2026-10-18',
+    summary: 'Integração Nativa XPoint Remote (AppRemoto v1.4.8) na Gaveta Lateral com Bridge Bidirecional por CNPJ',
+    notes: [
+      {
+        id: '7.9.3-1',
+        category: 'features',
+        title: 'Painel Lateral (Split-View Drawer) Persistente do XPoint Remote (v1.4.8)',
+        description: 'Nova gaveta lateral acoplada à tela de atendimento e ao menu principal para acesso remoto sem recarregamento (Zero Reload) ao trocar de conversa, com controles de largura (Modo Compacto 520px, Modo Expandido 55vw e redimensionamento livre), Gestão por CNPJ e abertura em nova guia.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.9.3-2',
+        category: 'features',
+        title: 'Bridge Bidirecional em Tempo Real por CNPJ e Vínculo Reverso em 1 Clique',
+        description: 'Sincronização automática do CNPJ do contato ativo (ou empresa vinculada) via postMessage (XPOINT_REMOTE_SET_CNPJ / XPOINT_REMOTE_CNPJ_RESOLVED), exibindo no cabeçalho da conversa a quantidade de máquinas online e permitindo vincular o CNPJ ao cadastro do contato em 1 clique direto pelo XPoint Remote.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '7.9.3-3',
+        category: 'improvements',
+        title: 'Monitoramento de Sessão RustDesk Ativa e Registro Automático em Nota Interna',
+        description: 'Exibição de indicador visual em tempo real quando o técnico inicia uma sessão remota (XPOINT_REMOTE_SESSION_STARTED) e documentação automática do protocolo e máquina atendida em Nota Interna da conversa ao encerrar a sessão (XPOINT_REMOTE_SESSION_ENDED).',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+      }
+    ]
+  },
+  {
     version: '7.9.2',
     date: '2026-10-17',
     summary: 'Proteção Anti-Quebra de GUID/UUID em Links de WhatsApp (iFood/Cardápios) e Link Preview Resiliente Anti-Cloudflare',

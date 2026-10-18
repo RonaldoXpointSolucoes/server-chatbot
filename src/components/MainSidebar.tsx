@@ -51,10 +51,12 @@ import {
   Bell,
   BellOff,
   Building2,
-  Ticket
+  Ticket,
+  Monitor
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useChatStore, hasUserAccessToInstance, instanceCache } from '../store/chatStore';
+import { useXPointRemoteBridge } from '../hooks/useXPointRemoteBridge';
 import { supabase } from '../services/supabase';
 import { createPortal } from 'react-dom';
 import { getLocalNotificationPrefs, fetchUserInboxNotificationPreferences, toggleInboxNotification } from '../services/notificationPreferences';
@@ -73,6 +75,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
   const location = useLocation();
   const isAppEmbedded = location.pathname.startsWith('/apps/');
   const theme = useChatStore(state => state.theme);
+  const { isOpen: isRemoteDrawerOpen, toggleDrawer: toggleRemoteDrawer, currentActiveSession: remoteActiveSession, activeResolvedInfo: remoteResolvedInfo } = useXPointRemoteBridge();
   const tenantInfo = useChatStore(state => state.tenantInfo);
   const tenantIdFromStore = tenantInfo?.id;
   const tenantId = tenantIdFromStore || (typeof window !== 'undefined' ? (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')) : null);
@@ -1161,6 +1164,29 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
               onClick={() => navigate('/apps/agenda')}
               isActive={window.location.pathname === '/apps/agenda'}
             />
+
+            <NavItem 
+              title={
+                <div className="flex items-center justify-between gap-2 w-full">
+                  <span>Acesso Remoto</span>
+                  {remoteActiveSession ? (
+                    <span className="px-1.5 py-0.5 rounded-full bg-emerald-500 text-white text-[9px] font-bold animate-pulse">
+                      #{remoteActiveSession.protocolNumber}
+                    </span>
+                  ) : remoteResolvedInfo && remoteResolvedInfo.onlineDevices > 0 ? (
+                    <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-500 border border-emerald-500/30 text-[9.5px] font-bold">
+                      {remoteResolvedInfo.onlineDevices} ON
+                    </span>
+                  ) : null}
+                </div>
+              }
+              icon={<Monitor size={16} className={isRemoteDrawerOpen ? "text-indigo-500" : "text-indigo-400"} />} 
+              onClick={() => {
+                toggleRemoteDrawer();
+                onClose?.();
+              }}
+              isActive={isRemoteDrawerOpen}
+            />
           </CollapsibleSection>
 
           <CollapsibleSection 
@@ -1253,6 +1279,16 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
           </CollapsibleSection>
 
           <CollapsibleSection title="Apps" icon={<Puzzle size={16} />} isOpen={expandedSections.apps} onToggle={() => toggleSection('apps')}>
+            <NavItem 
+              title="XPoint Remote (Acesso Remoto)" 
+              icon={<Monitor size={15} className="text-indigo-400" />}
+              isSub 
+              onClick={() => {
+                toggleRemoteDrawer();
+                onClose?.();
+              }}
+              isActive={isRemoteDrawerOpen}
+            />
             <NavItem 
               title="Portal / Cadastros" 
               isSub 
