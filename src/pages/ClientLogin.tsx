@@ -8,6 +8,13 @@ import { geminiService } from '../services/geminiService';
 import LoginErrorAlert from '../components/LoginErrorAlert';
 import InfraHealthModal from '../components/InfraHealthModal';
 import { parseLoginError, LoginErrorInfo } from '../utils/authErrorDiagnostics';
+import {
+  getStoredAllowedGoogleEmails,
+  isEmailInAllowedList,
+  saveStoredAllowedGoogleEmails,
+  VERIFIED_GOOGLE_EMAIL_STORAGE_KEY,
+  normalizeEmail,
+} from '../hooks/useXPointRemoteBridge';
 
 export default function ClientLogin() {
   const [email, setEmail] = useState('');
@@ -741,7 +748,7 @@ export default function ClientLogin() {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user?.email) {
-          const gEmail = session.user.email.trim().toLowerCase();
+          const gEmail = normalizeEmail(session.user.email);
           const gName = session.user.user_metadata?.full_name || session.user.user_metadata?.name || gEmail.split('@')[0];
           const authId = session.user.id;
 
@@ -756,6 +763,11 @@ export default function ClientLogin() {
 
           if (compList && compList.length > 0) {
             const comp = compList[0];
+            const remoteAllowed = Array.isArray(comp.settings?.allowed_google_emails)
+              ? comp.settings.allowed_google_emails
+              : [];
+            saveStoredAllowedGoogleEmails([...getStoredAllowedGoogleEmails(), ...remoteAllowed, gEmail]);
+            localStorage.setItem(VERIFIED_GOOGLE_EMAIL_STORAGE_KEY, gEmail);
             saveUserSessionAndRedirect(comp, gName, 'admin', gEmail, authId, [comp.evolution_api_instance], [comp.id]);
             return;
           }
@@ -771,6 +783,11 @@ export default function ClientLogin() {
             const agent = agentList[0];
             const parentComp = agent.companies;
             if (parentComp) {
+              const remoteAllowed = Array.isArray(parentComp.settings?.allowed_google_emails)
+                ? parentComp.settings.allowed_google_emails
+                : [];
+              saveStoredAllowedGoogleEmails([...getStoredAllowedGoogleEmails(), ...remoteAllowed, gEmail]);
+              localStorage.setItem(VERIFIED_GOOGLE_EMAIL_STORAGE_KEY, gEmail);
               saveUserSessionAndRedirect(
                 parentComp,
                 agent.full_name || gName,
@@ -784,20 +801,47 @@ export default function ClientLogin() {
             }
           }
 
-          // 3. Caso não possua empresa vinculada, abre o modal de onboarding inteligente
-          setIsLoading(false);
-          setGoogleLinkModal({
-            open: true,
-            email: gEmail,
-            name: gName,
-            authUserId: authId,
-            mode: 'link',
-            linkEmail: '',
-            linkPass: '',
-            newCompanyName: '',
-            error: '',
-            loading: false
+          // 3. Verifica se o e-mail consta na Lista de E-mails Liberados (allowed_google_emails)
+          const { data: allComps } = await masterSupabase
+            .from('companies')
+            .select('*')
+            .limit(50);
+
+          const matchedAllowlistComp = (allComps || []).find((c: any) => {
+            const list: string[] = Array.isArray(c?.settings?.allowed_google_emails)
+              ? c.settings.allowed_google_emails.map((item: string) => normalizeEmail(item))
+              : [];
+            return list.includes(gEmail);
           });
+
+          if (matchedAllowlistComp || isEmailInAllowedList(gEmail)) {
+            const targetComp = matchedAllowlistComp || (allComps && allComps[0]);
+            if (targetComp) {
+              const remoteAllowed = Array.isArray(targetComp.settings?.allowed_google_emails)
+                ? targetComp.settings.allowed_google_emails
+                : [];
+              saveStoredAllowedGoogleEmails([...getStoredAllowedGoogleEmails(), ...remoteAllowed, gEmail]);
+              localStorage.setItem(VERIFIED_GOOGLE_EMAIL_STORAGE_KEY, gEmail);
+              saveUserSessionAndRedirect(
+                targetComp,
+                gName,
+                'admin',
+                gEmail,
+                authId,
+                [targetComp.evolution_api_instance],
+                [targetComp.id]
+              );
+              return;
+            }
+          }
+
+          // 4. Caso não conste na Lista de E-mails Liberados, bloqueia o acesso imediatamente
+          await supabase.auth.signOut();
+          localStorage.removeItem(VERIFIED_GOOGLE_EMAIL_STORAGE_KEY);
+          setIsLoading(false);
+          const blockedMessage = `Acesso Restrito: O e-mail Google "${gEmail}" não consta na Lista de E-mails Liberados. Solicite a liberação ao administrador.`;
+          setErrorMsg(blockedMessage);
+          setLoginError(parseLoginError({ message: blockedMessage }, blockedMessage));
         }
       } catch (err) {
         console.warn('Erro ao processar retorno OAuth:', err);
@@ -982,15 +1026,23 @@ export default function ClientLogin() {
       sessionStorage.removeItem('allowed_companies');
       sessionStorage.removeItem('current_user_id');
 
+      const cleanLoginEmail = normalizeEmail(email);
       const storage = keepLogged ? localStorage : sessionStorage;
       storage.setItem('current_tenant_id', tenantData.id);
       storage.setItem('current_tenant_name', tenantData.name);
       storage.setItem('current_user_name', userName);
       storage.setItem('current_user_role', userRole);
-      storage.setItem('current_user_email', email.trim().toLowerCase());
+      storage.setItem('current_user_email', cleanLoginEmail);
       if (signInData?.user?.id) {
          storage.setItem('current_user_id', signInData.user.id);
       }
+
+      // Sincroniza e-mail autenticado na Lista de E-mails Liberados
+      const remoteAllowed = Array.isArray(tenantData?.settings?.allowed_google_emails)
+        ? tenantData.settings.allowed_google_emails
+        : [];
+      saveStoredAllowedGoogleEmails([...getStoredAllowedGoogleEmails(), ...remoteAllowed, cleanLoginEmail]);
+      localStorage.setItem(VERIFIED_GOOGLE_EMAIL_STORAGE_KEY, cleanLoginEmail);
       
       // RBAC Global: Salva as instâncias e empresas permitidas independentemente do papel
       storage.setItem('allowed_instances', JSON.stringify(allowedInstances || []));
@@ -1015,15 +1067,62 @@ export default function ClientLogin() {
          <ThemeToggle />
       </div>
       <div className="w-full max-w-sm p-8 bg-white dark:bg-[#202c33] rounded-3xl shadow-xl animate-in slide-in-from-bottom-4 fade-in duration-500">
-        <div className="flex flex-col items-center mb-8">
+        <div className="flex flex-col items-center mb-6">
           <img src="/pwa-192x192.png" alt="Logo" className="w-16 h-16 object-contain rounded-2xl shadow-sm mb-4" />
+          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold uppercase tracking-wider mb-2">
+            <ShieldCheck size={12} />
+            Lista de E-mails Liberados
+          </div>
           <h1 className="text-2xl font-bold text-[#111b21] dark:text-[#e9edef]">Workspace Login</h1>
-          <p className="text-[#54656f] text-sm mt-1 text-center font-medium">Acesse a central de mensageria da sua empresa.</p>
+          <p className="text-[#54656f] dark:text-[#8696a0] text-xs mt-1 text-center font-medium">
+            Acesso exclusivo para contas autorizadas na Lista de E-mails Liberados.
+          </p>
         </div>
 
-        <form onSubmit={handleLogin} className="space-y-5">
+        {/* Botão Principal de Login com o Google (Obrigatório / Recomendado) */}
+        <div className="space-y-2.5 mb-5">
+          <button 
+            type="button"
+            onClick={handleGoogleLogin}
+            disabled={isLoading}
+            className="w-full bg-white dark:bg-[#182229] hover:bg-gray-50 dark:hover:bg-[#2a3942] text-gray-800 dark:text-[#e9edef] font-bold py-3.5 px-4 rounded-xl border-2 border-blue-500/30 dark:border-cyan-500/30 hover:border-blue-500 dark:hover:border-cyan-400 transition-all hover:-translate-y-0.5 flex items-center justify-center gap-3 shadow-md hover:shadow-lg active:scale-[0.99] disabled:opacity-50"
+          >
+            <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
+              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+            </svg>
+            <span>Entrar com o Google</span>
+          </button>
+
+          {/* Botão Oficial Face ID */}
+          <button 
+            type="button"
+            onClick={() => {
+              setFaceIdActive(true);
+              setFaceEmailStep(false);
+              setCameraActive(true);
+              setFaceVerifyError('');
+              setFaceLinkingStep(false);
+              setCapturedPhotoForLink(null);
+            }}
+            className="w-full bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-600 dark:text-emerald-400 font-semibold py-2.5 px-4 rounded-xl border border-emerald-500/20 hover:border-emerald-500/30 transition-all hover:-translate-y-0.5 flex items-center justify-center gap-2 text-sm"
+          >
+            <Camera size={16} className="text-emerald-500" />
+            Entrar com Face ID
+          </button>
+        </div>
+
+        <div className="flex items-center my-4">
+          <div className="flex-grow border-t border-gray-200 dark:border-white/10"></div>
+          <span className="mx-3 text-[11px] font-semibold text-[#8696a0] uppercase tracking-wider">ou credencial autorizada</span>
+          <div className="flex-grow border-t border-gray-200 dark:border-white/10"></div>
+        </div>
+
+        <form onSubmit={handleLogin} className="space-y-4">
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider ml-1">E-mail Corporativo</label>
+            <label className="text-xs font-semibold text-[#54656f] uppercase tracking-wider ml-1">E-mail Liberado</label>
             <input 
               type="email" 
               value={email}
@@ -1074,47 +1173,6 @@ export default function ClientLogin() {
           >
             {isLoading ? <Loader2 size={18} className="animate-spin" /> : <>Acessar Chat <ArrowRight size={18} /></>}
           </button>
-          
-          <div className="flex items-center my-4">
-            <div className="flex-grow border-t border-gray-200 dark:border-white/10"></div>
-            <span className="mx-4 text-xs font-semibold text-[#8696a0] uppercase tracking-wider">ou acessar com</span>
-            <div className="flex-grow border-t border-gray-200 dark:border-white/10"></div>
-          </div>
-
-          <div className="space-y-3">
-            {/* Botão Oficial do Google */}
-            <button 
-              type="button"
-              onClick={handleGoogleLogin}
-              disabled={isLoading}
-              className="w-full bg-white dark:bg-[#182229] hover:bg-gray-50 dark:hover:bg-[#202c33] text-gray-700 dark:text-[#e9edef] font-semibold py-3 px-4 rounded-xl border border-gray-200 dark:border-white/10 transition-all hover:-translate-y-0.5 flex items-center justify-center gap-3 shadow-sm hover:shadow active:scale-[0.99] disabled:opacity-50"
-            >
-              <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
-                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
-                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
-              </svg>
-              <span>Continuar com o Google</span>
-            </button>
-
-            {/* Botão Oficial Face ID */}
-            <button 
-              type="button"
-              onClick={() => {
-                setFaceIdActive(true);
-                setFaceEmailStep(false);
-                setCameraActive(true);
-                setFaceVerifyError('');
-                setFaceLinkingStep(false);
-                setCapturedPhotoForLink(null);
-              }}
-              className="w-full bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-600 dark:text-emerald-400 font-semibold py-3 px-4 rounded-xl border border-emerald-500/20 hover:border-emerald-500/30 transition-all hover:-translate-y-0.5 flex items-center justify-center gap-2"
-            >
-              <Camera size={18} className="text-emerald-500" />
-              Entrar com Face ID
-            </button>
-          </div>
           
           {/* Card de Alerta Rico com Diagnóstico Real do Erro */}
           <LoginErrorAlert

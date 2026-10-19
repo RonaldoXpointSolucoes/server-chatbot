@@ -1,6 +1,9 @@
 {
-  "version": "7.8.8",
+  "version": "7.9.1",
   "changelog": [
+    "🛡️ Prevenção de Throttling de CPU na VPS (ONNX RAG Inteligente): Salto automático de re-vetorização quando o cardápio permanece inalterado, cedência de Event Loop (25ms) por chunk e adiamento de sync pós-boot para 90s",
+    "⚡ Fim da Tempestade Multiplicativa de Retentativas no Supabase: Timeout estrito de 12s (AbortSignal.timeout), bloqueio imediato no CircuitBreaker aberto na 1ª tentativa e redução de retries acoplados",
+    "🔒 Anti-Deadlock em Mutex de Instância (AuthQueue): Timeouts defensivos de 10s em enqueueWrite e 5s em flushPendingWrites para impedir congelamento de sessões Baileys",
     "🛡️ Resiliência Total contra Erro 1006 / Connection Terminated: Detecção imediata de oscilações WebSocket com delegação instantânea ao Outbox Resiliente (202/200) sem falhas HTTP 500",
     "🔀 Roteamento Interno Multi-Worker (Alpha ↔ Produção): Encaminhamento automático de chamadas /invoke e /messages/send ao nó detentor da instância, eliminando loops de wake local",
     "⚡ Desbloqueio do Event Loop no Auth State: Conversão recursiva em memória de chaves Signal (sem JSON.stringify/parse síncrono) e preservação do cache RAM em reconexões transitórias",

@@ -70,6 +70,57 @@ export interface ActiveContactRemoteContext {
 
 export type XPointDrawerWidthMode = 'fullscreen' | 'expanded' | 'compact';
 
+export const ALLOWED_GOOGLE_EMAILS_STORAGE_KEY = 'xpoint_allowed_google_emails_v1';
+export const VERIFIED_GOOGLE_EMAIL_STORAGE_KEY = 'xpoint_google_oauth_verified_email';
+export const REOPEN_REMOTE_AFTER_OAUTH_KEY = 'xpoint_remote_reopen_after_oauth';
+export const DEFAULT_ALLOWED_GOOGLE_EMAILS = ['ronaldo.xpointsolucoes@gmail.com'];
+
+export function normalizeEmail(email?: string | null): string {
+  return String(email || '').trim().toLowerCase();
+}
+
+export function getStoredAllowedGoogleEmails(): string[] {
+  const base = new Set<string>(DEFAULT_ALLOWED_GOOGLE_EMAILS.map(normalizeEmail));
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = localStorage.getItem(ALLOWED_GOOGLE_EMAILS_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          parsed.forEach((item) => {
+            const clean = normalizeEmail(item);
+            if (clean && clean.includes('@')) base.add(clean);
+          });
+        }
+      }
+    } catch (_) {
+      // ignore parse errors
+    }
+  }
+  return Array.from(base);
+}
+
+export function saveStoredAllowedGoogleEmails(emails: string[]): string[] {
+  const unique = Array.from(
+    new Set([...DEFAULT_ALLOWED_GOOGLE_EMAILS, ...emails].map(normalizeEmail).filter((e) => e && e.includes('@')))
+  );
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem(ALLOWED_GOOGLE_EMAILS_STORAGE_KEY, JSON.stringify(unique));
+    } catch (_) {
+      // ignore storage errors
+    }
+  }
+  return unique;
+}
+
+export function isEmailInAllowedList(email?: string | null, allowedList?: string[]): boolean {
+  const clean = normalizeEmail(email);
+  if (!clean || !clean.includes('@')) return false;
+  const list = allowedList && allowedList.length > 0 ? allowedList : getStoredAllowedGoogleEmails();
+  return list.some((item) => normalizeEmail(item) === clean);
+}
+
 export interface XPointRemoteToast {
   id: string;
   message: string;
@@ -92,6 +143,16 @@ interface XPointRemoteStoreState {
   currentActiveSession: XPointRemoteActiveSession | null;
   toast: XPointRemoteToast | null;
 
+  // Estados de Autenticação Google & Lista de E-mails Liberados
+  allowedGoogleEmails: string[];
+  googleAuthEmail: string | null;
+  googleAuthName: string | null;
+  googleAuthAvatar: string | null;
+  isGoogleAuthenticated: boolean;
+  isGoogleEmailAllowed: boolean;
+  isCheckingGoogleAuth: boolean;
+  googleAuthError: string | null;
+
   openDrawer: (options?: { mode?: XPointDrawerWidthMode; openCnpjModal?: boolean }) => void;
   closeDrawer: () => void;
   toggleDrawer: () => void;
@@ -104,6 +165,13 @@ interface XPointRemoteStoreState {
   setSessionEnded: (protocolNumber?: string, contactId?: string, cnpj?: string) => void;
   showToast: (message: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
   clearToast: () => void;
+
+  syncAllowedEmailsFromSupabase: () => Promise<string[]>;
+  verifyGoogleSession: () => Promise<void>;
+  addAllowedGoogleEmail: (email: string) => Promise<{ ok: boolean; error?: string }>;
+  removeAllowedGoogleEmail: (email: string) => Promise<{ ok: boolean; error?: string }>;
+  loginWithGoogleForRemote: () => Promise<void>;
+  logoutGoogleForRemote: () => Promise<void>;
 }
 
 // Referência singleton global do elemento <iframe> para permitir envio de postMessage de qualquer lugar
@@ -338,6 +406,25 @@ export const useXPointRemoteStore = create<XPointRemoteStoreState>((set, get) =>
   currentActiveSession: null,
   toast: null,
 
+  allowedGoogleEmails: getStoredAllowedGoogleEmails(),
+  googleAuthEmail:
+    typeof window !== 'undefined'
+      ? normalizeEmail(localStorage.getItem(VERIFIED_GOOGLE_EMAIL_STORAGE_KEY)) || null
+      : null,
+  googleAuthName: null,
+  googleAuthAvatar: null,
+  isGoogleAuthenticated:
+    typeof window !== 'undefined' &&
+    Boolean(normalizeEmail(localStorage.getItem(VERIFIED_GOOGLE_EMAIL_STORAGE_KEY))),
+  isGoogleEmailAllowed:
+    typeof window !== 'undefined' &&
+    isEmailInAllowedList(
+      localStorage.getItem(VERIFIED_GOOGLE_EMAIL_STORAGE_KEY),
+      getStoredAllowedGoogleEmails()
+    ),
+  isCheckingGoogleAuth: true,
+  googleAuthError: null,
+
   openDrawer: (options) => {
     const state = get();
     const initialSrc = state.initialIframeSrc || buildInitialXPointRemoteEmbedUrl(state.activeContext);
@@ -347,6 +434,9 @@ export const useXPointRemoteStore = create<XPointRemoteStoreState>((set, get) =>
       initialIframeSrc: initialSrc,
       ...(options?.mode ? { widthMode: options.mode, customWidthPx: null } : {}),
     });
+
+    // Verifica a sessão Google e a lista de e-mails liberados ao abrir o painel
+    state.verifyGoogleSession();
 
     // Dispara sincronização imediata com o iframe para o contato atual
     setTimeout(() => {
@@ -483,6 +573,310 @@ export const useXPointRemoteStore = create<XPointRemoteStoreState>((set, get) =>
   },
 
   clearToast: () => set({ toast: null }),
+
+  syncAllowedEmailsFromSupabase: async () => {
+    const currentList = getStoredAllowedGoogleEmails();
+    const chatStore = useChatStore.getState();
+    const tenantId =
+      chatStore.tenantInfo?.id ||
+      (typeof window !== 'undefined'
+        ? localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')
+        : null);
+
+    if (!tenantId || tenantId === 'undefined') {
+      set({ allowedGoogleEmails: currentList });
+      return currentList;
+    }
+
+    try {
+      const { data: comp } = await supabase
+        .from('companies')
+        .select('id, email, settings')
+        .eq('id', tenantId)
+        .maybeSingle();
+
+      if (comp) {
+        const settings = comp.settings || {};
+        if (Array.isArray(settings.allowed_google_emails) && settings.allowed_google_emails.length > 0) {
+          const merged = saveStoredAllowedGoogleEmails(settings.allowed_google_emails);
+          set((s) => ({
+            allowedGoogleEmails: merged,
+            isGoogleEmailAllowed: s.googleAuthEmail ? isEmailInAllowedList(s.googleAuthEmail, merged) : false,
+          }));
+          return merged;
+        }
+
+        // Inicializa a lista com os e-mails autorizados da empresa e agentes caso ainda não exista no banco
+        const seed = new Set<string>(currentList);
+        if (comp.email && String(comp.email).includes('@')) seed.add(normalizeEmail(comp.email));
+        if (settings.google_email && String(settings.google_email).includes('@')) {
+          seed.add(normalizeEmail(settings.google_email));
+        }
+
+        const { data: agents } = await supabase
+          .from('tenant_users')
+          .select('email, settings')
+          .eq('tenant_id', tenantId);
+
+        if (Array.isArray(agents)) {
+          agents.forEach((ag: any) => {
+            if (ag?.email && String(ag.email).includes('@')) seed.add(normalizeEmail(ag.email));
+            if (ag?.settings?.google_email && String(ag.settings.google_email).includes('@')) {
+              seed.add(normalizeEmail(ag.settings.google_email));
+            }
+          });
+        }
+
+        const finalEmails = saveStoredAllowedGoogleEmails(Array.from(seed));
+        set((s) => ({
+          allowedGoogleEmails: finalEmails,
+          isGoogleEmailAllowed: s.googleAuthEmail ? isEmailInAllowedList(s.googleAuthEmail, finalEmails) : false,
+        }));
+        return finalEmails;
+      }
+    } catch (err) {
+      console.warn('[XPointRemoteBridge] Aviso ao sincronizar lista de e-mails liberados:', err);
+    }
+
+    set({ allowedGoogleEmails: currentList });
+    return currentList;
+  },
+
+  verifyGoogleSession: async () => {
+    set({ isCheckingGoogleAuth: true });
+    try {
+      const allowedList = await get().syncAllowedEmailsFromSupabase();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      const user = session?.user;
+      const sessionEmail = normalizeEmail(user?.email);
+      const provider = user?.app_metadata?.provider;
+      const providers: string[] = Array.isArray(user?.app_metadata?.providers)
+        ? user!.app_metadata.providers
+        : [];
+      const hasGoogleIdentity =
+        Array.isArray(user?.identities) &&
+        user!.identities.some((id: any) => id?.provider === 'google');
+      const storedVerifiedEmail =
+        typeof window !== 'undefined'
+          ? normalizeEmail(localStorage.getItem(VERIFIED_GOOGLE_EMAIL_STORAGE_KEY))
+          : '';
+      const hasOAuthReturnParam =
+        typeof window !== 'undefined' &&
+        (window.location.search.includes('remote_google_auth=1') ||
+          localStorage.getItem(REOPEN_REMOTE_AFTER_OAUTH_KEY) === '1');
+
+      const isGoogleOAuth =
+        Boolean(sessionEmail) &&
+        (provider === 'google' ||
+          providers.includes('google') ||
+          hasGoogleIdentity ||
+          storedVerifiedEmail === sessionEmail ||
+          hasOAuthReturnParam);
+
+      if (isGoogleOAuth && sessionEmail) {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(VERIFIED_GOOGLE_EMAIL_STORAGE_KEY, sessionEmail);
+        }
+        const allowed = isEmailInAllowedList(sessionEmail, allowedList);
+        const fullName =
+          user?.user_metadata?.full_name ||
+          user?.user_metadata?.name ||
+          sessionEmail.split('@')[0];
+        const avatarUrl =
+          user?.user_metadata?.avatar_url || user?.user_metadata?.picture || null;
+
+        set({
+          googleAuthEmail: sessionEmail,
+          googleAuthName: fullName,
+          googleAuthAvatar: avatarUrl,
+          isGoogleAuthenticated: true,
+          isGoogleEmailAllowed: allowed,
+          isCheckingGoogleAuth: false,
+          googleAuthError: allowed
+            ? null
+            : `O e-mail Google "${sessionEmail}" não consta na Lista de E-mails Liberados.`,
+        });
+      } else if (storedVerifiedEmail) {
+        const allowed = isEmailInAllowedList(storedVerifiedEmail, allowedList);
+        set({
+          googleAuthEmail: storedVerifiedEmail,
+          googleAuthName: storedVerifiedEmail.split('@')[0],
+          googleAuthAvatar: null,
+          isGoogleAuthenticated: true,
+          isGoogleEmailAllowed: allowed,
+          isCheckingGoogleAuth: false,
+          googleAuthError: allowed
+            ? null
+            : `O e-mail Google "${storedVerifiedEmail}" não consta na Lista de E-mails Liberados.`,
+        });
+      } else {
+        set({
+          googleAuthEmail: null,
+          googleAuthName: null,
+          googleAuthAvatar: null,
+          isGoogleAuthenticated: false,
+          isGoogleEmailAllowed: false,
+          isCheckingGoogleAuth: false,
+          googleAuthError: null,
+        });
+      }
+    } catch (err: any) {
+      set({
+        isCheckingGoogleAuth: false,
+        googleAuthError: err?.message || 'Erro ao verificar sessão Google.',
+      });
+    }
+  },
+
+  addAllowedGoogleEmail: async (rawEmail: string) => {
+    const clean = normalizeEmail(rawEmail);
+    if (!clean || !clean.includes('@') || !clean.includes('.')) {
+      return { ok: false, error: 'Informe um endereço de e-mail válido (ex: usuario@gmail.com).' };
+    }
+
+    const nextList = saveStoredAllowedGoogleEmails([...get().allowedGoogleEmails, clean]);
+    const currentGoogleEmail = get().googleAuthEmail;
+    const isNowAllowed = currentGoogleEmail ? isEmailInAllowedList(currentGoogleEmail, nextList) : false;
+
+    set({
+      allowedGoogleEmails: nextList,
+      isGoogleEmailAllowed: isNowAllowed,
+      googleAuthError: isNowAllowed ? null : get().googleAuthError,
+    });
+
+    // Persiste no Supabase em companies.settings.allowed_google_emails
+    try {
+      const tenantId =
+        useChatStore.getState().tenantInfo?.id ||
+        (typeof window !== 'undefined'
+          ? localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')
+          : null);
+
+      if (tenantId && tenantId !== 'undefined') {
+        const { data: comp } = await supabase
+          .from('companies')
+          .select('settings')
+          .eq('id', tenantId)
+          .maybeSingle();
+
+        const nextSettings = {
+          ...(comp?.settings || {}),
+          allowed_google_emails: nextList,
+        };
+
+        await supabase.from('companies').update({ settings: nextSettings }).eq('id', tenantId);
+      }
+    } catch (err) {
+      console.warn('[XPointRemoteBridge] Erro ao salvar allowed_google_emails no Supabase:', err);
+    }
+
+    get().showToast(`E-mail ${clean} adicionado à Lista de E-mails Liberados!`, 'success');
+    return { ok: true };
+  },
+
+  removeAllowedGoogleEmail: async (rawEmail: string) => {
+    const clean = normalizeEmail(rawEmail);
+    if (DEFAULT_ALLOWED_GOOGLE_EMAILS.map(normalizeEmail).includes(clean)) {
+      return {
+        ok: false,
+        error: 'O e-mail do administrador principal não pode ser removido da lista.',
+      };
+    }
+
+    const filtered = get()
+      .allowedGoogleEmails.map(normalizeEmail)
+      .filter((e) => e !== clean);
+    const nextList = saveStoredAllowedGoogleEmails(filtered);
+    const currentGoogleEmail = get().googleAuthEmail;
+    const isNowAllowed = currentGoogleEmail ? isEmailInAllowedList(currentGoogleEmail, nextList) : false;
+
+    set({
+      allowedGoogleEmails: nextList,
+      isGoogleEmailAllowed: isNowAllowed,
+      googleAuthError:
+        currentGoogleEmail && !isNowAllowed
+          ? `O e-mail Google "${currentGoogleEmail}" foi removido da Lista de E-mails Liberados.`
+          : null,
+    });
+
+    try {
+      const tenantId =
+        useChatStore.getState().tenantInfo?.id ||
+        (typeof window !== 'undefined'
+          ? localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')
+          : null);
+
+      if (tenantId && tenantId !== 'undefined') {
+        const { data: comp } = await supabase
+          .from('companies')
+          .select('settings')
+          .eq('id', tenantId)
+          .maybeSingle();
+
+        const nextSettings = {
+          ...(comp?.settings || {}),
+          allowed_google_emails: nextList,
+        };
+
+        await supabase.from('companies').update({ settings: nextSettings }).eq('id', tenantId);
+      }
+    } catch (err) {
+      console.warn('[XPointRemoteBridge] Erro ao remover e-mail no Supabase:', err);
+    }
+
+    get().showToast(`E-mail ${clean} removido da Lista de E-mails Liberados.`, 'info');
+    return { ok: true };
+  },
+
+  loginWithGoogleForRemote: async () => {
+    try {
+      set({ isCheckingGoogleAuth: true, googleAuthError: null });
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(REOPEN_REMOTE_AFTER_OAUTH_KEY, '1');
+      }
+      const redirectUrl =
+        typeof window !== 'undefined'
+          ? `${window.location.origin}/chat?remote_google_auth=1`
+          : undefined;
+
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: redirectUrl,
+          queryParams: {
+            prompt: 'select_account',
+            access_type: 'offline',
+          },
+        },
+      });
+
+      if (error) throw error;
+    } catch (err: any) {
+      set({
+        isCheckingGoogleAuth: false,
+        googleAuthError: err?.message || 'Falha ao iniciar autenticação com o Google.',
+      });
+    }
+  },
+
+  logoutGoogleForRemote: async () => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(VERIFIED_GOOGLE_EMAIL_STORAGE_KEY);
+      localStorage.removeItem(REOPEN_REMOTE_AFTER_OAUTH_KEY);
+    }
+    set({
+      googleAuthEmail: null,
+      googleAuthName: null,
+      googleAuthAvatar: null,
+      isGoogleAuthenticated: false,
+      isGoogleEmailAllowed: false,
+      googleAuthError: null,
+    });
+    get().showToast('Sessão Google desconectada do Acesso Remoto.', 'info');
+  },
 }));
 
 /**
@@ -693,9 +1087,49 @@ async function handleRemoteSessionEndedNote(data: any) {
 
 // Listener global único para evitar duplicação de tratadores de eventos window.postMessage
 let isGlobalBridgeListenerAttached = false;
+let isGlobalAuthListenerAttached = false;
 
 export function ensureGlobalXPointRemoteListener() {
-  if (typeof window === 'undefined' || isGlobalBridgeListenerAttached) return;
+  if (typeof window === 'undefined') return;
+
+  if (!isGlobalAuthListenerAttached) {
+    isGlobalAuthListenerAttached = true;
+
+    // Verifica retorno do OAuth do Google para reabrir o painel automaticamente se solicitado
+    const hasOAuthReturn =
+      window.location.search.includes('remote_google_auth=1') ||
+      localStorage.getItem(REOPEN_REMOTE_AFTER_OAUTH_KEY) === '1';
+
+    useXPointRemoteStore.getState().verifyGoogleSession().then(() => {
+      if (hasOAuthReturn) {
+        localStorage.removeItem(REOPEN_REMOTE_AFTER_OAUTH_KEY);
+        if (window.location.search.includes('remote_google_auth=1')) {
+          const url = new URL(window.location.href);
+          url.searchParams.delete('remote_google_auth');
+          window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+        }
+        useXPointRemoteStore.getState().openDrawer();
+      }
+    });
+
+    supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+        useXPointRemoteStore.getState().verifyGoogleSession();
+      } else if (event === 'SIGNED_OUT') {
+        localStorage.removeItem(VERIFIED_GOOGLE_EMAIL_STORAGE_KEY);
+        useXPointRemoteStore.setState({
+          googleAuthEmail: null,
+          googleAuthName: null,
+          googleAuthAvatar: null,
+          isGoogleAuthenticated: false,
+          isGoogleEmailAllowed: false,
+          isCheckingGoogleAuth: false,
+        });
+      }
+    });
+  }
+
+  if (isGlobalBridgeListenerAttached) return;
   isGlobalBridgeListenerAttached = true;
 
   window.addEventListener('message', (event: MessageEvent) => {
@@ -800,6 +1234,15 @@ export function useXPointRemoteBridge() {
   const toast = useXPointRemoteStore((s) => s.toast);
   const initialIframeSrc = useXPointRemoteStore((s) => s.initialIframeSrc);
 
+  const allowedGoogleEmails = useXPointRemoteStore((s) => s.allowedGoogleEmails);
+  const googleAuthEmail = useXPointRemoteStore((s) => s.googleAuthEmail);
+  const googleAuthName = useXPointRemoteStore((s) => s.googleAuthName);
+  const googleAuthAvatar = useXPointRemoteStore((s) => s.googleAuthAvatar);
+  const isGoogleAuthenticated = useXPointRemoteStore((s) => s.isGoogleAuthenticated);
+  const isGoogleEmailAllowed = useXPointRemoteStore((s) => s.isGoogleEmailAllowed);
+  const isCheckingGoogleAuth = useXPointRemoteStore((s) => s.isCheckingGoogleAuth);
+  const googleAuthError = useXPointRemoteStore((s) => s.googleAuthError);
+
   const openDrawer = useXPointRemoteStore((s) => s.openDrawer);
   const closeDrawer = useXPointRemoteStore((s) => s.closeDrawer);
   const toggleDrawer = useXPointRemoteStore((s) => s.toggleDrawer);
@@ -807,6 +1250,12 @@ export function useXPointRemoteBridge() {
   const setCustomWidthPx = useXPointRemoteStore((s) => s.setCustomWidthPx);
   const setActiveContext = useXPointRemoteStore((s) => s.setActiveContext);
   const clearToast = useXPointRemoteStore((s) => s.clearToast);
+
+  const addAllowedGoogleEmail = useXPointRemoteStore((s) => s.addAllowedGoogleEmail);
+  const removeAllowedGoogleEmail = useXPointRemoteStore((s) => s.removeAllowedGoogleEmail);
+  const loginWithGoogleForRemote = useXPointRemoteStore((s) => s.loginWithGoogleForRemote);
+  const logoutGoogleForRemote = useXPointRemoteStore((s) => s.logoutGoogleForRemote);
+  const verifyGoogleSession = useXPointRemoteStore((s) => s.verifyGoogleSession);
 
   const activeResolvedInfo = activeContext.rawCnpj
     ? resolvedByCnpj[activeContext.rawCnpj] || null
@@ -838,6 +1287,16 @@ export function useXPointRemoteBridge() {
     sendXPointRemoteOpenCnpjModal(ctx.rawCnpj || ctx.cnpj || '');
   }, []);
 
+  const togglePanel = useCallback(
+    (ctx?: Partial<XPointRemoteContactContext>) => {
+      if (ctx) {
+        useXPointRemoteStore.getState().setActiveContext(ctx);
+      }
+      useXPointRemoteStore.getState().toggleDrawer();
+    },
+    []
+  );
+
   return {
     isOpen,
     hasMountedOnce,
@@ -853,14 +1312,28 @@ export function useXPointRemoteBridge() {
     currentActiveSession,
     toast,
     initialIframeSrc: initialIframeSrc || buildInitialXPointRemoteEmbedUrl(activeContext),
+    allowedGoogleEmails,
+    googleAuthEmail,
+    googleAuthName,
+    googleAuthAvatar,
+    isGoogleAuthenticated,
+    isGoogleEmailAllowed,
+    isCheckingGoogleAuth,
+    googleAuthError,
     openDrawer,
     closeDrawer,
     toggleDrawer,
+    togglePanel,
     setWidthMode,
     setCustomWidthPx,
     setActiveContext,
     reloadSync,
     openCnpjModalInIframe,
     clearToast,
+    addAllowedGoogleEmail,
+    removeAllowedGoogleEmail,
+    loginWithGoogleForRemote,
+    logoutGoogleForRemote,
+    verifyGoogleSession,
   };
 }

@@ -6,11 +6,33 @@ import { useChatStore } from '../store/chatStore';
 import { useWaCallsStore } from '../store/useWaCallsStore';
 import WaCallsWidget from './WaCallsWidget';
 import XPointRemoteSidePanel from './XPointRemoteSidePanel';
+import { useXPointRemoteBridge } from '../hooks/useXPointRemoteBridge';
+
 export function MainLayout() {
   const [showMainSidebar, setShowMainSidebar] = useState(() => window.innerWidth >= 1024);
   const isQRModalOpen = useChatStore(s => s.isQRModalOpen);
   const qrModalTargetInstance = useChatStore(s => s.qrModalTargetInstance);
   const modalReason = useChatStore(s => s.modalReason);
+  const activeChatId = useChatStore(s => s.activeChatId);
+  const draftNewChat = useChatStore(s => s.draftNewChat);
+  const {
+    isOpen: isRemoteOpen,
+    widthMode: remoteWidthMode,
+    customWidthPx: remoteCustomWidth,
+  } = useXPointRemoteBridge();
+
+  const isSplitWithoutActiveChat =
+    isRemoteOpen &&
+    remoteWidthMode === 'expanded' &&
+    !remoteCustomWidth &&
+    !activeChatId &&
+    !draftNewChat;
+
+  React.useEffect(() => {
+    if (isRemoteOpen && remoteWidthMode !== 'fullscreen' && window.innerWidth < 1600) {
+      setShowMainSidebar(false);
+    }
+  }, [isRemoteOpen, remoteWidthMode]);
 
   React.useEffect(() => {
     // Garante que o tenantInfo esteja sempre carregado globalmente no Layout,
@@ -60,7 +82,13 @@ export function MainLayout() {
       </div>
 
       {/* Main Content Area (Outlet renderiza a rota ativa) */}
-      <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden relative">
+      <div
+        className={
+          isSplitWithoutActiveChat
+            ? "flex-1 md:flex-none md:w-[360px] lg:w-[400px] shrink-0 flex flex-col min-w-0 h-full overflow-hidden relative transition-all duration-200"
+            : "flex-1 flex flex-col min-w-0 h-full overflow-hidden relative transition-all duration-200"
+        }
+      >
         <Outlet context={{ showMainSidebar, setShowMainSidebar }} />
       </div>
 

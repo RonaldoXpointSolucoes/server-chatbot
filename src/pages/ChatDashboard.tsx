@@ -3272,6 +3272,8 @@ export default function ChatDashboard() {
   // Sincronização em tempo real do contato ativo com a ponte bidirecional XPoint Remote (AppRemoto v1.4.8)
   const {
     isOpen: isXPointRemoteOpen,
+    widthMode: xpointRemoteWidthMode,
+    customWidthPx: xpointRemoteCustomWidth,
     togglePanel: toggleXPointRemotePanel,
     setActiveContext: setXPointRemoteActiveContext,
     activeContext: xpointRemoteActiveContext,
@@ -6530,9 +6532,38 @@ export default function ChatDashboard() {
         className={cn(
           "w-full border-r border-[#d1d7db] dark:border-[#222d34] flex flex-col bg-white dark:bg-[#111b21] shrink-0",
           !isDragging && "transition-all",
-          activeChatId ? "hidden md:flex" : "flex"
+          activeChatId
+            ? isXPointRemoteOpen && xpointRemoteWidthMode === 'expanded'
+              ? "hidden 2xl:flex"
+              : "hidden md:flex"
+            : "flex"
         )}
-        style={{ width: window.innerWidth >= 768 ? sidebarWidth : '100%', maxWidth: window.innerWidth >= 768 ? sidebarWidth : '100%' }}
+        style={{
+          width:
+            window.innerWidth >= 768
+              ? isXPointRemoteOpen &&
+                !activeChat &&
+                !draftNewChat &&
+                ((xpointRemoteWidthMode === 'expanded' && !xpointRemoteCustomWidth) ||
+                  (xpointRemoteWidthMode === 'compact' && window.innerWidth < 1280))
+                ? '100%'
+                : isXPointRemoteOpen && xpointRemoteWidthMode !== 'fullscreen'
+                ? Math.min(sidebarWidth, 360)
+                : sidebarWidth
+              : '100%',
+          maxWidth:
+            window.innerWidth >= 768
+              ? isXPointRemoteOpen &&
+                !activeChat &&
+                !draftNewChat &&
+                ((xpointRemoteWidthMode === 'expanded' && !xpointRemoteCustomWidth) ||
+                  (xpointRemoteWidthMode === 'compact' && window.innerWidth < 1280))
+                ? '100%'
+                : isXPointRemoteOpen && xpointRemoteWidthMode !== 'fullscreen'
+                ? Math.min(sidebarWidth, 360)
+                : sidebarWidth
+              : '100%',
+        }}
         onClick={() => setActiveDropdown(null)} // fecha qq dropdown ao clicar fora
       >
         
@@ -8305,7 +8336,12 @@ export default function ChatDashboard() {
       {/* Resizer Handle */}
       <div 
         className={cn(
-          "hidden md:flex w-1.5 cursor-col-resize z-20 shrink-0 transition-colors relative group border-l border-r border-[#d1d7db] dark:border-[#222d34] bg-[#f0f2f5] dark:bg-[#202c33]",
+          isXPointRemoteOpen && xpointRemoteWidthMode === 'expanded'
+            ? activeChat || draftNewChat
+              ? "hidden 2xl:flex"
+              : "hidden"
+            : "hidden md:flex",
+          "w-1.5 cursor-col-resize z-20 shrink-0 transition-colors relative group border-l border-r border-[#d1d7db] dark:border-[#222d34] bg-[#f0f2f5] dark:bg-[#202c33]",
           isDragging ? "bg-[#00a884]/30 border-[#00a884]" : "hover:bg-[#00a884]/20 hover:border-[#00a884]/50"
         )}
         onMouseDown={(e) => { e.preventDefault(); setIsDragging(true); }}
@@ -8368,7 +8404,10 @@ export default function ChatDashboard() {
                       window.history.back();
                     }
                   }}
-                  className="md:hidden flex items-center justify-center p-2 -ml-2 mr-1 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#aebac1] transition-colors cursor-pointer shrink-0"
+                  className={cn(
+                    isXPointRemoteOpen && xpointRemoteWidthMode === 'expanded' ? "2xl:hidden" : "md:hidden",
+                    "flex items-center justify-center p-2 -ml-2 mr-1 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#aebac1] transition-colors cursor-pointer shrink-0"
+                  )}
                 >
                   <ChevronLeft size={24} />
                 </button>
@@ -8402,7 +8441,10 @@ export default function ChatDashboard() {
                 type="button"
                 aria-label="Voltar para a lista de conversas"
                 title="Voltar para todas as conversas"
-                className="md:hidden flex items-center justify-center p-2 -ml-2 mr-1 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#aebac1] transition-colors cursor-pointer shrink-0" 
+                className={cn(
+                  isXPointRemoteOpen && xpointRemoteWidthMode === 'expanded' ? "2xl:hidden" : "md:hidden",
+                  "flex items-center justify-center p-2 -ml-2 mr-1 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#aebac1] transition-colors cursor-pointer shrink-0"
+                )}
                 onClick={(e) => {
                   e.stopPropagation();
                   e.preventDefault();
@@ -11555,10 +11597,29 @@ export default function ChatDashboard() {
           </div>
         </div>
       ) : (
-        <div className="hidden md:flex flex-1 flex-col items-center justify-center bg-[#f0f2f5] dark:bg-[#222d34] border-l border-white/5 relative z-10">
-          <Bot size={80} className="text-gray-300 dark:text-[#2a3942] mb-6" />
-          <h1 className="text-3xl font-light text-[#54656f] dark:text-[#8696a0]">SaaS Multi-Agente Híbrido</h1>
-          <div className="text-sm text-[#54656f] dark:text-[#8696a0] mt-2 flex items-center gap-2"><div className="w-2 h-2 bg-[#00a884] rounded-full animate-pulse"></div> Conectado com banco de dados</div>
+        <div
+          className={cn(
+            isXPointRemoteOpen && xpointRemoteWidthMode === 'expanded' && !xpointRemoteCustomWidth
+              ? "hidden"
+              : isXPointRemoteOpen && xpointRemoteWidthMode === 'compact'
+              ? "hidden xl:flex min-w-[260px]"
+              : "hidden md:flex",
+            "flex-1 flex-col items-center justify-center px-6 text-center bg-[#f0f2f5] dark:bg-[#222d34] border-l border-white/5 relative z-10 overflow-hidden"
+          )}
+        >
+          <Bot size={isXPointRemoteOpen ? 64 : 80} className="text-gray-300 dark:text-[#2a3942] mb-5 shrink-0" />
+          <h1
+            className={cn(
+              "font-light text-[#54656f] dark:text-[#8696a0] leading-snug",
+              isXPointRemoteOpen ? "text-xl 2xl:text-2xl" : "text-2xl lg:text-3xl"
+            )}
+          >
+            SaaS Multi-Agente Híbrido
+          </h1>
+          <div className="text-xs sm:text-sm text-[#54656f] dark:text-[#8696a0] mt-2 flex items-center justify-center gap-2 whitespace-nowrap">
+            <div className="w-2 h-2 bg-[#00a884] rounded-full animate-pulse shrink-0"></div>
+            <span>Conectado com banco de dados</span>
+          </div>
         </div>
       )}
 

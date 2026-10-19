@@ -1235,77 +1235,88 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
             }
         }
         
-        // Deleta documentos antigos
+        // Verifica se já existe documento RAG pronto com exatamente o mesmo tamanho para evitar pico de CPU (ONNX) desnecessário na VPS
         const { data: oldDocs } = await supabase
             .from('knowledge_documents')
-            .select('id')
+            .select('id, name, status, metadata')
             .eq('tenant_id', tenantId)
             .in('name', [docName, 'cardapio_burguer_plus.txt']);
-            
-        if (oldDocs && oldDocs.length > 0) {
-            const docIds = oldDocs.map(d => d.id);
-            await supabase.from('knowledge_chunks').delete().in('document_id', docIds);
-            await supabase.from('knowledge_documents').delete().in('id', docIds);
-        }
-        
-        // Insere novo documento
-        const { data: docData, error: docError } = await supabase
-            .from('knowledge_documents')
-            .insert([{
-                tenant_id: tenantId,
-                name: docName,
-                type: 'text/plain',
-                status: 'processing',
-                metadata: { size: cardapioText.length }
-            }])
-            .select('*')
-            .single();
-            
-        if (docError) throw docError;
-        const documentId = docData.id;
-        
-        const splitTextIntoChunks = (text, chunkSize = 150, overlap = 20) => {
-            const words = text.split(/\s+/);
-            const chunks = [];
-            let i = 0;
-            while (i < words.length) {
-                const chunk = words.slice(i, i + chunkSize).join(' ');
-                chunks.push(chunk);
-                i += (chunkSize - overlap);
+
+        const alreadyUpToDate = Array.isArray(oldDocs) && oldDocs.length === 1 &&
+            oldDocs[0].name === docName &&
+            oldDocs[0].status === 'ready' &&
+            Number(oldDocs[0].metadata?.size) === cardapioText.length;
+
+        if (alreadyUpToDate) {
+            console.log(`[AutoHealing - RAG] Cardápio inalterado (${cardapioText.length} bytes). Mantendo vetorização RAG existente e preservando CPU da VPS.`);
+        } else {
+            if (oldDocs && oldDocs.length > 0) {
+                const docIds = oldDocs.map(d => d.id);
+                await supabase.from('knowledge_chunks').delete().in('document_id', docIds);
+                await supabase.from('knowledge_documents').delete().in('id', docIds);
             }
-            return chunks;
-        };
-        
-        const chunks = splitTextIntoChunks(cardapioText, 150, 20);
-        const transformer = await LocalEmbeddingsPipeline.getInstance();
-        const dbChunks = [];
-        
-        for (let i = 0; i < chunks.length; i++) {
-            const chunkText = chunks[i];
-            if (chunkText.trim().length < 5) continue;
             
-            const output = await transformer(chunkText, { pooling: 'mean', normalize: true });
-            const embeddingVector = Array.from(output.data);
+            // Insere novo documento
+            const { data: docData, error: docError } = await supabase
+                .from('knowledge_documents')
+                .insert([{
+                    tenant_id: tenantId,
+                    name: docName,
+                    type: 'text/plain',
+                    status: 'processing',
+                    metadata: { size: cardapioText.length }
+                }])
+                .select('*')
+                .single();
+                
+            if (docError) throw docError;
+            const documentId = docData.id;
             
-            dbChunks.push({
-                document_id: documentId,
-                tenant_id: tenantId,
-                content: chunkText,
-                embedding: embeddingVector,
-                chunk_index: i
-            });
+            const splitTextIntoChunks = (text, chunkSize = 150, overlap = 20) => {
+                const words = text.split(/\s+/);
+                const chunks = [];
+                let i = 0;
+                while (i < words.length) {
+                    const chunk = words.slice(i, i + chunkSize).join(' ');
+                    chunks.push(chunk);
+                    i += (chunkSize - overlap);
+                }
+                return chunks;
+            };
+            
+            const chunks = splitTextIntoChunks(cardapioText, 150, 20);
+            const transformer = await LocalEmbeddingsPipeline.getInstance();
+            const dbChunks = [];
+            
+            for (let i = 0; i < chunks.length; i++) {
+                const chunkText = chunks[i];
+                if (chunkText.trim().length < 5) continue;
+                
+                // Cede o Event Loop a cada chunk para não bloquear heartbeats do Baileys nem requisições HTTP na VPS de 2 vCPUs
+                await new Promise(r => setTimeout(r, 25));
+                const output = await transformer(chunkText, { pooling: 'mean', normalize: true });
+                const embeddingVector = Array.from(output.data);
+                
+                dbChunks.push({
+                    document_id: documentId,
+                    tenant_id: tenantId,
+                    content: chunkText,
+                    embedding: embeddingVector,
+                    chunk_index: i
+                });
+            }
+            
+            if (dbChunks.length > 0) {
+                await supabase.from('knowledge_chunks').insert(dbChunks);
+            }
+            
+            await supabase
+                .from('knowledge_documents')
+                .update({ status: 'ready' })
+                .eq('id', documentId);
+                
+            console.log(`[AutoHealing - RAG] Sincronização e vetorização RAG finalizadas com SUCESSO!`);
         }
-        
-        if (dbChunks.length > 0) {
-            await supabase.from('knowledge_chunks').insert(dbChunks);
-        }
-        
-        await supabase
-            .from('knowledge_documents')
-            .update({ status: 'ready' })
-            .eq('id', documentId);
-            
-        console.log(`[AutoHealing - RAG] Sincronização e vetorização RAG finalizadas com SUCESSO!`);
         
     } catch (ragErr) {
         console.error(`[AutoHealing - RAG] Erro ao vetorizar cardápio para RAG:`, ragErr);
@@ -1765,9 +1776,15 @@ class AutomationWorker {
                         continue;
                     }
 
-                    // Regra de 1 Hora: Se a empresa já foi sincronizada há menos de 60 minutos, pula para proteger a API Gastrofood
-                    if (gastrofoodCache.isCardapioRecent(tenantId, 60 * 60 * 1000)) {
-                        const remainingMins = gastrofoodCache.getMinutesUntilNextAllowedSync(tenantId, 60 * 60 * 1000);
+                    // Regra de 1 Hora: Se a empresa já foi sincronizada há menos de 60 minutos (em memória ou persistido no banco), pula para proteger a VPS e a API Gastrofood
+                    const persistedSyncTime = companySettings.last_cardapio_sync_time
+                        ? new Date(companySettings.last_cardapio_sync_time).getTime()
+                        : 0;
+                    const isPersistedRecent = persistedSyncTime > 0 && (Date.now() - persistedSyncTime < 60 * 60 * 1000);
+                    if (isPersistedRecent || gastrofoodCache.isCardapioRecent(tenantId, 60 * 60 * 1000)) {
+                        const remainingMins = isPersistedRecent
+                            ? Math.max(1, Math.ceil((60 * 60 * 1000 - (Date.now() - persistedSyncTime)) / 60000))
+                            : gastrofoodCache.getMinutesUntilNextAllowedSync(tenantId, 60 * 60 * 1000);
                         console.log(`[CardapioSync] ⏳ Empresa ${company.name} (${tenantId}) sincronizada há menos de 60m. Próxima consulta externa em ~${remainingMins}m. Preservando a infraestrutura Gastrofood.`);
                         continue;
                     }
@@ -1816,10 +1833,10 @@ class AutomationWorker {
             }
         };
         
-        // Executa 10 segundos após o boot do servidor
+        // Executa 90 segundos após o boot do servidor (após todas as sessões Baileys terminarem o handshake inicial)
         setTimeout(() => {
             syncAllCardapios().catch(err => console.error("[CardapioSync] Erro na execução inicial:", err));
-        }, 10000);
+        }, 90000);
         
         // Executa a cada 60 minutos
         setInterval(syncAllCardapios, 60 * 60 * 1000);

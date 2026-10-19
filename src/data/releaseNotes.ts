@@ -20,6 +20,37 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.9.5',
+    date: '2026-10-19',
+    summary: 'Estabilização de CPU na VPS, Proteção Anti-Deadlock no Motor Baileys e Modos Dividir Tela 50/50 + Login Google no XPoint Remote',
+    notes: [
+      {
+        id: '7.9.5-1',
+        category: 'fixes',
+        title: 'Prevenção de Throttling de CPU na VPS e Fim da Tempestade de Retentativas no Motor Baileys',
+        description: 'Otimização do motor RAG/ONNX para evitar re-vetorizações redundantes de cardápio na CPU, adição de timeout estrito de 12s no cliente Supabase com ativação imediata do CircuitBreaker e proteção contra deadlock de mutex nas filas de chaves Signal.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      },
+      {
+        id: '7.9.5-2',
+        category: 'improvements',
+        title: 'Modos Compacto (100% Altura) e Dividir Tela (50%/50% Lado a Lado) no XPoint Remote',
+        description: 'Refinamento visual dos modos Compacto (520px x 100vh) e Dividir Tela (50% Chat / 50% XPoint Remote lado a lado sem sobreposição), ocultação da barra flutuante fora da tela de Atendimento e remoção de ícones redundantes.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+      },
+      {
+        id: '7.9.5-3',
+        category: 'features',
+        title: 'Login Social com Google OAuth e Lista de E-mails Liberados no XPoint Remote',
+        description: 'Autenticação com conta Google em 1 clique na tela de login principal e nova seção administrativa "Lista de E-mails Liberados (Login Google)" dentro do painel do XPoint Remote para controle de acesso da equipe.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      }
+    ]
+  },
+  {
     version: '7.9.4',
     date: '2026-10-18',
     summary: 'Modo Tela Cheia Imersivo no XPoint Remote com Barra Superior Unificada e Retorno Rápido ao Chat',

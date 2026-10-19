@@ -96,23 +96,27 @@ export const nodeSupabaseCircuitBreaker = new NodeSupabaseCircuitBreaker();
  * Fetch resiliente com retry, jitter exponencial e tratamento de falhas de conexão / 5xx
  * para comunicação transparente e ininterrupta do Node.js com a API Supabase Cloud.
  */
-async function resilientFetch(url, options = {}, retries = 4, delay = 800) {
-  if (nodeSupabaseCircuitBreaker.isCircuitOpen() && retries < 4) {
+async function resilientFetch(url, options = {}, retries = 2, delay = 600) {
+  if (nodeSupabaseCircuitBreaker.isCircuitOpen()) {
     throw new Error('Supabase Node CircuitBreaker: Requisição pausada temporariamente para recuperação do gateway Supabase');
   }
 
+  const fetchOptions = options.signal
+    ? options
+    : { ...options, signal: AbortSignal.timeout(12000) };
+
   try {
-    const response = await fetch(url, options);
+    const response = await fetch(url, fetchOptions);
     
     // Tratamento de instabilidade HTTP 5xx do gateway / servidor Supabase Cloud (500, 502, 503, 504, 520-524)
     if (response.status >= 500 && retries > 0) {
       const jitter = Math.floor(Math.random() * 300);
       const waitTime = delay + jitter;
-      if (retries <= 2) {
+      if (retries <= 1) {
         console.info(`[Supabase/HTTP] Instabilidade HTTP ${response.status} na API Supabase. Retentando em ${waitTime}ms... (${retries} retentativas restantes)`);
       }
       await new Promise(resolve => setTimeout(resolve, waitTime));
-      return resilientFetch(url, options, retries - 1, Math.min(Math.round(delay * 1.5), 6000));
+      return resilientFetch(url, options, retries - 1, Math.min(Math.round(delay * 1.5), 4000));
     }
     
     if (response.ok) {
@@ -153,14 +157,14 @@ async function resilientFetch(url, options = {}, retries = 4, delay = 800) {
       errorName === 'AbortError' ||
       errorName === 'TimeoutError';
 
-    if (isTransientNetworkError && retries > 0) {
+    if (isTransientNetworkError && retries > 0 && !nodeSupabaseCircuitBreaker.isCircuitOpen()) {
       const jitter = Math.floor(Math.random() * 350);
       const waitTime = delay + jitter;
-      if (retries <= 2) {
+      if (retries <= 1) {
         console.info(`[Supabase/Network] Auto-recuperando conexão (${errorMsg || errorCode}) em ${waitTime}ms... (${retries} retentativas restantes)`);
       }
       await new Promise(resolve => setTimeout(resolve, waitTime));
-      return resilientFetch(url, options, retries - 1, Math.min(Math.round(delay * 1.5), 6000));
+      return resilientFetch(url, options, retries - 1, Math.min(Math.round(delay * 1.5), 4000));
     }
     
     if (retries === 0) {
@@ -189,11 +193,14 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
 export const NODE_ID = (process.env.NODE_ID || `worker-local-${Math.random().toString(36).substring(7)}`).trim();
 console.log(`[Worker Boot] Inicializado com NODE_ID: ${NODE_ID}`);
 
-export async function retryWithBackoff(fn, retries = 4, delay = 800) {
+export async function retryWithBackoff(fn, retries = 1, delay = 600) {
   try {
     return await fn();
   } catch (error) {
     const errorMsg = error?.message || String(error);
+    if (errorMsg.includes('CircuitBreaker') || nodeSupabaseCircuitBreaker.isCircuitOpen()) {
+      throw error;
+    }
     const errorCode = error?.code || '';
     const errorName = error?.name || '';
     const status = error?.status || error?.statusCode;
@@ -223,11 +230,9 @@ export async function retryWithBackoff(fn, retries = 4, delay = 800) {
     if (retries > 0 && isNetworkError) {
       const jitter = Math.floor(Math.random() * 300);
       const nextDelay = delay + jitter;
-      if (retries <= 2) {
-        console.info(`[Supabase/Network] Recuperando oscilação temporária (${errorMsg || errorCode}) em ${nextDelay}ms... (${retries} retentativas restantes)`);
-      }
+      console.info(`[Supabase/Network] Recuperando oscilação temporária (${errorMsg || errorCode}) em ${nextDelay}ms... (${retries} retentativas restantes)`);
       await new Promise(resolve => setTimeout(resolve, nextDelay));
-      return retryWithBackoff(fn, retries - 1, Math.min(Math.round(delay * 1.5), 8000));
+      return retryWithBackoff(fn, retries - 1, Math.min(Math.round(delay * 1.5), 4000));
     }
     throw error;
   }

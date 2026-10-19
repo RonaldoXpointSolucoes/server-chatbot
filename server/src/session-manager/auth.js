@@ -70,11 +70,19 @@ function enqueueWrite(instanceId, writeFn) {
             console.warn(`[SessionManager/AuthQueue] Auto-recuperando fila de escrita após erro anterior na instância ${instanceId}:`, prevErr?.message || prevErr);
         })
         .then(async () => {
+            let timer;
             try {
-                await writeFn();
+                await Promise.race([
+                    writeFn(),
+                    new Promise((_, reject) => {
+                        timer = setTimeout(() => reject(new Error('Auth writeQueue operation timed out after 10000ms')), 10000);
+                    })
+                ]);
             } catch (err) {
                 console.error(`[SessionManager] Erro na fila de escrita para instância ${instanceId}:`, err.message);
                 throw err;
+            } finally {
+                if (timer) clearTimeout(timer);
             }
         });
     writeQueues.set(instanceId, nextPromise);
@@ -84,10 +92,21 @@ function enqueueWrite(instanceId, writeFn) {
 export async function flushPendingWrites(instanceId) {
     if (writeQueues.has(instanceId)) {
         console.log(`[SessionManager] Aguardando conclusão da fila de escrita para a instância ${instanceId}...`);
+        let timer;
         try {
-            await writeQueues.get(instanceId);
+            await Promise.race([
+                writeQueues.get(instanceId),
+                new Promise((resolve) => {
+                    timer = setTimeout(() => {
+                        console.warn(`[SessionManager] Timeout defensivo (5000ms) atingido no flushPendingWrites da instância ${instanceId}. Liberando mutex.`);
+                        resolve();
+                    }, 5000);
+                })
+            ]);
         } catch (e) {
             console.error(`[SessionManager] Erro durante o flush da fila de escrita para ${instanceId}:`, e.message);
+        } finally {
+            if (timer) clearTimeout(timer);
         }
     }
 }
