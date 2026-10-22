@@ -483,6 +483,11 @@ export default function InstanceManagerStandalone() {
           .from('companies')
           .update({ evolution_api_instance: reassignTargetInstance.id })
           .eq('id', targetCompanyId);
+
+        // Migrar conversas, contatos e mensagens existentes da caixa para a empresa destino
+        await masterSupabase.from('conversations').update({ tenant_id: targetCompanyId }).eq('instance_id', reassignTargetInstance.id);
+        await masterSupabase.from('contacts').update({ tenant_id: targetCompanyId }).eq('instance_id', reassignTargetInstance.id);
+        await masterSupabase.from('messages').update({ tenant_id: targetCompanyId }).eq('instance_id', reassignTargetInstance.id);
       } else {
         // Desassociou: remove de qualquer empresa que aponte para esta caixa
         await masterSupabase

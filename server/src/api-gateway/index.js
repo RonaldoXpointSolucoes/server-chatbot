@@ -323,11 +323,66 @@ router.get('/v1/admin/companies', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+async function migrateInstanceDataToCompany(selectedInst, companyId) {
+    if (!selectedInst || !companyId) return;
+    try {
+        const { data: instData } = await supabase.from('whatsapp_instances')
+            .select('id')
+            .or(`id.eq.${selectedInst},display_name.eq.${selectedInst}`)
+            .maybeSingle();
+
+        const instUuid = instData?.id || selectedInst;
+
+        await supabase.from('whatsapp_instances').update({ tenant_id: companyId }).eq('id', instUuid);
+
+        const { data: orphanConvs } = await supabase.from('conversations').select('*').eq('instance_id', instUuid).neq('tenant_id', companyId);
+        for (const oc of orphanConvs || []) {
+            if (oc.contact_id) {
+                const { data: cRow } = await supabase.from('contacts').select('id, phone, tenant_id').eq('id', oc.contact_id).maybeSingle();
+                if (cRow && cRow.tenant_id !== companyId) {
+                    const { data: existingTargetContact } = await supabase.from('contacts').select('id').eq('tenant_id', companyId).eq('phone', cRow.phone).neq('id', cRow.id).maybeSingle();
+                    if (existingTargetContact) {
+                        oc.contact_id = existingTargetContact.id;
+                        await supabase.from('conversations').update({ contact_id: existingTargetContact.id }).eq('id', oc.id);
+                    } else {
+                        await supabase.from('contacts').update({ tenant_id: companyId, instance_id: instUuid }).eq('id', cRow.id);
+                    }
+                }
+            }
+            const { data: canonical } = oc.contact_id
+                ? await supabase.from('conversations').select('*').eq('instance_id', instUuid).eq('tenant_id', companyId).eq('contact_id', oc.contact_id).neq('id', oc.id).maybeSingle()
+                : { data: null };
+            if (canonical) {
+                await supabase.from('messages').update({ conversation_id: canonical.id, tenant_id: companyId }).eq('conversation_id', oc.id);
+                await supabase.from('conversations').delete().eq('id', oc.id);
+            } else {
+                await supabase.from('conversations').update({ tenant_id: companyId }).eq('id', oc.id);
+            }
+        }
+
+        await supabase.from('contacts').update({ tenant_id: companyId }).eq('instance_id', instUuid).neq('tenant_id', companyId);
+        await supabase.from('messages').update({ tenant_id: companyId }).eq('instance_id', instUuid).neq('tenant_id', companyId);
+
+        try {
+            const { default: sessionManager } = await import('../session-manager/index.js');
+            const liveSession = sessionManager?.sessions?.get(instUuid);
+            if (liveSession) liveSession.tenantId = companyId;
+            const { default: eventProcessor } = await import('../event-processor/index.js');
+            eventProcessor?.instanceConfigs?.delete(instUuid);
+        } catch (memErr) {}
+    } catch (ignoreErr) {
+        console.warn('[migrateInstanceDataToCompany] Aviso:', ignoreErr.message);
+    }
+}
+
 router.post('/v1/admin/companies', async (req, res) => {
     try {
         const { data, error } = await supabase.from('companies').insert(req.body).select();
         if (error) throw error;
         const created = Array.isArray(data) ? data[0] : data;
+        if (created?.id && req.body?.evolution_api_instance) {
+            await migrateInstanceDataToCompany(req.body.evolution_api_instance, created.id);
+        }
         res.json(created || data);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -339,18 +394,7 @@ router.put('/v1/admin/companies/:id', async (req, res) => {
         if (error) throw error;
 
         if (req.body && req.body.evolution_api_instance) {
-            const selectedInst = req.body.evolution_api_instance;
-            const { data: instData } = await supabase.from('whatsapp_instances')
-                .select('id')
-                .or(`id.eq.${selectedInst},display_name.eq.${selectedInst}`)
-                .maybeSingle();
-
-            const instUuid = instData?.id || selectedInst;
-
-            try {
-                await supabase.from('whatsapp_instances').update({ tenant_id: companyId }).eq('id', instUuid);
-                await supabase.from('conversations').update({ tenant_id: companyId }).eq('instance_id', instUuid);
-            } catch (ignoreErr) {}
+            await migrateInstanceDataToCompany(req.body.evolution_api_instance, companyId);
         }
 
         res.json(data);

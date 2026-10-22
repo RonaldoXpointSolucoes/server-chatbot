@@ -111,6 +111,12 @@ export default function InboxesList() {
 
       if (error) throw error;
 
+      if (targetCompanyId !== STANDALONE_TENANT_ID) {
+        await supabase.from('conversations').update({ tenant_id: targetCompanyId }).eq('instance_id', reassignTarget.id);
+        await supabase.from('contacts').update({ tenant_id: targetCompanyId }).eq('instance_id', reassignTarget.id);
+        await supabase.from('messages').update({ tenant_id: targetCompanyId }).eq('instance_id', reassignTarget.id);
+      }
+
       alert(
         targetCompanyId !== STANDALONE_TENANT_ID
           ? `Caixa "${reassignTarget.display_name}" vinculada com sucesso!`

@@ -20,6 +20,37 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.9.6',
+    date: '2026-10-22',
+    summary: 'Sincronização Automática de Tenant em Caixas Standalone, Resolução Dinâmica de Tenant no Motor Baileys e Finalização Limpa de Fluxos Typebot',
+    notes: [
+      {
+        id: '7.9.6-1',
+        category: 'fixes',
+        title: 'Migração Completa de Contatos, Conversas e Mensagens ao Vincular Caixa Standalone',
+        description: 'Ao vincular uma instância WhatsApp criada no painel Standalone a uma empresa, todo o histórico de contatos, conversas e mensagens já sincronizado é migrado e reconciliado automaticamente para o tenant da empresa destino.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      },
+      {
+        id: '7.9.6-2',
+        category: 'fixes',
+        title: 'Resolução Dinâmica de Tenant em Memória no SessionManager e EventProcessor',
+        description: 'Sockets Baileys já conectados em memória atualizam seu tenantId em tempo real assim que a instância é vinculada a uma empresa, garantindo que novas mensagens e o disparo de fluxos do Chatbot operem imediatamente no tenant correto sem exigir reinicialização.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      },
+      {
+        id: '7.9.6-3',
+        category: 'improvements',
+        title: 'Encerramento Automático de Estado BOT_ACTIVE em Fluxos Terminados com Bloco de Mensagem',
+        description: 'Fluxos Typebot que encerram sua execução em blocos de envio de mensagem (sem aguardar input adicional) passam a marcar conversation_states como FINISHED imediatamente, permitindo novos atendimentos subsequentes sem bloqueio.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+      }
+    ]
+  },
+  {
     version: '7.9.5',
     date: '2026-10-19',
     summary: 'Estabilização de CPU na VPS, Proteção Anti-Deadlock no Motor Baileys e Modos Dividir Tela 50/50 + Login Google no XPoint Remote',

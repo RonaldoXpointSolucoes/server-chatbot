@@ -1,5 +1,5 @@
 {
-  "version": "7.9.4",
-  "buildDate": "2026-10-18T18:49:18.860Z",
-  "summary": "Modo Tela Cheia Imersivo no XPoint Remote com Barra Superior Unificada e Retorno Rápido ao Chat"
+  "version": "7.9.6",
+  "buildDate": "2026-10-22T18:38:30.000Z",
+  "summary": "Sincronização Automática de Tenant em Caixas Standalone, Resolução Dinâmica de Tenant no Motor Baileys e Finalização Limpa de Fluxos Typebot"
 }

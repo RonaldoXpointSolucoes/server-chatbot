@@ -857,7 +857,9 @@ class FlowEngine {
             }
         }
 
-        if (iterationCount >= MAX_ITERATIONS) {
+        if (!isPaused && !currentPoint) {
+            await this.finishState(convState.id);
+        } else if (iterationCount >= MAX_ITERATIONS) {
             console.warn(`[FlowEngine] Limite máximo de iterações atingido para state ${convState.id}.`);
             await this.finishState(convState.id);
         }

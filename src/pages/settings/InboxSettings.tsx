@@ -224,6 +224,11 @@ export default function InboxSettings() {
         })
         .eq('id', instance.id);
       if (!error) {
+         if (selectedCompanyId && selectedCompanyId !== instance.tenant_id) {
+            await supabase.from('conversations').update({ tenant_id: selectedCompanyId }).eq('instance_id', instance.id);
+            await supabase.from('contacts').update({ tenant_id: selectedCompanyId }).eq('instance_id', instance.id);
+            await supabase.from('messages').update({ tenant_id: selectedCompanyId }).eq('instance_id', instance.id);
+         }
          const instAfter = { ...instance, tenant_id: selectedCompanyId, display_name: displayName, api_key: apiKey, color: instanceColor, notification_sound: notificationSound, phone_number: cleanPhone, settings: updatedSettings };
          await useChatStore.getState().logOperation('UPDATE', 'whatsapp_instances', instance.id, instBefore, instAfter);
       }

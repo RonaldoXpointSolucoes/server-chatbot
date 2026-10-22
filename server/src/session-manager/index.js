@@ -465,6 +465,15 @@ class SessionManager {
                         continue;
                     }
 
+                    // Sincroniza em tempo real o tenantId na sessão ativa caso a instância tenha sido vinculada/migrada de empresa
+                    if (inst.tenant_id && this.sessions.has(inst.id)) {
+                        const liveSession = this.sessions.get(inst.id);
+                        if (liveSession && liveSession.tenantId !== inst.tenant_id) {
+                            console.log(`[SessionManager] Sincronizando tenantId da sessão ativa ${inst.id}: ${liveSession.tenantId} -> ${inst.tenant_id}`);
+                            liveSession.tenantId = inst.tenant_id;
+                        }
+                    }
+
                     const lastHeal = this.autoHealingCooldowns.get(inst.id) || 0;
                     const lastCooldown = this.reconnectingCoolingDown.get(inst.id) || 0;
                     const failCount = this.autoHealingFailures.get(inst.id) || 0;
@@ -613,6 +622,14 @@ class SessionManager {
         return isSocketOpen(sock);
     }
 
+    getLiveTenantId(instanceId, fallbackTenantId) {
+        const live = this.sessions.get(instanceId)?.tenantId;
+        if (live && live !== '00000000-0000-0000-0000-000000000000') {
+            return live;
+        }
+        return live || fallbackTenantId;
+    }
+
     async runWithInstanceMutex(instanceId, action) {
         if (!instanceId) return action();
 
@@ -741,7 +758,7 @@ class SessionManager {
             const { data: inst, error } = await retryWithBackoff(() =>
                 supabase
                     .from('whatsapp_instances')
-                    .select('id, assigned_node_id, lease_until, status, monitoring_until, settings, updated_at')
+                    .select('id, tenant_id, assigned_node_id, lease_until, status, monitoring_until, settings, updated_at')
                     .eq('id', instanceId)
                     .single()
             );
@@ -966,6 +983,11 @@ class SessionManager {
 
             // Adquire atomicamente o lock/lease distribuído no Supabase
             const currentInstance = await this.acquireSessionLock(instanceId, force);
+            if (currentInstance?.tenant_id && currentInstance.tenant_id !== '00000000-0000-0000-0000-000000000000') {
+                tenantId = currentInstance.tenant_id;
+            } else if (currentInstance?.tenant_id && !tenantId) {
+                tenantId = currentInstance.tenant_id;
+            }
 
             // Health Check de IP Geográfico
             try {
@@ -1838,7 +1860,7 @@ class SessionManager {
 
                             const timer = setTimeout(() => {
                                 this.reconnectingTimers.delete(instanceId);
-                                this.createSession(tenantId, instanceId, true).catch(err => {
+                                this.createSession(this.getLiveTenantId(instanceId, tenantId), instanceId, true).catch(err => {
                                     console.error(`[SessionManager] Erro na retentativa de reconexão para ${instanceId}:`, err.message);
                                 });
                             }, delay);
@@ -1851,25 +1873,25 @@ class SessionManager {
             sock.ev.on('messaging-history.set', async (history) => {
                 console.log(`[SessionManager] Recebido messaging-history.set para a instância ${instanceId}. Processando histórico automaticamente para prevenir perda de mensagens.`);
                 this.pendingHistorySyncs.set(instanceId, history);
-                eventProcessor.handleMessagingHistorySet(tenantId, instanceId, sock, history).catch(err => {
+                eventProcessor.handleMessagingHistorySet(this.getLiveTenantId(instanceId, tenantId), instanceId, sock, history).catch(err => {
                     console.error(`[SessionManager] Erro ao processar histórico automático de mensagens:`, err);
                 });
             });
 
             sock.ev.on('chats.upsert', async (chats) => {
-                await eventProcessor.handleChatsUpsert(tenantId, instanceId, sock, chats);
+                await eventProcessor.handleChatsUpsert(this.getLiveTenantId(instanceId, tenantId), instanceId, sock, chats);
             });
 
             sock.ev.on('chats.update', async (updates) => {
-                await eventProcessor.handleChatsUpdate(tenantId, instanceId, sock, updates);
+                await eventProcessor.handleChatsUpdate(this.getLiveTenantId(instanceId, tenantId), instanceId, sock, updates);
             });
 
             sock.ev.on('messages.upsert', async (m) => {
-                await eventProcessor.handleMessageUpsert(tenantId, instanceId, sock, m);
+                await eventProcessor.handleMessageUpsert(this.getLiveTenantId(instanceId, tenantId), instanceId, sock, m);
             });
 
             sock.ev.on('message-receipt.update', async (updates) => {
-                await eventProcessor.handleMessageReceiptUpdate(tenantId, instanceId, sock, updates);
+                await eventProcessor.handleMessageReceiptUpdate(this.getLiveTenantId(instanceId, tenantId), instanceId, sock, updates);
             });
 
             sock.ev.on('messages.update', async (updates) => {
@@ -1897,7 +1919,7 @@ class SessionManager {
                         }
                     }
                 }
-                await eventProcessor.handleMessagesUpdate(tenantId, instanceId, sock, updates);
+                await eventProcessor.handleMessagesUpdate(this.getLiveTenantId(instanceId, tenantId), instanceId, sock, updates);
             });
             // --- Proteção Antiban e Fila de Mensagens Sequencial ---
             const originalSendMessage = sock.originalSendMessage || sock.sendMessage.bind(sock);

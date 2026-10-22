@@ -274,16 +274,25 @@ class EventProcessor {
         }
         try {
             const { data, error } = await retryWithBackoff(() =>
-                supabase.from('whatsapp_instances').select('settings').eq('id', instanceId).single()
+                supabase.from('whatsapp_instances').select('settings, tenant_id').eq('id', instanceId).single()
             );
             if (error) console.error('[EventProcessor] Erro ao buscar config da instância:', error);
-            const config = data?.settings || {};
+            const config = { ...(data?.settings || {}), _resolvedTenantId: data?.tenant_id || null };
             this.instanceConfigs.set(instanceId, { config, timestamp: Date.now() });
             return config;
         } catch (e) {
             console.error('[EventProcessor] Exception ao buscar config da instância:', e);
             return {};
         }
+    }
+
+    async resolveInstanceTenantId(instanceId, fallbackTenantId) {
+        if (!instanceId) return fallbackTenantId;
+        const cfg = await this.getInstanceConfig(instanceId);
+        if (cfg && cfg._resolvedTenantId && cfg._resolvedTenantId !== '00000000-0000-0000-0000-000000000000') {
+            return cfg._resolvedTenantId;
+        }
+        return fallbackTenantId || cfg?._resolvedTenantId || '00000000-0000-0000-0000-000000000000';
     }
 
     // Auxiliar: Filtra se é um grupo
@@ -393,6 +402,7 @@ class EventProcessor {
 
     async handleMessageUpsert(tenantId, instanceId, sock, m) {
         if (!m || !m.messages || !Array.isArray(m.messages) || m.messages.length === 0) return;
+        tenantId = await this.resolveInstanceTenantId(instanceId, tenantId);
  
         for (const msg of m.messages) {
             if (!msg || !msg.key) continue;
@@ -2019,11 +2029,14 @@ class EventProcessor {
         // Processa o histórico de forma assíncrona fora da pilha do evento do socket para NÃO bloquear o event loop e prevenir disconects (Code 428/408)
         setImmediate(async () => {
             try {
-                const { data: instCheck } = await supabase.from('whatsapp_instances').select('id').eq('id', instanceId).limit(1);
+                const { data: instCheck } = await supabase.from('whatsapp_instances').select('id, tenant_id').eq('id', instanceId).limit(1);
                 if (!instCheck || instCheck.length === 0) {
                     console.warn(`[EventProcessor] Instância ${instanceId} não existe mais no banco de dados. Encerrando sessão de memória residual.`);
                     sessionManager.closeSession(instanceId).catch(() => {});
                     return;
+                }
+                if (instCheck[0].tenant_id && instCheck[0].tenant_id !== '00000000-0000-0000-0000-000000000000') {
+                    tenantId = instCheck[0].tenant_id;
                 }
 
                 const chats = payload.chats || [];
@@ -2100,6 +2113,7 @@ class EventProcessor {
     }
 
     async handleChatsUpdate(tenantId, instanceId, sock, updates) {
+        tenantId = await this.resolveInstanceTenantId(instanceId, tenantId);
         // Envia para o banco numa bala se houver atualização.
         const phones = updates.map(u => u.id?.split('@')[0]?.split(':')[0]).filter(Boolean);
         if(phones.length === 0) return;
@@ -2153,6 +2167,7 @@ class EventProcessor {
 
     async handleMessageReceiptUpdate(tenantId, instanceId, sock, updates) {
         if (!updates || updates.length === 0) return;
+        tenantId = await this.resolveInstanceTenantId(instanceId, tenantId);
 
         try {
             const instanceConfig = await this.getInstanceConfig(instanceId);
@@ -2202,6 +2217,7 @@ class EventProcessor {
 
     async handleMessagesUpdate(tenantId, instanceId, sock, updates) {
         if (!updates || updates.length === 0) return;
+        tenantId = await this.resolveInstanceTenantId(instanceId, tenantId);
 
         try {
             for (const item of updates) {
