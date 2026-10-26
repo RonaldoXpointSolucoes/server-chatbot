@@ -564,9 +564,18 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                         });
                     } catch (attemptErr) {
                         lastFastErr = attemptErr;
+                        if (String(attemptErr?.message || '').includes('TIMEOUT_FASTPATH_SEND')) {
+                            activeSock._fastPathTimeouts = (activeSock._fastPathTimeouts || 0) + 1;
+                            if (activeSock._fastPathTimeouts >= 2 && typeof activeSock.end === 'function') {
+                                console.warn(`[API Gateway] Auto-reciclando socket de ${instanceId} após ${activeSock._fastPathTimeouts} timeouts consecutivos no Fast-Path...`);
+                                activeSock._fastPathTimeouts = 0;
+                                try { activeSock.end({ message: 'connection closed', output: { statusCode: 428 } }); } catch (e) {}
+                            }
+                        }
                     }
 
                     if (sentResult) {
+                        if (activeSock) activeSock._fastPathTimeouts = 0;
                         console.log(`[API Gateway] [MSG_TRACE:FASTPATH_SENT] Instância: ${instanceId} | WhatsAppMsgId: ${sentResult?.key?.id} | JID: ${targetJid}`);
 
                         // Grava no outbox já como 'sent' para histórico e auditoria com messageId oficial

@@ -26,6 +26,7 @@ interface TransactionContext {
 	cache: SignalDataSet
 	mutations: SignalDataSet
 	dbQueries: number
+	closed?: boolean
 }
 
 // One storage for the process: per-socket AsyncLocalStorage instances stay registered
@@ -124,7 +125,10 @@ export const addTransactionCapability = (
 	{ maxCommitRetries, delayBetweenTriesMs }: TransactionCapabilityOptions
 ): SignalKeyStoreWithTransaction => {
 	const transactionOwner = Symbol('signal-key-store')
-	const getTransactionContext = () => transactionStorage.getStore()?.get(transactionOwner)
+	const getTransactionContext = () => {
+		const ctx = transactionStorage.getStore()?.get(transactionOwner)
+		return ctx && !ctx.closed ? ctx : undefined
+	}
 
 	// Queues for concurrency control (keyed by signal data type - bounded set)
 	const keyQueues = new Map<string, PQueue>()
@@ -237,7 +241,9 @@ export const addTransactionCapability = (
 				ctx.dbQueries++
 				logger.trace({ type, count: missing.length }, 'fetching missing keys in transaction')
 
-				const fetched = await getTxMutex(type).runExclusive(() => state.get(type, missing))
+				// Read directly from state without acquiring getTxMutex(type) inside a transaction
+				// to prevent re-entrant self-deadlock when type === transaction key
+				const fetched = await state.get(type, missing)
 
 				// Update cache
 				ctx.cache[type] = ctx.cache[type] || ({} as any)
@@ -329,10 +335,15 @@ export const addTransactionCapability = (
 
 					logger.trace('entering transaction')
 
+					const contexts = new Map(transactionStorage.getStore())
+					contexts.set(transactionOwner, ctx)
+					let txTimer: NodeJS.Timeout | undefined
 					try {
-						const contexts = new Map(transactionStorage.getStore())
-						contexts.set(transactionOwner, ctx)
-						const result = await transactionStorage.run(contexts, work)
+						const workPromise = transactionStorage.run(contexts, work)
+						const timeoutPromise = new Promise<never>((_, reject) => {
+							txTimer = setTimeout(() => reject(new Error(`TX_MUTEX_TIMEOUT:${key}`)), 20000)
+						})
+						const result = await Promise.race([workPromise, timeoutPromise])
 
 						// Commit mutations
 						await commitWithRetry(ctx.mutations)
@@ -343,6 +354,10 @@ export const addTransactionCapability = (
 					} catch (error) {
 						logger.error({ error }, 'transaction failed, rolling back')
 						throw error
+					} finally {
+						if (txTimer) clearTimeout(txTimer)
+						ctx.closed = true
+						contexts.delete(transactionOwner)
 					}
 				})
 			} finally {

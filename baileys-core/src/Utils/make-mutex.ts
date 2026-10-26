@@ -5,7 +5,19 @@ export const makeMutex = () => {
 
 	return {
 		mutex<T>(code: () => Promise<T> | T): Promise<T> {
-			return mutex.runExclusive(code)
+			return mutex.runExclusive(async () => {
+				let timer: NodeJS.Timeout | undefined
+				try {
+					return await Promise.race([
+						Promise.resolve().then(code),
+						new Promise<never>((_, reject) => {
+							timer = setTimeout(() => reject(new Error('MAKE_MUTEX_TIMEOUT')), 25000)
+						})
+					])
+				} finally {
+					if (timer) clearTimeout(timer)
+				}
+			})
 		}
 	}
 }

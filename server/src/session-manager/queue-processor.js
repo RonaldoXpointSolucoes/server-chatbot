@@ -415,9 +415,19 @@ class QueueProcessor {
                 const responseType = msg.response_type || msg.options?.responseType || 'STANDARD';
 
                 const sendOptions = { priority: msg.priority, isAutomation: (msg.priority || 1) >= 5, skipDelay: true };
+                const sendTimeoutMs = msg.message_type === 'text' ? 15000 : 45000;
+                const sendWithTimeout = (jid, payload, opts) => {
+                    let timer;
+                    return Promise.race([
+                        sendFn(jid, payload, opts),
+                        new Promise((_, reject) => {
+                            timer = setTimeout(() => reject(new Error('TIMEOUT_OUTBOX_SEND')), sendTimeoutMs);
+                        })
+                    ]).finally(() => clearTimeout(timer));
+                };
 
                 if (msg.message_type === 'text') {
-                    result = await sendFn(targetJid, { text: msg.body }, sendOptions);
+                    result = await sendWithTimeout(targetJid, { text: msg.body }, sendOptions);
                 } else if (msg.message_type === 'media' && msg.media_url) {
                     // Se for TUTORIAL, garante validação estrita e envio com gifPlayback: true
                     if (responseType === 'TUTORIAL') {
@@ -429,7 +439,7 @@ class QueueProcessor {
                             mimetype: msg.options?.mimetype || 'video/mp4',
                             responseType: 'TUTORIAL'
                         });
-                        result = await sendFn(targetJid, tutorialPayload);
+                        result = await sendWithTimeout(targetJid, tutorialPayload);
                     } else {
                         // Envio de mídia por URL convencional (STANDARD)
                         let pathname = '';
@@ -487,7 +497,7 @@ class QueueProcessor {
                             forceDocument
                         });
 
-                        result = await sendFn(targetJid, mediaOptions);
+                        result = await sendWithTimeout(targetJid, mediaOptions);
                     }
                 } else {
                     throw new Error(`Tipo de mensagem não suportado: ${msg.message_type}`);
@@ -576,7 +586,16 @@ class QueueProcessor {
             } catch (err) {
                 if (msg) {
                     const errMsg = err?.message || err?.error || (typeof err === 'object' ? JSON.stringify(err) : String(err));
-                    const isTransient = errMsg.includes('Connection Closed') || errMsg.includes('WebSocket') || errMsg.includes('restartRequired');
+                    const isTransient = errMsg.includes('Connection Closed') || errMsg.includes('WebSocket') || errMsg.includes('restartRequired') || errMsg.includes('TIMEOUT_OUTBOX_SEND');
+                    if (errMsg.includes('TIMEOUT_OUTBOX_SEND') || errMsg.includes('TX_MUTEX_TIMEOUT')) {
+                        console.warn(`[QueueProcessor] Auto-reciclando socket de ${instanceId} após ${errMsg} para destravar fila de envio...`);
+                        try {
+                            const sessionObj = sessionManager.sessions.get(instanceId);
+                            if (sessionObj?.sock && typeof sessionObj.sock.end === 'function') {
+                                sessionObj.sock.end({ message: 'connection closed', output: { statusCode: 428 } });
+                            }
+                        } catch (recycleErr) {}
+                    }
                     
                     if (isTransient) {
                         console.warn(`[QueueProcessor] [MSG_TRACE:OUTBOX_TRANSIENT] Oscilação temporária ao enviar mensagem ${msg.id}: ${errMsg}. Reagendando...`);

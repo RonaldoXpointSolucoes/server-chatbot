@@ -1,4 +1,4 @@
-import { supabase, retryWithBackoff, nodeSupabaseCircuitBreaker } from '../supabase.js';
+import { supabase, retryWithBackoff } from '../supabase.js';
 import { initAuthCreds, BufferJSON } from '@whiskeysockets/baileys';
 
 export const sessionCaches = new Map();
@@ -58,33 +58,21 @@ class BoundedKeyCache {
 }
 
 const writeQueues = new Map();
-const pendingKeyBuffers = new Map();
-const pendingCredTimers = new Map();
-
-async function waitForCircuitRecoveryIfNeeded() {
-    if (nodeSupabaseCircuitBreaker && nodeSupabaseCircuitBreaker.isCircuitOpen()) {
-        const elapsed = Date.now() - (nodeSupabaseCircuitBreaker.lastStateChange || 0);
-        const remaining = Math.max(500, Math.min((nodeSupabaseCircuitBreaker.cooldownMs || 5000) - elapsed + 250, 6000));
-        await new Promise(r => setTimeout(r, remaining));
-    }
-}
 
 function enqueueWrite(instanceId, writeFn) {
     if (!writeQueues.has(instanceId)) {
         writeQueues.set(instanceId, Promise.resolve());
     }
     const currentQueue = writeQueues.get(instanceId);
-
     const taskPromise = currentQueue
         .catch(() => {})
         .then(async () => {
             let timer;
             try {
-                await waitForCircuitRecoveryIfNeeded();
                 await Promise.race([
                     writeFn(),
                     new Promise((_, reject) => {
-                        timer = setTimeout(() => reject(new Error('Auth writeQueue operation timed out after 25000ms')), 25000);
+                        timer = setTimeout(() => reject(new Error('Auth writeQueue operation timed out after 10000ms')), 10000);
                     })
                 ]);
             } catch (err) {
@@ -96,97 +84,12 @@ function enqueueWrite(instanceId, writeFn) {
                 if (timer) clearTimeout(timer);
             }
         });
-
-    // Mantém sempre uma Promise resolvida na cauda da fila para nunca envenenar chamadas futuras ou o flushPendingWrites
     const safeTail = taskPromise.catch(() => {});
     writeQueues.set(instanceId, safeTail);
     return safeTail;
 }
 
-function scheduleKeyFlush(instanceId, tenantId, immediate = false) {
-    const buf = pendingKeyBuffers.get(instanceId);
-    if (!buf) return Promise.resolve();
-
-    if (buf.timer) {
-        clearTimeout(buf.timer);
-        buf.timer = null;
-    }
-
-    const executeFlush = () => {
-        const currentBuf = pendingKeyBuffers.get(instanceId);
-        if (!currentBuf) return Promise.resolve();
-        currentBuf.timer = null;
-
-        const upsertsMap = currentBuf.upserts;
-        const deletesSet = currentBuf.deletes;
-        if (upsertsMap.size === 0 && deletesSet.size === 0) {
-            return Promise.resolve();
-        }
-
-        const keysToUpsert = Array.from(upsertsMap.values());
-        const keysToDelete = Array.from(deletesSet.values());
-        upsertsMap.clear();
-        deletesSet.clear();
-
-        return enqueueWrite(instanceId, async () => {
-            await retryWithBackoff(async () => {
-                await waitForCircuitRecoveryIfNeeded();
-                const promises = [];
-                if (keysToDelete.length > 0) {
-                    const DEL_CHUNK = 200;
-                    for (let i = 0; i < keysToDelete.length; i += DEL_CHUNK) {
-                        promises.push(
-                            supabase.from('wa_auth_keys')
-                                .delete()
-                                .eq('instance_id', instanceId)
-                                .in('key_name', keysToDelete.slice(i, i + DEL_CHUNK))
-                        );
-                    }
-                }
-                if (keysToUpsert.length > 0) {
-                    const CHUNK = 400;
-                    for (let i = 0; i < keysToUpsert.length; i += CHUNK) {
-                        promises.push(
-                            supabase.from('wa_auth_keys')
-                                .upsert(keysToUpsert.slice(i, i + CHUNK), { onConflict: 'instance_id, key_name' })
-                        );
-                    }
-                }
-
-                if (promises.length > 0) {
-                    const results = await Promise.all(promises);
-                    for (const res of results) {
-                        if (res.error) throw res.error;
-                    }
-                }
-            }, 2, 800);
-        });
-    };
-
-    if (immediate) {
-        return executeFlush();
-    }
-
-    return new Promise((resolve) => {
-        buf.timer = setTimeout(() => {
-            executeFlush().finally(resolve);
-        }, 250);
-    });
-}
-
 export async function flushPendingWrites(instanceId) {
-    if (pendingKeyBuffers.has(instanceId)) {
-        const buf = pendingKeyBuffers.get(instanceId);
-        if (buf && (buf.upserts.size > 0 || buf.deletes.size > 0)) {
-            await scheduleKeyFlush(instanceId, buf.tenantId, true);
-        }
-    }
-    if (pendingCredTimers.has(instanceId)) {
-        const credEntry = pendingCredTimers.get(instanceId);
-        if (credEntry?.flushNow) {
-            await credEntry.flushNow();
-        }
-    }
     if (writeQueues.has(instanceId)) {
         let timer;
         try {
@@ -195,7 +98,7 @@ export async function flushPendingWrites(instanceId) {
                 new Promise((resolve) => {
                     timer = setTimeout(() => {
                         resolve();
-                    }, 8000);
+                    }, 5000);
                 })
             ]);
         } catch (e) {
@@ -466,7 +369,6 @@ export async function useSupabaseAuthState(tenantId, instanceId, forceCleanState
                     // Fallback em LOTE para o Banco de Dados para todas as chaves ausentes da RAM
                     if (missingKeys.length > 0) {
                         try {
-                            await waitForCircuitRecoveryIfNeeded();
                             const CHUNK_SIZE = 100;
                             for (let i = 0; i < missingKeys.length; i += CHUNK_SIZE) {
                                 const chunk = missingKeys.slice(i, i + CHUNK_SIZE);
@@ -475,9 +377,7 @@ export async function useSupabaseAuthState(tenantId, instanceId, forceCleanState
                                         .from('wa_auth_keys')
                                         .select('key_name, key_data')
                                         .eq('instance_id', instanceId)
-                                        .in('key_name', chunk),
-                                    2,
-                                    600
+                                        .in('key_name', chunk)
                                 );
                                 
                                 if (error) {
@@ -528,16 +428,8 @@ export async function useSupabaseAuthState(tenantId, instanceId, forceCleanState
                     return data;
                 },
                 set: async (data) => {
-                    if (!pendingKeyBuffers.has(instanceId)) {
-                        pendingKeyBuffers.set(instanceId, {
-                            tenantId,
-                            upserts: new Map(),
-                            deletes: new Set(),
-                            timer: null
-                        });
-                    }
-                    const buf = pendingKeyBuffers.get(instanceId);
-                    buf.tenantId = tenantId || buf.tenantId;
+                    const keysToUpsert = [];
+                    const keysToDelete = [];
                     let processedCount = 0;
                     
                     for (const category in data) {
@@ -547,13 +439,12 @@ export async function useSupabaseAuthState(tenantId, instanceId, forceCleanState
                             const isNull = !val;
                             
                             if (isNull) {
-                                memCache.delete(name);
-                                buf.upserts.delete(name);
-                                buf.deletes.add(name);
+                                // Mantém null no cache negativo para impedir que keys.get ressuscite a chave deletada do DB antes do DELETE concluir
+                                memCache.set(name, null);
+                                keysToDelete.push(name);
                             } else {
                                 memCache.set(name, val);
-                                buf.deletes.delete(name);
-                                buf.upserts.set(name, {
+                                keysToUpsert.push({
                                     instance_id: instanceId,
                                     tenant_id: tenantId,
                                     key_name: name,
@@ -566,42 +457,50 @@ export async function useSupabaseAuthState(tenantId, instanceId, forceCleanState
                         }
                     }
 
-                    // Coalescência em lote (250ms) na fila ordenada por instância para evitar saturação do gateway Supabase
-                    scheduleKeyFlush(instanceId, tenantId, false).catch(() => {});
+                    // Dispara persistência assíncrona na fila ordenada sem segurar o txMutex do Signal em chamadas de rede
+                    enqueueWrite(instanceId, async () => {
+                        await retryWithBackoff(async () => {
+                            const promises = [];
+                            if (keysToDelete.length > 0) {
+                                promises.push(
+                                    supabase.from('wa_auth_keys')
+                                        .delete()
+                                        .eq('instance_id', instanceId)
+                                        .in('key_name', keysToDelete)
+                                );
+                            }
+                            if (keysToUpsert.length > 0) {
+                                const CHUNK = 500;
+                                for (let i = 0; i < keysToUpsert.length; i += CHUNK) {
+                                    promises.push(
+                                        supabase.from('wa_auth_keys')
+                                            .upsert(keysToUpsert.slice(i, i + CHUNK), { onConflict: 'instance_id, key_name' })
+                                    );
+                                }
+                            }
+
+                            if (promises.length > 0) {
+                                const results = await Promise.all(promises);
+                                for (const res of results) {
+                                    if (res.error) throw res.error;
+                                }
+                            }
+                        });
+                    }).catch(() => {});
                 }
             }
         },
         saveCreds: async () => {
-            if (pendingCredTimers.has(instanceId)) {
-                const existing = pendingCredTimers.get(instanceId);
-                if (existing?.timer) clearTimeout(existing.timer);
-            }
-
-            const flushNow = () => {
-                const entry = pendingCredTimers.get(instanceId);
-                if (entry?.timer) {
-                    clearTimeout(entry.timer);
-                    entry.timer = null;
-                }
-                pendingCredTimers.delete(instanceId);
-                return enqueueWrite(instanceId, async () => {
-                    await retryWithBackoff(async () => {
-                        await waitForCircuitRecoveryIfNeeded();
-                        const { error } = await supabase.from('wa_auth_credentials').upsert({
-                            instance_id: instanceId,
-                            tenant_id: tenantId,
-                            creds_data: serializeAuthData(authState.state.creds)
-                        });
-                        if (error) throw new Error(error.message);
-                    }, 2, 800);
+            enqueueWrite(instanceId, async () => {
+                await retryWithBackoff(async () => {
+                    const { error } = await supabase.from('wa_auth_credentials').upsert({
+                        instance_id: instanceId,
+                        tenant_id: tenantId,
+                        creds_data: serializeAuthData(authState.state.creds)
+                    });
+                    if (error) throw new Error(error.message);
                 });
-            };
-
-            const timer = setTimeout(() => {
-                flushNow().catch(() => {});
-            }, 300);
-
-            pendingCredTimers.set(instanceId, { timer, flushNow });
+            }).catch(() => {});
         }
     };
 

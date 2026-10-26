@@ -109,7 +109,7 @@ async function resilientFetch(url, options = {}, retries = 2, delay = 600) {
 
   const fetchOptions = options.signal
     ? options
-    : { ...options, signal: AbortSignal.timeout(8500) };
+    : { ...options, signal: AbortSignal.timeout(12000) };
 
   try {
     const response = await fetch(url, fetchOptions);
@@ -205,10 +205,6 @@ export async function retryWithBackoff(fn, retries = 1, delay = 600) {
   } catch (error) {
     const errorMsg = error?.message || String(error);
     if (errorMsg.includes('CircuitBreaker') || nodeSupabaseCircuitBreaker.isCircuitOpen()) {
-      if (retries > 0) {
-        await new Promise(resolve => setTimeout(resolve, 1800));
-        return retryWithBackoff(fn, retries - 1, delay);
-      }
       throw error;
     }
     const errorCode = error?.code || '';

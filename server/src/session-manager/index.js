@@ -1029,7 +1029,7 @@ class SessionManager {
                 emitOwnEvents: true,
                 connectTimeoutMs: 90000,
                 keepAliveIntervalMs: 25000,
-                defaultQueryTimeoutMs: 90000,
+                defaultQueryTimeoutMs: 15000,
                 retryRequestDelayMs: 3000,
                 maxMsgRetryCount: 5, // Ativado (5 retentativas) com busca no DB e controle de cache para garantir 100% das entregas
                 msgRetryCounterCache,

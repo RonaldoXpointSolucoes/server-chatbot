@@ -1,5 +1,5 @@
 {
-  "version": "7.9.8",
-  "buildDate": "2026-10-26T14:28:15.000Z",
-  "summary": "Exibição Integral de Múltiplas Imagens/Mídias Consecutivas sem Ocultação Indevida e Reconciliação Estrita por ID Oficial"
+  "version": "7.9.9",
+  "buildDate": "2026-10-26T15:47:29.312Z",
+  "summary": "Blindagem Definitiva contra Deadlock de Mutex/Transação no Baileys e Auto-Cura Instantânea de Sockets de Envio/Recebimento"
 }

@@ -20,6 +20,37 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.9.9',
+    date: '2026-10-26',
+    summary: 'Blindagem Definitiva contra Deadlock de Mutex/Transação no Baileys e Auto-Cura Instantânea de Sockets de Envio/Recebimento',
+    notes: [
+      {
+        id: '7.9.9-1',
+        category: 'fixes',
+        title: 'Eliminação de Deadlock Reentrante e Vazamento de AsyncLocalStorage em Transações Signal',
+        description: 'Remoção do lock reentrante em keys.get dentro de transações ativas, encerramento estrito do contexto AsyncLocalStorage no bloco finally e timeout defensivo de 20s em txMutex e makeMutex.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      },
+      {
+        id: '7.9.9-2',
+        category: 'fixes',
+        title: 'Commit Assíncrono Zero-Latency na AuthQueue com Cache Negativo em Memória',
+        description: 'Liberação imediata do txMutex do Baileys durante keys.set e saveCreds com persistência em background no Supabase e marcação explícita de chaves deletadas em memória.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      },
+      {
+        id: '7.9.9-3',
+        category: 'improvements',
+        title: 'Timeout Defensivo e Auto-Reciclagem de Socket no Fast-Path e QueueProcessor',
+        description: 'Redução do defaultQueryTimeoutMs de 90s para 15s, proteção Promise.race no QueueProcessor e reciclagem automática de socket em caso de timeouts consecutivos.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      }
+    ]
+  },
+  {
     version: '7.9.8',
     date: '2026-10-26',
     summary: 'Exibição Integral de Múltiplas Imagens/Mídias Consecutivas sem Ocultação Indevida e Reconciliação Estrita por ID Oficial',
