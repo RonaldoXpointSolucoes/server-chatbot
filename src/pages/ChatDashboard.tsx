@@ -29,6 +29,7 @@ import { supabase } from '../services/supabase';
 import { geminiService } from '../services/geminiService';
 import { useScheduleMonitor } from '../hooks/useScheduleMonitor';
 import { useXPointRemoteBridge, resolveContactRemoteContext } from '../hooks/useXPointRemoteBridge';
+import { convertClipboardToWhatsAppFormat, formatStructuredPlainText, hasWhatsAppRichFormatting } from '../utils/whatsappRichText';
 
 export function cn(...inputs: (string | undefined | null | false)[]) {
   return twMerge(clsx(inputs));
@@ -292,54 +293,219 @@ export function renderMessageText(text: string) {
   }
 
   const urlRegex = /(https?:\/\/[^\s<>'"]+|www\.[a-zA-Z0-9-]+\.[^\s<>'"]+)/gi;
-  const parts = text.split(urlRegex);
+  const inlineTokenRegex = /(\*\*[^*\n]+\*\*|\*[^*\n]+\*|_[^_\n]+_|~~[^~\n]+~~|~[^~\n]+~|`[^`\n]+`)/g;
 
-  return parts.map((part, i) => {
-    if (part.match(urlRegex)) {
-      const cleanUrl = part.replace(/[.,;:!?]+$/, '');
-      const rawHref = cleanUrl.startsWith('http') ? cleanUrl : `https://${cleanUrl}`;
-      const href = rawHref.replace(/([0-9a-fA-F]{8})-([0-9a-fA-F]{4})-([0-9a-fA-F]{4})-([0-9a-fA-F]{4})-([0-9a-fA-F]{12})/g, '$1%2D$2%2D$3%2D$4%2D$5');
-      const displayUrl = cleanUrl.replace(/^https?:\/\//, '').replace(/%2D/gi, '-');
+  const renderInlineTokens = (str: string) => {
+    const urlParts = str.split(urlRegex);
+    return urlParts.map((part, uIdx) => {
+      if (part.match(urlRegex)) {
+        const cleanUrl = part.replace(/[.,;:!?]+$/, '');
+        const rawHref = cleanUrl.startsWith('http') ? cleanUrl : `https://${cleanUrl}`;
+        const href = rawHref.replace(/([0-9a-fA-F]{8})-([0-9a-fA-F]{4})-([0-9a-fA-F]{4})-([0-9a-fA-F]{4})-([0-9a-fA-F]{12})/g, '$1%2D$2%2D$3%2D$4%2D$5');
+        const displayUrl = cleanUrl.replace(/^https?:\/\//, '').replace(/%2D/gi, '-');
+        return (
+          <a
+            key={`u-${uIdx}`}
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[#00a884] dark:text-[#53bdeb] hover:underline font-semibold inline-flex items-center gap-0.5 align-middle mx-1 group"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <span className="truncate block" style={{ maxWidth: 'min(100%, 250px)' }}>{displayUrl}</span>
+            <ExternalLink size={12} className="inline opacity-80 shrink-0 group-hover:scale-110 transition-transform" />
+          </a>
+        );
+      }
+
+      const tokens = part.split(inlineTokenRegex);
       return (
-        <a 
-          key={i} 
-          href={href} 
-          target="_blank" 
-          rel="noopener noreferrer" 
-          className="text-[#00a884] dark:text-[#53bdeb] hover:underline font-semibold inline-flex items-center gap-0.5 align-middle mx-1 group"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <span className="truncate block" style={{ maxWidth: 'min(100%, 250px)' }}>{displayUrl}</span>
-          <ExternalLink size={12} className="inline opacity-80 shrink-0 group-hover:scale-110 transition-transform" />
-        </a>
+        <React.Fragment key={`t-${uIdx}`}>
+          {tokens.map((tok, k) => {
+            if (!tok) return null;
+            if (tok.startsWith('**') && tok.endsWith('**') && tok.length > 4) {
+              return (
+                <strong key={k} className="font-extrabold tracking-tight text-inherit">
+                  {formatTextWithMentions(tok.slice(2, -2))}
+                </strong>
+              );
+            }
+            if (tok.startsWith('*') && tok.endsWith('*') && tok.length > 2) {
+              return (
+                <strong key={k} className="font-extrabold tracking-tight text-inherit">
+                  {formatTextWithMentions(tok.slice(1, -1))}
+                </strong>
+              );
+            }
+            if (tok.startsWith('_') && tok.endsWith('_') && tok.length > 2) {
+              return (
+                <em key={k} className="italic opacity-95 text-inherit">
+                  {formatTextWithMentions(tok.slice(1, -1))}
+                </em>
+              );
+            }
+            if (tok.startsWith('~~') && tok.endsWith('~~') && tok.length > 4) {
+              return (
+                <del key={k} className="line-through opacity-75 text-inherit">
+                  {formatTextWithMentions(tok.slice(2, -2))}
+                </del>
+              );
+            }
+            if (tok.startsWith('~') && tok.endsWith('~') && tok.length > 2) {
+              return (
+                <del key={k} className="line-through opacity-75 text-inherit">
+                  {formatTextWithMentions(tok.slice(1, -1))}
+                </del>
+              );
+            }
+            if (tok.startsWith('`') && tok.endsWith('`') && tok.length > 2) {
+              return (
+                <code key={k} className="px-1.5 py-0.5 mx-0.5 rounded bg-black/10 dark:bg-white/10 font-mono text-[12.5px] border border-black/5 dark:border-white/5">
+                  {tok.slice(1, -1)}
+                </code>
+              );
+            }
+            return <React.Fragment key={k}>{formatTextWithMentions(tok)}</React.Fragment>;
+          })}
+        </React.Fragment>
       );
-    }
-    
-    // Tratamento para quebras de linha e formatação WhatsApp (apenas negrito básico para strings limpas)
-    const lines = part.split('\n');
-    return (
-      <React.Fragment key={i}>
-        {lines.map((line, j) => {
-            const boldParts = line.split(/(\*[^*\n]+\*)/g);
+    });
+  };
+
+  const normalizedText = text.includes('\n\n') && !/(\*[^*\n]+\*|^#{1,4}\s+)/m.test(text)
+    ? formatStructuredPlainText(text)
+    : text.replace(/\r\n/g, '\n');
+
+  const lines = normalizedText.split('\n');
+
+  // Se for mensagem curta de 1 linha sem listas ou cabeçalhos, retorna inline puro
+  if (lines.length === 1 && !/^(?:#{1,4}\s+|(?:•|\-|\*)\s+|\d+\.\s+|>\s+)/.test(lines[0].trim())) {
+    return <React.Fragment>{renderInlineTokens(lines[0])}</React.Fragment>;
+  }
+
+  const mainSectionTitles = new Set([
+    'resumo', 'decisões', 'decisoes', 'conclusão', 'conclusao', 'próximos passos',
+    'proximos passos', 'objetivo', 'objetivos', 'pauta', 'ata de reunião', 'ata da reunião',
+    'introdução', 'introducao', 'contexto', 'observações', 'observacoes', 'pendências',
+    'pendencias', 'ações', 'acoes', 'alinhamento', 'alinhada', 'participantes', 'cronograma'
+  ]);
+
+  let prevWasEmpty = false;
+  let prevWasMainHeading = false;
+
+  return (
+    <React.Fragment>
+      {lines.map((line, j) => {
+        const trimmed = line.trim();
+        const isLastLine = j === lines.length - 1;
+
+        if (!trimmed) {
+          if (prevWasEmpty) return null;
+          prevWasEmpty = true;
+          const gapClass = prevWasMainHeading ? "h-1.5 select-none" : "h-3 select-none";
+          prevWasMainHeading = false;
+          return <div key={j} className={gapClass} />;
+        }
+
+        const wasAfterEmpty = prevWasEmpty;
+        prevWasEmpty = false;
+
+        // 1. Detecção de Título Principal ("Parte Grande") ou Subtítulo em Negrito
+        const headingMatch = trimmed.match(/^(?:(#{1,4})\s+\**([^*\n]+)\**|\*{1,2}([^*\n]+)\*{1,2})$/);
+        if (headingMatch && trimmed.length <= 95) {
+          const hashes = headingMatch[1] || '';
+          const titleContent = (headingMatch[2] || headingMatch[3] || '').trim();
+          const nextTrimmed = j < lines.length - 1 ? lines[j + 1].trim() : null;
+          const lowerTitle = titleContent.toLowerCase().replace(/[:.]+$/, '');
+
+          const isMainHeading =
+            Boolean(hashes) ||
+            nextTrimmed === '' ||
+            mainSectionTitles.has(lowerTitle) ||
+            (j === 0 && titleContent.split(/\s+/).length <= 3 && titleContent.length <= 28);
+
+          prevWasMainHeading = isMainHeading;
+
+          if (isMainHeading) {
             return (
-              <React.Fragment key={j}>
-                 {boldParts.map((bp, k) => {
-                    if (bp.startsWith('*') && bp.endsWith('*') && bp.length > 2) {
-                      return (
-                        <strong key={k} className="font-bold tracking-tight text-inherit">
-                          {formatTextWithMentions(bp.substring(1, bp.length - 1))}
-                        </strong>
-                      );
-                    }
-                    return <React.Fragment key={k}>{formatTextWithMentions(bp)}</React.Fragment>;
-                 })}
-                 {j < lines.length - 1 && <br />}
-              </React.Fragment>
+              <div
+                key={j}
+                className={cn(
+                  "text-[17px] sm:text-[18px] font-extrabold tracking-tight leading-snug text-inherit",
+                  j > 0 && !wasAfterEmpty ? "mt-2.5" : "mt-0.5",
+                  "mb-0.5"
+                )}
+              >
+                {renderInlineTokens(titleContent)}
+              </div>
             );
-        })}
-      </React.Fragment>
-    );
-  });
+          }
+
+          return (
+            <div
+              key={j}
+              className={cn(
+                "text-[14.5px] sm:text-[15px] font-extrabold tracking-tight leading-snug text-inherit",
+                j > 0 && !wasAfterEmpty ? "mt-2" : "mt-0",
+                "mb-0.5"
+              )}
+            >
+              {renderInlineTokens(titleContent)}
+            </div>
+          );
+        }
+
+        prevWasMainHeading = false;
+
+        // 2. Lista com Marcador (•, -, *)
+        const bulletMatch = trimmed.match(/^(?:•|\-|\*)\s+(.+)$/);
+        if (bulletMatch) {
+          return (
+            <div key={j} className="flex items-start gap-2 pl-1.5 my-0.5 leading-[1.48]">
+              <span className="font-extrabold text-emerald-600 dark:text-emerald-400 select-none mt-[1px]">•</span>
+              <span className="flex-1">{renderInlineTokens(bulletMatch[1])}</span>
+            </div>
+          );
+        }
+
+        // 3. Lista Numerada (1., 2., ...)
+        const numMatch = trimmed.match(/^(\d+)\.\s+(.+)$/);
+        if (numMatch) {
+          return (
+            <div key={j} className="flex items-start gap-1.5 pl-1.5 my-0.5 leading-[1.48]">
+              <span className="font-extrabold text-emerald-600 dark:text-emerald-400 select-none min-w-[16px]">{numMatch[1]}.</span>
+              <span className="flex-1">{renderInlineTokens(numMatch[2])}</span>
+            </div>
+          );
+        }
+
+        // 4. Bloco de Citação (> texto)
+        const quoteMatch = trimmed.match(/^>\s*(.+)$/);
+        if (quoteMatch) {
+          return (
+            <div key={j} className="border-l-[3px] border-emerald-500/60 dark:border-emerald-400/60 pl-2.5 py-0.5 my-1 italic opacity-90 bg-black/5 dark:bg-white/5 rounded-r-lg leading-[1.45]">
+              {renderInlineTokens(quoteMatch[1])}
+            </div>
+          );
+        }
+
+        // 5. Linha de Parágrafo Padrão
+        if (isLastLine) {
+          return (
+            <span key={j} className="leading-[1.48] inline">
+              {renderInlineTokens(line)}
+            </span>
+          );
+        }
+
+        return (
+          <div key={j} className="leading-[1.48]">
+            {renderInlineTokens(line)}
+          </div>
+        );
+      })}
+    </React.Fragment>
+  );
 }
 
 const formatDisplayPhone = (phoneNum: string) => {
@@ -889,6 +1055,7 @@ export default function ChatDashboard() {
   const [taskAssignedTo, setTaskAssignedTo] = useState<string | null>(null);
   const [checklistDraft, setChecklistDraft] = useState<string[]>([]);
   const [notePreviewMode, setNotePreviewMode] = useState(false);
+  const [whatsappPreviewMode, setWhatsappPreviewMode] = useState(false);
   const [noteAttachedFile, setNoteAttachedFile] = useState<File | null>(null);
   const [noteAttachedPreview, setNoteAttachedPreview] = useState<string | null>(null);
   const [noteAttachedType, setNoteAttachedType] = useState<'image' | 'video' | 'audio' | 'document' | null>(null);
@@ -1384,35 +1551,51 @@ export default function ChatDashboard() {
     }, 50);
   };
 
+  const insertWhatsAppFormatTag = (formatType: 'heading' | 'bold' | 'italic' | 'strikethrough' | 'code' | 'bullet') => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const text = textarea.value;
+    const selectedText = text.substring(start, end);
+
+    let replacement = '';
+    switch (formatType) {
+      case 'heading':
+        replacement = `*${selectedText || 'Título'}*\n\n`;
+        break;
+      case 'bold':
+        replacement = `*${selectedText || 'texto'}*`;
+        break;
+      case 'italic':
+        replacement = `_${selectedText || 'texto'}_`;
+        break;
+      case 'strikethrough':
+        replacement = `~${selectedText || 'texto'}~`;
+        break;
+      case 'code':
+        replacement = `\`${selectedText || 'código'}\``;
+        break;
+      case 'bullet':
+        replacement = `\n• ${selectedText || 'item'}`;
+        break;
+    }
+
+    const val = text.substring(0, start) + replacement + text.substring(end);
+    setInputText(val);
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(start, start + replacement.length);
+    }, 50);
+  };
+
   const renderMarkdownPreview = (mdText: string) => {
     if (!mdText) return <span className="text-gray-400 dark:text-gray-500 italic block py-4 text-center">Nenhuma anotação digitada. Use a barra superior para formatar ou digite abaixo...</span>;
-    
-    // Parser seguro e leve de Markdown
-    let html = mdText
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
-      
-    // Headers ###
-    html = html.replace(/^### (.*$)/gim, '<h3 class="text-amber-600 dark:text-amber-400 font-extrabold text-sm tracking-wider uppercase mt-4 mb-2 flex items-center gap-1.5 border-b border-amber-500/10 pb-1">$1</h3>');
-    // Bold **
-    html = html.replace(/\*\*(.*?)\*\*/g, '<strong class="font-extrabold text-amber-800 dark:text-amber-400">$1</strong>');
-    // Italic *
-    html = html.replace(/\*(.*?)\*/g, '<em class="italic text-gray-700 dark:text-gray-300">$1</em>');
-    // Strikethrough ~~
-    html = html.replace(/~~(.*?)~~/g, '<del class="line-through opacity-55">$1</del>');
-    // Code block `
-    html = html.replace(/`(.*?)`/g, '<code class="bg-black/10 dark:bg-white/10 px-1.5 py-0.5 rounded font-mono text-[11.5px] text-amber-600 dark:text-amber-400 border border-black/5 dark:border-white/5">$1</code>');
-    // Bullet list -
-    html = html.replace(/^\- (.*$)/gim, '<li class="ml-4 list-disc pl-1 py-0.5 text-[13px] text-gray-700 dark:text-gray-200">$1</li>');
-    // Quebras de linha
-    html = html.replace(/\n/g, '<br />');
 
     return (
-      <div 
-        className="text-[13px] leading-relaxed text-gray-800 dark:text-gray-200 select-text max-h-[250px] overflow-y-auto pr-1 bg-black/5 dark:bg-black/20 p-3 rounded-xl border border-black/5 dark:border-white/5 shadow-inner"
-        dangerouslySetInnerHTML={{ __html: html }}
-      />
+      <div className="text-[13.5px] leading-relaxed text-gray-800 dark:text-gray-200 select-text max-h-[250px] overflow-y-auto pr-1 bg-black/5 dark:bg-black/20 p-3 rounded-xl border border-black/5 dark:border-white/5 shadow-inner">
+        {renderMessageText(mdText)}
+      </div>
     );
   };
 
@@ -4143,7 +4326,10 @@ export default function ChatDashboard() {
 
     const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
     const isChecklistFilled = isTaskMode && checklistDraft.filter(i => i.trim()).length > 0;
-    const textToSend = inputText.trim();
+    const rawTextToSend = inputText.trim();
+    const textToSend = (chatMode !== 'internal_note' && rawTextToSend.includes('\n\n') && !/(\*[^*\n]+\*|^#{1,4}\s+)/m.test(rawTextToSend))
+      ? formatStructuredPlainText(rawTextToSend)
+      : rawTextToSend;
 
     if ((!textToSend && !isChecklistFilled) || !activeChatId || !properTargetInstance) {
        console.warn("[handleSendHuman] Bloqueado! Valores obrigatórios ausentes.");
@@ -4276,6 +4462,7 @@ export default function ChatDashboard() {
 
         // Reseta o input e o DOM do textarea IMEDIATAMENTE de forma síncrona
         setInputText('');
+        setWhatsappPreviewMode(false);
         if (textareaRef.current) {
            textareaRef.current.value = '';
            textareaRef.current.style.height = 'auto';
@@ -10524,17 +10711,40 @@ export default function ChatDashboard() {
                             }}
                             onPaste={(e) => {
                               const items = e.clipboardData?.items;
-                              if (!items) return;
-                              for (let i = 0; i < items.length; i++) {
-                                if (items[i].type.indexOf('image') !== -1) {
-                                  e.preventDefault();
-                                  const file = items[i].getAsFile();
-                                  if (file) {
-                                    setPastedImage(file);
-                                    setPastedImagePreview(URL.createObjectURL(file));
-                                    setPastedImageCaption('');
+                              if (items) {
+                                for (let i = 0; i < items.length; i++) {
+                                  if (items[i].type.indexOf('image') !== -1) {
+                                    e.preventDefault();
+                                    const file = items[i].getAsFile();
+                                    if (file) {
+                                      setPastedImage(file);
+                                      setPastedImagePreview(URL.createObjectURL(file));
+                                      setPastedImageCaption('');
+                                    }
+                                    return;
                                   }
-                                  break;
+                                }
+                              }
+                              const html = e.clipboardData?.getData('text/html') || '';
+                              const plain = e.clipboardData?.getData('text/plain') || '';
+                              if (html || plain) {
+                                const formatted = convertClipboardToWhatsAppFormat(html, plain);
+                                const normPlain = plain.replace(/\r\n/g, '\n').trim();
+                                if (formatted && (formatted !== normPlain || hasWhatsAppRichFormatting(formatted))) {
+                                  e.preventDefault();
+                                  const el = e.currentTarget;
+                                  const start = el.selectionStart ?? inputText.length;
+                                  const end = el.selectionEnd ?? inputText.length;
+                                  const nextVal = inputText.substring(0, start) + formatted + inputText.substring(end);
+                                  setInputText(nextVal);
+                                  handleUserTyping(nextVal);
+                                  setTimeout(() => {
+                                    if (textareaRef.current) {
+                                      textareaRef.current.style.height = 'auto';
+                                      textareaRef.current.style.height = `${Math.min(Math.max(textareaRef.current.scrollHeight, 20), 250)}px`;
+                                      textareaRef.current.setSelectionRange(start + formatted.length, start + formatted.length);
+                                    }
+                                  }, 20);
                                 }
                               }
                             }}
@@ -11344,6 +11554,108 @@ export default function ChatDashboard() {
                             </div>
                           )}
 
+                          {(hasWhatsAppRichFormatting(inputText) || inputText.includes('\n')) && inputText.trim().length > 0 && (
+                            <div className="flex items-center justify-between gap-2 pb-1.5 mb-1 border-b border-black/5 dark:border-white/10 select-none animate-in fade-in duration-150">
+                              <div className="flex items-center gap-1 flex-wrap">
+                                {!whatsappPreviewMode ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => insertWhatsAppFormatTag('heading')}
+                                      className="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20 transition-all"
+                                      title="Inserir Título Grande (*Título*)"
+                                    >
+                                      Título
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => insertWhatsAppFormatTag('bold')}
+                                      className="px-2 py-0.5 rounded-md text-[10px] font-black bg-black/5 dark:bg-white/5 hover:bg-emerald-500/15 text-gray-700 dark:text-gray-200 transition-all"
+                                      title="Negrito (*texto*)"
+                                    >
+                                      B
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => insertWhatsAppFormatTag('italic')}
+                                      className="px-2 py-0.5 rounded-md text-[10px] italic font-serif font-bold bg-black/5 dark:bg-white/5 hover:bg-emerald-500/15 text-gray-700 dark:text-gray-200 transition-all"
+                                      title="Itálico (_texto_)"
+                                    >
+                                      I
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => insertWhatsAppFormatTag('strikethrough')}
+                                      className="px-2 py-0.5 rounded-md text-[10px] line-through font-bold bg-black/5 dark:bg-white/5 hover:bg-emerald-500/15 text-gray-700 dark:text-gray-200 transition-all"
+                                      title="Tachado (~texto~)"
+                                    >
+                                      S
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => insertWhatsAppFormatTag('bullet')}
+                                      className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-black/5 dark:bg-white/5 hover:bg-emerald-500/15 text-gray-700 dark:text-gray-200 transition-all"
+                                      title="Lista com marcador (• item)"
+                                    >
+                                      • Lista
+                                    </button>
+                                  </>
+                                ) : (
+                                  <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                                    <Sparkles size={11} />
+                                    Formatação ativa para envio no WhatsApp Real (clique no texto para editar)
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="flex items-center bg-black/5 dark:bg-white/5 rounded-lg p-0.5 border border-black/5 dark:border-white/10 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setWhatsappPreviewMode(false);
+                                    setTimeout(() => textareaRef.current?.focus(), 20);
+                                  }}
+                                  className={cn(
+                                    "px-2.5 py-0.5 rounded-md text-[9.5px] font-extrabold uppercase tracking-wider transition-all",
+                                    !whatsappPreviewMode
+                                      ? "bg-[#00a884] text-white shadow-xs"
+                                      : "text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+                                  )}
+                                >
+                                  Editar
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setWhatsappPreviewMode(true);
+                                    setTimeout(() => textareaRef.current?.focus(), 20);
+                                  }}
+                                  className={cn(
+                                    "px-2.5 py-0.5 rounded-md text-[9.5px] font-extrabold uppercase tracking-wider transition-all",
+                                    whatsappPreviewMode
+                                      ? "bg-[#00a884] text-white shadow-xs"
+                                      : "text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+                                  )}
+                                >
+                                  Formatado
+                                </button>
+                              </div>
+                            </div>
+                          )}
+
+                          {whatsappPreviewMode && inputText.trim().length > 0 && (
+                            <div
+                              onClick={() => {
+                                setWhatsappPreviewMode(false);
+                                setTimeout(() => textareaRef.current?.focus(), 20);
+                              }}
+                              title="Clique para editar o texto"
+                              className="w-full max-h-[250px] overflow-y-auto scrollbar-thin text-[14px] leading-[1.48] text-[#111b21] dark:text-[#e9edef] py-0.5 pr-1 cursor-text select-text"
+                            >
+                              {renderMessageText(inputText)}
+                            </div>
+                          )}
+
                           <textarea 
                             ref={textareaRef}
                             value={inputText}
@@ -11360,6 +11672,7 @@ export default function ChatDashboard() {
                             onChange={e => {
                               const val = e.target.value;
                               setInputText(val);
+                              if (!val.trim()) setWhatsappPreviewMode(false);
                               if (val.startsWith('/')) {
                                 setShowQuickReplies(true);
                                 setQuickReplyFilter(val.substring(1).toLowerCase());
@@ -11388,23 +11701,53 @@ export default function ChatDashboard() {
                             }}
                             onPaste={(e) => {
                               const items = e.clipboardData?.items;
-                              if (!items) return;
-                              for (let i = 0; i < items.length; i++) {
-                                if (items[i].type.indexOf('image') !== -1) {
-                                  e.preventDefault();
-                                  const file = items[i].getAsFile();
-                                  if (file) {
-                                    setPastedImage(file);
-                                    setPastedImagePreview(URL.createObjectURL(file));
-                                    setPastedImageCaption('');
+                              if (items) {
+                                for (let i = 0; i < items.length; i++) {
+                                  if (items[i].type.indexOf('image') !== -1) {
+                                    e.preventDefault();
+                                    const file = items[i].getAsFile();
+                                    if (file) {
+                                      setPastedImage(file);
+                                      setPastedImagePreview(URL.createObjectURL(file));
+                                      setPastedImageCaption('');
+                                    }
+                                    return;
                                   }
-                                  break;
+                                }
+                              }
+                              const html = e.clipboardData?.getData('text/html') || '';
+                              const plain = e.clipboardData?.getData('text/plain') || '';
+                              if (html || plain) {
+                                const formatted = convertClipboardToWhatsAppFormat(html, plain);
+                                const normPlain = plain.replace(/\r\n/g, '\n').trim();
+                                if (formatted && (formatted !== normPlain || hasWhatsAppRichFormatting(formatted))) {
+                                  e.preventDefault();
+                                  const el = e.currentTarget;
+                                  const start = el.selectionStart ?? inputText.length;
+                                  const end = el.selectionEnd ?? inputText.length;
+                                  const nextVal = inputText.substring(0, start) + formatted + inputText.substring(end);
+                                  setInputText(nextVal);
+                                  handleUserTyping(nextVal);
+                                  if (nextVal.includes('\n') && hasWhatsAppRichFormatting(nextVal)) {
+                                    setWhatsappPreviewMode(true);
+                                  }
+                                  setTimeout(() => {
+                                    if (textareaRef.current) {
+                                      textareaRef.current.style.height = 'auto';
+                                      textareaRef.current.style.height = `${Math.min(Math.max(textareaRef.current.scrollHeight, 20), 250)}px`;
+                                      textareaRef.current.setSelectionRange(start + formatted.length, start + formatted.length);
+                                      textareaRef.current.focus();
+                                    }
+                                  }, 20);
                                 }
                               }
                             }}
                             rows={1}
                             placeholder="Responda como humano e a IA sera pausada automaticamente..."
-                            className="bg-transparent border-none outline-none w-full text-sm font-sans leading-relaxed resize-none p-0 pb-0.5 overflow-y-auto max-h-[250px] scrollbar-thin relative z-10 transition-colors duration-200 text-[#111b21] dark:text-[#e9edef] placeholder:text-[#54656f] dark:placeholder:text-[#aebac1]"
+                            className={cn(
+                              "bg-transparent border-none outline-none w-full text-sm font-sans leading-relaxed resize-none p-0 pb-0.5 overflow-y-auto max-h-[250px] scrollbar-thin relative z-10 transition-colors duration-200 text-[#111b21] dark:text-[#e9edef] placeholder:text-[#54656f] dark:placeholder:text-[#aebac1]",
+                              whatsappPreviewMode && inputText.trim().length > 0 && "sr-only h-0 opacity-0 absolute pointer-events-none"
+                            )}
                           />
                         </div>
 
@@ -11736,9 +12079,25 @@ export default function ChatDashboard() {
             <div className="p-6 bg-[#f0f2f5]/30 dark:bg-[#0b141a]/30">
               <textarea
                 autoFocus
-                className="w-full h-32 p-4 bg-white dark:bg-[#202c33] border border-gray-200 dark:border-[#304046] rounded-2xl resize-none outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 text-[#111b21] dark:text-[#e9edef] text-[15px] shadow-sm transition-all"
+                className="w-full h-40 p-4 bg-white dark:bg-[#202c33] border border-gray-200 dark:border-[#304046] rounded-2xl resize-none outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 text-[#111b21] dark:text-[#e9edef] text-[15px] shadow-sm transition-all"
                 value={editingMessage.text}
                 onChange={(e) => setEditingMessage({ ...editingMessage, text: e.target.value })}
+                onPaste={(e) => {
+                  const html = e.clipboardData?.getData('text/html') || '';
+                  const plain = e.clipboardData?.getData('text/plain') || '';
+                  if (html || plain) {
+                    const formatted = convertClipboardToWhatsAppFormat(html, plain);
+                    const normPlain = plain.replace(/\r\n/g, '\n').trim();
+                    if (formatted && (formatted !== normPlain || hasWhatsAppRichFormatting(formatted))) {
+                      e.preventDefault();
+                      const el = e.currentTarget;
+                      const start = el.selectionStart ?? editingMessage.text.length;
+                      const end = el.selectionEnd ?? editingMessage.text.length;
+                      const nextVal = editingMessage.text.substring(0, start) + formatted + editingMessage.text.substring(end);
+                      setEditingMessage({ ...editingMessage, text: nextVal });
+                    }
+                  }
+                }}
                 placeholder="Digite a nova mensagem..."
               />
             </div>

@@ -20,6 +20,37 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.0.0',
+    date: '2026-10-26',
+    summary: 'Formatação Inteligente de Rich Text (Google Docs, Word e IA) ao Colar e Renderização Hierárquica no Chat e WhatsApp Real',
+    notes: [
+      {
+        id: '8.0.0-1',
+        category: 'features',
+        title: 'Conversão Automática ao Colar (Google Docs, Word, Gemini e Texto Estruturado)',
+        description: 'Ao colar textos formatados no campo do chat, anotações CRM ou edição de mensagens, o sistema extrai automaticamente títulos principais, subtítulos em negrito, listas e espaçamentos de parágrafos na sintaxe nativa do WhatsApp.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      },
+      {
+        id: '8.0.0-2',
+        category: 'features',
+        title: 'Modo Visual Formatado Interativo no Campo de Digitação e Barra Rápida',
+        description: 'Visualização rica instantânea dentro da caixa de mensagem ao colar documentos estruturados, com barra rápida (Título, Negrito, Itálico, Tachado e Lista) e alternância rápida Editar/Formatado.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      },
+      {
+        id: '8.0.0-3',
+        category: 'improvements',
+        title: 'Renderização de Títulos Grandes, Subtítulos em Negrito e Parágrafos nas Bolhas do Chat',
+        description: 'Aprimoramento do renderMessageText para exibir títulos principais em destaque (18px extra-negrito), subtítulos em negrito acima dos parágrafos, listas recuadas e espaçamento editorial entre blocos.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      }
+    ]
+  },
+  {
     version: '7.9.9',
     date: '2026-10-26',
     summary: 'Blindagem Definitiva contra Deadlock de Mutex/Transação no Baileys e Auto-Cura Instantânea de Sockets de Envio/Recebimento',
