@@ -1,5 +1,5 @@
 {
-  "version": "7.9.6",
-  "buildDate": "2026-10-22T18:38:30.000Z",
-  "summary": "Sincronização Automática de Tenant em Caixas Standalone, Resolução Dinâmica de Tenant no Motor Baileys e Finalização Limpa de Fluxos Typebot"
+  "version": "7.9.7",
+  "buildDate": "2026-10-26T12:20:45.000Z",
+  "summary": "Correção de Edição/Exclusão de Mensagens com ID Nativo Baileys e Coalescência de Escrita na AuthQueue + CircuitBreaker Resiliente"
 }

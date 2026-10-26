@@ -1,4 +1,4 @@
-import { supabase, retryWithBackoff } from '../supabase.js';
+import { supabase, retryWithBackoff, nodeSupabaseCircuitBreaker } from '../supabase.js';
 import { initAuthCreds, BufferJSON } from '@whiskeysockets/baileys';
 
 export const sessionCaches = new Map();
@@ -58,53 +58,148 @@ class BoundedKeyCache {
 }
 
 const writeQueues = new Map();
+const pendingKeyBuffers = new Map();
+const pendingCredTimers = new Map();
+
+async function waitForCircuitRecoveryIfNeeded() {
+    if (nodeSupabaseCircuitBreaker && nodeSupabaseCircuitBreaker.isCircuitOpen()) {
+        const elapsed = Date.now() - (nodeSupabaseCircuitBreaker.lastStateChange || 0);
+        const remaining = Math.max(500, Math.min((nodeSupabaseCircuitBreaker.cooldownMs || 5000) - elapsed + 250, 6000));
+        await new Promise(r => setTimeout(r, remaining));
+    }
+}
 
 function enqueueWrite(instanceId, writeFn) {
     if (!writeQueues.has(instanceId)) {
         writeQueues.set(instanceId, Promise.resolve());
     }
     const currentQueue = writeQueues.get(instanceId);
-    // Encadeia com .catch() para que um erro pontual anterior não trave indefinidamente as escritas subsequentes
-    const nextPromise = currentQueue
-        .catch((prevErr) => {
-            console.warn(`[SessionManager/AuthQueue] Auto-recuperando fila de escrita após erro anterior na instância ${instanceId}:`, prevErr?.message || prevErr);
-        })
+
+    const taskPromise = currentQueue
+        .catch(() => {})
         .then(async () => {
             let timer;
             try {
+                await waitForCircuitRecoveryIfNeeded();
                 await Promise.race([
                     writeFn(),
                     new Promise((_, reject) => {
-                        timer = setTimeout(() => reject(new Error('Auth writeQueue operation timed out after 10000ms')), 10000);
+                        timer = setTimeout(() => reject(new Error('Auth writeQueue operation timed out after 25000ms')), 25000);
                     })
                 ]);
             } catch (err) {
-                console.error(`[SessionManager] Erro na fila de escrita para instância ${instanceId}:`, err.message);
-                throw err;
+                const msg = err?.message || String(err);
+                if (!msg.includes('CircuitBreaker')) {
+                    console.warn(`[SessionManager/AuthQueue] Oscilação transitória na fila de escrita (${instanceId}):`, msg);
+                }
             } finally {
                 if (timer) clearTimeout(timer);
             }
         });
-    writeQueues.set(instanceId, nextPromise);
-    return nextPromise;
+
+    // Mantém sempre uma Promise resolvida na cauda da fila para nunca envenenar chamadas futuras ou o flushPendingWrites
+    const safeTail = taskPromise.catch(() => {});
+    writeQueues.set(instanceId, safeTail);
+    return safeTail;
+}
+
+function scheduleKeyFlush(instanceId, tenantId, immediate = false) {
+    const buf = pendingKeyBuffers.get(instanceId);
+    if (!buf) return Promise.resolve();
+
+    if (buf.timer) {
+        clearTimeout(buf.timer);
+        buf.timer = null;
+    }
+
+    const executeFlush = () => {
+        const currentBuf = pendingKeyBuffers.get(instanceId);
+        if (!currentBuf) return Promise.resolve();
+        currentBuf.timer = null;
+
+        const upsertsMap = currentBuf.upserts;
+        const deletesSet = currentBuf.deletes;
+        if (upsertsMap.size === 0 && deletesSet.size === 0) {
+            return Promise.resolve();
+        }
+
+        const keysToUpsert = Array.from(upsertsMap.values());
+        const keysToDelete = Array.from(deletesSet.values());
+        upsertsMap.clear();
+        deletesSet.clear();
+
+        return enqueueWrite(instanceId, async () => {
+            await retryWithBackoff(async () => {
+                await waitForCircuitRecoveryIfNeeded();
+                const promises = [];
+                if (keysToDelete.length > 0) {
+                    const DEL_CHUNK = 200;
+                    for (let i = 0; i < keysToDelete.length; i += DEL_CHUNK) {
+                        promises.push(
+                            supabase.from('wa_auth_keys')
+                                .delete()
+                                .eq('instance_id', instanceId)
+                                .in('key_name', keysToDelete.slice(i, i + DEL_CHUNK))
+                        );
+                    }
+                }
+                if (keysToUpsert.length > 0) {
+                    const CHUNK = 400;
+                    for (let i = 0; i < keysToUpsert.length; i += CHUNK) {
+                        promises.push(
+                            supabase.from('wa_auth_keys')
+                                .upsert(keysToUpsert.slice(i, i + CHUNK), { onConflict: 'instance_id, key_name' })
+                        );
+                    }
+                }
+
+                if (promises.length > 0) {
+                    const results = await Promise.all(promises);
+                    for (const res of results) {
+                        if (res.error) throw res.error;
+                    }
+                }
+            }, 2, 800);
+        });
+    };
+
+    if (immediate) {
+        return executeFlush();
+    }
+
+    return new Promise((resolve) => {
+        buf.timer = setTimeout(() => {
+            executeFlush().finally(resolve);
+        }, 250);
+    });
 }
 
 export async function flushPendingWrites(instanceId) {
+    if (pendingKeyBuffers.has(instanceId)) {
+        const buf = pendingKeyBuffers.get(instanceId);
+        if (buf && (buf.upserts.size > 0 || buf.deletes.size > 0)) {
+            await scheduleKeyFlush(instanceId, buf.tenantId, true);
+        }
+    }
+    if (pendingCredTimers.has(instanceId)) {
+        const credEntry = pendingCredTimers.get(instanceId);
+        if (credEntry?.flushNow) {
+            await credEntry.flushNow();
+        }
+    }
     if (writeQueues.has(instanceId)) {
-        console.log(`[SessionManager] Aguardando conclusão da fila de escrita para a instância ${instanceId}...`);
         let timer;
         try {
             await Promise.race([
                 writeQueues.get(instanceId),
                 new Promise((resolve) => {
                     timer = setTimeout(() => {
-                        console.warn(`[SessionManager] Timeout defensivo (5000ms) atingido no flushPendingWrites da instância ${instanceId}. Liberando mutex.`);
                         resolve();
-                    }, 5000);
+                    }, 8000);
                 })
             ]);
         } catch (e) {
-            console.error(`[SessionManager] Erro durante o flush da fila de escrita para ${instanceId}:`, e.message);
+            // Silencioso: safeTail já trata erros internamente
         } finally {
             if (timer) clearTimeout(timer);
         }
@@ -371,6 +466,7 @@ export async function useSupabaseAuthState(tenantId, instanceId, forceCleanState
                     // Fallback em LOTE para o Banco de Dados para todas as chaves ausentes da RAM
                     if (missingKeys.length > 0) {
                         try {
+                            await waitForCircuitRecoveryIfNeeded();
                             const CHUNK_SIZE = 100;
                             for (let i = 0; i < missingKeys.length; i += CHUNK_SIZE) {
                                 const chunk = missingKeys.slice(i, i + CHUNK_SIZE);
@@ -379,11 +475,15 @@ export async function useSupabaseAuthState(tenantId, instanceId, forceCleanState
                                         .from('wa_auth_keys')
                                         .select('key_name, key_data')
                                         .eq('instance_id', instanceId)
-                                        .in('key_name', chunk)
+                                        .in('key_name', chunk),
+                                    2,
+                                    600
                                 );
                                 
                                 if (error) {
-                                    console.error(`[SessionManager] Erro no DB Fallback para ${chunk.length} chaves Signal:`, error.message);
+                                    if (!String(error.message || '').includes('CircuitBreaker')) {
+                                        console.warn(`[SessionManager] Aviso no DB Fallback para ${chunk.length} chaves Signal:`, error.message);
+                                    }
                                 } else {
                                     const foundNames = new Set();
                                     if (dbKeys && dbKeys.length > 0) {
@@ -419,15 +519,25 @@ export async function useSupabaseAuthState(tenantId, instanceId, forceCleanState
                                 }
                             }
                         } catch (err) {
-                            console.error(`[SessionManager] Exceção no DB Fallback de chaves Signal (${type}):`, err.message);
+                            if (!String(err?.message || '').includes('CircuitBreaker')) {
+                                console.warn(`[SessionManager] Oscilação no DB Fallback de chaves Signal (${type}):`, err.message);
+                            }
                         }
                     }
 
                     return data;
                 },
                 set: async (data) => {
-                    const keysToUpsert = [];
-                    const keysToDelete = [];
+                    if (!pendingKeyBuffers.has(instanceId)) {
+                        pendingKeyBuffers.set(instanceId, {
+                            tenantId,
+                            upserts: new Map(),
+                            deletes: new Set(),
+                            timer: null
+                        });
+                    }
+                    const buf = pendingKeyBuffers.get(instanceId);
+                    buf.tenantId = tenantId || buf.tenantId;
                     let processedCount = 0;
                     
                     for (const category in data) {
@@ -438,10 +548,12 @@ export async function useSupabaseAuthState(tenantId, instanceId, forceCleanState
                             
                             if (isNull) {
                                 memCache.delete(name);
-                                keysToDelete.push(name);
+                                buf.upserts.delete(name);
+                                buf.deletes.add(name);
                             } else {
                                 memCache.set(name, val);
-                                keysToUpsert.push({
+                                buf.deletes.delete(name);
+                                buf.upserts.set(name, {
                                     instance_id: instanceId,
                                     tenant_id: tenantId,
                                     key_name: name,
@@ -454,54 +566,42 @@ export async function useSupabaseAuthState(tenantId, instanceId, forceCleanState
                         }
                     }
 
-                    // Sincronização em fila ordenada e imediata com Supabase
-                    return enqueueWrite(instanceId, async () => {
-                        await retryWithBackoff(async () => {
-                            const promises = [];
-                            if (keysToDelete.length > 0) {
-                                promises.push(
-                                    supabase.from('wa_auth_keys')
-                                        .delete()
-                                        .eq('instance_id', instanceId)
-                                        .in('key_name', keysToDelete)
-                                );
-                            }
-                            if (keysToUpsert.length > 0) {
-                                const CHUNK = 500;
-                                for (let i = 0; i < keysToUpsert.length; i += CHUNK) {
-                                    promises.push(
-                                        supabase.from('wa_auth_keys')
-                                            .upsert(keysToUpsert.slice(i, i + CHUNK), { onConflict: 'instance_id, key_name' })
-                                    );
-                                }
-                            }
-
-                            if (promises.length > 0) {
-                                const results = await Promise.all(promises);
-                                for (const res of results) {
-                                    if (res.error) throw res.error;
-                                }
-                            }
-                        });
-                    }).catch(error => {
-                        console.error(`[${instanceId}] Erro fatal ao persistir chaves de autenticação na fila após retentativas:`, error.message);
-                    });
+                    // Coalescência em lote (250ms) na fila ordenada por instância para evitar saturação do gateway Supabase
+                    scheduleKeyFlush(instanceId, tenantId, false).catch(() => {});
                 }
             }
         },
         saveCreds: async () => {
-             return enqueueWrite(instanceId, async () => {
-                 await retryWithBackoff(async () => {
-                     const { error } = await supabase.from('wa_auth_credentials').upsert({
-                         instance_id: instanceId,
-                         tenant_id: tenantId,
-                         creds_data: serializeAuthData(authState.state.creds)
-                     });
-                     if (error) throw new Error(error.message);
-                 });
-             }).catch(error => {
-                 console.error(`[${instanceId}] Erro fatal ao salvar credenciais após retentativas:`, error.message);
-             });
+            if (pendingCredTimers.has(instanceId)) {
+                const existing = pendingCredTimers.get(instanceId);
+                if (existing?.timer) clearTimeout(existing.timer);
+            }
+
+            const flushNow = () => {
+                const entry = pendingCredTimers.get(instanceId);
+                if (entry?.timer) {
+                    clearTimeout(entry.timer);
+                    entry.timer = null;
+                }
+                pendingCredTimers.delete(instanceId);
+                return enqueueWrite(instanceId, async () => {
+                    await retryWithBackoff(async () => {
+                        await waitForCircuitRecoveryIfNeeded();
+                        const { error } = await supabase.from('wa_auth_credentials').upsert({
+                            instance_id: instanceId,
+                            tenant_id: tenantId,
+                            creds_data: serializeAuthData(authState.state.creds)
+                        });
+                        if (error) throw new Error(error.message);
+                    }, 2, 800);
+                });
+            };
+
+            const timer = setTimeout(() => {
+                flushNow().catch(() => {});
+            }, 300);
+
+            pendingCredTimers.set(instanceId, { timer, flushNow });
         }
     };
 

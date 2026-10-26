@@ -431,6 +431,37 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                     const sendFn = sock.originalSendMessage || sock.sendMessage;
                     const sent = await sendFn(targetJid, content);
                     
+                    // Se for edição de mensagem, sincroniza imediatamente na tabela messages do Supabase preservando original_text
+                    if (content.edit && content.edit.id && content.text) {
+                        supabase.from('messages')
+                            .select('id, text_content, raw_payload')
+                            .eq('whatsapp_message_id', content.edit.id)
+                            .maybeSingle()
+                            .then(({ data: existingMsg }) => {
+                                if (existingMsg) {
+                                    const originalText = existingMsg.raw_payload?.original_text || existingMsg.text_content || '';
+                                    const updatedPayload = {
+                                        ...(existingMsg.raw_payload || {}),
+                                        is_edited: true,
+                                        original_text: originalText,
+                                        edited_text: content.text,
+                                        edited_at: new Date().toISOString()
+                                    };
+                                    supabase.from('messages')
+                                        .update({
+                                            text_content: content.text,
+                                            status: 'edited',
+                                            raw_payload: updatedPayload,
+                                            updated_at: new Date().toISOString()
+                                        })
+                                        .eq('id', existingMsg.id)
+                                        .then(() => {})
+                                        .catch(() => {});
+                                }
+                            })
+                            .catch(() => {});
+                    }
+
                     // Se for exclusão de mensagem, atualiza o status na tabela messages do Supabase
                     if (content.delete && content.delete.id) {
                         supabase.from('messages')

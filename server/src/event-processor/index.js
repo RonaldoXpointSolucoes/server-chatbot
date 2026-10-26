@@ -2317,12 +2317,15 @@ class EventProcessor {
 
         // 2. Localiza o texto da mensagem no banco (messages ou wa_outgoing_messages)
         let bodyText = null;
-        const { data: dbMsg } = await supabase
+        const isUuidKey = typeof key.id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key.id);
+        let msgLookupQuery = supabase
             .from('messages')
             .select('text_content')
-            .eq('instance_id', instanceId)
-            .or(`whatsapp_message_id.eq.${key.id},id.eq.${key.id}`)
-            .maybeSingle();
+            .eq('instance_id', instanceId);
+        msgLookupQuery = isUuidKey
+            ? msgLookupQuery.or(`whatsapp_message_id.eq.${key.id},id.eq.${key.id}`)
+            : msgLookupQuery.eq('whatsapp_message_id', key.id);
+        const { data: dbMsg } = await msgLookupQuery.maybeSingle();
 
         if (dbMsg && dbMsg.text_content) {
             bodyText = dbMsg.text_content;

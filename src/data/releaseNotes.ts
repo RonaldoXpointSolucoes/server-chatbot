@@ -20,6 +20,37 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.9.7',
+    date: '2026-10-26',
+    summary: 'Correção de Edição/Exclusão de Mensagens com ID Nativo Baileys e Coalescência de Escrita na AuthQueue + CircuitBreaker Resiliente',
+    notes: [
+      {
+        id: '7.9.7-1',
+        category: 'fixes',
+        title: 'Correção do Erro de Sintaxe UUID ao Editar ou Apagar Mensagens Recém-Enviadas',
+        description: 'Tratamento inteligente do identificador de mensagens (UUID vs whatsapp_message_id nativo 3EB0...) ao editar, apagar, transcrever ou reconciliar mensagens, promovendo automaticamente o ID local otimista para o UUID oficial do banco.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      },
+      {
+        id: '7.9.7-2',
+        category: 'improvements',
+        title: 'Coalescência em Lote na Fila de Autenticação (AuthQueue) e Isolamento de Erros',
+        description: 'Agrupamento automático (debounce de 250ms/300ms) das gravações de chaves Signal e credenciais por instância no Supabase, eliminando timeouts em cascata e mantendo a fila de escrita sempre íntegra.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+      },
+      {
+        id: '7.9.7-3',
+        category: 'improvements',
+        title: 'Calibragem do Disjuntor (CircuitBreaker) com Janela Deslizante no Servidor Node.js',
+        description: 'Adição de janela deslizante de 20s e espera ativa de recuperação no cliente Supabase do backend para absorver oscilações de rede entre múltiplas instâncias simultâneas sem interromper operações.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+      }
+    ]
+  },
+  {
     version: '7.9.6',
     date: '2026-10-22',
     summary: 'Sincronização Automática de Tenant em Caixas Standalone, Resolução Dinâmica de Tenant no Motor Baileys e Finalização Limpa de Fluxos Typebot',

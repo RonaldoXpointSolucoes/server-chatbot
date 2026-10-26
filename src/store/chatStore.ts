@@ -159,6 +159,9 @@ export const getEffectiveContactTime = (c: any): number => {
   return maxTime;
 };
 
+const isValidUuid = (val: any): boolean =>
+  typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+
 
 export type ContactType = ContactRow & {
   avatar: string;
@@ -1966,9 +1969,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const text = await geminiService.transcribeAudio(mediaUrl);
 
       // Save to Supabase
-      const { error } = await supabase.from('messages')
-        .update({ transcription: text })
-        .eq('id', messageId);
+      const transQuery = supabase.from('messages').update({ transcription: text });
+      const { error } = await (isValidUuid(messageId)
+        ? transQuery.eq('id', messageId)
+        : transQuery.eq('whatsapp_message_id', messageId));
 
       if (error) {
         console.error('Erro ao salvar transcrição:', error);
@@ -2918,8 +2922,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const contact = state.contacts.find(c => c.id === contactId);
     if (!contact || !state.tenantInfo) return;
 
-    const msgToEdit = contact.messages.find(m => m.id === messageId);
-    if (!msgToEdit || !msgToEdit.whatsapp_id) {
+    const msgToEdit = contact.messages.find(m => m.id === messageId || m.whatsapp_id === messageId);
+    if (!msgToEdit || (!msgToEdit.whatsapp_id && !isValidUuid(messageId))) {
       window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Não é possível editar esta mensagem pois a chave nativa não foi encontrada.', type: 'warning' } }));
       return;
     }
@@ -2929,14 +2933,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       const apiKey = await getOrFetchApiKey(resolvedInstanceId);
       const targetJid = getContactJid(contact);
+      const nativeWaId = msgToEdit.whatsapp_id || messageId;
 
       const messageKey = {
         remoteJid: targetJid,
         fromMe: true,
-        id: msgToEdit.whatsapp_id
+        id: nativeWaId
       };
 
-      const isUnconfirmed = String(msgToEdit.whatsapp_id).startsWith('EDGE_') || String(msgToEdit.whatsapp_id).startsWith('optimistic-');
+      const isUnconfirmed = String(nativeWaId).startsWith('EDGE_') || String(nativeWaId).startsWith('optimistic-');
 
       try {
         await editNativeMessage(state.tenantInfo.id, resolvedInstanceId, targetJid, newText, messageKey, apiKey);
@@ -2947,13 +2952,33 @@ export const useChatStore = create<ChatState>((set, get) => ({
         console.log('[chatStore] Mensagem pendente editada localmente antes da entrega oficial no WhatsApp.');
       }
 
-      // Update Database
-      const finalNewText = newText.endsWith(' *(Editado)*') ? newText : newText + ' *(Editado)*';
-      const { error: dbError } = await supabase
-        .from('messages')
-        .update({ text_content: finalNewText })
-        .eq('id', messageId);
+      const originalText = msgToEdit.raw_payload?.original_text || (msgToEdit as any).original_text || (msgToEdit.text || '').replace(/\s*\*\(Editado\)\*$/, '') || '';
+      const updatedPayload = {
+        ...(msgToEdit.raw_payload || msgToEdit.payload || {}),
+        is_edited: true,
+        original_text: originalText,
+        edited_text: newText,
+        edited_at: new Date().toISOString()
+      };
 
+      // Update Database (usa id quando for UUID válido, ou whatsapp_message_id quando o ID local ainda for o ID nativo do Baileys)
+      let updateQuery = supabase
+        .from('messages')
+        .update({
+          text_content: newText,
+          status: 'edited',
+          raw_payload: updatedPayload
+        });
+
+      if (isValidUuid(messageId)) {
+        updateQuery = updateQuery.eq('id', messageId);
+      } else if (isValidUuid(msgToEdit.id)) {
+        updateQuery = updateQuery.eq('id', msgToEdit.id);
+      } else {
+        updateQuery = updateQuery.eq('whatsapp_message_id', nativeWaId);
+      }
+
+      const { error: dbError } = await updateQuery;
       if (dbError) throw dbError;
 
       // Update Local State Optimistically
@@ -2962,7 +2987,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
           if (c.id === contactId) {
             return {
               ...c,
-              messages: c.messages.map(m => m.id === messageId ? { ...m, text: finalNewText } : m)
+              messages: c.messages.map(m => (m.id === messageId || (nativeWaId && m.whatsapp_id === nativeWaId)) ? {
+                ...m,
+                text: newText,
+                status: 'edited',
+                raw_payload: updatedPayload
+              } : m)
             };
           }
           return c;
@@ -3050,13 +3080,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
         await deleteNativeMessage(state.tenantInfo.id, resolvedInstanceId, targetJid, messageKey, apiKey);
       }
 
-      // Update Database
-      const { error: dbError } = await supabase
+      // Update Database (usa id quando for UUID válido, ou whatsapp_message_id quando o ID local for o ID nativo do Baileys)
+      let delQuery = supabase
         .from('messages')
         .update({
           status: 'deleted'
-        })
-        .eq('id', messageId);
+        });
+
+      if (isValidUuid(messageId)) {
+        delQuery = delQuery.eq('id', messageId);
+      } else if (isValidUuid(msgToDelete.id)) {
+        delQuery = delQuery.eq('id', msgToDelete.id);
+      } else {
+        delQuery = delQuery.eq('whatsapp_message_id', waId || messageId);
+      }
+
+      const { error: dbError } = await delQuery;
 
       if (dbError) throw dbError;
 
@@ -3728,9 +3767,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
             const newPrio = statusPriority[targetStatus] || 0;
 
             const finalStatus = newPrio >= currentPrio ? newStatus : m.status;
-            const resolvedId = (String(m.id).startsWith('optimistic-') || String(m.id).startsWith('EDGE_')) && (newWhatsappId || identifier.whatsapp_id) 
-              ? (newWhatsappId || identifier.whatsapp_id) 
-              : m.id;
+            const resolvedId = (!isValidUuid(m.id) && isValidUuid(identifier.id))
+              ? identifier.id!
+              : ((String(m.id).startsWith('optimistic-') || String(m.id).startsWith('EDGE_')) && (newWhatsappId || identifier.whatsapp_id) 
+                ? (newWhatsappId || identifier.whatsapp_id) 
+                : m.id);
             const resolvedWhatsappId = newWhatsappId || identifier.whatsapp_id || m.whatsapp_id;
 
             if (m.status !== finalStatus || m.id !== resolvedId || m.whatsapp_id !== resolvedWhatsappId) {
@@ -3781,7 +3822,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             return {
               ...m,
               ...updates,
-              id: updates.id || m.id,
+              id: updates.id || (!isValidUuid(m.id) && isValidUuid(identifier.id) ? identifier.id! : m.id),
               whatsapp_id: updates.whatsapp_id || m.whatsapp_id || identifier.whatsapp_id,
               mediaUrl: updates.mediaUrl !== undefined ? updates.mediaUrl : m.mediaUrl,
               mediaMetadata: updates.mediaMetadata ? { ...(m.mediaMetadata || {}), ...updates.mediaMetadata } : m.mediaMetadata
@@ -3817,7 +3858,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
             const cleanText = (text || '').trim();
             let query = supabase.from('messages').select('id, whatsapp_message_id, status');
             if (waId && !waId.startsWith('EDGE_')) {
-              query = query.or(`whatsapp_message_id.eq.${waId},id.eq.${msg.id}`);
+              query = isValidUuid(msg.id)
+                ? query.or(`whatsapp_message_id.eq.${waId},id.eq.${msg.id}`)
+                : query.eq('whatsapp_message_id', waId);
             } else if (contact.conv_id) {
               query = query.eq('conversation_id', contact.conv_id).order('timestamp', { ascending: false }).limit(5);
             }
@@ -3902,7 +3945,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
             const updatedExisting: MessageType = {
               ...existingMsg,
               ...msg,
-              id: existingMsg.id.startsWith('optimistic-') && msg.id && !msg.id.startsWith('optimistic-') ? msg.id : existingMsg.id,
+              id: (!isValidUuid(existingMsg.id) && isValidUuid(msg.id))
+                ? msg.id
+                : (existingMsg.id.startsWith('optimistic-') && msg.id && !msg.id.startsWith('optimistic-') ? msg.id : existingMsg.id),
               whatsapp_id: msg.whatsapp_id || existingMsg.whatsapp_id,
               status: msg.status || existingMsg.status,
               mediaUrl: msg.mediaUrl || existingMsg.mediaUrl,
@@ -6916,7 +6961,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             data.whatsapp_message_id
           );
         }
-        if (data.media_url || data.media_metadata) {
+        if (data.media_url || data.media_metadata || data.text_content !== undefined || data.raw_payload) {
           get().updateMessageLocally(
             {
               whatsapp_id: data.whatsapp_message_id,
@@ -6924,8 +6969,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
               mock_id: data.mock_id
             },
             {
-              mediaUrl: data.media_url,
-              mediaMetadata: data.media_metadata
+              ...(data.media_url ? { mediaUrl: data.media_url } : {}),
+              ...(data.media_metadata ? { mediaMetadata: data.media_metadata } : {}),
+              ...(data.text_content !== undefined ? { text: data.text_content } : {}),
+              ...(data.status ? { status: data.status } : {}),
+              ...(data.raw_payload ? { raw_payload: data.raw_payload } : {})
             }
           );
         }

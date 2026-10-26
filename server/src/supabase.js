@@ -36,8 +36,9 @@ class NodeSupabaseCircuitBreaker {
     this.state = 'CLOSED'; // 'CLOSED' | 'OPEN' | 'HALF_OPEN'
     this.consecutiveFailures = 0;
     this.lastStateChange = Date.now();
-    this.failureThreshold = 5;
-    this.cooldownMs = 8000;
+    this.failureThreshold = 12;
+    this.cooldownMs = 5000;
+    this.lastFailureTime = 0;
   }
 
   canRequest() {
@@ -68,6 +69,11 @@ class NodeSupabaseCircuitBreaker {
       return;
     }
 
+    const now = Date.now();
+    if (this.lastFailureTime && (now - this.lastFailureTime > 20000)) {
+      this.consecutiveFailures = 0;
+    }
+    this.lastFailureTime = now;
     this.consecutiveFailures++;
     if (this.consecutiveFailures >= this.failureThreshold) {
       this.state = 'OPEN';
@@ -103,7 +109,7 @@ async function resilientFetch(url, options = {}, retries = 2, delay = 600) {
 
   const fetchOptions = options.signal
     ? options
-    : { ...options, signal: AbortSignal.timeout(12000) };
+    : { ...options, signal: AbortSignal.timeout(8500) };
 
   try {
     const response = await fetch(url, fetchOptions);
@@ -199,6 +205,10 @@ export async function retryWithBackoff(fn, retries = 1, delay = 600) {
   } catch (error) {
     const errorMsg = error?.message || String(error);
     if (errorMsg.includes('CircuitBreaker') || nodeSupabaseCircuitBreaker.isCircuitOpen()) {
+      if (retries > 0) {
+        await new Promise(resolve => setTimeout(resolve, 1800));
+        return retryWithBackoff(fn, retries - 1, delay);
+      }
       throw error;
     }
     const errorCode = error?.code || '';
