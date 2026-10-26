@@ -3989,12 +3989,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 return true;
               }
 
+              // Se 'm' já possui um whatsapp_id oficial (não sintético) diferente de msg.whatsapp_id, são mensagens distintas!
+              const mHasOfficialWaId = m.whatsapp_id &&
+                !String(m.whatsapp_id).startsWith('optimistic-') &&
+                !String(m.whatsapp_id).startsWith('EDGE_') &&
+                !String(m.whatsapp_id).startsWith('OUT_');
+              if (mHasOfficialWaId && msg.whatsapp_id && m.whatsapp_id !== msg.whatsapp_id) {
+                return false;
+              }
+
+              // Se ambas já possuem mediaUrl real (não blob) e são diferentes, são mídias distintas!
+              if (m.mediaUrl && msg.mediaUrl && !m.mediaUrl.startsWith('blob:') && !msg.mediaUrl.startsWith('blob:') && m.mediaUrl !== msg.mediaUrl) {
+                return false;
+              }
+
               const mTime = m.timestamp instanceof Date ? m.timestamp.getTime() : new Date(m.timestamp || 0).getTime();
               const isRecent = Math.abs(msgTime - mTime) < 60000; // Janela de segurança de 60s
               if (!isRecent) return false;
 
-              // Se ambas forem mídia do mesmo tipo
+              // Se ambas forem mídia do mesmo tipo (só reconcilia bolhas genuinamente otimistas locais)
               if (m.mediaType && msg.mediaType && m.mediaType === msg.mediaType) {
+                if (!String(m.id).startsWith('optimistic-') && !String(m.id).startsWith('EDGE_')) {
+                  return false;
+                }
                 // Se ambas possuem mediaUrl e não são blobs locais, checa URL idêntica
                 if (m.mediaUrl && msg.mediaUrl && !m.mediaUrl.startsWith('blob:') && m.mediaUrl === msg.mediaUrl) {
                   return true;
@@ -7449,21 +7466,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
           const updatedContacts = [...s.contacts];
           const normUpdateText = normalizeMessageTextForComparison(m.text_content);
 
-          // Tenta achar com fallback iterando as mensagens para bypassar conversa ausente no state.
+          // Tenta achar primeiro por identificador exato (UUID, whatsapp_id ou pseudoId)
           for (let i = 0; i < updatedContacts.length; i++) {
             if (!updatedContacts[i].messages) continue;
-            const msgIndex = updatedContacts[i].messages.findIndex(msg => {
+            let msgIndex = updatedContacts[i].messages.findIndex(msg => {
               if (msg.id === m.id) return true;
               if (m.whatsapp_message_id && (msg.whatsapp_id === m.whatsapp_message_id || msg.id === m.whatsapp_message_id)) return true;
               if (msg.pseudoId && (m.id === msg.pseudoId || m.whatsapp_message_id === msg.pseudoId)) return true;
-              if (String(msg.id).startsWith('optimistic-') || String(msg.id).startsWith('EDGE_') || msg.status === 'pending') {
-                const normMsgText = normalizeMessageTextForComparison(msg.text);
-                if (normUpdateText && normMsgText && normUpdateText === normMsgText) {
-                  return true;
-                }
-              }
               return false;
             });
+
+            // Fallback apenas para mensagens genuinamente otimistas (optimistic- / EDGE_) sem ID oficial conflitante
+            if (msgIndex === -1) {
+              msgIndex = updatedContacts[i].messages.findIndex(msg => {
+                if (!String(msg.id).startsWith('optimistic-') && !String(msg.id).startsWith('EDGE_')) return false;
+                if (msg.whatsapp_id && m.whatsapp_message_id && !String(msg.whatsapp_id).startsWith('optimistic-') && !String(msg.whatsapp_id).startsWith('EDGE_') && msg.whatsapp_id !== m.whatsapp_message_id) return false;
+                const normMsgText = normalizeMessageTextForComparison(msg.text);
+                return Boolean(normUpdateText && normMsgText && normUpdateText === normMsgText);
+              });
+            }
             if (msgIndex !== -1) {
               const newMessages = [...updatedContacts[i].messages];
               const advanced = parseAdvancedMsgMetadata(m);

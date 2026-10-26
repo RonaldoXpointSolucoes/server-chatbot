@@ -20,6 +20,29 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '7.9.8',
+    date: '2026-10-26',
+    summary: 'Exibição Integral de Múltiplas Imagens/Mídias Consecutivas sem Ocultação Indevida e Reconciliação Estrita por ID Oficial',
+    notes: [
+      {
+        id: '7.9.8-1',
+        category: 'fixes',
+        title: 'Correção da Ocultação da 2ª Imagem/Mídia ao Enviar Múltiplos Arquivos em Sequência',
+        description: 'Ajuste na 2ª e 3ª camadas de desduplicação do ChatDashboard para nunca colapsar mensagens oficiais com whatsapp_id ou mediaUrl distintos mesmo quando compartilham o mesmo texto placeholder de mídia (ex: "📸 Imagem / Foto" ou "🎵 Áudio").',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      },
+      {
+        id: '7.9.8-2',
+        category: 'fixes',
+        title: 'Precedência Estrita de ID Oficial no Realtime UPDATE e Reconciliação Otimista',
+        description: 'Garantia no chatStore e no EventProcessor de que eventos de atualização e reconciliação de mensagens de saída priorizem sempre o match exato por UUID e whatsapp_message_id antes de qualquer fallback textual.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      }
+    ]
+  },
+  {
     version: '7.9.7',
     date: '2026-10-26',
     summary: 'Correção de Edição/Exclusão de Mensagens com ID Nativo Baileys e Coalescência de Escrita na AuthQueue + CircuitBreaker Resiliente',

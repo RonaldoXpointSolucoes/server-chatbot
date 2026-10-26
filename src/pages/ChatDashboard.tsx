@@ -3450,6 +3450,16 @@ export default function ChatDashboard() {
       ['human', 'agent', 'bot', 'automation'].includes(m.sender)
     );
 
+    const isGenericMediaPlaceholder = (txt?: string) => {
+      if (!txt) return true;
+      const clean = txt.trim().toLowerCase();
+      return [
+        '📸 imagem / foto', '🎥 vídeo', '🎵 áudio', '📄 documento',
+        'imagem / foto', 'vídeo', 'áudio', 'documento',
+        '💟 figurinha / sticker', 'figurinha / sticker', '[image]', '[video]', '[audio]'
+      ].includes(clean);
+    };
+
     const nonOrphanMsgs = uniqueById.filter(m => {
       const isSyntheticOrPending = 
         String(m.id).startsWith('optimistic-') || 
@@ -3468,13 +3478,18 @@ export default function ChatDashboard() {
       const hasConfirmedMatch = confirmedOutbounds.some(conf => {
         if (m.pseudoId && (conf.id === m.pseudoId || conf.pseudoId === m.pseudoId)) return true;
         if (m.whatsapp_id && conf.whatsapp_id === m.whatsapp_id) return true;
+        // Se ambos já possuem whatsapp_id oficial distinto (não sintético), são mensagens diferentes
+        const mHasRealWaId = m.whatsapp_id && !String(m.whatsapp_id).startsWith('OUT_') && !String(m.whatsapp_id).startsWith('EDGE_') && !String(m.whatsapp_id).startsWith('optimistic-');
+        if (mHasRealWaId && conf.whatsapp_id && m.whatsapp_id !== conf.whatsapp_id) return false;
+
         const confTime = conf.timestamp instanceof Date ? conf.timestamp.getTime() : new Date(conf.timestamp || 0).getTime();
         if (Math.abs(mTime - confTime) < 90000) {
-          // Se for mídia, comparar mediaUrl idêntica ou texto idêntico
+          // Se for mídia, comparar mediaUrl idêntica ou legenda real (nunca o placeholder genérico '📸 Imagem / Foto')
           if (m.mediaType && conf.mediaType && m.mediaType === conf.mediaType) {
             if (m.mediaUrl && conf.mediaUrl && !m.mediaUrl.startsWith('blob:') && m.mediaUrl === conf.mediaUrl) return true;
+            if (m.mediaUrl && conf.mediaUrl && !m.mediaUrl.startsWith('blob:') && !conf.mediaUrl.startsWith('blob:') && m.mediaUrl !== conf.mediaUrl) return false;
             const confNorm = normalizeMessageTextForComparison(conf.text);
-            if (normText && confNorm && normText === confNorm) return true;
+            if (!isGenericMediaPlaceholder(m.text) && !isGenericMediaPlaceholder(conf.text) && normText && confNorm && normText === confNorm) return true;
             return false;
           }
           const confNorm = normalizeMessageTextForComparison(conf.text);
@@ -3488,7 +3503,7 @@ export default function ChatDashboard() {
       return !hasConfirmedMatch;
     });
 
-    // 3ª Camada: Desduplicação consecutiva (mensagens idênticas em <45s e mensagens consecutivas de sistema)
+    // 3ª Camada: Desduplicação consecutiva (somente para placeholders sintéticos/otimistas residuais e mensagens consecutivas de sistema)
     const deduped: typeof nonOrphanMsgs = [];
     for (let i = 0; i < nonOrphanMsgs.length; i++) {
       const current = nonOrphanMsgs[i];
@@ -3500,21 +3515,25 @@ export default function ChatDashboard() {
           continue;
         }
 
-        // Se mensagens consecutivas do mesmo remetente tiverem o mesmo texto em menos de 45s (double click, race condition ou OUT_ duplicado)
+        // Se mensagens consecutivas do mesmo remetente tiverem o mesmo texto em menos de 45s,
+        // SÓ desduplica se pelo menos uma delas for sintética/otimista (OUT_, EDGE_, optimistic-).
+        // Duas mensagens reais com whatsapp_id distintos (ex: 2 fotos ou 2 áudios enviados em sequência pelo celular) NUNCA devem ser ocultadas!
         if (current.sender === prev.sender && ['human', 'agent', 'bot', 'automation'].includes(current.sender)) {
-          const currTime = current.timestamp instanceof Date ? current.timestamp.getTime() : new Date(current.timestamp || 0).getTime();
-          const prevTime = prev.timestamp instanceof Date ? prev.timestamp.getTime() : new Date(prev.timestamp || 0).getTime();
-          if (Math.abs(currTime - prevTime) < 45000) {
-            const normCurr = normalizeMessageTextForComparison(current.text);
-            const normPrev = normalizeMessageTextForComparison(prev.text);
-            if (normCurr && normPrev && normCurr === normPrev && current.mediaType === prev.mediaType) {
-              const isPrevSynthetic = String(prev.whatsapp_id || '').startsWith('OUT_') || String(prev.id).startsWith('OUT_') || String(prev.id).startsWith('EDGE_') || String(prev.id).startsWith('optimistic-');
-              const isCurrSynthetic = String(current.whatsapp_id || '').startsWith('OUT_') || String(current.id).startsWith('OUT_') || String(current.id).startsWith('EDGE_') || String(current.id).startsWith('optimistic-');
-              // Se a anterior for sintética e a atual for oficial do WhatsApp, substitui pela oficial
-              if (isPrevSynthetic && !isCurrSynthetic) {
-                deduped[deduped.length - 1] = current;
+          const isPrevSynthetic = String(prev.whatsapp_id || '').startsWith('OUT_') || String(prev.id).startsWith('OUT_') || String(prev.id).startsWith('EDGE_') || String(prev.id).startsWith('optimistic-');
+          const isCurrSynthetic = String(current.whatsapp_id || '').startsWith('OUT_') || String(current.id).startsWith('OUT_') || String(current.id).startsWith('EDGE_') || String(current.id).startsWith('optimistic-');
+
+          if (isPrevSynthetic || isCurrSynthetic) {
+            const currTime = current.timestamp instanceof Date ? current.timestamp.getTime() : new Date(current.timestamp || 0).getTime();
+            const prevTime = prev.timestamp instanceof Date ? prev.timestamp.getTime() : new Date(prev.timestamp || 0).getTime();
+            if (Math.abs(currTime - prevTime) < 45000) {
+              const normCurr = normalizeMessageTextForComparison(current.text);
+              const normPrev = normalizeMessageTextForComparison(prev.text);
+              if (normCurr && normPrev && normCurr === normPrev && current.mediaType === prev.mediaType) {
+                if (isPrevSynthetic && !isCurrSynthetic) {
+                  deduped[deduped.length - 1] = current;
+                }
+                continue;
               }
-              continue;
             }
           }
         }

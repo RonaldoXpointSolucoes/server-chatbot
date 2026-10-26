@@ -1,5 +1,5 @@
 {
-  "version": "7.9.7",
-  "buildDate": "2026-10-26T12:20:45.000Z",
-  "summary": "Correção de Edição/Exclusão de Mensagens com ID Nativo Baileys e Coalescência de Escrita na AuthQueue + CircuitBreaker Resiliente"
+  "version": "7.9.8",
+  "buildDate": "2026-10-26T14:28:15.000Z",
+  "summary": "Exibição Integral de Múltiplas Imagens/Mídias Consecutivas sem Ocultação Indevida e Reconciliação Estrita por ID Oficial"
 }

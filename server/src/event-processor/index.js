@@ -1595,6 +1595,7 @@ class EventProcessor {
                   // 4.2.1 Reconciliação atômica de placeholders outbound temporários (OUT_, EDGE_, optimistic-)
                   const outboundMessages = messagesToInsert.filter(m => m.direction === 'outbound' && m.whatsapp_message_id && m.text_content);
                   const placeholdersReconciled = new Set();
+                  const usedPlaceholderIds = new Set();
 
                   if (outboundMessages.length > 0) {
                       for (const m of outboundMessages) {
@@ -1606,17 +1607,21 @@ class EventProcessor {
                                   .eq('conversation_id', m.conversation_id)
                                   .eq('direction', 'outbound')
                                   .eq('text_content', m.text_content)
+                                  .or('whatsapp_message_id.like.OUT_%,whatsapp_message_id.like.EDGE_%,whatsapp_message_id.like.optimistic-%')
                                   .gte('timestamp', new Date(mTime - 90000).toISOString())
                                   .lte('timestamp', new Date(mTime + 90000).toISOString())
-                                  .limit(2);
+                                  .limit(5);
 
                               const placeholder = (placeholders || []).find(p => 
-                                  p.whatsapp_message_id?.startsWith('OUT_') || 
-                                  p.whatsapp_message_id?.startsWith('EDGE_') || 
-                                  p.whatsapp_message_id?.startsWith('optimistic-')
+                                  !usedPlaceholderIds.has(p.id) && (
+                                      p.whatsapp_message_id?.startsWith('OUT_') || 
+                                      p.whatsapp_message_id?.startsWith('EDGE_') || 
+                                      p.whatsapp_message_id?.startsWith('optimistic-')
+                                  )
                               );
 
                               if (placeholder) {
+                                  usedPlaceholderIds.add(placeholder.id);
                                   await supabase
                                       .from('messages')
                                       .update({
