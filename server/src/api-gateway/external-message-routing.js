@@ -48,10 +48,12 @@ export async function forwardInternalInstanceRequest(req, res, instanceId, optio
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
+        const method = String(req.method || 'POST').toUpperCase();
+        const hasBody = method !== 'GET' && method !== 'HEAD';
         const headers = {
-            'content-type': 'application/json',
             'x-api-owner-hop': '1'
         };
+        if (hasBody) headers['content-type'] = 'application/json';
         if (req.headers.authorization) headers.authorization = req.headers.authorization;
         if (req.headers.apikey) headers.apikey = req.headers.apikey;
         if (req.headers.globalapikey) headers.globalapikey = req.headers.globalapikey;
@@ -59,14 +61,14 @@ export async function forwardInternalInstanceRequest(req, res, instanceId, optio
         if (req.headers['x-trace-id']) headers['x-trace-id'] = req.headers['x-trace-id'];
 
         const response = await fetch(targetOrigin + req.originalUrl, {
-            method: req.method || 'POST',
+            method,
             headers,
-            body: JSON.stringify(req.body || {}),
+            body: hasBody ? JSON.stringify(req.body || {}) : undefined,
             signal: controller.signal,
             redirect: 'follow'
         });
 
-        if (response.ok) {
+        if (response.ok || options.forwardAllStatuses) {
             const payload = await response.text();
             res.status(response.status);
             res.setHeader('Content-Type', response.headers.get('content-type') || 'application/json');

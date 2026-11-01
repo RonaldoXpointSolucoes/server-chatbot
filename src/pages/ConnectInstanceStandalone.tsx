@@ -293,8 +293,15 @@ export default function ConnectInstanceStandalone() {
     try {
       const view = await checkEngineStatus(inst);
       if (!view) throw new Error('Sem resposta do servidor. A sessão foi preservada; consulte os logs.');
-      if (!view.canStart) return;
-      const data = await requestEngine(inst, '/connect', { method:'POST', body:JSON.stringify({source:'reconecta_zap'}) });
+      if (view.connected || (!view.canStart && !_forceNew)) return;
+      const data = await requestEngine(inst, '/connect', {
+        method: 'POST',
+        body: JSON.stringify({
+          source: 'reconecta_zap',
+          forceNew: Boolean(_forceNew),
+          resetSession: Boolean(_forceNew)
+        })
+      });
       applyServerState(data);
     } catch(e:any) {
       setError(e.message || 'Falha ao solicitar conexão.');

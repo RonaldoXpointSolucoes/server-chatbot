@@ -61,17 +61,41 @@ router.post('/instances/:instanceId/connect', requireTenant, async (req, res) =>
     let handedOff = false;
     let ownsStart = false;
     try {
+        if (await forwardInternalInstanceRequest(req, res, instanceId, { forwardAllStatuses: true, timeoutMs: 12000 })) {
+            return;
+        }
         res.setHeader('Cache-Control', 'no-store');
         const requestId = String(req.headers['x-trace-id'] || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0,80) || undefined;
+        const forceReset = req.body?.forceReset === true;
+        const forceNew = forceReset || req.body?.forceNew === true || req.query?.force_new === 'true';
+        const resetSession = forceReset || req.body?.resetSession === true || forceNew;
+
+        if (forceReset) {
+            pendingConnectionStarts.delete(instanceId);
+            sessionManager.connectingState.delete(instanceId);
+            sessionManager.pairingInProgress.delete(instanceId);
+        }
+
         const diagnostic = connectionSnapshot(instanceId);
         const sock = sessionManager.sessions.get(instanceId)?.sock;
+        const isStarting = pendingConnectionStarts.has(instanceId) || sessionManager.connectingState.has(instanceId);
+        const isReconnecting = sessionManager.reconnectingTimers.has(instanceId);
+        const isPairing = sessionManager.pairingInProgress.has(instanceId);
+        const nothingRunningInMemory = !sock && !isStarting && !isReconnecting && !isPairing;
+        const effectivePhase = nothingRunningInMemory && ['authenticating', 'reconnecting'].includes(diagnostic.phase)
+            ? 'idle'
+            : diagnostic.phase;
+
         // A QR refresh must be idempotent, including old clients using force_new=true.
         const decision = connectDecision({
-            ...diagnostic, hasSession: Boolean(sock),
-            starting: pendingConnectionStarts.has(instanceId) || sessionManager.connectingState.has(instanceId),
-            reconnecting: sessionManager.reconnectingTimers.has(instanceId),
-            pairingInProgress: sessionManager.pairingInProgress.has(instanceId),
-            resetSession: req.body?.resetSession === true
+            ...diagnostic,
+            phase: effectivePhase,
+            hasSession: Boolean(sock),
+            starting: isStarting,
+            reconnecting: isReconnecting,
+            pairingInProgress: isPairing,
+            resetSession,
+            forceReset
         });
         if (decision !== 'start') {
             if (req.query.force_new === 'true' || req.body?.forceNew) {
@@ -85,12 +109,17 @@ router.post('/instances/:instanceId/connect', requireTenant, async (req, res) =>
         pendingConnectionStarts.add(instanceId);
         ownsStart = true;
         beginConnectionAttempt(instanceId, tenantId, requestId);
-        await logAndNotifyConnectionEvent({ tenantId, instanceId, eventType: 'connection_request', status: 'connecting', details: { requestId, source: req.body?.source || 'api', resetRequested: req.body?.resetSession === true } });
-        if (sock) await sessionManager.closeSession(instanceId);
+
+        // Limpa imediatamente o last_error no banco para evitar que o polling de status do frontend leia erros antigos durante o boot
+        const { error: stateError } = await supabase.from('whatsapp_instances').update({ status: 'connecting', reconnect_attempts: 0, last_error: null, assigned_node_id: NODE_ID }).eq('id', instanceId).eq('tenant_id', tenantId);
+        if (stateError) throw stateError;
+
+        await logAndNotifyConnectionEvent({ tenantId, instanceId, eventType: 'connection_request', status: 'connecting', details: { requestId, source: req.body?.source || 'api', resetRequested: resetSession, forceReset } });
+        if (sock || forceReset) await sessionManager.closeSession(instanceId);
         const { data: authCreds, error: authError } = await supabase.from('wa_auth_credentials').select('creds_data').eq('instance_id', instanceId).maybeSingle();
         if (authError) throw authError;
         const hasStoredIdentity = Boolean(authCreds?.creds_data?.me?.id || authCreds?.creds_data?.me?.jid);
-        if (shouldClearCredentials({ resetSession: req.body?.resetSession === true, hasStoredIdentity })) {
+        if (shouldClearCredentials({ resetSession, hasStoredIdentity, forceReset })) {
             const { clearInstanceMemoryCache, flushPendingWrites } = await import('../session-manager/auth.js');
             await flushPendingWrites(instanceId);
             clearInstanceMemoryCache(instanceId);
@@ -98,12 +127,15 @@ router.post('/instances/:instanceId/connect', requireTenant, async (req, res) =>
                 const { error } = await supabase.from(table).delete().eq('instance_id', instanceId);
                 if (error) throw error;
             }
+        } else if (!hasStoredIdentity) {
+            await supabase.from('whatsapp_instance_runtime').delete().eq('instance_id', instanceId);
         }
-        const { error: stateError } = await supabase.from('whatsapp_instances').update({ status: 'connecting', reconnect_attempts: 0, last_error: null, assigned_node_id: NODE_ID }).eq('id', instanceId).eq('tenant_id', tenantId);
-        if (stateError) throw stateError;
         activePairingAttempts.set(instanceId, { timestamp: Date.now(), source: 'api_connect_request', tenantId });
         sessionManager.reconnectAttempts.delete(instanceId);
         sessionManager.conflictAttempts.delete(instanceId);
+        sessionManager.autoHealingFailures?.delete(instanceId);
+        sessionManager.autoHealingCooldowns?.delete(instanceId);
+        sessionManager.reconnectingCoolingDown?.delete(instanceId);
         sessionManager.createSession(tenantId, instanceId, true).then(sock => {
             if (!sock) throw new Error('O servidor não inicializou o socket desta instância.');
         }).catch(error => {
@@ -125,6 +157,9 @@ router.post('/instances/:instanceId/pairing-code', requireTenant, async (req, re
     let ownsPairing = false;
     try {
         const { instanceId } = req.params;
+        if (await forwardInternalInstanceRequest(req, res, instanceId, { forwardAllStatuses: true, timeoutMs: 25000 })) {
+            return;
+        }
         const { phoneNumber } = req.body;
         const tenantId = req.tenantId;
 
@@ -231,15 +266,19 @@ router.post('/instances/:instanceId/pairing-code', requireTenant, async (req, re
 router.post('/instances/:instanceId/disconnect', requireTenant, async (req, res) => {
     try {
         const { instanceId } = req.params;
+        if (await forwardInternalInstanceRequest(req, res, instanceId, { forwardAllStatuses: true, timeoutMs: 10000 })) {
+            return;
+        }
         const sock = sessionManager.getSocket(instanceId);
         
         if (sock) {
             try { await sock.logout(); } catch(e) {}
-        } else {
-            await supabase.from('wa_auth_credentials').delete().eq('instance_id', instanceId);
-            await supabase.from('wa_auth_keys').delete().eq('instance_id', instanceId);
-            await supabase.from('whatsapp_instances').update({ status: 'offline' }).eq('id', instanceId);
+            await sessionManager.closeSession(instanceId);
         }
+        await supabase.from('wa_auth_credentials').delete().eq('instance_id', instanceId);
+        await supabase.from('wa_auth_keys').delete().eq('instance_id', instanceId);
+        await supabase.from('whatsapp_instance_runtime').delete().eq('instance_id', instanceId);
+        await supabase.from('whatsapp_instances').update({ status: 'offline', last_error: null, assigned_node_id: null, lease_until: null }).eq('id', instanceId);
 
         res.json({ ok: true });
     } catch (e) {
@@ -276,6 +315,9 @@ router.get('/instances/:instanceId/connection-logs', async (req, res) => {
 router.get('/instances/:instanceId/ping-whatsapp', requireTenant, async (req, res) => {
     try {
         const { instanceId } = req.params;
+        if (await forwardInternalInstanceRequest(req, res, instanceId, { forwardAllStatuses: true })) {
+            return;
+        }
         const tenantId = req.tenantId;
 
         const startTime = Date.now();
@@ -1052,6 +1094,9 @@ router.post('/instances/:instanceId/send-media', requireTenant, upload.single('m
 router.post('/instances/:instanceId/:action', requireTenant, async (req, res) => {
     try {
         const { instanceId, action } = req.params;
+        if (await forwardInternalInstanceRequest(req, res, instanceId, { forwardAllStatuses: true, timeoutMs: 12000 })) {
+            return;
+        }
         const sock = sessionManager.getSocket(instanceId);
         
         if (action === 'reconnect') {
@@ -1298,6 +1343,9 @@ router.put('/instances/:instanceId/groups/:groupId/ephemeral', requireTenant, as
 router.get('/instances/:instanceId/status', requireTenant, async (req, res) => {
     try {
         const { instanceId } = req.params;
+        if (await forwardInternalInstanceRequest(req, res, instanceId, { forwardAllStatuses: true })) {
+            return;
+        }
 
         const sock = sessionManager.getSocket(instanceId);
         const isSocketOpenStatus = sock ? isSocketOpen(sock) : false;
@@ -1339,7 +1387,8 @@ router.get('/instances/:instanceId/status', requireTenant, async (req, res) => {
             const qrCode = runtimeData?.qr_code || null;
             const pairingCode = runtimeData?.pairing_code || null;
             const diagnostic = connectionSnapshot(instanceId);
-            const showQr = !diagnostic.authenticated && !diagnostic.handshakeProtected && !['error','expired','waiting_qr'].includes(diagnostic.phase);
+            const hasActiveOrStartingSocket = Boolean(sock) || sessionManager.connectingState.has(instanceId) || pendingConnectionStarts.has(instanceId);
+            const showQr = hasActiveOrStartingSocket && !diagnostic.authenticated && !diagnostic.handshakeProtected && !['error','expired'].includes(diagnostic.phase);
             return res.json({
                 data: {
                     ...data,

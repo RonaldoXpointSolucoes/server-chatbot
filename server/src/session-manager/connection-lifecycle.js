@@ -69,7 +69,8 @@ export function getConnectionDiagnostics(instanceId, { wsOpen = null, authentica
     };
 }
 
-export function connectDecision({ authenticated, hasIdentity, wsOpen, hasSession, starting, reconnecting, pairingInProgress, phase, resetSession = false }) {
+export function connectDecision({ authenticated, hasIdentity, wsOpen, hasSession, starting, reconnecting, pairingInProgress, phase, resetSession = false, forceReset = false }) {
+    if (forceReset) return 'start';
     // force_new from older QR screens is NOT authorization to erase a paired device.
     if (authenticated) return 'connected';
     if ((hasIdentity && wsOpen) || pairingInProgress || ['authenticating','reconnecting'].includes(phase)) return 'preserve';
@@ -77,8 +78,8 @@ export function connectDecision({ authenticated, hasIdentity, wsOpen, hasSession
     return 'start';
 }
 
-export function shouldClearCredentials({ resetSession, hasStoredIdentity }) {
-    return resetSession === true && !hasStoredIdentity;
+export function shouldClearCredentials({ resetSession, hasStoredIdentity, forceReset = false }) {
+    return forceReset === true || (resetSession === true && !hasStoredIdentity);
 }
 
 export function connectionNeedsProtection(diagnostic, { hasSession = false, wsOpen = false, starting = false, reconnecting = false, now = Date.now() } = {}) {

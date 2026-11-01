@@ -288,6 +288,10 @@ export default function EvolutionModal({
   const loadingRef = useRef(loading);
   const pairingCodeRef = useRef(pairingCode);
   const pairingLoadingRef = useRef(pairingLoading);
+  const baileysDiagnosticErrorRef = useRef<BaileysDiagnostic | null>(baileysDiagnosticError);
+  const lastConnectIgnitionAtRef = useRef<number>(0);
+  const isIgnitionInFlightRef = useRef<boolean>(false);
+  const autoConnectedInstanceRef = useRef<string | null>(null);
 
   const [breadcrumbsLogs, setBreadcrumbsLogs] = useState<any[]>([]);
 
@@ -334,6 +338,10 @@ export default function EvolutionModal({
   useEffect(() => {
     pairingLoadingRef.current = pairingLoading;
   }, [pairingLoading]);
+
+  useEffect(() => {
+    baileysDiagnosticErrorRef.current = baileysDiagnosticError;
+  }, [baileysDiagnosticError]);
 
   const qrBase64Ref = useRef(qrBase64);
   const qrCountdownRef = useRef(qrCountdown);
@@ -423,10 +431,17 @@ export default function EvolutionModal({
   }, [isOpen]);
 
   useEffect(() => {
+    if (!isOpen) {
+      autoConnectedInstanceRef.current = null;
+      return;
+    }
     if (isOpen && targetInstanceName && !activePollingId) {
-      const targetInst = existingInstances.find((i) => i.id === targetInstanceName || i.display_name === targetInstanceName) || { id: targetInstanceName };
-      const isCurrentlyConnected = targetInst.status === 'connected' || targetInst.status === 'connected_local';
-      handleConnectExisting(targetInst, !isCurrentlyConnected);
+      const targetInst = existingInstances.find((i) => i.id === targetInstanceName || i.display_name === targetInstanceName);
+      if (targetInst && autoConnectedInstanceRef.current !== targetInst.id) {
+        autoConnectedInstanceRef.current = targetInst.id;
+        const isCurrentlyConnected = targetInst.status === 'connected' || targetInst.status === 'connected_local';
+        handleConnectExisting(targetInst, !isCurrentlyConnected, false);
+      }
     }
   }, [isOpen, targetInstanceName, activePollingId, existingInstances]);
 
@@ -485,26 +500,45 @@ export default function EvolutionModal({
     } catch (e) {}
   };
 
-  const handleConnectExisting = async (inst: any, forceNew = false) => {
+  const handleConnectExisting = async (inst: any, forceNew = false, forceReset = false) => {
+    lastConnectIgnitionAtRef.current = Date.now();
+    isIgnitionInFlightRef.current = true;
+    baileysDiagnosticErrorRef.current = null;
     setLoading(true);
     setError(null);
     setBaileysDiagnosticError(null);
     setIsQrExpired(false);
     setSuccessMsg(null);
-    if (forceNew || !qrBase64) {
+    if (forceReset || forceNew || !qrBase64) {
       setQrBase64(null);
+      qrBase64Ref.current = null;
+      setIsRenewingQr(false);
     } else {
       setIsRenewingQr(true);
     }
     setServerConnectionState('starting');
-    setConnectionStatusMessage("Iniciando motor e solicitando QR Code...");
+    setConnectionStatusMessage(
+      forceReset
+        ? "Limpando sessão antiga e solicitando novo QR Code..."
+        : "Iniciando motor e solicitando QR Code..."
+    );
     setCodeEntered(false);
     setActivePollingId(inst.id);
 
-    useDevStore.getState().addBreadcrumb(1, 7, `Iniciando reconexão da instância '${inst.display_name || inst.id}'`, 'EvolutionModal', { instanceId: inst.id, forceNew });
+    useDevStore.getState().addBreadcrumb(
+      1,
+      7,
+      forceReset
+        ? `Limpando sessão e reiniciando instância '${inst.display_name || inst.id}' do zero`
+        : `Iniciando reconexão da instância '${inst.display_name || inst.id}'`,
+      'EvolutionModal',
+      { instanceId: inst.id, forceNew, forceReset }
+    );
+
+    let cId = "00000000-0000-0000-0000-000000000000";
+    let targetInst = inst;
 
     try {
-      let targetInst = inst;
       if (!targetInst?.api_key || !targetInst?.display_name) {
         const { data: dbInst } = await supabase
           .from("whatsapp_instances")
@@ -517,9 +551,9 @@ export default function EvolutionModal({
         }
       }
 
-      const liveStatus = instancesStatus[inst.id];
+      const liveStatus = instancesStatus[targetInst.id];
       const isConn =
-        !forceNew && (
+        !forceNew && !forceReset && (
           targetInst.connection_status === "connected" ||
           targetInst.status === "connected" ||
           targetInst.connection_status === "connected_local" ||
@@ -533,19 +567,19 @@ export default function EvolutionModal({
 
       if (isConn) {
         useDevStore.getState().addBreadcrumb(7, 7, `Instância já estava previamente conectada: ${targetInst.id}`, 'EvolutionModal');
-        useChatStore.getState().updateTenantInstance(inst.id);
-        setEvolutionConnection(true, inst.id);
+        useChatStore.getState().updateTenantInstance(targetInst.id);
+        setEvolutionConnection(true, targetInst.id);
         setLoading(false);
         return;
       }
 
-      const cId =
+      cId =
         localStorage.getItem("current_tenant_id") ||
         sessionStorage.getItem("current_tenant_id") ||
         targetInst?.tenant_id ||
         "00000000-0000-0000-0000-000000000000";
 
-      if (!isConn && !forceNew && targetInst.api_key) {
+      if (!isConn && !forceNew && !forceReset && targetInst.api_key) {
         try {
           const engineSt = await fetchEngineStatus(cId, targetInst.id, targetInst.api_key);
           const st = engineSt?.data?.status || engineSt?.status;
@@ -562,8 +596,23 @@ export default function EvolutionModal({
         }
       }
 
-      useDevStore.getState().addBreadcrumb(2, 7, `Enviando requisição de ignição para o servidor Node/Baileys...`, 'EvolutionModal', { tenantId: cId, instanceId: targetInst.id, forceNew });
-      await createInstance(cId, targetInst.id, targetInst.api_key || "", forceNew);
+      // Limpa preventivamente o last_error e o runtime no banco antes de acionar a ignição para que o polling nunca leia estados obsoletos
+      try {
+        await supabase
+          .from("whatsapp_instances")
+          .update({ last_error: null, status: "connecting" })
+          .eq("id", targetInst.id);
+        if (forceNew || forceReset) {
+          await supabase
+            .from("whatsapp_instance_runtime")
+            .delete()
+            .eq("instance_id", targetInst.id);
+        }
+      } catch (e) {}
+
+      useDevStore.getState().addBreadcrumb(2, 7, `Enviando requisição de ignição para o servidor Node/Baileys...`, 'EvolutionModal', { tenantId: cId, instanceId: targetInst.id, forceNew, forceReset });
+      await createInstance(cId, targetInst.id, targetInst.api_key || "", forceNew, forceReset);
+      lastConnectIgnitionAtRef.current = Date.now();
     } catch (err: any) {
       const msg = err?.message || "";
       useDevStore.getState().addBreadcrumb(
@@ -571,7 +620,7 @@ export default function EvolutionModal({
         7,
         `Falha ao comunicar com motor: ${msg}`,
         'EvolutionModal',
-        { tenantId: cId, instanceId: targetInst.id, error: err },
+        { tenantId: cId, instanceId: targetInst?.id, error: err },
         'error'
       );
       if (msg === "Failed to fetch" || msg.includes("network") || msg.includes("fetch")) {
@@ -580,6 +629,8 @@ export default function EvolutionModal({
         setError(msg || "Erro ao conectar motor.");
       }
       setLoading(false);
+    } finally {
+      isIgnitionInFlightRef.current = false;
     }
   };
 
@@ -805,7 +856,9 @@ export default function EvolutionModal({
         }
 
         // Diagnóstico real da Baileys para falhas ou encerramento
-        if (lastError || (st === 'offline' && statusCode) || payload.payload?.isQrTimeout || payload.payload?.isConflict) {
+        const msSinceIgnitionBroadcast = Date.now() - lastConnectIgnitionAtRef.current;
+        const ignoreTransientOffline = isIgnitionInFlightRef.current || msSinceIgnitionBroadcast < 5000;
+        if (!ignoreTransientOffline && (lastError || (st === 'offline' && statusCode) || payload.payload?.isQrTimeout || payload.payload?.isConflict)) {
           const diag = parseBaileysError(lastError || payload.payload?.reason, statusCode);
           if (diag) {
             useDevStore.getState().addLog({
@@ -824,8 +877,8 @@ export default function EvolutionModal({
         }
 
         if (st === "offline") {
-          if (pairingCodeRef.current) {
-            console.log("[Realtime] Ignorando status offline na conexão via Pairing Code (transição esperada)");
+          if (pairingCodeRef.current || ignoreTransientOffline) {
+            console.log("[Realtime] Ignorando status offline transitório durante ignição/pareamento");
             return;
           }
           const diag = parseBaileysError(lastError || payload.payload?.reason || 'A conexão caiu ou foi rejeitada.', statusCode);
@@ -869,9 +922,24 @@ export default function EvolutionModal({
               if(!currInst) return;
               
               const st = await fetchEngineStatus(tenantId, activePollingIdRef.current, currInst.api_key || "");
+              const runtimeQr = st?.data?.whatsapp_instance_runtime?.qr_code || st?.data?.qr_code || st?.qr_code || st?.qr_base64;
               const lastError = st?.data?.last_error || st?.data?.whatsapp_instance_runtime?.last_error;
+              const msSinceIgnition = Date.now() - lastConnectIgnitionAtRef.current;
+              const serverPhase = st?.data?.diagnostic?.phase;
+              const isStartingOrWaitingQr =
+                st?.data?.status === 'connecting' ||
+                serverPhase === 'starting' ||
+                serverPhase === 'qr_ready' ||
+                serverPhase === 'waiting_qr';
 
-              if (lastError && !baileysDiagnosticError) {
+              if (
+                lastError &&
+                !runtimeQr &&
+                !isIgnitionInFlightRef.current &&
+                msSinceIgnition > 6000 &&
+                !isStartingOrWaitingQr &&
+                !baileysDiagnosticErrorRef.current
+              ) {
                 const diag = parseBaileysError(lastError);
                 if (diag) {
                   setBaileysDiagnosticError(diag);
@@ -883,7 +951,6 @@ export default function EvolutionModal({
                 }
               }
 
-              const runtimeQr = st?.data?.whatsapp_instance_runtime?.qr_code || st?.data?.qr_code || st?.qr_code || st?.qr_base64;
               if (runtimeQr) {
                 if (runtimeQr !== qrBase64Ref.current) {
                   setQrBase64(runtimeQr);
@@ -3159,7 +3226,7 @@ export default function EvolutionModal({
                                       setBaileysDiagnosticError(null);
                                       setIsQrExpired(false);
                                       const currentInst = existingInstancesRef.current.find(i => i.id === activePollingIdRef.current) || { id: activePollingIdRef.current };
-                                      handleConnectExisting(currentInst, false);
+                                      handleConnectExisting(currentInst, true, false);
                                     }}
                                     className="w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 text-white rounded-2xl font-bold text-xs flex items-center justify-center gap-2 shadow-md cursor-pointer active:scale-95"
                                   >
@@ -3172,7 +3239,7 @@ export default function EvolutionModal({
                                     setBaileysDiagnosticError(null);
                                     setIsQrExpired(false);
                                     const currentInst = existingInstancesRef.current.find(i => i.id === activePollingIdRef.current) || { id: activePollingIdRef.current };
-                                    handleConnectExisting(currentInst, true);
+                                    handleConnectExisting(currentInst, true, true);
                                   }}
                                   className="w-full py-2.5 bg-gray-200/80 dark:bg-white/10 hover:bg-gray-300 dark:hover:bg-white/15 text-slate-700 dark:text-slate-200 rounded-2xl font-semibold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-95"
                                 >
@@ -3283,7 +3350,7 @@ export default function EvolutionModal({
                                       setIsRenewingQr(true);
                                       const currentInst = existingInstancesRef.current.find(i => i.id === activePollingIdRef.current) || { id: activePollingIdRef.current };
                                       if (activePollingIdRef.current) {
-                                        handleConnectExisting(currentInst, false);
+                                        handleConnectExisting(currentInst, true, false);
                                       }
                                     }}
                                     className="text-[11px] text-slate-500 hover:text-emerald-500 dark:text-slate-400 dark:hover:text-emerald-400 flex items-center gap-1.5 transition-colors font-semibold py-1.5 px-3 rounded-xl hover:bg-emerald-500/10 cursor-pointer active:scale-95"
@@ -3297,7 +3364,7 @@ export default function EvolutionModal({
                                   onClick={() => {
                                     const currentInst = existingInstancesRef.current.find(i => i.id === activePollingIdRef.current) || { id: activePollingIdRef.current };
                                     if (activePollingIdRef.current) {
-                                      handleConnectExisting(currentInst, true);
+                                      handleConnectExisting(currentInst, true, true);
                                     }
                                   }}
                                   className="text-[11px] text-slate-400 hover:text-amber-500 dark:text-slate-500 dark:hover:text-amber-400 flex items-center gap-1.5 transition-colors font-medium py-1.5 px-2.5 rounded-xl hover:bg-amber-500/10 cursor-pointer active:scale-95"
@@ -3538,7 +3605,7 @@ export default function EvolutionModal({
                           setQrCountdown(30);
                           setQrScanned(false);
                           setKeysSynced(false);
-                          handleConnectExisting(existingInstances.find(i => i.id === activePollingId), true);
+                          handleConnectExisting(existingInstances.find(i => i.id === activePollingId) || { id: activePollingId }, true, false);
                         }}
                         className="flex-1 py-3 px-4 bg-gradient-to-r from-[#00a884] to-teal-600 hover:from-[#008f6f] hover:to-teal-700 text-white rounded-xl transition-all font-bold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-md active:scale-95"
                       >
@@ -3575,7 +3642,7 @@ export default function EvolutionModal({
                   <button
                     onClick={() => {
                       const curr = existingInstances.find(i => i.id === activePollingId) || { id: activePollingId };
-                      handleConnectExisting(curr, true);
+                      handleConnectExisting(curr, true, true);
                     }}
                     className="mt-3 text-xs bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded-lg transition-colors font-semibold flex items-center gap-1.5 cursor-pointer shadow-sm"
                   >

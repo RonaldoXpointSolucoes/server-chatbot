@@ -1386,7 +1386,8 @@ class SessionManager {
                         await this.destroyExistingSession(instanceId, 'qr_timeout');
                         await Promise.all([
                             supabase.from('wa_auth_credentials').delete().eq('instance_id', instanceId),
-                            supabase.from('wa_instances_keys').delete().eq('instance_id', instanceId)
+                            supabase.from('wa_auth_keys').delete().eq('instance_id', instanceId),
+                            supabase.from('whatsapp_instance_runtime').delete().eq('instance_id', instanceId)
                         ]).catch(() => {});
 
                         await retryWithBackoff(() =>

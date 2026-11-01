@@ -20,6 +20,37 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.0.1',
+    date: '2026-11-01',
+    summary: 'Correção de Geração de Novo QR Code, Reset de Sessão do Zero e Proxy Cross-Worker de Conexão',
+    notes: [
+      {
+        id: '8.0.1-1',
+        category: 'fixes',
+        title: 'Botões "Gerar Novo QR Code" e "Limpar Sessão e Resetar do Zero" no Modal de Conexão',
+        description: 'Corrigido o acionamento dos botões de recuperação de handshake para enviar flags explícitas de renovação e limpeza completa de credenciais (forceNew, resetSession e forceReset), eliminando o travamento nos Passos 1/7 e 2/7.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      },
+      {
+        id: '8.0.1-2',
+        category: 'fixes',
+        title: 'Proxy Automático Cross-Worker nas Rotas de Conexão e Status',
+        description: 'Habilitado o encaminhamento transparente entre workers (Produção <-> Alpha) nas rotas /connect, /status, /pairing-code e /disconnect, evitando erros HTTP 409 WRONG_NODE ao reconectar instâncias em nós dedicados.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      },
+      {
+        id: '8.0.1-3',
+        category: 'improvements',
+        title: 'Proteção contra Condição de Corrida no Polling durante a Ignição do QR Code',
+        description: 'Limpeza imediata de last_error no início do handshake e janela de proteção de ignição no modal para impedir que o polling de 1.5s reexiba o erro antigo antes da emissão do novo QR Code.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      }
+    ]
+  },
+  {
     version: '8.0.0',
     date: '2026-10-26',
     summary: 'Formatação Inteligente de Rich Text (Google Docs, Word e IA) ao Colar e Renderização Hierárquica no Chat e WhatsApp Real',

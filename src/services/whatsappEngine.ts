@@ -7,11 +7,18 @@ export const getApiUrl = () => {
 
 export const API_URL = getApiUrl();
 
-export const createInstance = async (tenantId: string, instanceId: string, apiKey: string, forceNew = false) => {
+export const createInstance = async (
+  tenantId: string,
+  instanceId: string,
+  apiKey: string,
+  forceNew = false,
+  forceReset = false
+) => {
   const apiUrl = getApiUrl();
   if (!apiUrl) throw new Error("URL do motor Antigravity não definida (.env)");
 
-  const url = `${apiUrl}/api/v1/instances/${instanceId}/connect${forceNew ? '?force_new=true' : ''}`;
+  const shouldForceNew = Boolean(forceNew || forceReset);
+  const url = `${apiUrl}/api/v1/instances/${instanceId}/connect${shouldForceNew ? '?force_new=true' : ''}`;
   const res = await fetch(url, {
     method: 'POST',
     headers: { 
@@ -19,10 +26,21 @@ export const createInstance = async (tenantId: string, instanceId: string, apiKe
       'x-tenant-id': tenantId,
       'apikey': apiKey
     },
-    body: JSON.stringify({ forceNew })
+    body: JSON.stringify({
+      forceNew: shouldForceNew,
+      resetSession: shouldForceNew,
+      forceReset: Boolean(forceReset)
+    })
   });
   
-  if (!res.ok) throw new Error('Falha ao acionar a ignição do motor do Whatsapp.');
+  if (!res.ok) {
+    let errMsg = 'Falha ao acionar a ignição do motor do Whatsapp.';
+    try {
+      const errJson = await res.json();
+      if (errJson?.error) errMsg = errJson.error;
+    } catch {}
+    throw new Error(errMsg);
+  }
   return res.json();
 };
 
