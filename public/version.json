@@ -1,5 +1,5 @@
 {
-  "version": "8.0.2",
-  "buildDate": "2026-11-01T14:41:01.332Z",
-  "summary": "Isolamento Estrito de Caixa no Envio de Mensagens e Resolução de Contatos Multi-Caixa"
+  "version": "8.0.3",
+  "buildDate": "2026-11-01T15:30:01.024Z",
+  "summary": "Atualização em Tempo Real dos Badges de Mensagens Não Lidas em Todas as Caixas da Sidebar"
 }

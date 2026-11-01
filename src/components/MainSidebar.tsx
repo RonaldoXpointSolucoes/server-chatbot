@@ -203,7 +203,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
   const isContactUnattended = React.useCallback((c: any) => {
     if (tenantId && c.tenant_id && c.tenant_id !== tenantId) return false;
     if (instances.length > 0) {
-      const cInst = c.instance_id || (c.id.includes('_') ? c.id.split('_')[1] : null);
+      const cInst = (c.id && c.id.includes('_') && c.id.split('_')[1] !== 'default') ? c.id.split('_')[1] : (c.instance_id || null);
       if (cInst && cInst !== 'default' && !instances.some(i => i.id === cInst || i.display_name === cInst)) {
         return false;
       }
@@ -234,7 +234,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
     return contacts.filter(c => {
       if (tenantId && c.tenant_id && c.tenant_id !== tenantId) return false;
       if (instances.length > 0) {
-        const cInst = c.instance_id || (c.id.includes('_') ? c.id.split('_')[1] : null);
+        const cInst = (c.id && c.id.includes('_') && c.id.split('_')[1] !== 'default') ? c.id.split('_')[1] : (c.instance_id || null);
         if (cInst && cInst !== 'default' && !instances.some(i => i.id === cInst || i.display_name === cInst)) return false;
       }
       return c.assigned_to?.split(',').includes(currentAgent.id) && !c.is_blocked && !(c.conv_status === 'snoozed' && c.snoozed_until && new Date(c.snoozed_until).getTime() > Date.now()) && c.conv_status !== 'closed' && c.conv_status !== 'resolved';
@@ -249,7 +249,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
     return contacts.filter(c => {
       if (tenantId && c.tenant_id && c.tenant_id !== tenantId) return false;
       if (instances.length > 0) {
-        const cInst = c.instance_id || (c.id.includes('_') ? c.id.split('_')[1] : null);
+        const cInst = (c.id && c.id.includes('_') && c.id.split('_')[1] !== 'default') ? c.id.split('_')[1] : (c.instance_id || null);
         if (cInst && cInst !== 'default' && !instances.some(i => i.id === cInst || i.display_name === cInst)) return false;
       }
       return (c.crm_tasks && c.crm_tasks.some((t: any) => !t.completed && (!t.assigned_to || (currentAgent && t.assigned_to === currentAgent.id))));
@@ -987,7 +987,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
                  {instances.map(inst => {
                     const instUuid = instanceCache.getId(inst.id) || inst.id;
                     const unreadCount = contacts.filter(c => {
-                      const cInst = c.instance_id || (c.id.includes('_') ? c.id.split('_')[1] : null);
+                      const cInst = (c.id && c.id.includes('_') && c.id.split('_')[1] !== 'default') ? c.id.split('_')[1] : (c.instance_id || null);
                       const isMatch = cInst === inst.id || cInst === inst.display_name || (cInst && (instanceCache.getId(cInst) === instUuid || instanceCache.getName(cInst) === inst.display_name));
                       if (!isMatch) return false;
                       return isContactUnattended(c);

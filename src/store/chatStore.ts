@@ -4042,6 +4042,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
           if (shouldWakeUp) {
             updatedStatus = 'open';
             updatedSnooze = undefined;
+          } else if (msg.sender === 'client' && !c.is_blocked && (c.conv_status === 'resolved' || c.conv_status === 'closed' || c.conv_status === 'snoozed' || !c.conv_status)) {
+            const cPaused = c.ai_paused === true || c.bot_status === 'paused';
+            updatedStatus = cPaused ? 'open' : 'bot';
+            updatedSnooze = undefined;
           }
 
           // 1. Previne duplicados exatos por ID do DB, whatsapp_id ou pseudoId
@@ -4200,12 +4204,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
           const newMessages = sortMessagesChronologically([...c.messages, msg]);
           const isChatCurrentlyFocused = (state.activeChatId === c.id || state.activeChatId === contactId || (c.conv_id && state.activeChatId === c.conv_id)) && (typeof document !== 'undefined' ? document.hasFocus() : true);
 
+          const msgTs = msg.timestamp ? new Date(msg.timestamp).getTime() : Date.now();
+          const isHistoricalMsg = (Date.now() - msgTs) > (5 * 60000);
+          const alreadySyncedByConv = Boolean((c as any).lastConvUnreadSyncAt && (Date.now() - (c as any).lastConvUnreadSyncAt) < 3000 && (c.unread || 0) >= ((c as any).lastConvUnreadCount || 1));
+
           let newUnread = c.unread || 0;
-          if (msg.sender === 'client' && !isChatCurrentlyFocused) {
+          if (msg.sender === 'client' && !isChatCurrentlyFocused && !isHistoricalMsg && !msg.isIgnored && !alreadySyncedByConv) {
             newUnread = (c.unread || 0) + 1;
           }
 
-          const msgTs = msg.timestamp ? new Date(msg.timestamp).getTime() : Date.now();
           const previewText = msg.text || (msg.mediaType === 'image' ? '📸 Imagem' : msg.mediaType === 'video' ? '🎥 Vídeo' : msg.mediaType === 'audio' ? '🎵 Áudio' : msg.mediaType === 'document' ? '📁 Documento' : 'Mensagem');
 
           const isSysResolution = msg.sender === 'system' || msg.sender_type === 'system' || msg.sender === 'internal_note' ||
@@ -4226,6 +4233,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             conv_status: updatedStatus,
             snoozed_until: updatedSnooze,
             unread: newUnread,
+            ...(msg.sender === 'client' && !isChatCurrentlyFocused && !isHistoricalMsg && !msg.isIgnored ? { lastClientMsgAt: Date.now() } : {}),
             lastMsgTimestamp: effectiveLastMsgTs,
             last_message_preview: previewText
           };
@@ -4304,13 +4312,32 @@ export const useChatStore = create<ChatState>((set, get) => ({
             custom_name: finalCustomName,
             name: finalName,
             avatar: contact.profile_picture_url || contact.avatar || c.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(finalName || contactPhoneMatch || 'U')}&background=random&color=fff`,
-            conv_labels: conv_labels
+            conv_labels: conv_labels,
+            // PROTEÇÃO CRÍTICA DE UNREAD E CONVERSA: A tabela `public.contacts` possui uma coluna legada `unread: 0`.
+            // Nunca permitir que um UPDATE genérico da tabela `contacts` zere `c.unread` ou apague o estado da conversa!
+            unread: isCompositePayload && typeof contact.unread === 'number'
+              ? Math.max(c.unread || 0, contact.unread)
+              : (c.unread || 0),
+            conv_id: contact.conv_id || c.conv_id,
+            conv_status: contact.conv_status || c.conv_status,
+            lastMsgTimestamp: contact.lastMsgTimestamp || c.lastMsgTimestamp,
+            last_message_preview: (contact as any).last_message_preview ?? c.last_message_preview,
+            last_message_at: (contact as any).last_message_at ?? c.last_message_at,
+            assigned_to: contact.assigned_to !== undefined ? contact.assigned_to : c.assigned_to,
+            is_pinned: contact.is_pinned !== undefined ? contact.is_pinned : c.is_pinned,
+            is_favorite: contact.is_favorite !== undefined ? contact.is_favorite : c.is_favorite,
+            snoozed_until: contact.snoozed_until !== undefined ? contact.snoozed_until : c.snoozed_until,
+            messages: Array.isArray(contact.messages) && contact.messages.length > 0 ? contact.messages : (c.messages || [])
           };
         }
         return c;
       });
 
       if (!foundAny) {
+        // Se for apenas um UPDATE genérico da tabela `contacts` (sem ID composto e sem conv_id), não cria card fantasma sem conversa
+        if (!isCompositePayload) {
+          return { contacts: updatedContacts };
+        }
         // Contato novinho folha
         const effectiveInstanceId = contact.instance_id || 'default';
         const compositeId = contact.id.includes('_') ? contact.id : `${contact.id}_${effectiveInstanceId}`;
@@ -4333,7 +4360,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           conv_id: contact.conv_id || undefined,
           conv_status: contact.conv_status || 'open',
           instance_id: contact.instance_id || null,
-          lastMsgTimestamp: new Date(contact.created_at || Date.now()).getTime(),
+          lastMsgTimestamp: contact.lastMsgTimestamp || ((contact as any).last_message_at ? new Date((contact as any).last_message_at).getTime() : new Date(contact.created_at || Date.now()).getTime()),
           conv_labels: conv_labels
         };
         updatedContacts.push(newContact);
@@ -4786,7 +4813,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             }
           }
         }
-        return isMatch ? { ...c, unread: 0 } : c;
+        return isMatch ? { ...c, unread: 0, lastClientMsgAt: 0 } as any : c;
       })
     }));
 
@@ -4812,7 +4839,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     // UI Otimista
     set((state) => ({
-      contacts: state.contacts.map(c => c.id === contactId ? { ...c, unread: newUnread, isManuallyUnread: newUnread > 0 } : c)
+      contacts: state.contacts.map(c => c.id === contactId ? { ...c, unread: newUnread, isManuallyUnread: newUnread > 0, ...(newUnread === 0 ? { lastClientMsgAt: 0 } : {}) } as any : c)
     }));
 
     try {
@@ -4862,11 +4889,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         ...c,
         unread: 0,
         isManuallyUnread: false,
+        lastClientMsgAt: 0,
         messages: c.messages.map(m => unreadIds.includes(m.id) ? {
           ...m,
           payload: { ...(m.payload || {}), read_receipt: readReceipt }
         } : m)
-      } : c)
+      } as any : c)
     }));
 
     try {
@@ -5210,11 +5238,34 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
       }
 
-      // Puxa até 300 conversas mais recentes para carregamento instantâneo da sidebar
-      const { data: dbConvs } = await convQuery
-        .order('is_pinned', { ascending: false })
-        .order('last_message_at', { ascending: false })
-        .limit(300);
+      // Puxa até 300 conversas mais recentes da caixa ativa + TODAS as conversas não lidas/não atendidas de TODAS as caixas do tenant (para exibir os badges globais na sidebar lateral em tempo real)
+      const [activeConvsRes, unreadGlobalConvsRes] = await Promise.all([
+        convQuery
+          .order('is_pinned', { ascending: false })
+          .order('last_message_at', { ascending: false })
+          .limit(300),
+        activeChannel
+          ? supabase.from('conversations')
+              .select('*, conversation_labels(tenant_labels(*))')
+              .eq('tenant_id', tenant.id)
+              .neq('status', 'resolved')
+              .neq('status', 'closed')
+              .or('unread_count.gt.0,status.eq.unassigned,status.eq.pending')
+              .order('last_message_at', { ascending: false })
+              .limit(300)
+          : Promise.resolve({ data: [] as any[] })
+      ]);
+
+      const rawDbConvs = [
+        ...(activeConvsRes.data || []),
+        ...(unreadGlobalConvsRes.data || [])
+      ];
+      const seenConvIds = new Set<string>();
+      const dbConvs = rawDbConvs.filter(cv => {
+        if (!cv || !cv.id || seenConvIds.has(cv.id)) return false;
+        seenConvIds.add(cv.id);
+        return true;
+      });
 
       if (!dbConvs || dbConvs.length === 0) {
         await supportPromises;
@@ -5974,8 +6025,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 conv_id: conv?.id || updated[idx].conv_id,
                 unread: 0,
                 isManuallyUnread: false,
+                lastClientMsgAt: 0,
                 messages: finalMsgs
-              };
+              } as any;
             }
             return { contacts: updated };
           });
@@ -7286,12 +7338,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
 
         if (!targetContactLocally) {
+          cData.id = expectedCompositeIdRefined;
           cData.conv_id = m.conversation_id;
-          cData.conv_status = 'open';
+          cData.conv_status = cData.bot_status === 'paused' ? 'open' : 'bot';
+          cData.unread = 0;
           get().upsertContactLocally(cData as any);
         }
 
         const cid = targetContactLocally ? targetContactLocally.id : expectedCompositeIdRefined;
+        const prevUnreadBeforeAdd = get().contacts.find(c =>
+          c.id === cid ||
+          (c.conv_id && m.conversation_id && c.conv_id === m.conversation_id)
+        )?.unread || 0;
 
         const isBlocked = cData.is_blocked || (targetContactLocally && targetContactLocally.is_blocked);
         if (isBlocked) {
@@ -7406,9 +7464,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
               // Impede notificação/Unread em mensagens antigas de sincronismo de histórico
               if (isClient && !isHistorical && !updatedContact.is_blocked) {
+                if (updatedContact.conv_status === 'resolved' || updatedContact.conv_status === 'closed' || updatedContact.conv_status === 'snoozed' || !updatedContact.conv_status) {
+                  updatedContact.conv_status = (updatedContact.ai_paused || updatedContact.bot_status === 'paused') ? 'open' : 'bot';
+                }
                 const isFocused = typeof document !== 'undefined' && document.hasFocus();
                 if (s.activeChatId !== cid || !isFocused) {
-                  updatedContact.unread = (updatedContact.unread || 0) + 1;
+                  updatedContact.unread = Math.max(updatedContact.unread || 0, prevUnreadBeforeAdd + 1);
+                  (updatedContact as any).lastClientMsgAt = Date.now();
                 } else {
                   updatedContact.isManuallyUnread = false;
                 }
@@ -7675,36 +7737,82 @@ export const useChatStore = create<ChatState>((set, get) => ({
           console.error('[Realtime] Erro ao sincronizar nova conversa inserida:', err);
         }
       })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'conversations', filter: `tenant_id=eq.${tenantId}` }, (payload) => {
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'conversations', filter: `tenant_id=eq.${tenantId}` }, async (payload) => {
         const conv = payload.new as any;
         console.log('[Realtime] Conversation UPDATE:', conv);
+
+        // RBAC RIGOROSO: Verifica se o usuário tem acesso a esta caixa antes de exibir/atualizar
+        if (conv.instance_id && !hasUserAccessToInstance(conv.instance_id)) {
+          return;
+        }
 
         // 1. Coleta e avalia o status antes do update, fora do set, para decidir se deve disparar o toast
         const currentContacts = get().contacts;
         let shouldToast = false;
         let toastType: 'reopen' | 'snooze' | null = null;
         let contactName = '';
+        let foundMatchingContact = false;
 
         for (const c of currentContacts) {
           const realId = getRealContactId(c.id);
-          const contactInstance = getInstanceIdFromContact(c.id) || c.instance_id || 'default';
+          const contactInstance = (c.id && c.id.includes('_') && c.id.split('_')[1] !== 'default') ? c.id.split('_')[1] : (c.instance_id || 'default');
           const convInstance = conv.instance_id || 'default';
 
           const cUuid = instanceCache.getId(contactInstance) || contactInstance;
           const convUuid = instanceCache.getId(convInstance) || convInstance;
-          const isSameInstance = contactInstance === 'default' || convInstance === 'default' || contactInstance === convInstance || cUuid === convUuid;
+          const isSameInstance = (c.conv_id && conv.id && c.conv_id === conv.id) || contactInstance === 'default' || convInstance === 'default' || contactInstance === convInstance || cUuid === convUuid;
 
           if (realId === conv.contact_id && isSameInstance) {
+            foundMatchingContact = true;
             contactName = c.custom_name || c.name || c.phone;
-            if ((c.conv_status === 'resolved' || c.conv_status === 'closed') && conv.status === 'open') {
+            if ((c.conv_status === 'resolved' || c.conv_status === 'closed') && (conv.status === 'open' || conv.status === 'bot')) {
               shouldToast = true;
               toastType = 'reopen';
               break; // Achou o contato correspondente
-            } else if (c.conv_status === 'snoozed' && conv.status === 'open') {
+            } else if (c.conv_status === 'snoozed' && (conv.status === 'open' || conv.status === 'bot')) {
               shouldToast = true;
               toastType = 'snooze';
               break;
             }
+          }
+        }
+
+        // Se a conversa atualizada pertence a uma caixa que ainda não estava carregada em state.contacts
+        // (ex: usuário está vendo Ronaldo-Web e chega mensagem na FoodNext), busca o contato e insere na store!
+        if (!foundMatchingContact && conv.contact_id) {
+          try {
+            const { data: dbContact } = await supabase.from('contacts').select('*').eq('id', conv.contact_id).maybeSingle();
+            if (dbContact) {
+              const instanceId = conv.instance_id || dbContact.instance_id || 'default';
+              const compositeId = `${dbContact.id}_${instanceId}`;
+              const formattedContact: any = {
+                ...dbContact,
+                id: compositeId,
+                conv_id: conv.id,
+                conv_status: conv.status || 'open',
+                assigned_to: conv.assigned_to,
+                unread: conv.unread_count || 0,
+                is_pinned: conv.is_pinned,
+                is_favorite: conv.is_favorite,
+                snoozed_until: conv.snoozed_until,
+                snoozed_at: conv.snoozed_at,
+                snoozed_by: conv.snoozed_by,
+                instance_id: instanceId,
+                ai_paused: conv.ai_paused,
+                ai_paused_manually: conv.ai_paused_manually,
+                last_message_preview: conv.last_message_preview ?? dbContact.last_message_preview,
+                last_message_at: conv.last_message_at ?? dbContact.last_message_at,
+                lastConvUnreadSyncAt: (conv.unread_count || 0) > 0 ? Date.now() : 0,
+                lastConvUnreadCount: conv.unread_count || 0,
+                lastClientMsgAt: (conv.unread_count || 0) > 0 ? Date.now() : 0,
+                messages: [],
+                lastMsgTimestamp: conv.last_message_at ? new Date(conv.last_message_at).getTime() : Date.now()
+              };
+              get().upsertContactLocally(formattedContact);
+              return;
+            }
+          } catch (err) {
+            console.error('[Realtime] Erro ao buscar contato para Conversation UPDATE:', err);
           }
         }
 
@@ -7733,20 +7841,39 @@ export const useChatStore = create<ChatState>((set, get) => ({
         set((s: any) => {
           const updatedContacts = s.contacts.map((c: any) => {
             const realId = getRealContactId(c.id);
-            const contactInstance = getInstanceIdFromContact(c.id) || c.instance_id || 'default';
+            const contactInstance = (c.id && c.id.includes('_') && c.id.split('_')[1] !== 'default') ? c.id.split('_')[1] : (c.instance_id || 'default');
             const convInstance = conv.instance_id || 'default';
 
             const cUuid = instanceCache.getId(contactInstance) || contactInstance;
             const convUuid = instanceCache.getId(convInstance) || convInstance;
-            const isSameInstance = contactInstance === 'default' || convInstance === 'default' || contactInstance === convInstance || cUuid === convUuid;
+            const isSameInstance = (c.conv_id && conv.id && c.conv_id === conv.id) || contactInstance === 'default' || convInstance === 'default' || contactInstance === convInstance || cUuid === convUuid;
 
             if (realId === conv.contact_id && isSameInstance) {
               const stillManuallyUnread = c.isManuallyUnread && conv.unread_count === 1;
+              const isChatCurrentlyOpen = s.activeChatId === c.id;
+              const recentClientMsgAge = Date.now() - (c.lastClientMsgAt || 0);
+              const isSpuriousZeroUnread = conv.unread_count === 0 && !isChatCurrentlyOpen && (c.unread || 0) > 0 && recentClientMsgAge < 30000 && conv.status !== 'resolved' && conv.status !== 'closed';
+
+              if (isSpuriousZeroUnread && conv.id) {
+                // Restaura unread_count no banco caso um evento secundário do Baileys (chats.update do celular aberto) tenha zerado indevidamente a mensagem recém-chegada no CRM
+                supabase.from('conversations').update({ unread_count: c.unread }).eq('id', conv.id).then(() => {});
+              }
+
+              const nextUnread = isSpuriousZeroUnread
+                ? c.unread
+                : (typeof conv.unread_count === 'number'
+                    ? (conv.unread_count > 0 && !isChatCurrentlyOpen ? Math.max(conv.unread_count, c.unread || 0) : conv.unread_count)
+                    : c.unread);
+
               return {
                 ...c,
-                conv_status: conv.status,
+                conv_id: conv.id || c.conv_id,
+                conv_status: conv.status || c.conv_status,
                 assigned_to: conv.assigned_to,
-                unread: conv.unread_count,
+                unread: nextUnread,
+                lastConvUnreadSyncAt: (conv.unread_count || 0) > 0 ? Date.now() : c.lastConvUnreadSyncAt,
+                lastConvUnreadCount: typeof conv.unread_count === 'number' ? conv.unread_count : c.lastConvUnreadCount,
+                lastClientMsgAt: (conv.unread_count || 0) > (c.unread || 0) ? Date.now() : c.lastClientMsgAt,
                 isManuallyUnread: stillManuallyUnread,
                 is_pinned: conv.is_pinned,
                 is_favorite: conv.is_favorite,
@@ -7756,6 +7883,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 instance_id: conv.instance_id || c.instance_id,
                 ai_paused: conv.ai_paused,
                 ai_paused_manually: conv.ai_paused_manually,
+                last_message_preview: conv.last_message_preview ?? c.last_message_preview,
+                last_message_at: conv.last_message_at ?? c.last_message_at,
                 lastMsgTimestamp: conv.last_message_at ? new Date(conv.last_message_at).getTime() : c.lastMsgTimestamp
               };
             }

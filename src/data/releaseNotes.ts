@@ -20,6 +20,29 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.0.3',
+    date: '2026-11-01',
+    summary: 'Atualização em Tempo Real dos Badges de Mensagens Não Lidas em Todas as Caixas da Sidebar',
+    notes: [
+      {
+        id: '8.0.3-1',
+        category: 'fixes',
+        title: 'Badges em Tempo Real nas Caixas da Barra Lateral (Sem Necessidade de Clicar)',
+        description: 'Corrigida a exibição e atualização instantânea do contador de novas mensagens em todas as caixas de entrada da barra lateral (ex: FoodNext) mesmo quando o atendente está navegando em outra caixa (ex: Ronaldo-Web).',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      },
+      {
+        id: '8.0.3-2',
+        category: 'fixes',
+        title: 'Proteção Contra Sobrescrita de Unread por Eventos Secundários de Contatos',
+        description: 'Impedido que atualizações genéricas da tabela contacts (que carregam unread: 0 legado) ou eventos secundários do WhatsApp apaguem o badge de não lida de conversas recém-recebidas e reabertas.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      }
+    ]
+  },
+  {
     version: '8.0.2',
     date: '2026-11-01',
     summary: 'Isolamento Estrito de Caixa no Envio de Mensagens e Resolução de Contatos Multi-Caixa',
