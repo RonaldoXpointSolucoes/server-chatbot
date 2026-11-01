@@ -434,6 +434,89 @@ export const resolveInstanceUuid = async (tenantId: string, identifier: string |
   return null;
 };
 
+export const findContactByIdAndInstance = (
+  contacts: any[],
+  contactId: string | null | undefined,
+  preferredInstance?: string | null
+) => {
+  if (!contactId || !Array.isArray(contacts)) return undefined;
+  // 1. Prioridade absoluta: match exato de ID (incluindo sufixo _instanceId) ou conv_id
+  const exact = contacts.find(c => c.id === contactId || (c.conv_id && c.conv_id === contactId));
+  if (exact) return exact;
+
+  const realId = getRealContactId(contactId);
+  const instFromId = getInstanceIdFromContact(contactId);
+  const targetInst = (instFromId && instFromId !== 'default' && instFromId !== 'all' ? instFromId : null) ||
+    (preferredInstance && preferredInstance !== 'all' && preferredInstance !== 'default' ? preferredInstance : null);
+  const resolvedTargetInst = targetInst ? (instanceCache.getId(targetInst) || targetInst) : null;
+
+  // 2. Segunda prioridade: match por realContactId E mesma instância (caixa)
+  if (resolvedTargetInst) {
+    const byInstance = contacts.find(c => {
+      if (!c?.id || getRealContactId(c.id) !== realId) return false;
+      const cInst = getInstanceIdFromContact(c.id) || c.instance_id;
+      const resolvedCInst = cInst ? (instanceCache.getId(cInst) || cInst) : null;
+      return resolvedCInst === resolvedTargetInst || cInst === targetInst;
+    });
+    if (byInstance) return byInstance;
+  }
+
+  // 3. Fallback: apenas se não houver instância específica ou nenhuma entrada daquela caixa existir ainda
+  return contacts.find(c => c?.id && getRealContactId(c.id) === realId);
+};
+
+export const isContactMatchingTarget = (
+  c: any,
+  contactId: string | null | undefined,
+  preferredInstance?: string | null
+): boolean => {
+  if (!c || !contactId) return false;
+  if (c.id === contactId || (c.conv_id && c.conv_id === contactId)) return true;
+
+  const realId = getRealContactId(contactId);
+  if (!c.id || getRealContactId(c.id) !== realId) return false;
+
+  const instFromId = getInstanceIdFromContact(contactId);
+  const targetInst = (instFromId && instFromId !== 'default' && instFromId !== 'all' ? instFromId : null) ||
+    (preferredInstance && preferredInstance !== 'all' && preferredInstance !== 'default' ? preferredInstance : null);
+  if (!targetInst) return true;
+
+  const resolvedTargetInst = instanceCache.getId(targetInst) || targetInst;
+  const cInst = getInstanceIdFromContact(c.id) || c.instance_id;
+  if (!cInst || cInst === 'default') return true;
+  const resolvedCInst = instanceCache.getId(cInst) || cInst;
+  return resolvedCInst === resolvedTargetInst || cInst === targetInst;
+};
+
+export const resolveStrictOutboundInstance = (
+  contactId: string | null | undefined,
+  instanceName: string | null | undefined,
+  activeChannelFilter: string | null | undefined,
+  contact: any,
+  connectedInstanceName: string | null | undefined
+): { expectedInstance: string | null; finalTargetInstance: string | null } => {
+  const fromContactId = getInstanceIdFromContact(contactId);
+  const validFromContactId = fromContactId && fromContactId !== 'default' && fromContactId !== 'all' ? fromContactId : null;
+  const validInstanceName = instanceName && instanceName !== 'default' && instanceName !== 'all' ? instanceName : null;
+  const validActiveFilter = activeChannelFilter && activeChannelFilter !== 'default' && activeChannelFilter !== 'all' ? activeChannelFilter : null;
+
+  const exactContactComposite = contact && (contact.id === contactId || (contact.conv_id && contact.conv_id === contactId))
+    ? getInstanceIdFromContact(contact.id)
+    : null;
+  const validExactComposite = exactContactComposite && exactContactComposite !== 'default' && exactContactComposite !== 'all'
+    ? exactContactComposite
+    : null;
+
+  const validContactInstance = contact?.instance_id && contact.instance_id !== 'default' && contact.instance_id !== 'all'
+    ? contact.instance_id
+    : null;
+
+  const expectedInstance = validFromContactId || validInstanceName || validActiveFilter || validExactComposite || validContactInstance || null;
+  const finalTargetInstance = expectedInstance || connectedInstanceName || null;
+
+  return { expectedInstance, finalTargetInstance };
+};
+
 export const hasUserAccessToInstance = (sessionId: string | null | undefined): boolean => {
   if (!sessionId || sessionId === 'default' || sessionId === 'all') return true;
 
@@ -1614,7 +1697,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
 
       const realContactId = getRealContactId(contactId);
-      const instId = getInstanceIdFromContact(contactId);
+      const instId = getInstanceIdFromContact(contactId) || (get().activeChannelFilter !== 'all' ? get().activeChannelFilter : null);
       const resolvedInstId = await resolveInstanceUuid(tenantInfo.id, instId);
 
       const { data: convs } = await supabase
@@ -1624,8 +1707,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
         .eq('tenant_id', tenantInfo.id)
         .order('last_message_at', { ascending: false });
 
-      const conv = convs && convs.length > 0 ? convs[0] : null;
-      const allConvIds = convs ? convs.map(c => c.id) : [];
+      const matchingConvs = resolvedInstId && convs?.some(c => c.instance_id === resolvedInstId)
+        ? convs.filter(c => c.instance_id === resolvedInstId)
+        : (convs || []);
+      const conv = matchingConvs.length > 0 ? matchingConvs[0] : null;
+      const allConvIds = matchingConvs.map(c => c.id);
 
       if (conv) {
         // 1. Inserir a mensagem interna System de reabertura
@@ -1653,10 +1739,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
       }
 
-      const targetContact = get().contacts.find(c => getRealContactId(c.id) === realContactId);
+      const targetContact = findContactByIdAndInstance(get().contacts, contactId, resolvedInstId);
       const isDefinitivelyPaused = targetContact?.bot_status === 'paused' || (targetContact?.ai_paused_manually && !targetContact?.bot_paused_until);
 
-      // 2. Atualiza no Supabase status para 'open' em TODAS as conversas do contato, preservando ai_paused caso esteja pausado definitivamente
+      // 2. Atualiza no Supabase status para 'open' nas conversas correspondentes à caixa, preservando ai_paused caso esteja pausado definitivamente
       if (allConvIds.length > 0) {
         const updatePayload: any = { status: 'open' };
         if (isDefinitivelyPaused) {
@@ -1666,9 +1752,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         await supabase.from('conversations').update(updatePayload).in('id', allConvIds);
       }
 
-      // 3. Atualização local de TODOS os registros de contato correspondentes ao realContactId para 'open'
+      // 3. Atualização local dos registros de contato correspondentes para 'open'
       set((state) => ({
-        contacts: state.contacts.map((c) => getRealContactId(c.id) === realContactId ? {
+        contacts: state.contacts.map((c) => isContactMatchingTarget(c, contactId, resolvedInstId) ? {
           ...c,
           conv_status: 'open',
           ai_paused: isDefinitivelyPaused ? true : c.ai_paused,
@@ -2131,12 +2217,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setActiveChat: (id) => {
     set({ activeChatId: id });
     if (id) {
-      // Hidratação instantânea da memória local (0ms) se houver cache de mensagens prévio
-      const cachedMsgs = messagesMemoryCache.get(id) || messagesMemoryCache.get(getRealContactId(id));
+      // Hidratação instantânea da memória local (0ms) se houver cache de mensagens prévio daquela caixa específica
+      const hasCompositeInst = id.includes('_') && !id.endsWith('_default');
+      const cachedMsgs = messagesMemoryCache.get(id) || (!hasCompositeInst ? messagesMemoryCache.get(getRealContactId(id)) : undefined);
       if (cachedMsgs && cachedMsgs.length > 0) {
         set((s) => {
           const updated = [...s.contacts];
-          const idx = updated.findIndex(c => c.id === id || c.conv_id === id || (c.id && getRealContactId(c.id) === getRealContactId(id)));
+          let idx = updated.findIndex(c => c.id === id || c.conv_id === id);
+          if (idx === -1 && !hasCompositeInst) {
+            idx = updated.findIndex(c => c.id && getRealContactId(c.id) === getRealContactId(id));
+          }
           if (idx !== -1 && (!updated[idx].messages || updated[idx].messages.length === 0)) {
             updated[idx] = { ...updated[idx], messages: cachedMsgs };
             return { contacts: updated };
@@ -2534,7 +2624,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     console.log("[sendHumanMessage] Called with:", { contactId, text, instanceName });
     const state = get();
     const realContactId = getRealContactId(contactId);
-    const contact = state.contacts.find(c => c.id === contactId || c.conv_id === contactId || (c.id && getRealContactId(c.id) === realContactId));
+    const contact = findContactByIdAndInstance(state.contacts, contactId, instanceName || state.activeChannelFilter);
     if (!contact) {
       console.warn("[sendHumanMessage] Contact not found in store!", contactId);
       return;
@@ -2613,21 +2703,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
 
     try {
-      // RESOLUÇÃO DE FALHA GRAVE DE SEGURANÇA: Extrai com 100% de segurança a instância vinculada ao contato
-      const compositeInstance = contact.id && typeof contact.id === 'string' && contact.id.includes('_') ? contact.id.split('_')[1] : null;
-      const expectedInstance = compositeInstance || contact.instance_id;
-      const finalTargetInstance = expectedInstance || instanceName || state.connectedInstanceName;
+      // RESOLUÇÃO DE FALHA GRAVE DE SEGURANÇA: Extrai com 100% de segurança a instância vinculada ao contato/caixa ativa
+      const { expectedInstance, finalTargetInstance } = resolveStrictOutboundInstance(
+        contactId,
+        instanceName,
+        state.activeChannelFilter,
+        contact,
+        state.connectedInstanceName
+      );
 
-      const resolvedInstanceId = await resolveInstanceUuid(state.tenantInfo?.id || '', finalTargetInstance);
+      const resolvedInstanceIdRaw = await resolveInstanceUuid(state.tenantInfo?.id || '', finalTargetInstance);
       const resolvedExpectedInstance = await resolveInstanceUuid(state.tenantInfo?.id || '', expectedInstance);
+      const resolvedInstanceId = resolvedExpectedInstance || resolvedInstanceIdRaw;
 
       if (!resolvedInstanceId) {
         throw new Error('Instância do WhatsApp não configurada ou não encontrada para envio.');
       }
 
       // VALIDAÇÃO IMPETRANTE DE SEGURANÇA: Bloqueia vazamentos forçando a instância estrita da conversa aberta
-      if (resolvedExpectedInstance && resolvedInstanceId !== resolvedExpectedInstance) {
-        console.warn(`[Security Guard] Bloqueada tentativa de envio por canal incorreto! Esperado: ${resolvedExpectedInstance}, Recebido: ${resolvedInstanceId}. Forçando canal da conversa.`);
+      if (resolvedExpectedInstance && resolvedInstanceIdRaw && resolvedInstanceIdRaw !== resolvedExpectedInstance) {
+        console.warn(`[Security Guard] Bloqueada tentativa de envio por canal incorreto! Esperado: ${resolvedExpectedInstance}, Recebido: ${resolvedInstanceIdRaw}. Forçando canal da conversa.`);
       }
 
       // Verifica a conexão da instância específica da conversa: bloqueia apenas se explicitamente offline
@@ -2661,7 +2756,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const officialMsgId = res.result?.key?.id || res.key?.id;
         set((s) => ({
           contacts: s.contacts.map(c => {
-            if (c.id === contactId || c.conv_id === contactId || (c.id && getRealContactId(c.id) === realContactId)) {
+            if (isContactMatchingTarget(c, contactId, resolvedInstanceId)) {
               return {
                 ...c,
                 messages: c.messages.map(m => (m.id === pseudoId || m.pseudoId === pseudoId || (officialMsgId && m.whatsapp_id === officialMsgId)) ? {
@@ -2742,7 +2837,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // Atualiza a mensagem na UI com ID do outbox e status 'sent' para dar feedback imediato positivo (1 check)
             set((s) => ({
               contacts: s.contacts.map(c => {
-                if (c.id === contactId || c.conv_id === contactId || (c.id && getRealContactId(c.id) === realContactId)) {
+                if (isContactMatchingTarget(c, contactId, resolvedInstanceId)) {
                   return {
                     ...c,
                     messages: c.messages.map(m => (m.id === pseudoId || m.pseudoId === pseudoId) ? {
@@ -2809,7 +2904,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   shareContactMessage: async (contactId, selectedContact, instanceName) => {
     console.log("[shareContactMessage] Called with:", { contactId, selectedContact, instanceName });
     const state = get();
-    const contact = state.contacts.find(c => c.id === contactId);
+    const contact = findContactByIdAndInstance(state.contacts, contactId, instanceName || state.activeChannelFilter);
     if (!contact) {
       console.warn("[shareContactMessage] Contact not found in store!", contactId);
       return;
@@ -2835,9 +2930,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
 
     try {
-      const compositeInstance = contact.id && typeof contact.id === 'string' && contact.id.includes('_') ? contact.id.split('_')[1] : null;
-      const expectedInstance = compositeInstance || contact.instance_id;
-      const finalTargetInstance = expectedInstance || instanceName || state.connectedInstanceName;
+      const { finalTargetInstance } = resolveStrictOutboundInstance(
+        contactId,
+        instanceName,
+        state.activeChannelFilter,
+        contact,
+        state.connectedInstanceName
+      );
 
       const resolvedInstanceId = await resolveInstanceUuid(state.tenantInfo?.id || '', finalTargetInstance);
 
@@ -2861,7 +2960,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       set((s) => ({
         contacts: s.contacts.map(c => {
-          if (c.id === contactId || (c.id && getRealContactId(c.id) === getRealContactId(contactId))) {
+          if (isContactMatchingTarget(c, contactId, resolvedInstanceId)) {
             return {
               ...c,
               messages: c.messages.map(m => (m.id === pseudoId || m.pseudoId === pseudoId) ? { ...m, status: 'sent' } : m)
@@ -2884,12 +2983,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   sendPresenceUpdate: async (contactId, presence, instanceName) => {
     const state = get();
-    const contact = state.contacts.find(c => c.id === contactId);
+    const contact = findContactByIdAndInstance(state.contacts, contactId, instanceName || state.activeChannelFilter);
     if (!contact || !state.tenantInfo) return;
 
-    const compositeInstance = contact.id && typeof contact.id === 'string' && contact.id.includes('_') ? contact.id.split('_')[1] : null;
-    const expectedInstance = compositeInstance || contact.instance_id;
-    const finalTargetInstance = expectedInstance || instanceName || state.connectedInstanceName;
+    const { finalTargetInstance } = resolveStrictOutboundInstance(
+      contactId,
+      instanceName,
+      state.activeChannelFilter,
+      contact,
+      state.connectedInstanceName
+    );
 
     try {
       const resolvedInstanceId = await resolveInstanceUuid(state.tenantInfo.id, finalTargetInstance);
@@ -2912,15 +3015,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   editHumanMessage: async (contactId, messageId, newText, instanceName) => {
     const state = get();
-    const resolvedInstanceId = await resolveInstanceUuid(state.tenantInfo?.id || '', instanceName);
+    const preferredInst = getInstanceIdFromContact(contactId) || instanceName || state.activeChannelFilter;
+    const contact = findContactByIdAndInstance(state.contacts, contactId, preferredInst);
+    if (!contact || !state.tenantInfo) return;
+
+    const finalTargetInstance = resolveStrictOutboundInstance(
+      contactId,
+      instanceName,
+      state.activeChannelFilter,
+      contact,
+      state.connectedInstanceName
+    );
+    const resolvedInstanceId = await resolveInstanceUuid(state.tenantInfo.id, finalTargetInstance);
 
     if (!resolvedInstanceId || !state.instancesStatus[resolvedInstanceId] || (state.instancesStatus[resolvedInstanceId] !== 'connected' && state.instancesStatus[resolvedInstanceId] !== 'connected_local')) {
       set({ modalReason: 'A instância do WhatsApp atrelada a esta conversa está offline. Por favor, reconecte para editar mensagens.' });
       return;
     }
-
-    const contact = state.contacts.find(c => c.id === contactId);
-    if (!contact || !state.tenantInfo) return;
 
     const msgToEdit = contact.messages.find(m => m.id === messageId || m.whatsapp_id === messageId);
     if (!msgToEdit || (!msgToEdit.whatsapp_id && !isValidUuid(messageId))) {
@@ -2984,7 +3095,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // Update Local State Optimistically
       set((s) => ({
         contacts: s.contacts.map(c => {
-          if (c.id === contactId) {
+          if (isContactMatchingTarget(c, contactId, resolvedInstanceId || preferredInst)) {
             return {
               ...c,
               messages: c.messages.map(m => (m.id === messageId || (nativeWaId && m.whatsapp_id === nativeWaId)) ? {
@@ -3007,15 +3118,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   deleteHumanMessage: async (contactId, messageId, instanceName) => {
     const state = get();
-    const resolvedInstanceId = await resolveInstanceUuid(state.tenantInfo?.id || '', instanceName);
+    const preferredInst = getInstanceIdFromContact(contactId) || instanceName || state.activeChannelFilter;
+    const contact = findContactByIdAndInstance(state.contacts, contactId, preferredInst);
+    if (!contact || !state.tenantInfo) return;
+
+    const finalTargetInstance = resolveStrictOutboundInstance(
+      contactId,
+      instanceName,
+      state.activeChannelFilter,
+      contact,
+      state.connectedInstanceName
+    );
+    const resolvedInstanceId = await resolveInstanceUuid(state.tenantInfo.id, finalTargetInstance);
 
     if (!resolvedInstanceId || !state.instancesStatus[resolvedInstanceId] || (state.instancesStatus[resolvedInstanceId] !== 'connected' && state.instancesStatus[resolvedInstanceId] !== 'connected_local')) {
       set({ modalReason: 'A instância do WhatsApp atrelada a esta conversa está offline. Por favor, reconecte para apagar mensagens.' });
       return;
     }
-
-    const contact = state.contacts.find(c => c.id === contactId);
-    if (!contact || !state.tenantInfo) return;
 
     const msgToDelete = contact.messages.find(m => m.id === messageId);
     if (!msgToDelete) return;
@@ -3024,7 +3143,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // Mensagem otimista: apenas define status deletado localmente sem tentar DB
       set((s) => ({
         contacts: s.contacts.map(c => {
-          if (c.id === contactId) {
+          if (isContactMatchingTarget(c, contactId, resolvedInstanceId || preferredInst)) {
             return {
               ...c,
               messages: c.messages.map(m => m.id === messageId ? {
@@ -3050,7 +3169,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // Atualização otimista imediata do estado local
     set((s) => ({
       contacts: s.contacts.map(c => {
-        if (c.id === contactId) {
+        if (isContactMatchingTarget(c, contactId, resolvedInstanceId || preferredInst)) {
           return {
             ...c,
             messages: c.messages.map(m => m.id === messageId ? {
@@ -3105,7 +3224,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // Reversão para o status original em caso de erro nas chamadas assíncronas
       set((s) => ({
         contacts: s.contacts.map(c => {
-          if (c.id === contactId) {
+          if (isContactMatchingTarget(c, contactId, resolvedInstanceId || preferredInst)) {
             return {
               ...c,
               messages: c.messages.map(m => m.id === messageId ? {
@@ -3124,21 +3243,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   uploadAndSendMedia: async (contactId, file, mediaType, instanceName, isPtt, caption) => {
     const state = get();
-    const contact = state.contacts.find(c => c.id === contactId);
+    const preferredInst = getInstanceIdFromContact(contactId) || instanceName || state.activeChannelFilter;
+    const contact = findContactByIdAndInstance(state.contacts, contactId, preferredInst);
     if (!contact || !state.tenantInfo) return;
 
-    // RESOLUÇÃO DE FALHA GRAVE DE SEGURANÇA: Extrai com 100% de segurança a instância vinculada ao contato
-    const compositeInstance = contact.id && typeof contact.id === 'string' && contact.id.includes('_') ? contact.id.split('_')[1] : null;
-    const expectedInstance = compositeInstance || contact.instance_id;
-    const finalTargetInstance = expectedInstance || instanceName || state.connectedInstanceName;
-
+    // RESOLUÇÃO DE FALHA GRAVE DE SEGURANÇA: Extrai com 100% de segurança a instância vinculada ao contato e à caixa ativa
+    const finalTargetInstance = resolveStrictOutboundInstance(
+      contactId,
+      instanceName,
+      state.activeChannelFilter,
+      contact,
+      state.connectedInstanceName
+    );
     const resolvedInstanceId = await resolveInstanceUuid(state.tenantInfo.id, finalTargetInstance);
-    const resolvedExpectedInstance = await resolveInstanceUuid(state.tenantInfo.id, expectedInstance);
-
-    // VALIDAÇÃO IMPETRANTE DE SEGURANÇA: Bloqueia vazamentos forçando a instância estrita da conversa aberta
-    if (resolvedExpectedInstance && resolvedInstanceId !== resolvedExpectedInstance) {
-      console.warn(`[Security Guard - Media] Bloqueada tentativa de envio por canal incorreto! Esperado: ${resolvedExpectedInstance}, Recebido: ${resolvedInstanceId}. Forçando canal da conversa.`);
-    }
 
     if (!resolvedInstanceId || !state.instancesStatus[resolvedInstanceId] || (state.instancesStatus[resolvedInstanceId] !== 'connected' && state.instancesStatus[resolvedInstanceId] !== 'connected_local')) {
       set({ modalReason: 'A instância do WhatsApp está offline. Por favor, reconecte para enviar arquivos.' });
@@ -3262,7 +3379,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (data.media_url || (data.result?.key?.id)) {
         const mediaMsgId = data.result?.key?.id;
         set((s) => ({
-          contacts: s.contacts.map(c => (c.id === contactId || (c.id && getRealContactId(c.id) === getRealContactId(contactId))) ? {
+          contacts: s.contacts.map(c => isContactMatchingTarget(c, contactId, resolvedInstanceId || preferredInst) ? {
             ...c,
             // Procura o pseudoId, substitui a url temporaria e adiciona o whatsapp_id correspondente
             messages: c.messages.map(m => (m.id === pseudoId || m.pseudoId === pseudoId) ? {
@@ -3322,7 +3439,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   sendMediaFromUrl: async (contactId, mediaUrl, mediaType, instanceName, caption, fileName, responseType) => {
     const state = get();
-    const contact = state.contacts.find(c => c.id === contactId);
+    const preferredInst = getInstanceIdFromContact(contactId) || instanceName || state.activeChannelFilter;
+    const contact = findContactByIdAndInstance(state.contacts, contactId, preferredInst);
     if (!contact || !state.tenantInfo) return;
 
     // Injeção Mágica de Assinatura Síncrona na mídia para evitar atrasos na UI
@@ -3409,18 +3527,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
 
     try {
-      // RESOLUÇÃO DE FALHA GRAVE DE SEGURANÇA: Extrai com 100% de segurança a instância vinculada ao contato
-      const compositeInstance = contact.id && typeof contact.id === 'string' && contact.id.includes('_') ? contact.id.split('_')[1] : null;
-      const expectedInstance = compositeInstance || contact.instance_id;
-      const finalTargetInstance = expectedInstance || instanceName || state.connectedInstanceName;
-
+      // RESOLUÇÃO DE FALHA GRAVE DE SEGURANÇA: Extrai com 100% de segurança a instância vinculada ao contato e à caixa ativa
+      const finalTargetInstance = resolveStrictOutboundInstance(
+        contactId,
+        instanceName,
+        state.activeChannelFilter,
+        contact,
+        state.connectedInstanceName
+      );
       const resolvedInstanceId = await resolveInstanceUuid(state.tenantInfo.id, finalTargetInstance);
-      const resolvedExpectedInstance = await resolveInstanceUuid(state.tenantInfo.id, expectedInstance);
-
-      // VALIDAÇÃO IMPETRANTE DE SEGURANÇA: Bloqueia vazamentos forçando a instância estrita da conversa aberta
-      if (resolvedExpectedInstance && resolvedInstanceId !== resolvedExpectedInstance) {
-        console.warn(`[Security Guard - Canned Media] Bloqueada tentativa de envio por canal incorreto! Esperado: ${resolvedExpectedInstance}, Recebido: ${resolvedInstanceId}. Forçando canal da conversa.`);
-      }
 
       if (!resolvedInstanceId || !state.instancesStatus[resolvedInstanceId] || (state.instancesStatus[resolvedInstanceId] !== 'connected' && state.instancesStatus[resolvedInstanceId] !== 'connected_local')) {
         set({ modalReason: 'A instância do WhatsApp está offline. Por favor, reconecte para enviar mídias.' });
@@ -3483,7 +3598,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (data && (data.media_url || (data.result?.key?.id))) {
         const officialMsgId = data.result?.key?.id;
         set((s) => ({
-          contacts: s.contacts.map(c => c.id === contactId ? {
+          contacts: s.contacts.map(c => isContactMatchingTarget(c, contactId, resolvedInstanceId || preferredInst) ? {
             ...c,
             messages: c.messages.map(m => (m.id === pseudoId || m.pseudoId === pseudoId || (officialMsgId && m.whatsapp_id === officialMsgId)) ? {
               ...m,
@@ -3520,7 +3635,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           if (!outboxErr && outboxMsg) {
             const mockId = `EDGE_${outboxMsg.id.replace(/-/g, '')}`;
             set((s) => ({
-              contacts: s.contacts.map(c => c.id === contactId ? {
+              contacts: s.contacts.map(c => isContactMatchingTarget(c, contactId, resolvedInstanceId || preferredInst) ? {
                 ...c,
                 messages: c.messages.map(m => (m.id === pseudoId || m.pseudoId === pseudoId) ? {
                   ...m,
@@ -3845,8 +3960,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     [2500, 6000].forEach((delay) => {
       setTimeout(async () => {
         try {
-          const currentContacts = get().contacts;
-          const contact = currentContacts.find(c => c.id === contactId || c.conv_id === contactId || (c.id && getRealContactId(c.id) === getRealContactId(contactId)));
+          const currentState = get();
+          const preferredInst = getInstanceIdFromContact(contactId) || currentState.activeChannelFilter;
+          const contact = findContactByIdAndInstance(currentState.contacts, contactId, preferredInst);
           if (!contact) return;
 
           const msg = contact.messages?.find(m => 
@@ -3897,11 +4013,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     // 1. Avalia se precisa acordar (Wake Up) a conversa antes do set
     const currentState = get();
-    const targetContact = currentState.contacts.find(c => 
-      c.id === contactId ||
-      (c.conv_id && msg.conversation_id && c.conv_id === msg.conversation_id) ||
-      (rawTargetId && getRealContactId(c.id) === rawTargetId && (!targetInstance || targetInstance === 'default' || c.instance_id === targetInstance))
-    );
+    const targetContact = findContactByIdAndInstance(currentState.contacts, contactId, targetInstance) ||
+      currentState.contacts.find(c => Boolean(c.conv_id && msg.conversation_id && c.conv_id === msg.conversation_id));
     let shouldWakeUp = false;
 
     const isAiPaused = targetContact ? (targetContact.ai_paused === true || targetContact.bot_status === 'paused') : false;
@@ -3921,7 +4034,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       contacts: state.contacts.map((c) => {
         const isMatch = c.id === contactId ||
           Boolean(c.conv_id && msg.conversation_id && c.conv_id === msg.conversation_id) ||
-          Boolean(rawTargetId && getRealContactId(c.id) === rawTargetId && (!targetInstance || targetInstance === 'default' || c.instance_id === targetInstance));
+          Boolean(rawTargetId && getRealContactId(c.id) === rawTargetId && (!targetInstance || targetInstance === 'default' || getInstanceIdFromContact(c.id) === targetInstance || c.instance_id === targetInstance));
 
         if (isMatch) {
           let updatedStatus = c.conv_status;
@@ -4139,13 +4252,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // 1. Resolvemos os dois principais identificadores unicos independentes (JID ou Telefone Formatado/Puro)
       const contactPhoneMatch = contact.phone || (contact.whatsapp_jid ? contact.whatsapp_jid.split('@')[0] : null);
       const realContactId = getRealContactId(contact.id);
+      const isCompositePayload = String(contact.id || '').includes('_') || Boolean(contact.conv_id);
 
       let foundAny = false;
       const updatedContacts = state.contacts.map((c) => {
         const cRealId = getRealContactId(c.id);
-        const cInst = c.instance_id || (c.id.includes('_') ? c.id.split('_')[1] : null);
-        const targetInst = contact.instance_id || (contact.id.includes('_') ? contact.id.split('_')[1] : null);
-        const sameInst = !cInst || !targetInst || cInst === 'default' || targetInst === 'default' || cInst === targetInst;
+        const cCompositeInst = (c.id && c.id.includes('_') && c.id.split('_')[1] !== 'default') ? c.id.split('_')[1] : null;
+        const cInst = cCompositeInst || c.instance_id;
+        const targetInst = (contact.id && contact.id.includes('_') && contact.id.split('_')[1] !== 'default')
+          ? contact.id.split('_')[1]
+          : contact.instance_id;
+        // Se for um UPDATE genérico da tabela `contacts` (sem ID composto e sem conv_id), atualiza os metadados do contato
+        // em todas as caixas existentes dele, MAS preservando estritamente o `instance_id` de cada caixa!
+        const sameInst = !isCompositePayload || !cInst || !targetInst || cInst === 'default' || targetInst === 'default' || cInst === targetInst;
 
         const isMatch = sameInst && (
           cRealId === realContactId ||
@@ -4160,9 +4279,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           const isNewTemp = contact.id.includes('temp-');
 
           const baseId = (!isExistingTemp) ? getRealContactId(c.id) : (!isNewTemp ? getRealContactId(contact.id) : c.id);
-          // Preserva o composite ID original daquela caixa (priorizando a instância informada)
-          const effectiveInstanceId = contact.instance_id || c.instance_id || 'default';
-          const finalId = c.id.includes('_') ? c.id : (baseId.includes('temp-') ? baseId : `${baseId}_${effectiveInstanceId}`);
+          // Preserva o composite ID e a instância original daquela caixa (NUNCA deixa `contacts.instance_id` sobrescrever outra caixa)
+          const preservedBoxInstanceId = cCompositeInst || c.instance_id || contact.instance_id || 'default';
+          const finalId = c.id.includes('_') ? c.id : (baseId.includes('temp-') ? baseId : `${baseId}_${preservedBoxInstanceId}`);
 
           const finalCustomName = c.custom_name || contact.custom_name;
           const fallbackName = c.name !== c.phone && c.name ? c.name : contact.name;
@@ -4181,6 +4300,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             ...c,
             ...contact,
             id: finalId,
+            instance_id: preservedBoxInstanceId !== 'default' ? preservedBoxInstanceId : (contact.instance_id || c.instance_id || null),
             custom_name: finalCustomName,
             name: finalName,
             avatar: contact.profile_picture_url || contact.avatar || c.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(finalName || contactPhoneMatch || 'U')}&background=random&color=fff`,
@@ -4267,7 +4387,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     }
 
-    const currentState = get().contacts.find(c => c.id === contactId);
+    const currentState = findContactByIdAndInstance(get().contacts, contactId, getInstanceIdFromContact(contactId) || get().activeChannelFilter);
     const beforeState = currentState ? { ...currentState } : null;
 
     // UI Otimista: atualiza todas as caixas/conversas correspondentes a este contato no state
@@ -4344,17 +4464,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (agent && agent.full_name) agentName = agent.full_name;
       }
 
-      // Descobre todas as conversas vinculadas ao contato para update de Status/Assigned_to e Insert de Message
+      // Descobre as conversas vinculadas ao contato naquela caixa específica para update de Status/Assigned_to e Insert de Message
       const realContactId = getRealContactId(contactId);
-      const instId = getInstanceIdFromContact(contactId);
+      const instId = getInstanceIdFromContact(contactId) || get().activeChannelFilter;
       const resolvedInstId = await resolveInstanceUuid(tenantInfo.id, instId);
 
-      const { data: convs } = await supabase
+      let convsQuery = supabase
         .from('conversations')
-        .select('id, instance_id')
+        .select('id, instance_id, last_message_at')
         .eq('contact_id', realContactId)
-        .eq('tenant_id', tenantInfo.id)
-        .order('last_message_at', { ascending: false });
+        .eq('tenant_id', tenantInfo.id);
+      if (resolvedInstId) {
+        convsQuery = convsQuery.eq('instance_id', resolvedInstId);
+      }
+      const { data: convs } = await convsQuery.order('last_message_at', { ascending: false });
 
       const conv = convs && convs.length > 0 ? convs[0] : null;
       const allConvIds = convs ? convs.map(c => c.id) : [];
@@ -4385,7 +4508,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
       }
 
-      const targetContact = get().contacts.find(c => getRealContactId(c.id) === realContactId);
+      const targetContact = findContactByIdAndInstance(get().contacts, contactId, resolvedInstId || instId);
 
       // Verifica se o contato estava pausado definitivamente por tempo indeterminado
       const isDefinitivelyPaused = targetContact?.bot_status === 'paused' || (targetContact?.ai_paused_manually && !targetContact?.bot_paused_until);
@@ -4410,7 +4533,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         })
         .eq('id', realContactId);
 
-      // 3. Remove o assignment e altera status para 'resolved' em TODAS as conversas do contato
+      // 3. Remove o assignment e altera status para 'resolved' nas conversas da caixa correspondente
       if (allConvIds.length > 0) {
         await supabase.from('conversations').update({
           assigned_to: null,
@@ -4464,9 +4587,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         console.error('Erro ao sincronizar chat_tickets:', err);
       }
 
-      // 4. Atualização local do estado para TODOS os cards do contato sumirem da lista e fechar o chat ativo
+      // 4. Atualização local do estado apenas para o card da caixa alvo e fechar o chat ativo
       set((state) => ({
-        contacts: state.contacts.map((c) => getRealContactId(c.id) === realContactId ? {
+        contacts: state.contacts.map((c) => isContactMatchingTarget(c, contactId, resolvedInstId || instId) ? {
           ...c,
           assigned_to: null,
           conv_status: 'resolved',
@@ -4478,7 +4601,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           snoozed_at: null,
           snoozed_by: null
         } : c),
-        activeChatId: (state.activeChatId && getRealContactId(state.activeChatId) === realContactId) ? null : state.activeChatId
+        activeChatId: (state.activeChatId === contactId || ( !resolvedInstId && state.activeChatId && getRealContactId(state.activeChatId) === realContactId)) ? null : state.activeChatId
       }));
 
     } catch (e) {
@@ -5640,11 +5763,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           targetInstanceId = instanceCache.getId(activeFilter) || (await resolveInstanceUuid(tenant.id, activeFilter)) || activeFilter;
         }
 
-        const activeContactObj = get().contacts.find(c =>
-          c.id === contactId ||
-          (c.conv_id && c.conv_id === contactId) ||
-          (c.id && getRealContactId(c.id) === realContactId && (!targetInstanceId || targetInstanceId === 'default' || c.instance_id === targetInstanceId))
-        ) || get().contacts.find(c => c.id === contactId || (c.conv_id && c.conv_id === contactId));
+        const activeContactObj = findContactByIdAndInstance(get().contacts, contactId, targetInstanceId);
 
         if (!targetInstanceId && activeContactObj?.instance_id) {
           targetInstanceId = activeContactObj.instance_id;
@@ -5652,7 +5771,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const hasValidInstanceId = targetInstanceId && isUuid(targetInstanceId);
 
         // Se knownConvId pertence a outra instância que não a alvo, ignora-o
-        const isConvSameInstance = !hasValidInstanceId || !activeContactObj?.instance_id || activeContactObj.instance_id === targetInstanceId;
+        const activeContactInst = getInstanceIdFromContact(activeContactObj?.id || '') || activeContactObj?.instance_id;
+        const isConvSameInstance = !hasValidInstanceId || !activeContactInst || activeContactInst === targetInstanceId;
         const knownConvId = isConvSameInstance ? activeContactObj?.conv_id : null;
 
         // Hidratação imediata da RAM (0ms) se houver mensagens em cache e o contato estiver sem mensagens

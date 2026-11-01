@@ -20,6 +20,29 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.0.2',
+    date: '2026-11-01',
+    summary: 'Isolamento Estrito de Caixa no Envio de Mensagens e Resolução de Contatos Multi-Caixa',
+    notes: [
+      {
+        id: '8.0.2-1',
+        category: 'fixes',
+        title: 'Isolamento Estrito da Caixa Selecionada no Envio de Mensagens e Mídias',
+        description: 'Corrigida a resolução de contato e instância em conversas presentes em múltiplas caixas (ex: Ronaldo-Web e Suporte X-Point), garantindo que a busca priorize o ID composto exato (contactId_instanceId) e envie 100% pela caixa selecionada.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      },
+      {
+        id: '8.0.2-2',
+        category: 'fixes',
+        title: 'Preservação de Instância por Caixa em Atualizações Realtime',
+        description: 'Blindado o estado local de contatos compostos contra sobrescrita de instance_id quando o mesmo número interage simultaneamente com outra caixa da empresa.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      }
+    ]
+  },
+  {
     version: '8.0.1',
     date: '2026-11-01',
     summary: 'Correção de Geração de Novo QR Code, Reset de Sessão do Zero e Proxy Cross-Worker de Conexão',

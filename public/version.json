@@ -1,5 +1,5 @@
 {
-  "version": "8.0.1",
-  "buildDate": "2026-11-01T13:17:00.000Z",
-  "summary": "Correção de Geração de Novo QR Code, Reset de Sessão do Zero e Proxy Cross-Worker de Conexão"
+  "version": "8.0.2",
+  "buildDate": "2026-11-01T14:41:01.332Z",
+  "summary": "Isolamento Estrito de Caixa no Envio de Mensagens e Resolução de Contatos Multi-Caixa"
 }

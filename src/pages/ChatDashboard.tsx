@@ -94,8 +94,10 @@ export const resolveLabelColor = (colorStr: string) => {
 
 export const getStrictInstance = (c: any): string | null => {
   if (!c) return null;
-  const compositeInst = typeof c.id === 'string' && c.id.includes('_') ? c.id.split('_')[1] : null;
-  return compositeInst || c.instance_id || null;
+  const rawComposite = typeof c.id === 'string' && c.id.includes('_') ? c.id.split('_')[1] : null;
+  const compositeInst = (rawComposite && rawComposite !== 'default' && rawComposite !== 'all') ? rawComposite : null;
+  const instId = (c.instance_id && c.instance_id !== 'default' && c.instance_id !== 'all') ? c.instance_id : null;
+  return compositeInst || instId || null;
 };
 
 export function isGroupContact(c: any): boolean {
