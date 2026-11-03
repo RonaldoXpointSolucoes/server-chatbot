@@ -4851,8 +4851,8 @@ export default function ChatDashboard() {
            setRecordingTime(prev => prev + 1);
          }, 1000);
        } catch (e) {
-         console.error('[handleMicClick] Falha de permissão ou microfone:', e);
-         alert("Permissão de microfone negada ou não suportada no seu navegador.");
+         console.warn('[handleMicClick] Aviso de permissão ou dispositivo de microfone:', (e as any)?.name || (e as any)?.message || e);
+         window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Permissão de microfone negada ou microfone indisponível neste dispositivo.', type: 'warning' } }));
        }
     }
   };

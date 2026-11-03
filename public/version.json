@@ -1,5 +1,5 @@
 {
-  "version": "8.0.3",
-  "buildDate": "2026-11-01T15:30:01.024Z",
-  "summary": "Atualização em Tempo Real dos Badges de Mensagens Não Lidas em Todas as Caixas da Sidebar"
+  "version": "8.0.4",
+  "buildDate": "2026-11-02T21:02:00.000Z",
+  "summary": "Estabilização de Envio de Mídia por Instância, Propagação Segura de CRM (Sem Erro 409) e Resiliência do AuthQueue/Cache Signal"
 }

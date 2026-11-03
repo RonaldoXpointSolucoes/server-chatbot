@@ -20,6 +20,37 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.0.4',
+    date: '2026-11-02',
+    summary: 'Estabilização de Envio de Mídia por Instância, Propagação Segura de CRM (Sem Erro 409) e Resiliência do AuthQueue/Cache Signal',
+    notes: [
+      {
+        id: '8.0.4-1',
+        category: 'fixes',
+        title: 'Correção de Envio, Edição e Exclusão de Mídias e Mensagens por Caixa',
+        description: 'Corrigida a desestruturação do identificador estrito de instância em sendMediaFromUrl, uploadAndSendMedia, editHumanMessage e deleteHumanMessage, eliminando o TypeError ao resolver o UUID da caixa ativa.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      },
+      {
+        id: '8.0.4-2',
+        category: 'fixes',
+        title: 'Propagação Cross-Instance de CRM sem Conflito HTTP 409 (23505)',
+        description: 'Removidos os campos de chave única (phone, whatsapp_jid, id e instance_id) no PATCH secundário de sincronização entre caixas, eliminando colisões de constraint no Supabase.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      },
+      {
+        id: '8.0.4-3',
+        category: 'improvements',
+        title: 'Ampliação do Cache LRU de Chaves Signal (3000 Chaves) e Resiliência da Fila de Escrita (30s)',
+        description: 'Dobrada a capacidade do cache em RAM de chaves criptográficas Signal por instância, ampliado o timeout do AuthQueue para 30s e higienizados logs transitórios de reconexão 503/515.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+      }
+    ]
+  },
+  {
     version: '8.0.3',
     date: '2026-11-01',
     summary: 'Atualização em Tempo Real dos Badges de Mensagens Não Lidas em Todas as Caixas da Sidebar',

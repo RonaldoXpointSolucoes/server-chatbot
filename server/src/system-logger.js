@@ -130,7 +130,7 @@ function interceptConsole() {
         text.includes('SessionManager - Antiban') ||
         text.includes('Caixa FoodNext não está conectada') ||
         text.includes('Falha 404: Instância') ||
-        text.includes('Chave de API Gemini personalizada ignorada') ||
+        text.includes('Chave de API Gemini personalizada ignorada') || text.includes('[SessionManager/AuthQueue]') || text.includes('Aviso no DB Fallback') || text.includes('Aviso transitório no DB Fallback') || text.includes('failed to sync regular_') || text.includes('invalid wire type') ||
         (text.includes('[WaCalls Listener]') && (text.includes('Contato não encontrado') || text.includes('mapeamento LID')))
     )) {
         originalFn.apply(console, args);
@@ -296,7 +296,7 @@ export function addLog(level, message) {
     msgStr.includes('verifyMAC') ||
     msgStr.includes('Caixa FoodNext não está conectada') ||
     msgStr.includes('Falha 404: Instância') ||
-    msgStr.includes('Chave de API Gemini personalizada ignorada');
+    msgStr.includes('Chave de API Gemini personalizada ignorada') || msgStr.includes('failed to sync regular_') || msgStr.includes('invalid wire type') || msgStr.includes('[SessionManager/AuthQueue]');
 
   let sanitizedLevel = level;
   if (isRoutineNoise && (sanitizedLevel === 'warn' || sanitizedLevel === 'error')) {

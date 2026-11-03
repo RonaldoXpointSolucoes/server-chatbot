@@ -965,6 +965,7 @@ async function handleContactAssociatedFromIframe(data: any) {
           .from('contacts')
           .update(updatePayload)
           .eq('tenant_id', tenantId)
+          .neq('id', targetRealContactId)
           .in('phone', phoneVars);
       }
     }

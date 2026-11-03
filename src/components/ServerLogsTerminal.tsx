@@ -39,6 +39,7 @@ const isSpamLog = (msg: string) => {
   if (msg.includes('received error in ack') && (msg.includes('479') || msg.includes('475'))) return true;
   if (msg.includes('Closing session:') || msg.includes('Closing session in favor of')) return true;
   if (msg.includes('QR Code ou pareamento expirou por falta de leitura')) return true;
+  if (msg.includes('Aviso no DB Fallback') || msg.includes('Aviso transitório no DB Fallback') || msg.includes('[SessionManager/AuthQueue]')) return true;
   return false;
 };
 
@@ -166,7 +167,13 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
           'mensagens inseridas',
           'ia e automações globais estão desativadas',
           'pushservice',
-          'batchprocessor'
+          'batchprocessor',
+          'whatsapp solicitou reinicialização/estabilização de socket',
+          'desativando e destruindo socket anterior',
+          'oscilação transitória na fila de escrita',
+          'auth writequeue operation timed out',
+          'failed to sync regular_',
+          'invalid wire type'
         ];
 
         if (msgLower.includes('gastrofood api') && (msgLower.includes('"status":200') || msgLower.includes('"status": 200') || (msgLower.includes('"error":null') && !msgLower.includes('error:')))) {

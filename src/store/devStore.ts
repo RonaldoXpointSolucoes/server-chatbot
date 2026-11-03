@@ -76,7 +76,7 @@ export const useDevStore = create<DevStore>()(
           lowerMsg.includes('timeout_socket_wake_fastfail') ||
           lowerMsg.includes('wa_outgoing_messages') ||
           lowerMsg.includes('sessionmanager - antiban') ||
-          lowerMsg.includes('signal is aborted without reason');
+          lowerMsg.includes('signal is aborted without reason') || lowerMsg.includes('aviso no db fallback') || lowerMsg.includes('aviso transitório no db fallback') || lowerMsg.includes('whatsapp solicitou reinicialização/estabilização de socket') || lowerMsg.includes('desativando e destruindo socket anterior') || lowerMsg.includes('oscilação transitória na fila de escrita') || lowerMsg.includes('auth writequeue operation timed out') || lowerMsg.includes('failed to sync regular_') || lowerMsg.includes('invalid wire type');
 
         if (isIrrelevantNoise && log.type !== 'error') {
           return; // Suprime avisos cosméticos e irrelevantes

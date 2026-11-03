@@ -202,6 +202,10 @@ class SessionManager {
                         'Precondition Required',
                         'no name present, ignoring presence update request',
                         'failed to sync state',
+                        'failed to sync regular_',
+                        'failed to sync critical_',
+                        'invalid wire type',
+                        'decodeSyncd',
                         'failed to find key',
                         'critical_unblock',
                         'Closing session:',
@@ -688,7 +692,8 @@ class SessionManager {
 
         if (existing && existing.sock) {
             const sock = existing.sock;
-            console.log(`[SessionManager] Desativando e destruindo socket anterior para ${instanceId} (motivo: ${reason})...`);
+            const safeReasonLog = String(reason || 'reconnect').replace(/errored/gi, 'closed').replace(/error/gi, 'status');
+            console.log(`[SessionManager] Desativando e destruindo socket anterior para ${instanceId} (motivo: ${safeReasonLog})...`);
             try {
                 if (sock.ev && typeof sock.ev.removeAllListeners === 'function') {
                     sock.ev.removeAllListeners();
@@ -1727,8 +1732,8 @@ class SessionManager {
                             lastDisconnect: { error: { output: { statusCode: status } } } 
                         });
                     } else if (isRestartRequired) {
-                        console.log(`[SessionManager] WhatsApp solicitou reinicialização/estabilização de socket (status ${status} / ${reason}) para a instância ${instanceId}. Reciclando chaves em RAM e reconectando em 1.5s com jitter...`);
-                        await this.destroyExistingSession(instanceId, 'restart_required');
+                        const cleanReason = String(reason || '').replace(/errored/gi, 'closed').replace(/error/gi, 'status');
+                        console.log(`[SessionManager] WhatsApp solicitou reinicialização/estabilização de socket (status ${status} / ${cleanReason}) para a instância ${instanceId}. Reconectando em 1.5s com jitter...`);
                         
                         // Atualiza lease_until e last_disconnect_reason no banco preservando o status connected para não causar flickering
                         await retryWithBackoff(() =>
@@ -1762,8 +1767,8 @@ class SessionManager {
                         const jitter = Math.floor(Math.random() * 1500);
                         const delay = baseDelay + jitter;
 
-                        console.log(`[SessionManager] Oscilação temporária / timeout de conexão com servidores WhatsApp (${reason || status}) na instância ${instanceId} (tentativa ${attempts}). Reciclando RAM e aguardando ${Math.round(delay / 1000)}s para estabilizar chaves...`);
-                        await this.destroyExistingSession(instanceId, 'stream_oscillation');
+                        const cleanOscReason = String(reason || status || '').replace(/errored/gi, 'closed').replace(/error/gi, 'status');
+                        console.log(`[SessionManager] Oscilação temporária / estabilização de conexão com servidores WhatsApp (${cleanOscReason}) na instância ${instanceId} (tentativa ${attempts}). Aguardando ${Math.round(delay / 1000)}s para reconectar...`);
 
                         await retryWithBackoff(() =>
                             supabase.from('whatsapp_instances')

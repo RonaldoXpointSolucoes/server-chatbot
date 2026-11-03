@@ -9,7 +9,7 @@ export const pendingWrites = new Map(); // Mantido por retrocompatibilidade
  * Limita a memória a no máximo maxSize chaves por instância, evitando estouro de heap.
  */
 class BoundedKeyCache {
-    constructor(maxSize = 1500) {
+    constructor(maxSize = 3000) {
         this.maxSize = maxSize;
         this.cache = new Map();
     }
@@ -72,13 +72,13 @@ function enqueueWrite(instanceId, writeFn) {
                 await Promise.race([
                     writeFn(),
                     new Promise((_, reject) => {
-                        timer = setTimeout(() => reject(new Error('Auth writeQueue operation timed out after 10000ms')), 10000);
+                        timer = setTimeout(() => reject(new Error('Auth writeQueue operation timed out after 30000ms')), 30000);
                     })
                 ]);
             } catch (err) {
                 const msg = err?.message || String(err);
                 if (!msg.includes('CircuitBreaker')) {
-                    console.warn(`[SessionManager/AuthQueue] Oscilação transitória na fila de escrita (${instanceId}):`, msg);
+                    console.info(`[SessionManager/AuthQueue] Oscilação transitória na fila de escrita (${instanceId}):`, msg);
                 }
             } finally {
                 if (timer) clearTimeout(timer);
@@ -381,8 +381,9 @@ export async function useSupabaseAuthState(tenantId, instanceId, forceCleanState
                                 );
                                 
                                 if (error) {
-                                    if (!String(error.message || '').includes('CircuitBreaker')) {
-                                        console.warn(`[SessionManager] Aviso no DB Fallback para ${chunk.length} chaves Signal:`, error.message);
+                                    const errMsg = String(error.message || '');
+                                    if (!errMsg.includes('CircuitBreaker') && !errMsg.includes('TimeoutError') && !errMsg.includes('aborted due to timeout')) {
+                                        console.info(`[SessionManager] Aviso transitório no DB Fallback para ${chunk.length} chaves Signal:`, errMsg);
                                     }
                                 } else {
                                     const foundNames = new Set();

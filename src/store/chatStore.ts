@@ -326,8 +326,11 @@ export const instanceCache = {
     if (settings !== undefined) this.settings[id] = settings;
   },
 
-  getId(name: string): string | null {
-    return this.byName[name.toLowerCase()] || null;
+  getId(name: string | any): string | null {
+    if (!name) return null;
+    const strName = typeof name === 'string' ? name : (name.finalTargetInstance || name.expectedInstance || '');
+    if (!strName || typeof strName !== 'string') return null;
+    return this.byName[strName.toLowerCase()] || null;
   },
 
   getName(id: string): string | null {
@@ -408,8 +411,11 @@ export const getContactJid = (contact: { whatsapp_jid?: string | null; phone?: s
   return `${digits}@s.whatsapp.net`;
 };
 
-export const resolveInstanceUuid = async (tenantId: string, identifier: string | null | undefined): Promise<string | null> => {
-  if (!identifier || identifier === 'default' || identifier === 'all') return null;
+export const resolveInstanceUuid = async (tenantId: string, rawIdentifier: string | any | null | undefined): Promise<string | null> => {
+  const identifier = typeof rawIdentifier === 'string'
+    ? rawIdentifier
+    : (rawIdentifier && typeof rawIdentifier === 'object' ? (rawIdentifier.finalTargetInstance || rawIdentifier.expectedInstance || null) : null);
+  if (!identifier || typeof identifier !== 'string' || identifier === 'default' || identifier === 'all') return null;
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   if (uuidRegex.test(identifier)) return identifier;
 
@@ -3019,7 +3025,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const contact = findContactByIdAndInstance(state.contacts, contactId, preferredInst);
     if (!contact || !state.tenantInfo) return;
 
-    const finalTargetInstance = resolveStrictOutboundInstance(
+    const { finalTargetInstance } = resolveStrictOutboundInstance(
       contactId,
       instanceName,
       state.activeChannelFilter,
@@ -3122,7 +3128,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const contact = findContactByIdAndInstance(state.contacts, contactId, preferredInst);
     if (!contact || !state.tenantInfo) return;
 
-    const finalTargetInstance = resolveStrictOutboundInstance(
+    const { finalTargetInstance } = resolveStrictOutboundInstance(
       contactId,
       instanceName,
       state.activeChannelFilter,
@@ -3248,7 +3254,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (!contact || !state.tenantInfo) return;
 
     // RESOLUÇÃO DE FALHA GRAVE DE SEGURANÇA: Extrai com 100% de segurança a instância vinculada ao contato e à caixa ativa
-    const finalTargetInstance = resolveStrictOutboundInstance(
+    const { finalTargetInstance } = resolveStrictOutboundInstance(
       contactId,
       instanceName,
       state.activeChannelFilter,
@@ -3432,7 +3438,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       await state.uploadAndSendMedia(contactId, file, basicType as any, instanceName, false, message.text);
     } catch (err) {
-      console.error("[forwardMessage] Erro ao extrair/encaminhar media:", err);
+      if (message.mediaUrl && /^https?:\/\//i.test(message.mediaUrl)) {
+        try {
+          await state.sendMediaFromUrl(
+            contactId,
+            message.mediaUrl,
+            (message.mediaType || 'document') as any,
+            instanceName,
+            message.text
+          );
+          return;
+        } catch {
+          // Segue para fallback
+        }
+      }
+      console.warn("[forwardMessage] Aviso ao extrair/encaminhar media:", err);
       window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Houve uma falha ao preparar a mídia para o envio. Se possível, faça o download e envio manual.', type: 'error' } }));
     }
   },
@@ -3528,7 +3548,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     try {
       // RESOLUÇÃO DE FALHA GRAVE DE SEGURANÇA: Extrai com 100% de segurança a instância vinculada ao contato e à caixa ativa
-      const finalTargetInstance = resolveStrictOutboundInstance(
+      const { finalTargetInstance } = resolveStrictOutboundInstance(
         contactId,
         instanceName,
         state.activeChannelFilter,
@@ -4455,15 +4475,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const { error } = await supabase.from('contacts').update(dbPayload).eq('id', realContactId);
       if (error) throw error;
 
-      // Propaga a atualização para variações do mesmo telefone (8/9 dígitos) no tenant
+      // Propaga a atualização para variações do mesmo telefone (8/9 dígitos) no tenant,
+      // omitindo campos de chave única (phone, whatsapp_jid, id, instance_id) para prevenir HTTP 409 Conflict
       const effectivePhone = rawBeforeState?.phone || targetPhone;
       if (effectivePhone) {
         const phoneVars = getBrPhoneVariations(effectivePhone);
         const tenantId = rawBeforeState?.tenant_id || (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
-        if (phoneVars.length > 0 && tenantId) {
+        const variationPayload = { ...dbPayload };
+        delete variationPayload.phone;
+        delete variationPayload.whatsapp_jid;
+        delete variationPayload.id;
+        delete variationPayload.instance_id;
+        if (phoneVars.length > 0 && tenantId && Object.keys(variationPayload).length > 0) {
           await supabase.from('contacts')
-            .update(dbPayload)
+            .update(variationPayload)
             .eq('tenant_id', tenantId)
+            .neq('id', realContactId)
             .in('phone', phoneVars);
         }
       }

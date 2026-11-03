@@ -1391,7 +1391,7 @@ export default function DevLogger() {
         msg.includes('interrompendo loop de reconexão') ||
         msg.includes('Caixa FoodNext não está conectada') ||
         msg.includes('Falha 404: Instância') ||
-        msg.includes('Chave de API Gemini personalizada ignorada')
+        msg.includes('Chave de API Gemini personalizada ignorada') || msg.includes('WhatsApp solicitou reinicialização/estabilização de socket') || msg.includes('Desativando e destruindo socket anterior') || msg.includes('Oscilação temporária / timeout de conexão com servidores WhatsApp') || msg.includes('Oscilação transitória na fila de escrita') || msg.includes('Auth writeQueue operation timed out') || msg.includes('failed to sync regular_') || msg.includes('invalid wire type')
       );
     };
 
@@ -1435,7 +1435,7 @@ export default function DevLogger() {
               });
             }
           } else {
-            if (!isRoutineServerNoise(data.message) && (data.level === 'error' || data.level === 'warn' || (data.level !== 'info' && data.message && (data.message.toLowerCase().includes('error') || data.message.toLowerCase().includes('falha') || data.message.toLowerCase().includes('loop'))))) {
+            if (!isRoutineServerNoise(data.message) && (data.level === 'error' || data.level === 'warn')) {
               addLog({
                 type: data.level === 'warn' ? 'warn' : 'error',
                 message: data.message || 'Exceção/Falha no Servidor Node.js',
@@ -1548,11 +1548,23 @@ export default function DevLogger() {
                     msg.includes('identity changed') ||
                     msg.includes('GetCardapioCompleto') ||
                     msg.includes('USync fetch yielded no results') ||
+          msg.includes('[SessionManager/AuthQueue]') ||
+          msg.includes('Aviso no DB Fallback') ||
+          msg.includes('Aviso transitório no DB Fallback') ||
+          msg.includes('Auth writeQueue operation timed out') ||
+          msg.includes('WhatsApp solicitou reinicialização/estabilização de socket') ||
+          msg.includes('Desativando e destruindo socket anterior') ||
+          msg.includes('Restabelecendo o socket com as credenciais preservadas') ||
+          msg.includes('Stream Errored') ||
+          msg.includes('failed to sync regular_') ||
+          msg.includes('invalid wire type') ||
+          msg.includes('[forwardMessage]') ||
+          msg.includes('[handleMicClick]') ||
                     msg.includes('pending PNs') ||
                     msg.includes('Erro de entrega/ack detectado') ||
                     msg.includes('Resetando chaves de sessão') ||
                     msg.includes('pertence ao ambiente de testes') ||
-                    msg.includes('não pertence ao escopo deste nó') ||
+                    msg.includes('não pertence ao escopo deste nó') || msg.includes('WhatsApp solicitou reinicialização/estabilização de socket') || msg.includes('Desativando e destruindo socket anterior') || msg.includes('Oscilação transitória na fila de escrita') || msg.includes('Auth writeQueue operation timed out') || msg.includes('failed to sync regular_') || msg.includes('invalid wire type') ||
                     (msg.includes('[WaCalls Listener]') && (msg.includes('Contato não encontrado') || msg.includes('mapeamento LID')));
                  
                  if (isRoutineNoise || err.level === 'info') {
@@ -1840,7 +1852,19 @@ export default function DevLogger() {
           msg.includes('Connection Terminated') ||
           msg.includes('Connection Closed') ||
           msg.includes('Bad MAC') ||
-          msg.includes('USync fetch yielded no results')
+          msg.includes('USync fetch yielded no results') ||
+          msg.includes('[SessionManager/AuthQueue]') ||
+          msg.includes('Aviso no DB Fallback') ||
+          msg.includes('Aviso transitório no DB Fallback') ||
+          msg.includes('Auth writeQueue operation timed out') ||
+          msg.includes('WhatsApp solicitou reinicialização/estabilização de socket') ||
+          msg.includes('Desativando e destruindo socket anterior') ||
+          msg.includes('Restabelecendo o socket com as credenciais preservadas') ||
+          msg.includes('Stream Errored') ||
+          msg.includes('failed to sync regular_') ||
+          msg.includes('invalid wire type') ||
+          msg.includes('[forwardMessage]') ||
+          msg.includes('[handleMicClick]')
         );
       };
 
