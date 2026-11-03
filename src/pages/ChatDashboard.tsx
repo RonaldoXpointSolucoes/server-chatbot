@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react';
-import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, ChevronRight, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, Save, ShieldCheck, Smile, Briefcase, Flag, Clock, Calendar, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, AlertCircle, CheckSquare, MessageSquare, MessageSquareText, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList, UploadCloud, FolderCheck, Globe, Lock, Zap, Folder, FolderOpen, FolderTree, CornerDownRight, BookOpen, Layers, Info, Activity, Monitor, Radio } from 'lucide-react';
+import { Bot, Settings, Users, Search, MoreVertical, Send, Check, CheckCheck, Smartphone, Power, Building2, Paperclip, Mic, FileText, Camera, Video, VideoOff, Image as ImageIcon, Pin, MessageSquarePlus, Star, Plus, Filter, Tag, Terminal, RefreshCw, History, BrainCircuit, ChevronDown, ChevronLeft, ChevronRight, MapPin, User, Menu, Sparkles, Wand2, HeartHandshake, ShoppingBag, LifeBuoy, X, CheckCircle2, ExternalLink, ShieldAlert, Trash2, MessageCircle, Copy, Loader2, Ban, UserCheck, MessageSquareReply, Ticket, RotateCcw, Wifi, Database, Save, ShieldCheck, Smile, Briefcase, Flag, Clock, Calendar, Mail, MailOpen, CircleDollarSign, Edit2, Undo2, AlertTriangle, AlertCircle, CheckSquare, MessageSquare, MessageSquareText, Play, Pause, StopCircle, ZoomIn, ZoomOut, CalendarClock, Lightbulb, ClipboardList, UploadCloud, FolderCheck, Globe, Lock, Zap, Folder, FolderOpen, FolderTree, CornerDownRight, BookOpen, Layers, Info, Activity, Monitor, Radio, Bell, BellRing } from 'lucide-react';
 import { getCurrentEnvironment, setEnvironment, validateServerEnvironment, ENVIRONMENTS } from '../services/environmentService';
 import { useNavigate, useOutletContext, useLocation } from 'react-router-dom';
 import { useChatStore, QuickReplyCategory, instanceCache, resolveInstanceUuid, sortMessagesChronologically, getEffectiveContactTime, getRealContactId, getUniquePersonKey, normalizeMessageTextForComparison } from '../store/chatStore';
@@ -3293,6 +3293,7 @@ export default function ChatDashboard() {
 
     isSendingRef.current = true;
     setIsSendingMessage(true);
+    const savedDraftText = inputText;
 
     try {
       // 1. Criar ou buscar contato no Supabase SOMENTE NO MOMENTO DO ENVIO DA MENSAGEM
@@ -3363,7 +3364,6 @@ export default function ChatDashboard() {
       const targetCompositeId = `${existingContact.id}_${targetInstanceId}`;
 
       // 4. Dispara o envio da mensagem
-      const savedDraftText = inputText;
       let finalMessageText = inputText;
       if (replyMessage) {
         const shortQuote = replyMessage.text.length > 80 ? replyMessage.text.substring(0, 80) + '...' : replyMessage.text;
@@ -9539,7 +9539,7 @@ export default function ChatDashboard() {
                   const target = otherUnreadInfo.latestContact;
                   if (!target) return;
                   if (otherUnreadInfo.isOtherChannel && target.instance_id) {
-                    setChannelFilter(target.instance_id, otherUnreadInfo.channelName || target.instance_id);
+                    setActiveChannelFilter(target.instance_id, otherUnreadInfo.channelName || target.instance_id);
                   }
                   setActiveChat(target.id);
                   const targetInst = getStrictInstance(target) || target.instance_id || activeChannelFilter || connectedInstanceName;
@@ -9585,7 +9585,7 @@ export default function ChatDashboard() {
                     const target = otherUnreadInfo.latestContact;
                     if (!target) return;
                     if (otherUnreadInfo.isOtherChannel && target.instance_id) {
-                      setChannelFilter(target.instance_id, otherUnreadInfo.channelName || target.instance_id);
+                      setActiveChannelFilter(target.instance_id, otherUnreadInfo.channelName || target.instance_id);
                     }
                     setActiveChat(target.id);
                     const targetInst = getStrictInstance(target) || target.instance_id || activeChannelFilter || connectedInstanceName;

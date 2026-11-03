@@ -20,6 +20,21 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.0.6',
+    date: '2026-11-03',
+    summary: 'Hotfix de Renderização ao Abrir Conversas (Importação do Ícone Bell e Ação de Troca de Canal no Banner Mobile)',
+    notes: [
+      {
+        id: '8.0.6-1',
+        category: 'fixes',
+        title: 'Correção do ReferenceError (Bell is not defined) ao Clicar em Conversas',
+        description: 'Adicionada a importação explícita de Bell e BellRing do pacote lucide-react em ChatDashboard.tsx e corrigida a referência de setActiveChannelFilter no banner de conversas não lidas.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      }
+    ]
+  },
+  {
     version: '8.0.5',
     date: '2026-11-02',
     summary: 'Rota Exclusiva Totem Cozinha PWA (/totem-cozinha), Despertador Android em Horário Exato por Setor (Mesmo com App Fechado), Aviso Mobile de Conversas Não Lidas e Menu / sem Pastas',
