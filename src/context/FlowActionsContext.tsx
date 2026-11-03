@@ -46,9 +46,12 @@ export const BLOCK_THEMES: Record<string, BlockTheme> = {
 
     // Eventos (Esmeralda / Ciano)
     start: { category: 'Eventos', iconColor: 'text-emerald-400', iconHex: '#10b981', tagBg: 'bg-emerald-500/20', tagText: 'text-emerald-300', tagBorder: 'border-emerald-500/30' },
+    handoff: { category: 'Eventos', iconColor: 'text-emerald-400', iconHex: '#10b981', tagBg: 'bg-emerald-500/20', tagText: 'text-emerald-300', tagBorder: 'border-emerald-500/30' },
     command: { category: 'Eventos', iconColor: 'text-sky-400', iconHex: '#38bdf8', tagBg: 'bg-sky-500/20', tagText: 'text-sky-300', tagBorder: 'border-sky-500/30' },
     reply: { category: 'Eventos', iconColor: 'text-sky-400', iconHex: '#38bdf8', tagBg: 'bg-sky-500/20', tagText: 'text-sky-300', tagBorder: 'border-sky-500/30' },
-    invalid: { category: 'Eventos', iconColor: 'text-amber-400', iconHex: '#f59e0b', tagBg: 'bg-amber-500/20', tagText: 'text-amber-300', tagBorder: 'border-amber-500/30' }
+    invalid: { category: 'Eventos', iconColor: 'text-amber-400', iconHex: '#f59e0b', tagBg: 'bg-amber-500/20', tagText: 'text-amber-300', tagBorder: 'border-amber-500/30' },
+    message: { category: 'Bubbles', iconColor: 'text-orange-500', iconHex: '#ea580c', tagBg: 'bg-orange-500/20', tagText: 'text-orange-300', tagBorder: 'border-orange-500/30' },
+    input: { category: 'Inputs', iconColor: 'text-orange-500', iconHex: '#ea580c', tagBg: 'bg-orange-500/20', tagText: 'text-orange-300', tagBorder: 'border-orange-500/30' }
 };
 
 export function getBlockTheme(flowType: string): BlockTheme {

@@ -36,8 +36,9 @@ class NodeSupabaseCircuitBreaker {
     this.state = 'CLOSED'; // 'CLOSED' | 'OPEN' | 'HALF_OPEN'
     this.consecutiveFailures = 0;
     this.lastStateChange = Date.now();
-    this.failureThreshold = 12;
+    this.failureThreshold = 15;
     this.cooldownMs = 5000;
+    this.coalesceWindowMs = 400;
     this.lastFailureTime = 0;
   }
 
@@ -46,6 +47,7 @@ class NodeSupabaseCircuitBreaker {
     if (this.state === 'OPEN') {
       if (Date.now() - this.lastStateChange > this.cooldownMs) {
         this.state = 'HALF_OPEN';
+        this.consecutiveFailures = Math.floor(this.failureThreshold / 2);
         this.lastStateChange = Date.now();
         return true;
       }
@@ -70,6 +72,9 @@ class NodeSupabaseCircuitBreaker {
     }
 
     const now = Date.now();
+    if (this.lastFailureTime && (now - this.lastFailureTime < this.coalesceWindowMs)) {
+      return;
+    }
     if (this.lastFailureTime && (now - this.lastFailureTime > 20000)) {
       this.consecutiveFailures = 0;
     }
@@ -78,7 +83,7 @@ class NodeSupabaseCircuitBreaker {
     if (this.consecutiveFailures >= this.failureThreshold) {
       this.state = 'OPEN';
       this.lastStateChange = Date.now();
-      console.warn(`[Supabase Node CircuitBreaker] ⚡ Disjuntor ABERTO após ${this.consecutiveFailures} falhas consecutivas. Pausando retentativas ativas por ${this.cooldownMs / 1000}s para alívio do gateway.`);
+      console.info(`[Supabase Node CircuitBreaker] ⚡ Disjuntor ABERTO após ${this.consecutiveFailures} janelas de falha consecutivas. Pausando retentativas ativas por ${this.cooldownMs / 1000}s para alívio do gateway.`);
     }
   }
 
@@ -86,6 +91,7 @@ class NodeSupabaseCircuitBreaker {
     if (this.state === 'OPEN') {
       if (Date.now() - this.lastStateChange > this.cooldownMs) {
         this.state = 'HALF_OPEN';
+        this.consecutiveFailures = Math.floor(this.failureThreshold / 2);
         this.lastStateChange = Date.now();
         console.info('[Supabase Node CircuitBreaker] Período de cooldown expirado. Transicionando para HALF_OPEN (permitindo requisições piloto)...');
         return false;
@@ -97,6 +103,36 @@ class NodeSupabaseCircuitBreaker {
 }
 
 export const nodeSupabaseCircuitBreaker = new NodeSupabaseCircuitBreaker();
+
+export function isTransientSupabaseError(err) {
+  if (!err) return false;
+  const msg = String(err?.message || err?.details || err || '');
+  const code = String(err?.code || '');
+  const name = String(err?.name || '');
+  return (
+    msg.includes('CircuitBreaker') ||
+    msg.includes('fetch failed') ||
+    msg.includes('Timeout') ||
+    msg.includes('timeout') ||
+    msg.includes('aborted due to timeout') ||
+    msg.includes('ECONNRESET') ||
+    msg.includes('ETIMEDOUT') ||
+    msg.includes('EPIPE') ||
+    msg.includes('ENOTFOUND') ||
+    msg.includes('EAI_AGAIN') ||
+    msg.includes('ECONNREFUSED') ||
+    msg.includes('ConnectTimeoutError') ||
+    msg.includes('SocketError') ||
+    msg.includes('Connection closed') ||
+    msg.includes('database connection') ||
+    code === 'UND_ERR_CONNECT_TIMEOUT' ||
+    code === 'UND_ERR_SOCKET' ||
+    code === 'UND_ERR_BODY_TIMEOUT' ||
+    code === 'UND_ERR_HEADERS_TIMEOUT' ||
+    name === 'AbortError' ||
+    name === 'TimeoutError'
+  );
+}
 
 /**
  * Fetch resiliente com retry, jitter exponencial e tratamento de falhas de conexão / 5xx
@@ -201,7 +237,16 @@ console.log(`[Worker Boot] Inicializado com NODE_ID: ${NODE_ID}`);
 
 export async function retryWithBackoff(fn, retries = 1, delay = 600) {
   try {
-    return await fn();
+    const res = await fn();
+    if (res && typeof res === 'object' && res.error && retries > 0) {
+      if (isTransientSupabaseError(res.error) && !nodeSupabaseCircuitBreaker.isCircuitOpen()) {
+        const jitter = Math.floor(Math.random() * 300);
+        const nextDelay = delay + jitter;
+        await new Promise(resolve => setTimeout(resolve, nextDelay));
+        return retryWithBackoff(fn, retries - 1, Math.min(Math.round(delay * 1.5), 4000));
+      }
+    }
+    return res;
   } catch (error) {
     const errorMsg = error?.message || String(error);
     if (errorMsg.includes('CircuitBreaker') || nodeSupabaseCircuitBreaker.isCircuitOpen()) {

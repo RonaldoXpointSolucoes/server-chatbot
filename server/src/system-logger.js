@@ -130,9 +130,19 @@ function interceptConsole() {
         text.includes('SessionManager - Antiban') ||
         text.includes('Caixa FoodNext não está conectada') ||
         text.includes('Falha 404: Instância') ||
-        text.includes('Chave de API Gemini personalizada ignorada') || text.includes('[SessionManager/AuthQueue]') || text.includes('Aviso no DB Fallback') || text.includes('Aviso transitório no DB Fallback') || text.includes('failed to sync regular_') || text.includes('invalid wire type') ||
+        text.includes('Chave de API Gemini personalizada ignorada') || text.includes('[SessionManager/AuthQueue]') || text.includes('Aviso no DB Fallback') || text.includes('Aviso transitório no DB Fallback') || text.includes('failed to sync regular_') || text.includes('invalid wire type') || text.includes('[Supabase Node CircuitBreaker]') || text.includes('Aviso ao gravar wa_incoming_messages') || text.includes('Contato não validado no banco') || text.includes('Inserção de novos contatos em lote') ||
         (text.includes('[WaCalls Listener]') && (text.includes('Contato não encontrado') || text.includes('mapeamento LID')))
     )) {
+        originalFn.apply(console, args);
+        return;
+    }
+
+    // Silencia erros transitórios de CircuitBreaker do gateway Supabase durante janela de 5s de auto-recuperação
+    const isTransientCircuitBreakerNoise = text.includes('Supabase Node CircuitBreaker') ||
+                                           (text.includes('[EventProcessor] Erro ao buscar config da instância') && text.includes('TimeoutError')) ||
+                                           text.includes('Contato não pôde ser inserido nem recuperado: Error: Supabase Node CircuitBreaker') ||
+                                           text.includes('[BatchProcessor] Erro ao buscar instâncias válidas');
+    if (isTransientCircuitBreakerNoise) {
         originalFn.apply(console, args);
         return;
     }

@@ -76,10 +76,10 @@ export const useDevStore = create<DevStore>()(
           lowerMsg.includes('timeout_socket_wake_fastfail') ||
           lowerMsg.includes('wa_outgoing_messages') ||
           lowerMsg.includes('sessionmanager - antiban') ||
-          lowerMsg.includes('signal is aborted without reason') || lowerMsg.includes('aviso no db fallback') || lowerMsg.includes('aviso transitório no db fallback') || lowerMsg.includes('whatsapp solicitou reinicialização/estabilização de socket') || lowerMsg.includes('desativando e destruindo socket anterior') || lowerMsg.includes('oscilação transitória na fila de escrita') || lowerMsg.includes('auth writequeue operation timed out') || lowerMsg.includes('failed to sync regular_') || lowerMsg.includes('invalid wire type');
+          lowerMsg.includes('signal is aborted without reason') || lowerMsg.includes('aviso no db fallback') || lowerMsg.includes('aviso transitório no db fallback') || lowerMsg.includes('whatsapp solicitou reinicialização/estabilização de socket') || lowerMsg.includes('desativando e destruindo socket anterior') || lowerMsg.includes('oscilação transitória na fila de escrita') || lowerMsg.includes('auth writequeue operation timed out') || lowerMsg.includes('failed to sync regular_') || lowerMsg.includes('invalid wire type') || lowerMsg.includes('supabase node circuitbreaker') || lowerMsg.includes('aviso ao gravar wa_incoming_messages') || lowerMsg.includes('contato não validado no banco') || lowerMsg.includes('inserção de novos contatos em lote') || lowerMsg.includes('contato não pôde ser inserido nem recuperado') || lowerMsg.includes('erro ao buscar instâncias válidas') || (lowerMsg.includes('erro ao buscar config da instância') && lowerMsg.includes('timeouterror'));
 
-        if (isIrrelevantNoise && log.type !== 'error') {
-          return; // Suprime avisos cosméticos e irrelevantes
+        if (isIrrelevantNoise) {
+          return; // Suprime avisos cosméticos e oscilações transitórias de CircuitBreaker
         }
 
         // 2. Detecção e Priorização de Erros Críticos e Ação Requerida

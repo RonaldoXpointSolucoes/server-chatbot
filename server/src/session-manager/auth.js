@@ -260,7 +260,7 @@ export async function useSupabaseAuthState(tenantId, instanceId, forceCleanState
         sessionCaches.get(instanceId).clear();
     }
     if (!sessionCaches.has(instanceId)) {
-        sessionCaches.set(instanceId, new BoundedKeyCache(1500));
+        sessionCaches.set(instanceId, new BoundedKeyCache(3000));
     }
     const memCache = sessionCaches.get(instanceId);
 
@@ -333,7 +333,7 @@ export async function useSupabaseAuthState(tenantId, instanceId, forceCleanState
                     }
                 }
             }
-            console.log(`[SessionManager] Warm-up leve concluído: ${memCache.size} chaves ativas em RAM para a instância ${instanceId} (LRU Bounded: max 1500 chaves)`);
+            console.log(`[SessionManager] Warm-up leve concluído: ${memCache.size} chaves ativas em RAM para a instância ${instanceId} (LRU Bounded: max 3000 chaves)`);
         } catch (warmErr) {
             console.warn(`[SessionManager] Aviso no warm-up de chaves para ${instanceId}:`, warmErr.message);
         }

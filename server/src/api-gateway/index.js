@@ -12,6 +12,7 @@ import { getUrlInfo } from '@whiskeysockets/baileys';
 import { ensureResilientUrlInfo } from '../flow-runtime/url-helper.js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import AutomationWorker from '../automation-worker/agent.js';
+import pushService from '../push-service/index.js';
 
 const router = express.Router();
 
@@ -1367,6 +1368,173 @@ Gere todas as propriedades em Português do Brasil (pt-BR). No "markdownReport",
 
 router.post('/chat/analyze-screen', handleAnalyzeScreen);
 router.post('/v1/chat/analyze-screen', handleAnalyzeScreen);
+
+// ============================================================================
+// ROTAS DE WEB PUSH & ALARMES DE CHECKLIST POR SETOR (TOTEM COZINHA PWA)
+// ============================================================================
+router.get(['/v1/push/public-key', '/push/public-key'], (req, res) => {
+    return res.json({ publicKey: pushService.getPublicKey() });
+});
+
+router.post(['/v1/push/subscribe', '/push/subscribe'], async (req, res) => {
+    try {
+        const tenantId = req.headers['x-tenant-id'] || req.body.tenantId;
+        const { subscription, userAgent, email, sectorId, sectorName } = req.body;
+        if (!tenantId || !subscription) {
+            return res.status(400).json({ error: 'tenantId e subscription são obrigatórios.' });
+        }
+        const saved = await pushService.saveSubscription({
+            tenantId,
+            subscription,
+            userAgent: userAgent || req.headers['user-agent'] || '',
+            email,
+            sectorId,
+            sectorName
+        });
+        return res.json({ ok: true, subscription: saved });
+    } catch (err) {
+        console.error('[PushAPI] Erro ao salvar subscription:', err);
+        return res.status(500).json({ ok: false, error: err.message });
+    }
+});
+
+router.post(['/v1/push/unsubscribe', '/push/unsubscribe'], async (req, res) => {
+    try {
+        const { endpoint } = req.body;
+        await pushService.removeSubscription(endpoint);
+        return res.json({ ok: true });
+    } catch (err) {
+        return res.status(500).json({ ok: false, error: err.message });
+    }
+});
+
+router.post(['/v1/push/checklist-alarm-test', '/push/checklist-alarm-test'], async (req, res) => {
+    try {
+        const tenantId = req.headers['x-tenant-id'] || req.body.tenantId;
+        const { sectorId, sectorName, checklistId, delaySeconds = 0, endpoint } = req.body;
+
+        if (!tenantId) {
+            return res.status(400).json({ ok: false, error: 'tenantId é obrigatório.' });
+        }
+
+        // Buscar checklist real do setor ou o checklistId informado
+        let targetChecklist = null;
+        if (checklistId) {
+            const { data: chkData } = await supabase
+                .from('checklists')
+                .select('*, sectors(id, name), checklist_items(id, title, description, is_required, is_critical, sort_order)')
+                .eq('id', checklistId)
+                .maybeSingle();
+            targetChecklist = chkData;
+        }
+
+        if (!targetChecklist) {
+            const { data: allChks } = await supabase
+                .from('checklists')
+                .select('*, sectors(id, name), checklist_items(id, title, description, is_required, is_critical, sort_order)')
+                .eq('tenant_id', tenantId)
+                .eq('is_active', true);
+
+            if (allChks && allChks.length > 0) {
+                targetChecklist = allChks.find(c =>
+                    pushService.doesChecklistMatchSector(c, sectorId, sectorName)
+                ) || allChks[0];
+            }
+        }
+
+        if (!targetChecklist) {
+            targetChecklist = {
+                id: 'test-kitchen-alarm',
+                title: `Rotina Operacional - ${sectorName || 'Cozinha'}`,
+                category: 'Abertura / Operação',
+                sector_id: sectorId || 'ALL',
+                sector_name: sectorName || 'Cozinha',
+                checklist_items: [
+                    { id: '1', title: 'Higienização das bancadas e equipamentos do setor', is_required: true, sort_order: 0 },
+                    { id: '2', title: 'Conferência de temperatura de câmaras frias e freezers', is_required: true, sort_order: 1 },
+                    { id: '3', title: 'Mise en place e validade dos insumos do turno', is_required: true, sort_order: 2 }
+                ]
+            };
+        }
+
+        const fireAlarm = async () => {
+            return await pushService.sendChecklistSectorAlarm({
+                tenantId,
+                sectorId: sectorId || targetChecklist.sector_id,
+                sectorName: sectorName || targetChecklist.sectors?.name || 'Cozinha',
+                checklist: targetChecklist,
+                scheduleTime: new Date().toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' }),
+                items: targetChecklist.checklist_items || [],
+                isTest: true,
+                targetEndpoint: endpoint || null
+            });
+        };
+
+        const waitSec = Math.min(Math.max(Number(delaySeconds) || 0, 0), 120);
+        if (waitSec > 0) {
+            setTimeout(() => {
+                fireAlarm().catch(e => console.error('[PushAPI] Erro no disparo agendado:', e));
+            }, waitSec * 1000);
+            return res.json({
+                ok: true,
+                scheduledInSeconds: waitSec,
+                checklistTitle: targetChecklist.title,
+                message: `Alarme agendado para daqui a ${waitSec} segundos! Você já pode fechar o aplicativo ou bloquear a tela do tablet para testar.`
+            });
+        }
+
+        const result = await fireAlarm();
+        return res.json({
+            ok: true,
+            ...result,
+            checklistTitle: targetChecklist.title
+        });
+    } catch (err) {
+        console.error('[PushAPI] Erro no teste de alarme:', err);
+        return res.status(500).json({ ok: false, error: err.message });
+    }
+});
+
+router.post(['/v1/push/checklist-alarm-snooze', '/push/checklist-alarm-snooze'], async (req, res) => {
+    try {
+        const tenantId = req.headers['x-tenant-id'] || req.body.tenantId;
+        const { sectorId, sectorName, checklistId, delayMinutes = 5, endpoint } = req.body;
+        if (!tenantId) return res.status(400).json({ ok: false, error: 'tenantId obrigatório' });
+
+        const waitMs = Math.min(Math.max(Number(delayMinutes) || 5, 1), 60) * 60 * 1000;
+        setTimeout(async () => {
+            try {
+                let targetChecklist = null;
+                if (checklistId && checklistId !== 'test-kitchen-alarm') {
+                    const { data } = await supabase
+                        .from('checklists')
+                        .select('*, sectors(id, name), checklist_items(id, title, description, is_required, is_critical, sort_order)')
+                        .eq('id', checklistId)
+                        .maybeSingle();
+                    targetChecklist = data;
+                }
+                if (targetChecklist) {
+                    await pushService.sendChecklistSectorAlarm({
+                        tenantId,
+                        sectorId: sectorId || targetChecklist.sector_id,
+                        sectorName: sectorName || targetChecklist.sectors?.name || 'Cozinha',
+                        checklist: targetChecklist,
+                        scheduleTime: new Date().toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' }),
+                        items: targetChecklist.checklist_items || [],
+                        isTest: true,
+                        targetEndpoint: endpoint || null
+                    });
+                }
+            } catch (e) {
+                console.error('[PushAPI] Erro ao disparar snooze de checklist:', e);
+            }
+        }, waitMs);
+
+        return res.json({ ok: true, snoozedMinutes: delayMinutes });
+    } catch (err) {
+        return res.status(500).json({ ok: false, error: err.message });
+    }
+});
 
 export default router;
 

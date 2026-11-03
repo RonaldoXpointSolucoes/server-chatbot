@@ -114,6 +114,48 @@ export const parseTypebotToFlow = (data: any): { nodes: Node[], edges: Edge[] } 
                    label = 'Mensagem';
                    text = extractText(block.content?.richText);
                } 
+               else if (block.type === 'image') {
+                   flowType = 'image';
+                   label = 'Imagem';
+                   extraProps.url = block.content?.url || '';
+               }
+               else if (block.type === 'video') {
+                   flowType = 'video';
+                   label = 'Vídeo';
+                   extraProps.url = block.content?.url || '';
+               }
+               else if (block.type === 'audio') {
+                   flowType = 'audio';
+                   label = 'Áudio';
+                   extraProps.url = block.content?.url || '';
+               }
+               else if (block.type === 'choice input' || block.type === 'buttons') {
+                   flowType = 'buttons';
+                   label = 'Botões / Opções';
+                   if (block.options?.variableId) {
+                       varName = varMap[block.options.variableId] || block.options.variableId;
+                   }
+                   extraProps.options = (block.items || []).map((item: any, idx: number) => item.content || `Opção ${idx + 1}`);
+                   extraProps.choiceItems = (block.items || []).map((item: any, idx: number) => ({
+                       id: item.id || `${block.id}-opt-${idx}`,
+                       index: idx,
+                       content: item.content || `Opção ${idx + 1}`
+                   }));
+               }
+               else if (block.type === 'picture choice') {
+                   flowType = 'pic_choice';
+                   label = 'Escolha Visual';
+                   if (block.options?.variableId) {
+                       varName = varMap[block.options.variableId] || block.options.variableId;
+                   }
+                   extraProps.options = (block.items || []).map((item: any, idx: number) => item.title || item.content || `Item ${idx + 1}`);
+                   extraProps.choiceItems = (block.items || []).map((item: any, idx: number) => ({
+                       id: item.id || `${block.id}-opt-${idx}`,
+                       index: idx,
+                       content: item.title || item.content || `Item ${idx + 1}`,
+                       pictureSrc: item.pictureSrc || ''
+                   }));
+               }
                else if (['text input', 'number input', 'email input', 'phone input', 'date input'].includes(block.type)) {
                    flowType = block.type === 'number input' ? 'number_input' : 'ask';
                    if (block.options?.variableId) {
@@ -209,17 +251,37 @@ export const parseTypebotToFlow = (data: any): { nodes: Node[], edges: Edge[] } 
         data.edges.forEach((edge: any) => {
             const sourceBlockId = edge.from?.blockId || edge.from?.eventId;
             let targetGroupId = edge.to?.groupId;
+            let edgeLabel: string | undefined = undefined;
             
-            // Tratamento especial para eventos start
+            // Tratamento especial para eventos start, condições e botões
             let sourceHandleId = sourceBlockId;
             if (edge.from?.eventId) {
                 sourceHandleId = edge.from.eventId + "-block";
             } else if (edge.from?.itemId) {
-                // Porta específica do item da condição
-                sourceHandleId = edge.from.itemId;
+                // Verifica se o item pertence a um bloco de Botões/Escolha Visual para mapear para `${blockId}-opt-${idx}`
+                let mappedChoice = false;
+                if (edge.from?.blockId) {
+                    for (const n of nodes) {
+                        const blk = (n.data?.blocks as any[])?.find((b: any) => b.id === edge.from.blockId);
+                        if (blk && Array.isArray(blk.choiceItems)) {
+                            const found = blk.choiceItems.find((ci: any) => ci.id === edge.from.itemId);
+                            if (found) {
+                                sourceHandleId = `${blk.id}-opt-${found.index}`;
+                                edgeLabel = `${found.index + 1} - ${found.content}`;
+                                mappedChoice = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (!mappedChoice) {
+                    // Porta específica do item da condição
+                    sourceHandleId = edge.from.itemId;
+                }
             } else if (edge.from?.blockId && conditionBlockMap.has(edge.from.blockId)) {
                 // Saída "Senão" da Condição
                 sourceHandleId = `${edge.from.blockId}-else`;
+                edgeLabel = 'Senão (Else)';
             }
 
             // Achar quem é o nó Container pai dono desse sourceBlockId
@@ -240,6 +302,7 @@ export const parseTypebotToFlow = (data: any): { nodes: Node[], edges: Edge[] } 
                    targetHandle: targetGroupId + "-in",
                    type: 'smoothstep',
                    animated: true,
+                   ...(edgeLabel ? { label: edgeLabel } : {}),
                    style: { stroke: '#818cf8', strokeWidth: 2.5 },
                    markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: '#818cf8' },
                 });

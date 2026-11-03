@@ -104,6 +104,7 @@ export default defineConfig({
         maximumFileSizeToCacheInBytes: 8000000,
       },
       includeAssets: [
+        'manifest-totem.webmanifest',
         'favicon.ico',
         'favicon-16x16.png',
         'favicon-32x32.png',

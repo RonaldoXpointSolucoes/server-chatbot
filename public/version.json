@@ -1,5 +1,5 @@
 {
   "version": "8.0.4",
-  "buildDate": "2026-11-02T21:02:00.000Z",
+  "buildDate": "2026-11-03T01:59:39.807Z",
   "summary": "Estabilização de Envio de Mídia por Instância, Propagação Segura de CRM (Sem Erro 409) e Resiliência do AuthQueue/Cache Signal"
 }

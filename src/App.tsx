@@ -70,7 +70,7 @@ function PushNotificationManager() {
   return null;
 }
 
-// Roteador Raiz Inteligente (Detecta se o acesso é via domínio de voucher dedicado ex: voucher-xpointsolucoes.vercel.app)
+// Roteador Raiz Inteligente (Detecta se o acesso é via domínio de voucher ou Totem Cozinha instalado em modo PWA)
 function RootRouter() {
   const hostname = window.location.hostname.toLowerCase();
   const isVoucherDomain = hostname.includes('voucher') || hostname.includes('xpointsolucoes') && hostname.includes('voucher') || hostname.startsWith('vch.') || hostname.startsWith('vouchers.');
@@ -88,6 +88,20 @@ function RootRouter() {
     return <CompanyPortalLogin />;
   }
 
+  // Se o tablet foi configurado como Totem Cozinha Standalone e abriu na raiz em modo aplicativo (standalone)
+  const isStandalonePwa = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true;
+  if (
+    window.location.pathname === '/' &&
+    localStorage.getItem('totem_standalone_mode') === 'true' &&
+    (isStandalonePwa || window.location.search.includes('totem=1'))
+  ) {
+    return (
+      <ErrorBoundary>
+        <ChecklistTablet />
+      </ErrorBoundary>
+    );
+  }
+
   return <ClientLogin />;
 }
 
@@ -102,9 +116,16 @@ export default function App() {
       <NetworkStatusToast />
       <GlobalToast />
       <Routes>
-        {/* Rota Raiz Inteligente (ChatBoot vs Portal Voucher Corporativo) */}
+        {/* Rota Raiz Inteligente (ChatBoot vs Portal Voucher Corporativo vs Totem Cozinha PWA) */}
         <Route path="/" element={<RootRouter />} />
-        <Route path="/login" element={<RootRouter />} />
+        <Route path="/login" element={<ClientLogin />} />
+
+        {/* Rotas Exclusivas e Autônomas do Totem Cozinha (PWA Android para Tablet sem exigir login administrativo) */}
+        <Route path="/totem-cozinha" element={<ErrorBoundary><ChecklistTablet /></ErrorBoundary>} />
+        <Route path="/totem-cozinha/:tenantIdParam" element={<ErrorBoundary><ChecklistTablet /></ErrorBoundary>} />
+        <Route path="/totem" element={<ErrorBoundary><ChecklistTablet /></ErrorBoundary>} />
+        <Route path="/totem/:tenantIdParam" element={<ErrorBoundary><ChecklistTablet /></ErrorBoundary>} />
+        <Route path="/checklist/tablet" element={<ErrorBoundary><ChecklistTablet /></ErrorBoundary>} />
 
         {/* Rotas Privadas (Client SaaS) */}
         <Route element={<ProtectedRoute role="client" />}>
@@ -157,10 +178,6 @@ export default function App() {
 
           {/* FlowBuilder Fullscreen (Experiência Imersiva Estilo Typebot Original) */}
           <Route path="/flows/:id/edit" element={<ErrorBoundary><FlowBuilder /></ErrorBoundary>} />
-
-          {/* Rota Blindada de Operador (Sem Sidebar para tablets de cozinha compartilhados) */}
-          <Route path="/checklist/tablet" element={<ErrorBoundary><ChecklistTablet /></ErrorBoundary>} />
-
         </Route>
 
         {/* Rotas Públicas do Módulo Voucher (Colaborador e Caixa) */}

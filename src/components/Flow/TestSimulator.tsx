@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { Node, Edge } from '@xyflow/react';
 import { parseTextToSegments } from '../../utils/urlHelper';
+import { useChatStore } from '../../store/chatStore';
 
 interface TestSimulatorProps {
   nodes: Node[];
@@ -31,25 +32,30 @@ interface Message {
   text: string;
 }
 
-const DEFAULT_SIMULATOR_VARS: Record<string, string> = {
-  pushName: 'Ronaldo Clemente',
-  saudacao: 'Boa tarde',
-  NomeEmpresa: 'Burguer Plus',
-  cardapio: 'https://burguerplus.com.br',
-  GoogleMaps: 'https://maps.app.goo.gl/6souriEL2Fnmk9bh8',
-  EnderecoEmpresa: 'Praça Miguel Ortega, 380 - Parque Assuncao, Taboão da Serra - SP, 06754-160',
-  DiaFuncionamento: 'Segunda a Sábado',
-  HoraFuncionamento: '11:00h às 22:45h',
-  NumeroTelefoneEmpresa: '(11) 94321-6659',
-  AbertoFechado: 'true',
-  NumeroMenu: '1',
-  message: 'Olá, gostaria de fazer um pedido'
+const getInitialSimulatorVars = (): Record<string, string> => {
+  const tenantInfo = useChatStore.getState().tenantInfo;
+  const settings = (tenantInfo as any)?.settings || {};
+  return {
+    pushName: 'Cliente Teste',
+    saudacao: 'Boa tarde',
+    NomeEmpresa: tenantInfo?.name || settings.nome_ia || 'Burguer Plus',
+    cardapio: settings.link_cardapio || 'https://burguerplus.com.br',
+    GoogleMaps: settings.google_maps || 'https://maps.app.goo.gl/6souriEL2Fnmk9bh8',
+    EnderecoEmpresa: settings.endereco || 'Praça Miguel Ortega, 380 - Taboão da Serra - SP',
+    DiaFuncionamento: 'Segunda a Sábado',
+    HoraFuncionamento: settings.horario_funcionamento || '11:00h às 22:45h',
+    NumeroTelefoneEmpresa: '(11) 94321-6659',
+    AbertoFechado: 'true',
+    NumeroMenu: '1',
+    message: 'Olá, gostaria de atendimento'
+  };
 };
 
 export default function TestSimulator({ nodes, edges, onClose, startNodeId }: TestSimulatorProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [currentBlock, setCurrentBlock] = useState<any>(null);
-  const [variables, setVariables] = useState<Record<string, string>>(DEFAULT_SIMULATOR_VARS);
+  const [variables, setVariables] = useState<Record<string, string>>(() => getInitialSimulatorVars());
+  const [lastUserInput, setLastUserInput] = useState<string>('');
   const [isAwaitingInput, setIsAwaitingInput] = useState(false);
   const [inputValue, setInputValue] = useState('');
   const [isRestarting, setIsRestarting] = useState(false);
@@ -83,9 +89,12 @@ export default function TestSimulator({ nodes, edges, onClose, startNodeId }: Te
     }
 
     // 1. Procura grupo com bloco de Início
-    let startGroup = nodes.find(n => n.type === 'typebot_group' && (
+    let startGroup = nodes.find(n => (n.type === 'typebot_group' || n.type === 'group') && (
       n.data?.label?.toLowerCase().includes('início') ||
       n.data?.label?.toLowerCase().includes('inicio') ||
+      n.data?.title?.toLowerCase().includes('início') ||
+      n.data?.title?.toLowerCase().includes('inicio') ||
+      n.data?.title?.toLowerCase().includes('boas-vindas') ||
       n.data?.label?.toLowerCase().includes('start') ||
       n.data?.label?.toLowerCase().includes('entrada') ||
       n.data?.blocks?.some((b: any) => 
@@ -99,7 +108,7 @@ export default function TestSimulator({ nodes, edges, onClose, startNodeId }: Te
     // 2. Se não achou por nome, pega o nó do topo ou sem arestas de entrada
     if (!startGroup) {
       const targetGroupsIds = edges.map(e => e.target);
-      const startCandidates = nodes.filter(n => !targetGroupsIds.includes(n.id) && (n.type === 'typebot_group' || n.type === 'custom'));
+      const startCandidates = nodes.filter(n => !targetGroupsIds.includes(n.id) && (n.type === 'typebot_group' || n.type === 'group' || n.type === 'custom'));
       if (startCandidates.length > 0) {
         startCandidates.sort((a, b) => (a.position.y - b.position.y) || (a.position.x - b.position.x));
         startGroup = startCandidates[0];
@@ -112,8 +121,8 @@ export default function TestSimulator({ nodes, edges, onClose, startNodeId }: Te
       return {
         id: startGroup.id,
         flowType: startGroup.data?.type || 'send_message',
-        label: startGroup.data?.label || 'Início',
-        text: startGroup.data?.message || startGroup.data?.label || ''
+        label: startGroup.data?.label || startGroup.data?.title || 'Início',
+        text: startGroup.data?.message || startGroup.data?.label || startGroup.data?.title || ''
       };
     }
     return null;
@@ -145,7 +154,7 @@ export default function TestSimulator({ nodes, edges, onClose, startNodeId }: Te
         if (targetNode && targetNode.data?.blocks?.length > 0) return targetNode.data.blocks[0];
       }
       if (targetName) {
-        const targetNode = nodes.find(n => n.data?.label?.toLowerCase().includes(targetName.toLowerCase()));
+        const targetNode = nodes.find(n => (n.data?.label || n.data?.title || '')?.toLowerCase().includes(targetName.toLowerCase()));
         if (targetNode && targetNode.data?.blocks?.length > 0) return targetNode.data.blocks[0];
       }
 
@@ -159,32 +168,51 @@ export default function TestSimulator({ nodes, edges, onClose, startNodeId }: Te
       if (start) return start;
     }
 
-    // Se o bloco atual for uma Condição com Itens (Typebot Pattern)
-    if (currentBlock?.flowType === 'condition' && currentBlock.items && Array.isArray(currentBlock.items)) {
-      for (const item of currentBlock.items) {
-        const varVal = String(variables[item.varName] ?? '').trim().toLowerCase();
-        const targetVal = String(item.value ?? '').trim().toLowerCase();
-        
-        let matches = false;
-        if (item.operator === '=' || item.operator === 'Equal to') {
-          matches = varVal === targetVal;
-        } else if (item.operator === '≠' || item.operator === 'Not equal') {
-          matches = varVal !== targetVal;
-        } else {
-          matches = varVal === targetVal;
-        }
+    const evalComparison = (varValRaw: string, op: string, targetValRaw: string) => {
+      const varVal = String(varValRaw ?? '').trim().toLowerCase();
+      const targetVal = String(targetValRaw ?? '').trim().toLowerCase();
+      if (op === '=' || op === 'Equal to' || op === 'equals') return varVal === targetVal;
+      if (op === '≠' || op === 'Not equal' || op === 'not_equals') return varVal !== targetVal;
+      if (op === 'contains' || op === 'Contains' || op === 'Contém') return varVal.includes(targetVal);
+      if (op === 'starts_with' || op === 'Starts with') return varVal.startsWith(targetVal);
+      if (op === '>' || op === 'Greater than') return Number(varVal) > Number(targetVal);
+      if (op === '<' || op === 'Less than') return Number(varVal) < Number(targetVal);
+      if (op === 'exists' || op === 'Is set') return varVal.length > 0;
+      return varVal === targetVal;
+    };
 
-        if (matches) {
-          const matchedEdge = edges.find(e => e.sourceHandle === item.id);
-          if (matchedEdge) {
-            const targetNode = nodes.find(n => n.id === matchedEdge.target);
+    // Se o bloco atual for uma Condição com Itens (Typebot Pattern)
+    if (currentBlock?.flowType === 'condition') {
+      if (currentBlock.items && Array.isArray(currentBlock.items) && currentBlock.items.length > 0) {
+        for (const item of currentBlock.items) {
+          const candidateVal = item.varName && variables[item.varName] !== undefined
+            ? variables[item.varName]
+            : (userInputOption || lastUserInput || variables['NumeroMenu'] || '');
+          
+          if (evalComparison(candidateVal, item.operator || '=', item.value)) {
+            const matchedEdge = edges.find(e => e.sourceHandle === item.id);
+            if (matchedEdge) {
+              const targetNode = nodes.find(n => n.id === matchedEdge.target);
+              if (targetNode && targetNode.data?.blocks?.length > 0) return targetNode.data.blocks[0];
+            }
+          }
+        }
+      } else if (currentBlock.variable || currentBlock.var_name || currentBlock.value) {
+        const varKey = currentBlock.variable || currentBlock.var_name;
+        const candidateVal = varKey && variables[varKey] !== undefined
+          ? variables[varKey]
+          : (userInputOption || lastUserInput || '');
+        if (evalComparison(candidateVal, currentBlock.operator || '=', currentBlock.value || '')) {
+          const trueEdge = edges.find(e => e.sourceHandle === currBlockId || e.sourceHandle === `${currBlockId}-true` || e.label?.toLowerCase().includes('verdadeiro'));
+          if (trueEdge) {
+            const targetNode = nodes.find(n => n.id === trueEdge.target);
             if (targetNode && targetNode.data?.blocks?.length > 0) return targetNode.data.blocks[0];
           }
         }
       }
 
       // Senão / Fallback
-      const elseEdge = edges.find(e => e.sourceHandle === `${currBlockId}-else` || (e.sourceHandle === currBlockId && !currentBlock.items.some((i: any) => i.id === e.sourceHandle)));
+      const elseEdge = edges.find(e => e.sourceHandle === `${currBlockId}-else` || (e.sourceHandle === currBlockId && !(currentBlock.items || []).some((i: any) => i.id === e.sourceHandle)));
       if (elseEdge) {
         const targetNode = nodes.find(n => n.id === elseEdge.target);
         if (targetNode && targetNode.data?.blocks?.length > 0) return targetNode.data.blocks[0];
@@ -200,7 +228,7 @@ export default function TestSimulator({ nodes, edges, onClose, startNodeId }: Te
 
       // 1. Tenta achar aresta com handle de opção específico
       let matchingEdge = edges.find(e => 
-        (e.source === parentGroup?.id || e.sourceHandle === currBlockId) &&
+        (e.source === parentGroup?.id || e.sourceHandle === currBlockId || e.sourceHandle?.startsWith(currBlockId)) &&
         (e.sourceHandle === `${currBlockId}-opt-${optionIndex}` || e.sourceHandle === `${currBlockId}-cond-${optionIndex}`)
       );
       
@@ -208,6 +236,7 @@ export default function TestSimulator({ nodes, edges, onClose, startNodeId }: Te
       if (!matchingEdge) {
         matchingEdge = edges.find(e => {
           if (!e.label) return false;
+          if (parentGroup && e.source !== parentGroup.id) return false;
           const l = e.label.toLowerCase();
           return l.includes(`numeromenu - ${optNum}`) || 
                  l.startsWith(`${optNum} -`) || 
@@ -275,21 +304,22 @@ export default function TestSimulator({ nodes, edges, onClose, startNodeId }: Te
     if (!currentBlock || isRestarting) return;
 
     const flowType = currentBlock.flowType;
+    const blockMsg = currentBlock.text || currentBlock.content || '';
 
     // 1. Mensagens de Texto & Mídias
-    if (['send_message', 'image', 'video', 'audio', 'embed'].includes(flowType)) {
-      const baseText = currentBlock.text 
-        ? currentBlock.text 
+    if (['send_message', 'message', 'image', 'video', 'audio', 'embed'].includes(flowType)) {
+      const baseText = blockMsg 
+        ? blockMsg 
         : currentBlock.url 
-          ? `[Mídia ${flowType.toUpperCase()}: ${currentBlock.url}]`
+          ? `[Mídia ${flowType.toUpperCase()}: ${currentBlock.url}]${currentBlock.caption ? `\n${currentBlock.caption}` : ''}`
           : `[Mídia: ${flowType}]`;
       const text = parseText(baseText, variables);
       pushMessage('bot', text);
       autoAdvance(currentBlock.id, 700);
     } 
     // 2. Inputs de Texto e Formulários
-    else if (['ask', 'number_input', 'email_input', 'website_input', 'phone_input', 'date_input', 'time_input', 'payment', 'rating', 'file_input'].includes(flowType)) {
-      const baseText = currentBlock.text || `Digite seu ${currentBlock.label || flowType}:`;
+    else if (['ask', 'input', 'number_input', 'email_input', 'website_input', 'phone_input', 'date_input', 'time_input', 'payment', 'rating', 'file_input'].includes(flowType)) {
+      const baseText = blockMsg || `Digite seu ${currentBlock.label || flowType}:`;
       const text = parseText(baseText, variables);
       pushMessage('bot', text);
 
@@ -313,8 +343,8 @@ export default function TestSimulator({ nodes, edges, onClose, startNodeId }: Te
     }
     // 3. Botões e Menus de Opções
     else if (['buttons', 'pic_choice', 'cards'].includes(flowType)) {
-      if (currentBlock.text) {
-        pushMessage('bot', parseText(currentBlock.text, variables));
+      if (blockMsg) {
+        pushMessage('bot', parseText(blockMsg, variables));
       }
       const opts = currentBlock.options || ['1 - Opção 1', '2 - Opção 2'];
       setActiveButtonOptions(opts);
@@ -322,9 +352,10 @@ export default function TestSimulator({ nodes, edges, onClose, startNodeId }: Te
     }
     // 4. Set Variable
     else if (flowType === 'set_variable') {
-      const { var_name, text } = currentBlock;
-      if (var_name && text) {
-        setVariables(prev => ({ ...prev, [var_name as string]: parseText(text, prev) }));
+      const varKey = currentBlock.var_name || currentBlock.variable;
+      const valExpr = currentBlock.text || currentBlock.value || currentBlock.expression || '';
+      if (varKey && valExpr) {
+        setVariables(prev => ({ ...prev, [varKey as string]: parseText(valExpr, prev) }));
       }
       autoAdvance(currentBlock.id, 80);
     }
@@ -335,19 +366,21 @@ export default function TestSimulator({ nodes, edges, onClose, startNodeId }: Te
     }
     // 6. Condicionais
     else if (flowType === 'condition') {
-      autoAdvance(currentBlock.id, 200, variables['NumeroMenu']);
+      autoAdvance(currentBlock.id, 200, lastUserInput || variables['NumeroMenu']);
     }
     // 7. Espera / Delay
-    else if (flowType === 'wait') {
-      const waitTime = currentBlock.wait_time ? Number(currentBlock.wait_time) : 2;
+    else if (flowType === 'wait' || flowType === 'delay') {
+      const waitTime = currentBlock.wait_time || currentBlock.delay ? Number(currentBlock.wait_time || currentBlock.delay) : 2;
       pushMessage('system', `⏳ Aguardando ${waitTime}s...`);
-      autoAdvance(currentBlock.id, Math.min(waitTime * 1000, 3000)); // Cap de 3s no simulador para agilidade
+      autoAdvance(currentBlock.id, Math.min(waitTime * 1000, 3000));
     }
     // 8. Webhook / GET
     else if (flowType === 'webhook') {
       const respVar = currentBlock.response_var_name || 'AbertoFechado';
+      const webhookUrl = currentBlock.url || currentBlock.webhookUrl || 'API';
+      const method = currentBlock.method || 'GET';
       setVariables(prev => ({ ...prev, [respVar]: 'true' }));
-      pushMessage('system', `⚡ Webhook GET: ${currentBlock.url || 'API'} (200 OK) -> ${respVar} = true`);
+      pushMessage('system', `⚡ Webhook ${method}: ${webhookUrl} (200 OK) -> ${respVar} = true`);
       autoAdvance(currentBlock.id, 400);
     }
     // 9. Start Block
@@ -356,6 +389,9 @@ export default function TestSimulator({ nodes, edges, onClose, startNodeId }: Te
     }
     // 10. Handoff
     else if (flowType === 'handoff') {
+      if (blockMsg) {
+        pushMessage('bot', parseText(blockMsg, variables));
+      }
       pushMessage('system', '👤 Atendimento transferido para atendente humano.');
       setCurrentBlock(null);
     }
@@ -370,7 +406,8 @@ export default function TestSimulator({ nodes, edges, onClose, startNodeId }: Te
   const handleRestart = () => {
     setIsRestarting(true);
     setMessages([]);
-    setVariables(DEFAULT_SIMULATOR_VARS);
+    setVariables(getInitialSimulatorVars());
+    setLastUserInput('');
     setIsAwaitingInput(false);
     setInputValue('');
     setActiveButtonOptions([]);
@@ -402,9 +439,10 @@ export default function TestSimulator({ nodes, edges, onClose, startNodeId }: Te
     pushMessage('user', optionText);
     setActiveButtonOptions([]);
     setIsAwaitingInput(false);
+    setLastUserInput(selectedValue);
 
-    const varName = currentBlock.var_name || 'NumeroMenu';
-    setVariables(prev => ({ ...prev, [varName]: selectedValue }));
+    const varName = currentBlock.var_name || currentBlock.variable || 'NumeroMenu';
+    setVariables(prev => ({ ...prev, [varName]: selectedValue, NumeroMenu: selectedValue }));
 
     autoAdvance(currentBlock.id, 400, selectedValue);
   };
@@ -418,9 +456,10 @@ export default function TestSimulator({ nodes, edges, onClose, startNodeId }: Te
     setInputValue('');
     setActiveButtonOptions([]);
     setIsAwaitingInput(false);
+    setLastUserInput(text);
 
-    const varName = currentBlock.var_name || 'NumeroMenu';
-    setVariables(prev => ({ ...prev, [varName]: text }));
+    const varName = currentBlock.var_name || currentBlock.variable || 'NumeroMenu';
+    setVariables(prev => ({ ...prev, [varName]: text, NumeroMenu: text }));
 
     autoAdvance(currentBlock.id, 400, text);
   };

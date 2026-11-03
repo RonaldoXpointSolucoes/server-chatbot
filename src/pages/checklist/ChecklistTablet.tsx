@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useParams } from 'react-router-dom';
 import { supabase } from '../../services/supabase';
+import { VAPID_PUBLIC_KEY, urlBase64ToUint8Array } from '../../hooks/usePushNotifications';
 import { 
   KeyRound, 
   User, 
@@ -35,7 +37,16 @@ import {
   Plus,
   CheckSquare,
   List,
-  FileText
+  FileText,
+  Bell,
+  BellRing,
+  Volume2,
+  VolumeX,
+  Settings,
+  Tag,
+  Copy,
+  QrCode,
+  ExternalLink
 } from 'lucide-react';
 import { Reorder } from 'framer-motion';
 
@@ -45,6 +56,7 @@ interface OperatorProfile {
   pin: string;
   role: string;
   is_active: boolean;
+  tenant_id?: string;
 }
 
 interface ChecklistToExecute {
@@ -52,6 +64,7 @@ interface ChecklistToExecute {
   title: string;
   description: string;
   category: string;
+  tags?: string[];
   sector_name: string;
   sector_id: string;
   use_unit_schedule_rules: boolean;
@@ -64,8 +77,10 @@ interface ChecklistToExecute {
   unit_radius_meters: number;
   require_geolocation: boolean;
   schedule_time?: string;
+  schedule_times?: string[];
   schedule_id?: string;
   responsible_ids?: string[];
+  items_list?: any[];
 }
 
 interface ExecutionResponse {
@@ -82,7 +97,17 @@ interface ExecutionResponse {
 }
 
 export default function ChecklistTablet() {
-  const tenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+  const { tenantIdParam } = useParams<{ tenantIdParam?: string }>();
+  const [tenantId, setTenantId] = useState<string | null>(() => {
+    const searchParams = new URLSearchParams(window.location.search);
+    const urlTenant = tenantIdParam || searchParams.get('tenant') || searchParams.get('t');
+    if (urlTenant && urlTenant !== 'undefined') {
+      localStorage.setItem('current_tenant_id', urlTenant);
+      return urlTenant;
+    }
+    return localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+  });
+  const apiBaseUrl = (import.meta.env.VITE_WHATSAPP_ENGINE_URL || '').replace(/\/$/, '');
 
   // Estados de Autenticação / PIN
   const [operators, setOperators] = useState<OperatorProfile[]>([]);
@@ -96,6 +121,62 @@ export default function ChecklistTablet() {
   const [checklists, setChecklists] = useState<ChecklistToExecute[]>([]);
   const [loadingChecklists, setLoadingChecklists] = useState(false);
   const [activeChecklist, setActiveChecklist] = useState<ChecklistToExecute | null>(null);
+
+  // =========================================================================
+  // CONFIGURAÇÃO DE SETOR DO TABLET & DESPERTADOR DE HORÁRIO EXATO (PWA)
+  // =========================================================================
+  const [totemSectorId, setTotemSectorId] = useState<string>(() => {
+    const searchParams = new URLSearchParams(window.location.search);
+    const urlSecId = searchParams.get('sectorId');
+    if (urlSecId) {
+      localStorage.setItem('totem_sector_id', urlSecId);
+      return urlSecId;
+    }
+    return localStorage.getItem('totem_sector_id') || '';
+  });
+  const [totemSectorName, setTotemSectorName] = useState<string>(() => {
+    const searchParams = new URLSearchParams(window.location.search);
+    const urlSecName = searchParams.get('sector') || searchParams.get('sectorName');
+    if (urlSecName) {
+      localStorage.setItem('totem_sector_name', urlSecName);
+      return urlSecName;
+    }
+    return localStorage.getItem('totem_sector_name') || 'Cozinha';
+  });
+  const [filterByTotemSector, setFilterByTotemSector] = useState<boolean>(() => localStorage.getItem('totem_filter_by_sector') !== 'false');
+  const [sectorsList, setSectorsList] = useState<Array<{ id: string; name: string; unit_id?: string }>>([]);
+  const [unitsList, setUnitsList] = useState<Array<{ id: string; name: string }>>([]);
+  const [allTenantChecklists, setAllTenantChecklists] = useState<ChecklistToExecute[]>([]);
+  const [isSectorAlarmModalOpen, setIsSectorAlarmModalOpen] = useState(false);
+  const [newSectorInputName, setNewSectorInputName] = useState('');
+  const [creatingSector, setCreatingSector] = useState(false);
+  const [pushStatus, setPushStatus] = useState<'idle' | 'subscribing' | 'active' | 'denied' | 'error'>('idle');
+  const [pushEndpoint, setPushEndpoint] = useState<string>('');
+  const [wakeLockActive, setWakeLockActive] = useState(false);
+  const [scheduleTimeInputs, setScheduleTimeInputs] = useState<Record<string, string>>({});
+  const [savingScheduleId, setSavingScheduleId] = useState<string | null>(null);
+  const [testingClosedAlarm, setTestingClosedAlarm] = useState(false);
+  const [closedAlarmCountdown, setClosedAlarmCountdown] = useState<number>(0);
+
+  // Estado do Alarme Sonoro de Tela Cheia (Disparo em Horário Exato)
+  const [activeAlarmModal, setActiveAlarmModal] = useState<{
+    checklistId: string;
+    checklistTitle: string;
+    checklistCategory: string;
+    sectorId: string;
+    sectorName: string;
+    scheduleTime: string;
+    tasks: Array<{ id: string; title: string; description?: string; is_required?: boolean; is_critical?: boolean }>;
+    isLeadWarning?: boolean;
+  } | null>(null);
+  const [isAlarmMuted, setIsAlarmMuted] = useState(false);
+  const [pendingAlarmChecklistId, setPendingAlarmChecklistId] = useState<string | null>(null);
+
+  const sirenIntervalRef = useRef<any>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const firedLocalAlarmsRef = useRef<Set<string>>(new Set());
+  const snoozedLocalAlarmsRef = useRef<Array<{ triggerAtMs: number; payload: any }>>([]);
+  const wakeLockSentinelRef = useRef<any>(null);
 
   // Estados para Histórico de Concluídos
   const [activeTab, setActiveTab] = useState<'active' | 'history'>('active');
@@ -158,6 +239,26 @@ export default function ChecklistTablet() {
     const checkStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true;
     setIsStandalone(checkStandalone);
 
+    // Marca este dispositivo como Totem Cozinha Standalone e vincula o manifesto exclusivo /manifest-totem.webmanifest
+    try {
+      localStorage.setItem('totem_standalone_mode', 'true');
+      document.title = `Totem ${totemSectorName || 'Cozinha'} • Checklists & Alarmes`;
+      const manifestLink = document.querySelector('link[rel="manifest"]');
+      if (manifestLink) {
+        manifestLink.setAttribute('href', '/manifest-totem.webmanifest');
+      } else {
+        const link = document.createElement('link');
+        link.rel = 'manifest';
+        link.href = '/manifest-totem.webmanifest';
+        document.head.appendChild(link);
+      }
+    } catch (e) {}
+
+    const searchParams = new URLSearchParams(window.location.search);
+    if (searchParams.get('install') === '1' && !checkStandalone) {
+      setIsInstallModalOpen(true);
+    }
+
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
       setDeferredPrompt(e);
@@ -168,19 +269,23 @@ export default function ChecklistTablet() {
   }, []);
 
   const handleInstallPwa = async () => {
+    // Já garante a ativação do despertador Web Push do setor Cozinha ao instalar
+    handleActivateSectorPushAlarm(totemSectorId || '', totemSectorName || 'Cozinha', true);
+
     if (deferredPrompt) {
       try {
         await deferredPrompt.prompt();
         const choiceResult = await deferredPrompt.userChoice;
         if (choiceResult.outcome === 'accepted') {
-          showToast('success', '✅ Aplicativo Totem instalado no tablet com sucesso!');
+          showToast('success', '✅ Aplicativo Totem Cozinha instalado no tablet Android com alarme ativo!');
           setDeferredPrompt(null);
+          setIsInstallModalOpen(false);
         }
       } catch (err) {
         setIsInstallModalOpen(true);
       }
     } else if (isStandalone) {
-      showToast('success', '📱 O App Totem já está instalado e rodando em modo aplicativo!');
+      setIsInstallModalOpen(true);
     } else {
       setIsInstallModalOpen(true);
     }
@@ -239,11 +344,26 @@ export default function ChecklistTablet() {
 
   const loadOperators = async () => {
     try {
-      const effectiveTenantId = tenantId || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+      let effectiveTenantId = tenantId || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+
+      // Se o tablet abriu pela rota limpa /totem-cozinha sem tenant salvo, descobre automaticamente o tenant ativo dos checklists/operadores
+      if (!effectiveTenantId || effectiveTenantId === 'undefined') {
+        const { data: chkTenant } = await supabase
+          .from('checklists')
+          .select('tenant_id')
+          .eq('is_active', true)
+          .limit(1)
+          .maybeSingle();
+        if (chkTenant?.tenant_id) {
+          effectiveTenantId = chkTenant.tenant_id;
+          localStorage.setItem('current_tenant_id', effectiveTenantId);
+          setTenantId(effectiveTenantId);
+        }
+      }
       
       let query = supabase
         .from('v_checklist_operators')
-        .select('id, name, pin, role, is_active')
+        .select('id, name, pin, role, is_active, tenant_id')
         .eq('is_active', true);
       
       if (effectiveTenantId) {
@@ -256,7 +376,7 @@ export default function ChecklistTablet() {
       if (!opsData || opsData.length === 0) {
         let profileQuery = supabase
           .from('users_profiles')
-          .select('id, name, pin, role, is_active')
+          .select('id, name, pin, role, is_active, tenant_id')
           .eq('is_active', true);
         if (effectiveTenantId) {
           profileQuery = profileQuery.eq('tenant_id', effectiveTenantId);
@@ -270,6 +390,11 @@ export default function ChecklistTablet() {
       if (opsErr && (!opsData || opsData.length === 0)) throw opsErr;
       
       const allOps = opsData || [];
+      if (!effectiveTenantId && allOps[0]?.tenant_id) {
+        localStorage.setItem('current_tenant_id', allOps[0].tenant_id);
+        setTenantId(allOps[0].tenant_id);
+      }
+
       setAllProfiles(allOps);
 
       const opsWithPin = allOps.filter(o => o.pin && o.pin.trim().length === 5);
@@ -279,14 +404,745 @@ export default function ChecklistTablet() {
     }
   };
 
-  useEffect(() => {
-    loadOperators();
-  }, [tenantId]);
-
   const showToast = (type: 'success' | 'error', msg: string) => {
     setToastMsg({ type, msg });
     setTimeout(() => setToastMsg(null), 4000);
   };
+
+  // =========================================================================
+  // MOTOR DE SETOR DO TABLET & ALARME EM HORÁRIO EXATO (COM APP ABERTO OU FECHADO)
+  // =========================================================================
+  const doesChecklistMatchSector = (chk: Partial<ChecklistToExecute>, targetSecId: string, targetSecName: string): boolean => {
+    const normId = (targetSecId || '').trim();
+    const normName = (targetSecName || '').trim().toLowerCase();
+
+    if (normId === 'ALL' || normName === 'todos' || normName === 'all' || (!normId && !normName)) {
+      return true;
+    }
+
+    if (normId && chk.sector_id && chk.sector_id === normId) {
+      return true;
+    }
+
+    const chkSecName = (chk.sector_name || '').trim().toLowerCase();
+    if (normName && chkSecName && (chkSecName === normName || chkSecName.includes(normName) || normName.includes(chkSecName))) {
+      return true;
+    }
+
+    if (normName) {
+      const title = (chk.title || '').toLowerCase();
+      const cat = (chk.category || '').toLowerCase();
+      const tags = (chk.tags || []).map(t => String(t).toLowerCase());
+      if (title.includes(normName) || cat.includes(normName) || tags.some(t => t.includes(normName))) {
+        return true;
+      }
+    }
+
+    return false;
+  };
+
+  const syncTotemSectorToSW = (secId: string, secName: string) => {
+    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+      navigator.serviceWorker.controller.postMessage({
+        type: 'SYNC_TOTEM_SECTOR',
+        config: {
+          sectorId: secId || 'ALL',
+          sectorName: secName || 'Cozinha',
+          tenantId,
+          apiBaseUrl
+        }
+      });
+    }
+  };
+
+  const startSirenSound = (sectorName: string, checklistTitle: string, taskTitles: string[] = []) => {
+    stopSirenSound();
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) {
+        const ctx = new AudioCtx();
+        audioCtxRef.current = ctx;
+
+        const playPulse = () => {
+          if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') return;
+          try {
+            if (audioCtxRef.current.state === 'suspended') {
+              audioCtxRef.current.resume().catch(() => {});
+            }
+            const now = audioCtxRef.current.currentTime;
+            const osc = audioCtxRef.current.createOscillator();
+            const gain = audioCtxRef.current.createGain();
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(880, now);
+            osc.frequency.setValueAtTime(1174.66, now + 0.22);
+            osc.frequency.setValueAtTime(880, now + 0.44);
+
+            gain.gain.setValueAtTime(0.01, now);
+            gain.gain.exponentialRampToValueAtTime(0.35, now + 0.04);
+            gain.gain.setValueAtTime(0.35, now + 0.58);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.65);
+
+            osc.connect(gain);
+            gain.connect(audioCtxRef.current.destination);
+            osc.start(now);
+            osc.stop(now + 0.66);
+          } catch (e) {}
+
+          if ('vibrate' in navigator) {
+            try { navigator.vibrate([400, 150, 400]); } catch (e) {}
+          }
+        };
+
+        playPulse();
+        sirenIntervalRef.current = setInterval(playPulse, 1100);
+      }
+    } catch (e) {
+      console.warn('Aviso ao iniciar sirene Web Audio:', e);
+    }
+
+    // Anúncio de Voz em Português (TTS) para a Cozinha
+    try {
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+        const tasksPreview = taskTitles.slice(0, 3).join(', ');
+        const utterance = new SpeechSynthesisUtterance(
+          `Atenção setor ${sectorName}! Horário do checklist ${checklistTitle}. ${tasksPreview ? `Tarefas: ${tasksPreview}` : 'Verifique as tarefas na tela.'}`
+        );
+        utterance.lang = 'pt-BR';
+        utterance.rate = 1.02;
+        utterance.pitch = 1.05;
+        utterance.volume = 1;
+        window.speechSynthesis.speak(utterance);
+      }
+    } catch (e) {}
+  };
+
+  const stopSirenSound = () => {
+    if (sirenIntervalRef.current) {
+      clearInterval(sirenIntervalRef.current);
+      sirenIntervalRef.current = null;
+    }
+    if (audioCtxRef.current) {
+      try { audioCtxRef.current.close(); } catch (e) {}
+      audioCtxRef.current = null;
+    }
+    try {
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+      if ('vibrate' in navigator) {
+        navigator.vibrate(0);
+      }
+    } catch (e) {}
+  };
+
+  const triggerFullAlarmModal = (payload: {
+    checklistId: string;
+    checklistTitle: string;
+    checklistCategory?: string;
+    sectorId?: string;
+    sectorName?: string;
+    scheduleTime?: string;
+    tasks?: any[];
+    isLeadWarning?: boolean;
+  }) => {
+    const matchedChk = allTenantChecklists.find(c => c.id === payload.checklistId) || checklists.find(c => c.id === payload.checklistId);
+    const rawTasks = (payload.tasks && payload.tasks.length > 0)
+      ? payload.tasks
+      : (matchedChk?.items_list || []);
+
+    const formattedTasks = rawTasks.map((t: any, idx: number) => ({
+      id: t.id || String(idx),
+      title: String(t.title || '').replace(/^\[.*?\]\s*/, ''),
+      description: t.description || '',
+      is_required: t.is_required ?? true,
+      is_critical: t.is_critical ?? false
+    }));
+
+    const secName = payload.sectorName || matchedChk?.sector_name || totemSectorName || 'Cozinha';
+    const chkTitle = payload.checklistTitle || matchedChk?.title || 'Rotina Operacional';
+    const schTime = payload.scheduleTime || matchedChk?.schedule_time || new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+    setIsAlarmMuted(false);
+    setActiveAlarmModal({
+      checklistId: payload.checklistId,
+      checklistTitle: chkTitle,
+      checklistCategory: payload.checklistCategory || matchedChk?.category || 'Operacional',
+      sectorId: payload.sectorId || matchedChk?.sector_id || totemSectorId || 'ALL',
+      sectorName: secName,
+      scheduleTime: schTime,
+      tasks: formattedTasks,
+      isLeadWarning: payload.isLeadWarning
+    });
+
+    startSirenSound(secName, chkTitle, formattedTasks.map(t => t.title));
+  };
+
+  const loadTenantSectorsAndSchedules = async () => {
+    const effectiveTenantId = tenantId || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+    if (!effectiveTenantId) return;
+
+    try {
+      const [secRes, unitRes, chkRes, schRes, todayRes] = await Promise.all([
+        supabase.from('sectors').select('id, name, unit_id').eq('tenant_id', effectiveTenantId).order('name'),
+        supabase.from('units').select('id, name').eq('tenant_id', effectiveTenantId).order('name'),
+        supabase
+          .from('checklists')
+          .select(`
+            id, title, description, category, tags, sector_id, weight, use_unit_schedule_rules,
+            min_time_lead_minutes, max_time_lag_minutes, responsible_ids,
+            sectors(id, name, unit_id, units(id, name, latitude, longitude, radius_meters, require_geolocation)),
+            checklist_items(id, title, description, response_type, is_required, is_critical, require_evidence, sort_order)
+          `)
+          .eq('tenant_id', effectiveTenantId)
+          .eq('is_active', true),
+        supabase
+          .from('checklist_schedules')
+          .select('id, checklist_id, start_time, recurrency, days_of_week, days_of_month, shift, is_active')
+          .eq('tenant_id', effectiveTenantId)
+          .eq('is_active', true),
+        (() => {
+          const startOfToday = new Date();
+          startOfToday.setHours(0, 0, 0, 0);
+          return supabase
+            .from('checklist_executions')
+            .select('id, checklist_id, completed_at, score')
+            .eq('tenant_id', effectiveTenantId)
+            .gte('completed_at', startOfToday.toISOString())
+            .in('status', ['completed_on_time', 'completed_late']);
+        })()
+      ]);
+
+      const loadedSectors = secRes.data || [];
+      const loadedUnits = unitRes.data || [];
+      setSectorsList(loadedSectors);
+      setUnitsList(loadedUnits);
+
+      // Se o tablet ainda não tiver setor salvo, vincula automaticamente ao setor "Cozinha" se existir
+      const savedSecId = localStorage.getItem('totem_sector_id');
+      const savedSecName = localStorage.getItem('totem_sector_name');
+      if (!savedSecId && loadedSectors.length > 0) {
+        const kitchenSec = loadedSectors.find((s: any) => s.name?.toLowerCase().includes('cozinha')) || loadedSectors[0];
+        if (kitchenSec) {
+          setTotemSectorId(kitchenSec.id);
+          setTotemSectorName(kitchenSec.name);
+          localStorage.setItem('totem_sector_id', kitchenSec.id);
+          localStorage.setItem('totem_sector_name', kitchenSec.name);
+          syncTotemSectorToSW(kitchenSec.id, kitchenSec.name);
+        }
+      } else {
+        syncTotemSectorToSW(savedSecId || totemSectorId, savedSecName || totemSectorName);
+      }
+
+      const schedulesByChecklist: Record<string, string[]> = {};
+      (schRes.data || []).forEach((s: any) => {
+        if (!s.checklist_id || !s.start_time) return;
+        const normTime = String(s.start_time).slice(0, 5);
+        if (!schedulesByChecklist[s.checklist_id]) schedulesByChecklist[s.checklist_id] = [];
+        if (!schedulesByChecklist[s.checklist_id].includes(normTime)) {
+          schedulesByChecklist[s.checklist_id].push(normTime);
+        }
+      });
+      Object.values(schedulesByChecklist).forEach(arr => arr.sort());
+
+      const mappedChecklists: ChecklistToExecute[] = (chkRes.data || []).map((chk: any) => {
+        const sector = chk.sectors;
+        const unit = sector?.units;
+        const times = schedulesByChecklist[chk.id] || [];
+        const sortedItems = [...(chk.checklist_items || [])].sort((a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+
+        return {
+          id: chk.id,
+          title: chk.title,
+          description: chk.description,
+          category: chk.category,
+          tags: chk.tags || [],
+          sector_name: sector?.name || 'Cozinha',
+          sector_id: chk.sector_id || '',
+          use_unit_schedule_rules: chk.use_unit_schedule_rules,
+          min_time_lead_minutes: chk.min_time_lead_minutes || 0,
+          max_time_lag_minutes: chk.max_time_lag_minutes || 60,
+          unit_id: unit?.id || '',
+          unit_name: unit?.name || 'Geral',
+          unit_latitude: unit?.latitude || null,
+          unit_longitude: unit?.longitude || null,
+          unit_radius_meters: unit?.radius_meters || 150,
+          require_geolocation: unit?.require_geolocation || false,
+          schedule_time: times[0] || undefined,
+          schedule_times: times,
+          responsible_ids: chk.responsible_ids || [],
+          items_list: sortedItems
+        };
+      });
+
+      setAllTenantChecklists(mappedChecklists);
+
+      if (todayRes.data) {
+        const todayMap: Record<string, { executionId: string; completedAt: string; score: number }> = {};
+        todayRes.data.forEach((td: any) => {
+          todayMap[td.checklist_id] = {
+            executionId: td.id,
+            completedAt: td.completed_at,
+            score: td.score || 100
+          };
+        });
+        setTodayCompletedChecklists(todayMap);
+      }
+    } catch (e) {
+      console.error('Erro ao carregar setores e agendamentos do Totem:', e);
+    }
+  };
+
+  const handleActivateSectorPushAlarm = async (overrideSecId?: string, overrideSecName?: string, silent = false) => {
+    const targetSecId = overrideSecId !== undefined ? overrideSecId : (totemSectorId || 'ALL');
+    const targetSecName = overrideSecName !== undefined ? overrideSecName : (totemSectorName || 'Cozinha');
+
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+      if (!silent) showToast('error', 'Este navegador não suporta Web Push. Use o Google Chrome no Android.');
+      return;
+    }
+
+    setPushStatus('subscribing');
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') {
+        setPushStatus('denied');
+        if (!silent) showToast('error', 'Permissão de notificação negada. Ative as notificações nas configurações do Chrome/Android.');
+        return;
+      }
+
+      const registration = await navigator.serviceWorker.ready;
+      let subscription = await registration.pushManager.getSubscription();
+      if (!subscription) {
+        const convertedKey = urlBase64ToUint8Array(VAPID_PUBLIC_KEY);
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: convertedKey
+        });
+      }
+
+      const subJson = JSON.parse(JSON.stringify(subscription));
+      setPushEndpoint(subJson.endpoint || '');
+
+      const userEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email') || null;
+      const taggedUserAgent = `[TOTEM_SECTOR:${targetSecId || 'ALL'}|${targetSecName || 'Cozinha'}] ${navigator.userAgent}`;
+
+      // 1. Grava diretamente no Supabase (push_subscriptions)
+      if (tenantId) {
+        await supabase.from('push_subscriptions').upsert({
+          tenant_id: tenantId,
+          endpoint: subJson.endpoint,
+          p256dh: subJson.keys.p256dh,
+          auth: subJson.keys.auth,
+          user_agent: taggedUserAgent,
+          email: userEmail ? userEmail.trim().toLowerCase() : null
+        }, { onConflict: 'endpoint' });
+      }
+
+      // 2. Sincroniza também com o servidor Node/WebPush se disponível
+      if (apiBaseUrl && tenantId) {
+        fetch(`${apiBaseUrl}/api/v1/push/subscribe`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-tenant-id': tenantId },
+          body: JSON.stringify({
+            tenantId,
+            subscription: subJson,
+            userAgent: navigator.userAgent,
+            email: userEmail,
+            sectorId: targetSecId || 'ALL',
+            sectorName: targetSecName || 'Cozinha'
+          })
+        }).catch(() => {});
+      }
+
+      // 3. Sincroniza com o Service Worker (IndexedDB)
+      syncTotemSectorToSW(targetSecId || 'ALL', targetSecName || 'Cozinha');
+
+      setPushStatus('active');
+      if (!silent) {
+        showToast('success', `🔔 Despertador do setor "${targetSecName}" ativado! Funciona mesmo com o app fechado.`);
+      }
+    } catch (err: any) {
+      console.error('Erro ao ativar Web Push do setor:', err);
+      setPushStatus('error');
+      if (!silent) showToast('error', 'Falha ao registrar Web Push no tablet.');
+    }
+  };
+
+  const handleSelectTotemSector = async (secId: string, secName: string) => {
+    setTotemSectorId(secId);
+    setTotemSectorName(secName);
+    localStorage.setItem('totem_sector_id', secId);
+    localStorage.setItem('totem_sector_name', secName);
+    syncTotemSectorToSW(secId, secName);
+    await handleActivateSectorPushAlarm(secId, secName, true);
+    showToast('success', `✅ Tablet configurado para o Setor: ${secName}!`);
+  };
+
+  const handleCreateNewSector = async () => {
+    const cleanName = newSectorInputName.trim();
+    if (!cleanName || !tenantId) return;
+    setCreatingSector(true);
+    try {
+      let targetUnitId = unitsList[0]?.id;
+      if (!targetUnitId) {
+        const { data: newUnit } = await supabase
+          .from('units')
+          .insert({ tenant_id: tenantId, name: 'Unidade Principal' })
+          .select()
+          .single();
+        if (newUnit) {
+          targetUnitId = newUnit.id;
+          setUnitsList([newUnit]);
+        }
+      }
+
+      const { data: createdSec, error } = await supabase
+        .from('sectors')
+        .insert({
+          tenant_id: tenantId,
+          unit_id: targetUnitId,
+          name: cleanName
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      if (createdSec) {
+        setSectorsList(prev => [...prev, createdSec]);
+        setNewSectorInputName('');
+        await handleSelectTotemSector(createdSec.id, createdSec.name);
+      }
+    } catch (e: any) {
+      showToast('error', `Erro ao criar setor: ${e.message || 'Falha no banco'}`);
+    } finally {
+      setCreatingSector(false);
+    }
+  };
+
+  const handleLinkChecklistToCurrentSector = async (chkId: string) => {
+    if (!totemSectorId || totemSectorId === 'ALL') {
+      showToast('error', 'Selecione um setor específico (ex: Cozinha) primeiro.');
+      return;
+    }
+    try {
+      const { error } = await supabase
+        .from('checklists')
+        .update({ sector_id: totemSectorId })
+        .eq('id', chkId);
+      if (error) throw error;
+      showToast('success', `Checklist vinculado ao setor ${totemSectorName}!`);
+      await loadTenantSectorsAndSchedules();
+      if (loggedInUser) {
+        loadOperatorChecklists(loggedInUser.id, loggedInUser.role, loggedInUser.name);
+      }
+    } catch (e: any) {
+      showToast('error', 'Falha ao vincular checklist ao setor.');
+    }
+  };
+
+  const handleSaveChecklistScheduleTime = async (chk: ChecklistToExecute, newTimeStr: string) => {
+    const cleanTime = (newTimeStr || '').trim().slice(0, 5);
+    if (!/^\d{2}:\d{2}$/.test(cleanTime) || !tenantId) {
+      showToast('error', 'Informe um horário válido no formato HH:MM (ex: 08:00).');
+      return;
+    }
+    setSavingScheduleId(chk.id);
+    try {
+      let targetUnitId = chk.unit_id || unitsList[0]?.id;
+      if (!targetUnitId) {
+        const { data: uData } = await supabase.from('units').select('id').eq('tenant_id', tenantId).limit(1).maybeSingle();
+        targetUnitId = uData?.id;
+      }
+
+      // Se o checklist ainda não estiver no setor do tablet e o tablet tiver um setor específico, vincula também
+      if (totemSectorId && totemSectorId !== 'ALL' && chk.sector_id !== totemSectorId) {
+        await supabase.from('checklists').update({ sector_id: totemSectorId }).eq('id', chk.id);
+      }
+
+      const { error } = await supabase.from('checklist_schedules').insert({
+        tenant_id: tenantId,
+        checklist_id: chk.id,
+        unit_id: targetUnitId || null,
+        start_time: cleanTime,
+        recurrency: 'daily',
+        shift: parseInt(cleanTime.split(':')[0], 10) < 12 ? 'Manhã' : parseInt(cleanTime.split(':')[0], 10) < 18 ? 'Tarde' : 'Noite',
+        start_date: new Date().toISOString().split('T')[0],
+        is_active: true
+      });
+
+      if (error) throw error;
+      showToast('success', `⏰ Alarme de ${cleanTime} salvo para "${chk.title}"!`);
+      await loadTenantSectorsAndSchedules();
+      if (loggedInUser) {
+        loadOperatorChecklists(loggedInUser.id, loggedInUser.role, loggedInUser.name);
+      }
+    } catch (e: any) {
+      showToast('error', `Erro ao salvar horário: ${e.message || 'Falha'}`);
+    } finally {
+      setSavingScheduleId(null);
+    }
+  };
+
+  const handleRemoveChecklistScheduleTime = async (chkId: string, timeToRemove: string) => {
+    try {
+      await supabase
+        .from('checklist_schedules')
+        .delete()
+        .eq('checklist_id', chkId)
+        .ilike('start_time', `${timeToRemove}%`);
+      showToast('success', `Horário ${timeToRemove} removido.`);
+      await loadTenantSectorsAndSchedules();
+      if (loggedInUser) {
+        loadOperatorChecklists(loggedInUser.id, loggedInUser.role, loggedInUser.name);
+      }
+    } catch (e) {
+      showToast('error', 'Erro ao remover horário.');
+    }
+  };
+
+  const handleTestClosedAppAlarm = async (delaySeconds = 10) => {
+    if (!tenantId) return;
+    setTestingClosedAlarm(true);
+    try {
+      await handleActivateSectorPushAlarm(totemSectorId || 'ALL', totemSectorName || 'Cozinha', true);
+
+      const sectorChecklists = allTenantChecklists.filter(c =>
+        doesChecklistMatchSector(c, totemSectorId, totemSectorName)
+      );
+      const sampleChk = sectorChecklists[0] || allTenantChecklists[0];
+
+      if (apiBaseUrl) {
+        await fetch(`${apiBaseUrl}/api/v1/push/checklist-alarm-test`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-tenant-id': tenantId },
+          body: JSON.stringify({
+            tenantId,
+            sectorId: totemSectorId || 'ALL',
+            sectorName: totemSectorName || 'Cozinha',
+            checklistId: sampleChk?.id,
+            delaySeconds,
+            endpoint: pushEndpoint || undefined
+          })
+        }).catch(() => {});
+      }
+
+      // Fallback local via Service Worker caso o app fique em segundo plano / tela bloqueada
+      setClosedAlarmCountdown(delaySeconds);
+      const countdownTimer = setInterval(() => {
+        setClosedAlarmCountdown(prev => {
+          if (prev <= 1) {
+            clearInterval(countdownTimer);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+
+      setTimeout(async () => {
+        setTestingClosedAlarm(false);
+        // Se o app ainda estiver aberto/em background, garante o disparo da notificação nativa + modal
+        const title = `🚨 ALARME ${(totemSectorName || 'COZINHA').toUpperCase()} • ${sampleChk?.title || 'Abertura Cozinha'}`;
+        const tasks = sampleChk?.items_list || [
+          { id: '1', title: 'Higienização das bancadas e equipamentos do setor', is_required: true },
+          { id: '2', title: 'Conferência de temperatura de câmaras frias e freezers', is_required: true },
+          { id: '3', title: 'Mise en place e validade dos insumos do turno', is_required: true }
+        ];
+        if ('serviceWorker' in navigator && Notification.permission === 'granted') {
+          try {
+            const reg = await navigator.serviceWorker.ready;
+            await reg.showNotification(title, {
+              body: `⏰ Horário exato atingido! Tarefas do setor ${totemSectorName}:\n` + tasks.slice(0, 5).map((t: any, i: number) => `${i + 1}. ${String(t.title).replace(/^\[.*?\]\s*/, '')}`).join('\n'),
+              icon: '/pwa-192x192.png',
+              badge: '/pwa-192x192.png',
+              tag: `checklist_alarm_test_${Date.now()}`,
+              renotify: true,
+              requireInteraction: true,
+              vibrate: [500, 200, 500, 200, 800, 200, 1000],
+              data: {
+                type: 'CHECKLIST_ALARM',
+                checklistId: sampleChk?.id || '',
+                checklistTitle: sampleChk?.title || 'Abertura Cozinha',
+                sectorId: totemSectorId || 'ALL',
+                sectorName: totemSectorName || 'Cozinha',
+                tasks
+              }
+            } as any);
+          } catch (e) {}
+        }
+        triggerFullAlarmModal({
+          checklistId: sampleChk?.id || '',
+          checklistTitle: sampleChk?.title || `Rotina ${totemSectorName}`,
+          checklistCategory: sampleChk?.category || 'Operacional',
+          sectorId: totemSectorId || 'ALL',
+          sectorName: totemSectorName || 'Cozinha',
+          scheduleTime: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+          tasks
+        });
+      }, delaySeconds * 1000);
+
+      showToast('success', `⏱️ Alarme agendado para daqui a ${delaySeconds}s! Bloqueie a tela ou minimize o app para testar.`);
+    } catch (e) {
+      setTestingClosedAlarm(false);
+      showToast('error', 'Erro ao agendar teste de alarme.');
+    }
+  };
+
+  // WakeLock para manter o tablet sempre alerta quando na tomada e sincronizar SW/Push
+  useEffect(() => {
+    loadOperators();
+    loadTenantSectorsAndSchedules();
+
+    const syncInterval = setInterval(() => {
+      loadTenantSectorsAndSchedules();
+    }, 60 * 1000);
+
+    // Ativa automaticamente o Push do setor se já tiver permissão concedida
+    if ('Notification' in window && Notification.permission === 'granted') {
+      handleActivateSectorPushAlarm(
+        localStorage.getItem('totem_sector_id') || 'ALL',
+        localStorage.getItem('totem_sector_name') || 'Cozinha',
+        true
+      );
+    }
+
+    // Solicita Screen WakeLock para impedir que o tablet apague durante a operação na cozinha
+    const requestWakeLock = async () => {
+      if ('wakeLock' in navigator) {
+        try {
+          wakeLockSentinelRef.current = await (navigator as any).wakeLock.request('screen');
+          setWakeLockActive(true);
+          wakeLockSentinelRef.current.addEventListener('release', () => {
+            setWakeLockActive(false);
+          });
+        } catch (e) {}
+      }
+    };
+    requestWakeLock();
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        requestWakeLock();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      clearInterval(syncInterval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      stopSirenSound();
+      if (wakeLockSentinelRef.current) {
+        try { wakeLockSentinelRef.current.release(); } catch (e) {}
+      }
+    };
+  }, [tenantId]);
+
+  // Escuta mensagens vindas do Service Worker (CHECKLIST_ALARM_TRIGGER / CHECKLIST_ALARM_CLICK) e URL Params (?alarmChecklistId=...)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const urlAlarmChkId = params.get('alarmChecklistId');
+    const urlSecId = params.get('sectorId');
+    const urlSecName = params.get('sectorName');
+    const urlSchTime = params.get('scheduleTime');
+
+    if (urlSecName && !localStorage.getItem('totem_sector_name')) {
+      setTotemSectorId(urlSecId || 'ALL');
+      setTotemSectorName(urlSecName);
+    }
+
+    if (urlAlarmChkId && allTenantChecklists.length > 0) {
+      const targetChk = allTenantChecklists.find(c => c.id === urlAlarmChkId);
+      if (targetChk) {
+        triggerFullAlarmModal({
+          checklistId: targetChk.id,
+          checklistTitle: targetChk.title,
+          checklistCategory: targetChk.category,
+          sectorId: targetChk.sector_id,
+          sectorName: targetChk.sector_name || urlSecName || totemSectorName,
+          scheduleTime: urlSchTime || targetChk.schedule_time || new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+          tasks: targetChk.items_list || []
+        });
+        // Limpa a query string para não reabrir em loop
+        window.history.replaceState({}, '', window.location.pathname);
+      }
+    }
+  }, [allTenantChecklists.length]);
+
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+    const handleSWMessage = (event: MessageEvent) => {
+      if (!event.data) return;
+      if (event.data.type === 'CHECKLIST_ALARM_TRIGGER' || event.data.type === 'CHECKLIST_ALARM_CLICK') {
+        const p = event.data.payload || {};
+        triggerFullAlarmModal({
+          checklistId: p.checklistId || '',
+          checklistTitle: p.checklistTitle || 'Checklist do Setor',
+          checklistCategory: p.checklistCategory || 'Operacional',
+          sectorId: p.sectorId || totemSectorId,
+          sectorName: p.sectorName || totemSectorName,
+          scheduleTime: p.scheduleTime,
+          tasks: p.tasks || [],
+          isLeadWarning: p.isLeadWarning
+        });
+      }
+    };
+    navigator.serviceWorker.addEventListener('message', handleSWMessage);
+    return () => navigator.serviceWorker.removeEventListener('message', handleSWMessage);
+  }, [totemSectorId, totemSectorName, allTenantChecklists]);
+
+  // Relógio de Precisão no Cliente (Verifica a cada 15s o horário exato de Brasília para o Setor do Tablet)
+  useEffect(() => {
+    const checkExactTimeAlarms = () => {
+      if (allTenantChecklists.length === 0) return;
+
+      const now = new Date();
+      // Checa alarmes adiados (Snooze)
+      const dueSnoozes = snoozedLocalAlarmsRef.current.filter(s => now.getTime() >= s.triggerAtMs);
+      if (dueSnoozes.length > 0) {
+        snoozedLocalAlarmsRef.current = snoozedLocalAlarmsRef.current.filter(s => now.getTime() < s.triggerAtMs);
+        triggerFullAlarmModal(dueSnoozes[0].payload);
+        return;
+      }
+
+      const currentHHMM = now.toLocaleTimeString('pt-BR', {
+        timeZone: 'America/Sao_Paulo',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      });
+      const todayKey = now.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+
+      const sectorChecklists = allTenantChecklists.filter(chk =>
+        doesChecklistMatchSector(chk, totemSectorId, totemSectorName)
+      );
+
+      for (const chk of sectorChecklists) {
+        if (todayCompletedChecklists[chk.id]) continue;
+        const times = chk.schedule_times || (chk.schedule_time ? [chk.schedule_time] : []);
+        for (const t of times) {
+          const normT = String(t).slice(0, 5);
+          const alarmKey = `${chk.id}_${todayKey}_${normT}`;
+          if (normT === currentHHMM && !firedLocalAlarmsRef.current.has(alarmKey)) {
+            firedLocalAlarmsRef.current.add(alarmKey);
+            triggerFullAlarmModal({
+              checklistId: chk.id,
+              checklistTitle: chk.title,
+              checklistCategory: chk.category,
+              sectorId: chk.sector_id || totemSectorId,
+              sectorName: chk.sector_name || totemSectorName,
+              scheduleTime: normT,
+              tasks: chk.items_list || []
+            });
+            break;
+          }
+        }
+      }
+    };
+
+    checkExactTimeAlarms();
+    const timer = setInterval(checkExactTimeAlarms, 15 * 1000);
+    return () => clearInterval(timer);
+  }, [allTenantChecklists, totemSectorId, totemSectorName, todayCompletedChecklists]);
 
   // ==========================================
   // AUTENTICAÇÃO POR PIN DE TROCA RÁPIDA
@@ -313,9 +1169,10 @@ export default function ChecklistTablet() {
     setPinCode(prev => prev.slice(0, -1));
   };
 
-  const validatePin = (pin: string) => {
+  const validatePin = async (pin: string) => {
     if (selectedOperator && selectedOperator.pin === pin) {
-      setLoggedInUser(selectedOperator);
+      const op = selectedOperator;
+      setLoggedInUser(op);
       setSelectedOperator(null);
       setPinCode('');
       
@@ -323,9 +1180,20 @@ export default function ChecklistTablet() {
       setActiveExecution(null);
       setActiveChecklist(null);
 
-      loadOperatorChecklists(selectedOperator.id, selectedOperator.role, selectedOperator.name);
-      loadCompletedExecutions(selectedOperator.id);
-      showToast('success', `Bem-vindo à cozinha, ${selectedOperator.name}!`);
+      const loadedList = await loadOperatorChecklists(op.id, op.role, op.name);
+      loadCompletedExecutions(op.id);
+      showToast('success', `Bem-vindo ao setor ${totemSectorName || 'Cozinha'}, ${op.name}!`);
+
+      // Se o operador autenticou após clicar em "Executar Tarefas Agora" no Alarme, abre o checklist imediatamente!
+      if (pendingAlarmChecklistId) {
+        const targetChk =
+          (loadedList || []).find(c => c.id === pendingAlarmChecklistId) ||
+          allTenantChecklists.find(c => c.id === pendingAlarmChecklistId);
+        setPendingAlarmChecklistId(null);
+        if (targetChk) {
+          handleStartChecklist(targetChk);
+        }
+      }
     } else {
       setPinCode('');
       setAuthError('Código PIN inválido. Tente novamente.');
@@ -409,7 +1277,7 @@ export default function ChecklistTablet() {
   // ==========================================
   // CARREGAR ROTINAS DO OPERADOR
   // ==========================================
-  const loadOperatorChecklists = async (userId: string, userRole: string, userName?: string) => {
+  const loadOperatorChecklists = async (userId: string, userRole: string, userName?: string): Promise<ChecklistToExecute[]> => {
     setLoadingChecklists(true);
     try {
       const isPowerUser = ['company_admin', 'super_admin', 'manager'].includes(userRole);
@@ -434,28 +1302,51 @@ export default function ChecklistTablet() {
         allowedUnits = uPerms?.map(p => p.unit_id) || [];
       }
 
-      const { data: checklistsData, error } = await supabase
-        .from('checklists')
-        .select(`
-          id, title, description, category, sector_id, weight, use_unit_schedule_rules,
-          min_time_lead_minutes, max_time_lag_minutes, responsible_ids,
-          sectors(id, name, unit_id, units(id, name, latitude, longitude, radius_meters, require_geolocation))
-        `)
-        .eq('tenant_id', tenantId)
-        .eq('is_active', true);
+      const [checklistsRes, schedulesRes] = await Promise.all([
+        supabase
+          .from('checklists')
+          .select(`
+            id, title, description, category, tags, sector_id, weight, use_unit_schedule_rules,
+            min_time_lead_minutes, max_time_lag_minutes, responsible_ids,
+            sectors(id, name, unit_id, units(id, name, latitude, longitude, radius_meters, require_geolocation)),
+            checklist_items(id, title, description, response_type, is_required, is_critical, require_evidence, sort_order)
+          `)
+          .eq('tenant_id', tenantId)
+          .eq('is_active', true),
+        supabase
+          .from('checklist_schedules')
+          .select('id, checklist_id, start_time, is_active')
+          .eq('tenant_id', tenantId)
+          .eq('is_active', true)
+      ]);
 
-      if (error) throw error;
+      if (checklistsRes.error) throw checklistsRes.error;
+      const checklistsData = checklistsRes.data || [];
 
-      const list: ChecklistToExecute[] = (checklistsData || [])
+      const schedulesMap: Record<string, string[]> = {};
+      (schedulesRes.data || []).forEach((s: any) => {
+        if (!s.checklist_id || !s.start_time) return;
+        const normT = String(s.start_time).slice(0, 5);
+        if (!schedulesMap[s.checklist_id]) schedulesMap[s.checklist_id] = [];
+        if (!schedulesMap[s.checklist_id].includes(normT)) {
+          schedulesMap[s.checklist_id].push(normT);
+        }
+      });
+      Object.values(schedulesMap).forEach(arr => arr.sort());
+
+      const list: ChecklistToExecute[] = checklistsData
         .map((chk: any) => {
           const sector = chk.sectors;
           const unit = sector?.units;
+          const times = schedulesMap[chk.id] || [];
+          const sortedItems = [...(chk.checklist_items || [])].sort((a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
           
           return {
             id: chk.id,
             title: chk.title,
             description: chk.description,
             category: chk.category,
+            tags: chk.tags || [],
             sector_name: sector?.name || 'Geral',
             sector_id: chk.sector_id,
             use_unit_schedule_rules: chk.use_unit_schedule_rules,
@@ -467,10 +1358,18 @@ export default function ChecklistTablet() {
             unit_longitude: unit?.longitude || null,
             unit_radius_meters: unit?.radius_meters || 150,
             require_geolocation: unit?.require_geolocation || false,
-            responsible_ids: chk.responsible_ids || []
+            schedule_time: times[0] || undefined,
+            schedule_times: times,
+            responsible_ids: chk.responsible_ids || [],
+            items_list: sortedItems
           };
         })
         .filter(c => {
+          // Se o tablet estiver configurado para um setor (ex: Cozinha) e o checklist pertencer a esse setor, libera para o operador do Totem
+          if (totemSectorId && doesChecklistMatchSector(c, totemSectorId, totemSectorName)) {
+            return true;
+          }
+
           const hasResponsibles = c.responsible_ids && c.responsible_ids.length > 0;
           
           let isResponsible = !hasResponsibles;
@@ -554,9 +1453,11 @@ export default function ChecklistTablet() {
         });
         setTodayCompletedChecklists(todayMap);
       }
+      return list;
     } catch (e) {
       console.error(e);
       showToast('error', 'Falha ao buscar checklists do operador.');
+      return [];
     } finally {
       setLoadingChecklists(false);
     }
@@ -1215,21 +2116,75 @@ export default function ChecklistTablet() {
             {/* Lista de Operadores da Equipe */}
             <div className="flex-1 w-full space-y-5">
               <div>
-                <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
                   <div className="flex items-center gap-2 text-indigo-400 font-bold text-sm uppercase tracking-widest">
                     <Tablet size={18} /> Totem Operacional Tablet PWA
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleInstallPwa}
-                    className="bg-indigo-600/30 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/40 text-xs font-bold px-3.5 py-1.5 rounded-2xl flex items-center gap-1.5 transition-all shadow-md active:scale-95 cursor-pointer shrink-0"
-                  >
-                    <Download size={13} />
-                    <span>Instalar App</span>
-                  </button>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => setIsSectorAlarmModalOpen(true)}
+                      className="bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-black px-3.5 py-1.5 rounded-2xl flex items-center gap-1.5 transition-all shadow-md active:scale-95 cursor-pointer shrink-0"
+                    >
+                      <BellRing size={13} className="text-amber-400 animate-pulse" />
+                      <span>Setor: {totemSectorName || 'Cozinha'} • Alarmes</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsInstallModalOpen(true)}
+                      className="bg-indigo-600/30 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/40 text-xs font-bold px-3.5 py-1.5 rounded-2xl flex items-center gap-1.5 transition-all shadow-md active:scale-95 cursor-pointer shrink-0"
+                    >
+                      <QrCode size={13} />
+                      <span>Link & Instalar PWA</span>
+                    </button>
+                  </div>
                 </div>
                 <h1 className="text-3xl sm:text-4xl font-black text-white tracking-tight mt-2">Quem está operando?</h1>
-                <p className="text-sm text-[#8696a0] mt-1.5">Selecione seu nome na lista para autenticar com seu PIN.</p>
+                <p className="text-sm text-[#8696a0] mt-1.5">
+                  Selecione seu nome na lista para autenticar com seu PIN • Tablet configurado para o setor <strong className="text-amber-300">{totemSectorName || 'Cozinha'}</strong>.
+                </p>
+
+                {/* Banner de Instalação Direta quando aberto pela rota exclusiva no navegador do Tablet Android */}
+                {!isStandalone && (
+                  <div className="mt-3 p-3.5 rounded-2xl bg-gradient-to-r from-indigo-600/20 via-purple-600/15 to-amber-500/15 border border-indigo-500/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-9 h-9 rounded-xl bg-indigo-500/25 border border-indigo-400/40 flex items-center justify-center text-indigo-300 shrink-0">
+                        <Download size={18} />
+                      </div>
+                      <div>
+                        <span className="text-xs font-black text-white block">
+                          📲 Instalar App Totem {totemSectorName || 'Cozinha'} no Tablet Android
+                        </span>
+                        <span className="text-[11px] text-[#d1d7db]">
+                          Instale na Tela Inicial e ative o despertador em segundo plano (funciona com o app fechado).
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
+                      <button
+                        type="button"
+                        onClick={handleInstallPwa}
+                        className="flex-1 sm:flex-initial bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs px-3.5 py-2 rounded-xl shadow-lg shadow-emerald-500/25 transition-all cursor-pointer active:scale-95"
+                      >
+                        Instalar + Ativar Alarme
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIsInstallModalOpen(true)}
+                        className="bg-[#202c33] hover:bg-[#2a3942] text-[#d1d7db] hover:text-white border border-white/15 font-bold text-xs px-3 py-2 rounded-xl transition-all cursor-pointer"
+                      >
+                        Link / QR
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {pendingAlarmChecklistId && (
+                  <div className="mt-3 p-3.5 rounded-2xl bg-rose-500/20 border border-rose-500/50 text-rose-200 text-xs font-bold flex items-center gap-2.5 animate-pulse">
+                    <BellRing size={18} className="text-rose-400 shrink-0" />
+                    <span>🚨 Alarme de Checklist Ativo! Selecione seu operador e digite o PIN para iniciar as tarefas imediatamente.</span>
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-4 max-h-[380px] overflow-y-auto styled-scrollbar pr-2">
@@ -1462,14 +2417,24 @@ export default function ChecklistTablet() {
             {!activeChecklist ? (
               <div className="flex-1 flex flex-col">
                 {/* Header Superior Mobile com Tema Escuro & Glassmorphism */}
-                <div className="bg-[#182229]/95 backdrop-blur-xl border-b border-white/15 px-5 py-4 flex items-center justify-between shadow-lg sticky top-0 z-20">
+                <div className="bg-[#182229]/95 backdrop-blur-xl border-b border-white/15 px-5 py-4 flex items-center justify-between shadow-lg sticky top-0 z-20 gap-2">
                   <div>
                     <span className="text-[9px] uppercase font-bold tracking-widest text-indigo-400 block">Totem Operacional Mobile</span>
                     <h1 className="text-xl font-black text-white tracking-tight">Meus Checklists</h1>
                   </div>
-                  <div className="bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 text-xs px-3.5 py-1.5 rounded-2xl font-bold flex items-center gap-2 shadow-md">
-                    <User size={14} className="text-indigo-400" />
-                    <span>{loggedInUser.name}</span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsSectorAlarmModalOpen(true)}
+                      className="bg-amber-500/20 text-amber-300 border border-amber-500/40 text-xs px-3 py-1.5 rounded-2xl font-black flex items-center gap-1.5 shadow-md active:scale-95 cursor-pointer"
+                    >
+                      <BellRing size={13} className="text-amber-400 animate-pulse" />
+                      <span>{totemSectorName || 'Cozinha'}</span>
+                    </button>
+                    <div className="bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 text-xs px-3 py-1.5 rounded-2xl font-bold flex items-center gap-1.5 shadow-md">
+                      <User size={13} className="text-indigo-400" />
+                      <span className="truncate max-w-[90px]">{loggedInUser.name}</span>
+                    </div>
                   </div>
                 </div>
 
@@ -1481,7 +2446,13 @@ export default function ChecklistTablet() {
                         <Clock size={16} className="text-indigo-400" />
                         <span>HOJE - {new Date().toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'short' })}</span>
                       </div>
-                      <span className="text-[10px] text-[#8696a0] uppercase tracking-wider font-mono">Turno Ativo</span>
+                      <button
+                        type="button"
+                        onClick={() => setIsSectorAlarmModalOpen(true)}
+                        className="text-[10px] text-amber-300 bg-amber-500/15 border border-amber-500/30 px-2.5 py-1 rounded-xl uppercase tracking-wider font-mono flex items-center gap-1 cursor-pointer"
+                      >
+                        <Bell size={11} /> Setor: {totemSectorName || 'Cozinha'}
+                      </button>
                     </div>
 
                     <div className="grid grid-cols-2 gap-3 pt-1">
@@ -1497,14 +2468,17 @@ export default function ChecklistTablet() {
                         </div>
                       </div>
 
-                      <div className="bg-[#111b21] p-3 rounded-2xl border border-rose-500/30 flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center font-bold text-sm">
-                          ⚠
+                      <div
+                        onClick={() => setIsSectorAlarmModalOpen(true)}
+                        className="bg-[#111b21] p-3 rounded-2xl border border-amber-500/30 flex items-center gap-3 cursor-pointer"
+                      >
+                        <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-sm">
+                          ⏰
                         </div>
                         <div>
-                          <span className="text-[10px] text-[#8696a0] font-bold block uppercase">Atrasados</span>
-                          <span className="text-base font-black text-rose-400 font-mono">
-                            1
+                          <span className="text-[10px] text-[#8696a0] font-bold block uppercase">Alarmes Ativos</span>
+                          <span className="text-xs font-black text-amber-300 font-mono">
+                            Configurar →
                           </span>
                         </div>
                       </div>
@@ -1513,99 +2487,113 @@ export default function ChecklistTablet() {
 
                   {/* Lista de Cards de Rotinas (Sem sobreposição) */}
                   <div className="space-y-4">
-                    {checklists.map((chk, idx) => {
-                      const isDoneToday = !!todayCompletedChecklists[chk.id];
-                      const inProg = inProgressExecutions[chk.id];
-                      const isLate = idx === 1 && !isDoneToday;
-                      const scheduleTime = idx === 0 ? '08:00' : idx === 1 ? '12:30' : '14:00';
-                      const progressPercent = isDoneToday ? 100 : inProg ? 50 : 0;
+                    {(() => {
+                      const sectorFiltered = filterByTotemSector && totemSectorId
+                        ? checklists.filter(c => doesChecklistMatchSector(c, totemSectorId, totemSectorName))
+                        : checklists;
+                      const displayList = sectorFiltered.length > 0 ? sectorFiltered : checklists;
 
-                      return (
-                        <div 
-                          key={chk.id}
-                          className={`bg-[#182229]/95 backdrop-blur-md rounded-3xl p-5 border shadow-2xl space-y-4 relative overflow-hidden transition-all hover:border-white/25 ${
-                            isDoneToday 
-                              ? 'border-emerald-500/40 bg-emerald-950/20' 
-                              : inProg 
-                                ? 'border-indigo-500/40 bg-indigo-950/20' 
-                                : 'border-white/15'
-                          }`}
-                        >
-                          {/* Topo do Card: Horário | Categoria & Título | Badge Em Andamento */}
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="flex items-center gap-3.5 min-w-0">
-                              <div className="text-center pr-3.5 border-r border-white/15 shrink-0">
-                                <span className={`text-lg font-black block leading-none font-mono ${isLate ? 'text-rose-400 animate-pulse' : 'text-white'}`}>
-                                  {isLate && '⚠ '}{scheduleTime}
-                                </span>
-                                <span className="text-[10px] text-[#8696a0] font-bold block mt-1">hoje</span>
-                                {isLate && (
-                                  <span className="bg-rose-500/30 text-rose-300 border border-rose-500/40 text-[9px] font-black uppercase px-1.5 py-0.5 rounded-md mt-1 block">
-                                    ATRASADO
-                                  </span>
-                                )}
-                              </div>
+                      return displayList.map((chk) => {
+                        const isDoneToday = !!todayCompletedChecklists[chk.id];
+                        const inProg = inProgressExecutions[chk.id];
+                        const scheduleTime = chk.schedule_time || chk.schedule_times?.[0] || 'Livre';
+                        const nowHHMM = new Date().toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false });
+                        const isLate = !isDoneToday && scheduleTime !== 'Livre' && nowHHMM > scheduleTime;
+                        const progressPercent = isDoneToday ? 100 : inProg ? 50 : 0;
 
-                              <div className="min-w-0 space-y-1">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <span className="text-[9px] font-bold uppercase tracking-wider text-indigo-300 bg-indigo-500/20 px-2.5 py-0.5 rounded-md border border-indigo-500/30 inline-block">
-                                    {chk.category}
+                        return (
+                          <div 
+                            key={chk.id}
+                            className={`bg-[#182229]/95 backdrop-blur-md rounded-3xl p-5 border shadow-2xl space-y-4 relative overflow-hidden transition-all hover:border-white/25 ${
+                              isDoneToday 
+                                ? 'border-emerald-500/40 bg-emerald-950/20' 
+                                : inProg 
+                                  ? 'border-indigo-500/40 bg-indigo-950/20' 
+                                  : 'border-white/15'
+                            }`}
+                          >
+                            {/* Topo do Card: Horário | Categoria & Título | Badge Em Andamento */}
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex items-center gap-3.5 min-w-0">
+                                <div
+                                  onClick={() => setIsSectorAlarmModalOpen(true)}
+                                  className="text-center pr-3.5 border-r border-white/15 shrink-0 cursor-pointer"
+                                  title="Toque para configurar horários de alarme"
+                                >
+                                  <span className={`text-lg font-black block leading-none font-mono ${isLate ? 'text-rose-400 animate-pulse' : 'text-amber-300'}`}>
+                                    {isLate ? '⚠ ' : '⏰ '}{scheduleTime}
                                   </span>
-                                  {inProg && !isDoneToday && (
-                                    <span className="bg-indigo-600/40 text-indigo-200 border border-indigo-500/50 text-[9px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1 animate-pulse">
-                                      <Clock size={11} /> Em Andamento
+                                  <span className="text-[10px] text-[#8696a0] font-bold block mt-1">
+                                    {chk.schedule_times && chk.schedule_times.length > 1 ? `+${chk.schedule_times.length - 1} hor.` : 'alarme'}
+                                  </span>
+                                  {isLate && (
+                                    <span className="bg-rose-500/30 text-rose-300 border border-rose-500/40 text-[9px] font-black uppercase px-1.5 py-0.5 rounded-md mt-1 block">
+                                      PENDENTE
                                     </span>
                                   )}
                                 </div>
-                                <h3 className="text-base font-black text-white leading-tight truncate">{chk.title}</h3>
+
+                                <div className="min-w-0 space-y-1">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="text-[9px] font-bold uppercase tracking-wider text-indigo-300 bg-indigo-500/20 px-2.5 py-0.5 rounded-md border border-indigo-500/30 inline-block">
+                                      {chk.category}
+                                    </span>
+                                    {inProg && !isDoneToday && (
+                                      <span className="bg-indigo-600/40 text-indigo-200 border border-indigo-500/50 text-[9px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1 animate-pulse">
+                                        <Clock size={11} /> Em Andamento
+                                      </span>
+                                    )}
+                                  </div>
+                                  <h3 className="text-base font-black text-white leading-tight truncate">{chk.title}</h3>
+                                </div>
                               </div>
                             </div>
-                          </div>
 
-                          {/* Barra de Progresso */}
-                          <div className="space-y-1">
-                            <div className="w-full bg-[#111b21] h-6 rounded-full overflow-hidden relative border border-white/10 p-0.5">
-                              <div 
-                                className={`h-full rounded-full transition-all duration-500 flex items-center justify-center text-[10px] font-black font-mono text-white ${
-                                  isDoneToday 
-                                    ? 'bg-gradient-to-r from-emerald-500 to-teal-400 text-black' 
-                                    : inProg 
-                                      ? 'bg-gradient-to-r from-indigo-500 to-purple-500' 
-                                      : 'bg-[#202c33] text-[#8696a0]'
-                                }`}
-                                style={{ width: `${Math.max(15, progressPercent)}%` }}
-                              >
-                                {progressPercent}%
+                            {/* Barra de Progresso */}
+                            <div className="space-y-1">
+                              <div className="w-full bg-[#111b21] h-6 rounded-full overflow-hidden relative border border-white/10 p-0.5">
+                                <div 
+                                  className={`h-full rounded-full transition-all duration-500 flex items-center justify-center text-[10px] font-black font-mono text-white ${
+                                    isDoneToday 
+                                      ? 'bg-gradient-to-r from-emerald-500 to-teal-400 text-black' 
+                                      : inProg 
+                                        ? 'bg-gradient-to-r from-indigo-500 to-purple-500' 
+                                        : 'bg-[#202c33] text-[#8696a0]'
+                                  }`}
+                                  style={{ width: `${Math.max(15, progressPercent)}%` }}
+                                >
+                                  {progressPercent}%
+                                </div>
                               </div>
                             </div>
-                          </div>
 
-                          {/* Rodapé do Card: Metadata | Botão de Ação */}
-                          <div className="flex items-end justify-between pt-1 gap-2">
-                            <div className="text-xs text-[#8696a0] space-y-0.5 font-medium min-w-0">
-                              <div className="flex items-center gap-1.5 truncate"><FolderOpen size={13} className="text-indigo-400 shrink-0" /> <span className="truncate">{chk.sector_name || 'Cozinha'}</span></div>
-                              <div className="flex items-center gap-1.5 truncate"><MapPin size={13} className="text-indigo-400 shrink-0" /> <span className="truncate">{chk.unit_name || 'Burguer Plus'}</span></div>
-                            </div>
-
-                            {isDoneToday ? (
-                              <div className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-xs font-bold px-4 py-2 rounded-2xl flex items-center gap-1.5 shadow-md shrink-0">
-                                <CheckCircle2 size={15} /> Finalizado
+                            {/* Rodapé do Card: Metadata | Botão de Ação */}
+                            <div className="flex items-end justify-between pt-1 gap-2">
+                              <div className="text-xs text-[#8696a0] space-y-0.5 font-medium min-w-0">
+                                <div className="flex items-center gap-1.5 truncate"><FolderOpen size={13} className="text-indigo-400 shrink-0" /> <span className="truncate">{chk.sector_name || totemSectorName || 'Cozinha'}</span></div>
+                                <div className="flex items-center gap-1.5 truncate"><MapPin size={13} className="text-indigo-400 shrink-0" /> <span className="truncate">{chk.unit_name || 'Unidade Principal'}</span></div>
                               </div>
-                            ) : (
-                              <button
-                                onClick={() => {
-                                  handleStartChecklist(chk);
-                                  setMobileStepIndex(0);
-                                }}
-                                className="bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-black px-6 py-2.5 rounded-2xl shadow-lg shadow-indigo-600/30 cursor-pointer active:scale-95 transition-all shrink-0"
-                              >
-                                {inProg ? 'Continuar' : 'Iniciar Rotina'}
-                              </button>
-                            )}
+
+                              {isDoneToday ? (
+                                <div className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-xs font-bold px-4 py-2 rounded-2xl flex items-center gap-1.5 shadow-md shrink-0">
+                                  <CheckCircle2 size={15} /> Finalizado
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => {
+                                    handleStartChecklist(chk);
+                                    setMobileStepIndex(0);
+                                  }}
+                                  className="bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-black px-6 py-2.5 rounded-2xl shadow-lg shadow-indigo-600/30 cursor-pointer active:scale-95 transition-all shrink-0"
+                                >
+                                  {inProg ? 'Continuar' : 'Iniciar Rotina'}
+                                </button>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      });
+                    })()}
                   </div>
                 </div>
 
@@ -1619,18 +2607,18 @@ export default function ChecklistTablet() {
                   >
                     <CheckSquare size={16} />
                     <span>Checklists</span>
-                    <span className="w-4 h-4 rounded-full bg-rose-500 text-white text-[10px] flex items-center justify-center font-bold">5</span>
+                    <span className="w-4 h-4 rounded-full bg-indigo-500 text-white text-[10px] flex items-center justify-center font-bold">{checklists.length}</span>
                   </button>
 
                   <button 
-                    onClick={() => setMobileTab('setores')} 
-                    className={`flex items-center gap-2 text-xs font-bold px-4 py-2 rounded-full transition-all cursor-pointer ${
-                      mobileTab === 'setores' ? 'bg-indigo-500/25 text-indigo-300 border border-indigo-500/40' : 'text-[#8696a0] hover:text-white'
-                    }`}
+                    onClick={() => {
+                      setMobileTab('setores');
+                      setIsSectorAlarmModalOpen(true);
+                    }} 
+                    className="flex items-center gap-2 text-xs font-bold px-4 py-2 rounded-full transition-all cursor-pointer bg-amber-500/20 text-amber-300 border border-amber-500/40"
                   >
-                    <List size={16} />
-                    <span>Setores</span>
-                    <span className="w-4 h-4 rounded-full bg-rose-500 text-white text-[10px] flex items-center justify-center font-bold">2</span>
+                    <BellRing size={15} className="text-amber-400" />
+                    <span>Setor: {totemSectorName || 'Cozinha'}</span>
                   </button>
 
                   <button 
@@ -2007,8 +2995,21 @@ export default function ChecklistTablet() {
               </div>
             )}
 
-            {/* Lado Direito: GPS, Instalar App no Tablet e Bloqueio de Tela */}
+            {/* Lado Direito: Setor/Alarme, GPS, Instalar App no Tablet e Bloqueio de Tela */}
             <div className="flex items-center gap-2.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => setIsSectorAlarmModalOpen(true)}
+                title="Configurar Setor do Tablet e Despertador em Horário Exato"
+                className="bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-black px-3 py-1.5 rounded-xl flex items-center gap-1.5 shadow-md transition-all cursor-pointer active:scale-95 shrink-0"
+              >
+                <BellRing size={14} className="text-amber-400 animate-pulse" />
+                <span>Setor: {totemSectorName || 'Cozinha'}</span>
+                {pushStatus === 'active' && (
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" title="Despertador Web Push Ativo (Mesmo com App Fechado)" />
+                )}
+              </button>
+
               {activeChecklist?.require_geolocation && (
                 <div className={`px-3 py-1.5 rounded-xl border flex items-center gap-1.5 text-xs font-bold shrink-0 ${
                   distanceFromUnit === null ? 'border-amber-500/30 bg-amber-500/10 text-amber-300' :
@@ -2077,6 +3078,63 @@ export default function ChecklistTablet() {
 
               {activeTab === 'active' ? (
                 <>
+                  {/* Card de Setor do Tablet & Despertador Android */}
+                  <div className="bg-gradient-to-r from-amber-950/50 via-[#1e2a30] to-indigo-950/60 border border-amber-500/35 p-3.5 rounded-2xl space-y-2.5 shadow-lg">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-300 shrink-0">
+                          <BellRing size={16} />
+                        </div>
+                        <div className="min-w-0">
+                          <span className="text-xs font-black text-white block leading-tight truncate">
+                            Setor: {totemSectorName || 'Cozinha'}
+                          </span>
+                          <span className="text-[10px] text-amber-300/90 block leading-tight font-medium">
+                            {pushStatus === 'active' ? '✓ Despertador ativo (Mesmo fechado)' : 'Toque para ativar despertador'}
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsSectorAlarmModalOpen(true)}
+                        className="bg-amber-500 hover:bg-amber-400 active:scale-95 text-black text-xs font-black px-3 py-1.5 rounded-xl flex items-center gap-1 transition-all shadow-md cursor-pointer shrink-0"
+                      >
+                        <Settings size={13} />
+                        <span>Alarmes</span>
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 pt-1 border-t border-white/10 text-[10px]">
+                      <span className="text-[#8696a0] font-bold">Filtro de exibição:</span>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFilterByTotemSector(true);
+                            localStorage.setItem('totem_filter_by_sector', 'true');
+                          }}
+                          className={`px-2 py-0.5 rounded-lg font-bold cursor-pointer transition-all ${
+                            filterByTotemSector ? 'bg-amber-500/25 text-amber-300 border border-amber-500/40' : 'text-[#8696a0] hover:text-white'
+                          }`}
+                        >
+                          Só {totemSectorName || 'Cozinha'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFilterByTotemSector(false);
+                            localStorage.setItem('totem_filter_by_sector', 'false');
+                          }}
+                          className={`px-2 py-0.5 rounded-lg font-bold cursor-pointer transition-all ${
+                            !filterByTotemSector ? 'bg-indigo-500/25 text-indigo-300 border border-indigo-500/40' : 'text-[#8696a0] hover:text-white'
+                          }`}
+                        >
+                          Todos
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
                   {/* Banner de Instalação no Tablet */}
                   <div className="bg-gradient-to-r from-indigo-950/70 via-[#1e2a30] to-purple-950/70 border border-indigo-500/30 p-3 rounded-2xl flex items-center justify-between gap-2 shadow-lg">
                     <div className="flex items-center gap-2.5 min-w-0">
@@ -2107,69 +3165,81 @@ export default function ChecklistTablet() {
                       Nenhum checklist disponível no momento.
                     </div>
                   ) : (
-                    checklists.map((chk) => {
-                      const isDoneToday = !!todayCompletedChecklists[chk.id];
-                      const isInProg = !isDoneToday && !!inProgressExecutions[chk.id];
-                      const todayData = todayCompletedChecklists[chk.id];
+                    (() => {
+                      const sectorFiltered = filterByTotemSector && totemSectorId
+                        ? checklists.filter(c => doesChecklistMatchSector(c, totemSectorId, totemSectorName))
+                        : checklists;
+                      const displayList = sectorFiltered.length > 0 ? sectorFiltered : checklists;
 
-                      return (
-                        <button
-                          key={chk.id}
-                          type="button"
-                          onClick={() => {
-                            handleStartChecklist(chk);
-                            setActiveExecution(null);
-                          }}
-                          disabled={submitting}
-                          className={`p-5 rounded-3xl border text-left transition-all relative flex flex-col justify-between min-h-[120px] cursor-pointer group ${
-                            activeChecklist?.id === chk.id 
-                              ? 'border-indigo-500 bg-indigo-500/20 shadow-xl shadow-indigo-500/15 scale-[1.01]' 
-                              : isDoneToday
-                                ? 'border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/15 shadow-md shadow-emerald-500/5'
-                                : isInProg
-                                  ? 'border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/15'
-                                  : 'border-white/10 bg-[#202c33]/70 hover:bg-[#202c33] hover:border-white/20'
-                          }`}
-                        >
-                          <div>
-                            <div className="flex justify-between items-start gap-2 flex-wrap">
-                              <span className="text-[10px] px-3 py-1 rounded-full font-bold bg-indigo-500/25 text-indigo-300 shrink-0 border border-indigo-500/40 uppercase tracking-wider">
-                                {chk.category || 'Geral'}
+                      return displayList.map((chk) => {
+                        const isDoneToday = !!todayCompletedChecklists[chk.id];
+                        const isInProg = !isDoneToday && !!inProgressExecutions[chk.id];
+                        const todayData = todayCompletedChecklists[chk.id];
+                        const scheduleTimes = chk.schedule_times || (chk.schedule_time ? [chk.schedule_time] : []);
+
+                        return (
+                          <button
+                            key={chk.id}
+                            type="button"
+                            onClick={() => {
+                              handleStartChecklist(chk);
+                              setActiveExecution(null);
+                            }}
+                            disabled={submitting}
+                            className={`p-5 rounded-3xl border text-left transition-all relative flex flex-col justify-between min-h-[120px] cursor-pointer group ${
+                              activeChecklist?.id === chk.id 
+                                ? 'border-indigo-500 bg-indigo-500/20 shadow-xl shadow-indigo-500/15 scale-[1.01]' 
+                                : isDoneToday
+                                  ? 'border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/15 shadow-md shadow-emerald-500/5'
+                                  : isInProg
+                                    ? 'border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/15'
+                                    : 'border-white/10 bg-[#202c33]/70 hover:bg-[#202c33] hover:border-white/20'
+                            }`}
+                          >
+                            <div>
+                              <div className="flex justify-between items-start gap-2 flex-wrap">
+                                <span className="text-[10px] px-3 py-1 rounded-full font-bold bg-indigo-500/25 text-indigo-300 shrink-0 border border-indigo-500/40 uppercase tracking-wider">
+                                  {chk.category || 'Geral'}
+                                </span>
+                                {isDoneToday ? (
+                                  <span className="text-[10px] px-2.5 py-0.5 rounded-full font-bold bg-emerald-500/25 text-emerald-300 border border-emerald-500/40 uppercase tracking-wider flex items-center gap-1 shrink-0">
+                                    <CheckCircle2 size={12} className="text-emerald-400" /> Realizada Hoje ({todayData.score}%)
+                                  </span>
+                                ) : isInProg ? (
+                                  <span className="text-[10px] px-2.5 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 uppercase tracking-wider animate-pulse flex items-center gap-1 shrink-0">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400" /> Em Andamento
+                                  </span>
+                                ) : scheduleTimes.length > 0 ? (
+                                  <span className="text-[10px] px-2.5 py-0.5 rounded-full font-black font-mono bg-amber-500/20 text-amber-300 border border-amber-500/35 flex items-center gap-1 shrink-0">
+                                    ⏰ {scheduleTimes.join(', ')}
+                                  </span>
+                                ) : (
+                                  <span className="text-xs text-[#8696a0] font-semibold truncate">{chk.unit_name}</span>
+                                )}
+                              </div>
+                              <h4 className={`font-black text-base mt-3 leading-snug line-clamp-2 transition-colors ${
+                                isDoneToday ? 'text-emerald-200 opacity-90' : 'text-white group-hover:text-indigo-300'
+                              }`}>
+                                {chk.title}
+                              </h4>
+                            </div>
+
+                            <div className="flex items-center justify-between mt-4 text-xs text-[#8696a0] pt-3 border-t border-white/10 w-full">
+                              <span className="flex items-center gap-1.5 font-bold text-slate-200">
+                                <Compass size={14} className="text-indigo-400 shrink-0" /> {chk.sector_name}
                               </span>
                               {isDoneToday ? (
-                                <span className="text-[10px] px-2.5 py-0.5 rounded-full font-bold bg-emerald-500/25 text-emerald-300 border border-emerald-500/40 uppercase tracking-wider flex items-center gap-1 shrink-0">
-                                  <CheckCircle2 size={12} className="text-emerald-400" /> Realizada Hoje ({todayData.score}%)
-                                </span>
-                              ) : isInProg ? (
-                                <span className="text-[10px] px-2.5 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 uppercase tracking-wider animate-pulse flex items-center gap-1 shrink-0">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400" /> Em Andamento
+                                <span className="text-[11px] font-bold text-emerald-400 font-mono">
+                                  {new Date(todayData.completedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}h
                                 </span>
                               ) : (
-                                <span className="text-xs text-[#8696a0] font-semibold truncate">{chk.unit_name}</span>
+                                <ChevronRight size={16} className="text-[#8696a0] group-hover:translate-x-1 transition-transform" />
                               )}
                             </div>
-                            <h4 className={`font-black text-base mt-3 leading-snug line-clamp-2 transition-colors ${
-                              isDoneToday ? 'text-emerald-200 opacity-90' : 'text-white group-hover:text-indigo-300'
-                            }`}>
-                              {chk.title}
-                            </h4>
-                          </div>
-
-                          <div className="flex items-center justify-between mt-4 text-xs text-[#8696a0] pt-3 border-t border-white/10 w-full">
-                            <span className="flex items-center gap-1.5 font-bold text-slate-200">
-                              <Compass size={14} className="text-indigo-400 shrink-0" /> {chk.sector_name}
-                            </span>
-                            {isDoneToday ? (
-                              <span className="text-[11px] font-bold text-emerald-400 font-mono">
-                                {new Date(todayData.completedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}h
-                              </span>
-                            ) : (
-                              <ChevronRight size={16} className="text-[#8696a0] group-hover:translate-x-1 transition-transform" />
-                            )}
-                          </div>
-                        </button>
-                      );
-                    })
+                          </button>
+                        );
+                      });
+                    })()
                   )}
                 </>
               ) : (
@@ -2981,72 +4051,651 @@ export default function ChecklistTablet() {
       </div>
       )}
 
-      {/* MODAL DE INSTRUÇÕES DE INSTALAÇÃO NO TABLET */}
-      {isInstallModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
-          <div className="bg-[#182229] border border-white/20 rounded-[36px] p-6 sm:p-8 shadow-2xl max-w-xl w-full text-left space-y-6 relative animate-in zoom-in-95 duration-200">
-            <button
-              onClick={() => setIsInstallModalOpen(false)}
-              className="absolute top-5 right-5 p-2 rounded-full hover:bg-white/10 text-[#8696a0] hover:text-white transition-colors cursor-pointer"
-            >
-              <X size={20} />
-            </button>
+      {/* MODAL DE LINK EXCLUSIVO & INSTALAÇÃO DO PWA NO TABLET ANDROID */}
+      {isInstallModalOpen && (() => {
+        const cleanOrigin = window.location.origin;
+        const shortTotemUrl = `${cleanOrigin}/totem-cozinha`;
+        const fullTotemUrl = `${cleanOrigin}/totem-cozinha?${tenantId ? `tenant=${encodeURIComponent(tenantId)}&` : ''}sector=${encodeURIComponent(totemSectorName || 'Cozinha')}&install=1`;
+        const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data=${encodeURIComponent(fullTotemUrl)}`;
 
-            <div className="flex items-center gap-4">
-              <div className="w-14 h-14 rounded-3xl bg-gradient-to-br from-indigo-600 to-purple-600 flex items-center justify-center text-white shrink-0 shadow-lg shadow-indigo-600/30">
-                <Tablet size={30} />
-              </div>
-              <div>
-                <h3 className="text-xl font-black text-white tracking-tight">Instalar App Totem no Tablet</h3>
-                <p className="text-xs text-[#8696a0] mt-0.5">Deixe o sistema fixo em tela cheia na cozinha ou bar sem barras de navegação do navegador.</p>
-              </div>
-            </div>
-
-            <div className="space-y-3.5 bg-[#111b21] p-4 sm:p-5 rounded-3xl border border-white/10 text-xs text-[#d1d7db]">
-              <div className="flex items-start gap-3">
-                <div className="w-6 h-6 rounded-full bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 font-bold flex items-center justify-center shrink-0 mt-0.5">1</div>
-                <div>
-                  <strong className="text-white font-bold block mb-0.5">Android Tablet / Google Chrome 📱</strong>
-                  <span>Toque nos <strong>3 pontinhos (⋮)</strong> no canto superior direito do navegador e selecione <strong className="text-indigo-300">"Adicionar à Tela Inicial"</strong> ou <strong className="text-indigo-300">"Instalar Aplicativo"</strong>.</span>
-                </div>
-              </div>
-
-              <div className="h-px bg-white/10 my-2" />
-
-              <div className="flex items-start gap-3">
-                <div className="w-6 h-6 rounded-full bg-purple-500/20 border border-purple-500/40 text-purple-300 font-bold flex items-center justify-center shrink-0 mt-0.5">2</div>
-                <div>
-                  <strong className="text-white font-bold block mb-0.5">iPad / Apple Safari 🍏</strong>
-                  <span>Toque no botão <strong className="text-purple-300">Compartilhar (📤)</strong> no topo do Safari e selecione <strong className="text-purple-300">"Adicionar à Tela de Início"</strong>.</span>
-                </div>
-              </div>
-
-              <div className="h-px bg-white/10 my-2" />
-
-              <div className="flex items-start gap-3">
-                <div className="w-6 h-6 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-bold flex items-center justify-center shrink-0 mt-0.5">3</div>
-                <div>
-                  <strong className="text-white font-bold block mb-0.5">Computador / Windows 💻</strong>
-                  <span>Clique no ícone de instalação <strong className="text-emerald-300">(📲 ou ➕)</strong> localizado na barra de endereço do navegador.</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex flex-col sm:flex-row gap-3 pt-2">
-              {deferredPrompt && (
-                <button
-                  onClick={handleInstallPwa}
-                  className="flex-1 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-black text-sm py-3.5 px-5 rounded-2xl flex items-center justify-center gap-2 shadow-xl shadow-indigo-600/30 transition-all cursor-pointer active:scale-95"
-                >
-                  <Download size={18} />
-                  <span>Instalar Agora (Automático)</span>
-                </button>
-              )}
+        return (
+          <div className="fixed inset-0 z-[9998] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200 overflow-y-auto">
+            <div className="bg-[#182229] border border-indigo-500/30 rounded-[36px] p-6 sm:p-8 shadow-2xl max-w-2xl w-full text-left space-y-5 relative my-auto max-h-[92vh] overflow-y-auto">
               <button
                 onClick={() => setIsInstallModalOpen(false)}
-                className="flex-1 bg-[#202c33] hover:bg-[#2a3942] text-[#d1d7db] hover:text-white font-bold text-sm py-3.5 px-5 rounded-2xl border border-white/10 transition-all cursor-pointer text-center"
+                className="absolute top-5 right-5 p-2 rounded-full hover:bg-white/10 text-[#8696a0] hover:text-white transition-colors cursor-pointer"
               >
-                Entendi / Fechar
+                <X size={20} />
+              </button>
+
+              <div className="flex items-center gap-4">
+                <div className="w-14 h-14 rounded-3xl bg-gradient-to-br from-indigo-600 to-purple-600 flex items-center justify-center text-white shrink-0 shadow-lg shadow-indigo-600/30">
+                  <Tablet size={30} />
+                </div>
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-amber-400 block">
+                    Rota Exclusiva Android PWA • Setor {totemSectorName || 'Cozinha'}
+                  </span>
+                  <h3 className="text-xl font-black text-white tracking-tight">
+                    Link & Instalador do Totem Cozinha
+                  </h3>
+                  <p className="text-xs text-[#8696a0] mt-0.5">
+                    Abra o link abaixo ou escaneie o QR Code no Tablet Android da cozinha para instalar o app dedicado com despertador em segundo plano.
+                  </p>
+                </div>
+              </div>
+
+              {/* BLOCO DO LINK EXCLUSIVO E QR CODE */}
+              <div className="bg-[#111b21] p-4 sm:p-5 rounded-3xl border border-indigo-500/25 flex flex-col sm:flex-row items-center gap-5">
+                <div className="bg-white p-2.5 rounded-2xl shrink-0 shadow-lg">
+                  <img
+                    src={qrImageUrl}
+                    alt="QR Code Totem Cozinha PWA"
+                    className="w-36 h-36 rounded-xl object-contain"
+                  />
+                </div>
+
+                <div className="flex-1 w-full space-y-3">
+                  <div>
+                    <span className="text-[10px] font-black uppercase tracking-wider text-indigo-400 block mb-1">
+                      Link Curto (Para digitar no Chrome do Tablet Android):
+                    </span>
+                    <div className="flex items-center gap-2 bg-[#182229] border border-white/10 rounded-xl px-3 py-2">
+                      <code className="text-xs font-mono font-bold text-emerald-300 truncate flex-1">
+                        {shortTotemUrl}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(shortTotemUrl);
+                          showToast('success', '📋 Link curto copiado para a área de transferência!');
+                        }}
+                        className="p-1.5 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 text-xs font-bold flex items-center gap-1 cursor-pointer shrink-0"
+                      >
+                        <Copy size={13} />
+                        <span>Copiar</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <span className="text-[10px] font-black uppercase tracking-wider text-amber-400 block mb-1">
+                      Link Direto com Empresa + Setor ({totemSectorName || 'Cozinha'}):
+                    </span>
+                    <div className="flex items-center gap-2 bg-[#182229] border border-white/10 rounded-xl px-3 py-2">
+                      <code className="text-[11px] font-mono text-[#d1d7db] truncate flex-1">
+                        {fullTotemUrl}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(fullTotemUrl);
+                          showToast('success', '📋 Link completo do Totem Cozinha copiado!');
+                        }}
+                        className="p-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-bold flex items-center gap-1 cursor-pointer shrink-0"
+                      >
+                        <Copy size={13} />
+                        <span>Copiar</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* PASSO A PASSO NO TABLET ANDROID */}
+              <div className="space-y-3 bg-[#111b21] p-4 sm:p-5 rounded-3xl border border-white/10 text-xs text-[#d1d7db]">
+                <div className="flex items-start gap-3">
+                  <div className="w-6 h-6 rounded-full bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 font-bold flex items-center justify-center shrink-0 mt-0.5">1</div>
+                  <div>
+                    <strong className="text-white font-bold block mb-0.5">No Tablet Android (Google Chrome) 📱</strong>
+                    <span>Acesse <strong className="text-emerald-300">{shortTotemUrl}</strong> e toque no botão <strong className="text-indigo-300">"Instalar Agora"</strong> abaixo (ou nos <strong>3 pontinhos ⋮</strong> do Chrome ➔ <strong className="text-indigo-300">"Instalar Aplicativo / Adicionar à Tela Inicial"</strong>).</span>
+                  </div>
+                </div>
+
+                <div className="h-px bg-white/10 my-1.5" />
+
+                <div className="flex items-start gap-3">
+                  <div className="w-6 h-6 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold flex items-center justify-center shrink-0 mt-0.5">2</div>
+                  <div>
+                    <strong className="text-white font-bold block mb-0.5">Ative o Despertador do Setor ({totemSectorName || 'Cozinha'}) 🔔</strong>
+                    <span>Ao aceitar a permissão de notificação, o tablet recebe os <strong>alarmes nos horários exatos</strong> com a lista de tarefas do setor mesmo com o aplicativo fechado ou tela bloqueada.</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3 pt-1">
+                {deferredPrompt && (
+                  <button
+                    onClick={handleInstallPwa}
+                    className="flex-1 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-black text-sm py-3.5 px-5 rounded-2xl flex items-center justify-center gap-2 shadow-xl shadow-indigo-600/30 transition-all cursor-pointer active:scale-95"
+                  >
+                    <Download size={18} />
+                    <span>📲 Instalar App no Tablet Agora</span>
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    handleActivateSectorPushAlarm(totemSectorId || '', totemSectorName || 'Cozinha', false);
+                  }}
+                  className="flex-1 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-slate-950 font-black text-sm py-3.5 px-5 rounded-2xl flex items-center justify-center gap-2 shadow-xl shadow-amber-500/25 transition-all cursor-pointer active:scale-95"
+                >
+                  <BellRing size={18} />
+                  <span>🔔 Ativar Alarme Setor {totemSectorName || 'Cozinha'}</span>
+                </button>
+                <button
+                  onClick={() => setIsInstallModalOpen(false)}
+                  className="bg-[#202c33] hover:bg-[#2a3942] text-[#d1d7db] hover:text-white font-bold text-sm py-3.5 px-5 rounded-2xl border border-white/10 transition-all cursor-pointer text-center"
+                >
+                  Fechar
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ========================================================================
+          MODAL DE CONFIGURAÇÃO DE SETOR DO TABLET & ALARMES ANDROID (APP FECHADO)
+         ======================================================================== */}
+      {isSectorAlarmModalOpen && (
+        <div
+          className="fixed inset-0 z-[9998] bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 overflow-y-auto animate-fade-in"
+          onClick={() => setIsSectorAlarmModalOpen(false)}
+        >
+          <div
+            className="bg-[#182229] border border-amber-500/30 w-full max-w-3xl max-h-[92vh] rounded-3xl overflow-hidden shadow-2xl shadow-black/80 flex flex-col relative"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header do Modal */}
+            <div className="p-5 sm:p-6 bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-transparent border-b border-white/10 flex items-center justify-between gap-4 shrink-0">
+              <div className="flex items-center gap-3.5">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center text-white shadow-lg shadow-amber-500/30 shrink-0">
+                  <BellRing size={24} className="animate-bounce" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-lg sm:text-xl font-black text-white tracking-tight">
+                      Setor do Tablet & Despertador Android
+                    </h3>
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                      Setor Atual: {totemSectorId === 'ALL' ? 'Todos os Setores' : (totemSectorName || 'Cozinha')}
+                    </span>
+                  </div>
+                  <p className="text-xs text-[#8696a0] mt-0.5">
+                    Configure o setor deste tablet (ex: <strong>Cozinha</strong>) para que ele desperte nos horários exatos mostrando todas as tarefas, mesmo com o app fechado.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsSectorAlarmModalOpen(false)}
+                className="p-2 rounded-full bg-white/5 hover:bg-white/15 text-[#8696a0] hover:text-white transition-colors cursor-pointer shrink-0"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Corpo Rolável */}
+            <div className="p-5 sm:p-6 overflow-y-auto space-y-6 flex-1">
+              {/* PASSO 1: ESCOLHER OU CRIAR O SETOR DO TABLET */}
+              <div className="bg-[#111b21] border border-white/10 rounded-2xl p-4 sm:p-5 space-y-4">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div>
+                    <span className="text-[10px] font-black uppercase tracking-widest text-amber-400 block">
+                      1. Regra de Despertar por Setor
+                    </span>
+                    <h4 className="text-sm sm:text-base font-bold text-white">
+                      Qual é o Setor deste Tablet?
+                    </h4>
+                  </div>
+                  <label className="flex items-center gap-2 text-xs text-[#d1d7db] cursor-pointer bg-[#202c33] px-3 py-1.5 rounded-xl border border-white/10">
+                    <input
+                      type="checkbox"
+                      checked={filterByTotemSector}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setFilterByTotemSector(checked);
+                        localStorage.setItem('totem_filter_by_sector', String(checked));
+                      }}
+                      className="rounded accent-amber-500"
+                    />
+                    <span>Filtrar tela apenas pelo setor selecionado</span>
+                  </label>
+                </div>
+
+                {/* Chips de Setores Existentes */}
+                <div className="flex flex-wrap gap-2">
+                  {sectorsList.map((sec) => {
+                    const isSelected = totemSectorId === sec.id || (!totemSectorId && sec.name.toLowerCase() === totemSectorName.toLowerCase());
+                    return (
+                      <button
+                        key={sec.id}
+                        onClick={() => handleSelectTotemSector(sec.id, sec.name)}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer border ${
+                          isSelected
+                            ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-lg shadow-amber-500/25 scale-[1.02]'
+                            : 'bg-[#202c33] text-[#d1d7db] border-white/10 hover:border-amber-500/40 hover:text-white'
+                        }`}
+                      >
+                        <MapPin size={14} />
+                        <span>{sec.name}</span>
+                        {isSelected && <Check size={14} className="stroke-[3]" />}
+                      </button>
+                    );
+                  })}
+
+                  {/* Atalho rápido para Cozinha caso ainda não exista no banco */}
+                  {!sectorsList.some(s => s.name.toLowerCase().includes('cozinha')) && (
+                    <button
+                      onClick={() => handleSelectTotemSector('', 'Cozinha')}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer border ${
+                        totemSectorName.toLowerCase() === 'cozinha' && totemSectorId !== 'ALL'
+                          ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-lg shadow-amber-500/25'
+                          : 'bg-[#202c33] text-amber-300 border-amber-500/30 hover:bg-amber-500/20'
+                      }`}
+                    >
+                      <MapPin size={14} />
+                      <span>Cozinha (Padrão)</span>
+                    </button>
+                  )}
+
+                  <button
+                    onClick={() => handleSelectTotemSector('ALL', 'Todos os Setores')}
+                    className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer border ${
+                      totemSectorId === 'ALL'
+                        ? 'bg-indigo-600 text-white border-indigo-400 shadow-lg shadow-indigo-600/25'
+                        : 'bg-[#202c33] text-[#8696a0] border-white/10 hover:text-white'
+                    }`}
+                  >
+                    <span>Todos os Setores</span>
+                  </button>
+                </div>
+
+                {/* Criar Novo Setor Rápido */}
+                <div className="flex flex-col sm:flex-row gap-2 pt-2 border-t border-white/5">
+                  <input
+                    type="text"
+                    value={newSectorInputName}
+                    onChange={(e) => setNewSectorInputName(e.target.value)}
+                    placeholder="Criar novo setor (ex: Cozinha Quente, Bar, Confeitaria, Salão)..."
+                    className="flex-1 bg-[#202c33] border border-white/10 focus:border-amber-500/60 rounded-xl px-3.5 py-2 text-xs text-white placeholder-[#8696a0] outline-none"
+                  />
+                  <button
+                    onClick={handleCreateNewSector}
+                    disabled={creatingSector || !newSectorInputName.trim()}
+                    className="px-4 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 disabled:opacity-40 text-amber-300 border border-amber-500/30 text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer shrink-0"
+                  >
+                    <Plus size={15} />
+                    <span>{creatingSector ? 'Criando...' : 'Criar & Selecionar Setor'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* PASSO 2: PERMISSÃO DE ALARME EM SEGUNDO PLANO (WEB PUSH ANDROID + WAKELOCK) */}
+              <div className="bg-[#111b21] border border-white/10 rounded-2xl p-4 sm:p-5 space-y-4">
+                <div className="flex items-start justify-between gap-4 flex-wrap">
+                  <div>
+                    <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400 block">
+                      2. Despertador com App Fechado / Tela Bloqueada (Web Push High-Priority)
+                    </span>
+                    <h4 className="text-sm sm:text-base font-bold text-white mt-0.5">
+                      Status do Motor de Alarme no Android
+                    </h4>
+                    <p className="text-xs text-[#8696a0] mt-1">
+                      Nosso servidor monitora os horários exatos (fuso de Brasília) a cada 20 segundos e envia um sinal <strong>Web Push de Alta Prioridade (Urgency: High)</strong> que acorda o tablet mesmo com o navegador ou PWA fechado.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className={`px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-wider flex items-center gap-1.5 border ${
+                      pushStatus === 'active'
+                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                        : pushStatus === 'denied'
+                        ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                        : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                    }`}>
+                      <span className={`w-2 h-2 rounded-full ${pushStatus === 'active' ? 'bg-emerald-400 animate-ping' : 'bg-amber-400'}`} />
+                      {pushStatus === 'active' ? 'Push Ativo no Tablet' : pushStatus === 'subscribing' ? 'Ativando...' : pushStatus === 'denied' ? 'Bloqueado no Navegador' : 'Aguardando Ativação'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  <button
+                    onClick={() => handleActivateSectorPushAlarm()}
+                    disabled={pushStatus === 'subscribing'}
+                    className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25 transition-all cursor-pointer active:scale-95"
+                  >
+                    <BellRing size={16} />
+                    <span>{pushStatus === 'active' ? 'Revalidar Alarme Push' : 'Ativar Alarme no Tablet'}</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      const sectorChecklists = allTenantChecklists.filter(c =>
+                        doesChecklistMatchSector(c, totemSectorId, totemSectorName)
+                      );
+                      const sampleChk = sectorChecklists[0] || allTenantChecklists[0];
+                      triggerFullAlarmModal({
+                        checklistId: sampleChk?.id || '',
+                        checklistTitle: sampleChk?.title || `Rotina ${totemSectorName || 'Cozinha'}`,
+                        checklistCategory: sampleChk?.category || 'Operacional',
+                        sectorId: totemSectorId || 'ALL',
+                        sectorName: totemSectorName || 'Cozinha',
+                        scheduleTime: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+                        tasks: sampleChk?.items_list && sampleChk.items_list.length > 0 ? sampleChk.items_list : [
+                          { id: '1', title: 'Verificar temperatura de geladeiras e balcões térmicos', is_required: true },
+                          { id: '2', title: 'Higienizar bancadas de manipulação de alimentos', is_required: true },
+                          { id: '3', title: 'Conferir etiquetas de validade e mise en place do turno', is_required: true }
+                        ]
+                      });
+                    }}
+                    className="bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-black text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-95"
+                  >
+                    <Volume2 size={16} />
+                    <span>Testar Sirene & Voz Agora</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleTestClosedAppAlarm(10)}
+                    disabled={testingClosedAlarm}
+                    className="bg-indigo-600/25 hover:bg-indigo-600/40 text-indigo-200 border border-indigo-500/40 font-black text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-95"
+                  >
+                    <Clock size={16} />
+                    <span>
+                      {closedAlarmCountdown > 0
+                        ? `Disparando em ${closedAlarmCountdown}s (Feche o App!)`
+                        : 'Testar com App Fechado (10s)'}
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              {/* PASSO 3: HORÁRIOS EXATOS DOS CHECKLISTS DO SETOR */}
+              <div className="bg-[#111b21] border border-white/10 rounded-2xl p-4 sm:p-5 space-y-4">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div>
+                    <span className="text-[10px] font-black uppercase tracking-widest text-indigo-400 block">
+                      3. Horários Exatos de Despertar ({totemSectorId === 'ALL' ? 'Todos os Setores' : `Setor: ${totemSectorName}`})
+                    </span>
+                    <h4 className="text-sm sm:text-base font-bold text-white mt-0.5">
+                      Checklists & Tarefas que Acordam este Tablet
+                    </h4>
+                  </div>
+                  <span className="text-[11px] text-[#8696a0]">
+                    Fuso Horário Oficial: <strong className="text-white">Brasília (GMT-3)</strong>
+                  </span>
+                </div>
+
+                {allTenantChecklists.length === 0 ? (
+                  <div className="text-center py-6 text-xs text-[#8696a0]">
+                    Nenhum checklist ativo cadastrado ainda. Crie um checklist em "Modelos & Rotinas".
+                  </div>
+                ) : (
+                  <div className="space-y-3 max-h-[320px] overflow-y-auto pr-1">
+                    {allTenantChecklists.map((chk) => {
+                      const matchesCurrentSector = doesChecklistMatchSector(chk, totemSectorId, totemSectorName);
+                      const times = chk.schedule_times || (chk.schedule_time ? [chk.schedule_time] : []);
+                      const taskCount = chk.items_list?.length || 0;
+                      const inputVal = scheduleTimeInputs[chk.id] ?? '08:00';
+
+                      return (
+                        <div
+                          key={chk.id}
+                          className={`p-3.5 rounded-2xl border transition-all ${
+                            matchesCurrentSector
+                              ? 'bg-[#182229] border-amber-500/30'
+                              : 'bg-[#182229]/50 border-white/5 opacity-75'
+                          }`}
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-bold text-sm text-white">{chk.title}</span>
+                                <span className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase ${
+                                  matchesCurrentSector
+                                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                                    : 'bg-white/10 text-[#8696a0]'
+                                }`}>
+                                  Setor: {chk.sector_name || 'Sem Setor'}
+                                </span>
+                                <span className="text-[11px] text-[#8696a0]">
+                                  • {taskCount} {taskCount === 1 ? 'tarefa' : 'tarefas'}
+                                </span>
+                              </div>
+
+                              {/* Lista de Horários Programados */}
+                              <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                                {times.length === 0 ? (
+                                  <span className="text-[11px] text-rose-400 font-medium">
+                                    ⚠️ Sem horário definido — adicione ao lado para despertar
+                                  </span>
+                                ) : (
+                                  times.map((t) => (
+                                    <span
+                                      key={t}
+                                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-black"
+                                    >
+                                      <Clock size={12} />
+                                      <span>{t}</span>
+                                      <button
+                                        onClick={() => handleRemoveChecklistScheduleTime(chk.id, t)}
+                                        title="Remover horário"
+                                        className="hover:text-rose-400 transition-colors cursor-pointer ml-0.5"
+                                      >
+                                        <X size={12} />
+                                      </button>
+                                    </span>
+                                  ))
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Ações: Vincular ao setor atual + Adicionar Horário Exato */}
+                            <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                              {!matchesCurrentSector && totemSectorId && totemSectorId !== 'ALL' && (
+                                <button
+                                  onClick={() => handleLinkChecklistToCurrentSector(chk.id)}
+                                  className="px-2.5 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-[11px] font-bold transition-all cursor-pointer"
+                                >
+                                  Mover p/ {totemSectorName}
+                                </button>
+                              )}
+
+                              <div className="flex items-center gap-1.5 bg-[#111b21] p-1 rounded-xl border border-white/10">
+                                <input
+                                  type="time"
+                                  value={inputVal}
+                                  onChange={(e) =>
+                                    setScheduleTimeInputs(prev => ({ ...prev, [chk.id]: e.target.value }))
+                                  }
+                                  className="bg-transparent text-white text-xs font-bold px-2 py-1 outline-none"
+                                />
+                                <button
+                                  onClick={() => handleSaveChecklistScheduleTime(chk, inputVal)}
+                                  disabled={savingScheduleId === chk.id}
+                                  className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-black transition-all cursor-pointer"
+                                >
+                                  {savingScheduleId === chk.id ? '...' : '+ Horário'}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 sm:p-5 bg-[#111b21] border-t border-white/10 flex items-center justify-between gap-3 shrink-0">
+              <div className="text-[11px] text-[#8696a0] flex items-center gap-2">
+                <span className={`w-2 h-2 rounded-full ${wakeLockActive ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+                <span>
+                  {wakeLockActive
+                    ? 'Screen WakeLock Ativo (Tela não apaga sozinha na tomada)'
+                    : 'Dica: Instale o app na Tela Inicial do Android para máxima prioridade de som'}
+                </span>
+              </div>
+              <button
+                onClick={() => setIsSectorAlarmModalOpen(false)}
+                className="px-6 py-2.5 rounded-xl bg-[#202c33] hover:bg-[#2a3942] text-white font-bold text-xs border border-white/10 transition-all cursor-pointer"
+              >
+                Concluído
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================
+          MODAL DE ALARME SONORO DE TELA CHEIA (HORÁRIO EXATO + LISTA DE TAREFAS)
+         ======================================================================== */}
+      {activeAlarmModal && (
+        <div className="fixed inset-0 z-[9999] bg-black/95 backdrop-blur-xl flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-fade-in">
+          <div className="w-full max-w-2xl bg-gradient-to-b from-[#2a1215] via-[#182229] to-[#111b21] border-2 border-amber-500 rounded-3xl shadow-[0_0_80px_rgba(245,158,11,0.45)] overflow-hidden flex flex-col max-h-[94vh]">
+            {/* Faixa Superior Pulsante */}
+            <div className="bg-gradient-to-r from-rose-600 via-amber-500 to-orange-600 px-5 py-3 flex items-center justify-between text-slate-950 font-black text-xs sm:text-sm uppercase tracking-wider">
+              <div className="flex items-center gap-2">
+                <BellRing size={18} className="animate-bounce" />
+                <span>
+                  🚨 ALARME DE HORÁRIO EXATO • SETOR: {(activeAlarmModal.sectorName || 'COZINHA').toUpperCase()}
+                </span>
+              </div>
+              <span className="bg-black/25 text-white px-3 py-0.5 rounded-full text-xs font-black">
+                ⏰ {activeAlarmModal.scheduleTime}
+              </span>
+            </div>
+
+            {/* Cabeçalho do Checklist */}
+            <div className="p-5 sm:p-6 border-b border-white/10 flex items-start justify-between gap-4">
+              <div>
+                <span className="inline-block px-2.5 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-black uppercase tracking-widest mb-2">
+                  {activeAlarmModal.checklistCategory || 'Rotina Obrigatória do Setor'}
+                </span>
+                <h2 className="text-xl sm:text-2xl font-black text-white leading-tight">
+                  {activeAlarmModal.checklistTitle}
+                </h2>
+                <p className="text-xs sm:text-sm text-[#d1d7db] mt-1">
+                  Confira abaixo as <strong>{activeAlarmModal.tasks.length} tarefas</strong> programadas para execução agora no setor <strong>{activeAlarmModal.sectorName}</strong>:
+                </p>
+              </div>
+
+              <button
+                onClick={() => {
+                  stopSirenSound();
+                  setIsAlarmMuted(true);
+                }}
+                className={`px-3.5 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 border transition-all cursor-pointer shrink-0 ${
+                  isAlarmMuted
+                    ? 'bg-white/10 text-[#8696a0] border-white/10'
+                    : 'bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border-rose-500/40 animate-pulse'
+                }`}
+              >
+                {isAlarmMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
+                <span>{isAlarmMuted ? 'Sirene Silenciada' : 'Silenciar Sirene'}</span>
+              </button>
+            </div>
+
+            {/* Lista de Tarefas do Checklist */}
+            <div className="p-5 sm:p-6 overflow-y-auto space-y-2.5 flex-1 bg-[#111b21]/70">
+              {activeAlarmModal.tasks.length === 0 ? (
+                <div className="p-4 rounded-2xl bg-[#182229] border border-white/10 text-xs text-[#d1d7db]">
+                  Toque em <strong>"Iniciar e Executar Tarefas Agora"</strong> abaixo para abrir o checklist completo.
+                </div>
+              ) : (
+                activeAlarmModal.tasks.map((task, idx) => (
+                  <div
+                    key={task.id || idx}
+                    className="p-3.5 rounded-2xl bg-[#182229] border border-white/10 flex items-start gap-3"
+                  >
+                    <div className="w-7 h-7 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-300 font-black text-xs flex items-center justify-center shrink-0 mt-0.5">
+                      {idx + 1}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-sm text-white leading-snug">
+                          {task.title}
+                        </span>
+                        {task.is_critical && (
+                          <span className="px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[10px] font-black uppercase">
+                            Crítico
+                          </span>
+                        )}
+                      </div>
+                      {task.description && (
+                        <p className="text-xs text-[#8696a0] mt-0.5">{task.description}</p>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Botões de Ação Principal */}
+            <div className="p-5 sm:p-6 bg-[#182229] border-t border-white/10 flex flex-col sm:flex-row gap-3 shrink-0">
+              <button
+                onClick={() => {
+                  const targetId = activeAlarmModal.checklistId;
+                  stopSirenSound();
+                  setActiveAlarmModal(null);
+
+                  const foundChk =
+                    checklists.find(c => c.id === targetId) ||
+                    allTenantChecklists.find(c => c.id === targetId);
+
+                  if (loggedInUser && foundChk) {
+                    handleStartChecklist(foundChk);
+                  } else if (targetId) {
+                    setPendingAlarmChecklistId(targetId);
+                    showToast('success', '🔐 Selecione seu operador e digite o PIN para iniciar as tarefas agora!');
+                  }
+                }}
+                className="flex-1 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-black text-sm sm:text-base py-4 px-6 rounded-2xl flex items-center justify-center gap-2.5 shadow-xl shadow-emerald-500/30 transition-all cursor-pointer active:scale-95"
+              >
+                <CheckCircle2 size={22} className="stroke-[2.5]" />
+                <span>🚀 INICIAR E EXECUTAR TAREFAS AGORA</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  const currentModal = activeAlarmModal;
+                  stopSirenSound();
+                  setActiveAlarmModal(null);
+                  snoozedLocalAlarmsRef.current.push({
+                    triggerAtMs: Date.now() + 5 * 60 * 1000,
+                    payload: currentModal
+                  });
+                  if (apiBaseUrl && tenantId) {
+                    fetch(`${apiBaseUrl}/api/v1/push/checklist-alarm-snooze`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', 'x-tenant-id': tenantId },
+                      body: JSON.stringify({
+                        tenantId,
+                        checklistId: currentModal.checklistId,
+                        sectorId: currentModal.sectorId,
+                        sectorName: currentModal.sectorName,
+                        snoozeMinutes: 5
+                      })
+                    }).catch(() => {});
+                  }
+                  showToast('success', '⏰ Alarme adiado! O tablet tocará novamente em 5 minutos.');
+                }}
+                className="bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-black text-xs sm:text-sm py-4 px-5 rounded-2xl flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-95"
+              >
+                <Clock size={18} />
+                <span>Adiar 5 min</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  stopSirenSound();
+                  setActiveAlarmModal(null);
+                }}
+                className="bg-[#202c33] hover:bg-[#2a3942] text-[#8696a0] hover:text-white font-bold text-xs sm:text-sm py-4 px-4 rounded-2xl border border-white/10 transition-all cursor-pointer"
+              >
+                Fechar
               </button>
             </div>
           </div>

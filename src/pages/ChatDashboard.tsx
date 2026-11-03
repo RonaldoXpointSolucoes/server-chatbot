@@ -3587,6 +3587,79 @@ export default function ChatDashboard() {
     };
   }, [location.search]);
 
+  // Estado e cálculo de conversas não lidas de outros contatos (para alerta em telas menores / mobile quando uma conversa está aberta)
+  const [dismissedUnreadBannerSig, setDismissedUnreadBannerSig] = useState<string | null>(null);
+  const otherUnreadInfo = useMemo(() => {
+    if (!activeChat) {
+      return { count: 0, totalMessages: 0, latestContact: null as any, latestPreview: '', signature: '', isOtherChannel: false, channelName: '' };
+    }
+    const activeRealId = getRealContactId(activeChat.id);
+    const validInstanceIds = new Set((tenantInstances || []).map((i: any) => i.id));
+
+    // 1. Contatos não lidos na caixa ativa atual
+    const unreadInCurrentChannel = contacts.filter(c => {
+      if (!c || c.is_blocked || c.isSearchResult) return false;
+      if (c.id === activeChat.id || getRealContactId(c.id) === activeRealId) return false;
+      if (!isMatchingChannel(c)) return false;
+      if (ticketMode && !isContactOpenTicket(c)) return false;
+      return Number(c.unread || 0) > 0 || Boolean(c.isManuallyUnread);
+    });
+
+    // 2. Contatos não lidos em outras caixas permitidas do tenant
+    const unreadInOtherChannels = contacts.filter(c => {
+      if (!c || c.is_blocked || c.isSearchResult) return false;
+      if (c.id === activeChat.id || getRealContactId(c.id) === activeRealId) return false;
+      if (isMatchingChannel(c)) return false;
+      const cInst = c.instance_id || (typeof c.id === 'string' && c.id.includes('_') ? c.id.split('_')[1] : null);
+      const resolvedUuid = cInst ? (instanceCache.getId(cInst) || cInst) : null;
+      if (validInstanceIds.size > 0 && resolvedUuid && !validInstanceIds.has(resolvedUuid)) return false;
+      return Number(c.unread || 0) > 0 || Boolean(c.isManuallyUnread);
+    });
+
+    // Deduplica por pessoa+caixa
+    const dedupMap = new Map<string, any>();
+    for (const c of [...unreadInCurrentChannel, ...unreadInOtherChannels]) {
+      const pKey = `${getUniquePersonKey(c)}_${c.instance_id || 'default'}`;
+      if (!dedupMap.has(pKey)) {
+        dedupMap.set(pKey, c);
+      }
+    }
+
+    const allOtherUnread = Array.from(dedupMap.values()).sort((a, b) => getEffectiveContactTime(b) - getEffectiveContactTime(a));
+    if (allOtherUnread.length === 0) {
+      return { count: 0, totalMessages: 0, latestContact: null as any, latestPreview: '', signature: '', isOtherChannel: false, channelName: '' };
+    }
+
+    const totalMessages = allOtherUnread.reduce((acc, c) => acc + Math.max(1, Number(c.unread || 0)), 0);
+    const latestContact = allOtherUnread[0];
+    const lastMsg = Array.isArray(latestContact.messages) && latestContact.messages.length > 0
+      ? latestContact.messages[latestContact.messages.length - 1]
+      : null;
+    const latestPreview = (() => {
+      if (lastMsg?.text) return lastMsg.text;
+      if (lastMsg?.mediaType === 'image') return '📸 Imagem';
+      if (lastMsg?.mediaType === 'video') return '🎥 Vídeo';
+      if (lastMsg?.mediaType === 'audio') return '🎵 Áudio';
+      if (lastMsg?.mediaType === 'document') return '📁 Documento';
+      return latestContact.last_message_preview || 'Nova mensagem recebida';
+    })();
+
+    const isOtherChannel = !isMatchingChannel(latestContact);
+    const cInst = latestContact.instance_id || (typeof latestContact.id === 'string' && latestContact.id.includes('_') ? latestContact.id.split('_')[1] : null);
+    const channelName = cInst ? getChannelDisplayName(cInst) : '';
+    const signature = `${allOtherUnread.length}_${totalMessages}_${latestContact.id}_${getEffectiveContactTime(latestContact)}`;
+
+    return {
+      count: allOtherUnread.length,
+      totalMessages,
+      latestContact,
+      latestPreview,
+      signature,
+      isOtherChannel,
+      channelName
+    };
+  }, [contacts, activeChat, isMatchingChannel, ticketMode, tenantInstances, getChannelDisplayName]);
+
   // Memoização de alta performance das mensagens do chat ativo com tripla blindagem de desduplicação
   const { sortedRawMsgs, dedupedMsgs } = useMemo(() => {
     const raw = activeChat?.messages?.filter(m => Boolean(m.text || m.mediaUrl || m.isTask || m.sender || m.payload || m.id)) || [];
@@ -8648,10 +8721,10 @@ export default function ChatDashboard() {
               <button 
                 type="button"
                 aria-label="Voltar para a lista de conversas"
-                title="Voltar para todas as conversas"
+                title={otherUnreadInfo.count > 0 ? `Voltar (${otherUnreadInfo.count} conversa(s) não lida(s) aguardando)` : "Voltar para todas as conversas"}
                 className={cn(
                   isXPointRemoteOpen && xpointRemoteWidthMode === 'expanded' ? "2xl:hidden" : "md:hidden",
-                  "flex items-center justify-center p-2 -ml-2 mr-1 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#aebac1] transition-colors cursor-pointer shrink-0"
+                  "relative flex items-center justify-center p-2 -ml-2 mr-1 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#aebac1] transition-colors cursor-pointer shrink-0"
                 )}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -8665,6 +8738,11 @@ export default function ChatDashboard() {
                 }}
               >
                 <ChevronLeft size={24} />
+                {otherUnreadInfo.count > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-[#00a884] text-white text-[10px] font-black flex items-center justify-center shadow-md ring-2 ring-[#f0f2f5] dark:ring-[#202c33] animate-bounce">
+                    {otherUnreadInfo.count > 99 ? '99+' : otherUnreadInfo.count}
+                  </span>
+                )}
               </button>
               
               <div className="flex items-center gap-3 relative">
@@ -9447,7 +9525,104 @@ export default function ChatDashboard() {
           </div>
           )}
 
-          {/* Badge flutuante de novas mensagens foi movido para o cabeçalho */}
+          {/* Aviso em Tempo Real de Conversas Não Lidas de Outros Contatos (Telas Menores / Mobile com Conversa Aberta) */}
+          {activeChat && otherUnreadInfo.count > 0 && dismissedUnreadBannerSig !== otherUnreadInfo.signature && (
+            <div
+              className={cn(
+                isXPointRemoteOpen && xpointRemoteWidthMode === 'expanded' ? "2xl:hidden" : "md:hidden",
+                "shrink-0 z-20 px-3 py-2 bg-gradient-to-r from-[#00a884]/95 via-emerald-600/95 to-teal-700/95 text-white shadow-lg border-b border-white/15 flex items-center justify-between gap-2 animate-in fade-in slide-in-from-top-2 duration-200"
+              )}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  const target = otherUnreadInfo.latestContact;
+                  if (!target) return;
+                  if (otherUnreadInfo.isOtherChannel && target.instance_id) {
+                    setChannelFilter(target.instance_id, otherUnreadInfo.channelName || target.instance_id);
+                  }
+                  setActiveChat(target.id);
+                  const targetInst = getStrictInstance(target) || target.instance_id || activeChannelFilter || connectedInstanceName;
+                  if (targetInst) {
+                    loadHistoricalMessages(target.id, targetInst);
+                  }
+                }}
+                className="flex items-center gap-2.5 min-w-0 flex-1 text-left cursor-pointer group"
+                title="Clique para abrir a conversa que está chamando"
+              >
+                <div className="relative flex items-center justify-center w-8 h-8 rounded-full bg-white/20 shrink-0 shadow-inner">
+                  <Bell size={15} className="text-white animate-bounce" />
+                  <span className="absolute -top-1 -right-1 min-w-[16px] h-[16px] px-1 rounded-full bg-amber-400 text-slate-950 text-[9px] font-black flex items-center justify-center shadow">
+                    {otherUnreadInfo.count}
+                  </span>
+                </div>
+                <div className="flex flex-col min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-[11px] font-black uppercase tracking-wide text-white truncate">
+                      {otherUnreadInfo.count === 1
+                        ? '1 outra conversa chamando!'
+                        : `${otherUnreadInfo.count} conversas não lidas (${otherUnreadInfo.totalMessages} msg)`}
+                    </span>
+                    {otherUnreadInfo.isOtherChannel && otherUnreadInfo.channelName && (
+                      <span className="px-1.5 py-0.2 rounded bg-black/25 text-[9px] font-bold text-amber-200 shrink-0">
+                        {otherUnreadInfo.channelName}
+                      </span>
+                    )}
+                  </div>
+                  {otherUnreadInfo.latestContact && (
+                    <span className="text-[11px] text-white/95 truncate font-medium group-hover:underline">
+                      <strong>{getContactDisplayName(otherUnreadInfo.latestContact.custom_name || otherUnreadInfo.latestContact.name, otherUnreadInfo.latestContact.push_name, otherUnreadInfo.latestContact.phone)}:</strong>{' '}
+                      {otherUnreadInfo.latestPreview}
+                    </span>
+                  )}
+                </div>
+              </button>
+
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = otherUnreadInfo.latestContact;
+                    if (!target) return;
+                    if (otherUnreadInfo.isOtherChannel && target.instance_id) {
+                      setChannelFilter(target.instance_id, otherUnreadInfo.channelName || target.instance_id);
+                    }
+                    setActiveChat(target.id);
+                    const targetInst = getStrictInstance(target) || target.instance_id || activeChannelFilter || connectedInstanceName;
+                    if (targetInst) {
+                      loadHistoricalMessages(target.id, targetInst);
+                    }
+                  }}
+                  className="px-2.5 py-1.5 rounded-xl bg-white text-emerald-800 hover:bg-emerald-50 text-[10px] font-black uppercase tracking-wider shadow-sm transition-all active:scale-95 cursor-pointer"
+                >
+                  Atender
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDraftNewChat(null);
+                    setActiveChat(null);
+                    useChatStore.setState({ activeChatId: null, activeTicket: null });
+                  }}
+                  className="px-2 py-1.5 rounded-xl bg-black/20 hover:bg-black/30 text-white text-[10px] font-bold transition-all active:scale-95 cursor-pointer"
+                  title="Voltar para a lista de conversas"
+                >
+                  Lista
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setDismissedUnreadBannerSig(otherUnreadInfo.signature);
+                  }}
+                  className="p-1 rounded-lg hover:bg-white/15 text-white/80 hover:text-white transition-colors cursor-pointer"
+                  title="Ocultar aviso até chegar nova mensagem"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Chat Messages */}
           {draftNewChat && !activeChat ? (
@@ -11199,14 +11374,9 @@ export default function ChatDashboard() {
                       {/* Campo de Texto WhatsApp */}
                       <div className="flex flex-1 flex-row items-end px-4 py-2 bg-white dark:bg-[#2a3942] border border-transparent focus-within:border-[#00a884]/50 gap-3 rounded-[24px] shadow-sm relative">
                         
-                        {/* Quick Replies & Folders Popover */}
-                        {showQuickReplies && (quickReplies.length > 0 || (tenantInfo?.settings?.quickReplyCategories && tenantInfo.settings.quickReplyCategories.length > 0)) && (() => {
+                        {/* Quick Replies Popover */}
+                        {showQuickReplies && quickReplies.length > 0 && (() => {
                           const categories: QuickReplyCategory[] = tenantInfo?.settings?.quickReplyCategories || [];
-                          
-                          const getCategory = (catId?: string | null): QuickReplyCategory | undefined => {
-                            if (!catId) return undefined;
-                            return categories.find(c => c.id === catId);
-                          };
 
                           const getCategoryPath = (catId?: string | null): string => {
                             if (!catId) return '';
@@ -11221,48 +11391,16 @@ export default function ChatDashboard() {
                             return cat.name;
                           };
 
-                          const getAllDescendantCategoryIds = (catId: string): string[] => {
-                            const result: string[] = [catId];
-                            const directChildren = categories.filter(c => c.parent_id === catId);
-                            for (const child of directChildren) {
-                              result.push(...getAllDescendantCategoryIds(child.id));
-                            }
-                            return result;
-                          };
-
-                          const getCategoryItemCount = (catId: string): number => {
-                            const descendantIds = new Set(getAllDescendantCategoryIds(catId));
-                            return quickReplies.filter(q => q.category_id && descendantIds.has(q.category_id)).length;
-                          };
-
-                          const activeFolder = activeQuickReplyFolderId ? getCategory(activeQuickReplyFolderId) : null;
                           const hasFilter = !!quickReplyFilter.trim();
 
-                          // 1. Pastas a Exibir
-                          let displayFolders: QuickReplyCategory[] = [];
-                          // 2. Respostas a Exibir
-                          let displayReplies: typeof quickReplies = [];
-
-                          if (hasFilter) {
-                            // Modo de Busca Global
-                            displayFolders = categories.filter(c => 
-                              c.name.toLowerCase().includes(quickReplyFilter) ||
-                              (c.shortcut && c.shortcut.toLowerCase().includes(quickReplyFilter))
-                            );
-                            displayReplies = quickReplies.filter(qr => 
-                              qr.shortcut.toLowerCase().includes(quickReplyFilter) ||
-                              qr.content.toLowerCase().includes(quickReplyFilter) ||
-                              (qr.category_id && getCategoryPath(qr.category_id).toLowerCase().includes(quickReplyFilter))
-                            );
-                          } else if (activeQuickReplyFolderId) {
-                            // Modo Navegação Dentro de uma Pasta
-                            displayFolders = categories.filter(c => c.parent_id === activeQuickReplyFolderId);
-                            displayReplies = quickReplies.filter(qr => qr.category_id === activeQuickReplyFolderId);
-                          } else {
-                            // Modo Raiz
-                            displayFolders = categories.filter(c => !c.parent_id);
-                            displayReplies = quickReplies.filter(qr => !qr.category_id);
-                          }
+                          // Exibir apenas as Respostas Prontas (sem listar pastas ao digitar /)
+                          const displayReplies = hasFilter
+                            ? quickReplies.filter(qr => 
+                                qr.shortcut.toLowerCase().includes(quickReplyFilter) ||
+                                qr.content.toLowerCase().includes(quickReplyFilter) ||
+                                (qr.category_id && getCategoryPath(qr.category_id).toLowerCase().includes(quickReplyFilter))
+                              )
+                            : quickReplies;
 
                           const handleSelectReply = (qr: typeof quickReplies[0]) => {
                             setShowQuickReplies(false);
@@ -11300,57 +11438,18 @@ export default function ChatDashboard() {
                             setTimeout(() => textareaRef.current?.focus(), 10);
                           };
 
-                          const handleOpenFolder = (folder: QuickReplyCategory) => {
-                            setActiveQuickReplyFolderId(folder.id);
-                            setQuickReplyFilter('');
-                            setInputText('/');
-                            setTimeout(() => textareaRef.current?.focus(), 10);
-                          };
-
-                          const handleGoBack = () => {
-                            if (activeFolder?.parent_id) {
-                              setActiveQuickReplyFolderId(activeFolder.parent_id);
-                            } else {
-                              setActiveQuickReplyFolderId(null);
-                            }
-                            setQuickReplyFilter('');
-                            setInputText('/');
-                            setTimeout(() => textareaRef.current?.focus(), 10);
-                          };
-
                           return (
                             <div className="absolute bottom-full left-0 mb-2 w-[380px] max-w-[92vw] bg-white dark:bg-[#202c33] rounded-3xl shadow-2xl border border-gray-100 dark:border-white/10 overflow-hidden z-[100] animate-in fade-in zoom-in-95 slide-in-from-bottom-4 backdrop-blur-md">
                               
-                              {/* Header com Navegação e Breadcrumb */}
+                              {/* Header de Respostas Prontas */}
                               <div className="p-3 bg-gray-50/90 dark:bg-[#111b21]/90 border-b border-gray-100 dark:border-white/5 flex items-center justify-between text-xs font-bold text-gray-700 dark:text-gray-200">
                                 <div className="flex items-center gap-2 min-w-0">
-                                  {activeQuickReplyFolderId ? (
-                                    <>
-                                      <button
-                                        type="button"
-                                        onClick={handleGoBack}
-                                        className="p-1 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 text-blue-600 dark:text-blue-400 transition-colors flex items-center gap-1 cursor-pointer font-black text-[11px] uppercase tracking-wider"
-                                        title="Voltar ao nível anterior"
-                                      >
-                                        <ChevronLeft size={14} />
-                                        <span>Voltar</span>
-                                      </button>
-                                      <span className="text-gray-300 dark:text-white/20">•</span>
-                                      <div className="flex items-center gap-1.5 min-w-0">
-                                        <Folder className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                                        <span className="truncate max-w-[170px] text-[11px] font-black text-slate-800 dark:text-slate-100">
-                                          {getCategoryPath(activeQuickReplyFolderId)}
-                                        </span>
-                                      </div>
-                                    </>
-                                  ) : (
-                                    <div className="flex items-center gap-2">
-                                      <span className="text-amber-500">⚡</span>
-                                      <span className="text-[11px] font-black uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                                        Respostas Prontas & Pastas
-                                      </span>
-                                    </div>
-                                  )}
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-amber-500">⚡</span>
+                                    <span className="text-[11px] font-black uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                                      Respostas Prontas ({displayReplies.length})
+                                    </span>
+                                  </div>
                                 </div>
 
                                 <button
@@ -11366,19 +11465,11 @@ export default function ChatDashboard() {
                                 </button>
                               </div>
 
-                              {/* Lista com Pastas e Respostas */}
+                              {/* Lista de Respostas Prontas */}
                               <div className="max-h-72 overflow-y-auto custom-scrollbar divide-y divide-gray-50 dark:divide-white/5">
-                                
-                                {/* 1. Seção de Respostas Prontas (Prioridade 1 ao digitar /) */}
                                 {displayReplies.length > 0 && (
                                   <div className="p-2 space-y-1">
-                                    <div className="px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 flex items-center gap-1">
-                                      <MessageSquareText size={11} className="text-amber-500" />
-                                      <span>Respostas Prontas</span>
-                                    </div>
-
                                     {displayReplies.map(qr => {
-                                      const qrCategoryPath = getCategoryPath(qr.category_id);
                                       return (
                                         <button
                                           key={qr.id}
@@ -11391,12 +11482,6 @@ export default function ChatDashboard() {
                                               <span className="font-mono font-black text-blue-600 dark:text-blue-400 text-xs group-hover:text-blue-700 dark:group-hover:text-blue-300 transition-colors">
                                                 {qr.shortcut}
                                               </span>
-
-                                              {hasFilter && qrCategoryPath && (
-                                                <span className="px-1.5 py-0.2 rounded bg-slate-100 dark:bg-white/10 text-[9px] font-bold text-slate-500 dark:text-slate-400 truncate max-w-[120px]">
-                                                  📁 {qrCategoryPath}
-                                                </span>
-                                              )}
 
                                               {qr.type === 'TUTORIAL' ? (
                                                 <span className="flex items-center gap-1 text-[9px] font-black uppercase tracking-wider text-purple-600 dark:text-purple-400 bg-purple-500/10 px-1.5 py-0.2 rounded-md border border-purple-500/15">
@@ -11424,77 +11509,24 @@ export default function ChatDashboard() {
                                   </div>
                                 )}
 
-                                {/* 2. Seção de Pastas/Categorias */}
-                                {displayFolders.length > 0 && (
-                                  <div className="p-2 space-y-1">
-                                    <div className="px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 flex items-center gap-1">
-                                      <FolderTree size={11} className="text-blue-500" />
-                                      <span>Pastas / Projetos</span>
-                                    </div>
-
-                                    <div className="grid grid-cols-1 gap-1">
-                                      {displayFolders.map(folder => {
-                                        const count = getCategoryItemCount(folder.id);
-                                        const folderColor = folder.color || '#3b82f6';
-
-                                        return (
-                                          <button
-                                            key={folder.id}
-                                            type="button"
-                                            onClick={() => handleOpenFolder(folder)}
-                                            className="w-full text-left px-3 py-2.5 hover:bg-blue-50/80 dark:hover:bg-[#2a3942] rounded-2xl transition-all flex items-center justify-between group cursor-pointer border border-transparent hover:border-blue-500/20 active:scale-[0.99]"
-                                          >
-                                            <div className="flex items-center gap-2.5 min-w-0">
-                                              <div 
-                                                className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0 shadow-2xs"
-                                                style={{ backgroundColor: `${folderColor}20`, color: folderColor }}
-                                              >
-                                                <Folder size={14} />
-                                              </div>
-                                              <div className="min-w-0">
-                                                <div className="flex items-center gap-1.5">
-                                                  <span className="font-black text-xs text-slate-800 dark:text-[#e9edef] truncate">
-                                                    {folder.name}
-                                                  </span>
-                                                  {folder.shortcut && (
-                                                    <span className="px-1.5 py-0.2 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 font-mono text-[10px] font-bold">
-                                                      {folder.shortcut}
-                                                    </span>
-                                                  )}
-                                                </div>
-                                                <p className="text-[10px] text-slate-400 dark:text-[#8696a0]">
-                                                  {count} resposta(s) • Clique para abrir
-                                                </p>
-                                              </div>
-                                            </div>
-
-                                            <div className="flex items-center gap-1 text-slate-400 group-hover:text-blue-500 group-hover:translate-x-0.5 transition-all">
-                                              <span className="text-[10px] font-bold">Abrir</span>
-                                              <ChevronRight size={14} />
-                                            </div>
-                                          </button>
-                                        );
-                                      })}
-                                    </div>
-                                  </div>
-                                )}
-
-                                {/* 3. Nenhum resultado */}
-                                {displayFolders.length === 0 && displayReplies.length === 0 && (
+                                {/* Nenhum resultado */}
+                                {displayReplies.length === 0 && (
                                   <div className="p-8 text-center text-gray-500 dark:text-gray-400 text-xs">
                                     <p className="font-semibold mb-2">
-                                      Nenhum resultado encontrado para "{quickReplyFilter}"
+                                      Nenhuma resposta pronta encontrada{quickReplyFilter ? ` para "${quickReplyFilter}"` : ''}
                                     </p>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setQuickReplyFilter('');
-                                        setActiveQuickReplyFolderId(null);
-                                      }}
-                                      className="text-blue-500 hover:underline text-[11px] font-bold cursor-pointer"
-                                    >
-                                      Ver todas as pastas raiz
-                                    </button>
+                                    {hasFilter && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setQuickReplyFilter('');
+                                          setInputText('/');
+                                        }}
+                                        className="text-blue-500 hover:underline text-[11px] font-bold cursor-pointer"
+                                      >
+                                        Ver todas as respostas prontas
+                                      </button>
+                                    )}
                                   </div>
                                 )}
                               </div>

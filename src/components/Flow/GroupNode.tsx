@@ -275,7 +275,7 @@ export default function GroupNode({ id, data, selected }: any) {
               title="Clique duplo para editar o título do painel"
             >
               <span className="text-sm font-bold text-zinc-100 truncate tracking-tight">
-                {data.label || 'Grupo'}
+                {data.label || data.title || 'Grupo'}
               </span>
               <button
                 type="button"
@@ -484,9 +484,9 @@ export default function GroupNode({ id, data, selected }: any) {
                     /* 4. Menu de Opções / Botões / Cards / Seleção */
                     (block.flowType === 'buttons' || block.flowType === 'cards' || block.flowType === 'pic_choice') ? (
                        <div className="space-y-1.5 mt-1">
-                          {block.text && (
+                          {(block.text || block.content) && (
                              <div className="text-xs text-zinc-200 bg-zinc-900/60 p-2 rounded-lg border border-zinc-800/60">
-                                {renderFormattedTypebotText(block.text)}
+                                {renderFormattedTypebotText(block.text || block.content)}
                              </div>
                           )}
                           <div className="space-y-1 mt-1">
@@ -574,8 +574,8 @@ export default function GroupNode({ id, data, selected }: any) {
                             </span>
                         </div>
                     ) : 
-                    /* 8. Input do Usuário (ask, email, etc.) */
-                    block.flowType.endsWith('_input') || block.flowType === 'ask' ? (
+                    /* 8. Input do Usuário (ask, input, email, etc.) */
+                    block.flowType.endsWith('_input') || block.flowType === 'ask' || block.flowType === 'input' ? (
                         <div className="space-y-1.5 mt-1 bg-zinc-900/60 p-2.5 rounded-xl border border-zinc-800/70">
                             {isEditingThisBlock ? (
                               <div className="space-y-2" onClick={(e) => e.stopPropagation()}>
@@ -613,18 +613,18 @@ export default function GroupNode({ id, data, selected }: any) {
                               </div>
                             ) : (
                               <div 
-                                onDoubleClick={(e) => handleStartEditingBlock(index, block.text, e)}
+                                onDoubleClick={(e) => handleStartEditingBlock(index, block.text || block.content || '', e)}
                                 title="Clique duplo para editar pergunta"
                               >
-                                {block.text ? renderFormattedTypebotText(block.text) : <span className="italic opacity-50">Configurar pergunta...</span>}
+                                {(block.text || block.content) ? renderFormattedTypebotText(block.text || block.content) : <span className="italic opacity-50">Configurar pergunta...</span>}
                               </div>
                             )}
 
-                            {block.var_name && (
+                            {(block.var_name || block.variable) && (
                               <div className="flex items-center gap-1.5 pt-1 border-t border-zinc-800/60">
                                   <span className="text-[10px] text-zinc-500 font-medium">Salvar em</span>
                                   <span className="bg-purple-900/60 text-purple-200 border border-purple-500/40 font-semibold px-2 py-0.5 rounded text-[10px] shadow-sm font-mono">
-                                     {block.var_name}
+                                     {block.var_name || block.variable}
                                   </span>
                               </div>
                             )}
@@ -690,11 +690,11 @@ export default function GroupNode({ id, data, selected }: any) {
                     ) : (
                         <div 
                           className="p-1 cursor-text"
-                          onDoubleClick={(e) => handleStartEditingBlock(index, block.text, e)}
+                          onDoubleClick={(e) => handleStartEditingBlock(index, block.text || block.content || '', e)}
                           title="Clique duplo para editar inline"
                         >
-                          {block.text ? (
-                            renderFormattedTypebotText(block.text)
+                          {(block.text || block.content) ? (
+                            renderFormattedTypebotText(block.text || block.content)
                           ) : (
                             <p className="italic opacity-50 text-[11px]">Mensagem vazia...</p>
                           )}
@@ -703,7 +703,7 @@ export default function GroupNode({ id, data, selected }: any) {
                 </div>
 
                 {/* Handle de encadeamento na borda direita (estilo alaranjado Typebot da Imagem 1) */}
-                {(index === blocks.length - 1 && block.flowType !== 'condition' && block.flowType !== 'buttons') && (
+                {(index === blocks.length - 1 && !['condition', 'buttons', 'pic_choice', 'cards'].includes(block.flowType)) && (
                     <Handle 
                         type="source" 
                         position={Position.Right} 

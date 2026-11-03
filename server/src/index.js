@@ -28,6 +28,7 @@ import systemLogger, { errorBuffer, persistSystemLog } from './system-logger.js'
 import { supabase, NODE_ID } from './supabase.js';
 import sessionManager, { HOMOLOG_ALLOWED_INSTANCES, isInstanceAllowedForNode } from './session-manager/index.js';
 import snoozeManager from './snooze-manager.js';
+import pushService from './push-service/index.js';
 import queueProcessor from './session-manager/queue-processor.js';
 import autoRagTrainer from './automation-worker/auto-rag-trainer.js';
 import AutomationWorker from './automation-worker/agent.js';
@@ -989,6 +990,15 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
         snoozeManager.start();
     } catch(err) {
         console.error("[Worker Boot] Erro ao iniciar SnoozeManager:", err.message);
+    }
+
+    try {
+        if (APP_ENV !== 'alpha') {
+            console.log("[Worker Boot] Inicializando Monitor de Alarmes de Horário Exato (Totem Cozinha PWA)...");
+            pushService.startChecklistAlarmScheduler();
+        }
+    } catch(err) {
+        console.error("[Worker Boot] Erro ao iniciar ChecklistAlarmScheduler:", err.message);
     }
 
     try {

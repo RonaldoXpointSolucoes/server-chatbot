@@ -20,6 +20,45 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.0.5',
+    date: '2026-11-02',
+    summary: 'Rota Exclusiva Totem Cozinha PWA (/totem-cozinha), Despertador Android em Horário Exato por Setor (Mesmo com App Fechado), Aviso Mobile de Conversas Não Lidas e Menu / sem Pastas',
+    notes: [
+      {
+        id: '8.0.5-1',
+        category: 'features',
+        title: 'Rota Exclusiva e Manifesto Dedicado para Instalar o Totem Cozinha no Tablet Android (/totem-cozinha)',
+        description: 'Criada a rota autônoma /totem-cozinha com manifesto PWA dedicado (Totem Cozinha), QR Code integrado e instalação em 1 clique sem exigir login administrativo do CRM.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '8.0.5-2',
+        category: 'features',
+        title: 'Despertador por Setor (Cozinha) em Horário Exato Mesmo com o App Fechado no Android',
+        description: 'Implementado motor de agendamento Web Push de alta prioridade (Urgency: High) e modal de alarme em tela cheia com sirene sonora, voz em português (TTS) e listagem das tarefas obrigatórias do setor.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '8.0.5-3',
+        category: 'features',
+        title: 'Aviso em Tempo Real de Conversas Não Lidas no Modo Mobile / Compacto',
+        description: 'Adicionado banner flutuante em tempo real e badge pulsante no botão voltar quando novas mensagens de outros contatos chegam enquanto uma conversa está aberta em tela menor.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '8.0.5-4',
+        category: 'improvements',
+        title: 'Menu de Respostas Prontas (/) Focado Apenas em Respostas',
+        description: 'Ocultada a listagem de pastas ao digitar / no campo de mensagem, exibindo diretamente todas as respostas prontas.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+      }
+    ]
+  },
+  {
     version: '8.0.4',
     date: '2026-11-02',
     summary: 'Estabilização de Envio de Mídia por Instância, Propagação Segura de CRM (Sem Erro 409) e Resiliência do AuthQueue/Cache Signal',

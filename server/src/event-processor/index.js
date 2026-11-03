@@ -1,4 +1,4 @@
-import { supabase, NODE_ID, retryWithBackoff, resolveTargetJid } from '../supabase.js';
+import { supabase, NODE_ID, retryWithBackoff, resolveTargetJid, nodeSupabaseCircuitBreaker, isTransientSupabaseError } from '../supabase.js';
 import realtime from '../realtime-publisher/index.js';
 import qrcode from 'qrcode';
 import { downloadContentFromMessage } from '@whiskeysockets/baileys';
@@ -36,6 +36,8 @@ class EventProcessor {
         
         this.tenantConfigs = new Map();
         this.instanceConfigs = new Map();
+        this.instanceConfigInFlight = new Map();
+        this.validInstancesCache = new Map();
         this.lastGlobalMessageTimestamp = 0;
         
         this.pendingStatuses = new Map();
@@ -70,6 +72,7 @@ class EventProcessor {
 
     async reconcileMissingMessages() {
         try {
+            if (nodeSupabaseCircuitBreaker.isCircuitOpen()) return;
             if (!this.reconciliationAttempts) {
                 this.reconciliationAttempts = new Set();
             }
@@ -166,7 +169,7 @@ class EventProcessor {
     }
 
     async flushStatusQueue() {
-        if (this.isFlushingStatus || this.statusUpdateQueue.size === 0) return;
+        if (this.isFlushingStatus || this.statusUpdateQueue.size === 0 || nodeSupabaseCircuitBreaker.isCircuitOpen()) return;
         this.isFlushingStatus = true;
 
         try {
@@ -269,21 +272,48 @@ class EventProcessor {
     async getInstanceConfig(instanceId) {
         if (!instanceId) return {};
         const cached = this.instanceConfigs.get(instanceId);
-        if (cached && (Date.now() - cached.timestamp < 5000)) {
+        if (cached && (Date.now() - cached.timestamp < 60000)) {
             return cached.config;
         }
-        try {
-            const { data, error } = await retryWithBackoff(() =>
-                supabase.from('whatsapp_instances').select('settings, tenant_id').eq('id', instanceId).single()
-            );
-            if (error) console.error('[EventProcessor] Erro ao buscar config da instância:', error);
-            const config = { ...(data?.settings || {}), _resolvedTenantId: data?.tenant_id || null };
-            this.instanceConfigs.set(instanceId, { config, timestamp: Date.now() });
-            return config;
-        } catch (e) {
-            console.error('[EventProcessor] Exception ao buscar config da instância:', e);
-            return {};
+        if (nodeSupabaseCircuitBreaker.isCircuitOpen()) {
+            return cached?.config || {};
         }
+        if (this.instanceConfigInFlight?.has(instanceId)) {
+            return this.instanceConfigInFlight.get(instanceId);
+        }
+
+        const fetchPromise = (async () => {
+            try {
+                const { data, error } = await retryWithBackoff(() =>
+                    supabase.from('whatsapp_instances').select('settings, tenant_id').eq('id', instanceId).single()
+                );
+                if (error) {
+                    if (!isTransientSupabaseError(error)) {
+                        console.warn('[EventProcessor] Aviso ao buscar config da instância:', error.message || error);
+                    }
+                    if (cached?.config) {
+                        return cached.config;
+                    }
+                    return {};
+                }
+                const config = { ...(data?.settings || {}), _resolvedTenantId: data?.tenant_id || cached?.config?._resolvedTenantId || null };
+                this.instanceConfigs.set(instanceId, { config, timestamp: Date.now() });
+                if (data?.tenant_id) {
+                    this.validInstancesCache?.set(instanceId, Date.now());
+                }
+                return config;
+            } catch (e) {
+                if (!isTransientSupabaseError(e)) {
+                    console.warn('[EventProcessor] Exceção ao buscar config da instância:', e?.message || e);
+                }
+                return cached?.config || {};
+            } finally {
+                this.instanceConfigInFlight?.delete(instanceId);
+            }
+        })();
+
+        this.instanceConfigInFlight?.set(instanceId, fetchPromise);
+        return fetchPromise;
     }
 
     async resolveInstanceTenantId(instanceId, fallbackTenantId) {
@@ -402,7 +432,13 @@ class EventProcessor {
 
     async handleMessageUpsert(tenantId, instanceId, sock, m) {
         if (!m || !m.messages || !Array.isArray(m.messages) || m.messages.length === 0) return;
-        tenantId = await this.resolveInstanceTenantId(instanceId, tenantId);
+        const instanceConfig = await this.getInstanceConfig(instanceId);
+        if (instanceConfig?._resolvedTenantId && instanceConfig._resolvedTenantId !== '00000000-0000-0000-0000-000000000000') {
+            tenantId = instanceConfig._resolvedTenantId;
+        } else {
+            tenantId = tenantId || instanceConfig?._resolvedTenantId || '00000000-0000-0000-0000-000000000000';
+        }
+        const allowedGroups = instanceConfig.enabled_groups || instanceConfig.allowed_groups || instanceConfig.enabledGroups || instanceConfig.allowedGroups || [];
  
         for (const msg of m.messages) {
             if (!msg || !msg.key) continue;
@@ -423,8 +459,6 @@ class EventProcessor {
                     : (msg.messageTimestamp?.low || Math.floor(Date.now() / 1000));
                 const msgAgeSecs = Math.floor(Date.now() / 1000) - rawTimestamp;
                 const isAncientHistory = msgAgeSecs > 4 * 3600; // Mais de 4 horas
-
-                const instanceConfig = await this.getInstanceConfig(instanceId);
 
                 // Apenas ignora se for histórico verdadeiramente antigo (> 4h) E sync_history for false E não for fromMe recente
                 if ((instanceConfig.sync_history === false || instanceConfig.is_api_only === true) && isHistorySync && isAncientHistory && !msg.key?.fromMe) {
@@ -477,50 +511,12 @@ class EventProcessor {
 
             if (!jid) continue;
 
-            // Grava a mensagem na tabela wa_incoming_messages (logs do Edge)
-            try {
-                const fromMe = msg.key.fromMe || false;
-                const pushName = msg.pushName || (fromMe ? 'Me' : null);
-                let bodyText = '';
-                let mType = 'text';
-                
-                const content = msg.message;
-                if (content) {
-                    const keys = Object.keys(content);
-                    if (keys.length > 0) {
-                        mType = keys[0];
-                        const mTypeObj = content[mType];
-                        bodyText = content.conversation || mTypeObj?.text || mTypeObj?.caption || '';
-                    }
-                }
-
-                const { error: incErr } = await supabase.from('wa_incoming_messages').upsert({
-                    instance_id: instanceId,
-                    tenant_id: tenantId,
-                    chat_jid: jid,
-                    message_id: msg.key.id,
-                    from_me: fromMe,
-                    push_name: pushName,
-                    body: bodyText,
-                    message_type: mType,
-                    raw_payload: msg
-                }, { onConflict: 'instance_id, message_id' });
-                if (incErr) {
-                    console.warn('[EventProcessor] Aviso ao gravar wa_incoming_messages:', incErr.message);
-                }
-            } catch (err) {
-                console.warn('[EventProcessor] Falha de conexão ao gravar wa_incoming_messages (não impeditivo):', err.message);
-            }
-            
-            const instanceConfig = await this.getInstanceConfig(instanceId);
-            const allowedGroups = instanceConfig.enabled_groups || instanceConfig.allowed_groups || instanceConfig.enabledGroups || instanceConfig.allowedGroups || [];
-            
-            // Ignora status e LIDs isolados sem conteúdo de mensagem
+            // Ignora status e LIDs isolados sem conteúdo de mensagem antes de qualquer I/O no banco
             if (this.isBroadcast(jid) || (this.isLid(jid) && !msg.message)) {
                 continue;
             }
             
-            // Ignora grupos se não estiverem na lista de permitidos
+            // Ignora grupos se não estiverem na lista de permitidos antes de qualquer I/O no banco
             if (this.isGroup(jid)) {
                 if (!allowedGroups.includes(jid)) {
                     continue;
@@ -532,6 +528,45 @@ class EventProcessor {
             // Se salvarmos isso como mensagem vazia, o retry natural da Baileys será descartado por duplicidade de ID.
             if (msg.messageStubType && !msg.message) {
                 continue;
+            }
+
+            // Grava a mensagem na tabela wa_incoming_messages (logs do Edge) de forma resiliente
+            if (!nodeSupabaseCircuitBreaker.isCircuitOpen()) {
+                try {
+                    const fromMe = msg.key.fromMe || false;
+                    const pushName = msg.pushName || (fromMe ? 'Me' : null);
+                    let bodyText = '';
+                    let mType = 'text';
+                    
+                    const content = msg.message;
+                    if (content) {
+                        const keys = Object.keys(content);
+                        if (keys.length > 0) {
+                            mType = keys[0];
+                            const mTypeObj = content[mType];
+                            bodyText = content.conversation || mTypeObj?.text || mTypeObj?.caption || '';
+                        }
+                    }
+
+                    const { error: incErr } = await supabase.from('wa_incoming_messages').upsert({
+                        instance_id: instanceId,
+                        tenant_id: tenantId,
+                        chat_jid: jid,
+                        message_id: msg.key.id,
+                        from_me: fromMe,
+                        push_name: pushName,
+                        body: bodyText,
+                        message_type: mType,
+                        raw_payload: msg
+                    }, { onConflict: 'instance_id, message_id' });
+                    if (incErr && !isTransientSupabaseError(incErr)) {
+                        console.warn('[EventProcessor] Aviso ao gravar wa_incoming_messages:', incErr.message);
+                    }
+                } catch (err) {
+                    if (!isTransientSupabaseError(err)) {
+                        console.warn('[EventProcessor] Falha de conexão ao gravar wa_incoming_messages (não impeditivo):', err.message);
+                    }
+                }
             }
 
             try {
@@ -711,34 +746,62 @@ class EventProcessor {
     }
 
     async flushQueue() {
-        if (this.isFlushing || this.messageQueue.length === 0) return;
+        if (this.isFlushing || this.messageQueue.length === 0 || nodeSupabaseCircuitBreaker.isCircuitOpen()) return;
         this.isFlushing = true;
+        let hadTransientRetry = false;
         
         // Puxa até 1000 mensagens do buffer (Batch limit)
         let batch = this.messageQueue.splice(0, 1000);
         console.log(`[BatchProcessor] Drenando lote de ${batch.length} novas interações...`);
 
-        // Filtra elementos pertencentes a instâncias deletadas para evitar violações de FK no banco
+        // Filtra elementos pertencentes a instâncias deletadas para evitar violações de FK no banco (usando cache de 60s em RAM)
+        const nowValidMs = Date.now();
         const uniqueInstanceIds = Array.from(new Set(batch.map(b => b.instanceId).filter(Boolean)));
-        if (uniqueInstanceIds.length > 0) {
+        const uncachedInstanceIds = uniqueInstanceIds.filter(id => {
+            const cachedAt = this.validInstancesCache?.get(id);
+            return !cachedAt || (nowValidMs - cachedAt > 60000);
+        });
+
+        if (uncachedInstanceIds.length > 0) {
             try {
                 const { data: existingInstances, error: instError } = await supabase
                     .from('whatsapp_instances')
                     .select('id')
-                    .in('id', uniqueInstanceIds);
+                    .in('id', uncachedInstanceIds);
                 
                 if (instError) {
-                    console.error('[BatchProcessor] Erro ao buscar instâncias válidas:', instError);
+                    if (isTransientSupabaseError(instError) || nodeSupabaseCircuitBreaker.isCircuitOpen()) {
+                        for (let i = batch.length - 1; i >= 0; i--) {
+                            this.messageQueue.unshift(batch[i]);
+                        }
+                        this.isFlushing = false;
+                        return;
+                    }
+                    console.warn('[BatchProcessor] Aviso ao buscar instâncias válidas:', instError.message || instError);
                 } else {
                     const validInstanceSet = new Set((existingInstances || []).map(i => i.id));
-                    const filteredBatch = batch.filter(b => !b.instanceId || validInstanceSet.has(b.instanceId));
+                    for (const validId of validInstanceSet) {
+                        this.validInstancesCache?.set(validId, nowValidMs);
+                    }
+                    const allValidSet = new Set([
+                        ...uniqueInstanceIds.filter(id => !uncachedInstanceIds.includes(id)),
+                        ...validInstanceSet
+                    ]);
+                    const filteredBatch = batch.filter(b => !b.instanceId || allValidSet.has(b.instanceId));
                     if (filteredBatch.length < batch.length) {
                         console.log(`[BatchProcessor] Ignoradas ${batch.length - filteredBatch.length} interações de instâncias deletadas/inválidas.`);
                         batch = filteredBatch;
                     }
                 }
             } catch (err) {
-                console.error('[BatchProcessor] Exceção crítica ao validar instâncias no banco:', err);
+                if (isTransientSupabaseError(err) || nodeSupabaseCircuitBreaker.isCircuitOpen()) {
+                    for (let i = batch.length - 1; i >= 0; i--) {
+                        this.messageQueue.unshift(batch[i]);
+                    }
+                    this.isFlushing = false;
+                    return;
+                }
+                console.warn('[BatchProcessor] Aviso ao validar instâncias no banco:', err?.message || err);
             }
         }
 
@@ -872,6 +935,11 @@ class EventProcessor {
                       phonesToSeek.length > 0 ? supabase.from('contacts').select('*').in('tenant_id', tenantIdsToSeek).in('phone', phonesToSeek) : Promise.resolve({ data: [] }),
                       jidsToSeek.length > 0 ? supabase.from('contacts').select('*').in('tenant_id', tenantIdsToSeek).in('whatsapp_jid', jidsToSeek) : Promise.resolve({ data: [] })
                   ]);
+                  if (isTransientSupabaseError(phonesRes?.error) || isTransientSupabaseError(jidsRes?.error) || nodeSupabaseCircuitBreaker.isCircuitOpen()) {
+                      const deferErr = new Error('TRANSIENT_SUPABASE_BATCH_DEFER: ' + (phonesRes?.error?.message || jidsRes?.error?.message || 'CircuitBreaker'));
+                      deferErr.isTransientDefer = true;
+                      throw deferErr;
+                  }
                   const existingDbContacts = [...(phonesRes.data || []), ...(jidsRes.data || [])];
                       
                   if (existingDbContacts.length > 0) {
@@ -991,7 +1059,12 @@ class EventProcessor {
                   if (!errIns && resIns) {
                       upsertedContacts.push(...resIns);
                   } else if (errIns) {
-                      console.warn('[BatchProcessor] Inserção de novos contatos em lote falhou (código ' + errIns.code + '): ' + errIns.message + '. Aplicando resolução resiliente...');
+                      if (isTransientSupabaseError(errIns) || nodeSupabaseCircuitBreaker.isCircuitOpen()) {
+                          const deferErr = new Error('TRANSIENT_SUPABASE_BATCH_DEFER: ' + (errIns.message || 'CircuitBreaker'));
+                          deferErr.isTransientDefer = true;
+                          throw deferErr;
+                      }
+                      console.info('[BatchProcessor] Inserção de novos contatos em lote encontrou conflito (código ' + (errIns.code || 'N/A') + '). Aplicando resolução resiliente...');
                       
                       // Busca contatos no DB para garantir recuperação de IDs reais em caso de concorrência
                       const [fbPhones, fbJids] = await Promise.all([
@@ -1025,6 +1098,11 @@ class EventProcessor {
                                   if (!singleErr && singleRes && singleRes.length > 0) {
                                       upsertedContacts.push(...singleRes);
                                   } else {
+                                      if (isTransientSupabaseError(singleErr) || nodeSupabaseCircuitBreaker.isCircuitOpen()) {
+                                          const deferErr = new Error('TRANSIENT_SUPABASE_BATCH_DEFER: ' + (singleErr?.message || 'CircuitBreaker'));
+                                          deferErr.isTransientDefer = true;
+                                          throw deferErr;
+                                      }
                                       // Se falhou, busca no banco pelo telefone ou JID existente
                                       const { data: found } = await supabase.from('contacts')
                                           .select('id, tenant_id, phone, whatsapp_jid')
@@ -1035,11 +1113,14 @@ class EventProcessor {
                                       if (found) {
                                           upsertedContacts.push(found);
                                       } else {
-                                          console.error('[BatchProcessor] Contato não pôde ser inserido nem recuperado:', singleErr?.message || 'Falha na inserção individual');
+                                          console.info('[BatchProcessor] Contato não pôde ser inserido nem recuperado:', singleErr?.message || 'Falha na inserção individual');
                                       }
                                   }
                               } catch (sErr) {
-                                  console.error('[BatchProcessor] Erro na inserção individual de contato:', sErr?.message || sErr);
+                                  if (sErr?.isTransientDefer || isTransientSupabaseError(sErr)) {
+                                      throw sErr;
+                                  }
+                                  console.info('[BatchProcessor] Aviso na inserção individual de contato:', sErr?.message || sErr);
                               }
                           }
                       }
@@ -2002,14 +2083,22 @@ class EventProcessor {
              }
              
         } catch (e) {
-             console.error("[BatchProcessor] Flush Error Critico:", e);
-             // Re-enfileira os itens do lote para evitar perda de dados por falha temporária do banco de dados (ex: timeout)
+             hadTransientRetry = true;
+             const isTransient = Boolean(e?.isTransientDefer || isTransientSupabaseError(e) || nodeSupabaseCircuitBreaker.isCircuitOpen());
+             if (isTransient) {
+                 console.info(`[BatchProcessor] Pausando lote temporariamente para recuperação de conexão Supabase (${batch?.length || 0} mensagens preservadas na fila).`);
+             } else {
+                 console.error("[BatchProcessor] Flush Error Critico:", e);
+             }
+             // Re-enfileira os itens do lote mantendo a ordem cronológica para evitar perda de dados
              if (batch && batch.length > 0) {
-                 console.log(`[BatchProcessor] Enfileirando novamente ${batch.length} mensagens para evitar perda de dados por falha crítica no lote.`);
-                 for (const b of batch) {
-                     b.retryCount = (b.retryCount || 0) + 1;
-                     if (b.retryCount < 5) {
-                         this.messageQueue.unshift(b); // Adiciona no início da fila para reprocessamento
+                 for (let i = batch.length - 1; i >= 0; i--) {
+                     const b = batch[i];
+                     if (!isTransient) {
+                         b.retryCount = (b.retryCount || 0) + 1;
+                     }
+                     if ((b.retryCount || 0) < 5) {
+                         this.messageQueue.unshift(b);
                      } else {
                          const msgId = b.rawMsg?.key?.id || 'unknown';
                          console.error(`[BatchProcessor] EXCEÇÃO CRÍTICA: Mensagem ID ${msgId} descartada definitivamente após 5 tentativas de lote falhas.`);
@@ -2021,7 +2110,7 @@ class EventProcessor {
              }
         } finally {
              this.isFlushing = false;
-             if (this.flushPending || this.messageQueue.length > 0) {
+             if (!hadTransientRetry && !nodeSupabaseCircuitBreaker.isCircuitOpen() && (this.flushPending || this.messageQueue.length > 0)) {
                  this.flushPending = false;
                  setImmediate(() => this.flushQueue());
              }

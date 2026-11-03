@@ -1244,7 +1244,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
                icon={<Smartphone size={16} className="text-indigo-400" />} 
                title="Totem Cozinha (PWA)" 
                isSub
-               onClick={() => window.open('/checklist/tablet', '_blank')}
+               onClick={() => window.open(`/totem-cozinha${tenantId ? `?tenant=${encodeURIComponent(tenantId)}&sector=Cozinha` : ""}`, '_blank')}
                isActive={false}
              />
             <NavItem 

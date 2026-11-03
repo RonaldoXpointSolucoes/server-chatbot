@@ -5,9 +5,9 @@ import { useChatStore } from '../store/chatStore';
 
 
 // Public VAPID key generated previously
-const VAPID_PUBLIC_KEY = 'BHUicMvZIyz2f9F33OIj9S6EMlh-UdP39ZEl02XMqPJfXXpJM_HkIHKcS4n2k3pJ0NaXNeQkGoSHOL495TuAUMw';
+export const VAPID_PUBLIC_KEY = 'BHUicMvZIyz2f9F33OIj9S6EMlh-UdP39ZEl02XMqPJfXXpJM_HkIHKcS4n2k3pJ0NaXNeQkGoSHOL495TuAUMw';
 
-function urlBase64ToUint8Array(base64String: string) {
+export function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
   const base64 = (base64String + padding)
     .replace(/\-/g, '+')
@@ -38,6 +38,12 @@ export function usePushNotifications() {
           setTimeout(() => {
             useChatStore.getState().openConversationFromNotification(p);
           }, 150);
+        }
+      } else if (event.data && event.data.type === 'CHECKLIST_ALARM_CLICK' && event.data.payload) {
+        const p = event.data.payload;
+        const target = `/checklist/tablet?alarmChecklistId=${encodeURIComponent(p.checklistId || '')}&sectorId=${encodeURIComponent(p.sectorId || '')}&sectorName=${encodeURIComponent(p.sectorName || '')}`;
+        if (!location.pathname.startsWith('/checklist/tablet')) {
+          navigate(target);
         }
       }
     };
@@ -82,6 +88,11 @@ export function usePushNotifications() {
         const subData = JSON.parse(JSON.stringify(subscription));
 
         const userEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
+        const totemSectorId = localStorage.getItem('totem_sector_id') || '';
+        const totemSectorName = localStorage.getItem('totem_sector_name') || '';
+        const effectiveUserAgent = (totemSectorId || totemSectorName)
+          ? `[TOTEM_SECTOR:${totemSectorId || 'ALL'}|${totemSectorName || 'Cozinha'}] ${navigator.userAgent}`
+          : navigator.userAgent;
 
         // Função de gravação com retentativa e backoff exponencial para lidar com falhas de rede ou concorrência de locks
         const saveSubscriptionWithRetry = async (retries = 3, delay = 1000): Promise<boolean> => {
@@ -93,7 +104,7 @@ export function usePushNotifications() {
                 endpoint: subData.endpoint,
                 p256dh: subData.keys.p256dh,
                 auth: subData.keys.auth,
-                user_agent: navigator.userAgent,
+                user_agent: effectiveUserAgent,
                 email: userEmail ? userEmail.trim().toLowerCase() : null
               }, { onConflict: 'endpoint' });
 
@@ -172,4 +183,3 @@ export function usePushNotifications() {
     initPush();
   }, [tenantId]);
 }
-

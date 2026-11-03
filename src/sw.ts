@@ -12,7 +12,7 @@ precacheAndRoute(self.__WB_MANIFEST);
 
 // --- IMPORTAÇÃO DE ESTRATÉGIAS WORKBOX PARA PWA PREMIUM ---
 import { registerRoute, NavigationRoute } from 'workbox-routing';
-import { StaleWhileRevalidate, CacheFirst, NetworkFirst } from 'workbox-strategies';
+import { StaleWhileRevalidate, CacheFirst } from 'workbox-strategies';
 import { CacheableResponsePlugin } from 'workbox-cacheable-response';
 import { ExpirationPlugin } from 'workbox-expiration';
 import { createHandlerBoundToURL } from 'workbox-precaching';
@@ -95,7 +95,7 @@ self.addEventListener('message', (event) => {
 });
 clientsClaim();
 
-// --- INÍCIO INDEXEDDB RBAC CONFIG ---
+// --- INÍCIO INDEXEDDB RBAC & TOTEM SECTOR CONFIG ---
 const DB_NAME = 'ChatBootSWConfig';
 const STORE_NAME = 'userConfig';
 
@@ -123,6 +123,38 @@ async function saveConfigToDB(config: any) {
     });
   } catch (e) {
     console.error('[SW] Erro ao salvar no IndexedDB:', e);
+  }
+}
+
+async function saveTotemConfigToDB(totemConfig: any) {
+  try {
+    const db = await openDB();
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    tx.objectStore(STORE_NAME).put(totemConfig, 'totemConfig');
+    return new Promise((resolve) => {
+      tx.oncomplete = resolve;
+    });
+  } catch (e) {
+    console.error('[SW] Erro ao salvar totemConfig no IndexedDB:', e);
+  }
+}
+
+async function getTotemConfigFromDB(): Promise<{
+  sectorId?: string;
+  sectorName?: string;
+  tenantId?: string;
+  apiBaseUrl?: string;
+} | null> {
+  try {
+    const db = await openDB();
+    const tx = db.transaction(STORE_NAME, 'readonly');
+    const request = tx.objectStore(STORE_NAME).get('totemConfig');
+    return new Promise((resolve) => {
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => resolve(null);
+    });
+  } catch (e) {
+    return null;
   }
 }
 
@@ -169,12 +201,15 @@ function extractQueryParam(urlStr: string | undefined, param: string): string | 
     return match ? decodeURIComponent(match[1]) : null;
   }
 }
-// --- FIM INDEXEDDB RBAC CONFIG ---
+// --- FIM INDEXEDDB RBAC & TOTEM SECTOR CONFIG ---
 
 self.addEventListener('message', async (event) => {
   if (event.data && event.data.type === 'SYNC_USER_CONFIG') {
     await saveConfigToDB(event.data.config);
     console.log('[SW] User config persistido no IndexedDB:', event.data.config);
+  } else if (event.data && event.data.type === 'SYNC_TOTEM_SECTOR') {
+    await saveTotemConfigToDB(event.data.config);
+    console.log('[SW] Totem Sector config persistido no IndexedDB:', event.data.config);
   } else if (event.data && event.data.type === 'CLEAR_PENDING_NOTIFICATION_TARGET') {
     await savePendingNotificationTarget(null);
   }
@@ -191,6 +226,82 @@ self.addEventListener('push', (event) => {
       } catch (e) {
         data = { title: 'Nova Notificação', body: event.data.text() };
       }
+    }
+
+    // =========================================================================
+    // TRATAMENTO PRIORITÁRIO: ALARME DE HORÁRIO EXATO DE CHECKLIST (TOTEM PWA)
+    // Funciona mesmo com o aplicativo fechado ou tela bloqueada no tablet Android
+    // =========================================================================
+    if (data.type === 'CHECKLIST_ALARM' || data.data?.type === 'CHECKLIST_ALARM') {
+      const alarmPayload = data.data || {};
+      const totemConfig = await getTotemConfigFromDB();
+
+      // Se o tablet tiver um setor específico configurado (ex: Cozinha), valida se o alarme é deste setor
+      if (totemConfig && totemConfig.sectorId && totemConfig.sectorId !== 'ALL' && !alarmPayload.isTest) {
+        const tabletSecId = String(totemConfig.sectorId || '').trim();
+        const tabletSecName = String(totemConfig.sectorName || '').trim().toLowerCase();
+        const alarmSecId = String(alarmPayload.sectorId || '').trim();
+        const alarmSecName = String(alarmPayload.sectorName || '').trim().toLowerCase();
+        const alarmTitle = String(alarmPayload.checklistTitle || data.title || '').toLowerCase();
+
+        const idMatches = tabletSecId && alarmSecId && (tabletSecId === alarmSecId || alarmSecId === 'ALL');
+        const nameMatches = tabletSecName && (
+          alarmSecName === tabletSecName ||
+          alarmSecName.includes(tabletSecName) ||
+          tabletSecName.includes(alarmSecName) ||
+          alarmTitle.includes(tabletSecName)
+        );
+
+        if (!idMatches && !nameMatches) {
+          console.log(`[SW/ChecklistAlarm] Alarme ignorado: Setor do alarme (${alarmSecName}) diferente do setor do tablet (${tabletSecName}).`);
+          return;
+        }
+      }
+
+      // Avisar abas abertas (caso o tablet esteja com o app aberto ou em segundo plano) para disparar a sirene sonora
+      try {
+        const windowClients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+        for (const client of windowClients) {
+          client.postMessage({
+            type: 'CHECKLIST_ALARM_TRIGGER',
+            payload: alarmPayload
+          });
+        }
+      } catch (e) {}
+
+      const alarmTitle = data.title || `🚨 ALARME ${(alarmPayload.sectorName || 'COZINHA').toUpperCase()} • ${alarmPayload.checklistTitle || 'Checklist'}`;
+      const alarmBody = data.body || 'Horário de execução atingido! Toque para abrir e realizar as tarefas.';
+      const alarmUrl = alarmPayload.url || `/totem-cozinha?tenant=${encodeURIComponent(alarmPayload.tenantId || '')}&alarmChecklistId=${encodeURIComponent(alarmPayload.checklistId || '')}&sectorId=${encodeURIComponent(alarmPayload.sectorId || '')}&sectorName=${encodeURIComponent(alarmPayload.sectorName || '')}`;
+
+      const alarmOptions: any = {
+        body: alarmBody,
+        icon: data.icon || '/pwa-192x192.png',
+        badge: data.badge || '/pwa-192x192.png',
+        tag: data.tag || `checklist_alarm_${alarmPayload.checklistId || Date.now()}`,
+        renotify: true,
+        requireInteraction: true,
+        vibrate: data.vibrate || [500, 200, 500, 200, 800, 200, 1000],
+        timestamp: Date.now(),
+        data: {
+          ...alarmPayload,
+          type: 'CHECKLIST_ALARM',
+          url: alarmUrl,
+          apiBaseUrl: totemConfig?.apiBaseUrl || ''
+        },
+        actions: [
+          {
+            action: 'start_checklist',
+            title: '🚀 Executar Tarefas Agora'
+          },
+          {
+            action: 'snooze_5m',
+            title: '⏰ Lembrar em 5 min'
+          }
+        ]
+      };
+
+      await self.registration.showNotification(alarmTitle, alarmOptions);
+      return;
     }
 
     // Filtro de mensagens antigas (evita enxurrada de notificações acumuladas ao abrir o navegador/sistema)
@@ -305,11 +416,68 @@ self.addEventListener('push', (event) => {
   })());
 });
 
-// Handle notification click: Direciona exatamente para a Caixa e Conversa da notificação
+// Handle notification click: Direciona exatamente para a Caixa/Conversa ou para o Checklist no Totem PWA
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
 
   const notifData = event.notification.data || {};
+
+  // Tratamento de Clique em Alarme de Checklist do Totem Cozinha PWA
+  if (notifData.type === 'CHECKLIST_ALARM') {
+    event.waitUntil((async () => {
+      const totemConfig = await getTotemConfigFromDB();
+
+      if (event.action === 'snooze_5m') {
+        const apiBase = notifData.apiBaseUrl || totemConfig?.apiBaseUrl || '';
+        if (apiBase && notifData.tenantId) {
+          try {
+            await fetch(`${apiBase.replace(/\/$/, '')}/api/v1/push/checklist-alarm-snooze`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                tenantId: notifData.tenantId,
+                sectorId: notifData.sectorId,
+                sectorName: notifData.sectorName,
+                checklistId: notifData.checklistId,
+                delayMinutes: 5
+              })
+            });
+          } catch (e) {}
+        }
+        return;
+      }
+
+      const targetUrl = notifData.url || `/totem-cozinha?tenant=${encodeURIComponent(notifData.tenantId || '')}&alarmChecklistId=${encodeURIComponent(notifData.checklistId || '')}&sectorId=${encodeURIComponent(notifData.sectorId || '')}&sectorName=${encodeURIComponent(notifData.sectorName || '')}`;
+
+      const windowClients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      let focusedClient: WindowClient | null = null;
+
+      for (const client of windowClients) {
+        try {
+          const clientUrl = new URL(client.url);
+          if (clientUrl.origin === self.location.origin) {
+            client.postMessage({
+              type: 'CHECKLIST_ALARM_CLICK',
+              payload: notifData
+            });
+            if (!focusedClient && 'focus' in client) {
+              focusedClient = await client.focus();
+            }
+          }
+        } catch (e) {}
+      }
+
+      if (focusedClient) {
+        return focusedClient;
+      }
+
+      if (self.clients.openWindow) {
+        return self.clients.openWindow(targetUrl);
+      }
+    })());
+    return;
+  }
+
   const rawUrl = notifData.url || '/';
 
   const conversationId = notifData.conversationId || extractQueryParam(rawUrl, 'conversation') || null;
@@ -366,4 +534,3 @@ self.addEventListener('notificationclick', (event) => {
     }
   })());
 });
-

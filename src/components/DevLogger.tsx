@@ -1391,7 +1391,7 @@ export default function DevLogger() {
         msg.includes('interrompendo loop de reconexão') ||
         msg.includes('Caixa FoodNext não está conectada') ||
         msg.includes('Falha 404: Instância') ||
-        msg.includes('Chave de API Gemini personalizada ignorada') || msg.includes('WhatsApp solicitou reinicialização/estabilização de socket') || msg.includes('Desativando e destruindo socket anterior') || msg.includes('Oscilação temporária / timeout de conexão com servidores WhatsApp') || msg.includes('Oscilação transitória na fila de escrita') || msg.includes('Auth writeQueue operation timed out') || msg.includes('failed to sync regular_') || msg.includes('invalid wire type')
+        msg.includes('Chave de API Gemini personalizada ignorada') || msg.includes('WhatsApp solicitou reinicialização/estabilização de socket') || msg.includes('Desativando e destruindo socket anterior') || msg.includes('Oscilação temporária / timeout de conexão com servidores WhatsApp') || msg.includes('Oscilação transitória na fila de escrita') || msg.includes('Auth writeQueue operation timed out') || msg.includes('failed to sync regular_') || msg.includes('invalid wire type') || msg.includes('Supabase Node CircuitBreaker') || msg.includes('Aviso ao gravar wa_incoming_messages') || msg.includes('Contato não validado no banco') || msg.includes('Inserção de novos contatos em lote') || msg.includes('Contato não pôde ser inserido nem recuperado') || msg.includes('Erro ao buscar instâncias válidas') || (msg.includes('Erro ao buscar config da instância') && msg.includes('TimeoutError'))
       );
     };
 
@@ -1560,6 +1560,20 @@ export default function DevLogger() {
           msg.includes('invalid wire type') ||
           msg.includes('[forwardMessage]') ||
           msg.includes('[handleMicClick]') ||
+          msg.includes('Supabase Node CircuitBreaker') ||
+          msg.includes('Aviso ao gravar wa_incoming_messages') ||
+          msg.includes('Contato não validado no banco') ||
+          msg.includes('Inserção de novos contatos em lote') ||
+          msg.includes('Contato não pôde ser inserido nem recuperado') ||
+          msg.includes('Erro ao buscar instâncias válidas') ||
+          msg.includes('Erro ao buscar config da instância') ||
+          msg.includes('Supabase Node CircuitBreaker') ||
+          msg.includes('Aviso ao gravar wa_incoming_messages') ||
+          msg.includes('Contato não validado no banco') ||
+          msg.includes('Inserção de novos contatos em lote') ||
+          msg.includes('Contato não pôde ser inserido nem recuperado') ||
+          msg.includes('Erro ao buscar instâncias válidas') ||
+          msg.includes('Erro ao buscar config da instância') ||
                     msg.includes('pending PNs') ||
                     msg.includes('Erro de entrega/ack detectado') ||
                     msg.includes('Resetando chaves de sessão') ||
@@ -1864,7 +1878,14 @@ export default function DevLogger() {
           msg.includes('failed to sync regular_') ||
           msg.includes('invalid wire type') ||
           msg.includes('[forwardMessage]') ||
-          msg.includes('[handleMicClick]')
+          msg.includes('[handleMicClick]') ||
+          msg.includes('Supabase Node CircuitBreaker') ||
+          msg.includes('Aviso ao gravar wa_incoming_messages') ||
+          msg.includes('Contato não validado no banco') ||
+          msg.includes('Inserção de novos contatos em lote') ||
+          msg.includes('Contato não pôde ser inserido nem recuperado') ||
+          msg.includes('Erro ao buscar instâncias válidas') ||
+          msg.includes('Erro ao buscar config da instância')
         );
       };
 
