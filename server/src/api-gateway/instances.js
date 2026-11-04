@@ -699,8 +699,7 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                     supabase.from('whatsapp_instances')
                         .update({ status: 'connecting', last_error: 'Reconectando instância para envio de mensagens...', updated_at: new Date().toISOString() })
                         .eq('id', instanceId)
-                        .in('status', ['connected', 'connected_local'])
-                        .then(() => {}).catch(() => {});
+                        .then(() => {}, () => {});
                     const isStartingNow = typeof sessionManager.isConnectingStateActive === 'function' ? sessionManager.isConnectingStateActive(instanceId) : sessionManager.connectingState.has(instanceId);
                     if (!isStartingNow) {
                         sessionManager.createSession(req.tenantId, instanceId, false).catch(() => {});
@@ -1413,8 +1412,7 @@ router.get('/instances/:instanceId/status', requireTenant, async (req, res) => {
                     if (isAllowedHere && isLeaseExpiredOrLocal) {
                         await supabase.from('whatsapp_instances')
                             .update({ status: finalStatus, updated_at: new Date().toISOString() })
-                            .eq('id', instanceId)
-                            .catch(() => {});
+                            .then(() => {}, () => {});
                     }
                 }
             }

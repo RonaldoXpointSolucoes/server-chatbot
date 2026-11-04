@@ -332,7 +332,7 @@ class SessionManager {
                                     status: activeStatus,
                                     last_error: null,
                                     assigned_node_id: NODE_ID,
-                                    lease_until: new Date(Date.now() + 45000).toISOString(),
+                                    lease_until: new Date(Date.now() + 180000).toISOString(),
                                     updated_at: new Date().toISOString()
                                 })
                                 .in('id', authenticatedIds);
@@ -349,7 +349,7 @@ class SessionManager {
                             supabase.from('whatsapp_instances')
                                 .update({
                                     assigned_node_id: NODE_ID,
-                                    lease_until: new Date(Date.now() + 45000).toISOString(),
+                                    lease_until: new Date(Date.now() + 180000).toISOString(),
                                     updated_at: new Date().toISOString()
                                 })
                                 .in('id', unauthenticatedIds)
@@ -518,22 +518,21 @@ class SessionManager {
                     }
 
                     // CORREÇÃO DE FALSO POSITIVO ('connected' sem socket aberto na RAM):
-                    // Se o banco diz 'connected' mas este nó (ou lease expirado) não possui socket aberto e não está em sessão recém-criada (< 15s),
-                    // rebaixa imediatamente o status no banco para 'connecting' para que a UI nunca mostre bolinha verde falsa!
-                    if (inst.status === 'connected' && (!hasSessionInRam || !isWsOpen) && (now - sessionCreatedAt >= 15000)) {
-                        console.warn(`[SessionManager/AutoHealing] ⚠️ Instância ${inst.id} constava como 'connected' no banco mas está sem socket ativo na RAM. Corrigindo status para 'connecting'...`);
+                    // Só rebaixa se a instância NÃO estiver na RAM deste nó, não estiver conectando/com timer ativo,
+                    // e (pertencer a este nó OU estiver sem lease há mais de 3 minutos).
+                    const isTrulyOrphaned = !hasSessionInRam && !isConnecting && !hasActiveTimer && (isAssignedToThisNode || (!inst.lease_until || (now - leaseExpiry > 180000)));
+                    if (inst.status === 'connected' && isTrulyOrphaned) {
+                        console.warn(`[SessionManager/AutoHealing] ⚠️ Instância ${inst.id} constava como 'connected' no banco mas está sem sessão ativa na RAM. Corrigindo status para 'connecting'...`);
                         inst.status = 'connecting';
-                        await supabase.from('whatsapp_instances')
-                            .update({
-                                status: 'connecting',
-                                last_error: 'Conexão interrompida. Reconectando automaticamente...',
-                                updated_at: new Date().toISOString()
-                            })
-                            .eq('id', inst.id)
-                            .catch(() => {});
-                        eventProcessor.handleConnectionUpdate(inst.tenant_id, inst.id, {
-                            connection: 'connecting'
-                        }).catch(() => {});
+                        try {
+                            await supabase.from('whatsapp_instances')
+                                .update({
+                                    status: 'connecting',
+                                    last_error: 'Conexão interrompida. Reconectando automaticamente...',
+                                    updated_at: new Date().toISOString()
+                                })
+                                .eq('id', inst.id);
+                        } catch (_) {}
                     }
 
                     const lastHeal = this.autoHealingCooldowns.get(inst.id) || 0;
@@ -583,14 +582,16 @@ class SessionManager {
                                 const timeSinceUpdate = inst.updated_at ? (now - new Date(inst.updated_at).getTime()) : Infinity;
                                 if (timeSinceUpdate > 60000 && !hasSessionInRam) {
                                     console.log(`[SessionManager/AutoHealing] Instância ${inst.id} sem credenciais autenticadas em '${inst.status}' há mais de 1m. Marcando como 'disconnected'.`);
-                                    await supabase.from('whatsapp_instances').update({
-                                        status: 'disconnected',
-                                        qr_code: null,
-                                        pairing_code: null,
-                                        assigned_node_id: null,
-                                        lease_until: null,
-                                        last_error: 'Aguardando leitura de QR Code. Clique em Conectar para iniciar.'
-                                    }).eq('id', inst.id).catch(() => {});
+                                    try {
+                                        await supabase.from('whatsapp_instances').update({
+                                            status: 'disconnected',
+                                            qr_code: null,
+                                            pairing_code: null,
+                                            assigned_node_id: null,
+                                            lease_until: null,
+                                            last_error: 'Aguardando leitura de QR Code. Clique em Conectar para iniciar.'
+                                        }).eq('id', inst.id);
+                                    } catch (_) {}
                                 }
                                 continue;
                             }
@@ -618,7 +619,7 @@ class SessionManager {
                                         updated_at: new Date().toISOString()
                                     })
                                     .eq('id', inst.id)
-                                    .then(() => {}).catch(() => {});
+                                    .then(() => {}, () => {});
                                 eventProcessor.handleConnectionUpdate(inst.tenant_id, inst.id, {
                                     connection: 'close',
                                     status: 'disconnected',
@@ -636,29 +637,14 @@ class SessionManager {
             }
         }, 25000);
 
-        // Limpeza periódica preventiva de locks órfãos/expirados no banco de dados (a cada 30s)
+        // Limpeza periódica preventiva de locks órfãos/expirados no banco de dados (a cada 60s)
         setInterval(async () => {
             try {
                 const isLocalDev = process.env.DISABLE_AUTO_START_SESSIONS === 'true' || process.env.IS_LOCAL_DEV === 'true';
                 if (isLocalDev) return;
 
                 const now = new Date().toISOString();
-                const expiredThreshold = new Date(Date.now() - 60000).toISOString();
-
-                // Se uma instância estava 'connected' mas seu lease expirou há mais de 60s, rebaixa para 'connecting'
-                // para evitar que fique eternamente 'connected' sem worker ativo
-                await supabase
-                    .from('whatsapp_instances')
-                    .update({
-                        status: 'connecting',
-                        assigned_node_id: null,
-                        lease_until: null,
-                        last_error: 'Sessão expirada no servidor. Reconectando...',
-                        updated_at: now
-                    })
-                    .lt('lease_until', expiredThreshold)
-                    .in('status', ['connected', 'connected_local']);
-
+                const expiredThreshold = new Date(Date.now() - 180000).toISOString();
                 await supabase
                     .from('whatsapp_instances')
                     .update({
@@ -667,9 +653,9 @@ class SessionManager {
                         updated_at: now
                     })
                     .lt('lease_until', expiredThreshold)
-                    .not('assigned_node_id', 'is', null);
+                    .eq('assigned_node_id', NODE_ID);
             } catch (errClean) {}
-        }, 30000);
+        }, 60000);
     }
 
     isSocketOpen(sock) {
@@ -1905,8 +1891,7 @@ class SessionManager {
                                     last_error: 'Conexão interrompida após múltiplas oscilações de rede. Reconexão automática em andamento.',
                                     updated_at: new Date().toISOString()
                                 })
-                                .eq('id', instanceId)
-                                .catch(() => {});
+                                .then(() => {}, () => {});
                             eventProcessor.handleConnectionUpdate(tenantId, instanceId, {
                                 connection: 'close',
                                 status: 'disconnected',
@@ -1963,8 +1948,7 @@ class SessionManager {
                                     last_error: 'Desconectada após 6 tentativas de reconexão. O sistema tentará restaurar automaticamente.',
                                     updated_at: new Date().toISOString()
                                 })
-                                .eq('id', instanceId)
-                                .catch(() => {});
+                                .then(() => {}, () => {});
                             eventProcessor.handleConnectionUpdate(tenantId, instanceId, {
                                 connection: 'close',
                                 status: 'disconnected',
@@ -2599,7 +2583,7 @@ class SessionManager {
             if (!hasMe) {
                 const isActivelyPairing = this.pairingInProgress?.has(instanceId) || this.pairingPendingSync?.has(instanceId) || this.sessions.has(instanceId);
                 if (!isActivelyPairing) {
-                    await supabase.from('wa_auth_credentials').delete().eq('instance_id', instanceId).catch(() => {});
+                    await supabase.from('wa_auth_credentials').delete().then(() => {}, () => {});
                 }
                 return false;
             }
