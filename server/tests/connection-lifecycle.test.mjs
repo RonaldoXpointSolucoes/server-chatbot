@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { beginConnectionAttempt, connectionProgress, getConnectionDiagnostics, connectDecision, shouldClearCredentials } from '../src/session-manager/connection-lifecycle.js';
+import { beginConnectionAttempt, connectionProgress, getConnectionDiagnostics, connectDecision, connectionNeedsProtection, shouldClearCredentials } from '../src/session-manager/connection-lifecycle.js';
 import { connectionView, qrSeconds } from '../../apps/reconecta-zap/src/connection-state.mjs';
 
 test('QR rotations retain the attempt and match Baileys first/subsequent deadlines', () => {
@@ -74,4 +74,12 @@ test('transport open alone never means WhatsApp authenticated', () => {
   assert.equal(v.step,2);
   assert.equal(connectDecision({authenticated:true,resetSession:true}),'connected');
   assert.equal(shouldClearCredentials({resetSession:false,hasStoredIdentity:false}),false);
+});
+
+test('stale starting or reconnecting flags (>90s) do not permanently block recovery', () => {
+  beginConnectionAttempt('stale-reconnect','tenant');
+  connectionProgress('stale-reconnect',{connection:'close',lastDisconnect:{error:{message:'Connection Terminated',output:{statusCode:428}}}},{hasIdentity:true});
+  const d=getConnectionDiagnostics('stale-reconnect');
+  assert.equal(connectionNeedsProtection(d,{starting:true,now:Date.parse(d.updatedAt)+30000}),true);
+  assert.equal(connectionNeedsProtection(d,{starting:true,now:Date.parse(d.updatedAt)+95000}),false);
 });

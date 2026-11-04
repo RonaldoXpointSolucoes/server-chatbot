@@ -2606,10 +2606,6 @@ class EventProcessor {
                 const isTransient = (![401, 403, 409, 410].includes(reason) || isPairingPendingSync) && reconnectAttempts < 5;
 
                 if (isTransient) {
-                    if (isAlreadyConnected) {
-                        console.log(`[EventProcessor] Ignorando evento de status transiente (code: ${reason}) para instância ${instanceId} que já está autenticada.`);
-                        return;
-                    }
                     await supabase.from('whatsapp_instances')
                         .update({ 
                             status: 'connecting', 
@@ -2660,13 +2656,8 @@ class EventProcessor {
                 }
             }
             if (connection === 'connecting') {
-                if (isAlreadyConnected) {
-                    console.log(`[EventProcessor] Ignorando evento de status connecting para instância ${instanceId} que já está autenticada.`);
-                    return;
-                }
-
                 await supabase.from('whatsapp_instances')
-                    .update({ status: 'connecting', last_error: null })
+                    .update({ status: 'connecting', last_error: null, updated_at: new Date().toISOString() })
                     .eq('id', instanceId);
                 payload.status = 'connecting';
 

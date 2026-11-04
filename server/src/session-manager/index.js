@@ -147,6 +147,7 @@ class SessionManager {
     constructor() {
         this.sessions = new Map();
         this.connectingState = new Map();
+        this.connectingStateStartedAt = new Map();
         this.reconnectAttempts = new Map();
         this.reconnectTimeouts = new Map();
         this.conflictAttempts = new Map();
@@ -164,6 +165,7 @@ class SessionManager {
         this.oscillationAttempts = new Map();
         this.inProgressLocks = new Map();
         this.instanceMutexes = new Map();
+        this.instanceMutexStartedAt = new Map();
         this.autoHealingCooldowns = new Map();
         this.autoHealingFailures = new Map();
         this.reconnectingCoolingDown = new Map();
@@ -285,7 +287,7 @@ class SessionManager {
                         const sock = sessionData?.sock;
                         const ws = sock?.ws;
                         const rawState = ws?.socket?.readyState;
-                        const isConnecting = this.connectingState.has(id) || (ws && (ws.isConnecting || rawState === 0));
+                        const isConnecting = this.isConnectingStateActive(id) || (ws && (ws.isConnecting || rawState === 0));
                         const hasActiveTimer = this.reconnectingTimers.has(id) || this.reconnectTimeouts.has(id) || this.conflictTimeouts.has(id);
                         const lastCooldown = this.reconnectingCoolingDown.get(id) || 0;
                         const isCoolingDown = (Date.now() - lastCooldown < 35000);
@@ -323,8 +325,9 @@ class SessionManager {
                     const authenticatedIds = healthyIds.filter(id => this.authenticatedSessions.has(id) && !this.pairingPendingSync.get(id));
 
                     if (authenticatedIds.length > 0) {
-                        await retryWithBackoff(() =>
-                            supabase.from('whatsapp_instances')
+                        const isProdNode = NODE_ID === 'production-worker' || (process.env.APP_ENV || '').toLowerCase() === 'production';
+                        await retryWithBackoff(() => {
+                            let q = supabase.from('whatsapp_instances')
                                 .update({
                                     status: activeStatus,
                                     last_error: null,
@@ -332,9 +335,12 @@ class SessionManager {
                                     lease_until: new Date(Date.now() + 45000).toISOString(),
                                     updated_at: new Date().toISOString()
                                 })
-                                .in('id', authenticatedIds)
-                                .or(`assigned_node_id.eq.${NODE_ID},assigned_node_id.is.null`)
-                        );
+                                .in('id', authenticatedIds);
+                            if (!isProdNode) {
+                                q = q.or(`assigned_node_id.eq.${NODE_ID},assigned_node_id.is.null`);
+                            }
+                            return q;
+                        });
                     }
 
                     const unauthenticatedIds = healthyIds.filter(id => !authenticatedIds.includes(id));
@@ -398,7 +404,7 @@ class SessionManager {
 
                         if (connectionNeedsProtection(getConnectionDiagnostics(stuck.id), {
                             hasSession: Boolean(sock), wsOpen: isTransportOpen(sock),
-                            starting: this.connectingState.has(stuck.id),
+                            starting: this.isConnectingStateActive(stuck.id),
                             reconnecting: this.reconnectingTimers.has(stuck.id) || this.reconnectTimeouts.has(stuck.id)
                         })) continue;
 
@@ -412,6 +418,8 @@ class SessionManager {
                         connectionProgress(stuck.id, timeoutUpdate, { tenantId: stuck.tenant_id });
                         await this.destroyExistingSession(stuck.id, 'watchdog_connecting_timeout');
                         this.connectingState?.delete?.(stuck.id);
+                        this.connectingStateStartedAt?.delete?.(stuck.id);
+                        this.instanceMutexes?.delete?.(stuck.id);
                         this.connectingSessions?.delete?.(stuck.id);
 
                         // Registra falha de auto-healing para impedir loop infinito de acordar a mesma instância (cooldown de 30 minutos)
@@ -457,7 +465,7 @@ class SessionManager {
                 const isProductionMaster = currentNodeId === 'production-worker' || (process.env.APP_ENV || '').toLowerCase() === 'production';
 
                 let revivedInThisCycle = 0;
-                const MAX_HEAL_PER_CYCLE = 2; // Protege o pool de conexões HTTP/DB do Supabase
+                const MAX_HEAL_PER_CYCLE = 4; // Protege o pool de conexões HTTP/DB do Supabase permitindo curar lotes maiores
 
                 for (const inst of dbInstances) {
                     if (revivedInThisCycle >= MAX_HEAL_PER_CYCLE) {
@@ -478,16 +486,6 @@ class SessionManager {
                         }
                     }
 
-                    const lastHeal = this.autoHealingCooldowns.get(inst.id) || 0;
-                    const lastCooldown = this.reconnectingCoolingDown.get(inst.id) || 0;
-                    const failCount = this.autoHealingFailures.get(inst.id) || 0;
-
-                    // Backoff defensivo: se falhou repetidamente (2+ vezes), respeita intervalo longo de 30 minutos
-                    const requiredHealInterval = failCount >= 2 ? 30 * 60000 : 120000;
-                    if (now - lastHeal < requiredHealInterval || now - lastCooldown < 60000) {
-                        continue;
-                    }
-
                     const hasSessionInRam = this.sessions.has(inst.id);
                     const sessionData = this.sessions.get(inst.id);
                     const sessionCreatedAt = sessionData?.createdAt || 0;
@@ -495,24 +493,10 @@ class SessionManager {
                     const sock = sessionData?.sock;
                     const ws = sock?.ws;
                     const rawState = ws?.socket?.readyState;
-                    const isConnecting = this.connectingState.has(inst.id) || (ws && (ws.isConnecting || rawState === 0));
+                    const isConnecting = this.isConnectingStateActive(inst.id) || (ws && (ws.isConnecting || rawState === 0));
                     const hasActiveTimer = this.reconnectingTimers.has(inst.id) || this.reconnectTimeouts.has(inst.id) || this.conflictTimeouts.has(inst.id);
                     const conflictCount = this.conflictAttempts.get(inst.id) || 0;
-
-                    // Se a instância já está conectando, em handshake inicial (< 45s), em período de backoff agendado ou atingiu limite de conflito, não interfere
-                    if (isYoungSession || isConnecting || hasActiveTimer || conflictCount >= 3) {
-                        continue;
-                    }
-
                     const isWsOpen = isTransportOpen(sock);
-                    if (connectionNeedsProtection(getConnectionDiagnostics(inst.id), {
-                        hasSession: hasSessionInRam, wsOpen: isWsOpen,
-                        starting: isConnecting, reconnecting: hasActiveTimer
-                    })) continue;
-
-                    if (hasSessionInRam && isWsOpen) {
-                        continue;
-                    }
 
                     const leaseExpiry = inst.lease_until ? new Date(inst.lease_until).getTime() : 0;
                     const isLeaseExpired = !inst.lease_until || (leaseExpiry < now);
@@ -530,6 +514,49 @@ class SessionManager {
 
                     // Se a instância pertence ativamente a outro nó com lease válido (e não é Master Takeover), não concorre
                     if (assignedNodeId && !isAssignedToThisNode && !isLeaseExpired && !isMasterTakeover) {
+                        continue;
+                    }
+
+                    // CORREÇÃO DE FALSO POSITIVO ('connected' sem socket aberto na RAM):
+                    // Se o banco diz 'connected' mas este nó (ou lease expirado) não possui socket aberto e não está em sessão recém-criada (< 15s),
+                    // rebaixa imediatamente o status no banco para 'connecting' para que a UI nunca mostre bolinha verde falsa!
+                    if (inst.status === 'connected' && (!hasSessionInRam || !isWsOpen) && (now - sessionCreatedAt >= 15000)) {
+                        console.warn(`[SessionManager/AutoHealing] ⚠️ Instância ${inst.id} constava como 'connected' no banco mas está sem socket ativo na RAM. Corrigindo status para 'connecting'...`);
+                        inst.status = 'connecting';
+                        await supabase.from('whatsapp_instances')
+                            .update({
+                                status: 'connecting',
+                                last_error: 'Conexão interrompida. Reconectando automaticamente...',
+                                updated_at: new Date().toISOString()
+                            })
+                            .eq('id', inst.id)
+                            .catch(() => {});
+                        eventProcessor.handleConnectionUpdate(inst.tenant_id, inst.id, {
+                            connection: 'connecting'
+                        }).catch(() => {});
+                    }
+
+                    const lastHeal = this.autoHealingCooldowns.get(inst.id) || 0;
+                    const lastCooldown = this.reconnectingCoolingDown.get(inst.id) || 0;
+                    const failCount = this.autoHealingFailures.get(inst.id) || 0;
+
+                    // Backoff defensivo: 3 minutos após 3+ falhas, ou 45s entre tentativas normais
+                    const requiredHealInterval = failCount >= 3 ? 3 * 60000 : 45000;
+                    if (now - lastHeal < requiredHealInterval || now - lastCooldown < 35000) {
+                        continue;
+                    }
+
+                    // Se a instância já está conectando, em handshake inicial (< 45s), em período de backoff agendado ou atingiu limite de conflito, não interfere
+                    if (isYoungSession || isConnecting || hasActiveTimer || conflictCount >= 3) {
+                        continue;
+                    }
+
+                    if (connectionNeedsProtection(getConnectionDiagnostics(inst.id), {
+                        hasSession: hasSessionInRam, wsOpen: isWsOpen,
+                        starting: isConnecting, reconnecting: hasActiveTimer
+                    })) continue;
+
+                    if (hasSessionInRam && isWsOpen) {
                         continue;
                     }
 
@@ -580,35 +607,58 @@ class SessionManager {
                             console.error(`[SessionManager/AutoHealing] Falha ao reviver instância ${inst.id} (falhas consecutivas: ${newFails}):`, err.message);
 
                             if (newFails >= 3) {
-                                console.warn(`[SessionManager/AutoHealing] ⚠️ Instância ${inst.id} falhou 3 vezes seguidas no auto-healing. Colocando em repouso por 15m e marcando offline no banco.`);
+                                console.warn(`[SessionManager/AutoHealing] ⚠️ Instância ${inst.id} falhou 3 vezes seguidas no auto-healing. Marcando disconnected no banco.`);
                                 supabase
                                     .from('whatsapp_instances')
                                     .update({
-                                        status: 'offline',
-                                        last_error: 'Desconectada (falha repetida na auto-recuperação da sessão)',
+                                        status: 'disconnected',
+                                        last_error: 'Desconectada (falha repetida na auto-recuperação da sessão. Clique em Reconectar)',
                                         assigned_node_id: null,
                                         lease_until: null,
                                         updated_at: new Date().toISOString()
                                     })
                                     .eq('id', inst.id)
                                     .then(() => {}).catch(() => {});
+                                eventProcessor.handleConnectionUpdate(inst.tenant_id, inst.id, {
+                                    connection: 'close',
+                                    status: 'disconnected',
+                                    lastDisconnect: { error: { message: 'Desconectada após tentativas de auto-recuperação', output: { statusCode: 408 } } }
+                                }).catch(() => {});
                             }
                         });
 
                         // Espaçamento defensivo entre inicializações no mesmo ciclo para evitar concorrência no gateway
-                        await new Promise(r => setTimeout(r, 2500));
+                        await new Promise(r => setTimeout(r, 2000));
                     }
                 }
             } catch (healErr) {
                 console.error('[SessionManager/AutoHealing] Erro no ciclo de auto-healing:', healErr.message);
             }
-        }, 60000);
+        }, 25000);
 
-        // Limpeza periódica preventiva de locks órfãos/expirados no banco de dados (a cada 60s)
+        // Limpeza periódica preventiva de locks órfãos/expirados no banco de dados (a cada 30s)
         setInterval(async () => {
             try {
+                const isLocalDev = process.env.DISABLE_AUTO_START_SESSIONS === 'true' || process.env.IS_LOCAL_DEV === 'true';
+                if (isLocalDev) return;
+
                 const now = new Date().toISOString();
                 const expiredThreshold = new Date(Date.now() - 60000).toISOString();
+
+                // Se uma instância estava 'connected' mas seu lease expirou há mais de 60s, rebaixa para 'connecting'
+                // para evitar que fique eternamente 'connected' sem worker ativo
+                await supabase
+                    .from('whatsapp_instances')
+                    .update({
+                        status: 'connecting',
+                        assigned_node_id: null,
+                        lease_until: null,
+                        last_error: 'Sessão expirada no servidor. Reconectando...',
+                        updated_at: now
+                    })
+                    .lt('lease_until', expiredThreshold)
+                    .in('status', ['connected', 'connected_local']);
+
                 await supabase
                     .from('whatsapp_instances')
                     .update({
@@ -619,7 +669,7 @@ class SessionManager {
                     .lt('lease_until', expiredThreshold)
                     .not('assigned_node_id', 'is', null);
             } catch (errClean) {}
-        }, 60000);
+        }, 30000);
     }
 
     isSocketOpen(sock) {
@@ -634,6 +684,24 @@ class SessionManager {
         return live || fallbackTenantId;
     }
 
+    isConnectingStateActive(instanceId, maxAgeMs = 45000) {
+        if (!instanceId || !this.connectingState.has(instanceId)) {
+            return false;
+        }
+        const startedAt = this.connectingStateStartedAt.get(instanceId) || 0;
+        const ageMs = startedAt > 0 ? (Date.now() - startedAt) : 0;
+        if (ageMs > maxAgeMs) {
+            console.warn(`[SessionManager] Evictando connectingState órfão/travado (${ageMs}ms > ${maxAgeMs}ms) para a instância ${instanceId}.`);
+            this.connectingState.delete(instanceId);
+            this.connectingStateStartedAt.delete(instanceId);
+            this.inProgressLocks.delete(instanceId);
+            this.instanceMutexes.delete(instanceId);
+            this.instanceMutexStartedAt.delete(instanceId);
+            return false;
+        }
+        return true;
+    }
+
     async runWithInstanceMutex(instanceId, action) {
         if (!instanceId) return action();
 
@@ -643,6 +711,13 @@ class SessionManager {
             return action();
         }
 
+        const mutexStartedAt = this.instanceMutexStartedAt.get(instanceId) || 0;
+        if (this.instanceMutexes.has(instanceId) && mutexStartedAt > 0 && (Date.now() - mutexStartedAt > 35000)) {
+            console.warn(`[SessionManager] Evictando instanceMutex órfão/travado (> 35s) para a instância ${instanceId}.`);
+            this.instanceMutexes.delete(instanceId);
+            this.instanceMutexStartedAt.delete(instanceId);
+        }
+
         if (!this.instanceMutexes.has(instanceId)) {
             this.instanceMutexes.set(instanceId, Promise.resolve());
         }
@@ -650,20 +725,38 @@ class SessionManager {
         let release;
         const nextPromise = new Promise(resolve => { release = resolve; });
         this.instanceMutexes.set(instanceId, nextPromise);
+        this.instanceMutexStartedAt.set(instanceId, Date.now());
 
+        let waitTimer = null;
         try {
-            await currentPromise;
-        } catch (e) {}
+            await Promise.race([
+                currentPromise,
+                new Promise(resolve => {
+                    waitTimer = setTimeout(resolve, 35000);
+                })
+            ]);
+        } catch (e) {} finally {
+            if (waitTimer) clearTimeout(waitTimer);
+        }
 
         const nextStore = new Set(activeLocks || []);
         nextStore.add(instanceId);
+        this.instanceMutexStartedAt.set(instanceId, Date.now());
 
+        let actionTimer = null;
         try {
-            return await instanceMutexStorage.run(nextStore, () => action());
+            return await Promise.race([
+                instanceMutexStorage.run(nextStore, () => action()),
+                new Promise((_, reject) => {
+                    actionTimer = setTimeout(() => reject(new Error(`Timeout no mutex de inicialização da instância ${instanceId} (45s)`)), 45000);
+                })
+            ]);
         } finally {
+            if (actionTimer) clearTimeout(actionTimer);
             release();
             if (this.instanceMutexes.get(instanceId) === nextPromise) {
                 this.instanceMutexes.delete(instanceId);
+                this.instanceMutexStartedAt.delete(instanceId);
             }
         }
     }
@@ -825,8 +918,9 @@ class SessionManager {
             if (canTakeover) {
                 const leaseUntil = new Date(Date.now() + 45000).toISOString();
                 const updatedAt = new Date().toISOString();
-                const isAlreadyActive = inst.status === 'connected' || inst.status === 'connected_local';
-                const nextStatus = isAlreadyActive ? inst.status : 'connecting';
+                const existingSock = this.sessions.get(instanceId)?.sock;
+                const isActuallyOpenInRam = Boolean(existingSock && isSocketOpen(existingSock) && this.authenticatedSessions.has(instanceId));
+                const nextStatus = (isActuallyOpenInRam && (inst.status === 'connected' || inst.status === 'connected_local')) ? inst.status : 'connecting';
 
                 let updateQuery = supabase
                     .from('whatsapp_instances')
@@ -925,9 +1019,13 @@ class SessionManager {
         }
 
         // 1. Se já há uma Promise de inicialização em andamento para esta instância, reutiliza diretamente
-        if (!force && this.connectingState.has(instanceId)) {
+        if (!force && this.isConnectingStateActive(instanceId, 45000)) {
             console.log(`[SessionManager] Sessão ${instanceId} já está em processo de conexão ativo. Reutilizando Promise em andamento.`);
             return this.connectingState.get(instanceId);
+        }
+
+        if (force) {
+            this.isConnectingStateActive(instanceId, 20000);
         }
 
         return this.runWithInstanceMutex(instanceId, async () => {
@@ -962,20 +1060,34 @@ class SessionManager {
                 }
             }
 
-            if (this.connectingState.has(instanceId)) {
+            if (this.isConnectingStateActive(instanceId, force ? 20000 : 45000)) {
                 console.log(`[SessionManager] Sessão ${instanceId} já está em processo de conexão. Reutilizando Promise em andamento.`);
                 return this.connectingState.get(instanceId);
             }
 
             console.log(`[SessionManager] Iniciando sessão para Instance: ${instanceId} | Tenant: ${tenantId} | Force: ${force}`);
 
-            const promise = this._createSessionInner(tenantId, instanceId, force);
+            let initTimeout = null;
+            const innerPromise = instanceMutexStorage.exit(() => this._createSessionInner(tenantId, instanceId, force));
+            const promise = Promise.race([
+                innerPromise,
+                new Promise((_, reject) => {
+                    initTimeout = setTimeout(() => {
+                        reject(new Error(`Timeout ao inicializar sessão Baileys para ${instanceId} (45s)`));
+                    }, 45000);
+                })
+            ]);
             this.connectingState.set(instanceId, promise);
+            this.connectingStateStartedAt.set(instanceId, Date.now());
             
             try {
                 return await promise;
             } finally {
-                this.connectingState.delete(instanceId);
+                if (initTimeout) clearTimeout(initTimeout);
+                if (this.connectingState.get(instanceId) === promise) {
+                    this.connectingState.delete(instanceId);
+                    this.connectingStateStartedAt.delete(instanceId);
+                }
                 this.inProgressLocks.delete(instanceId);
             }
         });
@@ -1248,7 +1360,25 @@ class SessionManager {
                     delete safeUpdate.qr;
                 }
 
-                await eventProcessor.handleConnectionUpdate(tenantId, instanceId, safeUpdate);
+                if (update.connection === 'close') {
+                    this.reconnectingCoolingDown.set(instanceId, Date.now());
+                }
+
+                let connUpdateTimer = null;
+                try {
+                    await Promise.race([
+                        eventProcessor.handleConnectionUpdate(tenantId, instanceId, safeUpdate),
+                        new Promise(resolve => {
+                            connUpdateTimer = setTimeout(resolve, 8000);
+                        })
+                    ]);
+                } catch (e) {
+                    console.warn(`[SessionManager] Erro não-fatal em handleConnectionUpdate (${instanceId}):`, e?.message || e);
+                } finally {
+                    if (connUpdateTimer) clearTimeout(connUpdateTimer);
+                }
+
+                if (this.sessions.get(instanceId)?.sock !== sock) return;
 
                 const { connection, lastDisconnect } = update;
                 if (isRealAuthConnection) {
@@ -1735,10 +1865,11 @@ class SessionManager {
                         const cleanReason = String(reason || '').replace(/errored/gi, 'closed').replace(/error/gi, 'status');
                         console.log(`[SessionManager] WhatsApp solicitou reinicialização/estabilização de socket (status ${status} / ${cleanReason}) para a instância ${instanceId}. Reconectando em 1.5s com jitter...`);
                         
-                        // Atualiza lease_until e last_disconnect_reason no banco preservando o status connected para não causar flickering
+                        // Atualiza status para 'connecting' (o frontend possui debounce de 18s para evitar flickering em oscilações rápidas)
                         await retryWithBackoff(() =>
                             supabase.from('whatsapp_instances')
                                 .update({
+                                    status: 'connecting',
                                     lease_until: new Date(Date.now() + 60000).toISOString(),
                                     last_disconnected_at: new Date().toISOString(),
                                     last_disconnect_reason: reason || `restart_required_${status}`,
@@ -1762,6 +1893,28 @@ class SessionManager {
                         const attempts = (this.oscillationAttempts.get(instanceId) || 0) + 1;
                         this.oscillationAttempts.set(instanceId, attempts);
 
+                        if (attempts > 6) {
+                            console.warn(`[SessionManager] Limite de 6 tentativas de oscilação atingido para ${instanceId}. Marcando disconnected.`);
+                            this.oscillationAttempts.delete(instanceId);
+                            await supabase.from('whatsapp_instances')
+                                .update({
+                                    status: 'disconnected',
+                                    reconnect_attempts: attempts,
+                                    assigned_node_id: null,
+                                    lease_until: null,
+                                    last_error: 'Conexão interrompida após múltiplas oscilações de rede. Reconexão automática em andamento.',
+                                    updated_at: new Date().toISOString()
+                                })
+                                .eq('id', instanceId)
+                                .catch(() => {});
+                            eventProcessor.handleConnectionUpdate(tenantId, instanceId, {
+                                connection: 'close',
+                                status: 'disconnected',
+                                lastDisconnect: { error: { message: 'Conexão interrompida após múltiplas oscilações.', output: { statusCode: status || 408 } } }
+                            }).catch(() => {});
+                            return;
+                        }
+
                         const baseDelays = [3000, 6000, 10000, 18000];
                         const baseDelay = baseDelays[Math.min(attempts - 1, baseDelays.length - 1)];
                         const jitter = Math.floor(Math.random() * 1500);
@@ -1773,6 +1926,8 @@ class SessionManager {
                         await retryWithBackoff(() =>
                             supabase.from('whatsapp_instances')
                                 .update({
+                                    status: 'connecting',
+                                    reconnect_attempts: attempts,
                                     lease_until: new Date(Date.now() + 60000).toISOString(),
                                     last_disconnected_at: new Date().toISOString(),
                                     last_disconnect_reason: reason || `stream_oscillation_${status}`,
@@ -1795,6 +1950,28 @@ class SessionManager {
                         // Desconexão transitória de rede com credenciais salvas: auto-reconexão com backoff exponencial + jitter
                         const attempts = (this.reconnectAttempts.get(instanceId) || 0) + 1;
                         this.reconnectAttempts.set(instanceId, attempts);
+
+                        if (attempts > 6) {
+                            console.warn(`[SessionManager] Limite de 6 tentativas de reconexão autenticado atingido para ${instanceId}. Marcando disconnected.`);
+                            this.reconnectAttempts.delete(instanceId);
+                            await supabase.from('whatsapp_instances')
+                                .update({
+                                    status: 'disconnected',
+                                    reconnect_attempts: attempts,
+                                    assigned_node_id: null,
+                                    lease_until: null,
+                                    last_error: 'Desconectada após 6 tentativas de reconexão. O sistema tentará restaurar automaticamente.',
+                                    updated_at: new Date().toISOString()
+                                })
+                                .eq('id', instanceId)
+                                .catch(() => {});
+                            eventProcessor.handleConnectionUpdate(tenantId, instanceId, {
+                                connection: 'close',
+                                status: 'disconnected',
+                                lastDisconnect: { error: { message: 'Desconectada após 6 tentativas de reconexão.', output: { statusCode: status || 408 } } }
+                            }).catch(() => {});
+                            return;
+                        }
                         
                         const baseDelay = Math.min(1500 * Math.pow(1.4, attempts), 25000);
                         const jitter = Math.floor(Math.random() * 1500);
@@ -1805,6 +1982,8 @@ class SessionManager {
                         await retryWithBackoff(() =>
                             supabase.from('whatsapp_instances')
                                 .update({
+                                    status: 'connecting',
+                                    reconnect_attempts: attempts,
                                     lease_until: new Date(Date.now() + 60000).toISOString(),
                                     last_disconnected_at: new Date().toISOString(),
                                     last_disconnect_reason: reason || `status_${status}`,
@@ -2303,10 +2482,16 @@ class SessionManager {
             }
         }
 
-        // Se já houver promessa de inicialização em andamento, aguarda seu retorno
-        if (this.connectingState.has(instanceId)) {
+        // Se já houver promessa de inicialização em andamento, aguarda seu retorno com timeout seguro
+        if (this.isConnectingStateActive(instanceId, 45000)) {
+            let wakeWaitTimer = null;
             try {
-                const connectingSock = await this.connectingState.get(instanceId);
+                const connectingSock = await Promise.race([
+                    this.connectingState.get(instanceId),
+                    new Promise((_, reject) => {
+                        wakeWaitTimer = setTimeout(() => reject(new Error('TIMEOUT_WAIT_CONNECTING_STATE')), 15000);
+                    })
+                ]);
                 if (connectingSock) {
                     if (requireAuthenticated) {
                         const meId = connectingSock?.user?.id || connectingSock?.authState?.creds?.me?.id || connectingSock?.authState?.creds?.me?.jid;
@@ -2321,7 +2506,9 @@ class SessionManager {
                         return connectingSock;
                     }
                 }
-            } catch (e) {}
+            } catch (e) {} finally {
+                if (wakeWaitTimer) clearTimeout(wakeWaitTimer);
+            }
         }
 
         // Fallback para acordar a instância (Lazy Load) se o Node foi reiniciado

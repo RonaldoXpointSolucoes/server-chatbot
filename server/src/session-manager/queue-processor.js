@@ -155,7 +155,6 @@ class QueueProcessor {
                 const { data, error } = await supabase
                     .from('whatsapp_instances')
                     .select('id, tenant_id, assigned_node_id, lease_until')
-                    .eq('assigned_node_id', currentNodeId)
                     .in('status', ['connected', 'connected_local']);
                 if (error) throw error;
                 return data;

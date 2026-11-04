@@ -70,19 +70,35 @@ router.post('/instances/:instanceId/connect', requireTenant, async (req, res) =>
         const forceNew = forceReset || req.body?.forceNew === true || req.query?.force_new === 'true';
         const resetSession = forceReset || req.body?.resetSession === true || forceNew;
 
+        if (typeof sessionManager.isConnectingStateActive === 'function') {
+            sessionManager.isConnectingStateActive(instanceId);
+        }
+
         if (forceReset) {
             pendingConnectionStarts.delete(instanceId);
             sessionManager.connectingState.delete(instanceId);
+            sessionManager.connectingStateStartedAt?.delete?.(instanceId);
+            sessionManager.instanceMutexes?.delete?.(instanceId);
             sessionManager.pairingInProgress.delete(instanceId);
         }
 
         const diagnostic = connectionSnapshot(instanceId);
         const sock = sessionManager.sessions.get(instanceId)?.sock;
+        const diagnosticAgeMs = diagnostic.updatedAt ? (Date.now() - Date.parse(diagnostic.updatedAt)) : 0;
+        const isStaleDiagnostic = !sock && Number.isFinite(diagnosticAgeMs) && diagnosticAgeMs > 45000;
+        if (isStaleDiagnostic) {
+            pendingConnectionStarts.delete(instanceId);
+            sessionManager.connectingState.delete(instanceId);
+            sessionManager.connectingStateStartedAt?.delete?.(instanceId);
+            sessionManager.instanceMutexes?.delete?.(instanceId);
+            sessionManager.pairingInProgress.delete(instanceId);
+        }
+
         const isStarting = pendingConnectionStarts.has(instanceId) || sessionManager.connectingState.has(instanceId);
         const isReconnecting = sessionManager.reconnectingTimers.has(instanceId);
         const isPairing = sessionManager.pairingInProgress.has(instanceId);
-        const nothingRunningInMemory = !sock && !isStarting && !isReconnecting && !isPairing;
-        const effectivePhase = nothingRunningInMemory && ['authenticating', 'reconnecting'].includes(diagnostic.phase)
+        const nothingRunningInMemory = (!sock && !isStarting && !isReconnecting && !isPairing) || isStaleDiagnostic;
+        const effectivePhase = nothingRunningInMemory && ['starting', 'authenticating', 'reconnecting'].includes(diagnostic.phase)
             ? 'idle'
             : diagnostic.phase;
 
@@ -675,6 +691,19 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                         });
                     } else if (lastFastErr) {
                         console.log(`[Invoke/FastPath] Socket transitório indisponível (${lastFastErr.message}), delegando para outbox queue resiliente`);
+                    }
+                }
+
+                // Fallback para Outbox Queue Resiliente: corrige status se estava falsamente connected e aciona reconexão
+                if (isAllowedOnThisNode && !isSockConnected) {
+                    supabase.from('whatsapp_instances')
+                        .update({ status: 'connecting', last_error: 'Reconectando instância para envio de mensagens...', updated_at: new Date().toISOString() })
+                        .eq('id', instanceId)
+                        .in('status', ['connected', 'connected_local'])
+                        .then(() => {}).catch(() => {});
+                    const isStartingNow = typeof sessionManager.isConnectingStateActive === 'function' ? sessionManager.isConnectingStateActive(instanceId) : sessionManager.connectingState.has(instanceId);
+                    if (!isStartingNow) {
+                        sessionManager.createSession(req.tenantId, instanceId, false).catch(() => {});
                     }
                 }
 
@@ -1357,7 +1386,7 @@ router.get('/instances/:instanceId/status', requireTenant, async (req, res) => {
 
         const { data, error } = await supabase
             .from('whatsapp_instances')
-            .select('status, phone_number, display_name, last_error, whatsapp_instance_runtime(qr_code, pairing_code)')
+            .select('status, tenant_id, assigned_node_id, lease_until, phone_number, display_name, last_error, whatsapp_instance_runtime(qr_code, pairing_code)')
             .eq('id', instanceId)
             .single();
 
@@ -1377,7 +1406,16 @@ router.get('/instances/:instanceId/status', requireTenant, async (req, res) => {
             } else {
                 // Se a sessão NÃO possui socket aberto ou não está autenticada, não pode ser 'connected' ou 'connected_local'
                 if (finalStatus === 'connected' || finalStatus === 'connected_local') {
-                    finalStatus = sessionManager.connectingState.has(instanceId) ? 'connecting' : 'disconnected';
+                    const isStartingNow = typeof sessionManager.isConnectingStateActive === 'function' ? sessionManager.isConnectingStateActive(instanceId) : sessionManager.connectingState.has(instanceId);
+                    finalStatus = isStartingNow ? 'connecting' : 'disconnected';
+                    const isAllowedHere = isInstanceAllowedForNode(instanceId, data.tenant_id);
+                    const isLeaseExpiredOrLocal = !data.assigned_node_id || data.assigned_node_id === NODE_ID || !data.lease_until || new Date(data.lease_until).getTime() < Date.now();
+                    if (isAllowedHere && isLeaseExpiredOrLocal) {
+                        await supabase.from('whatsapp_instances')
+                            .update({ status: finalStatus, updated_at: new Date().toISOString() })
+                            .eq('id', instanceId)
+                            .catch(() => {});
+                    }
                 }
             }
 

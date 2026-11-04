@@ -83,9 +83,10 @@ export function shouldClearCredentials({ resetSession, hasStoredIdentity, forceR
 }
 
 export function connectionNeedsProtection(diagnostic, { hasSession = false, wsOpen = false, starting = false, reconnecting = false, now = Date.now() } = {}) {
-    if (starting || reconnecting) return true;
+    const parsedUpdatedAt = Date.parse(diagnostic?.updatedAt || '');
+    const activityAge = Number.isFinite(parsedUpdatedAt) ? (now - parsedUpdatedAt) : 0;
+    if ((starting || reconnecting) && activityAge < 90000) return true;
     if (hasSession && wsOpen && ['qr_ready', 'waiting_qr'].includes(diagnostic.phase)) return true;
-    const activityAge = now - Date.parse(diagnostic.updatedAt || '');
     return hasSession && ['authenticating', 'reconnecting'].includes(diagnostic.phase) && activityAge < 90000;
 }
 
