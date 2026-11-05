@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
-import { supabase } from '../../services/supabase';
+import { supabase, masterSupabase } from '../../services/supabase';
 import { VAPID_PUBLIC_KEY, urlBase64ToUint8Array } from '../../hooks/usePushNotifications';
 import { 
   KeyRound, 
@@ -46,7 +46,13 @@ import {
   Tag,
   Copy,
   QrCode,
-  ExternalLink
+  ExternalLink,
+  Building2,
+  Users,
+  Globe,
+  Unlock,
+  ShieldCheck,
+  Mail
 } from 'lucide-react';
 import { Reorder } from 'framer-motion';
 
@@ -57,6 +63,18 @@ interface OperatorProfile {
   role: string;
   is_active: boolean;
   tenant_id?: string;
+  isGeneralAccess?: boolean;
+}
+
+interface CompanySummary {
+  id: string;
+  name: string;
+  email: string;
+  status?: string;
+  unitName?: string;
+  collaboratorsCount: number;
+  checklistsCount: number;
+  sectorsCount: number;
 }
 
 interface ChecklistToExecute {
@@ -100,22 +118,47 @@ export default function ChecklistTablet() {
   const { tenantIdParam } = useParams<{ tenantIdParam?: string }>();
   const [tenantId, setTenantId] = useState<string | null>(() => {
     const searchParams = new URLSearchParams(window.location.search);
-    const urlTenant = tenantIdParam || searchParams.get('tenant') || searchParams.get('t');
+    const urlTenant = tenantIdParam || searchParams.get('tenant') || searchParams.get('t') || searchParams.get('empresa');
     if (urlTenant && urlTenant !== 'undefined') {
+      localStorage.setItem('totem_company_id', urlTenant);
       localStorage.setItem('current_tenant_id', urlTenant);
       return urlTenant;
     }
-    return localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+    return (
+      localStorage.getItem('totem_company_id') ||
+      localStorage.getItem('current_tenant_id') ||
+      sessionStorage.getItem('current_tenant_id')
+    );
   });
   const apiBaseUrl = (import.meta.env.VITE_WHATSAPP_ENGINE_URL || '').replace(/\/$/, '');
 
-  // Estados de Autenticação / PIN
+  // =========================================================================
+  // ESTADOS DE DADOS DA EMPRESA & LOGIN / VÍNCULO DE EMPRESA NO TABLET
+  // =========================================================================
+  const [companyInfo, setCompanyInfo] = useState<CompanySummary | null>(null);
+  const [availableCompanies, setAvailableCompanies] = useState<CompanySummary[]>([]);
+  const [userLinkedCompanies, setUserLinkedCompanies] = useState<CompanySummary[]>([]);
+  const [authenticatedCompanyEmail, setAuthenticatedCompanyEmail] = useState<string>(
+    () => localStorage.getItem('totem_auth_email') || localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email') || ''
+  );
+  const [isCompanyModalOpen, setIsCompanyModalOpen] = useState(false);
+  const [companyAuthEmail, setCompanyAuthEmail] = useState(
+    () => localStorage.getItem('totem_auth_email') || localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email') || ''
+  );
+  const [companyAuthPassword, setCompanyAuthPassword] = useState('');
+  const [companyAuthLoading, setCompanyAuthLoading] = useState(false);
+  const [companyAuthError, setCompanyAuthError] = useState('');
+  const [companyAuthSuccessMsg, setCompanyAuthSuccessMsg] = useState('');
+  const [companyModalTab, setCompanyModalTab] = useState<'select' | 'login'>('select');
+
+  // Estados de Autenticação / PIN & Login Geral (Funcionalidades Gerais sem pessoa exclusiva)
   const [operators, setOperators] = useState<OperatorProfile[]>([]);
   const [selectedOperator, setSelectedOperator] = useState<OperatorProfile | null>(null);
   const [pinCode, setPinCode] = useState('');
   const [authError, setAuthError] = useState('');
   const [loggedInUser, setLoggedInUser] = useState<OperatorProfile | null>(null);
   const [allProfiles, setAllProfiles] = useState<any[]>([]);
+  const [generalScopeFilter, setGeneralScopeFilter] = useState<'all' | 'general_only' | 'assigned'>('all');
 
   // Estados Operacionais
   const [checklists, setChecklists] = useState<ChecklistToExecute[]>([]);
@@ -239,18 +282,28 @@ export default function ChecklistTablet() {
     const checkStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true;
     setIsStandalone(checkStandalone);
 
-    // Marca este dispositivo como Totem Cozinha Standalone e vincula o manifesto exclusivo /manifest-totem.webmanifest
+    const currentPath = window.location.pathname.toLowerCase();
+    const isDedicatedTotemRoute =
+      currentPath.startsWith('/totem-cozinha') ||
+      currentPath.startsWith('/totem');
+
+    // Vincula o manifesto exclusivo /manifest-totem.webmanifest APENAS quando acessado pelo link específico do tablet (/totem-cozinha)
     try {
-      localStorage.setItem('totem_standalone_mode', 'true');
-      document.title = `Totem ${totemSectorName || 'Cozinha'} • Checklists & Alarmes`;
-      const manifestLink = document.querySelector('link[rel="manifest"]');
-      if (manifestLink) {
-        manifestLink.setAttribute('href', '/manifest-totem.webmanifest');
-      } else {
-        const link = document.createElement('link');
-        link.rel = 'manifest';
-        link.href = '/manifest-totem.webmanifest';
-        document.head.appendChild(link);
+      localStorage.removeItem('totem_standalone_mode');
+      if (isDedicatedTotemRoute) {
+        document.title = `Totem ${totemSectorName || 'Cozinha'} • Checklists & Alarmes`;
+        const allManifests = document.querySelectorAll('link[rel="manifest"]');
+        if (allManifests.length > 0) {
+          allManifests.forEach((el, idx) => {
+            if (idx === 0) el.setAttribute('href', '/manifest-totem.webmanifest');
+            else el.remove();
+          });
+        } else {
+          const link = document.createElement('link');
+          link.rel = 'manifest';
+          link.href = '/manifest-totem.webmanifest';
+          document.head.appendChild(link);
+        }
       }
     } catch (e) {}
 
@@ -265,7 +318,17 @@ export default function ChecklistTablet() {
     };
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      // Ao sair da tela do tablet de volta para o sistema principal, restaura o manifesto do Chat (Celular)
+      try {
+        const manifestLink = document.querySelector('link[rel="manifest"]');
+        if (manifestLink) {
+          manifestLink.setAttribute('href', '/manifest.webmanifest');
+        }
+        document.title = 'ChatBoot CRM';
+      } catch (_) {}
+    };
   }, []);
 
   const handleInstallPwa = async () => {
@@ -342,65 +405,515 @@ export default function ChecklistTablet() {
     return `Parabéns, ${name}! Todas as tarefas foram concluídas perfeitamente! 🌟✨`;
   };
 
-  const loadOperators = async () => {
-    try {
-      let effectiveTenantId = tenantId || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+  const resolveUserAccessibleCompanyIds = (
+    emailToResolve: string,
+    companiesData: any[],
+    tenantUsersData: any[],
+    extraCompanyIds: string[] = []
+  ): string[] => {
+    const cleanEmail = (emailToResolve || '').toLowerCase().trim();
+    const matchedIds = new Set<string>(extraCompanyIds.filter(Boolean));
 
-      // Se o tablet abriu pela rota limpa /totem-cozinha sem tenant salvo, descobre automaticamente o tenant ativo dos checklists/operadores
-      if (!effectiveTenantId || effectiveTenantId === 'undefined') {
-        const { data: chkTenant } = await supabase
-          .from('checklists')
-          .select('tenant_id')
-          .eq('is_active', true)
-          .limit(1)
-          .maybeSingle();
-        if (chkTenant?.tenant_id) {
-          effectiveTenantId = chkTenant.tenant_id;
-          localStorage.setItem('current_tenant_id', effectiveTenantId);
-          setTenantId(effectiveTenantId);
+    // Carrega empresas salvas anteriormente para este login no tablet
+    try {
+      const savedAllowed = localStorage.getItem('totem_allowed_companies');
+      if (savedAllowed) {
+        const parsed = JSON.parse(savedAllowed);
+        if (Array.isArray(parsed)) {
+          parsed.forEach((id: string) => {
+            if (id) matchedIds.add(id);
+          });
         }
       }
-      
-      let query = supabase
+    } catch (e) {}
+
+    if (cleanEmail) {
+      companiesData.forEach((c: any) => {
+        const cEmail = String(c.email || '').toLowerCase().trim();
+        const gEmail = String(c.settings?.google_email || '').toLowerCase().trim();
+        const allowedGEmails: string[] = Array.isArray(c.settings?.allowed_google_emails)
+          ? c.settings.allowed_google_emails.map((x: any) => String(x || '').toLowerCase().trim())
+          : [];
+        if (cEmail === cleanEmail || gEmail === cleanEmail || allowedGEmails.includes(cleanEmail)) {
+          matchedIds.add(c.id);
+        }
+      });
+
+      tenantUsersData.forEach((tu: any) => {
+        const tuEmail = String(tu.email || '').toLowerCase().trim();
+        if (tuEmail === cleanEmail) {
+          if (tu.tenant_id) matchedIds.add(tu.tenant_id);
+          if (Array.isArray(tu.allowed_companies)) {
+            tu.allowed_companies.forEach((cid: string) => {
+              if (cid) matchedIds.add(cid);
+            });
+          }
+        }
+      });
+    }
+
+    return Array.from(matchedIds);
+  };
+
+  const loadOperators = async (overrideTenantId?: string, overrideAuthEmail?: string): Promise<CompanySummary[]> => {
+    try {
+      const explicitTotemCompany = localStorage.getItem('totem_company_id');
+      let effectiveTenantId =
+        overrideTenantId ||
+        explicitTotemCompany ||
+        tenantId ||
+        localStorage.getItem('current_tenant_id') ||
+        sessionStorage.getItem('current_tenant_id');
+
+      // Verifica se há sessão ativa do Google / Supabase Auth
+      let sessionEmail = '';
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (sessionData?.session?.user?.email) {
+          sessionEmail = sessionData.session.user.email.toLowerCase().trim();
+        }
+      } catch (e) {}
+
+      const activeEmail = (
+        overrideAuthEmail ||
+        sessionEmail ||
+        authenticatedCompanyEmail ||
+        localStorage.getItem('totem_auth_email') ||
+        localStorage.getItem('current_user_email') ||
+        sessionStorage.getItem('current_user_email') ||
+        ''
+      )
+        .toLowerCase()
+        .trim();
+
+      if (activeEmail) {
+        if (activeEmail !== authenticatedCompanyEmail) setAuthenticatedCompanyEmail(activeEmail);
+        if (!companyAuthEmail) setCompanyAuthEmail(activeEmail);
+        localStorage.setItem('totem_auth_email', activeEmail);
+        localStorage.setItem('current_user_email', activeEmail);
+      }
+
+      // Usa masterSupabase para que o RLS nunca bloqueie a listagem de empresas, unidades, setores e colaboradores no Totem PWA
+      const [compRes, tenantUsersRes, unitRes, secRes, allProfRes, allChkRes] = await Promise.all([
+        masterSupabase.from('companies').select('id, name, email, status, settings').order('name'),
+        masterSupabase.from('tenant_users').select('id, email, full_name, role, tenant_id, allowed_companies'),
+        masterSupabase.from('units').select('id, name, tenant_id'),
+        masterSupabase.from('sectors').select('id, name, tenant_id'),
+        masterSupabase.from('users_profiles').select('id, name, pin, role, is_active, tenant_id').eq('is_active', true),
+        masterSupabase.from('checklists').select('id, tenant_id').eq('is_active', true)
+      ]);
+
+      const companiesData = compRes.data || [];
+      const tenantUsersData = tenantUsersRes.data || [];
+      const unitsData = unitRes.data || [];
+      const sectorsData = secRes.data || [];
+      const profilesData = allProfRes.data || [];
+      const checklistsData = allChkRes.data || [];
+
+      const userAccessibleIds = resolveUserAccessibleCompanyIds(activeEmail, companiesData, tenantUsersData);
+
+      const allSummaries: CompanySummary[] = companiesData
+        .map((c: any) => {
+          const compProfiles = profilesData.filter(
+            (p: any) => p.tenant_id === c.id && !String(p.name || '').toLowerCase().startsWith('equipe geral')
+          );
+          const compChecklists = checklistsData.filter((chk: any) => chk.tenant_id === c.id);
+          const compSectors = sectorsData.filter((s: any) => s.tenant_id === c.id);
+          const compUnit = unitsData.find((u: any) => u.tenant_id === c.id);
+          return {
+            id: c.id,
+            name: c.name || 'Empresa',
+            email: c.email || '',
+            status: c.status,
+            unitName: compUnit?.name || c.name,
+            collaboratorsCount: compProfiles.length,
+            checklistsCount: compChecklists.length,
+            sectorsCount: compSectors.length
+          };
+        })
+        .filter(
+          (s: CompanySummary) =>
+            s.collaboratorsCount > 0 ||
+            s.checklistsCount > 0 ||
+            s.id === effectiveTenantId ||
+            userAccessibleIds.includes(s.id)
+        )
+        .sort((a: CompanySummary, b: CompanySummary) => {
+          const aLinked = userAccessibleIds.includes(a.id) ? 1 : 0;
+          const bLinked = userAccessibleIds.includes(b.id) ? 1 : 0;
+          if (bLinked !== aLinked) return bLinked - aLinked;
+          if (b.checklistsCount !== a.checklistsCount) return b.checklistsCount - a.checklistsCount;
+          return b.collaboratorsCount - a.collaboratorsCount;
+        });
+
+      const linkedSummaries = allSummaries.filter(s => userAccessibleIds.includes(s.id));
+      setUserLinkedCompanies(linkedSummaries);
+      setAvailableCompanies(linkedSummaries.length > 0 ? linkedSummaries : allSummaries);
+
+      const poolForAutoSelect = linkedSummaries.length > 0 ? linkedSummaries : allSummaries;
+
+      // Se o tablet ainda não teve uma empresa escolhida manualmente (totem_company_id)
+      // e o tenant atual não tem checklists ativos enquanto outra empresa vinculada tem (ex: Burguer Plus),
+      // vincula automaticamente à empresa com checklists/colaboradores operacionais ativos!
+      if (!overrideTenantId && !explicitTotemCompany && poolForAutoSelect.length > 0) {
+        const currentSummary = poolForAutoSelect.find(s => s.id === effectiveTenantId);
+        if (!effectiveTenantId || effectiveTenantId === 'undefined' || !currentSummary || currentSummary.checklistsCount === 0) {
+          const bestCompany =
+            poolForAutoSelect.find(s => s.checklistsCount > 0 && s.collaboratorsCount > 0) ||
+            poolForAutoSelect.find(s => s.checklistsCount > 0) ||
+            poolForAutoSelect[0];
+
+          if (bestCompany && bestCompany.id !== effectiveTenantId) {
+            effectiveTenantId = bestCompany.id;
+            localStorage.setItem('totem_company_id', bestCompany.id);
+            localStorage.setItem('current_tenant_id', bestCompany.id);
+            localStorage.setItem('current_tenant_name', bestCompany.name);
+            setTenantId(bestCompany.id);
+          }
+        }
+      }
+
+      const activeCompSummary =
+        allSummaries.find(s => s.id === effectiveTenantId) ||
+        (effectiveTenantId
+          ? {
+              id: effectiveTenantId,
+              name: localStorage.getItem('current_tenant_name') || 'Empresa Operacional',
+              email: activeEmail || '',
+              unitName: 'Unidade Principal',
+              collaboratorsCount: 0,
+              checklistsCount: 0,
+              sectorsCount: 0
+            }
+          : null);
+
+      let query = masterSupabase
         .from('v_checklist_operators')
         .select('id, name, pin, role, is_active, tenant_id')
         .eq('is_active', true);
-      
+
       if (effectiveTenantId) {
         query = query.eq('tenant_id', effectiveTenantId);
       }
-      
-      let { data: opsData, error: opsErr } = await query;
 
-      // Fallback para a tabela users_profiles se v_checklist_operators estiver vazia
-      if (!opsData || opsData.length === 0) {
-        let profileQuery = supabase
-          .from('users_profiles')
-          .select('id, name, pin, role, is_active, tenant_id')
-          .eq('is_active', true);
-        if (effectiveTenantId) {
-          profileQuery = profileQuery.eq('tenant_id', effectiveTenantId);
-        }
-        const { data: profData } = await profileQuery;
-        if (profData && profData.length > 0) {
-          opsData = profData;
-        }
-      }
+      let { data: opsData } = await query;
 
-      if (opsErr && (!opsData || opsData.length === 0)) throw opsErr;
-      
-      const allOps = opsData || [];
+      // Une com users_profiles para garantir que 100% dos colaboradores ativos da empresa apareçam (mesmo sem PIN configurado)
+      const tenantProfiles = profilesData.filter((p: any) => !effectiveTenantId || p.tenant_id === effectiveTenantId);
+      const mergedMap = new Map<string, OperatorProfile>();
+      (opsData || []).forEach((op: any) => mergedMap.set(op.id, op));
+      tenantProfiles.forEach((p: any) => {
+        if (!mergedMap.has(p.id)) {
+          mergedMap.set(p.id, p);
+        }
+      });
+
+      const allOps = Array.from(mergedMap.values());
       if (!effectiveTenantId && allOps[0]?.tenant_id) {
-        localStorage.setItem('current_tenant_id', allOps[0].tenant_id);
-        setTenantId(allOps[0].tenant_id);
+        effectiveTenantId = allOps[0].tenant_id;
+        localStorage.setItem('totem_company_id', effectiveTenantId);
+        localStorage.setItem('current_tenant_id', effectiveTenantId);
+        setTenantId(effectiveTenantId);
       }
 
       setAllProfiles(allOps);
 
-      const opsWithPin = allOps.filter(o => o.pin && o.pin.trim().length === 5);
-      setOperators(opsWithPin.length > 0 ? opsWithPin : allOps);
+      // Filtra o perfil sintético "Equipe Geral" da lista individual de colaboradores para não duplicar com o botão de Login Geral
+      const humanCollaborators = allOps.filter(
+        o => !String(o.name || '').toLowerCase().startsWith('equipe geral')
+      );
+
+      // Mostra TODOS os colaboradores ativos da empresa (com ou sem PIN), ordenando primeiro quem tem PIN e depois por nome
+      humanCollaborators.sort((a, b) => {
+        const aHasPin = a.pin && a.pin.trim().length === 5 ? 1 : 0;
+        const bHasPin = b.pin && b.pin.trim().length === 5 ? 1 : 0;
+        if (bHasPin !== aHasPin) return bHasPin - aHasPin;
+        return String(a.name || '').localeCompare(String(b.name || ''));
+      });
+
+      setOperators(humanCollaborators);
+
+      if (activeCompSummary) {
+        localStorage.setItem('current_tenant_name', activeCompSummary.name);
+        setCompanyInfo({
+          ...activeCompSummary,
+          collaboratorsCount: humanCollaborators.length
+        });
+      }
+
+      return linkedSummaries.length > 0 ? linkedSummaries : allSummaries;
     } catch (e) {
-      console.error('Erro ao buscar e carregar operadores no totem:', e);
+      console.error('Erro ao buscar dados da empresa e colaboradores no totem:', e);
+      return [];
+    }
+  };
+
+  const handleSwitchCompany = async (
+    newCompanyId: string,
+    options?: { keepModalOpen?: boolean; authEmail?: string; silentToast?: boolean }
+  ) => {
+    if (!newCompanyId) return;
+    localStorage.setItem('totem_company_id', newCompanyId);
+    localStorage.setItem('current_tenant_id', newCompanyId);
+    // Reseta o setor salvo para que o novo tenant assuma automaticamente seu setor de Cozinha
+    localStorage.removeItem('totem_sector_id');
+    setTotemSectorId('');
+    setSelectedOperator(null);
+    setLoggedInUser(null);
+    setActiveChecklist(null);
+    setActiveExecution(null);
+    setPinCode('');
+    setAuthError('');
+    setTenantId(newCompanyId);
+    if (!options?.keepModalOpen) {
+      setIsCompanyModalOpen(false);
+    }
+    const loadedComps = await loadOperators(newCompanyId, options?.authEmail);
+    const chosen =
+      loadedComps.find(c => c.id === newCompanyId) ||
+      availableCompanies.find(c => c.id === newCompanyId);
+    if (chosen?.name) {
+      localStorage.setItem('current_tenant_name', chosen.name);
+    }
+    if (!options?.silentToast) {
+      showToast('success', `🏢 Tablet vinculado à empresa: ${chosen?.name || 'Empresa selecionada'}!`);
+    }
+  };
+
+  // Detecta retorno do login OAuth do Google no Totem e resolve todas as empresas vinculadas ao e-mail
+  useEffect(() => {
+    const checkGoogleOAuthReturn = async () => {
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const gUser = sessionData?.session?.user;
+        const isPendingOAuth = localStorage.getItem('totem_oauth_pending') === 'true';
+
+        if (gUser?.email) {
+          const cleanG = gUser.email.toLowerCase().trim();
+          localStorage.setItem('totem_auth_email', cleanG);
+          localStorage.setItem('current_user_email', cleanG);
+          setAuthenticatedCompanyEmail(cleanG);
+          setCompanyAuthEmail(cleanG);
+
+          if (isPendingOAuth) {
+            localStorage.removeItem('totem_oauth_pending');
+            const [compRes, tuRes] = await Promise.all([
+              masterSupabase.from('companies').select('id, name, email, status, settings'),
+              masterSupabase.from('tenant_users').select('id, email, tenant_id, allowed_companies')
+            ]);
+            const accessibleIds = resolveUserAccessibleCompanyIds(
+              cleanG,
+              compRes.data || [],
+              tuRes.data || []
+            );
+            if (accessibleIds.length > 0) {
+              localStorage.setItem('totem_allowed_companies', JSON.stringify(accessibleIds));
+              const loaded = await loadOperators(undefined, cleanG);
+              const myComps = loaded.filter(c => accessibleIds.includes(c.id));
+              const bestTarget =
+                myComps.find(c => c.checklistsCount > 0 && c.collaboratorsCount > 0) ||
+                myComps.find(c => c.checklistsCount > 0) ||
+                myComps[0] ||
+                loaded[0];
+
+              if (bestTarget) {
+                await handleSwitchCompany(bestTarget.id, {
+                  keepModalOpen: myComps.length >= 2,
+                  authEmail: cleanG,
+                  silentToast: true
+                });
+              }
+
+              if (myComps.length >= 2) {
+                setCompanyModalTab('select');
+                setCompanyAuthSuccessMsg(
+                  `✅ Autenticado com Google (${cleanG})! Você possui acesso a ${myComps.length} empresas. Escolha abaixo qual empresa deseja operar ou altere a qualquer momento:`
+                );
+                setIsCompanyModalOpen(true);
+              } else {
+                showToast('success', `✅ Autenticado com Google (${cleanG})!`);
+              }
+            } else {
+              await loadOperators(undefined, cleanG);
+              showToast('success', `✅ Conta Google conectada (${cleanG})! Selecione a empresa.`);
+              setCompanyModalTab('select');
+              setIsCompanyModalOpen(true);
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Erro ao verificar retorno Google OAuth no Totem:', e);
+      }
+    };
+
+    checkGoogleOAuthReturn();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_IN' && session?.user?.email) {
+        const cleanG = session.user.email.toLowerCase().trim();
+        localStorage.setItem('totem_auth_email', cleanG);
+        localStorage.setItem('current_user_email', cleanG);
+        setAuthenticatedCompanyEmail(cleanG);
+        setCompanyAuthEmail(cleanG);
+        loadOperators(undefined, cleanG);
+      }
+    });
+
+    return () => {
+      authListener?.subscription?.unsubscribe();
+    };
+  }, []);
+
+  const handleGoogleCompanyLogin = async () => {
+    setCompanyAuthError('');
+    setCompanyAuthSuccessMsg('');
+    setCompanyAuthLoading(true);
+    try {
+      localStorage.setItem('keep_logged', 'true');
+      localStorage.setItem('totem_oauth_pending', 'true');
+      const redirectUrl = `${window.location.origin}${window.location.pathname}`;
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: redirectUrl,
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'select_account'
+          }
+        }
+      });
+      if (error) throw error;
+    } catch (err: any) {
+      console.error('Erro no login Google do Totem:', err);
+      localStorage.removeItem('totem_oauth_pending');
+      setCompanyAuthError('Erro ao iniciar autenticação com o Google: ' + (err.message || 'Tente novamente.'));
+      setCompanyAuthLoading(false);
+    }
+  };
+
+  const handleAuthenticateCompanyLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCompanyAuthError('');
+    setCompanyAuthSuccessMsg('');
+    const cleanEmail = companyAuthEmail.trim().toLowerCase();
+    const cleanPass = companyAuthPassword.trim();
+    if (!cleanEmail || !cleanPass) {
+      setCompanyAuthError('Preencha o e-mail e a senha da empresa.');
+      return;
+    }
+
+    setCompanyAuthLoading(true);
+    try {
+      // 1. Valida via RPC check_login (retorna objeto JSON { type: 'admin' | 'agent', user, parent })
+      const { data: rpcResult, error: rpcError } = await masterSupabase.rpc('check_login', {
+        p_email: cleanEmail,
+        p_password: cleanPass
+      });
+
+      // 2. Tenta também autenticar no Supabase Auth em paralelo para sincronizar sessão JWT se existir
+      let supaAuthValid = false;
+      try {
+        const { data: authData, error: authErr } = await supabase.auth.signInWithPassword({
+          email: cleanEmail,
+          password: cleanPass
+        });
+        if (!authErr && authData?.user) {
+          supaAuthValid = true;
+        }
+      } catch (e) {}
+
+      // Extrai dados do retorno do check_login (suporta tanto objeto { type, user, parent } quanto array)
+      let primaryCompanyId: string | null = null;
+      const rpcAllowedIds: string[] = [];
+      let isRpcValid = false;
+
+      if (rpcResult && !rpcError) {
+        if (Array.isArray(rpcResult) && rpcResult.length > 0) {
+          isRpcValid = true;
+          primaryCompanyId = rpcResult[0].company_id || rpcResult[0].id || null;
+        } else if (typeof rpcResult === 'object' && (rpcResult.type || rpcResult.user || rpcResult.id)) {
+          isRpcValid = true;
+          if (rpcResult.type === 'admin' && rpcResult.user) {
+            primaryCompanyId = rpcResult.user.id;
+          } else if (rpcResult.type === 'agent') {
+            primaryCompanyId = rpcResult.parent?.id || rpcResult.user?.tenant_id || null;
+            if (Array.isArray(rpcResult.user?.allowed_companies)) {
+              rpcResult.user.allowed_companies.forEach((cid: string) => {
+                if (cid) rpcAllowedIds.push(cid);
+              });
+            }
+          } else if (rpcResult.id) {
+            primaryCompanyId = rpcResult.id;
+          }
+        }
+      }
+
+      if (!isRpcValid && !supaAuthValid) {
+        setCompanyAuthError('E-mail ou senha incorretos. Verifique suas credenciais ou utilize a opção "Entrar com o Google".');
+        return;
+      }
+
+      localStorage.setItem('keep_logged', 'true');
+      localStorage.setItem('totem_auth_email', cleanEmail);
+      localStorage.setItem('current_user_email', cleanEmail);
+      setAuthenticatedCompanyEmail(cleanEmail);
+
+      // 3. Busca todas as empresas às quais este login tem acesso (companies + tenant_users + allowed_companies)
+      const [compRes, tuRes] = await Promise.all([
+        masterSupabase.from('companies').select('id, name, email, status, settings'),
+        masterSupabase.from('tenant_users').select('id, email, tenant_id, allowed_companies')
+      ]);
+
+      const extraIds = [primaryCompanyId, ...rpcAllowedIds].filter(Boolean) as string[];
+      const allAccessibleIds = resolveUserAccessibleCompanyIds(
+        cleanEmail,
+        compRes.data || [],
+        tuRes.data || [],
+        extraIds
+      );
+
+      if (allAccessibleIds.length > 0) {
+        localStorage.setItem('totem_allowed_companies', JSON.stringify(allAccessibleIds));
+      }
+
+      const loadedSummaries = await loadOperators(undefined, cleanEmail);
+      const userSummaries = loadedSummaries.filter(s => allAccessibleIds.includes(s.id));
+
+      // Escolhe a empresa inicial ideal (prioriza a que possui checklists ativos, ex: Burguer Plus)
+      const bestCompany =
+        userSummaries.find(s => s.checklistsCount > 0 && s.collaboratorsCount > 0) ||
+        userSummaries.find(s => s.checklistsCount > 0) ||
+        userSummaries.find(s => s.id === primaryCompanyId) ||
+        userSummaries[0] ||
+        loadedSummaries[0];
+
+      const targetCompanyId = bestCompany?.id || primaryCompanyId;
+
+      if (targetCompanyId) {
+        setCompanyAuthPassword('');
+        const hasMultipleCompanies = userSummaries.length >= 2;
+
+        await handleSwitchCompany(targetCompanyId, {
+          keepModalOpen: hasMultipleCompanies,
+          authEmail: cleanEmail,
+          silentToast: hasMultipleCompanies
+        });
+
+        if (hasMultipleCompanies) {
+          setCompanyModalTab('select');
+          setCompanyAuthSuccessMsg(
+            `✅ Login autenticado (${cleanEmail})! Sua conta possui acesso a ${userSummaries.length} empresas (${userSummaries.map(u => u.name).join(', ')}). Escolha abaixo qual empresa deseja operar ou altere a qualquer momento:`
+          );
+          showToast('success', `✅ Conta autenticada! ${userSummaries.length} empresas disponíveis para alternar.`);
+        }
+      } else {
+        setCompanyAuthError('Nenhuma empresa encontrada para esta conta.');
+      }
+    } catch (err: any) {
+      console.error('Erro ao autenticar empresa no Totem:', err);
+      setCompanyAuthError('Erro ao autenticar empresa: ' + (err.message || 'Tente novamente.'));
+    } finally {
+      setCompanyAuthLoading(false);
     }
   };
 
@@ -584,9 +1097,9 @@ export default function ChecklistTablet() {
 
     try {
       const [secRes, unitRes, chkRes, schRes, todayRes] = await Promise.all([
-        supabase.from('sectors').select('id, name, unit_id').eq('tenant_id', effectiveTenantId).order('name'),
-        supabase.from('units').select('id, name').eq('tenant_id', effectiveTenantId).order('name'),
-        supabase
+        masterSupabase.from('sectors').select('id, name, unit_id').eq('tenant_id', effectiveTenantId).order('name'),
+        masterSupabase.from('units').select('id, name').eq('tenant_id', effectiveTenantId).order('name'),
+        masterSupabase
           .from('checklists')
           .select(`
             id, title, description, category, tags, sector_id, weight, use_unit_schedule_rules,
@@ -596,7 +1109,7 @@ export default function ChecklistTablet() {
           `)
           .eq('tenant_id', effectiveTenantId)
           .eq('is_active', true),
-        supabase
+        masterSupabase
           .from('checklist_schedules')
           .select('id, checklist_id, start_time, recurrency, days_of_week, days_of_month, shift, is_active')
           .eq('tenant_id', effectiveTenantId)
@@ -604,7 +1117,7 @@ export default function ChecklistTablet() {
         (() => {
           const startOfToday = new Date();
           startOfToday.setHours(0, 0, 0, 0);
-          return supabase
+          return masterSupabase
             .from('checklist_executions')
             .select('id, checklist_id, completed_at, score')
             .eq('tenant_id', effectiveTenantId)
@@ -729,7 +1242,7 @@ export default function ChecklistTablet() {
 
       // 1. Grava diretamente no Supabase (push_subscriptions)
       if (tenantId) {
-        await supabase.from('push_subscriptions').upsert({
+        await masterSupabase.from('push_subscriptions').upsert({
           tenant_id: tenantId,
           endpoint: subJson.endpoint,
           p256dh: subJson.keys.p256dh,
@@ -786,7 +1299,7 @@ export default function ChecklistTablet() {
     try {
       let targetUnitId = unitsList[0]?.id;
       if (!targetUnitId) {
-        const { data: newUnit } = await supabase
+        const { data: newUnit } = await masterSupabase
           .from('units')
           .insert({ tenant_id: tenantId, name: 'Unidade Principal' })
           .select()
@@ -797,7 +1310,7 @@ export default function ChecklistTablet() {
         }
       }
 
-      const { data: createdSec, error } = await supabase
+      const { data: createdSec, error } = await masterSupabase
         .from('sectors')
         .insert({
           tenant_id: tenantId,
@@ -826,7 +1339,7 @@ export default function ChecklistTablet() {
       return;
     }
     try {
-      const { error } = await supabase
+      const { error } = await masterSupabase
         .from('checklists')
         .update({ sector_id: totemSectorId })
         .eq('id', chkId);
@@ -851,16 +1364,16 @@ export default function ChecklistTablet() {
     try {
       let targetUnitId = chk.unit_id || unitsList[0]?.id;
       if (!targetUnitId) {
-        const { data: uData } = await supabase.from('units').select('id').eq('tenant_id', tenantId).limit(1).maybeSingle();
+        const { data: uData } = await masterSupabase.from('units').select('id').eq('tenant_id', tenantId).limit(1).maybeSingle();
         targetUnitId = uData?.id;
       }
 
       // Se o checklist ainda não estiver no setor do tablet e o tablet tiver um setor específico, vincula também
       if (totemSectorId && totemSectorId !== 'ALL' && chk.sector_id !== totemSectorId) {
-        await supabase.from('checklists').update({ sector_id: totemSectorId }).eq('id', chk.id);
+        await masterSupabase.from('checklists').update({ sector_id: totemSectorId }).eq('id', chk.id);
       }
 
-      const { error } = await supabase.from('checklist_schedules').insert({
+      const { error } = await masterSupabase.from('checklist_schedules').insert({
         tenant_id: tenantId,
         checklist_id: chk.id,
         unit_id: targetUnitId || null,
@@ -886,7 +1399,7 @@ export default function ChecklistTablet() {
 
   const handleRemoveChecklistScheduleTime = async (chkId: string, timeToRemove: string) => {
     try {
-      await supabase
+      await masterSupabase
         .from('checklist_schedules')
         .delete()
         .eq('checklist_id', chkId)
@@ -1145,7 +1658,7 @@ export default function ChecklistTablet() {
   }, [allTenantChecklists, totemSectorId, totemSectorName, todayCompletedChecklists]);
 
   // ==========================================
-  // AUTENTICAÇÃO POR PIN DE TROCA RÁPIDA
+  // AUTENTICAÇÃO POR PIN DE TROCA RÁPIDA & LOGIN GERAL (SEM PESSOA EXCLUSIVA)
   // ==========================================
   const handleSelectOperator = (op: OperatorProfile) => {
     setSelectedOperator(op);
@@ -1169,31 +1682,121 @@ export default function ChecklistTablet() {
     setPinCode(prev => prev.slice(0, -1));
   };
 
-  const validatePin = async (pin: string) => {
-    if (selectedOperator && selectedOperator.pin === pin) {
-      const op = selectedOperator;
-      setLoggedInUser(op);
-      setSelectedOperator(null);
-      setPinCode('');
-      
-      setActiveTab('active');
-      setActiveExecution(null);
-      setActiveChecklist(null);
+  const finalizeOperatorLogin = async (op: OperatorProfile, isGeneral = false) => {
+    const finalOp: OperatorProfile = {
+      ...op,
+      isGeneralAccess: isGeneral
+    };
+    setLoggedInUser(finalOp);
+    setSelectedOperator(null);
+    setPinCode('');
+    setAuthError('');
+    setActiveTab('active');
+    setActiveExecution(null);
+    setActiveChecklist(null);
 
-      const loadedList = await loadOperatorChecklists(op.id, op.role, op.name);
-      loadCompletedExecutions(op.id);
-      showToast('success', `Bem-vindo ao setor ${totemSectorName || 'Cozinha'}, ${op.name}!`);
+    const loadedList = await loadOperatorChecklists(finalOp.id, finalOp.role, finalOp.name, isGeneral);
+    loadCompletedExecutions(finalOp.id, isGeneral);
+    showToast(
+      'success',
+      isGeneral
+        ? `🌐 Login Geral ativado (${companyInfo?.name || 'Empresa'} • Setor ${totemSectorName || 'Cozinha'})!`
+        : `Bem-vindo ao setor ${totemSectorName || 'Cozinha'}, ${finalOp.name}!`
+    );
 
-      // Se o operador autenticou após clicar em "Executar Tarefas Agora" no Alarme, abre o checklist imediatamente!
-      if (pendingAlarmChecklistId) {
-        const targetChk =
-          (loadedList || []).find(c => c.id === pendingAlarmChecklistId) ||
-          allTenantChecklists.find(c => c.id === pendingAlarmChecklistId);
-        setPendingAlarmChecklistId(null);
-        if (targetChk) {
-          handleStartChecklist(targetChk);
+    if (pendingAlarmChecklistId) {
+      const targetChk =
+        (loadedList || []).find(c => c.id === pendingAlarmChecklistId) ||
+        allTenantChecklists.find(c => c.id === pendingAlarmChecklistId);
+      setPendingAlarmChecklistId(null);
+      if (targetChk) {
+        handleStartChecklist(targetChk);
+      }
+    }
+  };
+
+  const handleDirectOperatorLogin = async (op: OperatorProfile) => {
+    await finalizeOperatorLogin(op, false);
+  };
+
+  const handleEnterGeneralLogin = async () => {
+    const effectiveTenantId = tenantId || localStorage.getItem('totem_company_id') || localStorage.getItem('current_tenant_id');
+    if (!effectiveTenantId) {
+      setIsCompanyModalOpen(true);
+      showToast('error', 'Selecione ou autentique uma empresa primeiro.');
+      return;
+    }
+
+    try {
+      // 1. Procura se já existe um perfil "Equipe Geral" para este tenant no banco
+      let generalProfile = allProfiles.find(
+        (p: any) => p.tenant_id === effectiveTenantId && String(p.name || '').toLowerCase().startsWith('equipe geral')
+      );
+
+      // 2. Se não existir, tenta criar automaticamente em users_profiles para manter integridade de FK nas execuções
+      if (!generalProfile) {
+        const { data: createdProf } = await masterSupabase
+          .from('users_profiles')
+          .insert({
+            tenant_id: effectiveTenantId,
+            name: 'Equipe Geral (Compartilhado)',
+            role: 'manager',
+            pin: '00000',
+            is_active: true
+          })
+          .select('id, name, pin, role, is_active, tenant_id')
+          .maybeSingle();
+
+        if (createdProf) {
+          generalProfile = createdProf;
+          setAllProfiles(prev => [...prev, createdProf]);
         }
       }
+
+      // 3. Fallback seguro caso o banco/RLS não permita criar novo registro: usa o ID de um perfil existente do tenant com flag isGeneralAccess
+      const fallbackId = generalProfile?.id || allProfiles[0]?.id || operators[0]?.id || '00000000-0000-0000-0000-000000000000';
+      const displayGeneralName = `Equipe Geral • ${totemSectorName || companyInfo?.name || 'Cozinha'}`;
+
+      await finalizeOperatorLogin(
+        {
+          id: fallbackId,
+          name: displayGeneralName,
+          pin: '00000',
+          role: 'manager',
+          is_active: true,
+          tenant_id: effectiveTenantId,
+          isGeneralAccess: true
+        },
+        true
+      );
+    } catch (e) {
+      console.error('Erro ao iniciar Login Geral:', e);
+      showToast('error', 'Falha ao iniciar o Login Geral.');
+    }
+  };
+
+  const validatePin = async (pin: string) => {
+    if (!selectedOperator) return;
+
+    const hasConfiguredPin = Boolean(selectedOperator.pin && selectedOperator.pin.trim().length === 5);
+
+    // Se o colaborador ainda não tinha PIN de 5 dígitos configurado e digitou 5 números, cadastra esse PIN para ele e entra!
+    if (!hasConfiguredPin && pin.length === 5) {
+      try {
+        await masterSupabase.from('users_profiles').update({ pin }).eq('id', selectedOperator.id);
+        const updatedOp = { ...selectedOperator, pin };
+        setOperators(prev => prev.map(o => (o.id === selectedOperator.id ? updatedOp : o)));
+        showToast('success', `🔐 Novo PIN de 5 dígitos salvo para ${selectedOperator.name}!`);
+        await finalizeOperatorLogin(updatedOp, false);
+        return;
+      } catch (e) {
+        await finalizeOperatorLogin(selectedOperator, false);
+        return;
+      }
+    }
+
+    if (selectedOperator.pin === pin) {
+      await finalizeOperatorLogin(selectedOperator, false);
     } else {
       setPinCode('');
       setAuthError('Código PIN inválido. Tente novamente.');
@@ -1209,13 +1812,14 @@ export default function ChecklistTablet() {
     setActiveTab('active');
   };
 
-  const loadCompletedExecutions = async (userId: string) => {
+  const loadCompletedExecutions = async (userId: string, isGeneral = false) => {
     setLoadingHistory(true);
     try {
-      const { data, error } = await supabase
+      let query = masterSupabase
         .from('checklist_executions')
         .select(`
           id,
+          user_id,
           started_at,
           completed_at,
           score,
@@ -1223,10 +1827,15 @@ export default function ChecklistTablet() {
           duration_seconds,
           checklists(id, title, category, description)
         `)
-        .eq('user_id', userId)
         .eq('tenant_id', tenantId)
         .order('completed_at', { ascending: false })
-        .limit(20);
+        .limit(25);
+
+      if (!isGeneral && !loggedInUser?.isGeneralAccess) {
+        query = query.eq('user_id', userId);
+      }
+
+      const { data, error } = await query;
 
       if (error) throw error;
       setCompletedExecutions(data || []);
@@ -1241,7 +1850,7 @@ export default function ChecklistTablet() {
   const loadExecutionDetails = async (executionId: string) => {
     setLoadingExecutionDetails(true);
     try {
-      const { data, error } = await supabase
+      const { data, error } = await masterSupabase
         .from('checklist_item_responses')
         .select(`
           id,
@@ -1275,16 +1884,22 @@ export default function ChecklistTablet() {
   };
 
   // ==========================================
-  // CARREGAR ROTINAS DO OPERADOR
+  // CARREGAR ROTINAS DO OPERADOR OU DO LOGIN GERAL DA EMPRESA/SETOR
   // ==========================================
-  const loadOperatorChecklists = async (userId: string, userRole: string, userName?: string): Promise<ChecklistToExecute[]> => {
+  const loadOperatorChecklists = async (
+    userId: string,
+    userRole: string,
+    userName?: string,
+    isGeneralOverride?: boolean
+  ): Promise<ChecklistToExecute[]> => {
     setLoadingChecklists(true);
     try {
-      const isPowerUser = ['company_admin', 'super_admin', 'manager'].includes(userRole);
+      const isGeneralMode = isGeneralOverride !== undefined ? isGeneralOverride : Boolean(loggedInUser?.isGeneralAccess);
+      const isPowerUser = isGeneralMode || ['company_admin', 'super_admin', 'manager'].includes(userRole);
 
       let allowedSectors: string[] = [];
       if (!isPowerUser) {
-        const { data: sPerms } = await supabase
+        const { data: sPerms } = await masterSupabase
           .from('user_sector_permissions')
           .select('sector_id')
           .eq('user_id', userId);
@@ -1294,7 +1909,7 @@ export default function ChecklistTablet() {
 
       let allowedUnits: string[] = [];
       if (!isPowerUser) {
-        const { data: uPerms } = await supabase
+        const { data: uPerms } = await masterSupabase
           .from('user_unit_permissions')
           .select('unit_id')
           .eq('user_id', userId);
@@ -1303,7 +1918,7 @@ export default function ChecklistTablet() {
       }
 
       const [checklistsRes, schedulesRes] = await Promise.all([
-        supabase
+        masterSupabase
           .from('checklists')
           .select(`
             id, title, description, category, tags, sector_id, weight, use_unit_schedule_rules,
@@ -1313,7 +1928,7 @@ export default function ChecklistTablet() {
           `)
           .eq('tenant_id', tenantId)
           .eq('is_active', true),
-        supabase
+        masterSupabase
           .from('checklist_schedules')
           .select('id, checklist_id, start_time, is_active')
           .eq('tenant_id', tenantId)
@@ -1365,6 +1980,11 @@ export default function ChecklistTablet() {
           };
         })
         .filter(c => {
+          // No Login Geral (Funcionalidades Gerais sem pessoa exclusiva), libera todas as rotinas da empresa/setor!
+          if (isGeneralMode) {
+            return true;
+          }
+
           // Se o tablet estiver configurado para um setor (ex: Cozinha) e o checklist pertencer a esse setor, libera para o operador do Totem
           if (totemSectorId && doesChecklistMatchSector(c, totemSectorId, totemSectorName)) {
             return true;
@@ -1406,8 +2026,8 @@ export default function ChecklistTablet() {
 
       setChecklists(list);
 
-      // Busca execuções em andamento (in_progress) para este operador
-      const { data: inProgData } = await supabase
+      // Busca execuções em andamento (in_progress) para este operador (ou de toda a equipe quando em Login Geral)
+      let inProgQuery = masterSupabase
         .from('checklist_executions')
         .select(`
           id,
@@ -1415,8 +2035,13 @@ export default function ChecklistTablet() {
           checklist_item_responses(id, is_done)
         `)
         .eq('tenant_id', tenantId)
-        .eq('user_id', userId)
         .eq('status', 'in_progress');
+
+      if (!isGeneralMode) {
+        inProgQuery = inProgQuery.eq('user_id', userId);
+      }
+
+      const { data: inProgData } = await inProgQuery;
 
       if (inProgData) {
         const inProgMap: Record<string, { executionId: string; completedCount: number }> = {};
@@ -1435,7 +2060,7 @@ export default function ChecklistTablet() {
       const startOfToday = new Date();
       startOfToday.setHours(0, 0, 0, 0);
 
-      const { data: todayData } = await supabase
+      const { data: todayData } = await masterSupabase
         .from('checklist_executions')
         .select('id, checklist_id, completed_at, score')
         .eq('tenant_id', tenantId)
@@ -1490,7 +2115,7 @@ export default function ChecklistTablet() {
 
     try {
       // 1. Busca itens do checklist usando 'sort_order'
-      const { data: items, error } = await supabase
+      const { data: items, error } = await masterSupabase
         .from('checklist_items')
         .select('*')
         .eq('checklist_id', chk.id)
@@ -1499,10 +2124,11 @@ export default function ChecklistTablet() {
       if (error) throw error;
       setItemsToAnswer(items || []);
 
-      // 2. Busca se existe uma execução em andamento (in_progress) no banco para este operador
+      // 2. Busca se existe uma execução em andamento (in_progress) no banco para este operador (ou compartilhada no Login Geral)
       if (loggedInUser) {
-        // Restaura de localStorage primeiro como backup instantâneo
-        const storageKey = `subtasks_${loggedInUser.id}_${chk.id}`;
+        const storageKey = loggedInUser.isGeneralAccess
+          ? `subtasks_general_${tenantId}_${chk.id}`
+          : `subtasks_${loggedInUser.id}_${chk.id}`;
         const cachedSubtasks = localStorage.getItem(storageKey);
         let restoredSubtasks: Record<string, boolean> = {};
         if (cachedSubtasks) {
@@ -1515,20 +2141,24 @@ export default function ChecklistTablet() {
         startOfToday.setHours(0, 0, 0, 0);
 
         // 1. Tenta buscar execução em andamento (in_progress)
-        let { data: activeExec } = await supabase
+        let activeExecQuery = masterSupabase
           .from('checklist_executions')
           .select('id, started_at, status')
           .eq('tenant_id', tenantId)
           .eq('checklist_id', chk.id)
-          .eq('user_id', loggedInUser.id)
           .eq('status', 'in_progress')
           .order('started_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
+          .limit(1);
+
+        if (!loggedInUser.isGeneralAccess) {
+          activeExecQuery = activeExecQuery.eq('user_id', loggedInUser.id);
+        }
+
+        let { data: activeExec } = await activeExecQuery.maybeSingle();
 
         // 2. Se não houver em andamento, busca se foi concluída no dia atual
         if (!activeExec) {
-          const { data: todayDoneExec } = await supabase
+          const { data: todayDoneExec } = await masterSupabase
             .from('checklist_executions')
             .select('id, started_at, status')
             .eq('tenant_id', tenantId)
@@ -1549,7 +2179,7 @@ export default function ChecklistTablet() {
           setStartedAt(activeExec.started_at);
 
           // Restaura respostas salvas previamente no banco (seja em andamento ou concluída no dia)
-          const { data: savedResps } = await supabase
+          const { data: savedResps } = await masterSupabase
             .from('checklist_item_responses')
             .select(`
               id, item_id, response_value, is_conforming, is_meta_ok, is_done, observation, created_at,
@@ -1643,7 +2273,7 @@ export default function ChecklistTablet() {
 
       if (!execId) {
         // Cria a execução em andamento (in_progress) no banco
-        const { data: newExec, error: execErr } = await supabase
+        const { data: newExec, error: execErr } = await masterSupabase
           .from('checklist_executions')
           .insert({
             tenant_id: tenantId,
@@ -1672,7 +2302,7 @@ export default function ChecklistTablet() {
       }
 
       // Upsert em tempo real da resposta do item no banco
-      const { error: respErr } = await supabase
+      const { error: respErr } = await masterSupabase
         .from('checklist_item_responses')
         .upsert({
           tenant_id: tenantId,
@@ -1870,7 +2500,7 @@ export default function ChecklistTablet() {
       const cleanTitle = currentTitle.replace(/^\[.*?\]\s*/, '');
       const updatedTitle = newCategory.trim() ? `[${newCategory.trim().toUpperCase()}] ${cleanTitle}` : cleanTitle;
 
-      const { error } = await supabase
+      const { error } = await masterSupabase
         .from('checklist_items')
         .update({ title: updatedTitle })
         .eq('id', itemId);
@@ -1952,7 +2582,7 @@ export default function ChecklistTablet() {
       let executionId = currentExecutionId;
 
       if (executionId) {
-        const { error: updateErr } = await supabase
+        const { error: updateErr } = await masterSupabase
           .from('checklist_executions')
           .update({
             completed_at: now.toISOString(),
@@ -1965,7 +2595,7 @@ export default function ChecklistTablet() {
 
         if (updateErr) throw updateErr;
       } else {
-        const { data: execData, error: execErr } = await supabase
+        const { data: execData, error: execErr } = await masterSupabase
           .from('checklist_executions')
           .insert({
             tenant_id: tenantId,
@@ -2007,7 +2637,7 @@ export default function ChecklistTablet() {
         };
       });
 
-      const { data: savedResponses, error: respErr } = await supabase
+      const { data: savedResponses, error: respErr } = await masterSupabase
         .from('checklist_item_responses')
         .upsert(upsertResponses, { onConflict: 'execution_id, item_id' })
         .select('id, item_id');
@@ -2028,7 +2658,7 @@ export default function ChecklistTablet() {
       });
 
       if (insertEvidences.length > 0) {
-        await supabase.from('checklist_evidences').insert(insertEvidences);
+        await masterSupabase.from('checklist_evidences').insert(insertEvidences);
       }
 
       // Confetes e Modal de Sucesso
@@ -2105,22 +2735,36 @@ export default function ChecklistTablet() {
         </div>
       )}
 
-      {/* TELA DE AUTENTICAÇÃO POR PIN (TOTEM BLOQUEADO) */}
+      {/* TELA DE AUTENTICAÇÃO POR PIN & LOGIN GERAL (TOTEM BLOQUEADO) */}
       {!loggedInUser && (
-        <div className="flex-1 flex flex-col items-center justify-center p-6 sm:p-10 bg-[#0b141a] relative overflow-hidden">
+        <div className="flex-1 flex flex-col items-center justify-center p-4 sm:p-8 bg-[#0b141a] relative overflow-y-auto styled-scrollbar">
           <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
           <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
 
-          <div className="max-w-5xl w-full flex flex-col md:flex-row items-center gap-8 sm:gap-12 bg-[#182229]/80 backdrop-blur-xl border border-white/15 p-8 sm:p-12 rounded-[48px] shadow-2xl relative z-10">
+          <div className="max-w-5xl w-full flex flex-col md:flex-row items-stretch gap-6 sm:gap-10 bg-[#182229]/85 backdrop-blur-xl border border-white/15 p-6 sm:p-10 rounded-[40px] shadow-2xl relative z-10 my-auto">
             
-            {/* Lista de Operadores da Equipe */}
-            <div className="flex-1 w-full space-y-5">
+            {/* Coluna Principal: Dados da Empresa + Login Geral + Lista de Colaboradores */}
+            <div className="flex-1 w-full space-y-4 min-w-0">
               <div>
                 <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <div className="flex items-center gap-2 text-indigo-400 font-bold text-sm uppercase tracking-widest">
+                  <div className="flex items-center gap-2 text-indigo-400 font-bold text-xs sm:text-sm uppercase tracking-widest">
                     <Tablet size={18} /> Totem Operacional Tablet PWA
                   </div>
                   <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCompanyModalTab('select');
+                        setIsCompanyModalOpen(true);
+                      }}
+                      className="bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-xs font-black px-3.5 py-1.5 rounded-2xl flex items-center gap-1.5 transition-all shadow-md active:scale-95 cursor-pointer shrink-0"
+                    >
+                      <Building2 size={13} className="text-emerald-400" />
+                      <span>
+                        Empresa: {companyInfo?.name || 'Selecionar'}
+                        {availableCompanies.length > 1 ? ` • Alterar (${availableCompanies.length})` : ''}
+                      </span>
+                    </button>
                     <button
                       type="button"
                       onClick={() => setIsSectorAlarmModalOpen(true)}
@@ -2135,21 +2779,184 @@ export default function ChecklistTablet() {
                       className="bg-indigo-600/30 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/40 text-xs font-bold px-3.5 py-1.5 rounded-2xl flex items-center gap-1.5 transition-all shadow-md active:scale-95 cursor-pointer shrink-0"
                     >
                       <QrCode size={13} />
-                      <span>Link & Instalar PWA</span>
+                      <span>Links PWA (Celular & Tablet)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        try {
+                          localStorage.removeItem('totem_standalone_mode');
+                          const manifestLink = document.querySelector('link[rel="manifest"]');
+                          if (manifestLink) manifestLink.setAttribute('href', '/manifest.webmanifest');
+                        } catch (_) {}
+                        window.location.href = '/chat';
+                      }}
+                      className="bg-[#202c33] hover:bg-[#2a3942] text-[#d1d7db] hover:text-white border border-white/15 text-xs font-bold px-3.5 py-1.5 rounded-2xl flex items-center gap-1.5 transition-all shadow-md active:scale-95 cursor-pointer shrink-0"
+                      title="Voltar para a tela principal do Chat no Celular"
+                    >
+                      <Smartphone size={13} className="text-emerald-400" />
+                      <span>Abrir Chat (Celular)</span>
                     </button>
                   </div>
                 </div>
-                <h1 className="text-3xl sm:text-4xl font-black text-white tracking-tight mt-2">Quem está operando?</h1>
-                <p className="text-sm text-[#8696a0] mt-1.5">
-                  Selecione seu nome na lista para autenticar com seu PIN • Tablet configurado para o setor <strong className="text-amber-300">{totemSectorName || 'Cozinha'}</strong>.
+
+                {/* =====================================================================
+                    CARD DE DADOS DA EMPRESA VINCULADA AO TABLET + TROCA RÁPIDA DE EMPRESA
+                   ===================================================================== */}
+                <div className="mt-3 p-4 rounded-3xl bg-[#111b21]/95 border border-emerald-500/30 shadow-lg space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-emerald-500/30 to-teal-600/30 border border-emerald-400/40 flex items-center justify-center text-emerald-300 shrink-0 shadow-md">
+                        <Building2 size={22} />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">
+                            🏢 Dados da Empresa no Tablet
+                          </span>
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-[10px] font-bold text-emerald-300">
+                            {operators.length} {operators.length === 1 ? 'Colaborador' : 'Colaboradores'}
+                          </span>
+                          <span className="px-2 py-0.5 rounded-full bg-indigo-500/15 border border-indigo-500/30 text-[10px] font-bold text-indigo-300">
+                            {allTenantChecklists.length || companyInfo?.checklistsCount || 0} Rotinas Ativas
+                          </span>
+                          {authenticatedCompanyEmail && (
+                            <span className="px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-[10px] font-semibold text-[#d1d7db] truncate max-w-[200px]">
+                              ✓ {authenticatedCompanyEmail}
+                            </span>
+                          )}
+                        </div>
+                        <h2 className="text-base sm:text-lg font-black text-white truncate mt-0.5">
+                          {companyInfo?.name || 'Selecione ou autentique uma empresa'}
+                        </h2>
+                        <p className="text-[11px] text-[#8696a0] truncate">
+                          Unidade: <strong className="text-[#d1d7db]">{unitsList[0]?.name || companyInfo?.unitName || 'Principal'}</strong> • Setor: <strong className="text-amber-300">{totemSectorName || 'Cozinha'}</strong>
+                          {companyInfo?.email ? ` • ${companyInfo.email}` : ''}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-wrap shrink-0">
+                      <button
+                        type="button"
+                        onClick={handleGoogleCompanyLogin}
+                        disabled={companyAuthLoading}
+                        title="Autenticar conta corporativa com o Google"
+                        className="bg-white hover:bg-slate-100 text-slate-900 font-black text-xs px-3 py-2 rounded-xl flex items-center justify-center gap-1.5 shadow-md transition-all cursor-pointer active:scale-95"
+                      >
+                        <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24">
+                          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+                          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+                        </svg>
+                        <span>Login Google</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCompanyModalTab(availableCompanies.length > 1 ? 'select' : 'login');
+                          setIsCompanyModalOpen(true);
+                        }}
+                        className="bg-[#202c33] hover:bg-[#2a3942] text-emerald-300 hover:text-white border border-emerald-500/35 text-xs font-black px-3.5 py-2 rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer shrink-0 active:scale-95"
+                      >
+                        <Building2 size={14} />
+                        <span>{availableCompanies.length > 1 ? 'Alterar Empresa' : 'Login Empresa'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Seletor Rápido entre Empresas Disponíveis (Quando o login tem acesso a 2 ou mais empresas) */}
+                  {availableCompanies.length > 1 && (
+                    <div className="pt-2.5 border-t border-white/10 space-y-2">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <span className="text-[10px] font-black text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                          <RefreshCw size={11} />
+                          🔄 Alterar Empresa ({availableCompanies.length} empresas vinculadas ao seu login):
+                        </span>
+                        <span className="text-[10px] text-[#8696a0]">
+                          Toque em uma empresa para carregar seus colaboradores e checklists
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {availableCompanies.map((comp) => {
+                          const isCurrent = comp.id === tenantId;
+                          return (
+                            <button
+                              key={comp.id}
+                              type="button"
+                              onClick={() => handleSwitchCompany(comp.id)}
+                              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
+                                isCurrent
+                                  ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-black shadow-md shadow-emerald-500/20'
+                                  : 'bg-[#182229] text-[#d1d7db] border-white/15 hover:border-emerald-500/50 hover:text-white'
+                              }`}
+                            >
+                              <Building2 size={13} className={isCurrent ? 'text-slate-950' : 'text-emerald-400'} />
+                              <span>{comp.name}</span>
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded-md ${
+                                isCurrent ? 'bg-black/20 text-slate-950 font-black' : 'bg-white/5 text-[#8696a0]'
+                              }`}>
+                                {comp.collaboratorsCount} colab • {comp.checklistsCount} rotinas
+                              </span>
+                              {isCurrent && <Check size={13} className="stroke-[3]" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight mt-3">Quem está operando?</h1>
+                <p className="text-xs sm:text-sm text-[#8696a0] mt-1">
+                  Use o <strong className="text-emerald-300">Login Geral da Equipe</strong> para tarefas gerais sem pessoa exclusiva ou selecione seu nome na lista de colaboradores de <strong className="text-white">{companyInfo?.name || 'sua empresa'}</strong>.
                 </p>
+
+                {/* =====================================================================
+                    CARD DE LOGIN GERAL DE FUNCIONALIDADES GERAIS (SEM PESSOA EXCLUSIVA)
+                   ===================================================================== */}
+                <div className="mt-3 p-4 rounded-3xl bg-gradient-to-r from-emerald-600/25 via-teal-600/20 to-indigo-600/20 border-2 border-emerald-500/50 shadow-xl shadow-emerald-500/10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3.5">
+                  <div className="flex items-center gap-3.5 min-w-0">
+                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-400 to-teal-500 text-slate-950 font-black flex items-center justify-center shrink-0 shadow-lg shadow-emerald-500/30">
+                      <Globe size={24} />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="px-2 py-0.5 rounded-md bg-emerald-400/20 border border-emerald-400/40 text-emerald-300 text-[10px] font-black uppercase tracking-wider">
+                          🌐 Acesso Geral • Sem Pessoa Exclusiva
+                        </span>
+                        <span className="text-[11px] text-amber-300 font-bold">
+                          Setor: {totemSectorName || 'Cozinha'}
+                        </span>
+                      </div>
+                      <h3 className="text-base sm:text-lg font-black text-white leading-snug mt-0.5">
+                        Login Geral de Funcionalidades & Rotinas Gerais
+                      </h3>
+                      <p className="text-xs text-[#d1d7db] leading-relaxed">
+                        Acesso compartilhado para executar checklists e funcionalidades gerais da empresa/setor que não pertencem a um colaborador exclusivo.
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleEnterGeneralLogin}
+                    className="w-full sm:w-auto bg-gradient-to-r from-emerald-400 via-emerald-500 to-teal-500 hover:from-emerald-300 hover:to-teal-400 text-slate-950 font-black text-xs sm:text-sm px-5 py-3.5 rounded-2xl shadow-xl shadow-emerald-500/30 flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-95 shrink-0"
+                  >
+                    <Unlock size={16} className="stroke-[2.5]" />
+                    <span>Entrar no Login Geral</span>
+                    <ArrowRight size={16} className="stroke-[2.5]" />
+                  </button>
+                </div>
 
                 {/* Banner de Instalação Direta quando aberto pela rota exclusiva no navegador do Tablet Android */}
                 {!isStandalone && (
-                  <div className="mt-3 p-3.5 rounded-2xl bg-gradient-to-r from-indigo-600/20 via-purple-600/15 to-amber-500/15 border border-indigo-500/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div className="mt-3 p-3 rounded-2xl bg-gradient-to-r from-indigo-600/20 via-purple-600/15 to-amber-500/15 border border-indigo-500/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                     <div className="flex items-center gap-2.5">
-                      <div className="w-9 h-9 rounded-xl bg-indigo-500/25 border border-indigo-400/40 flex items-center justify-center text-indigo-300 shrink-0">
-                        <Download size={18} />
+                      <div className="w-8 h-8 rounded-xl bg-indigo-500/25 border border-indigo-400/40 flex items-center justify-center text-indigo-300 shrink-0">
+                        <Download size={16} />
                       </div>
                       <div>
                         <span className="text-xs font-black text-white block">
@@ -2164,7 +2971,7 @@ export default function ChecklistTablet() {
                       <button
                         type="button"
                         onClick={handleInstallPwa}
-                        className="flex-1 sm:flex-initial bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs px-3.5 py-2 rounded-xl shadow-lg shadow-emerald-500/25 transition-all cursor-pointer active:scale-95"
+                        className="flex-1 sm:flex-initial bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-400 hover:to-purple-400 text-white font-black text-xs px-3.5 py-2 rounded-xl shadow-lg shadow-indigo-500/25 transition-all cursor-pointer active:scale-95"
                       >
                         Instalar + Ativar Alarme
                       </button>
@@ -2180,100 +2987,212 @@ export default function ChecklistTablet() {
                 )}
 
                 {pendingAlarmChecklistId && (
-                  <div className="mt-3 p-3.5 rounded-2xl bg-rose-500/20 border border-rose-500/50 text-rose-200 text-xs font-bold flex items-center gap-2.5 animate-pulse">
-                    <BellRing size={18} className="text-rose-400 shrink-0" />
-                    <span>🚨 Alarme de Checklist Ativo! Selecione seu operador e digite o PIN para iniciar as tarefas imediatamente.</span>
+                  <div className="mt-3 p-3.5 rounded-2xl bg-rose-500/20 border border-rose-500/50 text-rose-200 text-xs font-bold flex items-center justify-between gap-2.5 animate-pulse flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <BellRing size={18} className="text-rose-400 shrink-0" />
+                      <span>🚨 Alarme Ativo! Entre no Login Geral ou selecione seu operador para executar as tarefas agora.</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleEnterGeneralLogin}
+                      className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs px-3 py-1.5 rounded-xl cursor-pointer"
+                    >
+                      Executar no Login Geral →
+                    </button>
                   </div>
                 )}
               </div>
 
-              <div className="grid grid-cols-2 gap-4 max-h-[380px] overflow-y-auto styled-scrollbar pr-2">
-                {operators.map((op) => (
-                  <button
-                    key={op.id}
-                    onClick={() => handleSelectOperator(op)}
-                    className={`p-5 rounded-3xl border text-left transition-all flex items-center gap-4 cursor-pointer min-h-[72px] ${
-                      selectedOperator?.id === op.id 
-                        ? 'bg-indigo-600/30 border-indigo-500 text-white shadow-xl shadow-indigo-500/20 scale-[1.02]' 
-                        : 'bg-[#202c33]/80 hover:bg-[#202c33] border-white/10 text-[#d1d7db]'
-                    }`}
-                  >
-                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-600 to-indigo-400 text-white font-black text-lg flex items-center justify-center shrink-0 shadow-md">
-                      {op.name.substring(0, 1).toUpperCase()}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <h4 className="font-black text-sm sm:text-base text-white truncate">{op.name}</h4>
-                      <p className="text-xs text-[#8696a0] capitalize mt-0.5">{op.role === 'manager' ? 'Gerente' : 'Operador'}</p>
-                    </div>
-                  </button>
-                ))}
+              {/* Cabeçalho da Lista de Colaboradores da Empresa */}
+              <div className="flex items-center justify-between px-1 pt-1">
+                <span className="text-xs font-black uppercase tracking-wider text-[#8696a0] flex items-center gap-1.5">
+                  <Users size={14} className="text-indigo-400" />
+                  Colaboradores de {companyInfo?.name || 'Empresa'} ({operators.length})
+                </span>
+                <button
+                  type="button"
+                  onClick={() => loadOperators(tenantId || undefined)}
+                  className="text-[11px] font-bold text-indigo-400 hover:text-indigo-300 flex items-center gap-1 cursor-pointer"
+                >
+                  <RefreshCw size={12} /> Atualizar Lista
+                </button>
               </div>
-            </div>
 
-            {/* Teclado Numérico de PIN de 5 Dígitos Otimizado para Toque */}
-            <div className="w-full md:w-80 shrink-0 bg-[#111b21] border border-white/15 p-8 rounded-[40px] flex flex-col items-center justify-center shadow-2xl">
-              {selectedOperator ? (
-                <>
-                  <div className="text-center mb-5">
-                    <span className="text-xs uppercase font-bold text-indigo-400 tracking-wider">Digitar PIN</span>
-                    <h3 className="text-base font-black text-white truncate max-w-[240px] mt-0.5">{selectedOperator.name}</h3>
+              {operators.length === 0 ? (
+                <div className="p-6 rounded-3xl bg-[#202c33]/60 border border-dashed border-white/15 text-center space-y-3">
+                  <p className="text-xs text-[#8696a0]">
+                    Nenhum colaborador encontrado para a empresa selecionada.
+                  </p>
+                  <div className="flex items-center justify-center gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => setIsCompanyModalOpen(true)}
+                      className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black px-4 py-2 rounded-xl cursor-pointer"
+                    >
+                      🏢 Selecionar Outra Empresa
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleEnterGeneralLogin}
+                      className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-black px-4 py-2 rounded-xl cursor-pointer"
+                    >
+                      🌐 Entrar no Login Geral
+                    </button>
                   </div>
-
-                  {/* Visor de Dígitos do PIN */}
-                  <div className="flex gap-3 mb-6">
-                    {[0, 1, 2, 3, 4].map((idx) => (
-                      <div 
-                        key={idx} 
-                        className={`w-10 h-12 rounded-2xl border flex items-center justify-center font-mono font-black text-xl transition-all ${
-                          pinCode.length > idx 
-                            ? 'bg-indigo-500/30 border-indigo-400 text-indigo-300 shadow-md shadow-indigo-500/20' 
-                            : 'bg-[#202c33] border-white/10 text-slate-600'
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[300px] overflow-y-auto styled-scrollbar pr-1">
+                  {operators.map((op) => {
+                    const hasPin = Boolean(op.pin && op.pin.trim().length === 5);
+                    return (
+                      <button
+                        key={op.id}
+                        onClick={() => handleSelectOperator(op)}
+                        className={`p-4 rounded-3xl border text-left transition-all flex items-center gap-3.5 cursor-pointer min-h-[68px] ${
+                          selectedOperator?.id === op.id 
+                            ? 'bg-indigo-600/30 border-indigo-500 text-white shadow-xl shadow-indigo-500/20 scale-[1.01]' 
+                            : 'bg-[#202c33]/80 hover:bg-[#202c33] border-white/10 text-[#d1d7db]'
                         }`}
                       >
-                        {pinCode.length > idx ? '•' : ''}
-                      </div>
-                    ))}
-                  </div>
-
-                  {authError && (
-                    <p className="text-xs text-rose-400 font-bold mb-4 animate-shake text-center">{authError}</p>
-                  )}
-
-                  {/* Teclado 3x4 com Teclas Grandes (56px) */}
-                  <div className="grid grid-cols-3 gap-3 w-full">
-                    {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map(num => (
-                      <button
-                        key={num}
-                        onClick={() => handleKeyPress(num)}
-                        className="h-14 rounded-2xl bg-[#202c33] hover:bg-[#2a3942] active:scale-95 text-white font-black text-2xl border border-white/10 transition-all shadow-md cursor-pointer flex items-center justify-center select-none"
-                      >
-                        {num}
+                        <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-indigo-600 to-indigo-400 text-white font-black text-base flex items-center justify-center shrink-0 shadow-md">
+                          {op.name.substring(0, 1).toUpperCase()}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <h4 className="font-black text-sm sm:text-base text-white truncate">{op.name}</h4>
+                          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                            <span className="text-[11px] text-[#8696a0] capitalize">
+                              {op.role === 'manager' || op.role === 'company_admin' ? 'Gerente' : 'Colaborador'}
+                            </span>
+                            <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ${
+                              hasPin
+                                ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
+                                : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                            }`}>
+                              {hasPin ? '🔐 PIN' : '⚡ Acesso Direto'}
+                            </span>
+                          </div>
+                        </div>
                       </button>
-                    ))}
-                    <button
-                      onClick={() => setSelectedOperator(null)}
-                      className="h-14 rounded-2xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 text-xs font-black uppercase transition-all cursor-pointer flex items-center justify-center select-none border border-rose-500/20"
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      onClick={() => handleKeyPress('0')}
-                      className="h-14 rounded-2xl bg-[#202c33] hover:bg-[#2a3942] active:scale-95 text-white font-black text-2xl border border-white/10 transition-all shadow-md cursor-pointer flex items-center justify-center select-none"
-                    >
-                      0
-                    </button>
-                    <button
-                      onClick={handleDeletePress}
-                      className="h-14 rounded-2xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 text-sm font-black transition-all cursor-pointer flex items-center justify-center select-none border border-amber-500/20"
-                    >
-                      ⌫
-                    </button>
-                  </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Painel Direito: Teclado Numérico de PIN ou Entrada Rápida / Login Geral */}
+            <div className="w-full md:w-80 shrink-0 bg-[#111b21] border border-white/15 p-6 sm:p-7 rounded-[36px] flex flex-col items-center justify-center shadow-2xl">
+              {selectedOperator ? (
+                <>
+                  {(() => {
+                    const hasConfiguredPin = Boolean(selectedOperator.pin && selectedOperator.pin.trim().length === 5);
+                    return (
+                      <>
+                        <div className="text-center mb-4 w-full">
+                          <span className="text-xs uppercase font-bold text-indigo-400 tracking-wider">
+                            {hasConfiguredPin ? 'Digitar PIN de 5 Dígitos' : 'Colaborador Selecionado'}
+                          </span>
+                          <h3 className="text-base font-black text-white truncate max-w-[240px] mx-auto mt-0.5">
+                            {selectedOperator.name}
+                          </h3>
+
+                          {!hasConfiguredPin && (
+                            <div className="mt-3 space-y-2">
+                              <button
+                                type="button"
+                                onClick={() => handleDirectOperatorLogin(selectedOperator)}
+                                className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs sm:text-sm shadow-xl shadow-emerald-500/25 flex items-center justify-center gap-2 cursor-pointer active:scale-95 transition-all"
+                              >
+                                <Unlock size={16} />
+                                <span>Entrar Agora como {selectedOperator.name.split(' ')[0]}</span>
+                              </button>
+                              <span className="text-[10px] text-[#8696a0] block">
+                                Ou digite 5 números abaixo caso queira criar um PIN pessoal:
+                              </span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Visor de Dígitos do PIN */}
+                        <div className="flex gap-2.5 mb-5">
+                          {[0, 1, 2, 3, 4].map((idx) => (
+                            <div 
+                              key={idx} 
+                              className={`w-10 h-11 rounded-2xl border flex items-center justify-center font-mono font-black text-xl transition-all ${
+                                pinCode.length > idx 
+                                  ? 'bg-indigo-500/30 border-indigo-400 text-indigo-300 shadow-md shadow-indigo-500/20' 
+                                  : 'bg-[#202c33] border-white/10 text-slate-600'
+                              }`}
+                            >
+                              {pinCode.length > idx ? '•' : ''}
+                            </div>
+                          ))}
+                        </div>
+
+                        {authError && (
+                          <p className="text-xs text-rose-400 font-bold mb-3 animate-shake text-center">{authError}</p>
+                        )}
+
+                        {/* Teclado 3x4 com Teclas Grandes (56px) */}
+                        <div className="grid grid-cols-3 gap-2.5 w-full">
+                          {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map(num => (
+                            <button
+                              key={num}
+                              onClick={() => handleKeyPress(num)}
+                              className="h-13 py-3 rounded-2xl bg-[#202c33] hover:bg-[#2a3942] active:scale-95 text-white font-black text-xl border border-white/10 transition-all shadow-md cursor-pointer flex items-center justify-center select-none"
+                            >
+                              {num}
+                            </button>
+                          ))}
+                          <button
+                            onClick={() => setSelectedOperator(null)}
+                            className="h-13 py-3 rounded-2xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 text-xs font-black uppercase transition-all cursor-pointer flex items-center justify-center select-none border border-rose-500/20"
+                          >
+                            Cancelar
+                          </button>
+                          <button
+                            onClick={() => handleKeyPress('0')}
+                            className="h-13 py-3 rounded-2xl bg-[#202c33] hover:bg-[#2a3942] active:scale-95 text-white font-black text-xl border border-white/10 transition-all shadow-md cursor-pointer flex items-center justify-center select-none"
+                          >
+                            0
+                          </button>
+                          <button
+                            onClick={handleDeletePress}
+                            className="h-13 py-3 rounded-2xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 text-sm font-black transition-all cursor-pointer flex items-center justify-center select-none border border-amber-500/20"
+                          >
+                            ⌫
+                          </button>
+                        </div>
+                      </>
+                    );
+                  })()}
                 </>
               ) : (
-                <div className="py-10 text-center text-[#8696a0]">
-                  <Lock size={40} className="mx-auto text-[#202c33] mb-3" />
-                  <p className="text-sm">Selecione seu perfil à esquerda para inserir o PIN.</p>
+                <div className="py-6 text-center text-[#8696a0] space-y-5 w-full">
+                  <div>
+                    <Lock size={38} className="mx-auto text-indigo-400/60 mb-2.5" />
+                    <h4 className="text-sm font-black text-white">Acesso do Tablet</h4>
+                    <p className="text-xs text-[#8696a0] mt-1">
+                      Selecione um colaborador à esquerda para usar o PIN individual, ou entre no <strong>Login Geral</strong> abaixo:
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleEnterGeneralLogin}
+                    className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-2 cursor-pointer active:scale-95 transition-all"
+                  >
+                    <Globe size={16} />
+                    <span>🌐 Entrar no Login Geral</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsCompanyModalOpen(true)}
+                    className="w-full py-2.5 px-4 rounded-2xl bg-[#202c33] hover:bg-[#2a3942] text-[#d1d7db] hover:text-white border border-white/10 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition-all"
+                  >
+                    <Building2 size={14} className="text-emerald-400" />
+                    <span>🏢 Dados da Empresa ({companyInfo?.name || 'Vincular'})</span>
+                  </button>
                 </div>
               )}
             </div>
@@ -2417,24 +3336,42 @@ export default function ChecklistTablet() {
             {!activeChecklist ? (
               <div className="flex-1 flex flex-col">
                 {/* Header Superior Mobile com Tema Escuro & Glassmorphism */}
-                <div className="bg-[#182229]/95 backdrop-blur-xl border-b border-white/15 px-5 py-4 flex items-center justify-between shadow-lg sticky top-0 z-20 gap-2">
+                <div className="bg-[#182229]/95 backdrop-blur-xl border-b border-white/15 px-4 py-3.5 flex items-center justify-between shadow-lg sticky top-0 z-20 gap-2 flex-wrap">
                   <div>
-                    <span className="text-[9px] uppercase font-bold tracking-widest text-indigo-400 block">Totem Operacional Mobile</span>
-                    <h1 className="text-xl font-black text-white tracking-tight">Meus Checklists</h1>
+                    <button
+                      type="button"
+                      onClick={() => setIsCompanyModalOpen(true)}
+                      className="text-[10px] uppercase font-black tracking-wider text-emerald-400 flex items-center gap-1 cursor-pointer"
+                    >
+                      <Building2 size={12} />
+                      <span>{companyInfo?.name || 'Empresa'}</span>
+                    </button>
+                    <h1 className="text-lg font-black text-white tracking-tight">
+                      {loggedInUser.isGeneralAccess ? '🌐 Rotinas Gerais & Equipe' : 'Meus Checklists'}
+                    </h1>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     <button
                       type="button"
                       onClick={() => setIsSectorAlarmModalOpen(true)}
-                      className="bg-amber-500/20 text-amber-300 border border-amber-500/40 text-xs px-3 py-1.5 rounded-2xl font-black flex items-center gap-1.5 shadow-md active:scale-95 cursor-pointer"
+                      className="bg-amber-500/20 text-amber-300 border border-amber-500/40 text-xs px-2.5 py-1.5 rounded-2xl font-black flex items-center gap-1 shadow-md active:scale-95 cursor-pointer"
                     >
-                      <BellRing size={13} className="text-amber-400 animate-pulse" />
+                      <BellRing size={12} className="text-amber-400 animate-pulse" />
                       <span>{totemSectorName || 'Cozinha'}</span>
                     </button>
-                    <div className="bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 text-xs px-3 py-1.5 rounded-2xl font-bold flex items-center gap-1.5 shadow-md">
-                      <User size={13} className="text-indigo-400" />
-                      <span className="truncate max-w-[90px]">{loggedInUser.name}</span>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={handleLogout}
+                      title="Trocar Colaborador ou Modo de Acesso"
+                      className={`text-xs px-2.5 py-1.5 rounded-2xl font-bold flex items-center gap-1 shadow-md border cursor-pointer ${
+                        loggedInUser.isGeneralAccess
+                          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                          : 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40'
+                      }`}
+                    >
+                      {loggedInUser.isGeneralAccess ? <Globe size={12} /> : <User size={12} />}
+                      <span className="truncate max-w-[100px]">{loggedInUser.name}</span>
+                    </button>
                   </div>
                 </div>
 
@@ -2941,13 +3878,31 @@ export default function ChecklistTablet() {
           {/* Header Superior do Totem - Consolidado, Compacto e Elegante (h-16) */}
           <div className="h-16 sm:h-18 bg-[#182229]/95 backdrop-blur-xl border-b border-white/15 px-6 sm:px-8 flex items-center justify-between shrink-0 shadow-lg relative z-20 gap-4">
             
-            {/* Lado Esquerdo: Operador Conectado */}
+            {/* Lado Esquerdo: Operador Conectado ou Login Geral + Dados da Empresa */}
             <div className="flex items-center gap-3 shrink-0">
-              <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-600 to-indigo-400 border border-white/20 flex items-center justify-center text-white font-black text-sm shadow-md">
-                {loggedInUser.name.substring(0, 1).toUpperCase()}
+              <div className={`w-10 h-10 rounded-2xl border border-white/20 flex items-center justify-center font-black text-sm shadow-md ${
+                loggedInUser.isGeneralAccess
+                  ? 'bg-gradient-to-tr from-emerald-500 to-teal-400 text-slate-950'
+                  : 'bg-gradient-to-tr from-indigo-600 to-indigo-400 text-white'
+              }`}>
+                {loggedInUser.isGeneralAccess ? <Globe size={18} /> : loggedInUser.name.substring(0, 1).toUpperCase()}
               </div>
               <div className="hidden sm:block">
-                <span className="text-[9px] uppercase font-bold tracking-wider text-[#8696a0] block leading-none">Operador Conectado</span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setIsCompanyModalOpen(true)}
+                    className="text-[9px] uppercase font-black tracking-wider text-emerald-400 hover:text-emerald-300 flex items-center gap-1 cursor-pointer leading-none"
+                    title="Ver ou Trocar Empresa Vinculada ao Tablet"
+                  >
+                    <Building2 size={11} />
+                    <span>{companyInfo?.name || 'Empresa'}</span>
+                  </button>
+                  <span className="text-[9px] text-[#8696a0]">•</span>
+                  <span className="text-[9px] uppercase font-bold tracking-wider text-[#8696a0] leading-none">
+                    {loggedInUser.isGeneralAccess ? 'Acesso Compartilhado (Sem Pessoa Exclusiva)' : 'Operador Conectado'}
+                  </span>
+                </div>
                 <h1 className="text-xs sm:text-sm font-black text-white flex items-center gap-1.5 mt-0.5 leading-tight">
                   {loggedInUser.name}
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block" />
@@ -2991,12 +3946,42 @@ export default function ChecklistTablet() {
               </div>
             ) : (
               <div className="flex-1 text-center hidden md:block">
-                <span className="text-xs font-bold text-[#8696a0]">Totem Operacional PWA</span>
+                <span className="text-xs font-bold text-[#8696a0]">
+                  Totem Operacional PWA • <strong className="text-emerald-300">{companyInfo?.name || 'Empresa'}</strong>
+                </span>
               </div>
             )}
 
-            {/* Lado Direito: Setor/Alarme, GPS, Instalar App no Tablet e Bloqueio de Tela */}
-            <div className="flex items-center gap-2.5 shrink-0">
+            {/* Lado Direito: Empresa, Login Geral, Setor/Alarme, GPS, Instalar App no Tablet e Troca de Operador */}
+            <div className="flex items-center gap-2 shrink-0">
+              {!loggedInUser.isGeneralAccess && (
+                <button
+                  type="button"
+                  onClick={handleEnterGeneralLogin}
+                  title="Alternar para o Login Geral de Funcionalidades Gerais (Sem Pessoa Exclusiva)"
+                  className="bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-xs font-black px-3 py-1.5 rounded-xl flex items-center gap-1.5 shadow-md transition-all cursor-pointer active:scale-95 shrink-0"
+                >
+                  <Globe size={14} className="text-emerald-400" />
+                  <span className="hidden lg:inline">Login Geral</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => {
+                  setCompanyModalTab('select');
+                  setIsCompanyModalOpen(true);
+                }}
+                title="Dados da Empresa e Alterar Empresa do Tablet"
+                className="bg-[#202c33] hover:bg-[#2a3942] text-emerald-300 border border-emerald-500/30 text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5 shadow-sm transition-all cursor-pointer active:scale-95 shrink-0"
+              >
+                <Building2 size={14} className="text-emerald-400" />
+                <span className="truncate max-w-[140px]">
+                  {companyInfo?.name || 'Empresa'}
+                  {availableCompanies.length > 1 ? ` (${availableCompanies.length})` : ''}
+                </span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => setIsSectorAlarmModalOpen(true)}
@@ -3037,7 +4022,7 @@ export default function ChecklistTablet() {
                 onClick={handleLogout}
                 className="bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer active:scale-95 shadow-sm"
               >
-                <Lock size={14} /> <span className="hidden sm:inline">Bloquear Tela</span>
+                <Users size={14} /> <span className="hidden sm:inline">Trocar Operador</span>
               </button>
             </div>
           </div>
@@ -3066,7 +4051,7 @@ export default function ChecklistTablet() {
                   onClick={() => {
                     setActiveTab('history');
                     setActiveChecklist(null);
-                    if (loggedInUser) loadCompletedExecutions(loggedInUser.id);
+                    if (loggedInUser) loadCompletedExecutions(loggedInUser.id, loggedInUser.isGeneralAccess);
                   }}
                   className={`flex-1 py-3 text-xs sm:text-sm font-black rounded-xl transition-all cursor-pointer ${
                     activeTab === 'history' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30' : 'text-[#8696a0] hover:text-white bg-transparent'
@@ -3078,6 +4063,48 @@ export default function ChecklistTablet() {
 
               {activeTab === 'active' ? (
                 <>
+                  {/* Card Rápido de Alterar Empresa (Exibido se o login tiver acesso a 2 ou mais empresas) */}
+                  {availableCompanies.length > 1 && (
+                    <div className="bg-[#111b21] border border-emerald-500/35 p-3 rounded-2xl space-y-2 shadow-md">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+                          <Building2 size={13} />
+                          Empresa Ativa ({availableCompanies.length} disponíveis)
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCompanyModalTab('select');
+                            setIsCompanyModalOpen(true);
+                          }}
+                          className="text-[10px] font-black text-emerald-300 hover:text-white underline cursor-pointer"
+                        >
+                          Alterar Empresa
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {availableCompanies.map((comp) => {
+                          const isCurr = comp.id === tenantId;
+                          return (
+                            <button
+                              key={comp.id}
+                              type="button"
+                              onClick={() => handleSwitchCompany(comp.id)}
+                              className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1.5 border ${
+                                isCurr
+                                  ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-black'
+                                  : 'bg-[#182229] text-[#d1d7db] border-white/10 hover:border-emerald-500/40 hover:text-white'
+                              }`}
+                            >
+                              <span>{comp.name}</span>
+                              {isCurr && <Check size={11} className="stroke-[3]" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Card de Setor do Tablet & Despertador Android */}
                   <div className="bg-gradient-to-r from-amber-950/50 via-[#1e2a30] to-indigo-950/60 border border-amber-500/35 p-3.5 rounded-2xl space-y-2.5 shadow-lg">
                     <div className="flex items-center justify-between gap-2">
@@ -3105,7 +4132,7 @@ export default function ChecklistTablet() {
                     </div>
 
                     <div className="flex items-center justify-between gap-2 pt-1 border-t border-white/10 text-[10px]">
-                      <span className="text-[#8696a0] font-bold">Filtro de exibição:</span>
+                      <span className="text-[#8696a0] font-bold">Filtro de setor:</span>
                       <div className="flex items-center gap-1">
                         <button
                           type="button"
@@ -3129,11 +4156,57 @@ export default function ChecklistTablet() {
                             !filterByTotemSector ? 'bg-indigo-500/25 text-indigo-300 border border-indigo-500/40' : 'text-[#8696a0] hover:text-white'
                           }`}
                         >
-                          Todos
+                          Toda a Empresa
                         </button>
                       </div>
                     </div>
                   </div>
+
+                  {/* Filtro de Escopo quando em Login Geral (Funcionalidades Gerais sem pessoa exclusiva) */}
+                  {loggedInUser.isGeneralAccess && (
+                    <div className="bg-[#111b21] border border-emerald-500/30 p-3 rounded-2xl space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400 flex items-center gap-1">
+                          <Globe size={12} /> Modo Geral • Sem Pessoa Exclusiva
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setGeneralScopeFilter('all')}
+                          className={`py-1.5 px-2 rounded-xl text-[10px] font-black transition-all cursor-pointer ${
+                            generalScopeFilter === 'all'
+                              ? 'bg-emerald-500 text-slate-950 shadow-sm'
+                              : 'bg-[#202c33] text-[#8696a0] hover:text-white'
+                          }`}
+                        >
+                          🌐 Todas
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setGeneralScopeFilter('general_only')}
+                          className={`py-1.5 px-2 rounded-xl text-[10px] font-black transition-all cursor-pointer ${
+                            generalScopeFilter === 'general_only'
+                              ? 'bg-emerald-500 text-slate-950 shadow-sm'
+                              : 'bg-[#202c33] text-[#8696a0] hover:text-white'
+                          }`}
+                        >
+                          👥 Gerais
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setGeneralScopeFilter('assigned')}
+                          className={`py-1.5 px-2 rounded-xl text-[10px] font-black transition-all cursor-pointer ${
+                            generalScopeFilter === 'assigned'
+                              ? 'bg-emerald-500 text-slate-950 shadow-sm'
+                              : 'bg-[#202c33] text-[#8696a0] hover:text-white'
+                          }`}
+                        >
+                          👤 Equipe
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Banner de Instalação no Tablet */}
                   <div className="bg-gradient-to-r from-indigo-950/70 via-[#1e2a30] to-purple-950/70 border border-indigo-500/30 p-3 rounded-2xl flex items-center justify-between gap-2 shadow-lg">
@@ -3156,7 +4229,9 @@ export default function ChecklistTablet() {
                     </button>
                   </div>
 
-                  <h3 className="text-xs font-black text-[#8696a0] uppercase tracking-widest px-2 mt-1">Rotinas do seu Turno</h3>
+                  <h3 className="text-xs font-black text-[#8696a0] uppercase tracking-widest px-2 mt-1">
+                    {loggedInUser.isGeneralAccess ? 'Rotinas Gerais & do Setor' : 'Rotinas do seu Turno'}
+                  </h3>
                   
                   {loadingChecklists ? (
                     <div className="p-10 text-center text-[#8696a0] animate-pulse text-sm">Carregando rotinas...</div>
@@ -3169,13 +4244,28 @@ export default function ChecklistTablet() {
                       const sectorFiltered = filterByTotemSector && totemSectorId
                         ? checklists.filter(c => doesChecklistMatchSector(c, totemSectorId, totemSectorName))
                         : checklists;
-                      const displayList = sectorFiltered.length > 0 ? sectorFiltered : checklists;
+                      const baseList = sectorFiltered.length > 0 ? sectorFiltered : checklists;
+
+                      const scopeFiltered = loggedInUser.isGeneralAccess
+                        ? baseList.filter(c => {
+                            const respCount = c.responsible_ids?.length || 0;
+                            if (generalScopeFilter === 'general_only') return respCount === 0 || respCount > 1;
+                            if (generalScopeFilter === 'assigned') return respCount === 1;
+                            return true;
+                          })
+                        : baseList;
+
+                      const displayList = scopeFiltered.length > 0 ? scopeFiltered : baseList;
 
                       return displayList.map((chk) => {
                         const isDoneToday = !!todayCompletedChecklists[chk.id];
                         const isInProg = !isDoneToday && !!inProgressExecutions[chk.id];
                         const todayData = todayCompletedChecklists[chk.id];
                         const scheduleTimes = chk.schedule_times || (chk.schedule_time ? [chk.schedule_time] : []);
+                        const respNames = (chk.responsible_ids || [])
+                          .map((rId: string) => allProfiles.find(p => p.id === rId)?.name?.split(' ')[0] || '')
+                          .filter(Boolean);
+                        const isSharedOrGeneral = respNames.length === 0 || respNames.length > 1;
 
                         return (
                           <button
@@ -3222,6 +4312,19 @@ export default function ChecklistTablet() {
                               }`}>
                                 {chk.title}
                               </h4>
+                              <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+                                <span className={`text-[10px] px-2 py-0.5 rounded-md font-bold ${
+                                  isSharedOrGeneral
+                                    ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+                                    : 'bg-white/5 text-[#8696a0] border border-white/10'
+                                }`}>
+                                  {respNames.length === 0
+                                    ? '🌐 Geral (Sem pessoa exclusiva)'
+                                    : respNames.length > 1
+                                      ? `👥 Equipe: ${respNames.join(', ')}`
+                                      : `👤 ${respNames[0]}`}
+                                </span>
+                              </div>
                             </div>
 
                             <div className="flex items-center justify-between mt-4 text-xs text-[#8696a0] pt-3 border-t border-white/10 w-full">
@@ -4051,9 +5154,10 @@ export default function ChecklistTablet() {
       </div>
       )}
 
-      {/* MODAL DE LINK EXCLUSIVO & INSTALAÇÃO DO PWA NO TABLET ANDROID */}
+      {/* MODAL DE LINKS EXCLUSIVOS & INSTALAÇÃO DOS 2 PWAs (CELULAR CHAT vs TABLET COZINHA) */}
       {isInstallModalOpen && (() => {
         const cleanOrigin = window.location.origin;
+        const mainChatMobileUrl = `${cleanOrigin}/`;
         const shortTotemUrl = `${cleanOrigin}/totem-cozinha`;
         const fullTotemUrl = `${cleanOrigin}/totem-cozinha?${tenantId ? `tenant=${encodeURIComponent(tenantId)}&` : ''}sector=${encodeURIComponent(totemSectorName || 'Cozinha')}&install=1`;
         const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data=${encodeURIComponent(fullTotemUrl)}`;
@@ -4074,18 +5178,47 @@ export default function ChecklistTablet() {
                 </div>
                 <div>
                   <span className="text-[10px] font-black uppercase tracking-widest text-amber-400 block">
-                    Rota Exclusiva Android PWA • Setor {totemSectorName || 'Cozinha'}
+                    2 Links Independentes de Instalação PWA
                   </span>
                   <h3 className="text-xl font-black text-white tracking-tight">
-                    Link & Instalador do Totem Cozinha
+                    PWA do Celular (Chat) vs. PWA do Tablet na Cozinha
                   </h3>
                   <p className="text-xs text-[#8696a0] mt-0.5">
-                    Abra o link abaixo ou escaneie o QR Code no Tablet Android da cozinha para instalar o app dedicado com despertador em segundo plano.
+                    Use o Link 1 no celular para abrir sempre o Chat Principal, e o Link 2 exclusivamente no Tablet da Cozinha.
                   </p>
                 </div>
               </div>
 
-              {/* BLOCO DO LINK EXCLUSIVO E QR CODE */}
+              {/* LINK 1: PWA PRINCIPAL DO CELULAR (CHAT & CRM) */}
+              <div className="bg-[#111b21] p-4 rounded-3xl border border-emerald-500/30 space-y-2">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <span className="text-[11px] font-black uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+                    <Smartphone size={14} />
+                    1. Link PWA para Celular (Abre a Tela Principal / Chat):
+                  </span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 font-bold border border-emerald-500/30">
+                    Uso no Celular
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 bg-[#182229] border border-white/10 rounded-xl px-3 py-2">
+                  <code className="text-xs font-mono font-bold text-emerald-300 truncate flex-1">
+                    {mainChatMobileUrl}
+                  </code>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(mainChatMobileUrl);
+                      showToast('success', '📋 Link do PWA Principal (Celular / Chat) copiado!');
+                    }}
+                    className="p-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs font-bold flex items-center gap-1 cursor-pointer shrink-0"
+                  >
+                    <Copy size={13} />
+                    <span>Copiar Link Celular</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* LINK 2: BLOCO DO LINK EXCLUSIVO DO TABLET DA COZINHA E QR CODE */}
               <div className="bg-[#111b21] p-4 sm:p-5 rounded-3xl border border-indigo-500/25 flex flex-col sm:flex-row items-center gap-5">
                 <div className="bg-white p-2.5 rounded-2xl shrink-0 shadow-lg">
                   <img
@@ -4098,17 +5231,17 @@ export default function ChecklistTablet() {
                 <div className="flex-1 w-full space-y-3">
                   <div>
                     <span className="text-[10px] font-black uppercase tracking-wider text-indigo-400 block mb-1">
-                      Link Curto (Para digitar no Chrome do Tablet Android):
+                      2. Link Exclusivo PWA do Tablet na Cozinha (Curto):
                     </span>
                     <div className="flex items-center gap-2 bg-[#182229] border border-white/10 rounded-xl px-3 py-2">
-                      <code className="text-xs font-mono font-bold text-emerald-300 truncate flex-1">
+                      <code className="text-xs font-mono font-bold text-indigo-300 truncate flex-1">
                         {shortTotemUrl}
                       </code>
                       <button
                         type="button"
                         onClick={() => {
                           navigator.clipboard.writeText(shortTotemUrl);
-                          showToast('success', '📋 Link curto copiado para a área de transferência!');
+                          showToast('success', '📋 Link do PWA do Tablet da Cozinha copiado!');
                         }}
                         className="p-1.5 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 text-xs font-bold flex items-center gap-1 cursor-pointer shrink-0"
                       >
@@ -4120,7 +5253,7 @@ export default function ChecklistTablet() {
 
                   <div>
                     <span className="text-[10px] font-black uppercase tracking-wider text-amber-400 block mb-1">
-                      Link Direto com Empresa + Setor ({totemSectorName || 'Cozinha'}):
+                      Link Completo do Tablet com Empresa + Setor ({totemSectorName || 'Cozinha'}):
                     </span>
                     <div className="flex items-center gap-2 bg-[#182229] border border-white/10 rounded-xl px-3 py-2">
                       <code className="text-[11px] font-mono text-[#d1d7db] truncate flex-1">
@@ -4694,6 +5827,310 @@ export default function ChecklistTablet() {
                   setActiveAlarmModal(null);
                 }}
                 className="bg-[#202c33] hover:bg-[#2a3942] text-[#8696a0] hover:text-white font-bold text-xs sm:text-sm py-4 px-4 rounded-2xl border border-white/10 transition-all cursor-pointer"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================
+          MODAL DE DADOS DA EMPRESA, VÍNCULO DO TABLET & LOGIN CORPORATIVO
+         ======================================================================== */}
+      {isCompanyModalOpen && (
+        <div
+          className="fixed inset-0 z-[9998] bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 overflow-y-auto animate-fade-in"
+          onClick={() => setIsCompanyModalOpen(false)}
+        >
+          <div
+            className="bg-[#182229] border border-emerald-500/35 w-full max-w-2xl max-h-[92vh] rounded-3xl overflow-hidden shadow-2xl shadow-black/80 flex flex-col relative"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header do Modal */}
+            <div className="p-5 sm:p-6 bg-gradient-to-r from-emerald-500/15 via-teal-500/10 to-transparent border-b border-white/10 flex items-center justify-between gap-4 shrink-0">
+              <div className="flex items-center gap-3.5">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-slate-950 shadow-lg shadow-emerald-500/30 shrink-0">
+                  <Building2 size={24} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-lg sm:text-xl font-black text-white tracking-tight">
+                      Dados da Empresa & Vínculo do Tablet
+                    </h3>
+                    {companyInfo && (
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                        Ativa: {companyInfo.name}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-[#8696a0] mt-0.5">
+                    Vincule o tablet à empresa desejada para carregar seus colaboradores, unidades, setores e rotinas.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsCompanyModalOpen(false)}
+                className="p-2 rounded-full bg-white/5 hover:bg-white/15 text-[#8696a0] hover:text-white transition-colors cursor-pointer shrink-0"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Resumo da Empresa Ativa no Tablet */}
+            {companyInfo && (
+              <div className="mx-5 sm:mx-6 mt-5 p-4 rounded-2xl bg-[#111b21] border border-emerald-500/30 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div>
+                  <span className="text-[10px] font-bold uppercase text-[#8696a0] block">Empresa Vinculada</span>
+                  <span className="text-sm font-black text-white truncate block">{companyInfo.name}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold uppercase text-[#8696a0] block">Unidade / Setor</span>
+                  <span className="text-xs font-bold text-amber-300 truncate block">
+                    {unitsList[0]?.name || companyInfo.unitName || 'Principal'} • {totemSectorName || 'Cozinha'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold uppercase text-[#8696a0] block">Colaboradores</span>
+                  <span className="text-sm font-black text-emerald-400 font-mono">{operators.length} ativos</span>
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold uppercase text-[#8696a0] block">Checklists Ativos</span>
+                  <span className="text-sm font-black text-indigo-400 font-mono">
+                    {allTenantChecklists.length || companyInfo.checklistsCount || 0} rotinas
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Abas: Selecionar/Alterar Empresa vs Autenticar com Google / E-mail & Senha */}
+            <div className="px-5 sm:px-6 pt-4 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setCompanyModalTab('select')}
+                className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-2 border ${
+                  companyModalTab === 'select'
+                    ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow-lg shadow-emerald-500/20'
+                    : 'bg-[#111b21] text-[#8696a0] border-white/10 hover:text-white'
+                }`}
+              >
+                <Building2 size={15} />
+                <span>
+                  {availableCompanies.length > 1
+                    ? `Alterar Empresa (${availableCompanies.length})`
+                    : `Selecionar Empresa (${availableCompanies.length})`}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setCompanyModalTab('login')}
+                className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-2 border ${
+                  companyModalTab === 'login'
+                    ? 'bg-indigo-600 text-white border-indigo-400 shadow-lg shadow-indigo-600/20'
+                    : 'bg-[#111b21] text-[#8696a0] border-white/10 hover:text-white'
+                }`}
+              >
+                <KeyRound size={15} />
+                <span>Autenticar (Google / E-mail & Senha)</span>
+              </button>
+            </div>
+
+            {/* Conteúdo do Modal */}
+            <div className="p-5 sm:p-6 overflow-y-auto space-y-4 flex-1">
+              {companyAuthSuccessMsg && (
+                <div className="p-3.5 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-200 text-xs font-bold flex items-start gap-2.5">
+                  <CheckCircle2 size={18} className="text-emerald-400 shrink-0 mt-0.5" />
+                  <span>{companyAuthSuccessMsg}</span>
+                </div>
+              )}
+
+              {companyModalTab === 'select' ? (
+                <div className="space-y-3">
+                  {availableCompanies.length > 1 && (
+                    <div className="p-3 rounded-xl bg-[#111b21] border border-emerald-500/30 flex items-center justify-between gap-2 flex-wrap">
+                      <span className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
+                        <RefreshCw size={14} />
+                        Seu login possui acesso a {availableCompanies.length} empresas. Toque em qualquer empresa abaixo para alternar:
+                      </span>
+                      {authenticatedCompanyEmail && (
+                        <span className="text-[11px] text-[#8696a0] font-mono">
+                          {authenticatedCompanyEmail}
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {availableCompanies.map((comp) => {
+                    const isSelected = comp.id === tenantId;
+                    return (
+                      <div
+                        key={comp.id}
+                        onClick={() => handleSwitchCompany(comp.id)}
+                        className={`p-4 rounded-2xl border transition-all cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                          isSelected
+                            ? 'bg-emerald-500/15 border-emerald-500 shadow-lg shadow-emerald-500/10'
+                            : 'bg-[#111b21] border-white/10 hover:border-emerald-500/40'
+                        }`}
+                      >
+                        <div className="space-y-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-black text-base text-white">{comp.name}</span>
+                            {isSelected && (
+                              <span className="px-2 py-0.5 rounded-full bg-emerald-500 text-slate-950 text-[10px] font-black uppercase">
+                                ✓ Empresa Ativa no Tablet
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-3 text-xs text-[#8696a0] flex-wrap">
+                            {comp.unitName && <span>📍 Unidade: <strong className="text-[#d1d7db]">{comp.unitName}</strong></span>}
+                            <span>👥 <strong className="text-emerald-300">{comp.collaboratorsCount}</strong> colaboradores</span>
+                            <span>📋 <strong className="text-indigo-300">{comp.checklistsCount}</strong> rotinas ativas</span>
+                            {comp.email && <span className="truncate">✉️ {comp.email}</span>}
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleSwitchCompany(comp.id);
+                          }}
+                          className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all cursor-pointer shrink-0 ${
+                            isSelected
+                              ? 'bg-emerald-500 text-slate-950'
+                              : 'bg-[#202c33] hover:bg-emerald-500 hover:text-slate-950 text-white border border-emerald-500/30'
+                          }`}
+                        >
+                          {isSelected ? '✓ Empresa Ativa' : '🔄 Alterar para esta Empresa'}
+                        </button>
+                      </div>
+                    );
+                  })}
+
+                  {/* Rodapé rápido na aba de seleção para autenticar com Google ou outra conta */}
+                  <div className="p-4 rounded-2xl bg-[#111b21]/80 border border-white/10 flex flex-col sm:flex-row items-center justify-between gap-3">
+                    <div className="text-xs text-[#8696a0]">
+                      Deseja conectar outra conta corporativa ou entrar com o Google?
+                    </div>
+                    <div className="flex items-center gap-2 w-full sm:w-auto">
+                      <button
+                        type="button"
+                        onClick={handleGoogleCompanyLogin}
+                        disabled={companyAuthLoading}
+                        className="flex-1 sm:flex-initial bg-white hover:bg-slate-100 text-slate-900 font-black text-xs px-3.5 py-2 rounded-xl flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer"
+                      >
+                        <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+                          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+                          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+                        </svg>
+                        <span>Entrar com o Google</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCompanyModalTab('login')}
+                        className="bg-indigo-600/25 hover:bg-indigo-600/40 text-indigo-200 border border-indigo-500/40 font-bold text-xs px-3.5 py-2 rounded-xl transition-all cursor-pointer"
+                      >
+                        E-mail & Senha
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-[#111b21] border border-white/10 rounded-2xl p-5 space-y-4">
+                  <div>
+                    <h4 className="text-sm font-black text-white">Autenticar Conta Corporativa no Tablet</h4>
+                    <p className="text-xs text-[#8696a0] mt-0.5">
+                      Entre com sua conta do Google ou informe o e-mail e a senha da empresa. Se seu login tiver acesso a duas ou mais empresas, você poderá alternar entre elas livremente.
+                    </p>
+                  </div>
+
+                  {companyAuthError && (
+                    <div className="p-3 rounded-xl bg-rose-500/20 border border-rose-500/40 text-rose-200 text-xs font-bold">
+                      {companyAuthError}
+                    </div>
+                  )}
+
+                  {/* Botão Oficial de Login com o Google */}
+                  <button
+                    type="button"
+                    onClick={handleGoogleCompanyLogin}
+                    disabled={companyAuthLoading}
+                    className="w-full py-3.5 px-4 rounded-xl bg-white hover:bg-slate-100 text-slate-900 font-black text-sm shadow-lg flex items-center justify-center gap-3 transition-all cursor-pointer active:scale-95"
+                  >
+                    <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
+                      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+                      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+                    </svg>
+                    <span>Entrar com o Google</span>
+                  </button>
+
+                  <div className="flex items-center gap-3 py-1">
+                    <div className="h-px bg-white/10 flex-1" />
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-[#8696a0]">
+                      ou autentique com e-mail e senha
+                    </span>
+                    <div className="h-px bg-white/10 flex-1" />
+                  </div>
+
+                  <form onSubmit={handleAuthenticateCompanyLogin} className="space-y-4">
+                    <div className="space-y-3">
+                      <div>
+                        <label className="text-xs font-bold text-[#d1d7db] block mb-1">E-mail da Empresa</label>
+                        <input
+                          type="email"
+                          value={companyAuthEmail}
+                          onChange={(e) => setCompanyAuthEmail(e.target.value)}
+                          placeholder="ex: ronaldo.xpointsolucoes@gmail.com"
+                          className="w-full bg-[#182229] border border-white/15 focus:border-emerald-500 rounded-xl px-4 py-3 text-sm text-white outline-none"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-bold text-[#d1d7db] block mb-1">Senha Corporativa</label>
+                        <input
+                          type="password"
+                          value={companyAuthPassword}
+                          onChange={(e) => setCompanyAuthPassword(e.target.value)}
+                          placeholder="••••••••"
+                          className="w-full bg-[#182229] border border-white/15 focus:border-emerald-500 rounded-xl px-4 py-3 text-sm text-white outline-none"
+                          required
+                        />
+                      </div>
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={companyAuthLoading}
+                      className="w-full py-3.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-sm shadow-lg shadow-emerald-500/25 cursor-pointer transition-all"
+                    >
+                      {companyAuthLoading ? 'Autenticando e Vinculando Empresa...' : '🔐 Autenticar e Carregar Empresas / Colaboradores'}
+                    </button>
+                  </form>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 sm:p-5 bg-[#111b21] border-t border-white/10 flex items-center justify-between gap-3 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsCompanyModalOpen(false);
+                  handleEnterGeneralLogin();
+                }}
+                className="px-4 py-2.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/35 font-black text-xs flex items-center gap-2 cursor-pointer transition-all"
+              >
+                <Globe size={15} />
+                <span>🌐 Entrar no Login Geral desta Empresa</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsCompanyModalOpen(false)}
+                className="px-5 py-2.5 rounded-xl bg-[#202c33] hover:bg-[#2a3942] text-white font-bold text-xs border border-white/10 transition-all cursor-pointer"
               >
                 Fechar
               </button>

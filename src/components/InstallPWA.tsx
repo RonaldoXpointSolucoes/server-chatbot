@@ -38,6 +38,15 @@ export function InstallPWA() {
     if (!promptInstall) {
       return;
     }
+
+    // Garante que a instalação na rota principal mantenha sempre o manifesto do Chat (Celular)
+    try {
+      localStorage.removeItem('totem_standalone_mode');
+      const manifestLink = document.querySelector('link[rel="manifest"]');
+      if (manifestLink) {
+        manifestLink.setAttribute('href', '/manifest.webmanifest');
+      }
+    } catch (_) {}
     
     // Mostra o prompt nativo
     await promptInstall.prompt();
@@ -53,7 +62,13 @@ export function InstallPWA() {
     localStorage.setItem('pwa-prompt-dismissed', 'true');
   };
 
-  if (!supportsPWA || isDismissed) {
+  const currentPath = typeof window !== 'undefined' ? window.location.pathname.toLowerCase() : '';
+  const isTotemRoute =
+    currentPath.startsWith('/totem-cozinha') ||
+    currentPath.startsWith('/totem') ||
+    currentPath.startsWith('/checklist/tablet');
+
+  if (!supportsPWA || isDismissed || isTotemRoute) {
     return null;
   }
 
@@ -79,10 +94,10 @@ export function InstallPWA() {
           
           <div className="flex-1 pt-1">
             <h3 className="text-lg font-semibold text-slate-900 dark:text-white leading-tight mb-1">
-              Testar App Offline?
+              Instalar ChatBoot no Celular?
             </h3>
             <p className="text-sm text-slate-600 dark:text-slate-300 mb-4">
-              Instale o ChatBoot para um acesso mais rápido, envio offline de mensagens e notificações.
+              Instale o aplicativo principal de atendimento e chat no celular para acesso rápido e notificações.
             </p>
             
             <div className="flex gap-3">
@@ -95,7 +110,7 @@ export function InstallPWA() {
                 ].filter(Boolean).join(" ")}
               >
                 <Download className="w-4 h-4" />
-                Instalar App
+                Instalar App Principal (Chat)
               </button>
             </div>
           </div>

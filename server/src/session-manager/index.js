@@ -171,6 +171,9 @@ class SessionManager {
         this.reconnectingCoolingDown = new Map();
         this.connectionLocks = new Set();
         this.connectingSessions = new Set();
+        this.activeInitSlots = 0;
+        this.maxConcurrentInits = 3;
+        this.initSlotQueue = [];
 
         // Pino stream configurado para enviar logs para nosso SSE e para o stdout
         const pinoStream = {
@@ -303,21 +306,24 @@ class SessionManager {
                         }
                     }
 
-                    // Limpa e auto-reconecta sockets zumbis confirmados
-                    for (const z of zombieEntries) {
-                        console.warn(`[SessionManager/Heartbeat] Detectado socket zumbi sem WebSocket aberto para ${z.id}. Destruindo sessão e reconectando...`);
+                    // Limpa e auto-reconecta sockets zumbis confirmados (máximo 3 por ciclo com escalonamento para evitar Thundering Herd)
+                    const zombiesBatch = zombieEntries.slice(0, 3);
+                    for (let zIdx = 0; zIdx < zombiesBatch.length; zIdx++) {
+                        const z = zombiesBatch[zIdx];
+                        console.log(`[SessionManager/Heartbeat] Detectado socket zumbi sem WebSocket aberto para ${z.id}. Reciclando sessão e reconectando...`);
                         const wasAuth = this.authenticatedSessions.has(z.id);
                         this.destroyExistingSession(z.id, 'zombie_heartbeat').catch(() => {});
                         if (z.tenantId && wasAuth && !isLocalDev) {
                             this.reconnectingCoolingDown.set(z.id, Date.now());
+                            const staggerDelayMs = 3000 + (zIdx * 4000) + Math.floor(Math.random() * 1500);
                             const timer = setTimeout(() => {
                                 this.reconnectingTimers.delete(z.id);
                                 if (!this.sessions.has(z.id)) {
                                     this.createSession(z.tenantId, z.id, true).catch(err => {
-                                        console.error(`[SessionManager/Heartbeat] Erro na auto-reconexão pós-zumbi para ${z.id}:`, err.message);
+                                        console.log(`[SessionManager/Heartbeat] Aviso na auto-reconexão pós-zumbi para ${z.id}: ${err.message}`);
                                     });
                                 }
-                            }, 3000);
+                            }, staggerDelayMs);
                             this.reconnectingTimers.set(z.id, timer);
                         }
                     }
@@ -517,24 +523,6 @@ class SessionManager {
                         continue;
                     }
 
-                    // CORREÇÃO DE FALSO POSITIVO ('connected' sem socket aberto na RAM):
-                    // Só rebaixa se a instância NÃO estiver na RAM deste nó, não estiver conectando/com timer ativo,
-                    // e (pertencer a este nó OU estiver sem lease há mais de 3 minutos).
-                    const isTrulyOrphaned = !hasSessionInRam && !isConnecting && !hasActiveTimer && (isAssignedToThisNode || (!inst.lease_until || (now - leaseExpiry > 180000)));
-                    if (inst.status === 'connected' && isTrulyOrphaned) {
-                        console.warn(`[SessionManager/AutoHealing] ⚠️ Instância ${inst.id} constava como 'connected' no banco mas está sem sessão ativa na RAM. Corrigindo status para 'connecting'...`);
-                        inst.status = 'connecting';
-                        try {
-                            await supabase.from('whatsapp_instances')
-                                .update({
-                                    status: 'connecting',
-                                    last_error: 'Conexão interrompida. Reconectando automaticamente...',
-                                    updated_at: new Date().toISOString()
-                                })
-                                .eq('id', inst.id);
-                        } catch (_) {}
-                    }
-
                     const lastHeal = this.autoHealingCooldowns.get(inst.id) || 0;
                     const lastCooldown = this.reconnectingCoolingDown.get(inst.id) || 0;
                     const failCount = this.autoHealingFailures.get(inst.id) || 0;
@@ -557,6 +545,22 @@ class SessionManager {
 
                     if (hasSessionInRam && isWsOpen) {
                         continue;
+                    }
+
+                    // CORREÇÃO DE FALSO POSITIVO ('connected' sem socket aberto na RAM após janelas de cooldown):
+                    const isTrulyOrphaned = !hasSessionInRam && !isConnecting && !hasActiveTimer && (isAssignedToThisNode || (!inst.lease_until || (now - leaseExpiry > 180000)));
+                    if (inst.status === 'connected' && isTrulyOrphaned) {
+                        console.log(`[SessionManager/AutoHealing] Instância ${inst.id} constava como 'connected' no banco mas está sem sessão ativa na RAM. Sincronizando status para 'connecting'...`);
+                        inst.status = 'connecting';
+                        try {
+                            await supabase.from('whatsapp_instances')
+                                .update({
+                                    status: 'connecting',
+                                    last_error: 'Conexão interrompida. Reconectando automaticamente...',
+                                    updated_at: new Date().toISOString()
+                                })
+                                .eq('id', inst.id);
+                        } catch (_) {}
                     }
 
                     // Se a instância está na RAM deste nó mas WS está fechado, valida se não é apenas uma oscilação recente
@@ -734,7 +738,7 @@ class SessionManager {
             return await Promise.race([
                 instanceMutexStorage.run(nextStore, () => action()),
                 new Promise((_, reject) => {
-                    actionTimer = setTimeout(() => reject(new Error(`Timeout no mutex de inicialização da instância ${instanceId} (45s)`)), 45000);
+                    actionTimer = setTimeout(() => reject(new Error(`Timeout no mutex de inicialização da instância ${instanceId} (120s)`)), 120000);
                 })
             ]);
         } finally {
@@ -994,6 +998,46 @@ class SessionManager {
         );
     }
 
+    async runWithGlobalInitSlot(instanceId, fn) {
+        if (this.activeInitSlots < this.maxConcurrentInits) {
+            this.activeInitSlots++;
+        } else {
+            await new Promise((resolve) => {
+                const safetyTimer = setTimeout(() => {
+                    const idx = this.initSlotQueue.indexOf(wake);
+                    if (idx !== -1) this.initSlotQueue.splice(idx, 1);
+                    this.activeInitSlots++;
+                    resolve();
+                }, 75000);
+                const wake = () => {
+                    clearTimeout(safetyTimer);
+                    resolve();
+                };
+                this.initSlotQueue.push(wake);
+            });
+        }
+
+        let initTimeout = null;
+        try {
+            return await Promise.race([
+                fn(),
+                new Promise((_, reject) => {
+                    initTimeout = setTimeout(() => {
+                        reject(new Error(`Timeout ao inicializar sessão Baileys para ${instanceId} (45s)`));
+                    }, 45000);
+                })
+            ]);
+        } finally {
+            if (initTimeout) clearTimeout(initTimeout);
+            if (this.initSlotQueue.length > 0) {
+                const nextWake = this.initSlotQueue.shift();
+                nextWake();
+            } else {
+                this.activeInitSlots = Math.max(0, this.activeInitSlots - 1);
+            }
+        }
+    }
+
     async startSession(tenantId, instanceId, force = false) {
         return this.createSession(tenantId, instanceId, force);
     }
@@ -1053,23 +1097,15 @@ class SessionManager {
 
             console.log(`[SessionManager] Iniciando sessão para Instance: ${instanceId} | Tenant: ${tenantId} | Force: ${force}`);
 
-            let initTimeout = null;
-            const innerPromise = instanceMutexStorage.exit(() => this._createSessionInner(tenantId, instanceId, force));
-            const promise = Promise.race([
-                innerPromise,
-                new Promise((_, reject) => {
-                    initTimeout = setTimeout(() => {
-                        reject(new Error(`Timeout ao inicializar sessão Baileys para ${instanceId} (45s)`));
-                    }, 45000);
-                })
-            ]);
+            const promise = instanceMutexStorage.exit(() =>
+                this.runWithGlobalInitSlot(instanceId, () => this._createSessionInner(tenantId, instanceId, force))
+            );
             this.connectingState.set(instanceId, promise);
             this.connectingStateStartedAt.set(instanceId, Date.now());
             
             try {
                 return await promise;
             } finally {
-                if (initTimeout) clearTimeout(initTimeout);
                 if (this.connectingState.get(instanceId) === promise) {
                     this.connectingState.delete(instanceId);
                     this.connectingStateStartedAt.delete(instanceId);
@@ -1348,20 +1384,20 @@ class SessionManager {
 
                 if (update.connection === 'close') {
                     this.reconnectingCoolingDown.set(instanceId, Date.now());
-                }
-
-                let connUpdateTimer = null;
-                try {
-                    await Promise.race([
-                        eventProcessor.handleConnectionUpdate(tenantId, instanceId, safeUpdate),
-                        new Promise(resolve => {
-                            connUpdateTimer = setTimeout(resolve, 8000);
-                        })
-                    ]);
-                } catch (e) {
-                    console.warn(`[SessionManager] Erro não-fatal em handleConnectionUpdate (${instanceId}):`, e?.message || e);
-                } finally {
-                    if (connUpdateTimer) clearTimeout(connUpdateTimer);
+                } else {
+                    let connUpdateTimer = null;
+                    try {
+                        await Promise.race([
+                            eventProcessor.handleConnectionUpdate(tenantId, instanceId, safeUpdate),
+                            new Promise(resolve => {
+                                connUpdateTimer = setTimeout(resolve, 8000);
+                            })
+                        ]);
+                    } catch (e) {
+                        console.warn(`[SessionManager] Erro não-fatal em handleConnectionUpdate (${instanceId}):`, e?.message || e);
+                    } finally {
+                        if (connUpdateTimer) clearTimeout(connUpdateTimer);
+                    }
                 }
 
                 if (this.sessions.get(instanceId)?.sock !== sock) return;
@@ -1534,9 +1570,16 @@ class SessionManager {
                     }
 
                     const reasonLower = (reason || '').toLowerCase();
-                    const isAckOrTransient401 = status === 401 && (reasonLower.includes('ack') || reasonLower.includes('bad session') || reasonLower.includes('decrypt') || reasonLower.includes('closed session'));
-                    const loggedOut = status === DisconnectReason.loggedOut && !isAckOrTransient401;
                     const isConflict = status === 440 || status === DisconnectReason.connectionReplaced || status === 409 || reasonLower.includes('conflict') || reasonLower.includes('replaced');
+                    const isAckOrTransient401 = status === 401 && (
+                        isConflict ||
+                        reasonLower.includes('ack') ||
+                        reasonLower.includes('bad session') ||
+                        reasonLower.includes('decrypt') ||
+                        reasonLower.includes('closed session') ||
+                        reasonLower.includes('stream errored')
+                    );
+                    const loggedOut = status === DisconnectReason.loggedOut && !isAckOrTransient401 && !isConflict;
                     const isBlocked12h = reasonLower.includes('blocked') || reasonLower.includes('12h') || status === 410 || status === 429;
                     const isForbidden = (status === 403 || reasonLower.includes('forbidden')) && status !== 503 && status !== 502 && status !== 504;
 
@@ -1609,7 +1652,7 @@ class SessionManager {
 
                     await this.logConnectionEvent(tenantId, instanceId, 'disconnected', 'close', reason || `status_${status}`, null, null);
 
-                    const isExplicitLogout = loggedOut || (status === 401 && reason.toLowerCase().includes('logged out'));
+                    const isExplicitLogout = !isConflict && (loggedOut || (status === 401 && !isAckOrTransient401 && reasonLower.includes('logged out')));
 
                     if (isExplicitLogout) {
                         console.log(`[SessionManager] Desconexão/Logout explícito pelo celular detectado na instância ${instanceId} (status: ${status}, reason: ${reason}). Limpando credenciais em RAM e Supabase.`);
@@ -1629,7 +1672,7 @@ class SessionManager {
                         // Publica evento de status offline para o frontend
                         await eventProcessor.handleConnectionUpdate(tenantId, instanceId, { 
                             connection: 'close', 
-                            lastDisconnect: { error: { output: { statusCode: status || 401 } } } 
+                            lastDisconnect: { error: { message: errMsg, output: { statusCode: status || 401 } } } 
                         });
                     } else if (isBlocked12h && isFullyAuthenticated) {
                         console.error(`[SessionManager] Instância ${instanceId} está BLOQUEADA por 12h no WhatsApp.`);
@@ -2827,18 +2870,19 @@ class SessionManager {
                     console.log(`[SessionManager/Watchdog] Instância ${instanceId} com WebSocket encerrado (isOpen: ${ws.isOpen}, isClosed: ${ws.isClosed}, rawState: ${rawState}). Reciclando socket e reconectando...`);
                     this.clearWatchdog(instanceId);
                     this.destroyExistingSession(instanceId, 'watchdog_ws_closed').catch(() => {});
+                    const reconnectDelayMs = 2500 + Math.floor(Math.random() * 5000);
                     const timer = setTimeout(() => {
                         this.reconnectingTimers.delete(instanceId);
                         if (!this.sessions.has(instanceId)) {
                             this.createSession(tenantId, instanceId, true).catch(err => {
-                                console.error(`[SessionManager/Watchdog] Erro ao reconectar ${instanceId}:`, err.message);
+                                console.log(`[SessionManager/Watchdog] Aviso ao reconectar ${instanceId}: ${err.message}`);
                             });
                         }
-                    }, 2000);
+                    }, reconnectDelayMs);
                     this.reconnectingTimers.set(instanceId, timer);
                 }
             }
-        }, 30000);
+        }, 30000 + Math.floor(Math.random() * 6000));
         
         this.watchdogs.set(instanceId, { interval, sock });
     }

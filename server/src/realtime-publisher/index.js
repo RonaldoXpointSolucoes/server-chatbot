@@ -19,13 +19,13 @@ class RealtimePublisher {
   }
 
   publishInstanceEvent(tenantId, instanceId, eventType, payload) {
-    if (!tenantId || !instanceId) return Promise.resolve();
-    return this.enqueue(`tenant:${tenantId}:instance:${instanceId}`, eventType, payload);
+    if (!tenantId || !instanceId) return Promise.resolve(false);
+    return this.enqueue(`tenant:${tenantId}:instance:${instanceId}`, eventType, payload).catch(() => false);
   }
 
   publishInboxEvent(tenantId, eventType, payload) {
-    if (!tenantId) return Promise.resolve();
-    return this.enqueue(`tenant:${tenantId}:inbox`, eventType, payload);
+    if (!tenantId) return Promise.resolve(false);
+    return this.enqueue(`tenant:${tenantId}:inbox`, eventType, payload).catch(() => false);
   }
 
   enqueue(channelName, eventType, payload) {
@@ -39,20 +39,22 @@ class RealtimePublisher {
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         await sendBroadcastHttp(this.getChannel(channelName), eventType, payload);
-        return;
+        return true;
       } catch (error) {
-        const message = error.message || String(error);
-        const isNetworkError = error.name === 'AbortError' || /aborted|timeout|fetch failed/i.test(message);
-        const isGatewayError = error.status >= 500 || /Bad Gateway|502|503|504|Gateway Timeout/i.test(message);
-        if ((isNetworkError || isGatewayError) && attempt < maxAttempts) {
-          await new Promise(resolve => setTimeout(resolve, 500 * Math.pow(2, attempt - 1)));
+        const message = error?.message || String(error);
+        const isNetworkError = error?.name === 'AbortError' || /aborted|timeout|fetch failed/i.test(message);
+        const isGatewayError = error?.status >= 500 || /Bad Gateway|502|503|504|520|522|524|Gateway Timeout/i.test(message);
+        const isTransientRealtimeError = /Tenant not found in database|Realtime is restarting|Unable to connect/i.test(message);
+        if ((isNetworkError || isGatewayError || isTransientRealtimeError) && attempt < maxAttempts) {
+          await new Promise(resolve => setTimeout(resolve, 600 * Math.pow(2, attempt - 1)));
           continue;
         }
-        console.warn(`[RealtimePublisher/Supabase] Falha ao publicar ${eventType}; evento persistente pode ser atualizado pelo banco. ${message}`);
-        // Always settle the caller; a failed request must release its dispatch slot.
-        throw error;
+        console.log(`[RealtimePublisher/Supabase] Broadcast HTTP ${eventType} ignorado após oscilação (${message}); sincronização garantida via banco.`);
+        // Resolve gracefully so callers (e.g. BatchProcessor.flushQueue) never abort message processing on transient Realtime hiccups.
+        return false;
       }
     }
+    return false;
   }
 }
 

@@ -20,6 +20,45 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.0.7',
+    date: '2026-11-05',
+    summary: 'Separação de Links PWA (Chat no Celular vs Totem Cozinha no Tablet), Semáforo Anti-Thundering Herd nas Reconexões Baileys e Blindagem de Conflitos Transitórios',
+    notes: [
+      {
+        id: '8.0.7-1',
+        category: 'features',
+        title: 'Separação Completa de Instalação PWA: Chat no Celular vs Totem Cozinha no Tablet',
+        description: 'O link principal do sistema agora instala e abre sempre o painel principal de Chat no celular (start_url: /), enquanto o link dedicado /totem-cozinha instala o PWA exclusivo da Cozinha com botão de compartilhamento/cópia rápida do link com tenant e setor.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '8.0.7-2',
+        category: 'improvements',
+        title: 'Semáforo Global de Reconexão Baileys (Anti-Thundering Herd) e Escalonamento de Watchdog/Heartbeat',
+        description: 'Implementado controle de concorrência global (máximo 3 inicializações simultâneas com escalonamento) no SessionManager, eliminando timeouts de 45s quando múltiplas caixas reconectam após oscilações de rede.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-sky-500/20 text-sky-300 border-sky-500/30'
+      },
+      {
+        id: '8.0.7-3',
+        category: 'fixes',
+        title: 'Roteamento Direto por Nó Proprietário e Prevenção de Falso Logout em Conflitos de Stream',
+        description: 'O envio de mensagens agora roteia diretamente para o nó proprietário ativo da caixa (Alpha ou Produção) sem aguardar timeout na fila, e oscilações Stream Errored (conflict) preservam as credenciais sem gerar falso alerta de logout.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      },
+      {
+        id: '8.0.7-4',
+        category: 'fixes',
+        title: 'Resiliência no BatchProcessor/Realtime, SnoozeManager e Limpeza de Push Inválido no Checklist',
+        description: 'Isoladas oscilações do Supabase Realtime para nunca interromperem lotes de mensagens, tratada oscilação de timeout no SnoozeManager via CircuitBreaker e automatizada a remoção de inscrições Web Push expiradas (HTTP 400/410) no alarme do Totem.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      }
+    ]
+  },
+  {
     version: '8.0.6',
     date: '2026-11-03',
     summary: 'Hotfix de Renderização ao Abrir Conversas (Importação do Ícone Bell e Ação de Troca de Canal no Banner Mobile)',

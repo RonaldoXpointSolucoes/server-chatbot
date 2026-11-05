@@ -1391,7 +1391,7 @@ export default function DevLogger() {
         msg.includes('interrompendo loop de reconexão') ||
         msg.includes('Caixa FoodNext não está conectada') ||
         msg.includes('Falha 404: Instância') ||
-        msg.includes('Chave de API Gemini personalizada ignorada') || msg.includes('WhatsApp solicitou reinicialização/estabilização de socket') || msg.includes('Desativando e destruindo socket anterior') || msg.includes('Oscilação temporária / timeout de conexão com servidores WhatsApp') || msg.includes('Oscilação transitória na fila de escrita') || msg.includes('Auth writeQueue operation timed out') || msg.includes('failed to sync regular_') || msg.includes('invalid wire type') || msg.includes('Supabase Node CircuitBreaker') || msg.includes('Aviso ao gravar wa_incoming_messages') || msg.includes('Contato não validado no banco') || msg.includes('Inserção de novos contatos em lote') || msg.includes('Contato não pôde ser inserido nem recuperado') || msg.includes('Erro ao buscar instâncias válidas') || (msg.includes('Erro ao buscar config da instância') && msg.includes('TimeoutError'))
+        msg.includes('Chave de API Gemini personalizada ignorada') || msg.includes('WhatsApp solicitou reinicialização/estabilização de socket') || msg.includes('Desativando e destruindo socket anterior') || msg.includes('Oscilação temporária / timeout de conexão com servidores WhatsApp') || msg.includes('Oscilação transitória na fila de escrita') || msg.includes('Auth writeQueue operation timed out') || msg.includes('failed to sync regular_') || msg.includes('invalid wire type') || msg.includes('Supabase Node CircuitBreaker') || msg.includes('Aviso ao gravar wa_incoming_messages') || msg.includes('Contato não validado no banco') || msg.includes('Inserção de novos contatos em lote') || msg.includes('Contato não pôde ser inserido nem recuperado') || msg.includes('Erro ao buscar instâncias válidas') || (msg.includes('Erro ao buscar config da instância') && msg.includes('TimeoutError')) || msg.includes('Restabelecendo o socket com as credenciais preservadas') || msg.includes('Stream Errored') || msg.includes('[handleMicClick]') || msg.includes("constava como 'connected' no banco mas está sem sessão ativa na RAM") || msg.includes('[SnoozeManager] Erro ao buscar conversas expiradas: TimeoutError') || msg.includes('Timeout ao inicializar sessão Baileys para') || msg.includes('[RealtimePublisher/Supabase] Falha ao publicar') || msg.includes('Tenant not found in database') || msg.includes('[PushService/ChecklistAlarm] Falha no envio push (400)')
       );
     };
 
@@ -1560,6 +1560,12 @@ export default function DevLogger() {
           msg.includes('invalid wire type') ||
           msg.includes('[forwardMessage]') ||
           msg.includes('[handleMicClick]') ||
+          msg.includes("constava como 'connected' no banco mas está sem sessão ativa na RAM") ||
+          msg.includes('[SnoozeManager] Erro ao buscar conversas expiradas: TimeoutError') ||
+          msg.includes('Timeout ao inicializar sessão Baileys para') ||
+          msg.includes('[RealtimePublisher/Supabase] Falha ao publicar') ||
+          msg.includes('Tenant not found in database') ||
+          msg.includes('[PushService/ChecklistAlarm] Falha no envio push (400)') ||
           msg.includes('Supabase Node CircuitBreaker') ||
           msg.includes('Aviso ao gravar wa_incoming_messages') ||
           msg.includes('Contato não validado no banco') ||
@@ -1879,6 +1885,12 @@ export default function DevLogger() {
           msg.includes('invalid wire type') ||
           msg.includes('[forwardMessage]') ||
           msg.includes('[handleMicClick]') ||
+          msg.includes("constava como 'connected' no banco mas está sem sessão ativa na RAM") ||
+          msg.includes('[SnoozeManager] Erro ao buscar conversas expiradas: TimeoutError') ||
+          msg.includes('Timeout ao inicializar sessão Baileys para') ||
+          msg.includes('[RealtimePublisher/Supabase] Falha ao publicar') ||
+          msg.includes('Tenant not found in database') ||
+          msg.includes('[PushService/ChecklistAlarm] Falha no envio push (400)') ||
           msg.includes('Supabase Node CircuitBreaker') ||
           msg.includes('Aviso ao gravar wa_incoming_messages') ||
           msg.includes('Contato não validado no banco') ||

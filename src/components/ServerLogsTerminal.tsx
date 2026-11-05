@@ -40,6 +40,17 @@ const isSpamLog = (msg: string) => {
   if (msg.includes('Closing session:') || msg.includes('Closing session in favor of')) return true;
   if (msg.includes('QR Code ou pareamento expirou por falta de leitura')) return true;
   if (msg.includes('Aviso no DB Fallback') || msg.includes('Aviso transitório no DB Fallback') || msg.includes('[SessionManager/AuthQueue]')) return true;
+  if (msg.includes('Restabelecendo o socket com as credenciais preservadas')) return true;
+  if (msg.includes('Socket encerrado pelo WhatsApp: Connection Terminated')) return true;
+  if (msg.includes('Socket encerrado pelo WhatsApp: Stream Errored (unknown)')) return true;
+  if (msg.includes('Socket encerrado pelo WhatsApp: Stream Errored (ack)')) return true;
+  if (msg.includes('[handleMicClick]')) return true;
+  if (msg.includes('HTTP Error 404 em POST') || msg.includes('HTTP Error 404 em GET')) return true;
+  if (msg.includes("constava como 'connected' no banco mas está sem sessão ativa na RAM")) return true;
+  if (msg.includes('[SnoozeManager] Erro ao buscar conversas expiradas: TimeoutError')) return true;
+  if (msg.includes('Timeout ao inicializar sessão Baileys para')) return true;
+  if (msg.includes('[RealtimePublisher/Supabase] Falha ao publicar') || msg.includes('Tenant not found in database')) return true;
+  if (msg.includes('[PushService/ChecklistAlarm] Falha no envio push (400)')) return true;
   return false;
 };
 
@@ -173,7 +184,18 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
           'oscilação transitória na fila de escrita',
           'auth writequeue operation timed out',
           'failed to sync regular_',
-          'invalid wire type'
+          'invalid wire type',
+          'gastrofoodcache',
+          'deduplicação gastrofood',
+          'iniciando sincronização do cardápio',
+          'baileys_message_receipt',
+          'restabelecendo o socket com as credenciais preservadas',
+          'socket encerrado pelo whatsapp: connection terminated',
+          'socket encerrado pelo whatsapp: stream errored (unknown)',
+          'socket encerrado pelo whatsapp: stream errored (ack)',
+          'handlemicclick',
+          'http error 404 em post',
+          'http error 404 em get'
         ];
 
         if (msgLower.includes('gastrofood api') && (msgLower.includes('"status":200') || msgLower.includes('"status": 200') || (msgLower.includes('"error":null') && !msgLower.includes('error:')))) {
@@ -200,11 +222,12 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
           'error', 'erro', 'falha', 'failed', 'fail', 'timeout',
           'reconnecting', 'connection_lost', 'connection errored', 'connection terminated',
           'disconnect', 'code 4', 'code 5', 'statuscode 4', 'statuscode 5',
-          'reject', '503', '405', '502', '408', '401', '500', 'lock', 'abort', 'denied',
+          'reject', 'lock', 'abort', 'denied',
           'exception', 'uncaught', 'badsession', 'bad_session', 'crash'
         ];
         
-        const hasKeyword = errorKeywords.some(kw => msgLower.includes(kw));
+        const hasStatusCode = /\b(503|405|502|408|401|500)\b/.test(msgLower.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, ''));
+        const hasKeyword = hasStatusCode || errorKeywords.some(kw => msgLower.includes(kw));
 
         if (hasKeyword && !isNormalOp) return true;
 

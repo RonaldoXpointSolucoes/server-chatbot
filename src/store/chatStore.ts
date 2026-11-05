@@ -3365,7 +3365,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (isPtt) formData.append('ptt', 'true');
 
       // Chamada HTTP pro Node (único dono do upload Supabase e Baileys)
-      const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+      const { getInstanceApiUrl } = await import('../services/whatsappEngine');
+      const API_URL = getInstanceApiUrl(resolvedInstanceId);
       const apiKey = await getOrFetchApiKey(resolvedInstanceId);
 
       const res = await fetch(`${API_URL}/api/v1/instances/${resolvedInstanceId}/send-media`, {
@@ -3563,7 +3564,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
 
       const jid = getContactJid(contact);
-      const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+      const { getInstanceApiUrl } = await import('../services/whatsappEngine');
+      const API_URL = getInstanceApiUrl(resolvedInstanceId);
       const apiKey = await getOrFetchApiKey(resolvedInstanceId);
 
       let mimetype = 'application/octet-stream';

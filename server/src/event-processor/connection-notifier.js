@@ -98,10 +98,19 @@ export async function logAndNotifyConnectionEvent({
             case 'syncing_keys':
                 logMessage = `[${instName}] Credenciais recebidas do celular. Sincronizando chaves; renovação do QR suspensa.`;
                 break;
-            case 'connection_closed':
+            case 'connection_closed': {
+                const errLower = String(error || '').toLowerCase();
+                const isRoutineRotation =
+                    errLower.includes('connection terminated') ||
+                    errLower.includes('stream errored (unknown)') ||
+                    errLower.includes('stream errored (ack)') ||
+                    errLower.includes('restart required') ||
+                    errLower.includes('precondition required') ||
+                    [428, 500, 503, 515, 408, 1006].includes(Number(details?.reason));
                 logMessage = `[${instName}] Socket encerrado pelo WhatsApp: ${error || 'sem motivo informado'}. ${getConnectionDiagnostics(instanceId).message}`;
-                logLevel = 'warn';
+                logLevel = isRoutineRotation ? 'info' : 'warn';
                 break;
+            }
 
             case 'connection_success':
                 logMessage = `[${instName}] Conexão WhatsApp estabelecida com sucesso! Aparelho sincronizado: +${finalPhone || 'identificado'}.`;

@@ -1,5 +1,5 @@
 {
-  "version": "8.0.4",
-  "buildDate": "2026-11-03T01:59:39.807Z",
-  "summary": "Estabilização de Envio de Mídia por Instância, Propagação Segura de CRM (Sem Erro 409) e Resiliência do AuthQueue/Cache Signal"
+  "version": "8.0.7",
+  "buildDate": "2026-11-05T19:02:00.000Z",
+  "summary": "Separação de Links PWA (Chat no Celular vs Totem Cozinha no Tablet), Semáforo Anti-Thundering Herd nas Reconexões Baileys e Blindagem de Conflitos Transitórios"
 }

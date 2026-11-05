@@ -1780,7 +1780,7 @@ class EventProcessor {
                          message: msg,
                          contact_phone: b.phone,
                          conversation_id: b.conversationId
-                     });
+                     }).catch(() => {});
 
                      if (b.direction === 'inbound') {
                          const messageAgeSecs = (Date.now() - new Date(msg.timestamp).getTime()) / 1000;
@@ -2554,8 +2554,19 @@ class EventProcessor {
 
             if (connection === 'close') {
                 const reason = lastDisconnect?.error?.output?.statusCode;
-                const loggedOut = reason === 401;
-                logAndNotifyConnectionEvent({ tenantId, instanceId, eventType: 'connection_closed', status: 'connecting', error: lastDisconnect?.error?.message || 'Conexão encerrada', details: { reason, instanceName: currentInst?.display_name, source: 'baileys.connection.update' } }).catch(() => {});
+                const errMsgRaw = lastDisconnect?.error?.message || 'Conexão encerrada';
+                const errMsgLower = errMsgRaw.toLowerCase();
+                const isConflict = reason === 440 || reason === 409 || errMsgLower.includes('conflict') || errMsgLower.includes('replaced');
+                const isTransient401 = reason === 401 && (
+                    isConflict ||
+                    errMsgLower.includes('ack') ||
+                    errMsgLower.includes('bad session') ||
+                    errMsgLower.includes('decrypt') ||
+                    errMsgLower.includes('closed session') ||
+                    errMsgLower.includes('stream errored')
+                );
+                const loggedOut = reason === 401 && !isTransient401;
+                logAndNotifyConnectionEvent({ tenantId, instanceId, eventType: 'connection_closed', status: 'connecting', error: errMsgRaw, details: { reason, instanceName: currentInst?.display_name, source: 'baileys.connection.update' } }).catch(() => {});
 
                 const isPausedOrBlocked = currentInst && ['paused', 'blocked_12h', 'forbidden', 'bad_session'].includes(currentInst.status);
 
@@ -2603,7 +2614,7 @@ class EventProcessor {
                 const reconnectAttempts = currentInst?.reconnect_attempts || 0;
 
                 // Trata como transiente se não for encerramento definitivo nem logout e não tiver excedido o limite de 5 tentativas
-                const isTransient = (![401, 403, 409, 410].includes(reason) || isPairingPendingSync) && reconnectAttempts < 5;
+                const isTransient = ((![401, 403, 409, 410, 440].includes(reason) || isTransient401 || isPairingPendingSync) && !isConflict) && reconnectAttempts < 5;
 
                 if (isTransient) {
                     await supabase.from('whatsapp_instances')
@@ -2616,15 +2627,15 @@ class EventProcessor {
                     payload.status = 'connecting';
                     payload.reason = reason;
                 } else {
-                    const errMsg = reason === 409
+                    const errMsg = (reason === 409 || reason === 440 || isConflict)
                         ? 'Desconectado por conflito: Outro dispositivo se conectou a esta conta de WhatsApp. O sistema suspendeu reconexões automáticas.'
-                        : reason === 401
+                        : loggedOut
                         ? 'Sessão encerrada (Logout realizado pelo WhatsApp no celular).'
                         : reconnectAttempts >= 5
                         ? 'Limite de reconexões automáticas atingido. Clique em Reconectar para vincular novamente.'
-                        : `Falha de conexão com o WhatsApp (Código: ${reason || 'N/A'})`;
+                        : (lastDisconnect?.error?.message || `Falha de conexão com o WhatsApp (Código: ${reason || 'N/A'})`);
 
-                    const finalStatus = (reason === 401 || reason === 409 || reconnectAttempts >= 5) ? 'disconnected' : 'offline';
+                    const finalStatus = (loggedOut || reason === 409 || reason === 440 || isConflict || reconnectAttempts >= 5) ? 'disconnected' : 'offline';
 
                     await supabase.from('whatsapp_instances')
                         .update({ 
@@ -2642,7 +2653,7 @@ class EventProcessor {
                     payload.error = errMsg;
                     if(loggedOut) payload.loggedOut = true;
                     if(reason === 408) payload.isQrTimeout = true;
-                    if(reason === 409) payload.isConflict = true;
+                    if(reason === 409 || reason === 440 || isConflict) payload.isConflict = true;
 
                     // Log e disparo de alerta via FoodNext para erros definitivos
                     logAndNotifyConnectionEvent({

@@ -88,13 +88,13 @@ function RootRouter() {
     return <CompanyPortalLogin />;
   }
 
-  // Se o tablet foi configurado como Totem Cozinha Standalone e abriu na raiz em modo aplicativo (standalone)
-  const isStandalonePwa = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true;
-  if (
-    window.location.pathname === '/' &&
-    localStorage.getItem('totem_standalone_mode') === 'true' &&
-    (isStandalonePwa || window.location.search.includes('totem=1'))
-  ) {
+  // Na rota raiz (/), garante sempre a abertura do App Principal (Chat no Celular / Login).
+  // O PWA do Tablet da Cozinha possui rota própria isolada (/totem-cozinha).
+  try {
+    localStorage.removeItem('totem_standalone_mode');
+  } catch (_) {}
+
+  if (window.location.search.includes('totem=1')) {
     return (
       <ErrorBoundary>
         <ChecklistTablet />

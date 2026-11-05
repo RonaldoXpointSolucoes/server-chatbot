@@ -58,32 +58,43 @@
         applyThemeColor(false);
       }
 
-      // Se o acesso for pela Rota Exclusiva do Totem Cozinha (PWA Android), vincula o Manifesto Dedicado do Totem
+      // Separação estrita entre os 2 PWAs:
+      // 1) Rota Exclusiva do Tablet da Cozinha (/totem-cozinha ou /totem) -> /manifest-totem.webmanifest
+      // 2) Rota Principal do Celular / Chat (/, /login, /chat, etc.) -> /manifest.webmanifest
       try {
         const currentPath = window.location.pathname.toLowerCase();
         const isTotemRoute =
           currentPath.startsWith('/totem-cozinha') ||
-          currentPath.startsWith('/totem') ||
-          currentPath.startsWith('/checklist/tablet');
+          currentPath.startsWith('/totem');
+
+        const syncManifestLink = (manifestHref) => {
+          const allLinks = document.querySelectorAll('link[rel="manifest"]');
+          if (allLinks.length > 0) {
+            allLinks.forEach((el, idx) => {
+              if (idx === 0) el.setAttribute('href', manifestHref);
+              else el.remove();
+            });
+          } else {
+            const link = document.createElement('link');
+            link.rel = 'manifest';
+            link.href = manifestHref;
+            document.head.appendChild(link);
+          }
+        };
 
         if (isTotemRoute) {
-          localStorage.setItem('totem_standalone_mode', 'true');
           document.title = 'Totem Cozinha • Checklists & Alarmes';
           const appleTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]');
           if (appleTitle) appleTitle.setAttribute('content', 'Totem Cozinha');
-          const swapManifest = () => {
-            const manifestLink = document.querySelector('link[rel="manifest"]');
-            if (manifestLink) {
-              manifestLink.setAttribute('href', '/manifest-totem.webmanifest');
-            } else {
-              const link = document.createElement('link');
-              link.rel = 'manifest';
-              link.href = '/manifest-totem.webmanifest';
-              document.head.appendChild(link);
-            }
-          };
-          swapManifest();
-          window.addEventListener('DOMContentLoaded', swapManifest);
+          syncManifestLink('/manifest-totem.webmanifest');
+          window.addEventListener('DOMContentLoaded', () => syncManifestLink('/manifest-totem.webmanifest'));
+        } else {
+          // Garante que a instalação na rota principal (celular) NUNCA abra a tela do tablet da cozinha
+          localStorage.removeItem('totem_standalone_mode');
+          const appleTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+          if (appleTitle) appleTitle.setAttribute('content', 'ChatBoot');
+          syncManifestLink('/manifest.webmanifest');
+          window.addEventListener('DOMContentLoaded', () => syncManifestLink('/manifest.webmanifest'));
         }
       } catch (e) {}
     </script>

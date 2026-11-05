@@ -1,4 +1,4 @@
-import { supabase } from './supabase.js';
+import { supabase, isTransientSupabaseError, nodeSupabaseCircuitBreaker } from './supabase.js';
 
 class SnoozeManager {
   constructor() {
@@ -23,6 +23,7 @@ class SnoozeManager {
 
   async checkSnoozedConversations() {
     try {
+      if (nodeSupabaseCircuitBreaker && !nodeSupabaseCircuitBreaker.canExecute()) return;
       const now = new Date().toISOString();
       
       // Buscar todas as conversas cujo snooze expirou
@@ -40,16 +41,16 @@ class SnoozeManager {
           selectError.message.includes('ETIMEDOUT') ||
           selectError.message.includes('ECONNRESET') ||
           selectError.message.includes('ECONNREFUSED') ||
-          selectError.message.includes('request to')
+          selectError.message.includes('request to') || selectError.message.includes('TimeoutError') || selectError.message.includes('AbortError') || selectError.message.toLowerCase().includes('aborted') || selectError.message.toLowerCase().includes('timeout') || isTransientSupabaseError(selectError)
         );
 
         if (isFetchError) {
           if (!this.wasOffline) {
-            console.warn('[SnoozeManager] Conexão com o Supabase indisponível temporariamente (Internet offline ou oscilação de rede). O loop do Snooze tentará novamente em 30s.');
+            console.log('[SnoozeManager] Oscilação transitória na consulta ao Supabase (timeout/rede). O loop do Snooze tentará novamente em 30s.');
             this.wasOffline = true;
           }
         } else {
-          console.error('[SnoozeManager] Erro ao buscar conversas expiradas:', selectError.message);
+          console.warn('[SnoozeManager] Aviso ao buscar conversas expiradas:', selectError.message);
         }
         return;
       }

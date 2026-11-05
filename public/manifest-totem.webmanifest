@@ -11,7 +11,7 @@
   "lang": "pt-BR",
   "dir": "ltr",
   "id": "/totem-cozinha",
-  "scope": "/",
+  "scope": "/totem-cozinha",
   "start_url": "/totem-cozinha?pwa=1&sector=Cozinha",
   "icons": [
     {

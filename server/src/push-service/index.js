@@ -505,11 +505,12 @@ class PushService {
                     sentCount++;
                 }).catch(async (err) => {
                     const status = err.statusCode || 500;
-                    const isStaleToken = status === 410 || status === 404 || status === 401;
+                    const isStaleToken = status === 410 || status === 404 || status === 403 || status === 401 || status === 400 || (err.message && err.message.includes('unexpected response code'));
                     if (isStaleToken) {
+                        console.log(`[PushService/ChecklistAlarm] Removendo assinatura push inválida/expirada do banco (Status: ${status}, ID: ${sub.id})`);
                         await supabase.from('push_subscriptions').delete().eq('id', sub.id);
                     } else {
-                        console.warn(`[PushService/ChecklistAlarm] Falha no envio push (${status}): ${err.message}`);
+                        console.log(`[PushService/ChecklistAlarm] Oscilação no envio push (${status}): ${err.message}`);
                     }
                 });
             });
