@@ -425,7 +425,7 @@ router.delete('/v1/admin/companies/:id', async (req, res) => {
         await supabase.from('whatsapp_instances')
             .update({ tenant_id: '00000000-0000-0000-0000-000000000000' })
             .eq('tenant_id', companyId)
-            .catch(() => null);
+            .then(r => r, () => null);
 
         // 2. Deletar usuarios do tenant
         const { error: errUsers } = await supabase.from('tenant_users').delete().eq('tenant_id', companyId);

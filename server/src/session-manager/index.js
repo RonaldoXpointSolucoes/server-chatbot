@@ -942,7 +942,7 @@ class SessionManager {
                     return updatedInst;
                 } else {
                     // Valida se o nó detentor do lock já é o próprio currentNodeId (corrida intra-nó / concorrência paralela)
-                    const { data: currentOwner } = await supabase.from('whatsapp_instances').select('assigned_node_id, lease_until, status').eq('id', instanceId).maybeSingle().catch(() => ({ data: null }));
+                    const { data: currentOwner } = await supabase.from('whatsapp_instances').select('assigned_node_id, lease_until, status').eq('id', instanceId).maybeSingle().then(r => r, () => ({ data: null }));
                     if (currentOwner && currentOwner.assigned_node_id === currentNodeId) {
                         console.log(`[SessionManager/Lock] ✅ Lock já assegurado no nó ${currentNodeId} por requisição concorrente para instância ${instanceId}.`);
                         return currentOwner;

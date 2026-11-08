@@ -155,7 +155,9 @@ async function resolveInstanceSmart(instanceName) {
 
 // Middleware de autenticação genérica para rotas de instância já existente
 const requireApiKey = async (req, res, next) => {
-    const apiKey = req.headers['apikey'] || req.headers['globalapikey'];
+    const authHeader = String(req.headers['authorization'] || '');
+    const bearerKey = authHeader.toLowerCase().startsWith('bearer ') ? authHeader.slice(7).trim() : null;
+    const apiKey = req.headers['apikey'] || req.headers['globalapikey'] || req.headers['x-api-key'] || bearerKey || req.query?.apikey;
     const originIp = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || req.ip || 'N/A';
 
     if (!apiKey) {
@@ -225,14 +227,26 @@ const requireApiKey = async (req, res, next) => {
         });
     }
 
-    // Busca a Global Api Key da empresa associada a esta instância específica
-    const { data: comp } = await supabase
-        .from('companies')
-        .select('global_api_key')
-        .eq('id', data.tenant_id)
-        .single();
+    // Fast-path: se a ApiKey bate diretamente com a api_key da instância, autoriza sem consultar companies
+    if (data.api_key && data.api_key === apiKey) {
+        req.instanceData = data;
+        req.apiKeyMasked = apiKey ? `${apiKey.slice(0, 6)}...${apiKey.slice(-4)}` : 'N/A';
+        req.originIp = originIp;
+        return next();
+    }
 
-    const globalKey = comp ? comp.global_api_key : process.env.GLOBAL_API_KEY;
+    // Busca a Global Api Key da empresa associada a esta instância específica
+    let globalKey = process.env.GLOBAL_API_KEY;
+    if (data.tenant_id && data.tenant_id !== '00000000-0000-0000-0000-000000000000') {
+        const { data: comp } = await supabase
+            .from('companies')
+            .select('global_api_key')
+            .eq('id', data.tenant_id)
+            .maybeSingle();
+        if (comp?.global_api_key) {
+            globalKey = comp.global_api_key;
+        }
+    }
 
     // Autoriza se for a ApiKey da Instância OU a Global Api Key da Empresa
     if (data.api_key !== apiKey && globalKey !== apiKey) {
@@ -403,10 +417,16 @@ router.get('/instance/:name/qrcode', requireApiKey, async (req, res) => {
  *         schema:
  *           type: string
  */
-router.get('/instance/:name/status', requireApiKey, async (req, res) => {
+router.get(['/instance/:name/status', '/instance/connectionState/:name', '/instance/:name/connectionState'], requireApiKey, async (req, res) => {
+    const rawStatus = req.instanceData.status;
+    const evoState = rawStatus === 'connected' ? 'open' : (rawStatus === 'connecting' ? 'connecting' : 'close');
     res.json({
-        instance: req.params.name,
-        state: req.instanceData.status
+        instance: {
+            instanceName: req.instanceData.display_name || req.params.name,
+            state: evoState,
+            status: rawStatus
+        },
+        state: rawStatus
     });
 });
 
@@ -494,7 +514,8 @@ router.post([
     '/api/message/sendText',
     '/api/message/sendText/:instance'
 ], requireApiKey, routeExternalMessage, async (req, res) => {
-    const { number, text } = req.body;
+    const number = req.body?.number || req.body?.phone || req.body?.to || req.body?.remoteJid;
+    const text = req.body?.text ?? req.body?.textMessage?.text ?? req.body?.message ?? req.body?.body;
     const { id, tenant_id, display_name } = req.instanceData;
     const originIp = req.originIp || 'N/A';
 
@@ -530,8 +551,7 @@ router.post([
             console.log(`[API Gateway] [sendText] 🔄 Socket em reconexão na RAM para ${id} ("${display_name}"). Enfileirando no outbox resiliente (wa_outgoing_messages)...`);
             try {
                 const { default: sessionManager } = await import('../session-manager/index.js');
-                const cleanPhone = String(number).replace(/\D/g, '');
-                const targetJid = cleanPhone.includes('@') ? cleanPhone : `${cleanPhone}@s.whatsapp.net`;
+                const targetJid = await resolveTargetJid(null, number, tenant_id);
                 const queued = await sessionManager.enqueueMessage(id, {
                     targetJid,
                     type: 'text',
@@ -607,8 +627,7 @@ router.post([
         if ((isConnClosed || !e?.isDefinitive) && id && number && text) {
             try {
                 const { default: sessionManager } = await import('../session-manager/index.js');
-                const cleanPhone = String(number).replace(/\D/g, '');
-                const targetJid = cleanPhone.includes('@') ? cleanPhone : `${cleanPhone}@s.whatsapp.net`;
+                const targetJid = await resolveTargetJid(null, number, tenant_id);
                 console.log(`[API Gateway] [sendText] 🔄 Enfileirando mensagem via outbox resiliente após oscilação de socket (${errMessage.substring(0, 60)}) | Instância: ${id} | Destino: ${targetJid}...`);
                 const queued = await sessionManager.enqueueMessage(id, {
                     targetJid,
@@ -627,8 +646,7 @@ router.post([
                 console.warn('[API Gateway] [sendText] Aviso no fallback primário para outbox:', qErr?.message || qErr);
                 // Fallback emergencial direto no banco se o SessionManager falhar
                 try {
-                    const cleanPhone = String(number).replace(/\D/g, '');
-                    const targetJid = cleanPhone.includes('@') ? cleanPhone : `${cleanPhone}@s.whatsapp.net`;
+                    const targetJid = await resolveTargetJid(null, number, tenant_id);
                     const { data: directSaved } = await supabase.from('wa_outgoing_messages').insert({
                         tenant_id: tenant_id,
                         instance_id: id,

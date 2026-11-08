@@ -56,6 +56,10 @@ class NodeSupabaseCircuitBreaker {
     return true;
   }
 
+  canExecute() {
+    return this.canRequest();
+  }
+
   recordSuccess() {
     if (this.state !== 'CLOSED') {
       console.info('[Supabase Node CircuitBreaker] Conexão normalizada com sucesso. Circuito FECHADO.');
@@ -321,6 +325,9 @@ export async function resolveTargetJid(sock, jid, tenantId) {
   // Se a entrada tiver 10 ou 11 dígitos sem o DDI 55, adiciona o 55
   if (!clean.startsWith('55') && (clean.length === 10 || clean.length === 11)) {
     clean = '55' + clean;
+  } else if (!clean.startsWith('55') && clean.length === 12 && /^[1-9]{2}99\d{8}$/.test(clean)) {
+    // Ex: 349946928878 (usuário digitou DDD + 9 duplicado sem DDI 55) -> 5534946928878
+    clean = '55' + clean.substring(0, 2) + clean.substring(3);
   }
 
   // Se for número brasileiro (+55) com 12 ou 13 dígitos
@@ -390,12 +397,15 @@ export async function resolveTargetJid(sock, jid, tenantId) {
       }
     }
 
-    // 2. Consulta via socket Baileys onWhatsApp apenas se não encontrado no cache/banco, com timeout estrito de 1.2s
+    // 2. Consulta via socket Baileys onWhatsApp apenas se não encontrado no cache/banco, com timeout de 2.5s
     if (sock && typeof sock.onWhatsApp === 'function') {
       try {
-        const queryList = Array.from(new Set([phone9, phone8]));
+        // Para DDD >= 31, o padrão do WhatsApp é 8 dígitos após o DDD (12 dígitos com 55), então prioriza phone8 na ordem
+        const queryList = ddd >= 31
+          ? Array.from(new Set([phone8, phone9]))
+          : Array.from(new Set([phone9, phone8]));
         const onWhatsAppPromise = sock.onWhatsApp(...queryList);
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT_ONWHATSAPP')), 1200));
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT_ONWHATSAPP')), 2500));
         const results = await Promise.race([onWhatsAppPromise, timeoutPromise]);
         if (Array.isArray(results)) {
           const valid = results.find(r => r && r.exists && r.jid);
@@ -404,18 +414,17 @@ export async function resolveTargetJid(sock, jid, tenantId) {
           }
         }
       } catch (e) {
-        // Silenciado para prosseguir com fallback
+        // Silenciado para prosseguir com fallback sem poluir o cache definitivo
       }
     }
 
-    // 3. FALLBACK INTELIGENTE (Sem Socket / Sem Registro Prévio):
-    // Se a entrada original do usuário tiver 12 dígitos (ex: 556692545851 - sem o 9º dígito digitado)
-    // E o DDD for >= 31 (ex: DDD 66 - Mato Grosso, MG, etc), mantém phone8 (12 dígitos).
-    // Caso contrário (ex: DDD 11 a 28, ou se veio com 13 dígitos), utiliza phone9 (13 dígitos).
-    if (clean.length === 12 && ddd >= 31) {
-      return saveAndReturn(`${phone8}@s.whatsapp.net`);
+    // 3. FALLBACK INTELIGENTE (Sem Socket ou Timeout no onWhatsApp):
+    // Não grava no resolvedJidCache para permitir resolução oficial via onWhatsApp na próxima tentativa.
+    // Para DDD >= 31 (MG, PR, SC, RS, Centro-Oeste, Nordeste, Norte), 99% das contas WhatsApp usam 8 dígitos (12 dígitos com DDI 55).
+    if (ddd >= 31) {
+      return `${phone8}@s.whatsapp.net`;
     }
-    return saveAndReturn(`${phone9}@s.whatsapp.net`);
+    return `${phone9}@s.whatsapp.net`;
   }
 
   const finalJid = `${clean}@s.whatsapp.net`;

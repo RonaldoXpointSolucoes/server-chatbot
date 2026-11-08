@@ -141,7 +141,13 @@ function interceptConsole() {
     const isTransientCircuitBreakerNoise = text.includes('Supabase Node CircuitBreaker') ||
                                            (text.includes('[EventProcessor] Erro ao buscar config da instância') && text.includes('TimeoutError')) ||
                                            text.includes('Contato não pôde ser inserido nem recuperado: Error: Supabase Node CircuitBreaker') ||
-                                           text.includes('[BatchProcessor] Erro ao buscar instâncias válidas');
+                                           text.includes('[BatchProcessor] Erro ao buscar instâncias válidas') ||
+                                           text.includes('nodeSupabaseCircuitBreaker.canExecute is not a function') ||
+                                           text.includes("constava como 'connected' no banco mas está sem") ||
+                                           text.includes('Timeout ao inicializar sessão Baileys para') ||
+                                           text.includes('[SnoozeManager] Erro ao buscar conversas expiradas: TimeoutError') ||
+                                           text.includes('Anti-Spam Ativado para convId') ||
+                                           text.includes('[PushService/ChecklistAlarm] Falha no envio push (400)');
     if (isTransientCircuitBreakerNoise) {
         originalFn.apply(console, args);
         return;

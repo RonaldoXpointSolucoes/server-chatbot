@@ -472,9 +472,11 @@ class EventProcessor {
                 }
             }
 
-            try {
-                fs.appendFileSync('event_debug.log', new Date().toISOString() + ' QUEUED RAW PAYLOAD: ' + JSON.stringify(msg) + '\n');
-            } catch(e){}
+            if (process.env.DEBUG_RAW_EVENTS === 'true') {
+                try {
+                    fs.appendFileSync('event_debug.log', new Date().toISOString() + ' QUEUED RAW PAYLOAD: ' + JSON.stringify(msg) + '\n');
+                } catch(e){}
+            }
 
             // Rastreabilidade E2E com Trace ID
             const msgText = extractTextFromMessage(msg);
@@ -1496,16 +1498,27 @@ class EventProcessor {
                              const mimeType = mediaMeta.mimetype || 'application/octet-stream';
                              const fileName = mediaMeta.fileName || 'media_' + Date.now();
                              const safeName = fileName.replace(/[^a-zA-Z0-9.\-]/g, '_');
-                             const storagePath = `tenant_${b.tenantId}/instance_${b.instanceId}/${b.conversationId}/${Date.now()}_${safeName}`;
+                             const uniqueSuffix = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                             const storagePath = `tenant_${b.tenantId}/instance_${b.instanceId}/${b.conversationId}/${uniqueSuffix}_${safeName}`;
                              
-                             const tmpFilePath = path.join(os.tmpdir(), `${Date.now()}_${safeName}`);
+                             const tmpFilePath = path.join(os.tmpdir(), `${uniqueSuffix}_${safeName}`);
                              const writeStream = fs.createWriteStream(tmpFilePath);
+                             let writeErr = null;
+                             writeStream.on('error', (err) => { writeErr = err; });
                              for await(const chunk of stream) {
+                                 if (writeErr) throw writeErr;
                                  writeStream.write(chunk);
                              }
                              writeStream.end();
-                             await new Promise((resolve) => writeStream.on('finish', resolve));
+                             await new Promise((resolve, reject) => {
+                                 if (writeErr) return reject(writeErr);
+                                 writeStream.on('finish', resolve);
+                                 writeStream.on('error', reject);
+                             });
 
+                             if (!fs.existsSync(tmpFilePath)) {
+                                 throw new Error('Temporary media file missing after write finish');
+                             }
                              const stats = fs.statSync(tmpFilePath);
                              const fileSize = stats.size;
                              const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -1533,7 +1546,11 @@ class EventProcessor {
 
                              if (!directUploadSuccess) {
                                  await new Promise((resolve, reject) => {
+                                     if (!fs.existsSync(tmpFilePath)) {
+                                         return reject(new Error('Temporary media file missing before TUS upload'));
+                                     }
                                      const fileStream = fs.createReadStream(tmpFilePath);
+                                     fileStream.on('error', (streamErr) => reject(streamErr));
                                      const upload = new tus.Upload(fileStream, {
                                          endpoint: `${supabaseUrl}/storage/v1/upload/resumable`,
                                          retryDelays: [0, 1000, 3000],
@@ -1843,7 +1860,7 @@ class EventProcessor {
                  rateData.timestamps = rateData.timestamps.filter(ts => now - ts < 60000);
                  
                  if (rateData.timestamps.length >= 15) { // Limite de 15 respostas de bot por minuto
-                     console.warn(`[EventProcessor] Anti-Spam Ativado para convId ${convId}. Excesso de disparos de bot detectados (${rateData.timestamps.length} em 60s). Pausando IA.`);
+                     console.log(`[EventProcessor] Anti-Spam Ativado para convId ${convId}. Excesso de disparos de bot detectados (${rateData.timestamps.length} em 60s). Pausando IA.`);
                      
                      try {
                          // Pausa a IA e define como status 'open' para operador humano
@@ -2102,9 +2119,11 @@ class EventProcessor {
                      } else {
                          const msgId = b.rawMsg?.key?.id || 'unknown';
                          console.error(`[BatchProcessor] EXCEÇÃO CRÍTICA: Mensagem ID ${msgId} descartada definitivamente após 5 tentativas de lote falhas.`);
-                         try {
-                             fs.appendFileSync('discarded_messages.log', `${new Date().toISOString()} [LOTE FAILED] MsgId: ${msgId} - Payload: ${JSON.stringify(b.rawMsg)}\n`);
-                         } catch (logErr) {}
+                         if (process.env.DEBUG_RAW_EVENTS === 'true') {
+                             try {
+                                 fs.appendFileSync('discarded_messages.log', `${new Date().toISOString()} [LOTE FAILED] MsgId: ${msgId} - Payload: ${JSON.stringify(b.rawMsg)}\n`);
+                             } catch (logErr) {}
+                         }
                      }
                  }
              }

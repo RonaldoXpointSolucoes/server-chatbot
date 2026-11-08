@@ -23,7 +23,7 @@ class SnoozeManager {
 
   async checkSnoozedConversations() {
     try {
-      if (nodeSupabaseCircuitBreaker && !nodeSupabaseCircuitBreaker.canExecute()) return;
+      if (nodeSupabaseCircuitBreaker && typeof nodeSupabaseCircuitBreaker.isCircuitOpen === 'function' && nodeSupabaseCircuitBreaker.isCircuitOpen()) return;
       const now = new Date().toISOString();
       
       // Buscar todas as conversas cujo snooze expirou
@@ -106,7 +106,7 @@ class SnoozeManager {
         }
       }
     } catch (err) {
-      console.error('[SnoozeManager] Exceção crítica no loop do snooze:', err);
+      if (!isTransientSupabaseError(err)) console.warn('[SnoozeManager] Aviso no loop do snooze:', err?.message || err);
     }
   }
 }
