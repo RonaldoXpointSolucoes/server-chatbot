@@ -1560,8 +1560,12 @@ export default function DevLogger() {
           msg.includes('invalid wire type') ||
           msg.includes('[forwardMessage]') ||
           msg.includes('[handleMicClick]') ||
-          msg.includes("constava como 'connected' no banco mas está sem sessão ativa na RAM") ||
+          msg.includes("constava como 'connected' no banco mas está sem") ||
           msg.includes('[SnoozeManager] Erro ao buscar conversas expiradas: TimeoutError') ||
+          msg.includes('nodeSupabaseCircuitBreaker.canExecute is not a function') ||
+          msg.includes('.catch is not a function') ||
+          msg.includes('Anti-Spam Ativado para convId') ||
+          msg.includes("ENOENT: no such file or directory, open '/tmp/") ||
           msg.includes('Timeout ao inicializar sessão Baileys para') ||
           msg.includes('[RealtimePublisher/Supabase] Falha ao publicar') ||
           msg.includes('Tenant not found in database') ||
@@ -1885,8 +1889,12 @@ export default function DevLogger() {
           msg.includes('invalid wire type') ||
           msg.includes('[forwardMessage]') ||
           msg.includes('[handleMicClick]') ||
-          msg.includes("constava como 'connected' no banco mas está sem sessão ativa na RAM") ||
+          msg.includes("constava como 'connected' no banco mas está sem") ||
           msg.includes('[SnoozeManager] Erro ao buscar conversas expiradas: TimeoutError') ||
+          msg.includes('nodeSupabaseCircuitBreaker.canExecute is not a function') ||
+          msg.includes('.catch is not a function') ||
+          msg.includes('Anti-Spam Ativado para convId') ||
+          msg.includes("ENOENT: no such file or directory, open '/tmp/") ||
           msg.includes('Timeout ao inicializar sessão Baileys para') ||
           msg.includes('[RealtimePublisher/Supabase] Falha ao publicar') ||
           msg.includes('Tenant not found in database') ||

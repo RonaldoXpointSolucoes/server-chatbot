@@ -192,12 +192,21 @@ const requireApiKey = async (req, res, next) => {
     const instanceName = req.params.instance || req.params.name || req.body?.instance;
     let data;
     if (!instanceName) {
-        // Multipart fields are unavailable before multer. An instance key uniquely
-        // identifies its inbox, so authenticate before accepting the upload.
-        const keyed = await supabase.from('whatsapp_instances')
-            .select('id, tenant_id, display_name, phone_number, status, api_key')
-            .eq('api_key', apiKey).maybeSingle();
-        data = keyed.data;
+        const apiKeyCacheKey = `apikey:${apiKey}`;
+        const cachedByKey = instanceResolutionCache.get(apiKeyCacheKey);
+        if (cachedByKey && (Date.now() - cachedByKey.timestamp < INSTANCE_CACHE_TTL_MS)) {
+            data = cachedByKey.data;
+        } else {
+            // Multipart fields are unavailable before multer. An instance key uniquely
+            // identifies its inbox, so authenticate before accepting the upload.
+            const keyed = await supabase.from('whatsapp_instances')
+                .select('id, tenant_id, display_name, phone_number, status, api_key')
+                .eq('api_key', apiKey).maybeSingle();
+            data = keyed.data;
+            if (data) {
+                instanceResolutionCache.set(apiKeyCacheKey, { data, timestamp: Date.now() });
+            }
+        }
         if (!data && String(req.headers['content-type'] || '').startsWith('multipart/form-data') && !req.readableEnded) {
             const { data: company } = await supabase.from('companies')
                 .select('id').eq('global_api_key', apiKey).maybeSingle();

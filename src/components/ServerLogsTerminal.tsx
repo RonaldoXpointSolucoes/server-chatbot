@@ -51,6 +51,9 @@ const isSpamLog = (msg: string) => {
   if (msg.includes('Timeout ao inicializar sessão Baileys para')) return true;
   if (msg.includes('[RealtimePublisher/Supabase] Falha ao publicar') || msg.includes('Tenant not found in database')) return true;
   if (msg.includes('[PushService/ChecklistAlarm] Falha no envio push (400)')) return true;
+  if (msg.includes('[Baileys] connection errored') && (msg.includes('Connection Terminated') || msg.includes('Stream Errored'))) return true;
+  if (msg.includes('Evento connection_lost registrado com sucesso')) return true;
+  if (msg.includes('Lock adquirido com sucesso')) return true;
   return false;
 };
 
@@ -195,7 +198,10 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
           'socket encerrado pelo whatsapp: stream errored (ack)',
           'handlemicclick',
           'http error 404 em post',
-          'http error 404 em get'
+          'http error 404 em get',
+          'evento connection_lost registrado com sucesso',
+          'lock adquirido com sucesso',
+          'connection terminated'
         ];
 
         if (msgLower.includes('gastrofood api') && (msgLower.includes('"status":200') || msgLower.includes('"status": 200') || (msgLower.includes('"error":null') && !msgLower.includes('error:')))) {
@@ -222,7 +228,7 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
           'error', 'erro', 'falha', 'failed', 'fail', 'timeout',
           'reconnecting', 'connection_lost', 'connection errored', 'connection terminated',
           'disconnect', 'code 4', 'code 5', 'statuscode 4', 'statuscode 5',
-          'reject', 'lock', 'abort', 'denied',
+          'reject', 'abort', 'denied',
           'exception', 'uncaught', 'badsession', 'bad_session', 'crash'
         ];
         

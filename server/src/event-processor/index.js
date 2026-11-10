@@ -466,7 +466,7 @@ class EventProcessor {
                     continue;
                 }
                 
-                if (!isDecryptionFailureStub && !isHistorySync && this.processedMessagesCache.has(cacheKey)) {
+                if (!isDecryptionFailureStub && this.processedMessagesCache.has(cacheKey)) {
                     // Mensagem já processada recentemente no worker local. Descarte limpo e silencioso.
                     continue;
                 }
@@ -532,43 +532,42 @@ class EventProcessor {
                 continue;
             }
 
-            // Grava a mensagem na tabela wa_incoming_messages (logs do Edge) de forma resiliente
+            // Grava a mensagem na tabela wa_incoming_messages (logs do Edge) de forma assíncrona (não bloqueia o enfileiramento)
             if (!nodeSupabaseCircuitBreaker.isCircuitOpen()) {
-                try {
-                    const fromMe = msg.key.fromMe || false;
-                    const pushName = msg.pushName || (fromMe ? 'Me' : null);
-                    let bodyText = '';
-                    let mType = 'text';
-                    
-                    const content = msg.message;
-                    if (content) {
-                        const keys = Object.keys(content);
-                        if (keys.length > 0) {
-                            mType = keys[0];
-                            const mTypeObj = content[mType];
-                            bodyText = content.conversation || mTypeObj?.text || mTypeObj?.caption || '';
-                        }
+                const fromMe = msg.key.fromMe || false;
+                const pushName = msg.pushName || (fromMe ? 'Me' : null);
+                let bodyText = '';
+                let mType = 'text';
+                
+                const content = msg.message;
+                if (content) {
+                    const keys = Object.keys(content);
+                    if (keys.length > 0) {
+                        mType = keys[0];
+                        const mTypeObj = content[mType];
+                        bodyText = content.conversation || mTypeObj?.text || mTypeObj?.caption || '';
                     }
+                }
 
-                    const { error: incErr } = await supabase.from('wa_incoming_messages').upsert({
-                        instance_id: instanceId,
-                        tenant_id: tenantId,
-                        chat_jid: jid,
-                        message_id: msg.key.id,
-                        from_me: fromMe,
-                        push_name: pushName,
-                        body: bodyText,
-                        message_type: mType,
-                        raw_payload: msg
-                    }, { onConflict: 'instance_id, message_id' });
+                supabase.from('wa_incoming_messages').upsert({
+                    instance_id: instanceId,
+                    tenant_id: tenantId,
+                    chat_jid: jid,
+                    message_id: msg.key.id,
+                    from_me: fromMe,
+                    push_name: pushName,
+                    body: bodyText,
+                    message_type: mType,
+                    raw_payload: msg
+                }, { onConflict: 'instance_id, message_id' }).then(({ error: incErr }) => {
                     if (incErr && !isTransientSupabaseError(incErr)) {
                         console.warn('[EventProcessor] Aviso ao gravar wa_incoming_messages:', incErr.message);
                     }
-                } catch (err) {
+                }, (err) => {
                     if (!isTransientSupabaseError(err)) {
                         console.warn('[EventProcessor] Falha de conexão ao gravar wa_incoming_messages (não impeditivo):', err.message);
                     }
-                }
+                });
             }
 
             try {
@@ -1901,8 +1900,8 @@ class EventProcessor {
                  this.aiSendRateLimiter.set(convId, rateData);
                  
                  this.getInstanceConfig(b.instanceId).then(async (instanceConfig) => {
-                      // 1. Verifica se o robô está ativo para esta caixa de entrada (padrão true se undefined)
-                      const botActive = instanceConfig.bot_active !== false;
+                      // 1. Verifica se o robô está ativo para esta caixa de entrada (padrão true se undefined) ou se é caixa exclusiva de API
+                      const botActive = instanceConfig.bot_active !== false && instanceConfig.is_api_only !== true;
                       if (!botActive) {
                           console.log(`[EventProcessor] Robô desativado nas configurações da caixa de entrada (${b.instanceId}). Silenciando robô.`);
                           return;
@@ -1949,7 +1948,25 @@ class EventProcessor {
                       }
 
                       try {
-                          const { data: companyData } = await supabase.from('companies').select('global_ai_enabled').eq('id', b.tenantId).single();
+                          if (!EventProcessor.tenantAiConfigCache) EventProcessor.tenantAiConfigCache = new Map();
+                          const tenantCacheKey = String(b.tenantId || 'default');
+                          let cachedTenantAi = EventProcessor.tenantAiConfigCache.get(tenantCacheKey);
+                          if (!cachedTenantAi || (Date.now() - cachedTenantAi.timestamp > 30000)) {
+                              const [{ data: companyData }, { data: allBotsData }] = await Promise.all([
+                                  b.tenantId && b.tenantId !== '00000000-0000-0000-0000-000000000000'
+                                      ? supabase.from('companies').select('global_ai_enabled').eq('id', b.tenantId).maybeSingle()
+                                      : Promise.resolve({ data: null }),
+                                  supabase.from('bots').select('*').eq('tenant_id', b.tenantId)
+                              ]);
+                              cachedTenantAi = {
+                                  companyData,
+                                  botsData: allBotsData || [],
+                                  timestamp: Date.now()
+                              };
+                              EventProcessor.tenantAiConfigCache.set(tenantCacheKey, cachedTenantAi);
+                          }
+                          const { companyData, botsData } = cachedTenantAi;
+
                           // Se o IA estiver desativado globalmente e NÃO for o simulador admin (teste_robo), aborta o processamento.
                           if (companyData && companyData.global_ai_enabled === false && b.convStatus !== 'teste_robo') {
                               console.log(`[BatchProcessor] IA e Automações Globais estão DESATIVADAS para o tenant ${b.tenantId}`);
@@ -1974,10 +1991,6 @@ class EventProcessor {
                           } catch (flowErr) {
                               console.error("[EventProcessor] Erro ao executar FlowEngine:", flowErr);
                           }
-
-                          // Busca TODOS os bots do tenant para orquestração
-                          const { data: allBotsData } = await supabase.from('bots').select('*').eq('tenant_id', b.tenantId);
-                          const botsData = allBotsData || [];
 
                           // Helper para identificar robôs com papel de Orquestrador/Maestro (não respondem diretamente)
                           const isOrchestratorBot = (bot) => {
@@ -2073,17 +2086,6 @@ class EventProcessor {
                                   botDelay: instanceConfig.bot_delay,
                                   botInstructions: instanceConfig.bot_instructions
                               });
-                          } else if (botsData.length === 0) {
-                              // Fallback para o Runtime do Flow Builder APENAS se o tenant não tiver nenhuma configuração de bot (evita double-talk)
-                              FlowEngine.processIncomingMessage({
-                                  tenantId: b.tenantId,
-                                  instanceId: b.instanceId,
-                                  conversationId: b.conversationId,
-                                  jid: b.jid,
-                                  textMessage: b.textMessage,
-                                  rawPayload: b.rawMsg,
-                                  sock: b.sock
-                              }).catch(e => console.error("[BatchProcessor] Erro no FlowEngine:", e));
                           }
                       } catch (err) {
                           console.error("[EventProcessor] Erro ao buscar dados do banco ou no roteamento inteligente:", err);

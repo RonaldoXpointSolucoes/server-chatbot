@@ -20,6 +20,45 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.0.8',
+    date: '2026-11-10',
+    summary: 'Alta Performance na API Externa (Cache RAM de ApiKey e JID 8/9 Dígitos), Deduplicação Instantânea no EventProcessor e Refinamento do Diagnóstico DevLogger',
+    notes: [
+      {
+        id: '8.0.8-1',
+        category: 'improvements',
+        title: 'Autenticação em Memória RAM (Sub-Milissegundo) e Cache Bidirecional de JID (8 e 9 Dígitos)',
+        description: 'Chamadas de sistemas externos via POST /message/sendText agora resolvem a instância por ApiKey diretamente no cache RAM e indexam simultaneamente as variações de 8 e 9 dígitos (DDD >= 31), reduzindo drasticamente a latência de disparo.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-sky-500/20 text-sky-300 border-sky-500/30'
+      },
+      {
+        id: '8.0.8-2',
+        category: 'fixes',
+        title: 'Eliminação de Duplo Enfileiramento de Mensagens e Execução Duplicada do FlowEngine',
+        description: 'Corrigida a verificação do processedMessagesCache para eventos append da Baileys, tornado o log bruto wa_incoming_messages não-bloqueante e adicionado cache de 30s para configurações de IA e bots por tenant.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      },
+      {
+        id: '8.0.8-3',
+        category: 'fixes',
+        title: 'Blindagem de Resolução de Números para DDD >= 31 e Outbox Resiliente na API Externa',
+        description: 'O fallback do resolveTargetJid e do Outbox agora prioriza 8 dígitos para DDD >= 31 sem poluir o cache em caso de timeout de rede e corrige automaticamente números digitados com 9 duplicado sem DDI 55.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      },
+      {
+        id: '8.0.8-4',
+        category: 'improvements',
+        title: 'Filtro Inteligente de Rotações Normais de Socket e Locks de Sucesso no DevLogger',
+        description: 'Suprimidos falsos positivos de rotação normal de socket TCP (Connection Terminated) e logs informativos de aquisição de lock no gerador de relatórios de erros do DevLogger.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-sky-500/20 text-sky-300 border-sky-500/30'
+      }
+    ]
+  },
+  {
     version: '8.0.7',
     date: '2026-11-05',
     summary: 'Separação de Links PWA (Chat no Celular vs Totem Cozinha no Tablet), Semáforo Anti-Thundering Herd nas Reconexões Baileys e Blindagem de Conflitos Transitórios',

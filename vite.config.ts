@@ -94,7 +94,7 @@ export default defineConfig({
     generateVersionFilePlugin(),
     localApiGeminiPlugin(),
     react(),
-    basicSsl(),
+    ...(process.env.VITE_HTTPS === 'true' ? [basicSsl()] : []),
     VitePWA({
       strategies: 'injectManifest',
       srcDir: 'src',

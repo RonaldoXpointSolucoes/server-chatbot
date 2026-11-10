@@ -330,6 +330,11 @@ export async function resolveTargetJid(sock, jid, tenantId) {
     clean = '55' + clean.substring(0, 2) + clean.substring(3);
   }
 
+  const normalizedCache = resolvedJidCache.get(`${tenantId || 'global'}_${clean}`);
+  if (normalizedCache && (Date.now() - normalizedCache.timestamp < JID_CACHE_TTL_MS)) {
+    return normalizedCache.result;
+  }
+
   // Se for número brasileiro (+55) com 12 ou 13 dígitos
   if (clean.startsWith('55') && (clean.length === 12 || clean.length === 13)) {
     const ddd = parseInt(clean.substring(2, 4), 10);
@@ -354,7 +359,11 @@ export async function resolveTargetJid(sock, jid, tenantId) {
 
     const saveAndReturn = (finalJid) => {
       if (finalJid) {
-        resolvedJidCache.set(cacheKey, { result: finalJid, timestamp: Date.now() });
+        const now = Date.now();
+        const tPrefix = `${tenantId || 'global'}_`;
+        resolvedJidCache.set(cacheKey, { result: finalJid, timestamp: now });
+        if (phone8) resolvedJidCache.set(`${tPrefix}${phone8}`, { result: finalJid, timestamp: now });
+        if (phone9) resolvedJidCache.set(`${tPrefix}${phone9}`, { result: finalJid, timestamp: now });
         if (resolvedJidCache.size > 5000) {
           const oldestKey = resolvedJidCache.keys().next().value;
           resolvedJidCache.delete(oldestKey);

@@ -310,14 +310,17 @@ export function addLog(level, message) {
     msgStr.includes('PreKeyError') ||
     msgStr.includes('SessionError') ||
     msgStr.includes('verifyMAC') ||
+    msgStr.includes('Connection Terminated') ||
+    msgStr.includes('connection errored') ||
+    msgStr.includes('Stream Errored (unknown)') ||
     msgStr.includes('Caixa FoodNext não está conectada') ||
     msgStr.includes('Falha 404: Instância') ||
     msgStr.includes('Chave de API Gemini personalizada ignorada') || msgStr.includes('failed to sync regular_') || msgStr.includes('invalid wire type') || msgStr.includes('[SessionManager/AuthQueue]');
 
-  let sanitizedLevel = level;
-  if (isRoutineNoise && (sanitizedLevel === 'warn' || sanitizedLevel === 'error')) {
-    sanitizedLevel = 'info';
+  if (isRoutineNoise) {
+    return;
   }
+  const sanitizedLevel = level;
 
   const logEntry = {
     type: 'log',
