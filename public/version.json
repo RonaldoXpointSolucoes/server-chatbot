@@ -1,5 +1,5 @@
 {
-  "version": "8.0.7",
-  "buildDate": "2026-11-05T19:02:00.000Z",
-  "summary": "Separação de Links PWA (Chat no Celular vs Totem Cozinha no Tablet), Semáforo Anti-Thundering Herd nas Reconexões Baileys e Blindagem de Conflitos Transitórios"
+  "version": "8.0.9",
+  "buildDate": "2026-11-10T20:07:11.795Z",
+  "summary": "Otimização Extrema de Performance: Zero Re-Renders em Massa no MessageBubble, Hidratação Instantânea (0ms) de Conversas, Índices Otimizados no Supabase e Cache RAM no API Gateway"
 }
