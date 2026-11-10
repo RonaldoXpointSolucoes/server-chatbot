@@ -761,11 +761,12 @@ export default function DevLogger() {
   };
 
   useEffect(() => {
-    // Ping Status Heartbeat
+    if (!isVisible) return;
+    // Ping Status Heartbeat (somente quando o painel DevLogger está visível)
     checkEngineStatus();
     const interval = setInterval(checkEngineStatus, 10000);
     return () => clearInterval(interval);
-  }, []);
+  }, [isVisible]);
 
   // ==========================================
   // ESTADOS E CONTROLADORES E2E & TELEMETRIA
@@ -1180,7 +1181,7 @@ export default function DevLogger() {
         const method = requestOptions?.method || 'GET';
         
         if (url) {
-          const isExpectedOfflineError = url.includes('/invoke') && response.status === 400;
+          const isExpectedOfflineError = url.includes('/invoke') && (response.status === 400 || response.status === 404);
           const isLocalFrontend = url.includes(window.location.host) || (!url.startsWith('http://') && !url.startsWith('https://'));
           const isStatus404 = url.includes('/status') && response.status === 404;
           

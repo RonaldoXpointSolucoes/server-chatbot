@@ -78,7 +78,6 @@ export const MessageBubble = memo(({
 }: MessageBubbleProps) => {
   const agents = useChatStore(state => state.agents);
   const toggleChecklistItem = useChatStore(state => state.toggleChecklistItem);
-  const contacts = useChatStore(state => state.contacts);
   
   const isMe = msg.sender === 'human' || msg.sender === 'bot' || msg.sender === 'me' || msg.sender === 'automation';
   
@@ -678,7 +677,7 @@ export const MessageBubble = memo(({
              if (isInstance) return null;
            }
 
-           const participantContact = cleanParticipant ? contacts.find((c: any) => {
+           const participantContact = cleanParticipant ? useChatStore.getState().contacts.find((c: any) => {
              const cPhone = c.phone?.replace(/\D/g, '');
              return cPhone && (cPhone === cleanParticipant || cleanParticipant.includes(cPhone));
            }) : null;
@@ -859,7 +858,7 @@ export const MessageBubble = memo(({
                           }
 
                           const cleanSender = msg.quoted.sender.replace(/\D/g, '');
-                          const quotedContact = contacts.find((c: any) => {
+                          const quotedContact = useChatStore.getState().contacts.find((c: any) => {
                             const cPhone = c.phone?.replace(/\D/g, '');
                             return cPhone && (cPhone === cleanSender || cleanSender.includes(cPhone));
                           });
@@ -1204,8 +1203,8 @@ export const MessageBubble = memo(({
     prevProps.msg.transcription === nextProps.msg.transcription &&
     prevProps.msg.mediaUrl === nextProps.msg.mediaUrl &&
     prevProps.msg.payload?.read_receipt?.read_at === nextProps.msg.payload?.read_receipt?.read_at &&
-    prevProps.activeMsgDropdown === nextProps.activeMsgDropdown &&
-    prevProps.transcribingIds[prevProps.msg.id] === nextProps.transcribingIds[nextProps.msg.id] &&
+    (prevProps.activeMsgDropdown === prevProps.msg.id) === (nextProps.activeMsgDropdown === nextProps.msg.id) &&
+    Boolean(prevProps.transcribingIds?.[prevProps.msg.id]) === Boolean(nextProps.transcribingIds?.[nextProps.msg.id]) &&
     prevProps.showDateSeparator === nextProps.showDateSeparator &&
     prevProps.msg.taskCompleted === nextProps.msg.taskCompleted &&
     JSON.stringify(prevProps.msg.checklistItems || []) === JSON.stringify(nextProps.msg.checklistItems || []) &&

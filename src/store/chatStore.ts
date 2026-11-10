@@ -423,12 +423,20 @@ export const resolveInstanceUuid = async (tenantId: string, rawIdentifier: strin
   if (cachedId) return cachedId;
 
   try {
-    const { data } = await supabase
+    let { data } = await supabase
       .from('whatsapp_instances')
       .select('id, display_name, whatsapp_name, api_key, phone_number')
       .eq('tenant_id', tenantId)
       .or(`display_name.eq.${identifier},whatsapp_name.eq.${identifier}`)
       .limit(1);
+    if (!data || data.length === 0) {
+      const fallbackRes = await supabase
+        .from('whatsapp_instances')
+        .select('id, display_name, whatsapp_name, api_key, phone_number')
+        .or(`display_name.eq.${identifier},whatsapp_name.eq.${identifier}`)
+        .limit(1);
+      data = fallbackRes.data;
+    }
     if (data && data.length > 0) {
       const inst = data[0];
       instanceCache.set(inst.id, inst.display_name || inst.whatsapp_name || '', inst.api_key || '', inst.phone_number || '');
@@ -1073,6 +1081,9 @@ function sanitizeContactName(targetName: string | null | undefined, fallbackPhon
   return targetName;
 }
 const instanceStatusTimeouts: Record<string, ReturnType<typeof setTimeout>> = {};
+let inFlightInitialDataPromise: Promise<void> | null = null;
+let inFlightInitialDataKey = '';
+let lastSupportFetchAt = 0;
 
 export const useChatStore = create<ChatState>((set, get) => ({
   contacts: [],
@@ -5207,6 +5218,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set({ tenantInfo: tenant });
     }
 
+    const activeChannel = get().activeChannelFilter;
+    const currentFetchKey = `${tenant.id}_${activeChannel || 'ALL'}`;
+    if (inFlightInitialDataPromise && inFlightInitialDataKey === currentFetchKey) {
+      return inFlightInitialDataPromise;
+    }
+
     // Safety fallback timeout to prevent infinite skeleton loader state if network fails
     const safetyTimer = setTimeout(() => {
       if (get().isChannelLoading) {
@@ -5215,50 +5232,54 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     }, 12000);
 
+    const runFetch = (async () => {
     try {
-      // Disparar buscas auxiliares de forma concorrente e resiliente em background
-      const supportPromises = Promise.allSettled([
-        get().fetchAutomations(),
-        get().fetchTenantLabels(),
-        get().fetchQuickReplies(),
-        get().fetchAppointments(),
-        get().fetchCrmBoards(),
-        (async () => {
-          try {
-            const email = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
-            if (email) {
-              const { data: userData } = await supabase.from('tenant_users')
-                .select('settings')
-                .eq('email', email)
-                .eq('tenant_id', tenant.id)
-                .maybeSingle();
+      // Disparar buscas auxiliares de forma concorrente e não-bloqueante em background (cooldown de 120s para evitar sobrecarga)
+      const nowSupport = Date.now();
+      if (nowSupport - lastSupportFetchAt > 120000) {
+        lastSupportFetchAt = nowSupport;
+        Promise.allSettled([
+          get().fetchAutomations(),
+          get().fetchTenantLabels(),
+          get().fetchQuickReplies(),
+          get().fetchAppointments(),
+          get().fetchCrmBoards(),
+          (async () => {
+            try {
+              const email = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
+              if (email) {
+                const { data: userData } = await supabase.from('tenant_users')
+                  .select('settings')
+                  .eq('email', email)
+                  .eq('tenant_id', tenant.id)
+                  .maybeSingle();
 
-              if (userData && userData.settings) {
-                set({ userSettings: userData.settings });
+                if (userData && userData.settings) {
+                  set({ userSettings: userData.settings });
+                }
               }
+            } catch (err) {
+              console.warn('Erro ao carregar settings do usuario:', err);
             }
-          } catch (err) {
-            console.warn('Erro ao carregar settings do usuario:', err);
-          }
-        })(),
-        (async () => {
-          try {
-            const { data: appVersionData } = await supabase.from('app_version').select('*').order('deploy_date', { ascending: false }).limit(1).maybeSingle();
-            if (appVersionData) {
-              set({ appVersion: { version: appVersionData.version, deploy_date: appVersionData.deploy_date } });
+          })(),
+          (async () => {
+            try {
+              const { data: appVersionData } = await supabase.from('app_version').select('*').order('deploy_date', { ascending: false }).limit(1).maybeSingle();
+              if (appVersionData) {
+                set({ appVersion: { version: appVersionData.version, deploy_date: appVersionData.deploy_date } });
+              }
+            } catch (err) {
+              console.warn('Erro ao carregar versao do app:', err);
             }
-          } catch (err) {
-            console.warn('Erro ao carregar versao do app:', err);
-          }
-        })()
-      ]);
+          })()
+        ]);
+      }
 
       // 1. Puxa as conversas recentes, garantindo a mesma ordem do WhatsApp Web
       let convQuery = supabase.from('conversations')
         .select('*, conversation_labels(tenant_labels(*))')
         .eq('tenant_id', tenant.id);
 
-      const activeChannel = get().activeChannelFilter;
       if (activeChannel) {
         const resolvedChannelUuid = instanceCache.getId(activeChannel) || (await resolveInstanceUuid(tenant.id, activeChannel)) || activeChannel;
         const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(resolvedChannelUuid);
@@ -5267,12 +5288,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
       }
 
-      // Puxa até 300 conversas mais recentes da caixa ativa + TODAS as conversas não lidas/não atendidas de TODAS as caixas do tenant (para exibir os badges globais na sidebar lateral em tempo real)
-      const [activeConvsRes, unreadGlobalConvsRes] = await Promise.all([
+      // Puxa até 150 conversas mais recentes da caixa ativa + conversas não lidas/não atendidas de TODAS as caixas + tarefas CRM ativas em paralelo
+      const [activeConvsRes, unreadGlobalConvsRes, activeTasksRes] = await Promise.all([
         convQuery
           .order('is_pinned', { ascending: false })
           .order('last_message_at', { ascending: false })
-          .limit(300),
+          .limit(150),
         activeChannel
           ? supabase.from('conversations')
               .select('*, conversation_labels(tenant_labels(*))')
@@ -5281,8 +5302,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
               .neq('status', 'closed')
               .or('unread_count.gt.0,status.eq.unassigned,status.eq.pending')
               .order('last_message_at', { ascending: false })
-              .limit(300)
-          : Promise.resolve({ data: [] as any[] })
+              .limit(150)
+          : Promise.resolve({ data: [] as any[] }),
+        supabase.from('contact_notes')
+          .select('*')
+          .eq('tenant_id', tenant.id)
+          .eq('is_task', true)
+          .eq('task_completed', false)
       ]);
 
       const rawDbConvs = [
@@ -5297,7 +5323,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
 
       if (!dbConvs || dbConvs.length === 0) {
-        await supportPromises;
         set({ isChannelLoading: false });
         return;
       }
@@ -5359,21 +5384,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
       }
 
-      // Puxar tarefas CRM ativas para popular reativamente os contatos de imediato
-      let dbActiveTasks: any[] = [];
-      try {
-        const { data } = await supabase.from('contact_notes')
-          .select('*')
-          .eq('tenant_id', tenant.id)
-          .eq('is_task', true)
-          .eq('task_completed', false);
-        if (data) dbActiveTasks = data;
-      } catch (e) {
-        console.warn('Erro ao carregar active CRM tasks:', e);
-      }
-
-      // Aguarda a conclusão das buscas auxiliares de apoio
-      await supportPromises;
+      // Tarefas CRM ativas já carregadas no Promise.all inicial
+      const dbActiveTasks: any[] = activeTasksRes?.data || [];
 
       if (dbContacts && dbContacts.length > 0) {
         // RBAC: Se for agente, só carrega contatos de instâncias permitidas
@@ -5618,7 +5630,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
     } finally {
       clearTimeout(safetyTimer);
       set({ isChannelLoading: false });
+      if (inFlightInitialDataKey === currentFetchKey) {
+        inFlightInitialDataPromise = null;
+        inFlightInitialDataKey = '';
+      }
     }
+    })();
+
+    inFlightInitialDataPromise = runFetch;
+    inFlightInitialDataKey = currentFetchKey;
+    return runFetch;
   },
 
   fetchTenantConfig: async () => {
@@ -5855,10 +5876,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const isConvSameInstance = !hasValidInstanceId || !activeContactInst || activeContactInst === targetInstanceId;
         const knownConvId = isConvSameInstance ? activeContactObj?.conv_id : null;
 
-        // Hidratação imediata da RAM (0ms) se houver mensagens em cache e o contato estiver sem mensagens
+        // Hidratação imediata da RAM (0ms) se houver mensagens em cache e o contato estiver sem histórico completo (vazio ou apenas preview)
         const memoryCacheKey = (targetInstanceId && targetInstanceId !== 'default') ? `${realContactId || contactId}_${targetInstanceId}` : (contactId || realContactId);
         const memoryCached = (memoryCacheKey ? messagesMemoryCache.get(memoryCacheKey) : null) || messagesMemoryCache.get(contactId);
-        if (memoryCached && memoryCached.length > 0 && (!activeContactObj?.messages || activeContactObj.messages.length === 0)) {
+        const hasOnlyPreviewOrEmpty = !activeContactObj?.messages || activeContactObj.messages.length === 0 || (activeContactObj.messages.length === 1 && String(activeContactObj.messages[0]?.id).startsWith('preview-'));
+        if (memoryCached && memoryCached.length > 0 && hasOnlyPreviewOrEmpty) {
           set((s) => {
             const updated = [...s.contacts];
             const idx = updated.findIndex(c =>
@@ -5926,11 +5948,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
             .order('created_at', { ascending: true })
           : Promise.resolve({ data: [] });
 
-        // Query direta e antecipada de mensagens se knownConvId já for conhecido e da mesma instância
+        // Query direta e antecipada de mensagens se knownConvId já for conhecido e da mesma instância (usa índice primário conversation_id + timestamp sem interseção redundante de tenant_id)
         const directMsgPromise = (knownConvId && isUuid(knownConvId))
           ? supabase.from('messages')
             .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
-            .eq('tenant_id', tenant.id)
             .eq('conversation_id', knownConvId)
             .order('timestamp', { ascending: false })
             .limit(80)
@@ -6075,7 +6096,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (rawFetchedMsgs.length === 0 && safeConvIds.length > 0) {
           let msgQuery = supabase.from('messages')
             .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
-            .eq('tenant_id', tenant.id)
             .in('conversation_id', convIds);
 
           if (hasValidInstanceId) {

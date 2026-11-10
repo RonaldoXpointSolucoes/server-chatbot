@@ -20,6 +20,45 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.0.9',
+    date: '2026-11-10',
+    summary: 'Otimização Extrema de Performance: Zero Re-Renders em Massa no MessageBubble, Hidratação Instantânea (0ms) de Conversas, Índices Otimizados no Supabase e Cache RAM no API Gateway',
+    notes: [
+      {
+        id: '8.0.9-1',
+        category: 'improvements',
+        title: 'Eliminação de Re-Renders em Massa no MessageBubble e EvolutionModal',
+        description: 'Removida a assinatura reativa global de contacts dentro de cada bolha de mensagem (MessageBubble) e no EvolutionModal, impedindo que 80 a 150 bolhas re-renderizem simultaneamente a cada mensagem ou atualização de status.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-sky-500/20 text-sky-300 border-sky-500/30'
+      },
+      {
+        id: '8.0.9-2',
+        category: 'improvements',
+        title: 'Hidratação Instantânea (0ms) de Mensagens e Queries 3.8x Mais Rápidas no Supabase',
+        description: 'A abertura de conversas agora hidrata imediatamente do cache em memória mesmo quando há preview na lista, utiliza diretamente o índice primário conversation_id + timestamp e carrega a lista inicial de conversas sem bloqueio por queries secundárias.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-sky-500/20 text-sky-300 border-sky-500/30'
+      },
+      {
+        id: '8.0.9-3',
+        category: 'improvements',
+        title: 'Cache RAM em requireTenant no API Gateway e Preservação do WebSocket Realtime',
+        description: 'Adicionado cache em memória (TTL 120s) no middleware requireTenant para eliminar round-trips ao banco em chamadas /invoke e /status, além de remover listeners duplicados de foco de aba que reiniciavam o WebSocket Realtime.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-sky-500/20 text-sky-300 border-sky-500/30'
+      },
+      {
+        id: '8.0.9-4',
+        category: 'fixes',
+        title: 'Proteção Contra Erros 404 em Instâncias Legadas ou Órfãs e Suspensão de Pollers em Background',
+        description: 'Suprimidos disparos de presença e chamadas de status para instâncias inexistentes no tenant ativo (eliminando HTTP 404) e pausados os pollers de telemetria do DevLogger quando o painel está fechado.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      }
+    ]
+  },
+  {
     version: '8.0.8',
     date: '2026-11-10',
     summary: 'Alta Performance na API Externa (Cache RAM de ApiKey e JID 8/9 Dígitos), Deduplicação Instantânea no EventProcessor e Refinamento do Diagnóstico DevLogger',

@@ -21,6 +21,10 @@ const router = express.Router();
 const pendingConnectionStarts = new Set();
 const connectionSnapshot = instanceId => sessionConnectionDiagnostics(sessionManager, instanceId);
 
+// Cache em memória (TTL 120s) para metadados de autenticação de instâncias, eliminando round-trip ao Supabase em cada requisição /invoke ou /status
+const instanceAuthCache = new Map();
+const INSTANCE_AUTH_CACHE_TTL_MS = 120 * 1000;
+
 const requireTenant = async (req, res, next) => {
     const tenantId = req.headers['x-tenant-id'];
     const apiKey = req.headers['apikey'];
@@ -28,20 +32,55 @@ const requireTenant = async (req, res, next) => {
 
     const instanceId = req.params.instanceId;
     if (instanceId) {
-        let query = supabase
-            .from('whatsapp_instances')
-            .select('api_key, tenant_id')
-            .eq('id', instanceId);
+        const now = Date.now();
+        const cachedEntry = instanceAuthCache.get(instanceId);
+        let data = (cachedEntry && (now - cachedEntry.ts < INSTANCE_AUTH_CACHE_TTL_MS)) ? cachedEntry.data : null;
+        let error = null;
 
-        if (!isMasterKey && tenantId) {
-            query = query.eq('tenant_id', tenantId);
+        if (!data) {
+            const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(instanceId);
+            let query = supabase
+                .from('whatsapp_instances')
+                .select('id, api_key, tenant_id, display_name');
+
+            if (isUuid) {
+                query = query.eq('id', instanceId);
+            } else {
+                query = query.or(`display_name.eq.${instanceId},whatsapp_name.eq.${instanceId}`);
+            }
+
+            const queryRes = await query.limit(1).maybeSingle();
+            data = queryRes.data;
+            error = queryRes.error;
+
+            if (data && !error) {
+                const entry = { data, ts: now };
+                instanceAuthCache.set(instanceId, entry);
+                if (data.id) instanceAuthCache.set(data.id, entry);
+                if (data.display_name) instanceAuthCache.set(data.display_name, entry);
+            }
+        }
+            
+        if (error || !data) {
+            if (req.body?.method === 'sendPresenceUpdate') {
+                return res.status(200).json({ ok: false, skipped: true, message: 'Instance not active for presence update' });
+            }
+            return res.status(404).json({ error: 'Instance not found or unauthorized' });
         }
 
-        const { data, error } = await query.maybeSingle();
-            
-        if (error || !data) return res.status(404).json({ error: 'Instance not found or unauthorized' });
-        
-        req.tenantId = data.tenant_id || tenantId || '8b1e427b-2321-4ea7-9d7e-90f7d5cbad21';
+        const isStandalone = !data.tenant_id || data.tenant_id === '00000000-0000-0000-0000-000000000000';
+        const hasValidInstanceApiKey = Boolean(apiKey && data.api_key && data.api_key === apiKey);
+        const matchesTenant = Boolean(tenantId && data.tenant_id === tenantId);
+
+        if (!isMasterKey && !hasValidInstanceApiKey && !isStandalone && !matchesTenant) {
+            if (req.body?.method === 'sendPresenceUpdate') {
+                return res.status(200).json({ ok: false, skipped: true, message: 'Presence update ignored across tenant boundary' });
+            }
+            return res.status(404).json({ error: 'Instance not found or unauthorized' });
+        }
+
+        req.params.instanceId = data.id;
+        req.tenantId = (!isStandalone ? data.tenant_id : null) || tenantId || '8b1e427b-2321-4ea7-9d7e-90f7d5cbad21';
 
         // Se a chamada enviar a chave API (integração externa), valida com a api_key da instância.
         if (apiKey && data.api_key) {
@@ -553,9 +592,10 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                 }
 
                 // Normalização defensiva do JID para o Brasil (+55) com suporte a 8 e 9 dígitos (DDD 34, 31, etc)
+                let activeSock = isAllowedOnThisNode ? sessionManager.sessions.get(instanceId)?.sock : null;
                 let targetJid = jid;
                 if (targetJid && typeof targetJid === 'string' && !targetJid.endsWith('@g.us')) {
-                    targetJid = await resolveTargetJid(null, jid, req.tenantId);
+                    targetJid = await resolveTargetJid(activeSock, jid, req.tenantId);
                 }
 
                 // Extração do traceId do cabeçalho ou corpo para telemetria E2E
@@ -573,7 +613,6 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                 console.log(`[API Gateway] [MSG_TRACE:GATEWAY_RECEIVE] Instância: ${instanceId} | JID: ${targetJid} | Tipo: ${messageType} | TraceId: ${traceId || 'N/A'}`);
 
                 // FAST-PATH: Se a instância pertence a este nó e o socket estiver na memória e conectado, envia IMEDIATAMENTE (< 300ms)
-                let activeSock = isAllowedOnThisNode ? sessionManager.sessions.get(instanceId)?.sock : null;
                 let hasCreds = Boolean(activeSock?.authState?.creds?.me?.id || activeSock?.user?.id);
                 let isSockConnected = isAllowedOnThisNode && activeSock && (!activeSock.ws || activeSock.ws.isOpen || activeSock.ws.readyState === 1) && hasCreds;
 
@@ -794,9 +833,9 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
         }
 
         if (method === 'sendPresenceUpdate') {
-            const sock = await sessionManager.getSocketOrWake(req.tenantId, instanceId);
+            const sock = sessionManager.getSocket(req.params.instanceId || instanceId);
             if (!sock) {
-                return res.json({ ok: false, message: 'Socket offline or presence update ignored' });
+                return res.json({ ok: false, skipped: true, message: 'Socket offline or presence update ignored' });
             }
             try {
                 const result = await sock.sendPresenceUpdate(...(args || []));

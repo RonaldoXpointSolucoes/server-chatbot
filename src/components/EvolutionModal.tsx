@@ -206,8 +206,10 @@ export default function EvolutionModal({
   onClose: () => void;
   targetInstanceName?: string | null;
 }) {
-  const { evolutionConnected, setEvolutionConnection, modalReason, contacts, instancesStatus } =
-    useChatStore();
+  const evolutionConnected = useChatStore((s) => s.evolutionConnected);
+  const setEvolutionConnection = useChatStore((s) => s.setEvolutionConnection);
+  const modalReason = useChatStore((s) => s.modalReason);
+  const instancesStatus = useChatStore((s) => s.instancesStatus);
   const [loading, setLoading] = useState(false);
   const [qrBase64, setQrBase64] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -2828,7 +2830,7 @@ export default function EvolutionModal({
                                     })
                                     .map((p: any) => {
                                       const num = p.id.split("@")[0];
-                                      const contactMatch = contacts?.find((c) => c.id.includes(num));
+                                      const contactMatch = useChatStore.getState().contacts?.find((c) => c.id.includes(num));
                                       const displayName = contactMatch?.name || contactMatch?.pushName || p.name || p.notify || "Desconhecido";
                                       const formattedPhone = formatPhoneNumber(p.id);
 

@@ -914,16 +914,18 @@ export default function ChatDashboard() {
   };
 
   // Garante que o chat ativo seja marcado como lido automaticamente ao ser aberto ou ao receber novas mensagens apenas se a tela/aba estiver com foco
+  const activeContactUnread = useChatStore(state => {
+    if (!state.activeChatId) return 0;
+    const c = state.contacts.find(x => x.id === state.activeChatId || x.conv_id === state.activeChatId);
+    return c && !c.isManuallyUnread ? Number(c.unread || 0) : 0;
+  });
   useEffect(() => {
-    if (activeChatId) {
-      const activeContact = contacts.find(c => c.id === activeChatId || c.conv_id === activeChatId) || contacts.find(c => getRealContactId(c.id) === getRealContactId(activeChatId));
-      if (activeContact && Number(activeContact.unread || 0) > 0 && !activeContact.isManuallyUnread) {
-        if (typeof document !== 'undefined' && document.hasFocus()) {
-          useChatStore.getState().markAsRead(activeChatId);
-        }
+    if (activeChatId && activeContactUnread > 0) {
+      if (typeof document !== 'undefined' && document.hasFocus()) {
+        useChatStore.getState().markAsRead(activeChatId);
       }
     }
-  }, [activeChatId, contacts]);
+  }, [activeChatId, activeContactUnread]);
 
   // Listener para marcar como lido quando o usuário retorna à aba ou foca a janela
   useEffect(() => {
@@ -1739,21 +1741,12 @@ export default function ChatDashboard() {
     };
     const handleOffline = () => setIsOnline(false);
 
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        console.log('[Tab Focus] Usuário retornou à aba. Sincronizando mensagens perdidas...');
-        useChatStore.getState().syncMissedMessages().catch(e => console.error('[Visibility Sync] Falha:', e));
-      }
-    };
-
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
 
@@ -1976,8 +1969,8 @@ export default function ChatDashboard() {
       return fromCache;
     }
 
-    // 6. Busca nos contatos
-    const contactMatch = contacts.find((c: any) => c.instance_id === channelId || (c.id && c.id.includes(channelId)));
+    // 6. Busca nos contatos (leitura direta da store para evitar invalidar a função a cada mensagem)
+    const contactMatch = useChatStore.getState().contacts.find((c: any) => c.instance_id === channelId || (c.id && c.id.includes(channelId)));
     if (contactMatch?.instance_name) return contactMatch.instance_name;
 
     // 7. Se for um UUID cru, não expõe o hash na UI
@@ -1986,7 +1979,7 @@ export default function ChatDashboard() {
     }
 
     return channelId;
-  }, [activeChannelFilter, activeChannelName, tenantInstances, availableInstancesList, instanceNamesMap, contacts]);
+  }, [activeChannelFilter, activeChannelName, tenantInstances, availableInstancesList, instanceNamesMap]);
 
   // Helper de validação de Ticket Aberto para a caixa atual
   const isContactOpenTicket = React.useCallback((c: any) => {
@@ -3467,7 +3460,7 @@ export default function ChatDashboard() {
   } = useXPointRemoteBridge();
 
   useEffect(() => {
-    const remoteCtx = resolveContactRemoteContext(activeChat, allCompanies, contacts);
+    const remoteCtx = resolveContactRemoteContext(activeChat, allCompanies, useChatStore.getState().contacts);
     setXPointRemoteActiveContext(remoteCtx);
   }, [
     activeChat?.id,
@@ -3480,7 +3473,6 @@ export default function ChatDashboard() {
     activeChat?.phone,
     activeChat?.company_ids,
     allCompanies,
-    contacts,
     setXPointRemoteActiveContext,
   ]);
 
@@ -4031,19 +4023,18 @@ export default function ChatDashboard() {
     })();
   }, []);
 
-  // Solução PWA: Atualiza os dados (contatos e mensagens) e força reconexão Realtime com Cooldown de 10s quando volta do background
+  // Solução PWA: Atualiza os dados (contatos e mensagens) com Cooldown de 60s quando volta do background sem destruir o WebSocket Realtime ativo
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         const now = Date.now();
-        if (now - lastSyncTimeRef.current < 10000) {
-          console.log('[PWA Sync] Ignorando sincronização excessiva (cooldown ativo)');
+        if (now - lastSyncTimeRef.current < 60000) {
           return;
         }
         lastSyncTimeRef.current = now;
         console.log('[PWA Sync] App no foreground, sincronizando...');
         fetchInitialData();
-        subscribeToNewMessages(true); // Restabelece/Reconecta canal realtime de forma ativa, eliminando conexões zumbis
+        subscribeToNewMessages(false); // Reconecta canal realtime apenas se não estiver conectado
       }
     };
 
