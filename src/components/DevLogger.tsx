@@ -1532,6 +1532,9 @@ export default function DevLogger() {
                     msg.includes('Connection Closed') ||
                     msg.includes('Connection was lost') ||
                     msg.includes('connection errored') ||
+                    msg.includes('Request aborted') ||
+                    msg.includes('request aborted') ||
+                    msg.includes('make-middleware.js') ||
                     msg.includes('Fast-Path') ||
                     msg.includes('SessionManager - Antiban') ||
                     msg.includes('não retornou novas mensagens') ||
@@ -1616,9 +1619,15 @@ export default function DevLogger() {
     fetchTelemetry();
     fetchRecentErrors();
     fetchGastrofoodLogs();
-    const intervalTelemetry = setInterval(fetchTelemetry, 5000);
-    const intervalGastrofood = setInterval(fetchGastrofoodLogs, 5000);
-    const intervalErrors = setInterval(fetchRecentErrors, 5000);
+    const intervalTelemetry = setInterval(() => {
+      if (document.visibilityState === 'visible') fetchTelemetry();
+    }, 8000);
+    const intervalGastrofood = setInterval(() => {
+      if (document.visibilityState === 'visible') fetchGastrofoodLogs();
+    }, 8000);
+    const intervalErrors = setInterval(() => {
+      if (document.visibilityState === 'visible') fetchRecentErrors();
+    }, 8000);
     return () => {
        clearInterval(intervalTelemetry);
        clearInterval(intervalGastrofood);

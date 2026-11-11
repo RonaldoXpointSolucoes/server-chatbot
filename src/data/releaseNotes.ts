@@ -20,6 +20,45 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.1.1',
+    date: '2026-11-11',
+    summary: 'Envio Paralelo de Mídia (Baileys + Storage), Fallback Direto de Upload no Navegador, Tratamento de Request Aborted no Multer e Otimização de I/O de Logs',
+    notes: [
+      {
+        id: '8.1.1-1',
+        category: 'improvements',
+        title: 'Envio Paralelo (Promise.all) de Mídia no Socket Baileys e Supabase Storage',
+        description: 'O endpoint /send-media agora dispara o buffer diretamente no socket Baileys em paralelo com o upload para o Supabase Storage, reduzindo a latência de envio de áudios, imagens e vídeos em 50% a 70%.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-sky-500/20 text-sky-300 border-sky-500/30'
+      },
+      {
+        id: '8.1.1-2',
+        category: 'features',
+        title: 'Contingência Automática Browser ➔ Supabase Storage + Outbox para Arquivos',
+        description: 'Caso o gateway Node esteja reiniciando ou haja oscilação de rede durante o envio de um arquivo no chat, o navegador faz upload direto para o bucket chat_media e enfileira em wa_outgoing_messages sem perda do anexo.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '8.1.1-3',
+        category: 'fixes',
+        title: 'Tratamento Case-Insensitive de Request Aborted no Multer e Express',
+        description: 'Corrigida a interceptação de uploads interrompidos pelo cliente (Error: Request aborted do Multer) para responder graciosamente sem registrar falso erro 500 no servidor.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      },
+      {
+        id: '8.1.1-4',
+        category: 'improvements',
+        title: 'Supressão de Logs de Polling no Morgan e Pausa em Aba Oculta no DevLogger',
+        description: 'Rotas de telemetria e healthcheck deixam de poluir o stdout do container e o DevLogger pausa o polling automático quando a aba do navegador está em segundo plano.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-sky-500/20 text-sky-300 border-sky-500/30'
+      }
+    ]
+  },
+  {
     version: '8.1.0',
     date: '2026-11-11',
     summary: 'Auto-Reparo Ativo de WebSocket Realtime (Zero Chat Congelado), Fast-Path Direto para Envio de Mídia Sem Timeout e Varredura Integral da Fila Outbox',

@@ -3413,6 +3413,70 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
 
     } catch (err: any) {
+      // Fallback Resiliente de Mídia: Se o gateway Node estiver reiniciando ou inacessível,
+      // fazemos upload direto para o Supabase Storage pelo navegador e enfileiramos em wa_outgoing_messages!
+      try {
+        if (state.tenantInfo?.id && resolvedInstanceId && err?.message !== 'whatsapp_offline') {
+          const jid = getContactJid(contact);
+          const safeName = (file.name || 'media.bin').replace(/[^a-zA-Z0-9.\-]/g, '_');
+          const storagePath = `tenant_${state.tenantInfo.id}/instance_${resolvedInstanceId}/${jid}/${Date.now()}_${safeName}`;
+          const { error: directUpErr } = await supabase.storage
+            .from('chat_media')
+            .upload(storagePath, file, { contentType: file.type || 'application/octet-stream', upsert: false });
+
+          if (!directUpErr) {
+            const { data: pubData } = supabase.storage.from('chat_media').getPublicUrl(storagePath);
+            const fallbackMediaUrl = pubData?.publicUrl || '';
+            if (fallbackMediaUrl) {
+              const { data: outboxRow, error: outboxErr } = await supabase
+                .from('wa_outgoing_messages')
+                .insert({
+                  instance_id: resolvedInstanceId,
+                  tenant_id: state.tenantInfo.id,
+                  chat_jid: jid,
+                  message_type: 'media',
+                  body: finalCaption || '',
+                  media_url: fallbackMediaUrl,
+                  options: {
+                    mimetype: file.type || 'application/octet-stream',
+                    fileName: file.name || safeName,
+                    messageType: mediaType,
+                    ptt: Boolean(isPtt || mediaType === 'audio'),
+                    responseType: 'STANDARD'
+                  },
+                  status: 'pending',
+                  priority: 1
+                })
+                .select()
+                .single();
+
+              if (!outboxErr && outboxRow) {
+                const mockId = `EDGE_${outboxRow.id.replace(/-/g, '')}`;
+                set((s) => ({
+                  contacts: s.contacts.map(c => isContactMatchingTarget(c, contactId, resolvedInstanceId || preferredInst) ? {
+                    ...c,
+                    messages: c.messages.map(m => (m.id === pseudoId || m.pseudoId === pseudoId) ? {
+                      ...m,
+                      id: mockId,
+                      pseudoId: pseudoId,
+                      mediaUrl: fallbackMediaUrl,
+                      whatsapp_id: mockId,
+                      status: 'sent'
+                    } : m)
+                  } : c)
+                }));
+                window.dispatchEvent(new CustomEvent('toast', {
+                  detail: { message: 'Mídia enfileirada com sucesso para entrega prioritária!', type: 'info', duration: 4000 }
+                }));
+                return;
+              }
+            }
+          }
+        }
+      } catch (fallbackMediaErr) {
+        console.warn('[uploadAndSendMedia] Fallback direto via Supabase Storage também falhou:', fallbackMediaErr);
+      }
+
       console.error('[uploadAndSendMedia] Falha crítica:', err);
       state.removeMessageLocally(contactId, pseudoId);
       window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Falha ao enviar arquivo para o WhatsApp: ' + (err.message || err), type: 'error' } }));

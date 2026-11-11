@@ -113,7 +113,12 @@ app.use(cors({
 app.use(helmet());
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
-app.use(morgan('dev'));
+app.use(morgan('dev', {
+    skip: (req) => {
+        const u = req.originalUrl || req.url || '';
+        return u.startsWith('/debug/') || u.startsWith('/health') || u.startsWith('/ready') || u.startsWith('/api/v1/system/logs/');
+    }
+}));
 
 const APP_ENV = (process.env.APP_ENV || 'production').toLowerCase();
 const APP_NODE = process.env.APP_NODE || (APP_ENV === 'alpha' ? 'ALFA-A' : 'PROD-C');
@@ -482,10 +487,21 @@ app.use((err, req, res, next) => {
         });
     }
 
-    // 2) Erro de requisição abortada prematuramente pelo cliente (ex: raw-body BadRequestError)
-    if (err.message === 'request aborted' || err.code === 'ECONNABORTED' || (err.status === 400 && err.message?.includes('abort'))) {
-        console.warn(`[Network] Requisição abortada prematuramente pelo cliente: ${err.message}`);
-        return res.status(400).json({ error: 'Conexão interrompida pelo cliente antes da conclusão da requisição' });
+    // 2) Erro de requisição abortada prematuramente pelo cliente (ex: Multer 'Request aborted' ou raw-body 'request aborted')
+    const errMsgLower = String(err?.message || '').toLowerCase();
+    if (
+        errMsgLower.includes('request aborted') ||
+        errMsgLower.includes('aborted') ||
+        err?.code === 'ECONNABORTED' ||
+        err?.code === 'ECONNRESET' ||
+        req.aborted ||
+        (err?.status === 400 && errMsgLower.includes('abort'))
+    ) {
+        console.info(`[Network] Upload/Requisição interrompida pelo cliente (${req.method} ${req.originalUrl || req.path}): ${err.message}`);
+        if (!res.headersSent) {
+            return res.status(400).json({ error: 'Conexão interrompida pelo cliente antes da conclusão da requisição' });
+        }
+        return;
     }
 
     // 3) Erros de limite de tamanho do body-parser (Entity too large)

@@ -137,8 +137,11 @@ function interceptConsole() {
         return;
     }
 
-    // Silencia erros transitórios de CircuitBreaker do gateway Supabase durante janela de 5s de auto-recuperação
+    // Silencia erros transitórios de CircuitBreaker do gateway Supabase durante janela de 5s de auto-recuperação e aborts de upload pelo cliente
     const isTransientCircuitBreakerNoise = text.includes('Supabase Node CircuitBreaker') ||
+                                           text.includes('Request aborted') ||
+                                           text.includes('request aborted') ||
+                                           text.includes('make-middleware.js') ||
                                            (text.includes('[EventProcessor] Erro ao buscar config da instância') && text.includes('TimeoutError')) ||
                                            text.includes('Contato não pôde ser inserido nem recuperado: Error: Supabase Node CircuitBreaker') ||
                                            text.includes('[BatchProcessor] Erro ao buscar instâncias válidas') ||
