@@ -1104,36 +1104,127 @@ router.post('/instances/:instanceId/send-media', requireTenant, upload.single('m
 
         let mediaUrl = '';
         if (uploadErr) {
-            console.error('Supabase media upload error:', uploadErr);
-             mediaUrl = 'upload_failed';
+            console.warn('[send-media] Aviso no upload para Supabase Storage:', uploadErr.message || uploadErr);
+            mediaUrl = '';
         } else {
             const { data: publicUrlData } = supabase.storage.from('chat_media').getPublicUrl(storagePath);
             mediaUrl = publicUrlData.publicUrl;
         }
 
-        // Em vez de enviar diretamente via sock.sendMessage, enfileira na fila do Edge BR
         const isPttAudio = Boolean(req.body.ptt === 'true' || req.body.ptt === true || messageType === 'audio');
-        const { data: newOutbox, error: outboxErr } = await supabase
-            .from('wa_outgoing_messages')
-            .insert({
-                instance_id: instanceId,
-                tenant_id: tenantId,
-                chat_jid: jid,
-                message_type: 'media',
-                body: caption || '',
-                media_url: mediaUrl,
-                options: {
-                    mimetype: file.mimetype,
-                    fileName: file.originalname,
-                    messageType: messageType,
-                    ptt: isPttAudio,
-                    responseType: 'STANDARD'
-                },
-                status: 'pending',
-                priority: 1
-            })
-            .select()
-            .single();
+
+        // FAST-PATH PARA MÍDIA: Se o socket está aberto na memória deste nó, envia o buffer diretamente via Baileys sem re-download!
+        const activeSock = sessionManager.getSocket(instanceId) || sessionManager.sessions.get(instanceId)?.sock;
+        if (activeSock && isSocketOpen(activeSock)) {
+            try {
+                let targetJid = String(jid).trim();
+                if (!targetJid.includes('@')) {
+                    targetJid = `${targetJid.replace(/\D/g, '')}@s.whatsapp.net`;
+                }
+                let mediaPayload = {};
+                if (messageType === 'image') {
+                    mediaPayload = { image: file.buffer, caption: caption || '', mimetype: file.mimetype };
+                } else if (messageType === 'video') {
+                    mediaPayload = { video: file.buffer, caption: caption || '', mimetype: file.mimetype };
+                } else if (messageType === 'audio') {
+                    mediaPayload = { audio: file.buffer, mimetype: 'audio/ogg; codecs=opus', ptt: isPttAudio };
+                } else {
+                    mediaPayload = { document: file.buffer, mimetype: file.mimetype || 'application/octet-stream', fileName: file.originalname || 'document', caption: caption || '' };
+                }
+
+                const sendFn = activeSock.originalSendMessage || activeSock.sendMessage.bind(activeSock);
+                const directRes = await Promise.race([
+                    sendFn(targetJid, mediaPayload),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT_FASTPATH_MEDIA_SEND')), 25000))
+                ]);
+                const realWaId = directRes?.key?.id || `FAST_${Date.now()}`;
+
+                Promise.resolve().then(async () => {
+                    try {
+                        const { default: eventProcessor } = await import('../event-processor/index.js');
+                        const msgPayload = directRes?.message || (
+                            messageType === 'image' ? { imageMessage: { url: mediaUrl, mimetype: file.mimetype, caption: caption || '' } } :
+                            messageType === 'video' ? { videoMessage: { url: mediaUrl, mimetype: file.mimetype, caption: caption || '' } } :
+                            messageType === 'audio' ? { audioMessage: { url: mediaUrl, mimetype: 'audio/ogg; codecs=opus', ptt: isPttAudio } } :
+                            { documentMessage: { url: mediaUrl, mimetype: file.mimetype, fileName: file.originalname, caption: caption || '' } }
+                        );
+                        await eventProcessor.handleMessagesUpsert(tenantId, instanceId, {
+                            type: 'notify',
+                            messages: [{
+                                key: directRes?.key || { remoteJid: targetJid, fromMe: true, id: realWaId },
+                                message: msgPayload,
+                                messageTimestamp: directRes?.messageTimestamp || Math.floor(Date.now() / 1000),
+                                status: 2
+                            }]
+                        });
+                    } catch (epErr) {
+                        console.warn(`[API Gateway] [send-media] Aviso ao sincronizar EventProcessor no Fast-Path:`, epErr.message);
+                    }
+                    try {
+                        await supabase.from('wa_outgoing_messages').insert({
+                            instance_id: instanceId,
+                            tenant_id: tenantId,
+                            chat_jid: targetJid,
+                            message_type: 'media',
+                            body: caption || '',
+                            media_url: mediaUrl || 'sent_via_fastpath_buffer',
+                            options: {
+                                mimetype: file.mimetype,
+                                fileName: file.originalname,
+                                messageType: messageType,
+                                ptt: isPttAudio,
+                                responseType: 'STANDARD',
+                                whatsapp_message_id: realWaId
+                            },
+                            status: 'sent',
+                            priority: 1,
+                            updated_at: new Date().toISOString()
+                        });
+                    } catch (auditErr) {}
+                });
+
+                return res.json({
+                    ok: true,
+                    fastPath: true,
+                    result: {
+                        key: directRes?.key || { remoteJid: targetJid, fromMe: true, id: realWaId },
+                        messageTimestamp: directRes?.messageTimestamp || Math.floor(Date.now() / 1000)
+                    },
+                    media_url: mediaUrl
+                });
+            } catch (fastMediaErr) {
+                console.warn(`[API Gateway] [send-media] Fast-Path de mídia oscilou para ${instanceId} (${fastMediaErr.message}). Usando fila de contingência...`);
+            }
+        }
+
+        if (!mediaUrl) {
+            return res.status(502).json({ error: 'Falha temporária no upload da mídia para o Storage e socket não disponível para envio direto. Tente novamente.' });
+        }
+
+        // Fallback: enfileira na fila de saída com retry resiliente
+        const { data: newOutbox, error: outboxErr } = await retryWithBackoff(() =>
+            supabase
+                .from('wa_outgoing_messages')
+                .insert({
+                    instance_id: instanceId,
+                    tenant_id: tenantId,
+                    chat_jid: jid,
+                    message_type: 'media',
+                    body: caption || '',
+                    media_url: mediaUrl,
+                    options: {
+                        mimetype: file.mimetype,
+                        fileName: file.originalname,
+                        messageType: messageType,
+                        ptt: isPttAudio,
+                        responseType: 'STANDARD'
+                    },
+                    status: 'pending',
+                    priority: 1
+                })
+                .select()
+                .single()
+        );
 
         if (outboxErr) throw outboxErr;
 

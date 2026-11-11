@@ -20,6 +20,45 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.1.0',
+    date: '2026-11-11',
+    summary: 'Auto-Reparo Ativo de WebSocket Realtime (Zero Chat Congelado), Fast-Path Direto para Envio de Mídia Sem Timeout e Varredura Integral da Fila Outbox',
+    notes: [
+      {
+        id: '8.1.0-1',
+        category: 'fixes',
+        title: 'Auto-Reparo de WebSockets Zumbis e Catch-up Sync Instantâneo do Chat Aberto',
+        description: 'Corrigida a verificação de saúde real dos canais Supabase Realtime (state === joined) e restaurada a sincronização automática (syncMissedMessages) das mensagens do chat aberto ao retornar do background, eliminando congelamento de tela.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      },
+      {
+        id: '8.1.0-2',
+        category: 'fixes',
+        title: 'Fast-Path Direto para Envio de Mídias e Timeout Estendido (60s) no Supabase Storage',
+        description: 'O endpoint /send-media agora despacha imagens, áudios, vídeos e PDFs diretamente pelo socket ativo em memória sem depender de re-download, além de ampliar o timeout de upload do Storage de 12s para 60s.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      },
+      {
+        id: '8.1.0-3',
+        category: 'fixes',
+        title: 'Varredura Integral de Mensagens Pendentes no QueueProcessor',
+        description: 'O QueueProcessor agora consulta diretamente mensagens pending em wa_outgoing_messages e acorda automaticamente instâncias em reconexão, impedindo que mensagens fiquem retidas até expirar.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      },
+      {
+        id: '8.1.0-4',
+        category: 'improvements',
+        title: 'Auto-Recuperação Cautelosa Pós-403 Transitório e Limpeza Proativa de ConnectingState',
+        description: 'Adicionada tentativa única de auto-reparo após 45s para oscilações 403 pós-stream 503 com credenciais válidas e timer automático de limpeza de estados de conexão.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-sky-500/20 text-sky-300 border-sky-500/30'
+      }
+    ]
+  },
+  {
     version: '8.0.9',
     date: '2026-11-10',
     summary: 'Otimização Extrema de Performance: Zero Re-Renders em Massa no MessageBubble, Hidratação Instantânea (0ms) de Conversas, Índices Otimizados no Supabase e Cache RAM no API Gateway',

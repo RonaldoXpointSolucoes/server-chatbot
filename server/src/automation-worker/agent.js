@@ -1,5 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { supabase, NODE_ID } from '../supabase.js';
+import { supabase, NODE_ID, retryWithBackoff } from '../supabase.js';
 import { pipeline } from '../embeddings/pipeline.js';
 import { AsyncLocalStorage } from 'async_hooks';
 import { getBrPhoneVariations, getCanonicalBrPhone } from '../event-processor/helpers.js';
@@ -1734,14 +1734,21 @@ class AutomationWorker {
             try {
                 console.log("[CardapioSync] Iniciando ciclo de sincronização de cardápios...");
 
-                // Busca as instâncias do WhatsApp designadas para este NODE_ID específico
-                const { data: myInstances, error: errInst } = await supabase
-                    .from('whatsapp_instances')
-                    .select('tenant_id')
-                    .eq('assigned_node_id', NODE_ID);
+                // Busca as instâncias do WhatsApp designadas para este NODE_ID específico com retry resiliente
+                const { data: myInstances, error: errInst } = await retryWithBackoff(() =>
+                    supabase
+                        .from('whatsapp_instances')
+                        .select('tenant_id')
+                        .eq('assigned_node_id', NODE_ID)
+                );
                 
                 if (errInst) {
-                    console.error("[CardapioSync] Erro ao buscar instâncias designadas para este nó:", errInst.message);
+                    const isTimeout = errInst.message?.includes('Timeout') || errInst.message?.includes('timeout') || errInst.message?.includes('fetch failed');
+                    if (isTimeout) {
+                        console.info("[CardapioSync] Oscilação transitória ao buscar instâncias designadas para este nó:", errInst.message);
+                    } else {
+                        console.error("[CardapioSync] Erro ao buscar instâncias designadas para este nó:", errInst.message);
+                    }
                     return;
                 }
 
@@ -1750,15 +1757,17 @@ class AutomationWorker {
                     return;
                 }
 
-                const myTenantIds = myInstances.map(inst => inst.tenant_id);
+                const myTenantIds = Array.from(new Set(myInstances.map(inst => inst.tenant_id).filter(Boolean)));
 
-                const { data: companies, error } = await supabase
-                    .from('companies')
-                    .select('id, name, settings')
-                    .in('id', myTenantIds);
+                const { data: companies, error } = await retryWithBackoff(() =>
+                    supabase
+                        .from('companies')
+                        .select('id, name, settings')
+                        .in('id', myTenantIds)
+                );
                     
                 if (error) {
-                    console.error("[CardapioSync] Erro ao buscar empresas para sincronização:", error.message);
+                    console.warn("[CardapioSync] Aviso ao buscar empresas para sincronização:", error.message);
                     return;
                 }
                 

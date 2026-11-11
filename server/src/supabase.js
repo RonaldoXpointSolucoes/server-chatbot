@@ -147,22 +147,26 @@ async function resilientFetch(url, options = {}, retries = 2, delay = 600) {
     throw new Error('Supabase Node CircuitBreaker: Requisição pausada temporariamente para recuperação do gateway Supabase');
   }
 
+  const isStorageRequest = typeof url === 'string' && url.includes('/storage/v1/');
+  const timeoutMs = isStorageRequest ? 60000 : 15000;
+  const effectiveRetries = isStorageRequest ? Math.min(retries, 1) : retries;
+
   const fetchOptions = options.signal
     ? options
-    : { ...options, signal: AbortSignal.timeout(12000) };
+    : { ...options, signal: AbortSignal.timeout(timeoutMs) };
 
   try {
     const response = await fetch(url, fetchOptions);
     
     // Tratamento de instabilidade HTTP 5xx do gateway / servidor Supabase Cloud (500, 502, 503, 504, 520-524)
-    if (response.status >= 500 && retries > 0) {
+    if (response.status >= 500 && effectiveRetries > 0) {
       const jitter = Math.floor(Math.random() * 300);
       const waitTime = delay + jitter;
-      if (retries <= 1) {
-        console.info(`[Supabase/HTTP] Instabilidade HTTP ${response.status} na API Supabase. Retentando em ${waitTime}ms... (${retries} retentativas restantes)`);
+      if (effectiveRetries <= 1) {
+        console.info(`[Supabase/HTTP] Instabilidade HTTP ${response.status} na API Supabase. Retentando em ${waitTime}ms... (${effectiveRetries} retentativas restantes)`);
       }
       await new Promise(resolve => setTimeout(resolve, waitTime));
-      return resilientFetch(url, options, retries - 1, Math.min(Math.round(delay * 1.5), 4000));
+      return resilientFetch(url, options, effectiveRetries - 1, Math.min(Math.round(delay * 1.5), 4000));
     }
     
     if (response.ok) {

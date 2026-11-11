@@ -1,5 +1,5 @@
 {
-  "version": "8.0.9",
-  "buildDate": "2026-11-10T20:07:11.795Z",
-  "summary": "Otimização Extrema de Performance: Zero Re-Renders em Massa no MessageBubble, Hidratação Instantânea (0ms) de Conversas, Índices Otimizados no Supabase e Cache RAM no API Gateway"
+  "version": "8.1.0",
+  "buildDate": "2026-11-11T20:18:06.116Z",
+  "summary": "Auto-Reparo Ativo de WebSocket Realtime (Zero Chat Congelado), Fast-Path Direto para Envio de Mídia Sem Timeout e Varredura Integral da Fila Outbox"
 }

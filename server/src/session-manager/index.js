@@ -681,7 +681,7 @@ class SessionManager {
         const startedAt = this.connectingStateStartedAt.get(instanceId) || 0;
         const ageMs = startedAt > 0 ? (Date.now() - startedAt) : 0;
         if (ageMs > maxAgeMs) {
-            console.warn(`[SessionManager] Evictando connectingState órfão/travado (${ageMs}ms > ${maxAgeMs}ms) para a instância ${instanceId}.`);
+            console.log(`[SessionManager] Evictando connectingState órfão/travado (${ageMs}ms > ${maxAgeMs}ms) para a instância ${instanceId}.`);
             this.connectingState.delete(instanceId);
             this.connectingStateStartedAt.delete(instanceId);
             this.inProgressLocks.delete(instanceId);
@@ -703,7 +703,7 @@ class SessionManager {
 
         const mutexStartedAt = this.instanceMutexStartedAt.get(instanceId) || 0;
         if (this.instanceMutexes.has(instanceId) && mutexStartedAt > 0 && (Date.now() - mutexStartedAt > 35000)) {
-            console.warn(`[SessionManager] Evictando instanceMutex órfão/travado (> 35s) para a instância ${instanceId}.`);
+            console.log(`[SessionManager] Evictando instanceMutex órfão/travado (> 35s) para a instância ${instanceId}.`);
             this.instanceMutexes.delete(instanceId);
             this.instanceMutexStartedAt.delete(instanceId);
         }
@@ -1102,10 +1102,18 @@ class SessionManager {
             );
             this.connectingState.set(instanceId, promise);
             this.connectingStateStartedAt.set(instanceId, Date.now());
+            const autoEvictTimer = setTimeout(() => {
+                if (this.connectingState.get(instanceId) === promise) {
+                    this.connectingState.delete(instanceId);
+                    this.connectingStateStartedAt.delete(instanceId);
+                    this.inProgressLocks.delete(instanceId);
+                }
+            }, 45000);
             
             try {
                 return await promise;
             } finally {
+                clearTimeout(autoEvictTimer);
                 if (this.connectingState.get(instanceId) === promise) {
                     this.connectingState.delete(instanceId);
                     this.connectingStateStartedAt.delete(instanceId);
@@ -1813,7 +1821,25 @@ class SessionManager {
                             this.reconnectingTimers.set(instanceId, timer);
                         }
                     } else if (isForbidden) {
-                        // 403 Forbidden: sinal claro de rejeição/bloqueio temporário pela Meta.
+                        const forbiddenCount = (this.consecutiveForbiddenAttempts.get(instanceId) || 0) + 1;
+                        this.consecutiveForbiddenAttempts.set(instanceId, forbiddenCount);
+                        const hasValidCreds = isFullyAuthenticated || Boolean(state?.creds?.me?.id);
+
+                        if (forbiddenCount === 1 && hasValidCreds) {
+                            console.info(`[SessionManager] Oscilação transitória 403 pós-stream na instância ${instanceId} (tentativa 1/2). Agendando auto-recuperação cautelosa em 45s...`);
+                            const timer = setTimeout(() => {
+                                this.reconnectingTimers.delete(instanceId);
+                                if (!this.sessions.has(instanceId)) {
+                                    this.createSession(tenantId, instanceId, false).catch(err => {
+                                        console.warn(`[SessionManager] Aviso na retentativa cautelosa pós-403 para ${instanceId}:`, err.message);
+                                    });
+                                }
+                            }, 45000);
+                            this.reconnectingTimers.set(instanceId, timer);
+                            return;
+                        }
+
+                        // 403 Forbidden persistente (>= 2 vezes): sinal claro de rejeição/bloqueio temporário pela Meta.
                         // Para proteger o chip do cliente contra ban definitivo por loops de reconexão agressivos,
                         // SUSPENDE IMEDIATAMENTE qualquer tentativa de auto-reconexão e limpa timers.
                         console.error(`[SessionManager] 🛑 Acesso proibido/restrito pelo WhatsApp (403 Forbidden) na instância ${instanceId}. Suspendendo auto-reconexão para proteção rigorosa do chip.`);

@@ -4023,18 +4023,25 @@ export default function ChatDashboard() {
     })();
   }, []);
 
-  // Solução PWA: Atualiza os dados (contatos e mensagens) com Cooldown de 60s quando volta do background sem destruir o WebSocket Realtime ativo
+  // Solução PWA: Atualiza conversas e o chat aberto (Catch-up Sync) com Cooldown de 15s quando volta do background e repara WebSockets zumbis
   useEffect(() => {
+    let hiddenAt = 0;
     const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        hiddenAt = Date.now();
+        return;
+      }
       if (document.visibilityState === 'visible') {
         const now = Date.now();
-        if (now - lastSyncTimeRef.current < 60000) {
+        const hiddenDurationMs = hiddenAt > 0 ? now - hiddenAt : 0;
+        if (now - lastSyncTimeRef.current < 15000 && hiddenDurationMs < 25000) {
           return;
         }
         lastSyncTimeRef.current = now;
-        console.log('[PWA Sync] App no foreground, sincronizando...');
-        fetchInitialData();
-        subscribeToNewMessages(false); // Reconecta canal realtime apenas se não estiver conectado
+        console.log('[PWA Sync] App no foreground, sincronizando conversas e mensagens do chat ativo...');
+        useChatStore.getState().syncMissedMessages();
+        // Se a aba ficou em background por mais de 25s, força renovação do canal Realtime para evitar WebSocket zumbi
+        subscribeToNewMessages(hiddenDurationMs > 25000);
       }
     };
 

@@ -5288,12 +5288,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
       }
 
-      // Puxa até 150 conversas mais recentes da caixa ativa + conversas não lidas/não atendidas de TODAS as caixas + tarefas CRM ativas em paralelo
+      // Puxa até 300 conversas mais recentes da caixa ativa + conversas não lidas/não atendidas de TODAS as caixas + tarefas CRM ativas em paralelo
       const [activeConvsRes, unreadGlobalConvsRes, activeTasksRes] = await Promise.all([
         convQuery
           .order('is_pinned', { ascending: false })
           .order('last_message_at', { ascending: false })
-          .limit(150),
+          .limit(300),
         activeChannel
           ? supabase.from('conversations')
               .select('*, conversation_labels(tenant_labels(*))')
@@ -5302,7 +5302,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               .neq('status', 'closed')
               .or('unread_count.gt.0,status.eq.unassigned,status.eq.pending')
               .order('last_message_at', { ascending: false })
-              .limit(150)
+              .limit(200)
           : Promise.resolve({ data: [] as any[] }),
         supabase.from('contact_notes')
           .select('*')
@@ -7117,7 +7117,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   subscribeToNewMessages: (force?: boolean) => {
     const state = get() as any;
-    if (state.isSubscribed && !force) return; // React 18 protection
     let tenantId = state.tenantInfo?.id;
     if (!tenantId && typeof window !== 'undefined') {
       tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
@@ -7126,6 +7125,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // Tenant em resolução ou usuário em processo de boot/autenticação. Retorna silenciosamente.
       return;
     }
+
+    const expectedMainTopic = `realtime:realtime_chat_${tenantId}`;
+    const expectedInboxTopic = `realtime:tenant:${tenantId}:inbox`;
+    const activeChannels = supabase.getChannels();
+    const mainCh = activeChannels.find(c => c.topic === expectedMainTopic) as any;
+    const inboxCh = activeChannels.find(c => c.topic === expectedInboxTopic) as any;
+    const areChannelsHealthy =
+      state.isSubscribed &&
+      state.realtimeStatus === 'connected' &&
+      mainCh && (mainCh.state === 'joined' || mainCh.state === 'joining') &&
+      inboxCh && (inboxCh.state === 'joined' || inboxCh.state === 'joining');
+
+    if (areChannelsHealthy && !force) return; // React 18 protection + validação real do socket
+
     set({ isSubscribed: true, realtimeStatus: 'connecting' } as any);
 
     // Inicia monitor Keep-Alive do Realtime
@@ -7138,8 +7151,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
             return;
           }
           const currentStatus = get().realtimeStatus;
-          if (currentStatus === 'disconnected') {
-            console.log('[Realtime Monitor] Detectado canal desconectado. Forçando auto-reparo do realtime...');
+          const chs = supabase.getChannels();
+          const mCh = chs.find(c => c.topic === `realtime:realtime_chat_${currentTenantId}`) as any;
+          const iCh = chs.find(c => c.topic === `realtime:tenant:${currentTenantId}:inbox`) as any;
+          const isDeadSocket = !mCh || (mCh.state !== 'joined' && mCh.state !== 'joining') || !iCh || (iCh.state !== 'joined' && iCh.state !== 'joining');
+
+          if (currentStatus === 'disconnected' || isDeadSocket) {
+            console.log('[Realtime Monitor] Detectado canal desconectado ou inativo. Forçando auto-reparo do realtime...');
             get().subscribeToNewMessages(true);
           }
         }, 10000); // Checa a cada 10 segundos para reconexão super rápida
@@ -7154,8 +7172,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
             return;
           }
           const currentStatus = get().realtimeStatus;
-          // Se estiver offline ou se não houver canais ativos no cliente Supabase
-          if (currentStatus === 'disconnected' || supabase.getChannels().length === 0) {
+          const chs = supabase.getChannels();
+          const mCh = chs.find(c => c.topic === `realtime:realtime_chat_${currentTenantId}`) as any;
+          const isDeadSocket = !mCh || (mCh.state !== 'joined' && mCh.state !== 'joining');
+          // Se estiver offline ou se não houver canais saudáveis no cliente Supabase
+          if (currentStatus === 'disconnected' || chs.length === 0 || isDeadSocket) {
             console.log('[Realtime Window Events] Foco ou rede restabelecidos, mas Realtime inativo. Reparando...');
             get().subscribeToNewMessages(true);
           }
@@ -7218,6 +7239,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       })
       .subscribe((subStatus) => {
         console.log('[Realtime Broadcast] Canal inbox status:', subStatus);
+        if (subStatus === 'CHANNEL_ERROR' || subStatus === 'TIMED_OUT') {
+          setTimeout(() => {
+            get().subscribeToNewMessages(true);
+          }, 4000);
+        }
       });
 
     const channelName = `realtime_chat_${tenantId}`;
@@ -8046,7 +8072,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
 
           console.error("[Realtime] Subscription critical error:", err);
-          set({ realtimeStatus: 'disconnected' });
+          set({ isSubscribed: false, realtimeStatus: 'disconnected' } as any);
           // Rotina ativa de auto-reparo e reconexão silenciosa
           setTimeout(() => {
             console.log("[Realtime] Tentativa de auto-reparo após erro de subscrição...");
@@ -8056,15 +8082,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
           console.log(`[Realtime status]: ${status}`);
           if (status === 'SUBSCRIBED') {
             const connectedOnce = get().hasRealtimeConnectedOnce;
-            set({ realtimeStatus: 'connected', hasRealtimeConnectedOnce: true });
+            set({ isSubscribed: true, realtimeStatus: 'connected', hasRealtimeConnectedOnce: true } as any);
             if (connectedOnce) {
               console.log('[Realtime] Conexão WebSocket restabelecida. Sincronizando mensagens perdidas durante a desconexão...');
               get().syncMissedMessages().catch(e => console.error('[Realtime Sync] Falha no syncMissedMessages:', e));
             }
           } else if (status === 'CLOSED') {
-            set({ realtimeStatus: 'disconnected' });
+            set({ isSubscribed: false, realtimeStatus: 'disconnected' } as any);
           } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-            set({ realtimeStatus: 'disconnected' });
+            set({ isSubscribed: false, realtimeStatus: 'disconnected' } as any);
             // Rotina ativa de auto-reparo e reconexão silenciosa
             setTimeout(() => {
               console.log("[Realtime] Rotina ativa de auto-reparo iniciada...");
