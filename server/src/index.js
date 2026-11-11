@@ -860,6 +860,21 @@ async function runMigrations() {
           CREATE POLICY "Permitir tudo em crm_leads" ON public.crm_leads FOR ALL USING (true) WITH CHECK (true);
           GRANT ALL ON public.crm_leads TO authenticated, anon, service_role;
 
+          -- =========================================================================
+          -- ÍNDICES DE ALTA PERFORMANCE PARA OUTBOX, RECONCILIAÇÃO E RECEBIMENTO
+          -- =========================================================================
+          CREATE INDEX IF NOT EXISTS idx_wa_incoming_messages_received_at
+            ON public.wa_incoming_messages (received_at DESC);
+
+          CREATE INDEX IF NOT EXISTS idx_wa_incoming_messages_instance_msg
+            ON public.wa_incoming_messages (instance_id, message_id);
+
+          CREATE INDEX IF NOT EXISTS idx_wa_outgoing_messages_status_scheduled
+            ON public.wa_outgoing_messages (status, scheduled_at, created_at);
+
+          CREATE INDEX IF NOT EXISTS idx_wa_outgoing_messages_sent_at
+            ON public.wa_outgoing_messages (status, sent_at);
+
           NOTIFY pgrst, 'reload schema';
         `;
         await client.query(migrationSQL);
@@ -1002,8 +1017,10 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
     }
 
     try {
-        console.log("[Worker Boot] Inicializando SnoozeManager...");
-        snoozeManager.start();
+        if (APP_ENV !== 'alpha') {
+            console.log("[Worker Boot] Inicializando SnoozeManager...");
+            snoozeManager.start();
+        }
     } catch(err) {
         console.error("[Worker Boot] Erro ao iniciar SnoozeManager:", err.message);
     }
@@ -1025,8 +1042,10 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
     }
 
     try {
-        console.log("[Worker Boot] Inicializando Cardapio Background Sync...");
-        AutomationWorker.startCardapioBackgroundSync();
+        if (APP_ENV !== 'alpha') {
+            console.log("[Worker Boot] Inicializando Cardapio Background Sync...");
+            AutomationWorker.startCardapioBackgroundSync();
+        }
     } catch(err) {
         console.error("[Worker Boot] Erro ao iniciar Cardapio Background Sync:", err.message);
     }
@@ -1072,6 +1091,12 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
                 .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'conversations' }, async (payload) => {
                     const oldConv = payload.old;
                     const newConv = payload.new;
+
+                    if (newConv && newConv.instance_id && !isInstanceAllowedForNode(newConv.instance_id, newConv.tenant_id)) {
+                        return;
+                    } else if (newConv && !newConv.instance_id && APP_ENV === 'alpha') {
+                        return;
+                    }
 
                     if (newConv && newConv.status === 'resolved') {
                         if (oldConv && oldConv.status !== 'resolved' && !notifiedResolvedConvs.has(newConv.id)) {

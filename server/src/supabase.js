@@ -147,9 +147,11 @@ async function resilientFetch(url, options = {}, retries = 2, delay = 600) {
     throw new Error('Supabase Node CircuitBreaker: Requisição pausada temporariamente para recuperação do gateway Supabase');
   }
 
-  const isStorageRequest = typeof url === 'string' && url.includes('/storage/v1/');
+  const urlStr = typeof url === 'string' ? url : String(url || '');
+  const isStorageRequest = urlStr.includes('/storage/v1/');
+  const isNonCriticalTelemetry = urlStr.includes('/rest/v1/system_logs') || urlStr.includes('/rest/v1/wa_incoming_messages');
   const timeoutMs = isStorageRequest ? 60000 : 15000;
-  const effectiveRetries = isStorageRequest ? Math.min(retries, 1) : retries;
+  const effectiveRetries = (isStorageRequest || isNonCriticalTelemetry) ? Math.min(retries, 1) : retries;
 
   const fetchOptions = options.signal
     ? options
@@ -171,7 +173,7 @@ async function resilientFetch(url, options = {}, retries = 2, delay = 600) {
     
     if (response.ok) {
       nodeSupabaseCircuitBreaker.recordSuccess();
-    } else if (response.status >= 500 && retries === 0) {
+    } else if (response.status >= 500 && effectiveRetries === 0 && !isStorageRequest && !isNonCriticalTelemetry) {
       nodeSupabaseCircuitBreaker.recordFailure();
     }
 
@@ -207,17 +209,17 @@ async function resilientFetch(url, options = {}, retries = 2, delay = 600) {
       errorName === 'AbortError' ||
       errorName === 'TimeoutError';
 
-    if (isTransientNetworkError && retries > 0 && !nodeSupabaseCircuitBreaker.isCircuitOpen()) {
+    if (isTransientNetworkError && effectiveRetries > 0 && !nodeSupabaseCircuitBreaker.isCircuitOpen()) {
       const jitter = Math.floor(Math.random() * 350);
       const waitTime = delay + jitter;
-      if (retries <= 1) {
-        console.info(`[Supabase/Network] Auto-recuperando conexão (${errorMsg || errorCode}) em ${waitTime}ms... (${retries} retentativas restantes)`);
+      if (effectiveRetries <= 1) {
+        console.info(`[Supabase/Network] Auto-recuperando conexão (${errorMsg || errorCode}) em ${waitTime}ms... (${effectiveRetries} retentativas restantes)`);
       }
       await new Promise(resolve => setTimeout(resolve, waitTime));
-      return resilientFetch(url, options, retries - 1, Math.min(Math.round(delay * 1.5), 4000));
+      return resilientFetch(url, options, effectiveRetries - 1, Math.min(Math.round(delay * 1.5), 4000));
     }
     
-    if (retries === 0) {
+    if (effectiveRetries === 0 && !isStorageRequest && !isNonCriticalTelemetry) {
       nodeSupabaseCircuitBreaker.recordFailure();
     }
     throw error;
@@ -418,8 +420,12 @@ export async function resolveTargetJid(sock, jid, tenantId) {
           ? Array.from(new Set([phone8, phone9]))
           : Array.from(new Set([phone9, phone8]));
         const onWhatsAppPromise = sock.onWhatsApp(...queryList);
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT_ONWHATSAPP')), 2500));
-        const results = await Promise.race([onWhatsAppPromise, timeoutPromise]);
+        onWhatsAppPromise.catch(() => {});
+        let waTimer;
+        const timeoutPromise = new Promise((_, reject) => {
+          waTimer = setTimeout(() => reject(new Error('TIMEOUT_ONWHATSAPP')), 2500);
+        });
+        const results = await Promise.race([onWhatsAppPromise, timeoutPromise]).finally(() => clearTimeout(waTimer));
         if (Array.isArray(results)) {
           const valid = results.find(r => r && r.exists && r.jid);
           if (valid && valid.jid) {

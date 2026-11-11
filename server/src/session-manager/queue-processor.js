@@ -153,99 +153,90 @@ class QueueProcessor {
     async loop() {
         if (!this.running) return;
 
-        let instances = null;
+        let hadPendingWork = false;
         try {
             const currentNodeId = String(NODE_ID).trim();
             const { default: sessionManager, isInstanceAllowedForNode } = await import('./index.js');
 
-            // 1. Busca instâncias com mensagens 'pending' na wa_outgoing_messages E instâncias conectadas em paralelo
-            const [pendingOutboxRes, instancesRes] = await Promise.all([
-                retryWithBackoff(async () => {
-                    const { data, error } = await supabase
-                        .from('wa_outgoing_messages')
-                        .select('instance_id, tenant_id')
-                        .eq('status', 'pending')
-                        .limit(60);
-                    if (error) throw error;
-                    return data || [];
-                }),
-                retryWithBackoff(async () => {
-                    const { data, error } = await supabase
-                        .from('whatsapp_instances')
-                        .select('id, tenant_id, status, assigned_node_id, lease_until')
-                        .in('status', ['connected', 'connected_local', 'connecting', 'reconnecting']);
-                    if (error) throw error;
-                    return data || [];
-                })
-            ]);
+            // 1. Consulta leve e cirúrgica: verifica apenas se existem mensagens prontas para envio no outbox
+            const tenMinutesAgo = new Date(Date.now() - OUTBOX_TTL_MS).toISOString();
+            const nowIso = new Date().toISOString();
+            const pendingOutboxRes = await retryWithBackoff(async () => {
+                const { data, error } = await supabase
+                    .from('wa_outgoing_messages')
+                    .select('instance_id, tenant_id')
+                    .eq('status', 'pending')
+                    .gte('created_at', tenMinutesAgo)
+                    .lte('scheduled_at', nowIso)
+                    .limit(60);
+                if (error) throw error;
+                return data || [];
+            });
 
-            instances = instancesRes;
-            const instMap = new Map();
-            for (const inst of (instancesRes || [])) {
-                instMap.set(inst.id, inst);
-            }
-
-            // Garante que qualquer instância com mensagem pendente na fila seja incluída mesmo se status oscilar
-            const candidateMap = new Map();
-            for (const inst of (instancesRes || [])) {
-                if (inst.status === 'connected' || inst.status === 'connected_local') {
-                    candidateMap.set(inst.id, inst);
+            if (pendingOutboxRes && pendingOutboxRes.length > 0) {
+                // Filtra apenas instâncias permitidas para este nó que realmente têm mensagens pendentes
+                const candidateRowsByInst = new Map();
+                for (const row of pendingOutboxRes) {
+                    if (!row.instance_id) continue;
+                    if (!isInstanceAllowedForNode(row.instance_id, row.tenant_id)) continue;
+                    if (!candidateRowsByInst.has(row.instance_id)) {
+                        candidateRowsByInst.set(row.instance_id, row);
+                    }
                 }
-            }
-            for (const row of (pendingOutboxRes || [])) {
-                if (row.instance_id && !candidateMap.has(row.instance_id)) {
-                    const knownInst = instMap.get(row.instance_id);
-                    candidateMap.set(row.instance_id, knownInst || {
-                        id: row.instance_id,
-                        tenant_id: row.tenant_id,
-                        assigned_node_id: null,
-                        lease_until: null
+
+                if (candidateRowsByInst.size > 0) {
+                    hadPendingWork = true;
+                    const targetInstanceIds = Array.from(candidateRowsByInst.keys());
+                    const instancesRes = await retryWithBackoff(async () => {
+                        const { data, error } = await supabase
+                            .from('whatsapp_instances')
+                            .select('id, tenant_id, status, assigned_node_id, lease_until')
+                            .in('id', targetInstanceIds);
+                        if (error) throw error;
+                        return data || [];
                     });
-                }
-            }
 
-            if (candidateMap.size > 0) {
-                const now = new Date();
-                const pendingInstanceIds = new Set((pendingOutboxRes || []).map(r => r.instance_id));
-
-                for (const inst of candidateMap.values()) {
-                    const instanceId = inst.id;
-                    const tenantId = inst.tenant_id;
-                    if (!isInstanceAllowedForNode(instanceId, tenantId)) continue;
-
-                    const assignedNodeId = inst.assigned_node_id ? String(inst.assigned_node_id).trim() : null;
-                    const isLockedByOther = assignedNodeId && assignedNodeId !== currentNodeId && inst.lease_until && new Date(inst.lease_until) > now;
-
-                    // Se a instância está sob lease ativo de outro worker, este nó não deve processá-la
-                    if (isLockedByOther) continue;
-
-                    // Isolamento de concorrência: processa se vinculada a este nó, se houver sessão ativa na RAM local, ou se houver mensagem pendente sem dono ativo
-                    const isOwnedByMe = assignedNodeId === currentNodeId;
-                    const hasLocalSession = sessionManager.sessions.has(instanceId);
-                    const hasPendingOutbox = pendingInstanceIds.has(instanceId);
-                    if (!isOwnedByMe && !hasLocalSession && !hasPendingOutbox) {
-                        continue;
+                    const instMap = new Map();
+                    for (const inst of (instancesRes || [])) {
+                        instMap.set(inst.id, inst);
                     }
 
-                    // Se já houver um processador rodando para esta instância, pula para não enviar em paralelo
-                    if (this.activeProcessors.has(instanceId)) continue;
+                    const now = new Date();
+                    for (const [instanceId, row] of candidateRowsByInst.entries()) {
+                        const inst = instMap.get(instanceId) || {
+                            id: instanceId,
+                            tenant_id: row.tenant_id,
+                            assigned_node_id: null,
+                            lease_until: null
+                        };
+                        const tenantId = inst.tenant_id || row.tenant_id;
 
-                    this.activeProcessors.add(instanceId);
-                    this.processInstanceQueue(tenantId, instanceId).finally(() => {
-                        this.activeProcessors.delete(instanceId);
-                    });
+                        const assignedNodeId = inst.assigned_node_id ? String(inst.assigned_node_id).trim() : null;
+                        const isLockedByOther = assignedNodeId && assignedNodeId !== currentNodeId && inst.lease_until && new Date(inst.lease_until) > now;
+
+                        // Se a instância está sob lease ativo de outro worker, este nó não deve processá-la
+                        if (isLockedByOther) continue;
+
+                        // Se já houver um processador rodando para esta instância, pula para não enviar em paralelo
+                        if (this.activeProcessors.has(instanceId)) continue;
+
+                        this.activeProcessors.add(instanceId);
+                        this.processInstanceQueue(tenantId, instanceId).finally(() => {
+                            this.activeProcessors.delete(instanceId);
+                        });
+                    }
                 }
             }
         } catch (err) {
-            if (err.message && (err.message.includes('fetch failed') || err.message.includes('timeout') || err.message.includes('Timeout') || err.message.includes('Network'))) {
+            if (err.message && (err.message.includes('fetch failed') || err.message.includes('timeout') || err.message.includes('Timeout') || err.message.includes('Network') || err.message.includes('CircuitBreaker'))) {
                 console.info(`[QueueProcessor/Loop] Oscilação temporária de rede no loop de outbox. Auto-recuperando em 3s...`);
             } else {
                 console.error(`[QueueProcessor/Loop] Erro no loop de outbox:`, err.message);
             }
         }
 
-        // Agenda a próxima execução com intervalo adaptativo suave (2.5s se houver instâncias, 3.5s em repouso)
-        const nextDelay = (instances && instances.length > 0) ? 2500 : 3500;
+        // Agenda a próxima execução com intervalo adaptativo suave (1.8s se havia trabalho ativo, 2.5s em repouso)
+        const nextDelay = hadPendingWork ? 1800 : 2500;
         this.timer = setTimeout(() => this.loop(), nextDelay);
     }
 
@@ -342,8 +333,12 @@ class QueueProcessor {
                 let sock = null;
                 try {
                     const wakePromise = sessionManager.getSocketOrWake(tenantId, instanceId);
-                    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT_QUEUE_WAKE')), 3500));
-                    sock = await Promise.race([wakePromise, timeoutPromise]);
+                    wakePromise.catch(() => {});
+                    let wakeTimer;
+                    const timeoutPromise = new Promise((_, reject) => {
+                        wakeTimer = setTimeout(() => reject(new Error('TIMEOUT_QUEUE_WAKE')), 3500);
+                    });
+                    sock = await Promise.race([wakePromise, timeoutPromise]).finally(() => clearTimeout(wakeTimer));
                 } catch (wErr) {
                     console.warn(`[QueueProcessor] Timeout ou falha rápida ao obter socket para ${instanceId}:`, wErr.message);
                 }

@@ -58,6 +58,7 @@ class BoundedKeyCache {
 }
 
 const writeQueues = new Map();
+const pendingCredsSaves = new Map(); // instanceId -> { timer, flushFn }
 
 function enqueueWrite(instanceId, writeFn) {
     if (!writeQueues.has(instanceId)) {
@@ -90,6 +91,14 @@ function enqueueWrite(instanceId, writeFn) {
 }
 
 export async function flushPendingWrites(instanceId) {
+    if (pendingCredsSaves.has(instanceId)) {
+        const pending = pendingCredsSaves.get(instanceId);
+        pendingCredsSaves.delete(instanceId);
+        if (pending.timer) clearTimeout(pending.timer);
+        if (typeof pending.flushFn === 'function') {
+            try { pending.flushFn(); } catch (e) {}
+        }
+    }
     if (writeQueues.has(instanceId)) {
         let timer;
         try {
@@ -110,8 +119,9 @@ export async function flushPendingWrites(instanceId) {
 }
 
 export async function flushAllPendingWrites() {
-    // No-op
-    return;
+    for (const instanceId of Array.from(pendingCredsSaves.keys())) {
+        await flushPendingWrites(instanceId);
+    }
 }
 
 export function clearInstanceMemoryCache(instanceId) {
@@ -492,16 +502,24 @@ export async function useSupabaseAuthState(tenantId, instanceId, forceCleanState
             }
         },
         saveCreds: async () => {
-            enqueueWrite(instanceId, async () => {
-                await retryWithBackoff(async () => {
-                    const { error } = await supabase.from('wa_auth_credentials').upsert({
-                        instance_id: instanceId,
-                        tenant_id: tenantId,
-                        creds_data: serializeAuthData(authState.state.creds)
+            if (pendingCredsSaves.has(instanceId)) {
+                return;
+            }
+            const flushFn = () => {
+                pendingCredsSaves.delete(instanceId);
+                enqueueWrite(instanceId, async () => {
+                    await retryWithBackoff(async () => {
+                        const { error } = await supabase.from('wa_auth_credentials').upsert({
+                            instance_id: instanceId,
+                            tenant_id: tenantId,
+                            creds_data: serializeAuthData(authState.state.creds)
+                        });
+                        if (error) throw new Error(error.message);
                     });
-                    if (error) throw new Error(error.message);
-                });
-            }).catch(() => {});
+                }).catch(() => {});
+            };
+            const timer = setTimeout(flushFn, 400);
+            pendingCredsSaves.set(instanceId, { timer, flushFn });
         }
     };
 

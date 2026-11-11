@@ -171,6 +171,8 @@ class SessionManager {
         this.reconnectingCoolingDown = new Map();
         this.connectionLocks = new Set();
         this.connectingSessions = new Set();
+        this.syncedInstancePhones = new Map();
+        this.recentRawMessagesCache = new Map();
         this.activeInitSlots = 0;
         this.maxConcurrentInits = 3;
         this.initSlotQueue = [];
@@ -1198,6 +1200,11 @@ class SessionManager {
                 },
                 getMessage: async (key) => {
                     if (!key || !key.id) return undefined;
+                    const cacheKey = `${instanceId}_${key.id}`;
+                    const cachedMsg = this.recentRawMessagesCache.get(cacheKey);
+                    if (cachedMsg) {
+                        return cachedMsg;
+                    }
                     try {
                         // 1. Tenta buscar no wa_incoming_messages do Supabase
                         const { data: incMsg } = await supabase
@@ -1208,6 +1215,7 @@ class SessionManager {
                             .maybeSingle();
 
                         if (incMsg?.raw_payload?.message) {
+                            this.recentRawMessagesCache.set(cacheKey, incMsg.raw_payload.message);
                             console.log(`[SessionManager - Retry] Mensagem ${key.id} resgatada de wa_incoming_messages para responder ao retry do WhatsApp.`);
                             return incMsg.raw_payload.message;
                         }
@@ -1221,6 +1229,7 @@ class SessionManager {
                             .maybeSingle();
 
                         if (dbMsg?.raw_payload?.message) {
+                            this.recentRawMessagesCache.set(cacheKey, dbMsg.raw_payload.message);
                             console.log(`[SessionManager - Retry] Mensagem ${key.id} resgatada da tabela messages para responder ao retry do WhatsApp.`);
                             return dbMsg.raw_payload.message;
                         }
@@ -1273,12 +1282,15 @@ class SessionManager {
                 if (hasValidMeId) {
                     this.authenticatedSessions.add(instanceId);
                     const phone = String(meId).split('@')[0].split(':')[0];
-                    if (phone && phone.length >= 7) {
+                    if (phone && phone.length >= 7 && this.syncedInstancePhones.get(instanceId) !== phone) {
+                        this.syncedInstancePhones.set(instanceId, phone);
                         retryWithBackoff(() => 
                             supabase.from('whatsapp_instances')
                                 .update({ phone_number: phone })
                                 .eq('id', instanceId)
-                        ).catch(() => {});
+                        ).catch(() => {
+                            this.syncedInstancePhones.delete(instanceId);
+                        });
                     }
                 }
                 // Só dispara a atualização de pareamento se a sessão NÃO estava autenticada no boot
@@ -2125,6 +2137,17 @@ class SessionManager {
             });
 
             sock.ev.on('messages.upsert', async (m) => {
+                if (m?.messages && Array.isArray(m.messages)) {
+                    for (const msg of m.messages) {
+                        if (msg?.key?.id && msg?.message) {
+                            this.recentRawMessagesCache.set(`${instanceId}_${msg.key.id}`, msg.message);
+                            if (this.recentRawMessagesCache.size > 3000) {
+                                const firstKey = this.recentRawMessagesCache.keys().next().value;
+                                if (firstKey !== undefined) this.recentRawMessagesCache.delete(firstKey);
+                            }
+                        }
+                    }
+                }
                 await eventProcessor.handleMessageUpsert(this.getLiveTenantId(instanceId, tenantId), instanceId, sock, m);
             });
 
@@ -2339,6 +2362,13 @@ class SessionManager {
 
                                     // Auto-persiste e sincroniza imediatamente no EventProcessor
                                     try {
+                                        if (result?.key?.id && result?.message) {
+                                            this.recentRawMessagesCache.set(`${instanceId}_${result.key.id}`, result.message);
+                                            if (this.recentRawMessagesCache.size > 3000) {
+                                                const firstKey = this.recentRawMessagesCache.keys().next().value;
+                                                if (firstKey !== undefined) this.recentRawMessagesCache.delete(firstKey);
+                                            }
+                                        }
                                         const { EventProcessor, default: eventProcessor } = await import('../event-processor/index.js');
                                         if (result && result.key && result.key.id) {
                                             const isAuto = options?.isAutomation || options?.senderType === 'automation' || content?.isAutomation;

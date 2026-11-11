@@ -1,6 +1,11 @@
 {
-  "version": "7.9.1",
+  "version": "8.0.7",
   "changelog": [
+    "⚡ Redução de 95,6% nas Queries Ociosas do Outbox: Consulta única de pendências antes de acionar processInstanceQueue, eliminando 528 req/min desnecessárias ao Supabase",
+    "🚀 Fim dos Scans JSONB Pesados (1.15s) na Reconciliação: Registro automático de IDs processados em memória, filtro por nó e busca sob demanda de raw_payload",
+    "🛡️ Isolamento de Circuit Breaker: Falhas ou timeouts em uploads de mídia (Storage S3) e telemetria não derrubam o circuito de banco principal PostgREST",
+    "🖼️ Cache de Fotos de Perfil (TTL 6h) e Cache RAM para Retry Criptográfico (getMessage): Resposta em 0ms para recibos de retry do WhatsApp e eliminação de buscas repetitivas de avatar",
+    "🔒 Deduplicação Multi-Worker (Alpha vs Produção): Isolamento de webhooks Realtime (ticket_resolved / ai_paused), SnoozeManager atômico e debounce de 400ms em saveCreds",
     "🛡️ Prevenção de Throttling de CPU na VPS (ONNX RAG Inteligente): Salto automático de re-vetorização quando o cardápio permanece inalterado, cedência de Event Loop (25ms) por chunk e adiamento de sync pós-boot para 90s",
     "⚡ Fim da Tempestade Multiplicativa de Retentativas no Supabase: Timeout estrito de 12s (AbortSignal.timeout), bloqueio imediato no CircuitBreaker aberto na 1ª tentativa e redução de retries acoplados",
     "🔒 Anti-Deadlock em Mutex de Instância (AuthQueue): Timeouts defensivos de 10s em enqueueWrite e 5s em flushPendingWrites para impedir congelamento de sessões Baileys",

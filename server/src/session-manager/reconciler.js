@@ -1,4 +1,5 @@
 import { supabase } from '../supabase.js';
+import { isInstanceAllowedForNode } from './index.js';
 
 /**
  * Reconciliador em background para garantir integridade absoluta de mensagens.
@@ -6,6 +7,7 @@ import { supabase } from '../supabase.js';
  * mas por alguma eventualidade de rede/concorrência ainda não constam na tabela messages.
  */
 let isReconciling = false;
+const reconciledOutboxIds = new Set();
 
 export async function runOutgoingReconciliation() {
     if (isReconciling) return;
@@ -30,8 +32,22 @@ export async function runOutgoingReconciliation() {
         }
 
         for (const msg of outMsgs) {
+            if (!msg.id || reconciledOutboxIds.has(msg.id)) continue;
+            if (!isInstanceAllowedForNode(msg.instance_id, msg.tenant_id)) continue;
+
+            const markReconciled = () => {
+                reconciledOutboxIds.add(msg.id);
+                if (reconciledOutboxIds.size > 2000) {
+                    const first = reconciledOutboxIds.values().next().value;
+                    if (first !== undefined) reconciledOutboxIds.delete(first);
+                }
+            };
+
             const rawBody = (msg.body || '').trim();
-            if (!rawBody) continue;
+            if (!rawBody) {
+                markReconciled();
+                continue;
+            }
 
             const options = typeof msg.options === 'object' && msg.options !== null ? msg.options : {};
             const realWaMsgId = options?.messageId;
@@ -46,6 +62,7 @@ export async function runOutgoingReconciliation() {
                     .limit(1);
 
                 if (existingById && existingById.length > 0) {
+                    markReconciled();
                     continue;
                 }
             }
@@ -56,7 +73,10 @@ export async function runOutgoingReconciliation() {
                 .replace('@g.us', '')
                 .split(':')[0]
                 .trim();
-            if (!cleanPhone) continue;
+            if (!cleanPhone) {
+                markReconciled();
+                continue;
+            }
 
             // 2. Verifica se a mensagem já está salva na tabela clássica messages (janela robusta de +-120s)
             const msgTime = new Date(msg.sent_at || msg.created_at).getTime();
@@ -70,6 +90,7 @@ export async function runOutgoingReconciliation() {
                 .limit(1);
 
             if (existing && existing.length > 0) {
+                markReconciled();
                 continue;
             }
 
@@ -81,7 +102,10 @@ export async function runOutgoingReconciliation() {
                 .or(`phone.eq.${cleanPhone},whatsapp_jid.ilike.%${cleanPhone}%`)
                 .limit(1);
 
-            if (!cData || cData.length === 0) continue;
+            if (!cData || cData.length === 0) {
+                markReconciled();
+                continue;
+            }
             const contact = cData[0];
 
             // Localizar conversa
@@ -93,7 +117,10 @@ export async function runOutgoingReconciliation() {
                 .order('updated_at', { ascending: false })
                 .limit(1);
 
-            if (!convData || convData.length === 0) continue;
+            if (!convData || convData.length === 0) {
+                markReconciled();
+                continue;
+            }
             const conv = convData[0];
 
             // 3. Verificação final no escopo da conversa para evitar duplicata de outbound
@@ -108,6 +135,7 @@ export async function runOutgoingReconciliation() {
                 .limit(1);
 
             if (convExisting && convExisting.length > 0) {
+                markReconciled();
                 continue;
             }
 
@@ -144,6 +172,7 @@ export async function runOutgoingReconciliation() {
                 .insert([payloadToInsert]);
 
             if (!insErr) {
+                markReconciled();
                 console.log(`[AutoReconciler] 🛡️ Mensagem recuperada e salva com sucesso para ${contact.name} (${cleanPhone}): ${rawBody.substring(0, 40)}...`);
                 if (!conv.last_message_at || new Date(msgTimestamp) >= new Date(conv.last_message_at)) {
                     await supabase

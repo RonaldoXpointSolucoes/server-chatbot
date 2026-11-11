@@ -73,6 +73,17 @@ function interceptConsole() {
   const originalInfo = console.info;
 
   function capture(level, originalFn, args) {
+    // Fast-path: Descarta dumps verbosos de chaves criptográficas do libsignal ANTES de JSON.stringify ou util.inspect no Event Loop
+    const firstArg = args && args.length > 0 && typeof args[0] === 'string' ? args[0] : '';
+    if (
+        firstArg.includes('Closing session:') ||
+        firstArg.includes('Removing old closed session:') ||
+        firstArg.includes('Closing open session in favor of incoming prekey bundle') ||
+        firstArg.includes('Opening session:')
+    ) {
+        return;
+    }
+
     let text = '';
     try {
         text = args.map(a => {
@@ -96,14 +107,13 @@ function interceptConsole() {
         text = `[${APP_ENV}][${APP_NODE}] ${text}`;
     }
 
-    // Filtro de ruído: Ignora dumps verbosos de chaves criptográficas do libsignal e rotinas inofensivas
+    // Filtro de ruído residual: Ignora estruturas internas do libsignal
     const isSignalKeyDump = text.includes('Closing session:') ||
                             text.includes('Removing old closed session:') ||
                             text.includes('_chains') ||
                             text.includes('currentRatchet') ||
                             text.includes('pendingPreKey');
     if (isSignalKeyDump) {
-        originalFn.apply(console, args);
         return;
     }
 

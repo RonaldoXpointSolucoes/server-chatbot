@@ -42,6 +42,8 @@ class EventProcessor {
         
         this.pendingStatuses = new Map();
         this.processedMessagesCache = new Map(); // Cache de deduplicação de mensagens recentes
+        this.reconciliationAttempts = new Set(); // Cache de IDs já reconciliados/salvos no banco
+        this.profilePicCache = new Map(); // Cache de fotos de perfil por JID (TTL 6h)
         this.statusUpdateQueue = new Map(); // Fila assíncrona para status atrasados
         this.aiSendRateLimiter = new Map(); // Rastreio de taxa de disparos automáticos por conversa para anti-spam
         this.isFlushingStatus = false;
@@ -49,8 +51,8 @@ class EventProcessor {
         // Loop de reconciliation assíncrono para status (a cada 1s)
         setInterval(() => this.flushStatusQueue(), 1000);
 
-        // Loop de auto-recuperação de mensagens não sincronizadas (Self-Healing a cada 30s)
-        setInterval(() => this.reconcileMissingMessages(), 30000);
+        // Loop de auto-recuperação de mensagens não sincronizadas (Self-Healing a cada 60s)
+        setInterval(() => this.reconcileMissingMessages(), 60000);
         
         // Cleanup loop para evitar memory leaks nos status pendentes e cache de mensagens processadas
         setInterval(() => {
@@ -67,6 +69,13 @@ class EventProcessor {
                     }
                 }
             }
+            if (this.profilePicCache && this.profilePicCache.size > 0) {
+                for (const [key, timestamp] of this.profilePicCache.entries()) {
+                    if (now - timestamp > 6 * 60 * 60 * 1000) { // 6 horas de TTL
+                        this.profilePicCache.delete(key);
+                    }
+                }
+            }
         }, 60000);
     }
 
@@ -76,15 +85,22 @@ class EventProcessor {
             if (!this.reconciliationAttempts) {
                 this.reconciliationAttempts = new Set();
             }
-            // Limpa o set se ultrapassar 2000 entradas para evitar memory leak
-            if (this.reconciliationAttempts.size > 2000) {
-                this.reconciliationAttempts.clear();
+            // Evicção FIFO suave se ultrapassar 5000 entradas (mantém os IDs recentes em memória sem zerar todo o cache)
+            if (this.reconciliationAttempts.size > 5000) {
+                let removed = 0;
+                for (const oldKey of this.reconciliationAttempts) {
+                    this.reconciliationAttempts.delete(oldKey);
+                    if (++removed >= 1500) break;
+                }
             }
 
+            const { isInstanceAllowedForNode } = await import('../session-manager/index.js');
+
+            // 1. Consulta leve SEM raw_payload (evita transferir megabytes de JSONB a cada ciclo)
             const fifteenMinutesAgo = new Date(Date.now() - 15 * 60000).toISOString();
             const { data: rawMessages, error } = await supabase
                 .from('wa_incoming_messages')
-                .select('instance_id, tenant_id, message_id, raw_payload, from_me, chat_jid, message_type')
+                .select('instance_id, tenant_id, message_id, from_me, chat_jid, message_type')
                 .gte('received_at', fifteenMinutesAgo)
                 .eq('from_me', false)
                 .order('received_at', { ascending: true })
@@ -92,9 +108,13 @@ class EventProcessor {
 
             if (error || !rawMessages || rawMessages.length === 0) return;
 
-            // Filtra mensagens que não são de broadcast, não são protocolMessages e ainda não foram verificadas
+            // Filtra mensagens pertencentes a este nó, que não são de broadcast, não são protocolMessages e ainda não foram verificadas
             const candidateMessages = rawMessages.filter(r => {
                 if (!r.message_id || this.reconciliationAttempts.has(r.message_id)) return false;
+                if (r.instance_id && !isInstanceAllowedForNode(r.instance_id, r.tenant_id)) {
+                    this.reconciliationAttempts.add(r.message_id);
+                    return false;
+                }
                 if (this.isBroadcast(r.chat_jid)) {
                     this.reconciliationAttempts.add(r.message_id);
                     return false;
@@ -104,8 +124,7 @@ class EventProcessor {
                     return false;
                 }
                 return r.message_type !== 'protocolMessage' && 
-                       r.message_type !== 'senderKeyDistributionMessage' && 
-                       r.raw_payload;
+                       r.message_type !== 'senderKeyDistributionMessage';
             });
 
             if (candidateMessages.length === 0) return;
@@ -119,7 +138,7 @@ class EventProcessor {
             const existingSet = new Set((existingMessages || []).map(m => m.whatsapp_message_id));
             const missingRaw = candidateMessages.filter(r => !existingSet.has(r.message_id));
 
-            // Marca os candidatos no cache de verificação para não gerar loops a cada 30 segundos
+            // Marca os candidatos no cache de verificação para não gerar loops
             for (const r of candidateMessages) {
                 this.reconciliationAttempts.add(r.message_id);
             }
@@ -137,10 +156,21 @@ class EventProcessor {
                 actionableMissing.push(r);
             }
 
+            // 2. Busca o raw_payload SOMENTE para as mensagens genuinamente ausentes em 'messages'
             if (actionableMissing.length > 0) {
-                console.log(`[EventProcessor] Self-Healing: Re-processando ${actionableMissing.length} mensagens reais pendentes...`);
-                for (const r of actionableMissing) {
-                    await this.handleMessageUpsert(r.tenant_id, r.instance_id, null, { messages: [r.raw_payload], type: 'reconcile' });
+                const missingIds = actionableMissing.map(r => r.message_id);
+                const { data: fullPayloads } = await supabase
+                    .from('wa_incoming_messages')
+                    .select('instance_id, tenant_id, message_id, raw_payload')
+                    .in('message_id', missingIds);
+
+                if (fullPayloads && fullPayloads.length > 0) {
+                    console.log(`[EventProcessor] Self-Healing: Re-processando ${fullPayloads.length} mensagens reais pendentes...`);
+                    for (const r of fullPayloads) {
+                        if (r.raw_payload) {
+                            await this.handleMessageUpsert(r.tenant_id, r.instance_id, null, { messages: [r.raw_payload], type: 'reconcile' });
+                        }
+                    }
                 }
             }
         } catch (e) {
@@ -707,6 +737,7 @@ class EventProcessor {
                 if (msg.key?.id) {
                     const safeInstanceId = instanceId || 'null_instance';
                     this.processedMessagesCache.set(`${safeInstanceId}_${msg.key.id}`, Date.now());
+                    this.reconciliationAttempts?.add(msg.key.id);
                 }
 
                 // Em memória: empurra pra fila invés de dar AWAIT no BD cru.
@@ -1589,9 +1620,12 @@ class EventProcessor {
                          const uploadPromise = doUpload();
 
                          // Janela síncrona ágil de 1.2s: imagens, áudios e vídeos leves concluem instantaneamente (<200ms)
-                         const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('MEDIA_BACKGROUND_DEFER')), 1200));
+                         let mediaDeferTimer;
+                         const timeoutPromise = new Promise((_, reject) => {
+                             mediaDeferTimer = setTimeout(() => reject(new Error('MEDIA_BACKGROUND_DEFER')), 1200);
+                         });
                          try {
-                             const res = await Promise.race([uploadPromise, timeoutPromise]);
+                             const res = await Promise.race([uploadPromise, timeoutPromise]).finally(() => clearTimeout(mediaDeferTimer));
                              b.mediaUrl = res.mediaUrl;
                              b.mediaMetadata = res.metadata;
                          } catch (raceErr) {
@@ -1764,8 +1798,11 @@ class EventProcessor {
                           console.log(`[BatchProcessor] [MSG_TRACE:DB_SAVED] Resolução individual concluída. ${realInserted.length} mensagens salvas no Supabase.`);
                       }
 
-                      // Registra telemetria de inserção no Supabase para mensagens E2E
+                      // Registra telemetria de inserção no Supabase para mensagens E2E e marca como reconciliada
                       for (const ins of realInserted) {
+                          if (ins.whatsapp_message_id) {
+                              this.reconciliationAttempts?.add(ins.whatsapp_message_id);
+                          }
                           const insText = ins.text || ins.body || '';
                           const insTraceMatch = insText.match(/E2E-[A-Za-z0-9-_]+/);
                           if (insTraceMatch) {
@@ -1826,16 +1863,23 @@ class EventProcessor {
                      }
                  }
                  
-                 // Puxa a foto do perfil assincronamente (background level 2) sem estourar tempo
-                 // SISTEMA ANTI-BAN/ANTI-LOOP: Garantir que não dispare múltiplas requisições (por JID) para a Meta no caso de batch insert (sync histórico de 50 msgs).
+                 // Puxa a foto do perfil assincronamente com cache de 6h em RAM (evita roundtrips na Meta e no Supabase a cada mensagem)
                  if(b.sock && b.jid && !b.jid.includes('@g.us')) {
                      const picKey = `${b.tenantId}_${b.jid}`;
-                     if (!fetchedPictures.has(picKey)) {
+                     const lastPicFetch = this.profilePicCache?.get(picKey) || 0;
+                     if (!fetchedPictures.has(picKey) && (Date.now() - lastPicFetch > 6 * 60 * 60 * 1000)) {
                          fetchedPictures.add(picKey);
+                         if (this.profilePicCache) {
+                             if (this.profilePicCache.size > 5000) {
+                                 const oldestPicKey = this.profilePicCache.keys().next().value;
+                                 if (oldestPicKey) this.profilePicCache.delete(oldestPicKey);
+                             }
+                             this.profilePicCache.set(picKey, Date.now());
+                         }
                          b.sock.profilePictureUrl(b.jid, 'image')
                              .then(async (url) => {
                                  const cid = contactIdMap.get(`${b.tenantId}_${b.phone}`);
-                                 if(cid) { 
+                                 if(cid && url) { 
                                      await supabase.from('contacts').update({ profile_picture_url: url }).eq('id', cid); 
                                  }
                              })

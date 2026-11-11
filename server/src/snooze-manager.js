@@ -29,7 +29,7 @@ class SnoozeManager {
       // Buscar todas as conversas cujo snooze expirou
       const { data: expiredConvs, error: selectError } = await supabase
         .from('conversations')
-        .select('*')
+        .select('id, tenant_id, instance_id')
         .eq('status', 'snoozed')
         .lte('snoozed_until', now);
 
@@ -67,18 +67,25 @@ class SnoozeManager {
       console.log(`[SnoozeManager] Encontradas ${expiredConvs.length} conversas com adiamento expirado. Reabrindo...`);
 
       for (const conv of expiredConvs) {
-        // 1. Atualizar o status da conversa para 'open' e limpar o snoozed_until
-        const { error: updateError } = await supabase
+        // 1. Atualizar o status da conversa para 'open' de forma atômica (apenas se ainda estiver 'snoozed')
+        const { data: reopenedConv, error: updateError } = await supabase
           .from('conversations')
           .update({
             status: 'open',
             snoozed_until: null,
             updated_at: new Date().toISOString()
           })
-          .eq('id', conv.id);
+          .eq('id', conv.id)
+          .eq('status', 'snoozed')
+          .select('id')
+          .maybeSingle();
 
         if (updateError) {
           console.error(`[SnoozeManager] Erro ao reabrir conversa ${conv.id}:`, updateError.message);
+          continue;
+        }
+
+        if (!reopenedConv) {
           continue;
         }
 
