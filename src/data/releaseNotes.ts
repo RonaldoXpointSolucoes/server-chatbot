@@ -1,3 +1,53 @@
+export interface FeatureGuideSpec {
+  featureNumber?: number;
+  moduleGroup:
+    | 'chat-header'
+    | 'chat-composer'
+    | 'chat-bubble'
+    | 'typebot-flow'
+    | 'baileys-hub-catalog'
+    | 'baileys-hub-business'
+    | 'baileys-hub-crm'
+    | 'baileys-hub-security'
+    | 'baileys-hub-profile'
+    | 'system';
+  moduleLabel: string;
+  purpose: string;
+  whereToAccess: string[];
+  howToTest: string[];
+  uiSnapshot: {
+    screenTitle: string;
+    contextElements: string[];
+    targetButtonLabel: string;
+    targetButtonPosition: string;
+    visualPreviewVariant:
+      | 'chat-header-pin'
+      | 'typebot-poll'
+      | 'chat-ptv-video'
+      | 'chat-album'
+      | 'chat-view-once'
+      | 'chat-order-cart'
+      | 'hub-catalog-gastrofood'
+      | 'hub-business-profile'
+      | 'hub-quick-replies'
+      | 'hub-labels-crm'
+      | 'chat-bubble-star'
+      | 'chat-header-modify'
+      | 'chat-history-sync'
+      | 'hub-account-limits'
+      | 'chat-block-contact'
+      | 'hub-reject-calls'
+      | 'hub-instance-profile'
+      | 'hub-privacy-settings';
+  };
+  quickAction?: {
+    label: string;
+    route?: string;
+    openBaileysHubTab?: 'profile' | 'business' | 'catalog' | 'shortcuts' | 'security';
+    chatAction?: 'open-poll-modal' | 'open-album-modal' | 'highlight-header' | 'highlight-composer';
+  };
+}
+
 export interface ReleaseNoteItem {
   id: string;
   category: 'features' | 'fixes' | 'improvements';
@@ -5,6 +55,7 @@ export interface ReleaseNoteItem {
   description: string;
   tag: string;
   badgeColor: string;
+  guide?: FeatureGuideSpec;
 }
 
 export interface VersionRelease {
@@ -15,64 +66,662 @@ export interface VersionRelease {
 }
 
 /**
+ * Catálogo das 18 Novidades Nativas da Baileys v7 com Mapa Mental, Print Visual Anotado,
+ * Proposta de Negócio, Caminho de Acesso ("Onde Clicar") e Roteiro Prático de Teste.
+ */
+export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
+  {
+    id: 'baileys-v7-01',
+    category: 'features',
+    title: '#01 — Fixar Link do Cardápio Digital por 30 Dias (Pin Message)',
+    description: 'Fixa o link do cardápio digital, endereço ou chave PIX no topo da conversa do cliente no WhatsApp por 24h, 7 dias ou 30 dias (sendMessage pin type 1). Também fixa automaticamente todo link de cardápio enviado.',
+    tag: 'NOVIDADE #01',
+    badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+    guide: {
+      featureNumber: 1,
+      moduleGroup: 'chat-header',
+      moduleLabel: 'Chat ao Vivo • Topo da Conversa & Mensagens',
+      purpose: 'Manter o link do cardápio digital, chave PIX ou endereço fixado no topo do WhatsApp do cliente durante 30 dias para aumentar a recorrência de pedidos sem o cliente precisar procurar o link.',
+      whereToAccess: [
+        '1. Menu Lateral Esquerdo ➔ Conversas (/chat)',
+        '2. Clique em qualquer conversa ativa na lista',
+        '3. Olhe para a Barra Superior da Conversa (ao lado do nome do cliente) e clique no botão âmbar "📌 Cardápio 30d"',
+        '4. Alternativa: Passe o mouse sobre qualquer mensagem enviada no chat e clique no ícone "📌 Fixar 30d"'
+      ],
+      howToTest: [
+        '1. Abra uma conversa de teste no Chat ao Vivo (/chat).',
+        '2. Clique no botão "📌 Cardápio 30d" no topo direito da conversa (ou envie uma mensagem com o link do cardápio).',
+        '3. Verifique no celular que a mensagem apareceu fixada no topo da conversa do WhatsApp por 30 dias.'
+      ],
+      uiSnapshot: {
+        screenTitle: 'Tela: Chat ao Vivo (/chat) ➔ Cabeçalho Superior da Conversa',
+        contextElements: ['👤 Nome do Cliente', '⚡ Baileys v7', '⏪ Histórico'],
+        targetButtonLabel: '📌 Cardápio 30d',
+        targetButtonPosition: 'Barra superior direita da conversa aberta (botão âmbar com ícone de alfinete)',
+        visualPreviewVariant: 'chat-header-pin'
+      },
+      quickAction: {
+        label: 'Ir para o Chat ao Vivo (Ver Topo)',
+        route: '/chat',
+        chatAction: 'highlight-header'
+      }
+    }
+  },
+  {
+    id: 'baileys-v7-02',
+    category: 'features',
+    title: '#02 — Enquetes Nativas Clicáveis no Typebot e no Chat (Polls)',
+    description: 'Substitui menus numéricos ("Digite 1 ou 2") por enquetes clicáveis nativas do WhatsApp (sendMessage poll) tanto no Construtor de Fluxos (Typebot) com roteamento automático de voto quanto no Chat ao Vivo.',
+    tag: 'NOVIDADE #02',
+    badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+    guide: {
+      featureNumber: 2,
+      moduleGroup: 'typebot-flow',
+      moduleLabel: 'Typebot (Fluxos) & Barra de Envio do Chat',
+      purpose: 'Substituir menus de texto ("Digite 1 para Cardápio, 2 para Atendente") por Enquetes Clicáveis Nativas do WhatsApp e pesquisas de NPS, decifrando o voto do cliente automaticamente para seguir o fluxo do robô.',
+      whereToAccess: [
+        '• No Typebot: Menu Lateral ➔ Fluxos (/flows) ➔ Editar Fluxo ➔ Barra Superior de Blocos Interativos ➔ Botão "📊 Enquete (Poll)"',
+        '• No Chat ao Vivo: Abra qualquer conversa (/chat) ➔ Barra Inferior de Envio (ao lado do botão de anexo/clipe) ➔ Ícone "📊 Criar Enquete Nativa"'
+      ],
+      howToTest: [
+        '1. No Chat ao Vivo, clique no ícone "📊" na barra inferior de digitação (ou clique em "Testar Enquete Agora" abaixo).',
+        '2. Digite a pergunta (ex: "Como você avalia nosso atendimento?") e adicione 2 ou mais opções.',
+        '3. Clique em "Disparar Enquete" e vote pelo celular para ver o voto registrado em tempo real.'
+      ],
+      uiSnapshot: {
+        screenTitle: 'Tela: Construtor Typebot (/flows) & Barra Inferior do Chat (/chat)',
+        contextElements: ['💬 Texto', '🖼️ Imagem', '🔀 Condição'],
+        targetButtonLabel: '📊 Enquete (Poll)',
+        targetButtonPosition: 'Barra superior de blocos do FlowBuilder ou ícone 📊 na barra inferior do Chat',
+        visualPreviewVariant: 'typebot-poll'
+      },
+      quickAction: {
+        label: 'Abrir Criador de Enquete no Chat',
+        route: '/chat',
+        chatAction: 'open-poll-modal'
+      }
+    }
+  },
+  {
+    id: 'baileys-v7-03',
+    category: 'features',
+    title: '#03 — Recado de Vídeo Redondo Instantâneo (Video Note / PTV)',
+    description: 'Envie vídeos curtos no formato circular instantâneo do WhatsApp (sendMessage video + ptv: true), gerando muito maior taxa de abertura e engajamento que vídeos comuns.',
+    tag: 'NOVIDADE #03',
+    badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+    guide: {
+      featureNumber: 3,
+      moduleGroup: 'chat-composer',
+      moduleLabel: 'Chat ao Vivo • Barra de Envio de Mídia',
+      purpose: 'Enviar vídeos curtos no formato redondo instantâneo do WhatsApp (Video Note / PTV), que toca automaticamente na tela do cliente e transmite proximidade real no atendimento.',
+      whereToAccess: [
+        '1. Menu Lateral ➔ Conversas (/chat) ➔ Abra uma conversa',
+        '2. Na barra inferior de digitação, clique no ícone de Clipe (Anexar Arquivo) e escolha um Vídeo',
+        '3. No modal de pré-visualização do vídeo, ative o botão "🔵 Recado Redondo (PTV)" antes de enviar'
+      ],
+      howToTest: [
+        '1. Abra uma conversa no Chat ao Vivo e clique no botão de anexar arquivo (clipe).',
+        '2. Selecione qualquer vídeo curto (.mp4).',
+        '3. Marque a chave "🔵 Recado Redondo (PTV)" que aparece na barra do anexo e clique em Enviar.',
+        '4. Confira no WhatsApp do celular e na bolha do chat o vídeo renderizado em formato circular!'
+      ],
+      uiSnapshot: {
+        screenTitle: 'Tela: Chat ao Vivo (/chat) ➔ Modal de Anexo de Vídeo',
+        contextElements: ['📎 Anexar Vídeo', '1️⃣ Vis. Única (1x)'],
+        targetButtonLabel: '🔵 Recado Redondo (PTV)',
+        targetButtonPosition: 'Barra de opções ao selecionar um vídeo para envio no Chat',
+        visualPreviewVariant: 'chat-ptv-video'
+      },
+      quickAction: {
+        label: 'Ir para o Chat (Barra de Mídia)',
+        route: '/chat',
+        chatAction: 'highlight-composer'
+      }
+    }
+  },
+  {
+    id: 'baileys-v7-04',
+    category: 'features',
+    title: '#04 — Álbuns de Mídia Agrupados (4 a 10 Fotos em 1 Único Balão)',
+    description: 'Envie de 2 a 10 fotos/vídeos de pratos ou promoções agrupados em um único balão de álbum nativo do WhatsApp (albumMessage + albumParentKey), sem poluir a conversa do cliente.',
+    tag: 'NOVIDADE #04',
+    badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+    guide: {
+      featureNumber: 4,
+      moduleGroup: 'chat-composer',
+      moduleLabel: 'Chat ao Vivo • Barra Inferior de Ferramentas',
+      purpose: 'Disparar várias fotos de produtos, combos ou cardápio agrupadas em uma única grade/álbum no WhatsApp do cliente, evitando dezenas de notificações separadas.',
+      whereToAccess: [
+        '1. Menu Lateral ➔ Conversas (/chat) ➔ Abra uma conversa',
+        '2. Na barra inferior de digitação (ao lado do clipe de anexo e enquete), clique no ícone roxo de Camadas "🖼️ Enviar Álbum de Fotos"'
+      ],
+      howToTest: [
+        '1. Clique no botão "Abrir Modal de Álbum" abaixo (ou no ícone de camadas roxo na barra inferior do Chat).',
+        '2. Selecione de 2 a 10 fotos do seu computador e digite uma legenda opcional.',
+        '3. Clique em "Enviar Álbum" e veja as fotos chegarem agrupadas no WhatsApp.'
+      ],
+      uiSnapshot: {
+        screenTitle: 'Tela: Chat ao Vivo (/chat) ➔ Barra Inferior de Envio',
+        contextElements: ['📎 Anexo', '📊 Enquete', '😊 Emoji'],
+        targetButtonLabel: '🖼️ Álbum Agrupado',
+        targetButtonPosition: 'Barra inferior de digitação do Chat (ícone de camadas/álbum)',
+        visualPreviewVariant: 'chat-album'
+      },
+      quickAction: {
+        label: 'Abrir Modal de Álbum no Chat',
+        route: '/chat',
+        chatAction: 'open-album-modal'
+      }
+    }
+  },
+  {
+    id: 'baileys-v7-05',
+    category: 'features',
+    title: '#05 — Visualização Única (ViewOnce 1x para Foto, Vídeo e Áudio)',
+    description: 'Envie comprovantes, cupons exclusivos ou promoções relâmpago com flag viewOnce: true que só podem ser abertos uma única vez pelo cliente no WhatsApp.',
+    tag: 'NOVIDADE #05',
+    badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+    guide: {
+      featureNumber: 5,
+      moduleGroup: 'chat-composer',
+      moduleLabel: 'Chat ao Vivo • Envio de Foto, Vídeo ou Áudio',
+      purpose: 'Enviar códigos promocionais, vouchers, dados sensíveis ou fotos/áudios temporários que se autodestroem após o cliente abrir 1 vez no celular.',
+      whereToAccess: [
+        '1. Menu Lateral ➔ Conversas (/chat) ➔ Abra uma conversa',
+        '2. Anexe qualquer Imagem ou Vídeo (ou grave um Áudio)',
+        '3. No painel de envio da mídia, clique no botão "1️⃣ Vis. Única (1x)" para ativar o modo ViewOnce'
+      ],
+      howToTest: [
+        '1. No Chat ao Vivo, clique no clipe para anexar uma imagem.',
+        '2. Ative o botão "1️⃣ Vis. Única (1x)" (ele ficará destacado em esmeralda/âmbar).',
+        '3. Envie a imagem e confirme no celular que ela chegou como mensagem de Visualização Única (ícone 1).'
+      ],
+      uiSnapshot: {
+        screenTitle: 'Tela: Chat ao Vivo (/chat) ➔ Pré-visualização de Mídia',
+        contextElements: ['🖼️ Foto Selecionada', '🔵 PTV Redondo'],
+        targetButtonLabel: '1️⃣ Vis. Única (1x)',
+        targetButtonPosition: 'Barra de opções do anexo antes de clicar em Enviar',
+        visualPreviewVariant: 'chat-view-once'
+      },
+      quickAction: {
+        label: 'Ir para o Chat (Testar Anexo 1x)',
+        route: '/chat',
+        chatAction: 'highlight-composer'
+      }
+    }
+  },
+  {
+    id: 'baileys-v7-06',
+    category: 'features',
+    title: '#06 — Leitura Automática de Carrinho Enviado pelo Cliente (getOrderDetails)',
+    description: 'Quando o cliente monta um carrinho no catálogo nativo do WhatsApp e envia para a loja, o sistema consulta sock.getOrderDetails(orderId, token) automaticamente e exibe todos os itens, quantidades e valor total no Chat e para a IA.',
+    tag: 'NOVIDADE #06',
+    badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+    guide: {
+      featureNumber: 6,
+      moduleGroup: 'chat-bubble',
+      moduleLabel: 'Chat ao Vivo • Leitura Automática no Balão da Mensagem',
+      purpose: 'Desbloquear a leitura automática dos carrinhos de compras enviados pelo cliente a partir da vitrine do WhatsApp Business, permitindo que o atendente e o Robô IA vejam exatamente quais pratos, quantidades e valores foram pedidos.',
+      whereToAccess: [
+        '1. 100% Automático dentro do Chat ao Vivo (/chat)!',
+        '2. Quando um cliente envia um carrinho do catálogo, o balão da mensagem exibe o card "🛒 PEDIDO DO CATÁLOGO WHATSAPP" com a lista de itens e total',
+        '3. Se quiser reconsultar manualmente um pedido, clique em "🔄 Ver Itens do Carrinho" dentro do balão'
+      ],
+      howToTest: [
+        '1. Pelo seu celular, abra o perfil da loja no WhatsApp, adicione 1 ou mais itens do catálogo ao carrinho e envie.',
+        '2. Veja no Chat ao Vivo (/chat) que a mensagem já chega detalhada com o nome de cada produto, quantidade, preço unitário e total.'
+      ],
+      uiSnapshot: {
+        screenTitle: 'Tela: Chat ao Vivo (/chat) ➔ Balão de Mensagem Recebida',
+        contextElements: ['🛒 Carrinho Recebido', '2x Burger Artesanal'],
+        targetButtonLabel: '🛒 Itens & Total Automáticos',
+        targetButtonPosition: 'Dentro do próprio balão da mensagem enviada pelo cliente no Chat',
+        visualPreviewVariant: 'chat-order-cart'
+      },
+      quickAction: {
+        label: 'Ir para o Chat ao Vivo',
+        route: '/chat'
+      }
+    }
+  },
+  {
+    id: 'baileys-v7-07',
+    category: 'features',
+    title: '#07 — Sincronizar Cardápio GastroFood com Catálogo do WhatsApp & Enviar Produto Único',
+    description: 'Sincroniza automaticamente os produtos do seu cardápio GastroFood direto para a vitrine nativa do WhatsApp Business (getCatalog, productCreate, productUpdate) e permite enviar o card nativo de um produto no chat (sendProduct).',
+    tag: 'NOVIDADE #07',
+    badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+    guide: {
+      featureNumber: 7,
+      moduleGroup: 'baileys-hub-catalog',
+      moduleLabel: 'Central Baileys v7 • Aba "🛍️ Catálogo & GastroFood"',
+      purpose: 'Importar todos os itens, fotos e preços do seu cardápio GastroFood direto para o Catálogo oficial do WhatsApp Business do chip com 1 clique, além de enviar cards de produtos clicáveis com botão "Ver item" na conversa.',
+      whereToAccess: [
+        '1. No topo do Chat ao Vivo (/chat) ou na tela de Conexões (/instances), clique no botão roxo/esmeralda "⚡ Baileys v7" (ou "Central Baileys v7")',
+        '2. Na janela que abrir, selecione a 1ª Aba: "🛍️ Catálogo & GastroFood"',
+        '3. Clique em "🔄 Sincronizar Cardápio GastroFood Agora" para abastecer a vitrine, ou em "📤 Enviar no Chat" ao lado de qualquer produto'
+      ],
+      howToTest: [
+        '1. Clique no botão "Abrir Aba Catálogo & GastroFood Agora" logo abaixo.',
+        '2. Clique em "🔄 Sincronizar Cardápio GastroFood Agora" para enviar seus produtos do GastroFood para o WhatsApp Business.',
+        '3. Na lista de produtos carregada abaixo, clique em "📤 Enviar no Chat" para disparar um card de produto nativo na conversa ativa.'
+      ],
+      uiSnapshot: {
+        screenTitle: 'Modal: Central Baileys v7 ➔ Aba "🛍️ Catálogo & GastroFood"',
+        contextElements: ['🛍️ Catálogo & GastroFood', '🏪 Perfil Business', '📤 Enviar Produto'],
+        targetButtonLabel: '🔄 Sincronizar Cardápio GastroFood',
+        targetButtonPosition: 'Botão principal no topo da aba "Catálogo & GastroFood" da Central Baileys v7',
+        visualPreviewVariant: 'hub-catalog-gastrofood'
+      },
+      quickAction: {
+        label: 'Abrir Aba Catálogo & GastroFood Agora',
+        openBaileysHubTab: 'catalog'
+      }
+    }
+  },
+  {
+    id: 'baileys-v7-08',
+    category: 'features',
+    title: '#08 — Editar Perfil Comercial e Foto de Capa do WhatsApp Business',
+    description: 'Configure descrição da loja, endereço físico, e-mail, site oficial e foto de capa do WhatsApp Business (updateBussinesProfile, updateCoverPhoto, getBusinessProfile) direto pelo painel do ChatBoot.',
+    tag: 'NOVIDADE #08',
+    badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+    guide: {
+      featureNumber: 8,
+      moduleGroup: 'baileys-hub-business',
+      moduleLabel: 'Central Baileys v7 • Aba "🏪 Perfil Business"',
+      purpose: 'Gerenciar os dados comerciais do WhatsApp Business (descrição, endereço, e-mail, site/cardápio e foto de capa) remotamente pelo sistema, sem precisar pegar o celular da operação.',
+      whereToAccess: [
+        '1. Clique no botão "⚡ Baileys v7" no topo do Chat (/chat) ou na página de Conexões (/instances)',
+        '2. Clique na 2ª Aba: "🏪 Perfil Business"',
+        '3. Preencha Descrição, Endereço, E-mail, Site e URL da Capa e clique em "💾 Salvar Perfil Comercial"'
+      ],
+      howToTest: [
+        '1. Clique no botão "Abrir Aba Perfil Business Agora" abaixo.',
+        '2. Edite a Descrição ou o Site do seu negócio e clique em "💾 Salvar Perfil Comercial".',
+        '3. Abra os dados da conta comercial no WhatsApp para ver as informações atualizadas instantaneamente.'
+      ],
+      uiSnapshot: {
+        screenTitle: 'Modal: Central Baileys v7 ➔ Aba "🏪 Perfil Business"',
+        contextElements: ['🛍️ Catálogo', '🏪 Perfil Business', '⚡ Atalhos & CRM'],
+        targetButtonLabel: '💾 Salvar Perfil Comercial & Capa',
+        targetButtonPosition: 'Aba "🏪 Perfil Business" dentro da Central Baileys v7',
+        visualPreviewVariant: 'hub-business-profile'
+      },
+      quickAction: {
+        label: 'Abrir Aba Perfil Business Agora',
+        openBaileysHubTab: 'business'
+      }
+    }
+  },
+  {
+    id: 'baileys-v7-09',
+    category: 'features',
+    title: '#09 — Sincronizar Respostas Rápidas (/) com o Aparelho WhatsApp Business',
+    description: 'Sincroniza os atalhos de Respostas Rápidas (/) cadastrados no ChatBoot diretamente com as respostas rápidas nativas do aparelho celular (addOrEditQuickReply / removeQuickReply).',
+    tag: 'NOVIDADE #09',
+    badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+    guide: {
+      featureNumber: 9,
+      moduleGroup: 'baileys-hub-crm',
+      moduleLabel: 'Central Baileys v7 • Aba "⚡ Atalhos & CRM"',
+      purpose: 'Manter todos os atalhos "/" do ChatBoot disponíveis também no teclado nativo do aparelho WhatsApp Business caso alguém utilize o celular diretamente.',
+      whereToAccess: [
+        '1. Clique no botão "⚡ Baileys v7" no topo do Chat (/chat) ou em Conexões (/instances)',
+        '2. Selecione a 3ª Aba: "⚡ Atalhos & CRM"',
+        '3. No card "Respostas Rápidas Nativas (/)", clique em "🔄 Sincronizar Atalhos (/) com o Aparelho"'
+      ],
+      howToTest: [
+        '1. Clique no botão "Abrir Aba Atalhos & CRM Agora" abaixo.',
+        '2. Clique em "🔄 Sincronizar Atalhos (/) com o Aparelho".',
+        '3. O sistema enviará todas as suas respostas prontas do banco para o aparelho conectado e exibirá o total sincronizado.'
+      ],
+      uiSnapshot: {
+        screenTitle: 'Modal: Central Baileys v7 ➔ Aba "⚡ Atalhos & CRM"',
+        contextElements: ['⚡ Atalhos & CRM', 'Respostas Prontas (/)'],
+        targetButtonLabel: '🔄 Sincronizar Atalhos (/)',
+        targetButtonPosition: 'Primeiro card da aba "⚡ Atalhos & CRM" na Central Baileys v7',
+        visualPreviewVariant: 'hub-quick-replies'
+      },
+      quickAction: {
+        label: 'Abrir Aba Atalhos & CRM Agora',
+        openBaileysHubTab: 'shortcuts'
+      }
+    }
+  },
+  {
+    id: 'baileys-v7-10',
+    category: 'features',
+    title: '#10 — Sincronização Bidirecional de Etiquetas do Kanban CRM com o WhatsApp',
+    description: 'Espelha as etiquetas e colunas do seu Kanban CRM diretamente nas etiquetas coloridas do WhatsApp Business no celular (addLabel, addChatLabel, removeChatLabel + eventos labels.edit).',
+    tag: 'NOVIDADE #10',
+    badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+    guide: {
+      featureNumber: 10,
+      moduleGroup: 'baileys-hub-crm',
+      moduleLabel: 'Central Baileys v7 • Aba "⚡ Atalhos & CRM"',
+      purpose: 'Espelhar as etapas do seu funil Kanban CRM e etiquetas de atendimento nas etiquetas coloridas oficiais do WhatsApp Business para organização visual tanto no PC quanto no celular.',
+      whereToAccess: [
+        '1. Clique no botão "⚡ Baileys v7" no topo do Chat (/chat) ou em Conexões (/instances)',
+        '2. Selecione a 3ª Aba: "⚡ Atalhos & CRM"',
+        '3. No card "Etiquetas Coloridas (Kanban ➔ WhatsApp)", clique em "🏷️ Espelhar Etiquetas do CRM no Aparelho"'
+      ],
+      howToTest: [
+        '1. Clique no botão "Abrir Aba Atalhos & CRM Agora" abaixo.',
+        '2. No segundo card, clique em "🏷️ Espelhar Etiquetas do CRM no Aparelho".',
+        '3. Veja a confirmação das etiquetas criadas/sincronizadas com o aparelho WhatsApp Business.'
+      ],
+      uiSnapshot: {
+        screenTitle: 'Modal: Central Baileys v7 ➔ Aba "⚡ Atalhos & CRM"',
+        contextElements: ['🏷️ Etiquetas CRM', 'Kanban Funil'],
+        targetButtonLabel: '🏷️ Espelhar Etiquetas do CRM',
+        targetButtonPosition: 'Segundo card da aba "⚡ Atalhos & CRM" na Central Baileys v7',
+        visualPreviewVariant: 'hub-labels-crm'
+      },
+      quickAction: {
+        label: 'Abrir Aba Atalhos & CRM Agora',
+        openBaileysHubTab: 'shortcuts'
+      }
+    }
+  },
+  {
+    id: 'baileys-v7-11',
+    category: 'features',
+    title: '#11 — Favoritar e Desfavoritar Mensagens Sincronizado com o Celular (Star)',
+    description: 'Permite favoritar mensagens importantes (comprovantes PIX, endereços, pedidos) no ChatBoot sincronizando imediatamente com as "Mensagens Favoritas" do aparelho celular (sock.star).',
+    tag: 'NOVIDADE #11',
+    badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+    guide: {
+      featureNumber: 11,
+      moduleGroup: 'chat-bubble',
+      moduleLabel: 'Chat ao Vivo • Menu de Ações da Mensagem',
+      purpose: 'Marcar comprovantes de pagamento, observações de pedidos ou mensagens críticas com estrela (⭐) para consulta imediata no sistema e no aparelho celular.',
+      whereToAccess: [
+        '1. Menu Lateral ➔ Conversas (/chat) ➔ Abra uma conversa',
+        '2. Passe o mouse sobre qualquer balão de mensagem (enviada ou recebida)',
+        '3. Na barra flutuante de ações da mensagem, clique no ícone de Estrela "⭐ Favoritar no Aparelho"'
+      ],
+      howToTest: [
+        '1. Abra qualquer conversa no Chat ao Vivo (/chat).',
+        '2. Passe o mouse sobre uma mensagem e clique na estrela "⭐".',
+        '3. A estrela ficará dourada no ChatBoot e a mensagem aparecerá em "Mensagens Favoritas" no WhatsApp do celular.'
+      ],
+      uiSnapshot: {
+        screenTitle: 'Tela: Chat ao Vivo (/chat) ➔ Hover sobre Balão de Mensagem',
+        contextElements: ['↩️ Responder', '📌 Fixar 30d', '😊 Reagir'],
+        targetButtonLabel: '⭐ Favoritar Mensagem',
+        targetButtonPosition: 'Barra de ações ao passar o mouse sobre qualquer mensagem no Chat',
+        visualPreviewVariant: 'chat-bubble-star'
+      },
+      quickAction: {
+        label: 'Ir para o Chat ao Vivo',
+        route: '/chat'
+      }
+    }
+  },
+  {
+    id: 'baileys-v7-12',
+    category: 'features',
+    title: '#12 — Modificar Estado do Chat no Aparelho (Arquivar, Fixar, Silenciar, Não Lida)',
+    description: 'Comandos diretos no cabeçalho da conversa para Arquivar chat, Fixar conversa no topo do celular, Silenciar notificações por 8h ou Marcar como Não Lida via sock.chatModify.',
+    tag: 'NOVIDADE #12',
+    badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+    guide: {
+      featureNumber: 12,
+      moduleGroup: 'chat-header',
+      moduleLabel: 'Chat ao Vivo • Barra Superior da Conversa',
+      purpose: 'Controlar o estado da conversa diretamente no aparelho celular (fixar conversas VIP no topo, arquivar conversas concluídas, silenciar grupos/contatos ou marcar como não lida) sem tocar no telefone.',
+      whereToAccess: [
+        '1. Menu Lateral ➔ Conversas (/chat) ➔ Abra uma conversa',
+        '2. No cabeçalho superior da conversa (ao lado dos botões de ação), utilize os ícones de ação rápida no aparelho:',
+        '   • 📌 Fixar Conversa no Topo | 📦 Arquivar no Aparelho | 🔇 Silenciar 8h | 🔵 Marcar Não Lida'
+      ],
+      howToTest: [
+        '1. Abra uma conversa no Chat ao Vivo (/chat).',
+        '2. No topo da conversa, clique no ícone de Arquivar (📦) ou Silenciar (🔇) ou Fixar Chat.',
+        '3. Veja a confirmação na tela e o estado refletido imediatamente na lista do WhatsApp do aparelho.'
+      ],
+      uiSnapshot: {
+        screenTitle: 'Tela: Chat ao Vivo (/chat) ➔ Barra Superior da Conversa',
+        contextElements: ['📌 Cardápio 30d', '⏪ Histórico'],
+        targetButtonLabel: '📦 Arquivar | 🔇 Silenciar | 📌 Fixar',
+        targetButtonPosition: 'Grupo de botões de controle do aparelho no cabeçalho superior do Chat',
+        visualPreviewVariant: 'chat-header-modify'
+      },
+      quickAction: {
+        label: 'Ir para o Cabeçalho do Chat',
+        route: '/chat',
+        chatAction: 'highlight-header'
+      }
+    }
+  },
+  {
+    id: 'baileys-v7-13',
+    category: 'features',
+    title: '#13 — Sincronização Sob Demanda de Histórico Antigo do Aparelho (fetchMessageHistory)',
+    description: 'Botão "Carregar mensagens anteriores do aparelho" para buscar conversas e mensagens antigas anteriores ao pareamento do QR Code diretamente do celular via sock.fetchMessageHistory.',
+    tag: 'NOVIDADE #13',
+    badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+    guide: {
+      featureNumber: 13,
+      moduleGroup: 'chat-header',
+      moduleLabel: 'Chat ao Vivo • Topo da Rolagem & Cabeçalho',
+      purpose: 'Recuperar mensagens antigas que aconteceram antes do chip ser conectado ao sistema, puxando o histórico sob demanda diretamente do aparelho celular para dentro da conversa.',
+      whereToAccess: [
+        '1. Menu Lateral ➔ Conversas (/chat) ➔ Abra uma conversa',
+        '2. Role a conversa até o topo OU olhe para a barra superior da conversa',
+        '3. Clique no botão "⏪ Histórico" (Carregar mensagens anteriores do aparelho)'
+      ],
+      howToTest: [
+        '1. Abra uma conversa que já existia no celular antes do pareamento.',
+        '2. Clique no botão "⏪ Histórico" no cabeçalho superior da conversa (ou no topo das mensagens).',
+        '3. Aguarde alguns segundos enquanto o aparelho envia o lote de mensagens antigas para a tela.'
+      ],
+      uiSnapshot: {
+        screenTitle: 'Tela: Chat ao Vivo (/chat) ➔ Topo da Conversa',
+        contextElements: ['📌 Cardápio 30d', '⚡ Baileys v7'],
+        targetButtonLabel: '⏪ Puxar Histórico do Aparelho',
+        targetButtonPosition: 'Cabeçalho superior da conversa e botão no topo da lista de mensagens',
+        visualPreviewVariant: 'chat-history-sync'
+      },
+      quickAction: {
+        label: 'Ir para o Chat (Testar Histórico)',
+        route: '/chat',
+        chatAction: 'highlight-header'
+      }
+    }
+  },
+  {
+    id: 'baileys-v7-14',
+    category: 'features',
+    title: '#14 — Consultar Bloqueio Temporário (Reachout Timelock) e Cota de Novas Conversas da Meta',
+    description: 'Painel de diagnóstico oficial da Meta (fetchAccountReachoutTimelock + fetchNewChatMessageCap) que verifica se o chip possui restrição temporária para abordar novos contatos e qual a cota disponível.',
+    tag: 'NOVIDADE #14',
+    badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+    guide: {
+      featureNumber: 14,
+      moduleGroup: 'baileys-hub-security',
+      moduleLabel: 'Central Baileys v7 • Aba "🛡️ Segurança & Ligações"',
+      purpose: 'Prevenir banimento do chip consultando diretamente na Meta se a conta está com bloqueio temporário de abordagem (Reachout Timelock) e quantas novas conversas ainda pode iniciar com segurança.',
+      whereToAccess: [
+        '1. Clique no botão "⚡ Baileys v7" no topo do Chat (/chat) ou em Conexões (/instances)',
+        '2. Selecione a 4ª Aba: "🛡️ Segurança & Ligações"',
+        '3. Veja o painel "Saúde da Conta & Limites Anti-Bloqueio da Meta" e clique em "🔄 Atualizar Diagnóstico"'
+      ],
+      howToTest: [
+        '1. Clique no botão "Abrir Aba Segurança & Limites Meta" abaixo.',
+        '2. No primeiro card da aba, clique em "🔄 Consultar Limites na Meta".',
+        '3. Veja o status real de Reachout Timelock (Liberado / Restrito) e a cota de novas conversas do chip.'
+      ],
+      uiSnapshot: {
+        screenTitle: 'Modal: Central Baileys v7 ➔ Aba "🛡️ Segurança & Ligações"',
+        contextElements: ['🛡️ Segurança & Ligações', 'Reachout Timelock', 'NewChatCap'],
+        targetButtonLabel: '🔄 Consultar Limites na Meta',
+        targetButtonPosition: 'Primeiro painel da aba "🛡️ Segurança & Ligações" na Central Baileys v7',
+        visualPreviewVariant: 'hub-account-limits'
+      },
+      quickAction: {
+        label: 'Abrir Aba Segurança & Limites Meta',
+        openBaileysHubTab: 'security'
+      }
+    }
+  },
+  {
+    id: 'baileys-v7-15',
+    category: 'features',
+    title: '#15 — Bloquear e Desbloquear Contatos Diretamente no WhatsApp (Blocklist Oficial)',
+    description: 'Bloqueie spammers ou contatos indesejados diretamente no servidor do WhatsApp (updateBlockStatus + fetchBlocklist), tanto pelo cabeçalho do Chat quanto pela Central Baileys v7.',
+    tag: 'NOVIDADE #15',
+    badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+    guide: {
+      featureNumber: 15,
+      moduleGroup: 'chat-header',
+      moduleLabel: 'Cabeçalho do Chat & Central Baileys v7 (Segurança)',
+      purpose: 'Bloquear números de spam ou trotes diretamente no WhatsApp do aparelho (e não apenas ocultar no painel), além de visualizar e desbloquear qualquer número da Blocklist oficial.',
+      whereToAccess: [
+        '• Pelo Chat ao Vivo: Abra a conversa (/chat) ➔ Cabeçalho Superior ➔ Botão vermelho "🚫 Bloquear no WhatsApp"',
+        '• Pela Central Baileys v7: Clique em "⚡ Baileys v7" ➔ Aba "🛡️ Segurança & Ligações" ➔ Seção "Lista de Bloqueados (Blocklist)"'
+      ],
+      howToTest: [
+        '1. Abra a aba "🛡️ Segurança & Ligações" clicando no botão abaixo (ou olhe no cabeçalho de qualquer conversa no Chat).',
+        '2. Veja a lista atual de números bloqueados no chip ou teste bloquear/desbloquear um número de teste.'
+      ],
+      uiSnapshot: {
+        screenTitle: 'Tela: Cabeçalho do Chat (/chat) & Central Baileys (Segurança)',
+        contextElements: ['📦 Arquivar', '🔇 Silenciar'],
+        targetButtonLabel: '🚫 Bloquear no WhatsApp',
+        targetButtonPosition: 'Cabeçalho superior direito da conversa ou Aba Segurança da Central Baileys',
+        visualPreviewVariant: 'chat-block-contact'
+      },
+      quickAction: {
+        label: 'Abrir Gerenciador de Bloqueios (Blocklist)',
+        openBaileysHubTab: 'security'
+      }
+    }
+  },
+  {
+    id: 'baileys-v7-16',
+    category: 'features',
+    title: '#16 — Rejeição Automática de Chamadas de Voz/Vídeo + Resposta Automática + Link de Chamada',
+    description: 'Rejeita automaticamente ligações de voz/vídeo recebidas no chip do robô (sock.rejectCall) enviando um texto personalizado na hora, além de gerar links nativos de chamada (createCallLink).',
+    tag: 'NOVIDADE #16',
+    badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+    guide: {
+      featureNumber: 16,
+      moduleGroup: 'baileys-hub-security',
+      moduleLabel: 'Central Baileys v7 • Aba "🛡️ Segurança & Ligações"',
+      purpose: 'Impedir que ligações de clientes travem o atendimento ou fiquem tocando sem resposta, recusando a chamada em 1 segundo e enviando automaticamente uma mensagem orientando o cliente a mandar texto ou áudio.',
+      whereToAccess: [
+        '1. Clique no botão "⚡ Baileys v7" no topo do Chat (/chat) ou em Conexões (/instances)',
+        '2. Selecione a 4ª Aba: "🛡️ Segurança & Ligações"',
+        '3. Ative a chave "Rejeitar Ligações Automaticamente (rejectCall)", personalize a mensagem automática e clique em Salvar'
+      ],
+      howToTest: [
+        '1. Clique no botão "Abrir Configuração de Chamadas Agora" abaixo.',
+        '2. Ative o switch "Rejeitar Chamadas Automaticamente", escolha a mensagem de resposta e clique em "Salvar Regra de Chamadas".',
+        '3. Ligue de outro celular para o número da caixa: a ligação será recusada na hora e você receberá a mensagem automática no WhatsApp!'
+      ],
+      uiSnapshot: {
+        screenTitle: 'Modal: Central Baileys v7 ➔ Aba "🛡️ Segurança & Ligações"',
+        contextElements: ['📵 Rejeitar Chamadas', '💬 Mensagem Automática', '🔗 Link de Chamada'],
+        targetButtonLabel: '📵 Ativar Rejeição Automática + Salvar',
+        targetButtonPosition: 'Card central da aba "🛡️ Segurança & Ligações" na Central Baileys v7',
+        visualPreviewVariant: 'hub-reject-calls'
+      },
+      quickAction: {
+        label: 'Abrir Configuração de Chamadas Agora',
+        openBaileysHubTab: 'security'
+      }
+    }
+  },
+  {
+    id: 'baileys-v7-17',
+    category: 'features',
+    title: '#17 — Atualizar Nome, Recado (Bio) e Foto de Perfil da Própria Instância',
+    description: 'Altere o nome de exibição (updateProfileName), recado/status da bio (updateProfileStatus) e a foto de perfil (updateProfilePicture) do seu número WhatsApp conectado direto pelo painel.',
+    tag: 'NOVIDADE #17',
+    badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+    guide: {
+      featureNumber: 17,
+      moduleGroup: 'baileys-hub-profile',
+      moduleLabel: 'Central Baileys v7 • Aba "👤 Perfil & Privacidade"',
+      purpose: 'Atualizar a identidade visual do chip (Nome visível para clientes, Recado/Bio de status e Foto de Perfil/Logo da loja) diretamente pelo ChatBoot.',
+      whereToAccess: [
+        '1. Clique no botão "⚡ Baileys v7" no topo do Chat (/chat) ou em Conexões (/instances)',
+        '2. Selecione a 5ª Aba: "👤 Perfil & Privacidade"',
+        '3. No card "Identidade da Instância", preencha Nome, Recado (Bio) ou URL da Foto e clique em "💾 Atualizar Perfil no WhatsApp"'
+      ],
+      howToTest: [
+        '1. Clique no botão "Abrir Aba Perfil & Privacidade Agora" abaixo.',
+        '2. Altere o Recado (Bio) — ex: "Atendimento Online 🍔 Peça pelo link!" — e clique em "💾 Atualizar Perfil".',
+        '3. Confira no WhatsApp a alteração imediata do recado/nome/foto do chip.'
+      ],
+      uiSnapshot: {
+        screenTitle: 'Modal: Central Baileys v7 ➔ Aba "👤 Perfil & Privacidade"',
+        contextElements: ['👤 Nome do Chip', '📝 Recado (Bio)', '🖼️ URL da Foto'],
+        targetButtonLabel: '💾 Atualizar Perfil no WhatsApp',
+        targetButtonPosition: 'Primeiro painel da aba "👤 Perfil & Privacidade" na Central Baileys v7',
+        visualPreviewVariant: 'hub-instance-profile'
+      },
+      quickAction: {
+        label: 'Abrir Aba Perfil & Privacidade Agora',
+        openBaileysHubTab: 'profile'
+      }
+    }
+  },
+  {
+    id: 'baileys-v7-18',
+    category: 'features',
+    title: '#18 — Configurações de Privacidade do Chip (Visto por Último, Online, Tique Azul e Ligações)',
+    description: 'Configure quem pode ver o Visto por Último, status Online, Confirmação de Leitura (tique azul), Foto de Perfil, Grupos e Chamadas (fetchPrivacySettings / update*Privacy) direto do sistema.',
+    tag: 'NOVIDADE #18',
+    badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+    guide: {
+      featureNumber: 18,
+      moduleGroup: 'baileys-hub-profile',
+      moduleLabel: 'Central Baileys v7 • Aba "👤 Perfil & Privacidade"',
+      purpose: 'Controlar a privacidade operacional do chip (ocultar visto por último/online, desativar ou ativar confirmação de leitura, restringir quem pode adicionar o número em grupos) sem precisar do aparelho físico.',
+      whereToAccess: [
+        '1. Clique no botão "⚡ Baileys v7" no topo do Chat (/chat) ou em Conexões (/instances)',
+        '2. Selecione a 5ª Aba: "👤 Perfil & Privacidade"',
+        '3. No card "Privacidade Nativa do Chip", ajuste os seletores (Todos, Meus Contatos, Ninguém) e clique em "🔒 Aplicar Privacidade no Chip"'
+      ],
+      howToTest: [
+        '1. Clique no botão "Abrir Configurações de Privacidade Agora" abaixo.',
+        '2. Veja as configurações atuais carregadas diretamente do aparelho.',
+        '3. Altere uma opção (ex: Visto por Último ou Quem pode adicionar aos grupos) e clique em "🔒 Aplicar Privacidade".'
+      ],
+      uiSnapshot: {
+        screenTitle: 'Modal: Central Baileys v7 ➔ Aba "👤 Perfil & Privacidade"',
+        contextElements: ['👁️ Visto por Último', '🔵 Status Online', '✓✓ Confirmação Leitura'],
+        targetButtonLabel: '🔒 Aplicar Privacidade no Chip',
+        targetButtonPosition: 'Segundo painel da aba "👤 Perfil & Privacidade" na Central Baileys v7',
+        visualPreviewVariant: 'hub-privacy-settings'
+      },
+      quickAction: {
+        label: 'Abrir Configurações de Privacidade Agora',
+        openBaileysHubTab: 'profile'
+      }
+    }
+  }
+];
+
+/**
  * Catálogo histórico oficial de releases reais do ChatBoot.
  * Ordenado do mais recente para o mais antigo.
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.1.3',
+    date: '2026-11-12',
+    summary: 'Mapa Mental Interativo & Guia Visual com Prints de Tela das 18 Novidades Nativas da Baileys v7 (Proposta, Onde Clicar, Como Acessar, Como Testar e Abertura em 1 Clique)',
+    notes: BAILEYS_18_FEATURES_NOTES
+  },
+  {
     version: '8.1.2',
     date: '2026-11-11',
     summary: 'Suíte Completa de 18 Funcionalidades Nativas da Baileys v7 (Enquetes Typebot, Auto-Pin Cardápio 30d, Vídeo Redondo PTV, Visualização Única, Álbuns, Catálogo GastroFood, Carrinho Nativo e Central WhatsApp Business) + Blindagem Anti-Crash',
-    notes: [
-      {
-        id: '8.1.2-1',
-        category: 'features',
-        title: 'Fixação de Mensagens e Auto-Pin de Cardápio Digital por 30 Dias (pinInChatMessage)',
-        description: 'Links de cardápio digital enviados no chat são fixados automaticamente por 30 dias no topo da conversa do cliente, além de novos botões no ChatInbox para fixar/desafixar qualquer mensagem por 24h, 7d ou 30d e enviar o cardápio fixado com 1 clique.',
-        tag: 'NOVIDADE',
-        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
-      },
-      {
-        id: '8.1.2-2',
-        category: 'features',
-        title: 'Enquetes Nativas Clicáveis no Construtor de Fluxos (Typebot) e no ChatInbox (Polls)',
-        description: 'Novo bloco "Enquete Nativa" no FlowBuilder com decifragem automática de votos (decryptPollVote) para roteamento inteligente de caminhos no robô, além de criador de enquetes direto no Chat.',
-        tag: 'NOVIDADE',
-        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
-      },
-      {
-        id: '8.1.2-3',
-        category: 'features',
-        title: 'Recado de Vídeo Redondo (PTV), Visualização Única (ViewOnce) e Álbuns de Mídia Agrupados',
-        description: 'Envio e renderização de vídeos circulares instantâneos (PTV), mídias de visualização única (1x) para fotos/vídeos/áudios e envio de 4 a 10 fotos agrupadas em um único balão de Álbum.',
-        tag: 'NOVIDADE',
-        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
-      },
-      {
-        id: '8.1.2-4',
-        category: 'features',
-        title: 'Sincronização GastroFood ➔ Catálogo WhatsApp Business e Leitura Automática de Carrinhos',
-        description: 'Sincronize todos os produtos ativos do GastroFood direto para a vitrine nativa do WhatsApp Business, envie cards de produtos individuais no chat e receba os itens/quantidades/totais detalhados quando o cliente enviar um carrinho.',
-        tag: 'NOVIDADE',
-        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
-      },
-      {
-        id: '8.1.2-5',
-        category: 'features',
-        title: 'Central Avançada do Chip: Perfil Comercial, Privacidade, Rejeição de Chamadas, Saúde Meta, Etiquetas e Histórico',
-        description: 'Novo hub visual nas conexões para editar Nome/Bio/Foto/Capa/Horários, configurar Privacidade do chip, ativar Rejeição Automática de Ligações com resposta de texto, consultar limites anti-bloqueio da Meta (Reachout Timelock / NewChatCap), sincronizar Respostas Rápidas e Etiquetas do CRM, favoritar mensagens, arquivar/silenciar conversas, carregar histórico antigo sob demanda e bloquear contatos.',
-        tag: 'NOVIDADE',
-        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
-      },
-      {
-        id: '8.1.2-6',
-        category: 'improvements',
-        title: 'Blindagem Anti-Crash e Anti-Hang nas 18 Operações Baileys v7',
-        description: 'Timeouts estritos por operação (withBaileysTimeout), auto-injeção de lastMessages no chatModify, auto-resolução de LID no bloqueio de contatos, lock anti-concorrência no catálogo e cooldown anti-flood em chamadas.',
-        tag: 'MELHORIA',
-        badgeColor: 'bg-sky-500/20 text-sky-300 border-sky-500/30'
-      }
-    ]
+    notes: BAILEYS_18_FEATURES_NOTES
   },
   {
     version: '8.1.1',
@@ -2296,10 +2945,16 @@ export function getDeltaReleaseNotes(
     };
   }
 
-  // Consolida as notas na ordem (mais recente primeiro)
+  // Consolida as notas na ordem (mais recente primeiro), sem duplicar IDs
+  const seenIds = new Set<string>();
   const consolidatedNotes: ReleaseNoteItem[] = [];
   applicableReleases.forEach(rel => {
-    consolidatedNotes.push(...rel.notes);
+    rel.notes.forEach(note => {
+      if (!seenIds.has(note.id)) {
+        seenIds.add(note.id);
+        consolidatedNotes.push(note);
+      }
+    });
   });
 
   return {

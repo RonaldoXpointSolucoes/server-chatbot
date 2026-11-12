@@ -1478,34 +1478,33 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
           <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 border-2 border-[#e9edef] dark:border-[#202c33] rounded-full group-hover:border-gray-200 dark:group-hover:border-[#2a3942] transition-colors" />
         </div>
         <div className={cn("ml-3 flex-1 min-w-0 transition-opacity duration-200", "group-[.is-minimized]/sidebar:opacity-0 group-hover/sidebar:!opacity-100")}>
-          <span 
-            className="text-[10px] font-mono text-[#00a884] opacity-90 block truncate leading-tight mb-0.5 select-none" 
-            title={(() => {
-              const version = import.meta.env.PACKAGE_VERSION || '5.2.4';
-              const rawDate = import.meta.env.PACKAGE_BUILD_DATE || import.meta.env.VITE_PACKAGE_BUILD_DATE;
-              if (!rawDate) return `v${version}`;
-              const d = new Date(rawDate);
-              if (isNaN(d.getTime())) return `v${version}`;
-              const day = String(d.getDate()).padStart(2, '0');
-              const month = String(d.getMonth() + 1).padStart(2, '0');
-              const hours = String(d.getHours()).padStart(2, '0');
-              const mins = String(d.getMinutes()).padStart(2, '0');
-              return `v${version} | ${day}/${month} ${hours}:${mins}`;
-            })()}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              window.dispatchEvent(new CustomEvent('open-release-notes-hub', { detail: { tab: 'mindmap', expand: true } }));
+            }}
+            className="text-[10px] font-mono text-[#00a884] hover:text-emerald-400 hover:underline opacity-95 flex items-center gap-1 truncate leading-tight mb-0.5 select-none cursor-pointer" 
+            title="Clique para abrir o Mapa Mental & Guia com Prints das 18 Novidades"
           >
-            {(() => {
-              const version = import.meta.env.PACKAGE_VERSION || '5.2.4';
-              const rawDate = import.meta.env.PACKAGE_BUILD_DATE || import.meta.env.VITE_PACKAGE_BUILD_DATE;
-              if (!rawDate) return `v${version}`;
-              const d = new Date(rawDate);
-              if (isNaN(d.getTime())) return `v${version}`;
-              const day = String(d.getDate()).padStart(2, '0');
-              const month = String(d.getMonth() + 1).padStart(2, '0');
-              const hours = String(d.getHours()).padStart(2, '0');
-              const mins = String(d.getMinutes()).padStart(2, '0');
-              return `v${version} | ${day}/${month} ${hours}:${mins}`;
-            })()}
-          </span>
+            <span>
+              {(() => {
+                const version = import.meta.env.PACKAGE_VERSION || '5.2.4';
+                const rawDate = import.meta.env.PACKAGE_BUILD_DATE || import.meta.env.VITE_PACKAGE_BUILD_DATE;
+                if (!rawDate) return `v${version}`;
+                const d = new Date(rawDate);
+                if (isNaN(d.getTime())) return `v${version}`;
+                const day = String(d.getDate()).padStart(2, '0');
+                const month = String(d.getMonth() + 1).padStart(2, '0');
+                const hours = String(d.getHours()).padStart(2, '0');
+                const mins = String(d.getMinutes()).padStart(2, '0');
+                return `v${version} | ${day}/${month} ${hours}:${mins}`;
+              })()}
+            </span>
+            <span className="px-1 py-0.2 rounded bg-emerald-500/20 text-emerald-400 font-sans font-bold text-[8.5px]">
+              🗺️ 18 Novidades
+            </span>
+          </button>
           <p className="text-[14px] font-medium text-[#111b21] dark:text-[#e9edef] truncate">{agentName}</p>
           <p className="text-[11px] text-[#54656f] dark:text-[#8696a0] truncate opacity-80">{currentUserEmail || ''}</p>
         </div>

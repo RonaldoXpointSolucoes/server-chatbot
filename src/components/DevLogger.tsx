@@ -2920,12 +2920,29 @@ export default function DevLogger() {
                   )}
                 </div>
 
-                <button 
-                  onClick={(e) => { e.stopPropagation(); setShowChangelog(!showChangelog); }}
-                  className="flex items-center gap-1.5 text-emerald-300 hover:text-white transition-all bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 px-2.5 py-1 rounded-xl text-[10px] font-black shadow-md cursor-pointer active:scale-95 shrink-0"
-                >
-                  <Rocket size={12} className="text-emerald-400" /> Novidades <ChevronDown size={11} className={`transition-transform duration-200 ${showChangelog ? 'rotate-180' : ''}`}/>
-                </button>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if ((window as any).__openReleaseNotesHub) {
+                        (window as any).__openReleaseNotesHub('mindmap', true);
+                      } else {
+                        window.dispatchEvent(new CustomEvent('open-release-notes-hub', { detail: { tab: 'mindmap', expand: true } }));
+                      }
+                    }}
+                    className="flex items-center gap-1.5 text-slate-950 bg-gradient-to-r from-emerald-400 to-teal-400 hover:from-emerald-300 hover:to-teal-300 px-2.5 py-1 rounded-xl text-[10px] font-black shadow-md cursor-pointer active:scale-95 shrink-0"
+                    title="Abrir Mapa Mental Interativo, Prints de Onde Clicar e Guia de Testes das 18 Novidades"
+                  >
+                    <Rocket size={12} className="text-slate-950" /> 🗺️ Mapa Mental (18 Novidades)
+                  </button>
+
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); setShowChangelog(!showChangelog); }}
+                    className="flex items-center gap-1.5 text-emerald-300 hover:text-white transition-all bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 px-2.5 py-1 rounded-xl text-[10px] font-black shadow-md cursor-pointer active:scale-95 shrink-0"
+                  >
+                    <Rocket size={12} className="text-emerald-400" /> Novidades <ChevronDown size={11} className={`transition-transform duration-200 ${showChangelog ? 'rotate-180' : ''}`}/>
+                  </button>
+                </div>
               </div>
 
               {/* Baileys Version History & GitHub Releases Dropdown */}
@@ -3067,22 +3084,38 @@ export default function DevLogger() {
               )}
 
               {/* Changelog Dropdown */}
-              {showChangelog && (serverMeta.changelog || serverMeta.history) && (
+              {showChangelog && (
                 <div className="mt-2 animate-in fade-in slide-in-from-top-2 relative overflow-hidden rounded-2xl bg-[#141d24] border border-emerald-500/30 shadow-2xl p-4 transition-all">
-                  <div className="flex items-center gap-2 mb-3">
-                    <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center">
-                      <Rocket size={16} className="text-emerald-400 animate-pulse" />
+                  <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center">
+                        <Rocket size={16} className="text-emerald-400 animate-pulse" />
+                      </div>
+                      <div>
+                        <span className="font-black text-white block text-xs">Novidades no Motor & App (v{serverMeta?.engineVersion || '8.1.3'})</span>
+                        <span className="text-[10px] text-[#8696a0]">
+                          Deploy de {serverMeta?.history && serverMeta.history[0] ? new Date(serverMeta.history[0].compile_date).toLocaleString('pt-BR') : 'Hoje'}
+                        </span>
+                      </div>
                     </div>
-                    <div>
-                      <span className="font-black text-white block text-xs">Novidades na v{serverMeta.engineVersion}</span>
-                      <span className="text-[10px] text-[#8696a0]">
-                        Deploy de {serverMeta.history && serverMeta.history[0] ? new Date(serverMeta.history[0].compile_date).toLocaleString('pt-BR') : 'Hoje'}
-                      </span>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if ((window as any).__openReleaseNotesHub) {
+                          (window as any).__openReleaseNotesHub('mindmap', true);
+                        } else {
+                          window.dispatchEvent(new CustomEvent('open-release-notes-hub', { detail: { tab: 'mindmap', expand: true } }));
+                        }
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-[11px] flex items-center gap-1.5 shadow cursor-pointer"
+                    >
+                      <span>📸 Ver Mapa Mental & Prints das 18 Funções</span>
+                    </button>
                   </div>
 
                   <ul className="space-y-2 mt-2">
-                    {serverMeta.changelog && serverMeta.changelog.map((logItem: string, idx: number) => (
+                    {serverMeta?.changelog && serverMeta.changelog.map((logItem: string, idx: number) => (
                       <li key={idx} className="flex items-start gap-2 text-xs text-[#d1d7db] leading-relaxed">
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mt-1.5 shrink-0" />
                         <span>{logItem}</span>

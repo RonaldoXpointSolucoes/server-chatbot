@@ -62,12 +62,18 @@ O deploy NUNCA deve ser executado de forma automática após alterações de có
    - **Alvo**: Frontend na **Vercel** (`chat-boot-theta.vercel.app`).
    - Incrementa a versão no `package.json` da raiz seguindo a regra de dígito único `X.Y.Z` (0 a 9 em cada componente, ex: de `4.9.4` para `4.9.5`). O valor máximo de cada componente é `9`.
    - Atualiza a variável `VITE_PACKAGE_BUILD_DATE` no `.env` para a data/hora atual.
-   - **OBRIGATÓRIO - Atualização do Catálogo de Releases (`src/data/releaseNotes.ts`)**:
+   - **OBRIGATÓRIO - Atualização do Catálogo de Releases com Mapa Mental, Print Visual e Guia de Testes (`src/data/releaseNotes.ts` & `UpdatePrompt.tsx`)**:
      - A IA deve obrigatoriamente adicionar no topo de `APP_RELEASES` a nova entrada contendo a mesma versão do `package.json`, data atual, sumário executivo e a lista categorizada de notas reais (`notes`) da entrega:
        - `features` (Novidades com tag `NOVIDADE`);
        - `improvements` (Melhorias com tag `MELHORIA`);
        - `fixes` (Correções com tag `CORREÇÃO`).
-     - Isso alimenta o modal de atualização do aplicativo (`UpdatePrompt.tsx`) e o arquivo `version.json`, garantindo que os usuários vejam exatamente o que mudou e onde a funcionalidade entrou.
+     - **PADRÃO DE OURO PARA TODA NOVA FUNCIONALIDADE (`guide: FeatureGuideSpec`)**: Sempre que uma funcionalidade nova para o usuário for criada ou entregue, ela deve obrigatoriamente incluir o objeto `guide` em `src/data/releaseNotes.ts` contendo:
+       1. **Print Visual Anotado (`uiSnapshot`)**: Reprodução visual da barra/tela onde a função vive, com os botões vizinhos de contexto e o botão-alvo destacado com `"👆 Clique Aqui"` e sua posição exata na tela.
+       2. **Qual a Proposta (`purpose`)**: Explicação clara do objetivo de negócio e do que a funcionalidade faz.
+       3. **Mapa Mental de Como Acessar (`whereToAccess`)**: Passo a passo numerado (`Menu ➔ Tela ➔ Botão`) indicando exatamente onde clicar.
+       4. **Como Testar na Prática (`howToTest`)**: Roteiro prático passo a passo para o usuário validar a entrega em segundos.
+       5. **Ação Rápida em 1 Clique (`quickAction`)**: Botão que leva o usuário diretamente para a tela ou abre o modal da funcionalidade.
+     - Isso alimenta o modal de atualização e o Mapa Mental de Novidades (`UpdatePrompt.tsx`) e o arquivo `version.json`, garantindo que os usuários sempre saibam o que existe de novidade, onde clicar, como acessar e como testar.
    - Executa o commit/push do frontend e a publicação na Vercel (`npm run deploy`).
    - Relata a versão gerada, as novidades catalogadas e o status da publicação no chat.
 

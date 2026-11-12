@@ -15,6 +15,7 @@ interface BaileysInstanceHubModalProps {
   instanceName?: string;
   activeChatJid?: string;
   embedded?: boolean;
+  initialTab?: 'profile' | 'business' | 'catalog' | 'shortcuts' | 'security';
 }
 
 export const BaileysInstanceHubModal: React.FC<BaileysInstanceHubModalProps> = ({
@@ -24,9 +25,16 @@ export const BaileysInstanceHubModal: React.FC<BaileysInstanceHubModalProps> = (
   instanceId,
   instanceName,
   activeChatJid,
-  embedded = false
+  embedded = false,
+  initialTab
 }) => {
-  const [activeTab, setActiveTab] = useState<'profile' | 'business' | 'catalog' | 'shortcuts' | 'security'>('catalog');
+  const [activeTab, setActiveTab] = useState<'profile' | 'business' | 'catalog' | 'shortcuts' | 'security'>(initialTab || 'catalog');
+
+  useEffect(() => {
+    if (initialTab && isOpen) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab, isOpen]);
   const [selectedInstanceId, setSelectedInstanceId] = useState<string>(instanceId || '');
   const [instancesList, setInstancesList] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);

@@ -1621,6 +1621,41 @@ export default function ChatDashboard() {
   const [isSendingAlbum, setIsSendingAlbum] = useState(false);
   const [specialMediaType, setSpecialMediaType] = useState<'ptv' | 'viewOnce' | null>(null);
   const specialMediaInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Listener global disparado pelo Mapa Mental & Guia de Novidades (UpdatePrompt)
+  useEffect(() => {
+    const handleOpenFeature = (ev: Event) => {
+      const customEv = ev as CustomEvent;
+      const action = customEv.detail?.action;
+      if (!action) return;
+
+      // Se nenhuma conversa estiver aberta, seleciona automaticamente a primeira da lista para permitir o teste imediato
+      const currentActiveId = useChatStore.getState().activeChatId;
+      if (!currentActiveId) {
+        const allContacts = useChatStore.getState().contacts || [];
+        if (allContacts.length > 0) {
+          useChatStore.setState({ activeChatId: allContacts[0].id });
+        }
+      }
+
+      setTimeout(() => {
+        if (action === 'open-poll-modal') {
+          setIsPollModalOpen(true);
+        } else if (action === 'open-album-modal') {
+          setAlbumFiles([]);
+          setAlbumCaption('');
+          setIsAlbumModalOpen(true);
+        } else if (action === 'highlight-header') {
+          setActiveChatDropdown(true);
+        } else if (action === 'highlight-composer') {
+          setIsAttachmentMenuOpen(true);
+        }
+      }, 200);
+    };
+
+    window.addEventListener('open-baileys-feature', handleOpenFeature);
+    return () => window.removeEventListener('open-baileys-feature', handleOpenFeature);
+  }, []);
   const location = useLocation();
   const isClosedTicketsOpen = location.pathname === '/chat/closed-tickets';
   const setIsClosedTicketsOpen = (open: boolean) => {
@@ -9281,6 +9316,51 @@ export default function ChatDashboard() {
               )}
 
               <div className="hidden lg:flex items-center gap-2">
+                {/* Botão Rápido #01: Fixar Cardápio Digital 30 Dias */}
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
+                    const resolvedId = await resolveInstanceUuid(tenantInfo?.id || '', properTargetInstance);
+                    if (!resolvedId || !tenantInfo?.id) return;
+                    const res = await invokeBaileysAction(tenantInfo.id, resolvedId, 'pinMenuLink', {
+                      jid: activeChat.whatsapp_jid || activeChat.phone,
+                      time: 2592000
+                    });
+                    if (res?.ok) {
+                      alert('📌 Link do Cardápio Digital enviado e fixado no topo da conversa por 30 dias!');
+                    }
+                  }}
+                  className="flex items-center justify-center gap-1.5 h-8 px-2.5 bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-500/25 rounded-full transition-all text-xs font-bold border border-amber-200 dark:border-amber-500/30 shadow-sm active:scale-95 whitespace-nowrap cursor-pointer"
+                  title="#01 — Enviar e Fixar Link do Cardápio Digital por 30 Dias no Topo do WhatsApp"
+                >
+                  <Pin size={13} />
+                  <span className="hidden xl:inline">Cardápio 30d</span>
+                </button>
+
+                {/* Botão Rápido: Central Avançada Baileys v7 (5 Abas) */}
+                <button
+                  type="button"
+                  onClick={() => setIsBaileysHubOpen(true)}
+                  className="flex items-center justify-center gap-1.5 h-8 px-2.5 bg-purple-50 text-purple-700 dark:bg-purple-500/15 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-500/25 rounded-full transition-all text-xs font-bold border border-purple-200 dark:border-purple-500/30 shadow-sm active:scale-95 whitespace-nowrap cursor-pointer"
+                  title="Abrir Central Avançada do Chip (Catálogo GastroFood, Perfil Business, Etiquetas, Chamadas e Privacidade)"
+                >
+                  <Zap size={13} />
+                  <span className="hidden xl:inline">Baileys v7</span>
+                </button>
+
+                {/* Botão Rápido: Abrir Mapa Mental & Prints das 18 Novidades */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    window.dispatchEvent(new CustomEvent('open-release-notes-hub', { detail: { tab: 'mindmap', expand: true } }));
+                  }}
+                  className="flex items-center justify-center gap-1.5 h-8 px-2.5 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-500/25 rounded-full transition-all text-xs font-bold border border-emerald-200 dark:border-emerald-500/30 shadow-sm active:scale-95 whitespace-nowrap cursor-pointer"
+                  title="Abrir Mapa Mental Interativo e Prints de Onde Clicar nas 18 Novidades"
+                >
+                  <Sparkles size={13} />
+                  <span className="hidden 2xl:inline">18 Novidades</span>
+                </button>
 
                 {activeChat.conv_status === 'resolved' ? (
                   <button 
