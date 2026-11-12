@@ -1629,12 +1629,17 @@ export default function ChatDashboard() {
       const action = customEv.detail?.action;
       if (!action) return;
 
-      // Se nenhuma conversa estiver aberta, seleciona automaticamente a primeira da lista para permitir o teste imediato
+      // Se nenhuma conversa estiver aberta, seleciona automaticamente uma conversa ativa de uma instância conectada
       const currentActiveId = useChatStore.getState().activeChatId;
       if (!currentActiveId) {
         const allContacts = useChatStore.getState().contacts || [];
+        const instStatus = useChatStore.getState().instancesStatus || {};
         if (allContacts.length > 0) {
-          useChatStore.setState({ activeChatId: allContacts[0].id });
+          const connectedContact = allContacts.find((c: any) => {
+            const inst = getStrictInstance(c);
+            return inst && instStatus[inst] === 'connected';
+          });
+          useChatStore.setState({ activeChatId: (connectedContact || allContacts[0]).id });
         }
       }
 
@@ -11736,7 +11741,7 @@ export default function ChatDashboard() {
                                 method: 'POST',
                                 headers: {
                                   'x-tenant-id': tenantInfo.id,
-                                  'apikey': 'INTERNAL_KEY'
+                                  'apikey': import.meta.env.VITE_EVOLUTION_GLOBAL_API_KEY || '356c087d9-4073-4ceb-986a-09083992518c'
                                 },
                                 body: formData
                               });

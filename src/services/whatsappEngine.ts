@@ -592,18 +592,22 @@ export const invokeBaileysAction = async (
   instanceId: string,
   method: string,
   payloadOrArgs: any = {},
-  apiKey: string = 'INTERNAL_KEY'
+  apiKey: string = '356c087d9-4073-4ceb-986a-09083992518c'
 ) => {
   const apiUrl = getInstanceApiUrl(instanceId);
   if (!apiUrl) throw new Error('URL do motor Antigravity não definida (.env)');
   const args = Array.isArray(payloadOrArgs) ? payloadOrArgs : [payloadOrArgs];
+  const effectiveKey =
+    !apiKey || apiKey === 'INTERNAL_KEY'
+      ? import.meta.env.VITE_EVOLUTION_GLOBAL_API_KEY || '356c087d9-4073-4ceb-986a-09083992518c'
+      : apiKey;
 
   const res = await fetch(`${apiUrl}/api/v1/instances/${instanceId}/invoke`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'x-tenant-id': tenantId,
-      'apikey': apiKey
+      'apikey': effectiveKey
     },
     body: JSON.stringify({ method, args })
   });

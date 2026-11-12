@@ -24,7 +24,7 @@ interface TenantItem {
 }
 
 import { supabase } from '../services/supabase';
-import { createInstance, migrateInstanceHistory } from '../services/whatsappEngine';
+import { createInstance, migrateInstanceHistory, getInstanceApiUrl } from '../services/whatsappEngine';
 import { BaileysInstanceHubModal } from '../components/modals/BaileysInstanceHubModal';
 
 const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
@@ -134,7 +134,8 @@ export default function InstancesDashboard() {
       
       const tenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id') || localStorage.getItem('tenantId');
       const nodeStatusStart = Date.now();
-      const nodeResponse = await fetch(`${ENGINE_URL}/api/v1/instances/${sid}/status`, {
+      const targetEngineUrl = getInstanceApiUrl(sid);
+      const nodeResponse = await fetch(`${targetEngineUrl}/api/v1/instances/${sid}/status`, {
         headers: {
           'x-tenant-id': tenantId || ''
         }
@@ -357,7 +358,7 @@ export default function InstancesDashboard() {
           // Sempre checa na Engine para limpar falsos positivos de online/offline do banco de dados.
           try {
               const targetTenantHeader = inst.tenant_id || activeTenantId || '';
-              const res = await fetch(`${ENGINE_URL}/api/v1/instances/${inst.id}/status`, {
+              const res = await fetch(`${getInstanceApiUrl(inst.id)}/api/v1/instances/${inst.id}/status`, {
                   headers: { 
                     'x-tenant-id': targetTenantHeader,
                     'apikey': inst.api_key || '' 
@@ -491,7 +492,7 @@ export default function InstancesDashboard() {
       await migrateInstanceHistory(oldInst.id, targetInstId);
 
       const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
-      await fetch(`${ENGINE_URL}/api/v1/instances/${oldInst.id}`, { 
+      await fetch(`${getInstanceApiUrl(oldInst.id)}/api/v1/instances/${oldInst.id}`, { 
           method: 'DELETE',
           headers: { 
             'x-tenant-id': tenantId!,
@@ -535,7 +536,7 @@ export default function InstancesDashboard() {
         await supabase.from('contacts').update({ instance_id: null }).eq('instance_id', deletingInstance.id);
       }
 
-      await fetch(`${ENGINE_URL}/api/v1/instances/${deletingInstance.id}`, { 
+      await fetch(`${getInstanceApiUrl(deletingInstance.id)}/api/v1/instances/${deletingInstance.id}`, { 
           method: 'DELETE',
           headers: { 
             'x-tenant-id': tenantId!,
@@ -575,7 +576,7 @@ export default function InstancesDashboard() {
     if (!window.confirm('Isto fará logoff do WhatsApp atual mas manterá a instância. Deseja Continuar?')) return;
     // O delete sem apagar do banco. O /delete agora apaga tudo se feito via painel se não mudarmos
     const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
-    await fetch(`${ENGINE_URL}/api/v1/instances/${id}/disconnect`, { 
+    await fetch(`${getInstanceApiUrl(id)}/api/v1/instances/${id}/disconnect`, { 
         method: 'POST',
         headers: { 
           'x-tenant-id': tenantId!,
@@ -587,7 +588,7 @@ export default function InstancesDashboard() {
   const fireEngineAction = async (id: string, apiKey: string | undefined, action: string, successMsg: string) => {
     try {
        const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
-       const res = await fetch(`${ENGINE_URL}/api/v1/instances/${id}/${action}`, { 
+       const res = await fetch(`${getInstanceApiUrl(id)}/api/v1/instances/${id}/${action}`, { 
            method: 'POST',
            headers: { 
              'x-tenant-id': tenantId!,
@@ -615,7 +616,7 @@ export default function InstancesDashboard() {
 
     try {
       const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
-      await fetch(`${ENGINE_URL}/api/v1/instances/${id}/connect`, { 
+      await fetch(`${getInstanceApiUrl(id)}/api/v1/instances/${id}/connect`, { 
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json', 
@@ -638,7 +639,7 @@ export default function InstancesDashboard() {
       try {
         secondsElapsed += 2;
         const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
-        const res = await fetch(`${ENGINE_URL}/api/v1/instances/${id}/status`, {
+        const res = await fetch(`${getInstanceApiUrl(id)}/api/v1/instances/${id}/status`, {
             headers: { 
               'x-tenant-id': tenantId!,
               'apikey': apiKey || ''
@@ -672,7 +673,7 @@ export default function InstancesDashboard() {
           secondsElapsed = 0; // Renova ciclo da UI
           console.log('[UI] 30 Segundos Ociosos. Renovando QR Code do Motor via API...');
           setQrLoading(true);
-          await fetch(`${ENGINE_URL}/api/v1/instances/${id}/connect`, { 
+          await fetch(`${getInstanceApiUrl(id)}/api/v1/instances/${id}/connect`, { 
             method: 'POST',
             headers: { 
               'Content-Type': 'application/json', 
@@ -719,11 +720,11 @@ export default function InstancesDashboard() {
       
       logger.addLog({
         type: 'info',
-        message: `Passo 1/3: Comunicando com API do gateway: ${ENGINE_URL}/api/v1/instances/${id}/pairing-code`,
+        message: `Passo 1/3: Comunicando com API do gateway: ${getInstanceApiUrl(id)}/api/v1/instances/${id}/pairing-code`,
         source: 'WhatsApp Pairing (Dashboard)'
       });
       
-      const res = await fetch(`${ENGINE_URL}/api/v1/instances/${id}/pairing-code`, {
+      const res = await fetch(`${getInstanceApiUrl(id)}/api/v1/instances/${id}/pairing-code`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -782,7 +783,7 @@ export default function InstancesDashboard() {
     const interval = setInterval(async () => {
       try {
         const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
-        const res = await fetch(`${ENGINE_URL}/api/v1/instances/${id}/status`, {
+        const res = await fetch(`${getInstanceApiUrl(id)}/api/v1/instances/${id}/status`, {
             headers: { 
               'x-tenant-id': tenantId!,
               'apikey': apiKey || ''

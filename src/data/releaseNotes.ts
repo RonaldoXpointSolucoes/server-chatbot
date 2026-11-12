@@ -712,6 +712,38 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.1.4',
+    date: '2026-11-12',
+    summary: 'Estúdio Panorâmico de 18 Novidades Baileys v7 (1.240px s/ Textos Cortados) + Roteamento Multi-Nó em Buscar Histórico (ALFA-A/PROD-C) + Autenticação Master Key em Enquetes',
+    notes: [
+      ...BAILEYS_18_FEATURES_NOTES,
+      {
+        id: 'ui-studio-1240px-814',
+        category: 'improvements',
+        title: 'Estúdio Panorâmico de 1.240px no Mapa Mental das 18 Novidades (Zero Textos Cortados)',
+        description: 'Refatorado o modal de Novidades em layout Master-Detail de 2 colunas (5/12 lista + 7/12 painel de inspeção ao vivo), eliminando truncamentos com reticências (...) e barras de rolagem horizontais.',
+        tag: 'MELHORIA UI/UX',
+        badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
+      },
+      {
+        id: 'fix-sync-history-multinode-814',
+        category: 'fixes',
+        title: 'Roteamento Multi-Nó Automático no "Buscar Histórico" (ALFA-A e PROD-C)',
+        description: 'Corrigido o erro HTTP 400 (Socket offline) ao sincronizar histórico nas caixas Ronaldo-Web e FoodNext através de roteamento direto por instância no Frontend e proxy interno forwardInternalInstanceRequest no Backend.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      },
+      {
+        id: 'fix-poll-master-apikey-814',
+        category: 'fixes',
+        title: 'Autenticação Master API Key em Enquetes Clicáveis e 18 Ações da Baileys v7',
+        description: 'Corrigido o alerta "Invalid API Key provided for this instance" ao disparar Enquetes Nativas e recursos da Baileys v7 quando a chave individual da caixa não estava em cache local.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      }
+    ]
+  },
+  {
     version: '8.1.3',
     date: '2026-11-12',
     summary: 'Mapa Mental Interativo & Guia Visual com Prints de Tela das 18 Novidades Nativas da Baileys v7 (Proposta, Onde Clicar, Como Acessar, Como Testar e Abertura em 1 Clique)',

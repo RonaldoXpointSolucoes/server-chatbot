@@ -223,9 +223,40 @@ router.post('/conversations/:conversationId/sync-history', requireTenant, async 
     try {
         const { conversationId } = req.params;
         const tenantId = req.tenantId;
-        const { instanceId } = req.body;
+        let { instanceId } = req.body;
+        const isUuid = (val) => typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+
+        if (instanceId && !isUuid(instanceId)) {
+            const { data: instByName } = await supabase
+                .from('whatsapp_instances')
+                .select('id')
+                .eq('tenant_id', tenantId)
+                .eq('display_name', instanceId)
+                .maybeSingle();
+            if (instByName?.id) {
+                instanceId = instByName.id;
+                req.body.instanceId = instanceId;
+            }
+        }
+
+        if (!instanceId && conversationId && isUuid(conversationId)) {
+            const { data: convInst } = await supabase
+                .from('conversations')
+                .select('instance_id')
+                .eq('id', conversationId)
+                .maybeSingle();
+            if (convInst?.instance_id) {
+                instanceId = convInst.instance_id;
+                req.body.instanceId = instanceId;
+            }
+        }
 
         if (!instanceId) return res.status(400).json({ error: 'instanceId is required' });
+
+        // Encaminha ao worker detentor caso a instância pertença a outro nó (alpha-worker vs production-worker)
+        if (await forwardInternalInstanceRequest(req, res, instanceId, { forwardAllStatuses: true, timeoutMs: 25000 })) {
+            return;
+        }
 
         let sock = sessionManager.getSocket(instanceId);
         

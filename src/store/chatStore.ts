@@ -3798,7 +3798,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       let timeoutId: any = null;
       try {
         const apiKey = await getOrFetchApiKey(resolvedInstanceId);
-        const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+        const { getInstanceApiUrl } = await import('../services/whatsappEngine');
+        const API_URL = getInstanceApiUrl(resolvedInstanceId);
 
         const controller = new AbortController();
         timeoutId = setTimeout(() => controller.abort(), 8000);
@@ -6228,19 +6229,36 @@ export const useChatStore = create<ChatState>((set, get) => ({
             }));
 
             try {
-              const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
-              const apiKey = resolvedInstanceId ? await getOrFetchApiKey(resolvedInstanceId) : '';
+              const { getInstanceApiUrl, getInstanceFallbackApiUrl } = await import('../services/whatsappEngine');
+              const syncInstanceId = resolvedInstanceId || targetInstanceId || conv?.instance_id || activeContactObj?.instance_id || '';
+              const primaryApiUrl = getInstanceApiUrl(syncInstanceId);
+              const fallbackApiUrl = getInstanceFallbackApiUrl(syncInstanceId);
+              const fetchedKey = syncInstanceId ? await getOrFetchApiKey(syncInstanceId) : '';
+              const apiKey = (!fetchedKey || fetchedKey === 'INTERNAL_KEY')
+                ? (import.meta.env.VITE_EVOLUTION_GLOBAL_API_KEY || '356c087d9-4073-4ceb-986a-09083992518c')
+                : fetchedKey;
               const targetConvId = conv?.id || targetContactUuid || contactId;
 
-              const res = await fetch(`${API_URL}/api/v1/conversations/${targetConvId}/sync-history`, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'x-tenant-id': tenant.id,
-                  'apikey': apiKey
-                },
-                body: JSON.stringify({ instanceId: resolvedInstanceId, count: 50, limit: 50 })
-              });
+              const performSyncFetch = (baseUrl: string) =>
+                fetch(`${baseUrl}/api/v1/conversations/${targetConvId}/sync-history`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'x-tenant-id': tenant.id,
+                    'apikey': apiKey
+                  },
+                  body: JSON.stringify({ instanceId: syncInstanceId, count: 50, limit: 50 })
+                });
+
+              let res = await performSyncFetch(primaryApiUrl);
+              if (!res.ok && fallbackApiUrl && fallbackApiUrl !== primaryApiUrl) {
+                try {
+                  const fallbackRes = await performSyncFetch(fallbackApiUrl);
+                  if (fallbackRes.ok) {
+                    res = fallbackRes;
+                  }
+                } catch (_fallbackErr) {}
+              }
 
               const result = await res.json();
               if (!res.ok) {
