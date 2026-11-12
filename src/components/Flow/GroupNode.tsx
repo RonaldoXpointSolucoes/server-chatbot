@@ -33,6 +33,7 @@ const icons: Record<string, any> = {
   rating: Star,
   file_input: FileUp,
   cards: LayoutTemplate,
+  poll: CheckSquare,
 
   // Logic
   set_variable: PenTool,
@@ -481,9 +482,15 @@ export default function GroupNode({ id, data, selected }: any) {
                           )}
                        </div>
                     ) : 
-                    /* 4. Menu de Opções / Botões / Cards / Seleção */
-                    (block.flowType === 'buttons' || block.flowType === 'cards' || block.flowType === 'pic_choice') ? (
+                    /* 4. Menu de Opções / Botões / Cards / Enquete Nativa / Seleção */
+                    (block.flowType === 'buttons' || block.flowType === 'cards' || block.flowType === 'pic_choice' || block.flowType === 'poll') ? (
                        <div className="space-y-1.5 mt-1">
+                          {block.flowType === 'poll' && (
+                             <div className="flex items-center justify-between px-2 py-1 rounded bg-emerald-500/10 border border-emerald-500/30 text-[10px] font-bold text-emerald-300">
+                                <span>📊 Enquete Clicável WhatsApp</span>
+                                <span>{block.selectableCount && Number(block.selectableCount) > 1 ? `Até ${block.selectableCount} votos` : '1 escolha'}</span>
+                             </div>
+                          )}
                           {(block.text || block.content) && (
                              <div className="text-xs text-zinc-200 bg-zinc-900/60 p-2 rounded-lg border border-zinc-800/60">
                                 {renderFormattedTypebotText(block.text || block.content)}
@@ -703,7 +710,7 @@ export default function GroupNode({ id, data, selected }: any) {
                 </div>
 
                 {/* Handle de encadeamento na borda direita (estilo alaranjado Typebot da Imagem 1) */}
-                {(index === blocks.length - 1 && !['condition', 'buttons', 'pic_choice', 'cards'].includes(block.flowType)) && (
+                {(index === blocks.length - 1 && !['condition', 'buttons', 'pic_choice', 'cards', 'poll'].includes(block.flowType)) && (
                     <Handle 
                         type="source" 
                         position={Position.Right} 

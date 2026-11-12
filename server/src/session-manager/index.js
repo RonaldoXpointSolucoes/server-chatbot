@@ -138,7 +138,7 @@ async function getCachedBaileysVersion() {
     } catch (e) {
         console.log('[SessionManager] Usando versão padrão estável do Baileys (2.3000.x):', e.message);
     }
-    cachedBaileysVersion = { version: [2, 3000, 1043857760], isLatest: true };
+    cachedBaileysVersion = { version: [2, 3000, 1053614044], isLatest: true };
     lastVersionFetchTime = now;
     return cachedBaileysVersion;
 }
@@ -2182,6 +2182,137 @@ class SessionManager {
                 }
                 await eventProcessor.handleMessagesUpdate(this.getLiveTenantId(instanceId, tenantId), instanceId, sock, updates);
             });
+
+            // --- Item 16: Rejeição Automática de Chamadas (rejectCall) + Resposta Automática ---
+            sock.ev.on('call', async (calls) => {
+                try {
+                    if (!Array.isArray(calls)) return;
+                    for (const call of calls) {
+                        if (call.status !== 'offer') continue;
+                        const callerJid = call.from || call.chatId;
+                        if (!callerJid) continue;
+
+                        if (!this.callSettingsCache) this.callSettingsCache = new Map();
+                        let callCfg = this.callSettingsCache.get(instanceId);
+                        if (!callCfg || (Date.now() - callCfg.fetchedAt > 60000)) {
+                            const { data: instRow } = await supabase
+                                .from('whatsapp_instances')
+                                .select('reject_calls, call_reject_message')
+                                .eq('id', instanceId)
+                                .maybeSingle()
+                                .catch(() => ({ data: null }));
+                            callCfg = {
+                                rejectCalls: Boolean(instRow?.reject_calls),
+                                rejectMessage: instRow?.call_reject_message || 'Olá! 🤖 Não atendemos chamadas de voz ou vídeo por este número. Por favor, envie uma mensagem de texto ou áudio que responderemos em instantes!',
+                                fetchedAt: Date.now()
+                            };
+                            this.callSettingsCache.set(instanceId, callCfg);
+                        }
+
+                        if (callCfg.rejectCalls && typeof sock.rejectCall === 'function') {
+                            console.log(`[SessionManager/Call] 📞 Rejeitando chamada recebida (${call.isVideo ? 'vídeo' : 'voz'}) de ${callerJid} na instância ${instanceId}...`);
+                            let rejectTimer = null;
+                            try {
+                                await Promise.race([
+                                    sock.rejectCall(call.id, callerJid),
+                                    new Promise((_, reject) => {
+                                        rejectTimer = setTimeout(() => reject(new Error('TIMEOUT_REJECT_CALL')), 5000);
+                                    })
+                                ]);
+                            } catch (rejErr) {
+                                console.warn(`[SessionManager/Call] Aviso ao rejeitar chamada (${call.id}):`, rejErr.message);
+                            } finally {
+                                if (rejectTimer) clearTimeout(rejectTimer);
+                            }
+
+                            if (callCfg.rejectMessage && callCfg.rejectMessage.trim()) {
+                                if (!this.callRejectCooldown) this.callRejectCooldown = new Map();
+                                const cooldownKey = `${instanceId}:${callerJid}`;
+                                const lastReplyAt = this.callRejectCooldown.get(cooldownKey) || 0;
+                                // Evita flood de mensagens se o contato ligar repetidamente em menos de 60 segundos
+                                if (Date.now() - lastReplyAt > 60000) {
+                                    this.callRejectCooldown.set(cooldownKey, Date.now());
+                                    const sendFn = sock.originalSendMessage || sock.sendMessage.bind(sock);
+                                    await sendFn(callerJid, { text: callCfg.rejectMessage.trim() }).catch(e => {
+                                        console.warn(`[SessionManager/Call] Aviso ao enviar mensagem pós-rejeição de chamada:`, e.message);
+                                    });
+                                }
+                            }
+                        }
+                    }
+                } catch (callErr) {
+                    console.warn(`[SessionManager/Call] Erro ao processar evento de chamada na instância ${instanceId}:`, callErr.message);
+                }
+            });
+
+            // --- Item 10: Sincronização Bidirecional de Etiquetas (Labels) WhatsApp Business <-> Kanban CRM ---
+            sock.ev.on('labels.edit', async (label) => {
+                try {
+                    if (!this.instanceLabelsCache) this.instanceLabelsCache = new Map();
+                    if (!this.instanceLabelsCache.has(instanceId)) {
+                        this.instanceLabelsCache.set(instanceId, new Map());
+                    }
+                    const labelsMap = this.instanceLabelsCache.get(instanceId);
+                    if (label?.deleted) {
+                        labelsMap.delete(String(label.id));
+                    } else if (label?.id) {
+                        labelsMap.set(String(label.id), {
+                            id: String(label.id),
+                            name: label.name || `Etiqueta ${label.id}`,
+                            color: label.color ?? 0
+                        });
+                    }
+                } catch (lblErr) {
+                    console.warn(`[SessionManager/Labels] Erro ao processar labels.edit:`, lblErr.message);
+                }
+            });
+
+            sock.ev.on('labels.association', async ({ association, type }) => {
+                try {
+                    if (!association || !association.chatId || !association.labelId) return;
+                    const labelsMap = this.instanceLabelsCache?.get(instanceId);
+                    const labelObj = labelsMap?.get(String(association.labelId));
+                    const labelName = labelObj?.name || `WA-Label-${association.labelId}`;
+                    const cleanPhone = String(association.chatId).split('@')[0].split(':')[0].replace(/\D/g, '');
+                    if (!cleanPhone) return;
+
+                    const liveTenantId = this.getLiveTenantId(instanceId, tenantId);
+                    const { data: contacts } = await supabase
+                        .from('contacts')
+                        .select('id')
+                        .eq('tenant_id', liveTenantId)
+                        .eq('phone', cleanPhone)
+                        .limit(1);
+
+                    if (contacts && contacts.length > 0) {
+                        const { data: conv } = await supabase
+                            .from('conversations')
+                            .select('id, tags')
+                            .eq('tenant_id', liveTenantId)
+                            .eq('contact_id', contacts[0].id)
+                            .order('updated_at', { ascending: false })
+                            .limit(1)
+                            .maybeSingle();
+
+                        if (conv) {
+                            const currentTags = Array.isArray(conv.tags) ? conv.tags : [];
+                            let nextTags = [...currentTags];
+                            if (type === 'add') {
+                                if (!nextTags.includes(labelName)) nextTags.push(labelName);
+                            } else if (type === 'remove') {
+                                nextTags = nextTags.filter(t => t !== labelName);
+                            }
+                            await supabase
+                                .from('conversations')
+                                .update({ tags: nextTags, updated_at: new Date().toISOString() })
+                                .eq('id', conv.id);
+                        }
+                    }
+                } catch (assocErr) {
+                    console.warn(`[SessionManager/Labels] Erro ao sincronizar associação de etiqueta com CRM:`, assocErr.message);
+                }
+            });
+
             // --- Proteção Antiban e Fila de Mensagens Sequencial ---
             const originalSendMessage = sock.originalSendMessage || sock.sendMessage.bind(sock);
             sock.originalSendMessage = originalSendMessage;
@@ -2359,6 +2490,38 @@ class SessionManager {
                                     } finally {
                                         if (sendTimeoutHandle) clearTimeout(sendTimeoutHandle);
                                     }
+
+                                    // --- Item 1: Auto-Fixar (Pin) Link do Cardápio Digital no topo da conversa por 30 dias (2592000s) ---
+                                    try {
+                                        const msgTextCheck = String(content?.text || content?.caption || '').toLowerCase();
+                                        const isMenuLinkMessage = !content?.pin && Boolean(
+                                            content?.autoPin ||
+                                            options?.autoPin ||
+                                            (msgTextCheck.includes('http') && (
+                                                msgTextCheck.includes('cardapio') ||
+                                                msgTextCheck.includes('cardápio') ||
+                                                msgTextCheck.includes('gastrofood') ||
+                                                msgTextCheck.includes('menudigital') ||
+                                                msgTextCheck.includes('menu.') ||
+                                                msgTextCheck.includes('pedido.')
+                                            ))
+                                        );
+                                        if (isMenuLinkMessage && result?.key?.id && !targetJid.endsWith('@g.us')) {
+                                            const pinTimeSeconds = Number(content?.pinTime || options?.pinTime || 2592000); // 30 dias padrão
+                                            result.pinned = true;
+                                            setTimeout(() => {
+                                                sendFn(targetJid, {
+                                                    pin: result.key,
+                                                    type: 1,
+                                                    time: pinTimeSeconds
+                                                }).then(() => {
+                                                    console.log(`[SessionManager - AutoPin] 📌 Link do cardápio digital fixado automaticamente por 30 dias para ${targetJid} (msgId: ${result.key.id})`);
+                                                }).catch(pinErr => {
+                                                    console.warn(`[SessionManager - AutoPin] Aviso ao fixar link do cardápio em ${targetJid}:`, pinErr.message);
+                                                });
+                                            }, 600);
+                                        }
+                                    } catch (autoPinErr) {}
 
                                     // Auto-persiste e sincroniza imediatamente no EventProcessor
                                     try {

@@ -1,7 +1,7 @@
 import { supabase, NODE_ID, retryWithBackoff, resolveTargetJid, nodeSupabaseCircuitBreaker, isTransientSupabaseError } from '../supabase.js';
 import realtime from '../realtime-publisher/index.js';
 import qrcode from 'qrcode';
-import { downloadContentFromMessage } from '@whiskeysockets/baileys';
+import { downloadContentFromMessage, decryptPollVote, jidNormalizedUser } from '@whiskeysockets/baileys';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -652,10 +652,178 @@ class EventProcessor {
                 }
 
 
-                const textMessage = this.extractTextFromMessage(msg);
+                let textMessage = this.extractTextFromMessage(msg);
                 const msgType = this.extractTypeFromMessage(msg);
 
                 let content = this.extractMessageContent(msg);
+
+                // Detecta e preserva flags nativas (ViewOnce e PTV - Vídeo Redondo)
+                const rawRootMsg = msg?.message || {};
+                if (rawRootMsg.viewOnceMessage || rawRootMsg.viewOnceMessageV2 || rawRootMsg.viewOnceMessageV2Extension || content?.imageMessage?.viewOnce || content?.videoMessage?.viewOnce || content?.audioMessage?.viewOnce) {
+                    msg.viewOnce = true;
+                }
+                if (rawRootMsg.ptvMessage || content?.ptvMessage || content?.videoMessage?.ptv) {
+                    msg.ptv = true;
+                }
+
+                // 1. Tratamento de Fixar / Desafixar Mensagem (pinInChatMessage)
+                if (content && content.pinInChatMessage) {
+                    const pinData = content.pinInChatMessage;
+                    const targetMsgId = pinData.key?.id;
+                    const isPinned = pinData.type === 1 || pinData.type === 'PIN_FOR_ALL';
+                    if (targetMsgId) {
+                        supabase.from('messages')
+                            .select('id, raw_payload')
+                            .eq('whatsapp_message_id', targetMsgId)
+                            .maybeSingle()
+                            .then(async ({ data: existingMsg }) => {
+                                if (existingMsg) {
+                                    const updatedPayload = {
+                                        ...(existingMsg.raw_payload || {}),
+                                        pinned: isPinned,
+                                        pinned_at: isPinned ? new Date().toISOString() : null
+                                    };
+                                    await supabase.from('messages')
+                                        .update({ raw_payload: updatedPayload, updated_at: new Date().toISOString() })
+                                        .eq('id', existingMsg.id);
+                                    realtime.publishInboxEvent(tenantId, 'message.update', {
+                                        id: existingMsg.id,
+                                        whatsapp_message_id: targetMsgId,
+                                        raw_payload: updatedPayload
+                                    }).catch(() => {});
+                                }
+                            }).catch(() => {});
+                    }
+                    continue;
+                }
+
+                // 2. Tratamento de Voto em Enquete Nativa (pollUpdateMessage) -> Decifra voto e alimenta Typebot/Chat
+                if (content && content.pollUpdateMessage) {
+                    try {
+                        const pollUpdate = content.pollUpdateMessage;
+                        const pollKey = pollUpdate.pollCreationMessageKey;
+                        const pollMsgId = pollKey?.id;
+                        let pollCreationMsg = null;
+
+                        if (pollMsgId) {
+                            const { data: dbPollMsg } = await supabase
+                                .from('messages')
+                                .select('id, text_content, raw_payload')
+                                .eq('whatsapp_message_id', pollMsgId)
+                                .maybeSingle();
+                            if (dbPollMsg?.raw_payload) {
+                                pollCreationMsg = dbPollMsg.raw_payload.message || dbPollMsg.raw_payload;
+                            }
+                        }
+
+                        const pollContent = pollCreationMsg?.pollCreationMessage || pollCreationMsg?.pollCreationMessageV2 || pollCreationMsg?.pollCreationMessageV3;
+                        const pollOptions = (pollContent?.options || []).map(o => o.optionName || o);
+                        let selectedOptions = [];
+
+                        if (pollUpdate.vote && pollCreationMsg?.messageContextInfo?.messageSecret && typeof decryptPollVote === 'function') {
+                            try {
+                                const toBufferSafe = (val) => {
+                                    if (!val) return null;
+                                    if (Buffer.isBuffer(val)) return val;
+                                    if (val instanceof Uint8Array) return Buffer.from(val);
+                                    if (typeof val === 'string') return Buffer.from(val, 'base64');
+                                    if (val.type === 'Buffer' && Array.isArray(val.data)) return Buffer.from(val.data);
+                                    if (typeof val === 'object') return Buffer.from(Object.values(val));
+                                    return null;
+                                };
+                                const meId = jidNormalizedUser(sock?.user?.id || sock?.authState?.creds?.me?.id || '');
+                                const pollCreatorJid = pollKey?.fromMe ? meId : jidNormalizedUser(pollKey?.participant || pollKey?.remoteJid || jid);
+                                const voterJid = msg.key.fromMe ? meId : jidNormalizedUser(msg.key.participant || msg.key.remoteJid || jid);
+                                const pollEncKey = toBufferSafe(pollCreationMsg.messageContextInfo.messageSecret);
+                                const encPayload = toBufferSafe(pollUpdate.vote.encPayload);
+                                const encIv = toBufferSafe(pollUpdate.vote.encIv);
+
+                                if (pollEncKey && encPayload && encIv) {
+                                    const decryptedVote = decryptPollVote({ encPayload, encIv }, {
+                                        pollCreatorJid,
+                                        pollMsgId,
+                                        pollEncKey,
+                                        voterJid
+                                    });
+                                    const selectedHashes = (decryptedVote?.selectedOptions || []).map(h => Buffer.from(h).toString('hex').toLowerCase());
+                                    for (const optName of pollOptions) {
+                                        const optHash = crypto.createHash('sha256').update(String(optName)).digest('hex').toLowerCase();
+                                        if (selectedHashes.includes(optHash)) {
+                                            selectedOptions.push(optName);
+                                        }
+                                    }
+                                }
+                            } catch (decErr) {
+                                console.warn('[EventProcessor] Aviso ao decifrar voto de enquete via decryptPollVote:', decErr.message);
+                            }
+                        }
+
+                        if (selectedOptions.length > 0) {
+                            textMessage = selectedOptions.join(', ');
+                            msg.pollVote = { pollMsgId, selectedOptions };
+                        } else if (pollOptions.length > 0) {
+                            textMessage = `🗳️ Voto em Enquete: ${pollContent?.name || ''}`;
+                            msg.pollVote = { pollMsgId, selectedOptions: [] };
+                        }
+                    } catch (pollErr) {
+                        console.warn('[EventProcessor] Erro ao processar pollUpdateMessage:', pollErr.message);
+                    }
+                }
+
+                // 3. Tratamento de Carrinho / Pedido do Catálogo WhatsApp (orderMessage -> sock.getOrderDetails)
+                if (content && content.orderMessage) {
+                    const om = content.orderMessage;
+                    let orderDetails = {
+                        orderId: om.orderId,
+                        token: om.token,
+                        title: om.orderTitle || 'Pedido do Catálogo',
+                        message: om.message || '',
+                        itemCount: om.itemCount || 1,
+                        totalAmount: om.totalAmount1000 ? Number(om.totalAmount1000) / 1000 : null,
+                        currency: om.totalCurrencyCode || 'BRL',
+                        products: []
+                    };
+                    if (sock && typeof sock.getOrderDetails === 'function' && om.orderId && om.token) {
+                        let orderTimer = null;
+                        try {
+                            const fetchedOrder = await Promise.race([
+                                sock.getOrderDetails(om.orderId, om.token),
+                                new Promise((_, reject) => {
+                                    orderTimer = setTimeout(() => reject(new Error('TIMEOUT_ORDER_DETAILS')), 5000);
+                                })
+                            ]);
+                            if (fetchedOrder) {
+                                const products = (fetchedOrder.products || []).map(p => ({
+                                    id: p.id,
+                                    name: p.name,
+                                    quantity: Number(p.quantity || 1),
+                                    price: p.price ? Number(p.price) / 1000 : 0,
+                                    currency: p.currency || 'BRL',
+                                    imageUrl: p.imageUrl || null
+                                }));
+                                const calcTotal = fetchedOrder.price?.total ? Number(fetchedOrder.price.total) / 1000 : orderDetails.totalAmount;
+                                orderDetails = {
+                                    ...orderDetails,
+                                    totalAmount: calcTotal,
+                                    currency: fetchedOrder.price?.currency || orderDetails.currency,
+                                    products
+                                };
+                            }
+                        } catch (ordErr) {
+                            console.warn(`[EventProcessor] Aviso ao buscar detalhes do carrinho (${om.orderId}):`, ordErr.message);
+                        } finally {
+                            if (orderTimer) clearTimeout(orderTimer);
+                        }
+                    }
+                    msg.orderDetails = orderDetails;
+                    if (orderDetails.products && orderDetails.products.length > 0) {
+                        const itemsLines = orderDetails.products.map(p => `• ${p.quantity}x *${p.name}* — R$ ${(p.price * p.quantity).toFixed(2)}`).join('\n');
+                        const totalLine = orderDetails.totalAmount ? `\n💰 *Total do Carrinho:* R$ ${Number(orderDetails.totalAmount).toFixed(2)}` : '';
+                        const obsLine = orderDetails.message ? `\n💬 *Obs:* ${orderDetails.message}` : '';
+                        textMessage = `🛒 *CARRINHO RECEBIDO DO CATÁLOGO*\n\n${itemsLines}${totalLine}${obsLine}`;
+                    }
+                }
+
                 if (content && content.protocolMessage) {
                     const p = content.protocolMessage;
                     

@@ -881,12 +881,782 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
             return res.json({ ok: true, message: 'A arquitetura atual não utiliza in-memory store global, RAM está otimizada automaticamente.' });
         }
 
+        const macroArg = (args && args[0]) || {};
 
+        // Helper de timeout estrito para impedir que qualquer IQ/query do Baileys trave o Event Loop ou a requisição HTTP
+        const withBaileysTimeout = async (promiseOrFn, timeoutMs = 12000, opLabel = 'BaileysOp') => {
+            let timer = null;
+            try {
+                const targetPromise = typeof promiseOrFn === 'function' ? promiseOrFn() : promiseOrFn;
+                return await Promise.race([
+                    targetPromise,
+                    new Promise((_, reject) => {
+                        timer = setTimeout(() => {
+                            reject(new Error(`TIMEOUT_${opLabel} (${timeoutMs}ms)`));
+                        }, timeoutMs);
+                    })
+                ]);
+            } finally {
+                if (timer) clearTimeout(timer);
+            }
+        };
+
+        if (!sessionManager.activeCatalogSyncs) {
+            sessionManager.activeCatalogSyncs = new Set();
+        }
+
+        // ============================================================================
+        // MACROS AVANÇADOS BAILEYS (18 FUNCIONALIDADES INTEGRADAS E BLINDADAS)
+        // ============================================================================
+        try {
+            // 1. Fixar / Desafixar Mensagem no Chat (pin) - 24h (86400), 7d (604800), 30d (2592000)
+            if (method === 'pinMessage') {
+                const { jid, key, type = 1, time = 2592000 } = macroArg;
+                if (!jid || !key || !key.id) return res.status(400).json({ ok: false, error: 'Missing jid or valid key.id' });
+                const targetJid = jid.endsWith('@g.us') ? jid : await resolveTargetJid(sock, jid, req.tenantId);
+                const VALID_PIN_TIMES = [86400, 604800, 2592000];
+                const safePinTime = VALID_PIN_TIMES.includes(Number(time)) ? Number(time) : 2592000;
+                const pinKey = {
+                    remoteJid: key.remoteJid || targetJid,
+                    fromMe: Boolean(key.fromMe),
+                    id: String(key.id),
+                    ...(key.participant ? { participant: key.participant } : {})
+                };
+                const sendFn = sock.originalSendMessage || sock.sendMessage.bind(sock);
+                const result = await withBaileysTimeout(
+                    sendFn(targetJid, {
+                        pin: pinKey,
+                        type: Number(type) === 0 || Number(type) === 2 ? 2 : 1,
+                        time: Number(type) === 1 ? safePinTime : undefined
+                    }),
+                    12000,
+                    'PIN_MESSAGE'
+                );
+                const isPinned = Number(type) === 1;
+                if (pinKey.id) {
+                    const { data: existingMsg } = await supabase
+                        .from('messages')
+                        .select('id, raw_payload')
+                        .eq('whatsapp_message_id', pinKey.id)
+                        .maybeSingle()
+                        .catch(() => ({ data: null }));
+                    if (existingMsg) {
+                        const updatedPayload = {
+                            ...(existingMsg.raw_payload || {}),
+                            pinned: isPinned,
+                            pin_time: isPinned ? safePinTime : null,
+                            pinned_at: isPinned ? new Date().toISOString() : null
+                        };
+                        await supabase.from('messages').update({ raw_payload: updatedPayload }).eq('id', existingMsg.id).catch(() => {});
+                    }
+                }
+                return res.json({ ok: true, result, pinned: isPinned });
+            }
+
+            // 1.1 Enviar e Fixar Link do Cardápio Digital por 30 Dias Automaticamente
+            if (method === 'pinMenuLink') {
+                const { jid, menuUrl, text, time = 2592000 } = macroArg;
+                if (!jid) return res.status(400).json({ ok: false, error: 'Missing jid' });
+                const targetJid = jid.endsWith('@g.us') ? jid : await resolveTargetJid(sock, jid, req.tenantId);
+                const VALID_PIN_TIMES = [86400, 604800, 2592000];
+                const safePinTime = VALID_PIN_TIMES.includes(Number(time)) ? Number(time) : 2592000;
+                let finalUrl = menuUrl;
+                if (!finalUrl) {
+                    const { data: instData } = await supabase
+                        .from('whatsapp_instances')
+                        .select('gastrofood_url, menu_url, display_name')
+                        .eq('id', instanceId)
+                        .maybeSingle()
+                        .catch(() => ({ data: null }));
+                    finalUrl = instData?.menu_url || instData?.gastrofood_url || 'https://cardapiodigital.io';
+                }
+                const finalBody = text || `🍔 *CARDÁPIO DIGITAL OFICIAL*\n\nFaça seu pedido de forma rápida e prática pelo nosso link abaixo:\n👉 ${finalUrl}`;
+                const sendFn = sock.originalSendMessage || sock.sendMessage.bind(sock);
+                const sentMsg = await withBaileysTimeout(sendFn(targetJid, { text: finalBody }), 12000, 'SEND_MENU_LINK');
+                if (sentMsg?.key?.id) {
+                    await new Promise(r => setTimeout(r, 300));
+                    await withBaileysTimeout(
+                        sendFn(targetJid, {
+                            pin: sentMsg.key,
+                            type: 1,
+                            time: safePinTime
+                        }),
+                        8000,
+                        'PIN_MENU_LINK'
+                    ).catch(e => console.warn('[Invoke/pinMenuLink] Aviso ao fixar mensagem:', e.message));
+                }
+                return res.json({ ok: true, result: sentMsg, pinnedForSeconds: safePinTime });
+            }
+
+            // 2. Enviar Enquete Nativa Clicável (poll)
+            if (method === 'sendPoll') {
+                const { jid, name, values, selectableCount = 1 } = macroArg;
+                if (!jid || !name || !Array.isArray(values)) {
+                    return res.status(400).json({ ok: false, error: 'Enquete requer jid, pergunta (name) e ao menos 2 opções válidas (values).' });
+                }
+                const cleanValues = values.map(v => String(v || '').trim()).filter(Boolean).slice(0, 12);
+                if (cleanValues.length < 2) {
+                    return res.status(400).json({ ok: false, error: 'Enquete requer ao menos 2 opções não vazias.' });
+                }
+                const targetJid = jid.endsWith('@g.us') ? jid : await resolveTargetJid(sock, jid, req.tenantId);
+                const result = await withBaileysTimeout(
+                    sock.sendMessage(targetJid, {
+                        poll: {
+                            name: String(name).trim(),
+                            values: cleanValues,
+                            selectableCount: Math.max(1, Math.min(cleanValues.length, Number(selectableCount || 1)))
+                        }
+                    }, { isHuman: true, skipDelay: true }),
+                    15000,
+                    'SEND_POLL'
+                );
+                return res.json({ ok: true, result, key: result?.key });
+            }
+
+            // 4. Enviar Álbum de Mídias Agrupadas (albumMessage + albumParentKey)
+            if (method === 'sendAlbum') {
+                const { jid, medias = [], caption = '' } = macroArg;
+                const validMedias = (Array.isArray(medias) ? medias : [])
+                    .filter(m => m && typeof m.url === 'string' && m.url.trim().startsWith('http'))
+                    .slice(0, 10);
+                if (!jid || validMedias.length === 0) {
+                    return res.status(400).json({ ok: false, error: 'Álbum requer jid e array medias com URLs HTTP/HTTPS válidas.' });
+                }
+                const targetJid = jid.endsWith('@g.us') ? jid : await resolveTargetJid(sock, jid, req.tenantId);
+                const expectedImageCount = validMedias.filter(m => (m.type || 'image') === 'image').length;
+                const expectedVideoCount = validMedias.filter(m => m.type === 'video').length;
+                const sendFn = sock.originalSendMessage || sock.sendMessage.bind(sock);
+
+                const albumParent = await withBaileysTimeout(
+                    sendFn(targetJid, {
+                        album: {
+                            expectedImageCount,
+                            expectedVideoCount,
+                            caption: caption || undefined
+                        }
+                    }),
+                    12000,
+                    'SEND_ALBUM_HEADER'
+                );
+
+                const sentChildren = [];
+                const failedChildren = [];
+                for (let i = 0; i < validMedias.length; i++) {
+                    const item = validMedias[i];
+                    const isVid = item.type === 'video';
+                    const childCaption = item.caption || (i === 0 ? caption : '') || undefined;
+                    // Baileys v7 verifica message.albumParentKey diretamente no objeto content (messages.js:534)
+                    const childPayload = isVid
+                        ? { video: { url: item.url.trim() }, caption: childCaption, albumParentKey: albumParent?.key }
+                        : { image: { url: item.url.trim() }, caption: childCaption, albumParentKey: albumParent?.key };
+                    try {
+                        const childRes = await withBaileysTimeout(
+                            sendFn(targetJid, childPayload, { albumParentKey: albumParent?.key }),
+                            18000,
+                            `SEND_ALBUM_ITEM_${i + 1}`
+                        );
+                        sentChildren.push(childRes?.key);
+                    } catch (childErr) {
+                        failedChildren.push({ index: i, url: item.url, error: childErr.message });
+                        console.warn(`[Invoke/sendAlbum] Aviso ao enviar item ${i + 1}/${validMedias.length} do álbum:`, childErr.message);
+                    }
+                }
+                return res.json({
+                    ok: sentChildren.length > 0,
+                    albumKey: albumParent?.key,
+                    childrenKeys: sentChildren,
+                    failedChildren
+                });
+            }
+
+            // 6. Ler Detalhes do Carrinho enviado pelo Cliente (getOrderDetails)
+            if (method === 'getOrderDetails') {
+                const { orderId, token } = macroArg;
+                if (!orderId || !token) return res.status(400).json({ ok: false, error: 'Missing orderId or token' });
+                const details = await withBaileysTimeout(sock.getOrderDetails(String(orderId), String(token)), 10000, 'GET_ORDER_DETAILS');
+                return res.json({ ok: true, result: details });
+            }
+
+            // 7. Catálogo WhatsApp Business & Sincronização com Cardápio GastroFood + Envio de Produto Único
+            if (method === 'getCatalog') {
+                const { jid, limit = 50 } = macroArg;
+                const safeLimit = Math.max(1, Math.min(100, Number(limit || 50)));
+                const catalog = await withBaileysTimeout(
+                    sock.getCatalog({ jid: jid || sock.user?.id, limit: safeLimit }),
+                    12000,
+                    'GET_CATALOG'
+                );
+                return res.json({ ok: true, result: catalog });
+            }
+
+            if (method === 'syncGastrofoodCatalog') {
+                if (sessionManager.activeCatalogSyncs.has(instanceId)) {
+                    return res.json({
+                        ok: false,
+                        error: 'Já existe uma sincronização de catálogo em andamento para esta instância. Aguarde alguns segundos.'
+                    });
+                }
+                sessionManager.activeCatalogSyncs.add(instanceId);
+                try {
+                    const safeLimit = Math.max(1, Math.min(50, Number(macroArg.limit || 40)));
+                    // 1. Busca produtos já sincronizados do GastroFood na tabela cardapio_produtos (ou força sync se vazio)
+                    let { data: dbProducts } = await supabase
+                        .from('cardapio_produtos')
+                        .select('*')
+                        .eq('instance_id', instanceId)
+                        .eq('ativo', true)
+                        .order('nome', { ascending: true })
+                        .limit(safeLimit)
+                        .catch(() => ({ data: [] }));
+
+                    if (!dbProducts || dbProducts.length === 0) {
+                        try {
+                            const { default: cardapioSync } = await import('../services/cardapioSync.js');
+                            if (cardapioSync && typeof cardapioSync.syncInstance === 'function') {
+                                await withBaileysTimeout(cardapioSync.syncInstance(instanceId), 15000, 'GASTROFOOD_SYNC');
+                                const retryRes = await supabase
+                                    .from('cardapio_produtos')
+                                    .select('*')
+                                    .eq('instance_id', instanceId)
+                                    .eq('ativo', true)
+                                    .order('nome', { ascending: true })
+                                    .limit(safeLimit)
+                                    .catch(() => ({ data: [] }));
+                                dbProducts = retryRes.data || [];
+                            }
+                        } catch (syncErr) {
+                            console.warn('[Invoke/syncGastrofoodCatalog] Aviso ao acionar cardapioSync:', syncErr.message);
+                        }
+                    }
+
+                    if (!dbProducts || dbProducts.length === 0) {
+                        return res.json({
+                            ok: false,
+                            error: 'Nenhum produto ativo encontrado no cardápio desta instância. Verifique o token GastroFood na aba Integrações.'
+                        });
+                    }
+
+                    let existingProducts = [];
+                    try {
+                        const currentCat = await withBaileysTimeout(
+                            sock.getCatalog({ jid: sock.user?.id, limit: 100 }),
+                            10000,
+                            'GET_CATALOG_FOR_SYNC'
+                        );
+                        existingProducts = currentCat?.products || [];
+                    } catch (catErr) {
+                        console.warn('[Invoke/syncGastrofoodCatalog] Aviso ao ler catálogo atual:', catErr.message);
+                    }
+
+                    const defaultImage = 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=600&q=80';
+                    let createdCount = 0;
+                    let updatedCount = 0;
+                    let failedCount = 0;
+
+                    for (const prod of dbProducts) {
+                        try {
+                            const prodName = String(prod.nome || 'Produto').trim().slice(0, 100);
+                            const prodPrice = Math.max(100, Math.round(Number(prod.preco || 0) * 1000));
+                            const prodDesc = String(prod.descricao || prod.categoria || prodName).trim().slice(0, 500);
+                            const imgUrl = prod.imagem_url && String(prod.imagem_url).startsWith('http') ? prod.imagem_url : defaultImage;
+                            const retailerId = String(prod.external_id || prod.id).slice(0, 50);
+
+                            const existingMatch = existingProducts.find(
+                                ep => (ep.retailerId && String(ep.retailerId) === retailerId) ||
+                                      (ep.name && String(ep.name).toLowerCase() === prodName.toLowerCase())
+                            );
+
+                            const productPayload = {
+                                name: prodName,
+                                description: prodDesc,
+                                price: prodPrice,
+                                currency: 'BRL',
+                                isHidden: false,
+                                retailerId,
+                                images: [{ url: imgUrl }]
+                            };
+
+                            if (existingMatch?.id && typeof sock.productUpdate === 'function') {
+                                await withBaileysTimeout(sock.productUpdate(existingMatch.id, productPayload), 12000, 'PRODUCT_UPDATE');
+                                updatedCount++;
+                            } else if (typeof sock.productCreate === 'function') {
+                                await withBaileysTimeout(sock.productCreate(productPayload), 12000, 'PRODUCT_CREATE');
+                                createdCount++;
+                            }
+                        } catch (itemErr) {
+                            failedCount++;
+                            console.warn(`[Invoke/syncGastrofoodCatalog] Falha ao sincronizar produto "${prod?.nome}":`, itemErr.message);
+                        }
+                    }
+
+                    return res.json({
+                        ok: true,
+                        totalProcessed: dbProducts.length,
+                        createdCount,
+                        updatedCount,
+                        failedCount,
+                        message: `Sincronização concluída! ${createdCount} criados e ${updatedCount} atualizados no Catálogo WhatsApp Business.`
+                    });
+                } finally {
+                    sessionManager.activeCatalogSyncs.delete(instanceId);
+                }
+            }
+
+            if (method === 'sendProduct') {
+                const { jid, product } = macroArg;
+                if (!jid || !product) return res.status(400).json({ ok: false, error: 'Missing jid or product' });
+                const targetJid = jid.endsWith('@g.us') ? jid : await resolveTargetJid(sock, jid, req.tenantId);
+                const ownerJid = sock.user?.id ? sock.user.id.split(':')[0] + (sock.user.id.includes('@') ? '' : '@s.whatsapp.net') : targetJid;
+                const normalizedOwnerJid = ownerJid.includes('@') ? ownerJid : `${ownerJid}@s.whatsapp.net`;
+                const price1000 = product.priceAmount1000 || Math.max(100, Math.round(Number(product.price || product.preco || 0) * 1000));
+                const rawImgUrl = product.productImageUrl || product.imageUrl || product.imagem_url;
+                const imgUrl = (rawImgUrl && String(rawImgUrl).startsWith('http'))
+                    ? String(rawImgUrl).trim()
+                    : 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=600&q=80';
+
+                const sendFn = sock.originalSendMessage || sock.sendMessage.bind(sock);
+                const result = await withBaileysTimeout(
+                    sendFn(targetJid, {
+                        product: {
+                            productImage: { url: imgUrl },
+                            productId: String(product.productId || product.id || Date.now()),
+                            title: String(product.title || product.nome || 'Produto'),
+                            description: String(product.description || product.descricao || ''),
+                            currencyCode: product.currencyCode || 'BRL',
+                            priceAmount1000: price1000,
+                            retailerId: String(product.retailerId || product.external_id || product.id || 'ITEM-1'),
+                            url: product.url || undefined,
+                            productImageCount: 1
+                        },
+                        businessOwnerJid: normalizedOwnerJid
+                    }),
+                    15000,
+                    'SEND_PRODUCT'
+                );
+                return res.json({ ok: true, result, key: result?.key });
+            }
+
+            // 8. Editar Perfil Comercial e Capa (getBusinessProfile, updateBusinessProfile, updateCoverPhoto)
+            if (method === 'getBusinessProfile') {
+                const targetJid = macroArg.jid || sock.user?.id;
+                const cleanJid = String(targetJid || '').split(':')[0] + (String(targetJid || '').includes('@') ? '' : '@s.whatsapp.net');
+                const finalJid = cleanJid.includes('@s.whatsapp.net') ? cleanJid : `${cleanJid.split('@')[0]}@s.whatsapp.net`;
+                const profile = await withBaileysTimeout(sock.getBusinessProfile(finalJid), 10000, 'GET_BUSINESS_PROFILE');
+                return res.json({ ok: true, result: profile || null });
+            }
+
+            if (method === 'updateBusinessProfile') {
+                const { address, email, description, websites, hours, coverPhotoUrl } = macroArg;
+                if (typeof sock.updateBussinesProfile === 'function') {
+                    await withBaileysTimeout(
+                        sock.updateBussinesProfile({
+                            address: address || '',
+                            email: email || '',
+                            description: description || '',
+                            websites: Array.isArray(websites) ? websites : (websites ? [websites] : []),
+                            hours: hours || undefined
+                        }),
+                        12000,
+                        'UPDATE_BUSINESS_PROFILE'
+                    );
+                }
+                if (coverPhotoUrl && String(coverPhotoUrl).startsWith('http') && typeof sock.updateCoverPhoto === 'function') {
+                    await withBaileysTimeout(sock.updateCoverPhoto({ url: String(coverPhotoUrl).trim() }), 15000, 'UPDATE_COVER_PHOTO');
+                }
+                return res.json({ ok: true, message: 'Perfil comercial WhatsApp Business atualizado com sucesso!' });
+            }
+
+            // 9. Respostas Rápidas Nativas do Aparelho (addOrEditQuickReply / removeQuickReply)
+            if (method === 'syncQuickReplies') {
+                let replies = macroArg.quickReplies;
+                if (!Array.isArray(replies)) {
+                    const { data: dbReplies } = await supabase
+                        .from('quick_replies')
+                        .select('*')
+                        .eq('tenant_id', req.tenantId)
+                        .limit(50)
+                        .catch(() => ({ data: [] }));
+                    replies = dbReplies || [];
+                }
+                let synced = 0;
+                const cappedReplies = replies.slice(0, 50);
+                for (const qr of cappedReplies) {
+                    const shortcut = String(qr?.shortcut || qr?.title || '').replace(/^\//, '').trim();
+                    const message = String(qr?.content || qr?.message || qr?.text || '').trim();
+                    if (!shortcut || !message) continue;
+                    try {
+                        await withBaileysTimeout(
+                            sock.addOrEditQuickReply({
+                                timestamp: Math.floor(Date.now() / 1000).toString(),
+                                shortcut,
+                                message,
+                                type: 'text',
+                                count: 0,
+                                keywords: []
+                            }),
+                            8000,
+                            'ADD_QUICK_REPLY'
+                        );
+                        synced++;
+                    } catch (qrErr) {
+                        console.warn(`[Invoke/syncQuickReplies] Aviso no atalho /${shortcut}:`, qrErr.message);
+                    }
+                }
+                return res.json({ ok: true, synced, message: `${synced} respostas rápidas sincronizadas com o aparelho WhatsApp Business.` });
+            }
+
+            // 10. Sincronização Bidirecional de Etiquetas (Labels) com Kanban CRM
+            if (method === 'syncLabelsWithCrm') {
+                let columns = macroArg.columns;
+                if (!Array.isArray(columns) || columns.length === 0) {
+                    const { data: stages } = await supabase
+                        .from('crm_stages')
+                        .select('id, name, color, position')
+                        .eq('tenant_id', req.tenantId)
+                        .order('position', { ascending: true })
+                        .limit(20)
+                        .catch(() => ({ data: [] }));
+                    columns = stages && stages.length > 0 ? stages : [
+                        { name: 'Novo Lead', color: 1 },
+                        { name: 'Em Atendimento', color: 2 },
+                        { name: 'Pedido Realizado', color: 3 },
+                        { name: 'Pós-Venda / Fidelizado', color: 4 }
+                    ];
+                }
+                const syncedLabels = [];
+                const cappedCols = columns.slice(0, 20);
+                for (let i = 0; i < cappedCols.length; i++) {
+                    const col = cappedCols[i];
+                    const labelId = String(i + 1);
+                    const labelName = String(col?.name || col?.title || `Etapa ${i + 1}`).trim();
+                    const colorIdx = typeof col?.color === 'number' ? col.color : (i % 10);
+                    try {
+                        await withBaileysTimeout(
+                            sock.addLabel(labelId, { name: labelName, color: colorIdx }),
+                            8000,
+                            'ADD_LABEL'
+                        );
+                        syncedLabels.push({ id: labelId, name: labelName, color: colorIdx });
+                    } catch (lblErr) {
+                        console.warn(`[Invoke/syncLabelsWithCrm] Aviso ao criar/atualizar label "${labelName}":`, lblErr.message);
+                    }
+                }
+                const existingMap = Array.from((sessionManager.instanceLabelsCache?.get(instanceId) || new Map()).values());
+                return res.json({ ok: true, syncedLabels, cachedLabels: existingMap });
+            }
+
+            if (method === 'setChatLabel') {
+                const { jid, labelId, action = 'add' } = macroArg;
+                if (!jid || !labelId) return res.status(400).json({ ok: false, error: 'Missing jid or labelId' });
+                const targetJid = jid.endsWith('@g.us') ? jid : await resolveTargetJid(sock, jid, req.tenantId);
+                if (action === 'remove') {
+                    await withBaileysTimeout(sock.removeChatLabel(targetJid, String(labelId)), 8000, 'REMOVE_CHAT_LABEL');
+                } else {
+                    await withBaileysTimeout(sock.addChatLabel(targetJid, String(labelId)), 8000, 'ADD_CHAT_LABEL');
+                }
+                return res.json({ ok: true, action, labelId });
+            }
+
+            // 11. Favoritar Mensagens no Aparelho (star)
+            if (method === 'starMessage') {
+                const { jid, messageId, whatsappId, fromMe = false, star = true } = macroArg;
+                if (!jid || (!whatsappId && !messageId)) return res.status(400).json({ ok: false, error: 'Missing jid or whatsappId' });
+                const targetJid = jid.endsWith('@g.us') ? jid : await resolveTargetJid(sock, jid, req.tenantId);
+                const targetWaId = String(whatsappId || messageId);
+                await withBaileysTimeout(
+                    sock.star(targetJid, [{ id: targetWaId, fromMe: Boolean(fromMe) }], Boolean(star)),
+                    8000,
+                    'STAR_MESSAGE'
+                );
+
+                const { data: existingMsg } = await supabase
+                    .from('messages')
+                    .select('id, raw_payload')
+                    .or(`id.eq.${messageId || targetWaId},whatsapp_message_id.eq.${targetWaId}`)
+                    .limit(1)
+                    .maybeSingle()
+                    .catch(() => ({ data: null }));
+
+                if (existingMsg) {
+                    const updatedPayload = {
+                        ...(existingMsg.raw_payload || {}),
+                        starred: Boolean(star),
+                        starred_at: star ? new Date().toISOString() : null
+                    };
+                    await supabase.from('messages').update({ raw_payload: updatedPayload }).eq('id', existingMsg.id).catch(() => {});
+                }
+                return res.json({ ok: true, starred: Boolean(star) });
+            }
+
+            // 12. Modificar Estado do Chat no Aparelho (chatModify: archive, pin, mute, markRead, clear, delete)
+            if (method === 'chatModify') {
+                const { jid, mod } = macroArg;
+                if (!jid || !mod || typeof mod !== 'object') return res.status(400).json({ ok: false, error: 'Missing jid or valid mod object' });
+                const targetJid = jid.endsWith('@g.us') ? jid : await resolveTargetJid(sock, jid, req.tenantId);
+                const safeMod = { ...mod };
+
+                // Normaliza mute (true -> 8 horas em ms, false/0 -> null)
+                if ('mute' in safeMod) {
+                    if (safeMod.mute === true) {
+                        safeMod.mute = Date.now() + 8 * 60 * 60 * 1000;
+                    } else if (safeMod.mute === false || safeMod.mute === 0) {
+                        safeMod.mute = null;
+                    }
+                }
+                if ('pin' in safeMod) {
+                    safeMod.pin = Boolean(safeMod.pin);
+                }
+
+                // Baileys v7 exige lastMessages preenchido para archive, markRead, clear e delete (chat-utils.js:445-545)
+                const requiresLastMessages = 'archive' in safeMod || 'markRead' in safeMod || 'clear' in safeMod || 'delete' in safeMod;
+                if (requiresLastMessages && (!Array.isArray(safeMod.lastMessages) || safeMod.lastMessages.length === 0)) {
+                    let fallbackLastMsg = {
+                        key: {
+                            remoteJid: targetJid,
+                            fromMe: true,
+                            id: 'SYNC_LAST_MSG'
+                        },
+                        messageTimestamp: Math.floor(Date.now() / 1000)
+                    };
+                    try {
+                        const cleanPhone = String(targetJid).split('@')[0].split(':')[0].replace(/\D/g, '');
+                        if (cleanPhone && req.tenantId) {
+                            const { data: contactRow } = await supabase
+                                .from('contacts')
+                                .select('id')
+                                .eq('tenant_id', req.tenantId)
+                                .eq('phone', cleanPhone)
+                                .limit(1)
+                                .maybeSingle()
+                                .catch(() => ({ data: null }));
+                            if (contactRow?.id) {
+                                const { data: lastConv } = await supabase
+                                    .from('conversations')
+                                    .select('id')
+                                    .eq('tenant_id', req.tenantId)
+                                    .eq('contact_id', contactRow.id)
+                                    .order('updated_at', { ascending: false })
+                                    .limit(1)
+                                    .maybeSingle()
+                                    .catch(() => ({ data: null }));
+                                if (lastConv?.id) {
+                                    const { data: lastMsgRow } = await supabase
+                                        .from('messages')
+                                        .select('whatsapp_message_id, sender, timestamp')
+                                        .eq('conversation_id', lastConv.id)
+                                        .not('whatsapp_message_id', 'is', null)
+                                        .order('timestamp', { ascending: false })
+                                        .limit(1)
+                                        .maybeSingle()
+                                        .catch(() => ({ data: null }));
+                                    if (lastMsgRow?.whatsapp_message_id) {
+                                        fallbackLastMsg = {
+                                            key: {
+                                                remoteJid: targetJid,
+                                                fromMe: lastMsgRow.sender === 'me',
+                                                id: lastMsgRow.whatsapp_message_id
+                                            },
+                                            messageTimestamp: lastMsgRow.timestamp
+                                                ? Math.floor(new Date(lastMsgRow.timestamp).getTime() / 1000)
+                                                : Math.floor(Date.now() / 1000)
+                                        };
+                                    }
+                                }
+                            }
+                        }
+                    } catch (lmErr) {}
+                    safeMod.lastMessages = [fallbackLastMsg];
+                }
+
+                await withBaileysTimeout(sock.chatModify(safeMod, targetJid), 10000, 'CHAT_MODIFY');
+                return res.json({ ok: true, mod: safeMod, jid: targetJid });
+            }
+
+            // 13. Sincronização Sob Demanda de Histórico Antigo (fetchMessageHistory)
+            if (method === 'fetchMessageHistory') {
+                const { jid, count = 50, oldestMsgKey, oldestMsgTimestamp } = macroArg;
+                if (!jid) return res.status(400).json({ ok: false, error: 'Missing jid' });
+                const targetJid = jid.endsWith('@g.us') ? jid : await resolveTargetJid(sock, jid, req.tenantId);
+                const safeCount = Math.max(1, Math.min(50, Number(count || 50)));
+                const keyToUse = (oldestMsgKey && oldestMsgKey.id) ? {
+                    remoteJid: oldestMsgKey.remoteJid || targetJid,
+                    fromMe: Boolean(oldestMsgKey.fromMe),
+                    id: String(oldestMsgKey.id)
+                } : {
+                    remoteJid: targetJid,
+                    fromMe: false,
+                    id: 'OLDEST_SYNC_REQ'
+                };
+                const tsToUse = Number(oldestMsgTimestamp) > 0 ? Number(oldestMsgTimestamp) : (Math.floor(Date.now() / 1000) - 86400);
+                const sessionId = await withBaileysTimeout(
+                    sock.fetchMessageHistory(safeCount, keyToUse, tsToUse),
+                    10000,
+                    'FETCH_MESSAGE_HISTORY'
+                );
+                return res.json({
+                    ok: true,
+                    sessionId,
+                    message: 'Solicitação enviada ao aparelho! As mensagens anteriores desta conversa chegarão automaticamente em instantes.'
+                });
+            }
+
+            // 14. Consultar Bloqueio Temporário (Reachout Timelock) & Limite de Novas Conversas (NewChatMessageCap)
+            if (method === 'getAccountHealthLimits') {
+                const [timelockRes, capRes] = await Promise.allSettled([
+                    typeof sock.fetchAccountReachoutTimelock === 'function'
+                        ? withBaileysTimeout(sock.fetchAccountReachoutTimelock(), 8000, 'FETCH_TIMELOCK')
+                        : Promise.resolve(null),
+                    typeof sock.fetchNewChatMessageCap === 'function'
+                        ? withBaileysTimeout(sock.fetchNewChatMessageCap(), 8000, 'FETCH_CHAT_CAP')
+                        : Promise.resolve(null)
+                ]);
+                return res.json({
+                    ok: true,
+                    reachoutTimelock: timelockRes.status === 'fulfilled' ? timelockRes.value : { isActive: false, error: timelockRes.reason?.message },
+                    newChatMessageCap: capRes.status === 'fulfilled' ? capRes.value : { error: capRes.reason?.message },
+                    checkedAt: new Date().toISOString()
+                });
+            }
+
+            // 15. Bloquear / Desbloquear Contatos no WhatsApp (updateBlockStatus + fetchBlocklist)
+            if (method === 'updateBlockStatus') {
+                const { jid, action = 'block' } = macroArg;
+                if (!jid) return res.status(400).json({ ok: false, error: 'Missing jid' });
+                const targetJid = jid.endsWith('@g.us') ? jid : await resolveTargetJid(sock, jid, req.tenantId);
+                const blockAction = action === 'unblock' ? 'unblock' : 'block';
+                try {
+                    await withBaileysTimeout(sock.updateBlockStatus(targetJid, blockAction), 10000, 'UPDATE_BLOCK_STATUS');
+                } catch (blkErr) {
+                    // Baileys v7 requer mapeamento PN -> LID em updateBlockStatus (chats.js:297).
+                    // Se o mapeamento LID ainda não existir no repositório local, resolve via onWhatsApp e retenta:
+                    if (String(blkErr?.message || '').includes('LID') && typeof sock.onWhatsApp === 'function') {
+                        const [waCheck] = (await withBaileysTimeout(sock.onWhatsApp(targetJid), 6000, 'ON_WHATSAPP_LID').catch(() => [])) || [];
+                        if (waCheck?.lid) {
+                            if (sock.signalRepository?.lidMapping?.storeLIDPNMapping) {
+                                await sock.signalRepository.lidMapping.storeLIDPNMapping(waCheck.lid, targetJid).catch(() => {});
+                            }
+                            await withBaileysTimeout(sock.updateBlockStatus(waCheck.lid, blockAction), 10000, 'UPDATE_BLOCK_STATUS_LID');
+                        } else {
+                            throw blkErr;
+                        }
+                    } else {
+                        throw blkErr;
+                    }
+                }
+                return res.json({ ok: true, jid: targetJid, action: blockAction });
+            }
+
+            if (method === 'fetchBlocklist') {
+                const blocklist = await withBaileysTimeout(sock.fetchBlocklist(), 10000, 'FETCH_BLOCKLIST');
+                return res.json({ ok: true, blocklist: blocklist || [] });
+            }
+
+            // 16. Rejeição Automática de Chamadas & Link de Chamada (createCallLink / updateCallSettings)
+            if (method === 'createCallLink') {
+                const { media = 'audio', startTime } = macroArg;
+                const safeMedia = media === 'video' ? 'video' : 'audio';
+                const token = await withBaileysTimeout(
+                    sock.createCallLink(safeMedia, startTime ? { startTime: Number(startTime) } : undefined),
+                    10000,
+                    'CREATE_CALL_LINK'
+                );
+                const callUrl = token ? `https://call.whatsapp.com/${safeMedia === 'video' ? 'video' : 'voice'}/${token}` : null;
+                return res.json({ ok: true, token, url: callUrl, media: safeMedia });
+            }
+
+            if (method === 'getCallSettings') {
+                const { data: instRow } = await supabase
+                    .from('whatsapp_instances')
+                    .select('reject_calls, call_reject_message')
+                    .eq('id', instanceId)
+                    .maybeSingle()
+                    .catch(() => ({ data: null }));
+                return res.json({
+                    ok: true,
+                    rejectCalls: Boolean(instRow?.reject_calls),
+                    rejectMessage: instRow?.call_reject_message || 'Olá! 🤖 Não atendemos chamadas de voz ou vídeo por este número. Por favor, envie uma mensagem de texto ou áudio que responderemos em instantes!'
+                });
+            }
+
+            if (method === 'updateCallSettings') {
+                const { rejectCalls, rejectMessage } = macroArg;
+                await supabase
+                    .from('whatsapp_instances')
+                    .update({
+                        reject_calls: Boolean(rejectCalls),
+                        call_reject_message: rejectMessage || null,
+                        updated_at: new Date().toISOString()
+                    })
+                    .eq('id', instanceId)
+                    .catch(() => {});
+                if (!sessionManager.callSettingsCache) sessionManager.callSettingsCache = new Map();
+                sessionManager.callSettingsCache.set(instanceId, {
+                    rejectCalls: Boolean(rejectCalls),
+                    rejectMessage: rejectMessage || 'Olá! 🤖 Não atendemos chamadas de voz ou vídeo por este número. Por favor, envie uma mensagem de texto ou áudio que responderemos em instantes!',
+                    fetchedAt: Date.now()
+                });
+                return res.json({ ok: true, rejectCalls: Boolean(rejectCalls), rejectMessage });
+            }
+
+            // 17. Atualizar Nome, Recado (Bio) e Foto da Própria Instância
+            if (method === 'updateInstanceProfile') {
+                const { name, status, pictureUrl } = macroArg;
+                const myJid = sock.user?.id ? `${sock.user.id.split(':')[0].split('@')[0]}@s.whatsapp.net` : null;
+                if (name && typeof sock.updateProfileName === 'function') {
+                    await withBaileysTimeout(sock.updateProfileName(String(name).trim()), 10000, 'UPDATE_PROFILE_NAME');
+                    await supabase.from('whatsapp_instances').update({ display_name: String(name).trim() }).eq('id', instanceId).catch(() => {});
+                }
+                if (status !== undefined && typeof sock.updateProfileStatus === 'function') {
+                    await withBaileysTimeout(sock.updateProfileStatus(String(status).trim()), 10000, 'UPDATE_PROFILE_STATUS');
+                }
+                if (pictureUrl && String(pictureUrl).startsWith('http') && myJid && typeof sock.updateProfilePicture === 'function') {
+                    await withBaileysTimeout(sock.updateProfilePicture(myJid, { url: String(pictureUrl).trim() }), 15000, 'UPDATE_PROFILE_PICTURE');
+                }
+                return res.json({ ok: true, message: 'Perfil da instância atualizado no WhatsApp com sucesso!' });
+            }
+
+            // 18. Configurações de Privacidade do Chip
+            if (method === 'getPrivacySettings') {
+                const settings = await withBaileysTimeout(sock.fetchPrivacySettings(true), 10000, 'FETCH_PRIVACY_SETTINGS');
+                return res.json({ ok: true, settings });
+            }
+
+            if (method === 'updatePrivacySettings') {
+                const { lastSeen, online, readReceipts, callAdd, profilePicture, statusPrivacy, groupsAdd } = macroArg;
+                if (lastSeen && typeof sock.updateLastSeenPrivacy === 'function') {
+                    await withBaileysTimeout(sock.updateLastSeenPrivacy(lastSeen), 8000, 'PRIVACY_LAST_SEEN');
+                }
+                if (online && typeof sock.updateOnlinePrivacy === 'function') {
+                    await withBaileysTimeout(sock.updateOnlinePrivacy(online), 8000, 'PRIVACY_ONLINE');
+                }
+                if (readReceipts && typeof sock.updateReadReceiptsPrivacy === 'function') {
+                    await withBaileysTimeout(sock.updateReadReceiptsPrivacy(readReceipts), 8000, 'PRIVACY_READ_RECEIPTS');
+                }
+                if (callAdd && typeof sock.updateCallPrivacy === 'function') {
+                    await withBaileysTimeout(sock.updateCallPrivacy(callAdd), 8000, 'PRIVACY_CALL');
+                }
+                if (profilePicture && typeof sock.updateProfilePicturePrivacy === 'function') {
+                    await withBaileysTimeout(sock.updateProfilePicturePrivacy(profilePicture), 8000, 'PRIVACY_PICTURE');
+                }
+                if (statusPrivacy && typeof sock.updateStatusPrivacy === 'function') {
+                    await withBaileysTimeout(sock.updateStatusPrivacy(statusPrivacy), 8000, 'PRIVACY_STATUS');
+                }
+                if (groupsAdd && typeof sock.updateGroupsAddPrivacy === 'function') {
+                    await withBaileysTimeout(sock.updateGroupsAddPrivacy(groupsAdd), 8000, 'PRIVACY_GROUPS');
+                }
+                const updated = await withBaileysTimeout(sock.fetchPrivacySettings(true), 8000, 'FETCH_PRIVACY_AFTER').catch(() => ({}));
+                return res.json({ ok: true, settings: updated });
+            }
+        } catch (macroErr) {
+            const safeMsg = macroErr?.message || (typeof macroErr === 'string' ? macroErr : 'Falha na execução da macro Baileys');
+            console.warn(`[API Gateway / Invoke] Aviso na macro "${method}" para instância ${instanceId}: ${safeMsg}`);
+            return res.status(200).json({ ok: false, error: safeMsg, method });
+        }
 
         if(typeof sock[method] !== 'function') return res.status(400).json({ error: `Method ${method} not found on Baileys socket` });
 
         try {
-            const result = await sock[method](...(args || []));
+            const result = await withBaileysTimeout(sock[method](...(args || [])), 12000, `RAW_${method}`);
             res.json({ ok: true, result });
         } catch (sockError) {
             // Se o Baileys disparar um erro (ex: not-authorized ao buscar avatar protegido)
@@ -937,7 +1707,7 @@ router.post('/instances/:instanceId/send-media-url', requireTenant, express.json
             }
         }
 
-        const { mediaUrl, mimetype, fileName, jid, caption, messageType, ptt, responseType } = req.body;
+        const { mediaUrl, mimetype, fileName, jid, caption, messageType, ptt, ptv, viewOnce, responseType } = req.body;
 
         if (!mediaUrl || !jid || !messageType) {
             return res.status(400).json({ error: 'Missing mediaUrl, jid or messageType' });
@@ -961,6 +1731,8 @@ router.post('/instances/:instanceId/send-media-url', requireTenant, express.json
                     fileName,
                     messageType,
                     ptt: Boolean(ptt),
+                    ptv: Boolean(ptv),
+                    viewOnce: Boolean(viewOnce),
                     responseType: finalResponseType
                 },
                 status: 'pending',
@@ -1115,6 +1887,8 @@ router.post('/instances/:instanceId/send-media', requireTenant, upload.single('m
             });
 
         const isPttAudio = Boolean(req.body.ptt === 'true' || req.body.ptt === true || messageType === 'audio');
+        const isPtvVideo = Boolean(req.body.ptv === 'true' || req.body.ptv === true);
+        const isViewOnce = Boolean(req.body.viewOnce === 'true' || req.body.viewOnce === true);
 
         // FAST-PATH PARA MÍDIA: Se o socket está aberto na memória deste nó, envia o buffer diretamente via Baileys em paralelo ao Storage!
         const activeSock = sessionManager.getSocket(instanceId) || sessionManager.sessions.get(instanceId)?.sock;
@@ -1126,11 +1900,11 @@ router.post('/instances/:instanceId/send-media', requireTenant, upload.single('m
                 }
                 let mediaPayload = {};
                 if (messageType === 'image') {
-                    mediaPayload = { image: file.buffer, caption: caption || '', mimetype: file.mimetype };
+                    mediaPayload = { image: file.buffer, caption: caption || '', mimetype: file.mimetype, ...(isViewOnce ? { viewOnce: true } : {}) };
                 } else if (messageType === 'video') {
-                    mediaPayload = { video: file.buffer, caption: caption || '', mimetype: file.mimetype };
+                    mediaPayload = { video: file.buffer, caption: isPtvVideo ? undefined : (caption || ''), mimetype: file.mimetype, ...(isPtvVideo ? { ptv: true } : {}), ...(isViewOnce ? { viewOnce: true } : {}) };
                 } else if (messageType === 'audio') {
-                    mediaPayload = { audio: file.buffer, mimetype: 'audio/ogg; codecs=opus', ptt: isPttAudio };
+                    mediaPayload = { audio: file.buffer, mimetype: 'audio/ogg; codecs=opus', ptt: isPttAudio, ...(isViewOnce ? { viewOnce: true } : {}) };
                 } else {
                     mediaPayload = { document: file.buffer, mimetype: file.mimetype || 'application/octet-stream', fileName: file.originalname || 'document', caption: caption || '' };
                 }
@@ -1224,6 +1998,8 @@ router.post('/instances/:instanceId/send-media', requireTenant, upload.single('m
                         fileName: file.originalname,
                         messageType: messageType,
                         ptt: isPttAudio,
+                        ptv: isPtvVideo,
+                        viewOnce: isViewOnce,
                         responseType: 'STANDARD'
                     },
                     status: 'pending',

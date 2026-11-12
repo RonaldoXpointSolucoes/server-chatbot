@@ -23,6 +23,8 @@ import { formatDocumentNumber } from '../utils/format';
 import { useShallow } from 'zustand/react/shallow';
 import { MessageBubble } from '../components/chat/MessageBubble';
 import { AddRagModal } from '../components/chat/AddRagModal';
+import { BaileysInstanceHubModal } from '../components/modals/BaileysInstanceHubModal';
+import { invokeBaileysAction, getInstanceApiUrl } from '../services/whatsappEngine';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { supabase } from '../services/supabase';
@@ -1607,6 +1609,18 @@ export default function ChatDashboard() {
   const [isAgentSettingsOpen, setIsAgentSettingsOpen] = useState(false);
   const [isTechDocsOpen, setIsTechDocsOpen] = useState(false);
   const [isSnoozedListOpen, setIsSnoozedListOpen] = useState(false);
+  const [isBaileysHubOpen, setIsBaileysHubOpen] = useState(false);
+  const [isPollModalOpen, setIsPollModalOpen] = useState(false);
+  const [pollQuestion, setPollQuestion] = useState('');
+  const [pollOptions, setPollOptions] = useState<string[]>(['Quero fazer um pedido', 'Ver Cardápio Digital', 'Falar com Atendente']);
+  const [pollSelectableCount, setPollSelectableCount] = useState<number>(1);
+  const [isSendingPoll, setIsSendingPoll] = useState(false);
+  const [isAlbumModalOpen, setIsAlbumModalOpen] = useState(false);
+  const [albumFiles, setAlbumFiles] = useState<File[]>([]);
+  const [albumCaption, setAlbumCaption] = useState('');
+  const [isSendingAlbum, setIsSendingAlbum] = useState(false);
+  const [specialMediaType, setSpecialMediaType] = useState<'ptv' | 'viewOnce' | null>(null);
+  const specialMediaInputRef = useRef<HTMLInputElement | null>(null);
   const location = useLocation();
   const isClosedTicketsOpen = location.pathname === '/chat/closed-tickets';
   const setIsClosedTicketsOpen = (open: boolean) => {
@@ -9505,6 +9519,13 @@ export default function ChatDashboard() {
                         const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
                         if (properTargetInstance) {
                           await loadHistoricalMessages(activeChat.id, properTargetInstance, true);
+                          const resolvedId = await resolveInstanceUuid(tenantInfo?.id || '', properTargetInstance);
+                          if (resolvedId && tenantInfo?.id) {
+                            invokeBaileysAction(tenantInfo.id, resolvedId, 'fetchMessageHistory', {
+                              jid: activeChat.whatsapp_jid || activeChat.phone,
+                              count: 50
+                            }).catch(() => {});
+                          }
                         }
                         setActiveChatDropdown(false);
                       }}
@@ -9513,7 +9534,127 @@ export default function ChatDashboard() {
                     >
                       <History size={16} className={cn("text-[#00a884]", isSyncingHistory[activeChat.id] && "animate-spin")} />
                       <span className="text-[14px] text-[#3b4a54] dark:text-[#d1d7db]">
-                         {isSyncingHistory[activeChat.id] ? "Buscando..." : "Buscar Histórico"}
+                         {isSyncingHistory[activeChat.id] ? "Buscando..." : "Buscar Histórico do Aparelho"}
+                      </span>
+                    </button>
+
+                    {/* 1. Fixar Link do Cardápio Digital por 30 Dias */}
+                    <button
+                      onClick={async () => {
+                        setActiveChatDropdown(false);
+                        const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
+                        const resolvedId = await resolveInstanceUuid(tenantInfo?.id || '', properTargetInstance);
+                        if (!resolvedId || !tenantInfo?.id) return;
+                        const res = await invokeBaileysAction(tenantInfo.id, resolvedId, 'pinMenuLink', {
+                          jid: activeChat.whatsapp_jid || activeChat.phone,
+                          time: 2592000 // 30 dias
+                        });
+                        if (res?.ok) {
+                          alert('📌 Link do Cardápio Digital enviado e fixado no topo da conversa por 30 dias!');
+                        }
+                      }}
+                      className="w-full text-left px-4 py-2.5 hover:bg-amber-50 dark:hover:bg-amber-950/30 flex items-center gap-3 transition-colors"
+                    >
+                      <Pin size={16} className="text-amber-500" />
+                      <span className="text-[14px] text-amber-600 dark:text-amber-400 font-medium">
+                        Fixar Cardápio 30 Dias
+                      </span>
+                    </button>
+
+                    {/* 12. Modificar Estado do Chat no Aparelho (Fixar / Arquivar no Celular) */}
+                    <button
+                      onClick={async () => {
+                        setActiveChatDropdown(false);
+                        const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
+                        const resolvedId = await resolveInstanceUuid(tenantInfo?.id || '', properTargetInstance);
+                        if (!resolvedId || !tenantInfo?.id) return;
+                        await invokeBaileysAction(tenantInfo.id, resolvedId, 'chatModify', {
+                          jid: activeChat.whatsapp_jid || activeChat.phone,
+                          mod: { pin: true }
+                        });
+                        alert('📱 Conversa fixada no topo do aparelho WhatsApp!');
+                      }}
+                      className="w-full text-left px-4 py-2.5 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3 transition-colors"
+                    >
+                      <Smartphone size={16} className="text-indigo-500" />
+                      <span className="text-[14px] text-[#3b4a54] dark:text-[#d1d7db]">
+                        Fixar Conversa no Celular
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={async () => {
+                        setActiveChatDropdown(false);
+                        const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
+                        const resolvedId = await resolveInstanceUuid(tenantInfo?.id || '', properTargetInstance);
+                        if (!resolvedId || !tenantInfo?.id) return;
+                        await invokeBaileysAction(tenantInfo.id, resolvedId, 'chatModify', {
+                          jid: activeChat.whatsapp_jid || activeChat.phone,
+                          mod: { archive: true }
+                        });
+                        alert('📦 Conversa arquivada no aparelho WhatsApp!');
+                      }}
+                      className="w-full text-left px-4 py-2.5 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3 transition-colors"
+                    >
+                      <FolderCheck size={16} className="text-sky-500" />
+                      <span className="text-[14px] text-[#3b4a54] dark:text-[#d1d7db]">
+                        Arquivar no Aparelho
+                      </span>
+                    </button>
+
+                    {/* 16. Criar e Enviar Link Nativo de Chamada WhatsApp */}
+                    <button
+                      onClick={async () => {
+                        setActiveChatDropdown(false);
+                        const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
+                        const resolvedId = await resolveInstanceUuid(tenantInfo?.id || '', properTargetInstance);
+                        if (!resolvedId || !tenantInfo?.id) return;
+                        const res = await invokeBaileysAction(tenantInfo.id, resolvedId, 'createCallLink', { media: 'audio' });
+                        if (res?.ok && res.url) {
+                          setInputText(prev => prev ? `${prev}\n📞 Link para chamada de voz: ${res.url}` : `📞 Link para chamada de voz: ${res.url}`);
+                        }
+                      }}
+                      className="w-full text-left px-4 py-2.5 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3 transition-colors"
+                    >
+                      <Phone size={16} className="text-emerald-500" />
+                      <span className="text-[14px] text-[#3b4a54] dark:text-[#d1d7db]">
+                        Inserir Link de Chamada
+                      </span>
+                    </button>
+
+                    {/* 15. Bloquear Contato Direto no WhatsApp */}
+                    <button
+                      onClick={async () => {
+                        setActiveChatDropdown(false);
+                        if (!window.confirm(`Deseja bloquear ${activeChat.name || activeChat.phone} diretamente no chip do WhatsApp?`)) return;
+                        const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
+                        const resolvedId = await resolveInstanceUuid(tenantInfo?.id || '', properTargetInstance);
+                        if (!resolvedId || !tenantInfo?.id) return;
+                        await invokeBaileysAction(tenantInfo.id, resolvedId, 'updateBlockStatus', {
+                          jid: activeChat.whatsapp_jid || activeChat.phone,
+                          action: 'block'
+                        });
+                        alert('🚫 Contato bloqueado diretamente no WhatsApp!');
+                      }}
+                      className="w-full text-left px-4 py-2.5 hover:bg-rose-50 dark:hover:bg-rose-950/30 flex items-center gap-3 transition-colors"
+                    >
+                      <Ban size={16} className="text-rose-500" />
+                      <span className="text-[14px] text-rose-600 dark:text-rose-400 font-medium">
+                        Bloquear no WhatsApp
+                      </span>
+                    </button>
+
+                    {/* Abrir Central Avançada do Chip */}
+                    <button
+                      onClick={() => {
+                        setActiveChatDropdown(false);
+                        setIsBaileysHubOpen(true);
+                      }}
+                      className="w-full text-left px-4 py-2.5 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 flex items-center gap-3 transition-colors border-t border-black/5 dark:border-white/5"
+                    >
+                      <Zap size={16} className="text-emerald-500" />
+                      <span className="text-[14px] text-emerald-600 dark:text-emerald-400 font-bold">
+                        Central WhatsApp & Catálogo
                       </span>
                     </button>
                   </div>
@@ -9666,6 +9807,37 @@ export default function ChatDashboard() {
                      Sincronizando histórico anterior...
                   </span>
                </div>
+            )}
+
+            {/* 13. Botão Sob Demanda para Carregar Mensagens Anteriores do Aparelho (fetchMessageHistory) */}
+            {!isSyncingHistory[activeChat.id] && dedupedMsgs.length > 0 && (
+              <div className="flex justify-center my-2">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
+                    if (!properTargetInstance) return;
+                    await loadHistoricalMessages(activeChat.id, properTargetInstance, true);
+                    const resolvedId = await resolveInstanceUuid(tenantInfo?.id || '', properTargetInstance);
+                    if (resolvedId && tenantInfo?.id) {
+                      const oldest = dedupedMsgs[0];
+                      await invokeBaileysAction(tenantInfo.id, resolvedId, 'fetchMessageHistory', {
+                        jid: activeChat.whatsapp_jid || activeChat.phone,
+                        count: 50,
+                        oldestMsgKey: oldest?.whatsapp_message_id ? {
+                          remoteJid: activeChat.whatsapp_jid || `${activeChat.phone}@s.whatsapp.net`,
+                          fromMe: oldest.sender !== 'client',
+                          id: oldest.whatsapp_message_id
+                        } : undefined
+                      }).catch(() => {});
+                    }
+                  }}
+                  className="px-3.5 py-1.5 rounded-full bg-white/80 dark:bg-[#202c33]/90 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 text-[11px] font-semibold text-[#54656f] dark:text-[#8696a0] hover:text-[#00a884] border border-black/5 dark:border-white/10 shadow-sm flex items-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <History size={13} className="text-[#00a884]" />
+                  Carregar mensagens anteriores do aparelho
+                </button>
+              </div>
             )}
             
 
@@ -11354,10 +11526,147 @@ export default function ChatDashboard() {
                                     <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">Enviar cartão vCard oficial</p>
                                   </div>
                                 </button>
+
+                                {/* 2. Enviar Enquete Nativa Clicável (Polls) */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsAttachmentMenuOpen(false);
+                                    setIsPollModalOpen(true);
+                                  }}
+                                  className="flex items-center gap-3 w-full p-2.5 text-sm rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/5 transition-all group font-medium active:scale-[0.98]"
+                                >
+                                  <div className="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center group-hover:scale-110 transition-transform shadow-sm">
+                                    <CheckSquare size={16} />
+                                  </div>
+                                  <div className="text-left">
+                                    <p className="text-xs font-bold leading-none">Enquete Nativa (Poll)</p>
+                                    <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">Menu clicável ou pesquisa NPS</p>
+                                  </div>
+                                </button>
+
+                                {/* 4. Enviar Álbum de Fotos Agrupado (albumMessage) */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsAttachmentMenuOpen(false);
+                                    setAlbumFiles([]);
+                                    setAlbumCaption('');
+                                    setIsAlbumModalOpen(true);
+                                  }}
+                                  className="flex items-center gap-3 w-full p-2.5 text-sm rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/5 transition-all group font-medium active:scale-[0.98]"
+                                >
+                                  <div className="w-8 h-8 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center group-hover:scale-110 transition-transform shadow-sm">
+                                    <Layers size={16} />
+                                  </div>
+                                  <div className="text-left">
+                                    <p className="text-xs font-bold leading-none">Álbum de Fotos Agrupado</p>
+                                    <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">4 a 10 fotos em um único balão</p>
+                                  </div>
+                                </button>
+
+                                {/* 3. Enviar Recado de Vídeo Redondo (PTV / Video Note) */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsAttachmentMenuOpen(false);
+                                    setSpecialMediaType('ptv');
+                                    setTimeout(() => specialMediaInputRef.current?.click(), 50);
+                                  }}
+                                  className="flex items-center gap-3 w-full p-2.5 text-sm rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/5 transition-all group font-medium active:scale-[0.98]"
+                                >
+                                  <div className="w-8 h-8 rounded-xl bg-sky-500/10 text-sky-600 dark:text-sky-400 flex items-center justify-center group-hover:scale-110 transition-transform shadow-sm">
+                                    <Video size={16} />
+                                  </div>
+                                  <div className="text-left">
+                                    <p className="text-xs font-bold leading-none">Vídeo Redondo (PTV)</p>
+                                    <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">Recado circular instantâneo</p>
+                                  </div>
+                                </button>
+
+                                {/* 5. Enviar Mídia de Visualização Única (viewOnce) */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsAttachmentMenuOpen(false);
+                                    setSpecialMediaType('viewOnce');
+                                    setTimeout(() => specialMediaInputRef.current?.click(), 50);
+                                  }}
+                                  className="flex items-center gap-3 w-full p-2.5 text-sm rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/5 transition-all group font-medium active:scale-[0.98]"
+                                >
+                                  <div className="w-8 h-8 rounded-xl bg-rose-500/10 text-rose-600 dark:text-rose-400 flex items-center justify-center group-hover:scale-110 transition-transform shadow-sm">
+                                    <Lock size={16} />
+                                  </div>
+                                  <div className="text-left">
+                                    <p className="text-xs font-bold leading-none">Visualização Única (1x)</p>
+                                    <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">Foto, vídeo ou áudio que abre 1 vez</p>
+                                  </div>
+                                </button>
+
+                                {/* 7. Enviar Produto do Catálogo / Fixar Cardápio 30 Dias */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsAttachmentMenuOpen(false);
+                                    setIsBaileysHubOpen(true);
+                                  }}
+                                  className="flex items-center gap-3 w-full p-2.5 text-sm rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/5 transition-all group font-medium active:scale-[0.98]"
+                                >
+                                  <div className="w-8 h-8 rounded-xl bg-teal-500/10 text-teal-600 dark:text-teal-400 flex items-center justify-center group-hover:scale-110 transition-transform shadow-sm">
+                                    <ShoppingBag size={16} />
+                                  </div>
+                                  <div className="text-left">
+                                    <p className="text-xs font-bold leading-none">Catálogo & Central WhatsApp</p>
+                                    <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">Enviar produto ou sincronizar cardápio</p>
+                                  </div>
+                                </button>
                               </div>
                             </>
                           )}
                         </div>
+
+                        {/* Input oculto para envio direto de Vídeo Redondo (PTV) ou Visualização Única (viewOnce) */}
+                        <input
+                          type="file"
+                          ref={specialMediaInputRef}
+                          style={{ display: 'none' }}
+                          accept={specialMediaType === 'ptv' ? 'video/*' : 'image/*,video/*,audio/*'}
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            e.target.value = '';
+                            if (!file || !activeChat) return;
+                            const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
+                            const resolvedId = await resolveInstanceUuid(tenantInfo?.id || '', properTargetInstance);
+                            if (!resolvedId || !tenantInfo?.id) return;
+                            const apiUrl = getInstanceApiUrl(resolvedId);
+                            const formData = new FormData();
+                            formData.append('media', file);
+                            formData.append('jid', activeChat.whatsapp_jid || activeChat.phone);
+                            const isVid = file.type.startsWith('video') || specialMediaType === 'ptv';
+                            const isAud = file.type.startsWith('audio');
+                            formData.append('messageType', isVid ? 'video' : isAud ? 'audio' : 'image');
+                            if (specialMediaType === 'ptv') {
+                              formData.append('ptv', 'true');
+                            }
+                            if (specialMediaType === 'viewOnce') {
+                              formData.append('viewOnce', 'true');
+                            }
+                            try {
+                              await fetch(`${apiUrl}/api/v1/instances/${resolvedId}/send-media`, {
+                                method: 'POST',
+                                headers: {
+                                  'x-tenant-id': tenantInfo.id,
+                                  'apikey': 'INTERNAL_KEY'
+                                },
+                                body: formData
+                              });
+                            } catch (err) {
+                              console.error('Erro ao enviar mídia especial:', err);
+                            } finally {
+                              setSpecialMediaType(null);
+                            }
+                          }}
+                        />
 
                         <input 
                           type="file" 
@@ -13339,6 +13648,251 @@ export default function ChatDashboard() {
           ...(ragAnswerMsg?.id ? [ragAnswerMsg.id] : [])
         ]}
       />
+
+      {/* Modal: Central Avançada WhatsApp Business & Baileys (18 Funcionalidades) */}
+      <BaileysInstanceHubModal
+        isOpen={isBaileysHubOpen}
+        onClose={() => setIsBaileysHubOpen(false)}
+        tenantId={tenantInfo?.id || localStorage.getItem('current_tenant_id') || ''}
+        instanceId={activeChat?.instance_id || activeChannelFilter || ''}
+        instanceName={connectedInstanceName || ''}
+        activeChatJid={activeChat?.whatsapp_jid || activeChat?.phone || ''}
+      />
+
+      {/* Modal 2: Criar e Enviar Enquete Nativa Clicável (Poll) */}
+      {isPollModalOpen && activeChat && (
+        <div className="fixed inset-0 z-[130] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4 text-white">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
+                  <CheckSquare size={18} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold">Enviar Enquete Nativa no WhatsApp</h3>
+                  <p className="text-[11px] text-slate-400">O cliente vota com 1 toque diretamente na conversa</p>
+                </div>
+              </div>
+              <button onClick={() => setIsPollModalOpen(false)} className="text-slate-400 hover:text-white">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-slate-300 block mb-1">Pergunta / Título da Enquete</label>
+              <input
+                type="text"
+                value={pollQuestion}
+                onChange={(e) => setPollQuestion(e.target.value)}
+                placeholder="Ex: Como podemos ajudar você hoje?"
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white focus:border-amber-500 outline-none"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-300">Opções Clicáveis ({pollOptions.length}/12)</label>
+                {pollOptions.length < 12 && (
+                  <button
+                    type="button"
+                    onClick={() => setPollOptions([...pollOptions, `Opção ${pollOptions.length + 1}`])}
+                    className="text-[11px] font-bold text-emerald-400 hover:underline"
+                  >
+                    + Adicionar Opção
+                  </button>
+                )}
+              </div>
+              <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
+                {pollOptions.map((opt, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={opt}
+                      onChange={(e) => {
+                        const next = [...pollOptions];
+                        next[idx] = e.target.value;
+                        setPollOptions(next);
+                      }}
+                      className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"
+                    />
+                    {pollOptions.length > 2 && (
+                      <button
+                        type="button"
+                        onClick={() => setPollOptions(pollOptions.filter((_, i) => i !== idx))}
+                        className="p-2 text-slate-500 hover:text-rose-400"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-slate-300 block mb-1">Quantidade Permitida de Votos</label>
+              <select
+                value={pollSelectableCount}
+                onChange={(e) => setPollSelectableCount(Number(e.target.value))}
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"
+              >
+                <option value={1}>Apenas 1 opção (Escolha única)</option>
+                <option value={2}>Até 2 opções</option>
+                <option value={3}>Até 3 opções</option>
+                <option value={pollOptions.length}>Múltipla escolha livre</option>
+              </select>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsPollModalOpen(false)}
+                className="px-4 py-2 rounded-xl bg-slate-800 text-xs font-semibold text-slate-300"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={isSendingPoll || !pollQuestion.trim()}
+                onClick={async () => {
+                  setIsSendingPoll(true);
+                  try {
+                    const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
+                    const resolvedId = await resolveInstanceUuid(tenantInfo?.id || '', properTargetInstance);
+                    if (!resolvedId || !tenantInfo?.id) return;
+                    const res = await invokeBaileysAction(tenantInfo.id, resolvedId, 'sendPoll', {
+                      jid: activeChat.whatsapp_jid || activeChat.phone,
+                      name: pollQuestion.trim(),
+                      values: pollOptions.filter(Boolean),
+                      selectableCount: pollSelectableCount
+                    });
+                    if (res?.ok) {
+                      setIsPollModalOpen(false);
+                      setPollQuestion('');
+                    } else {
+                      alert(res?.error || 'Falha ao enviar enquete.');
+                    }
+                  } finally {
+                    setIsSendingPoll(false);
+                  }
+                }}
+                className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-xs font-bold text-white flex items-center gap-2 cursor-pointer"
+              >
+                {isSendingPoll ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                Disparar Enquete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 4: Enviar Álbum de Fotos Agrupado (albumMessage) */}
+      {isAlbumModalOpen && activeChat && (
+        <div className="fixed inset-0 z-[130] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4 text-white">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-purple-500/20 border border-purple-500/40 flex items-center justify-center text-purple-400">
+                  <Layers size={18} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold">Álbum de Mídia Agrupado</h3>
+                  <p className="text-[11px] text-slate-400">Agrupa várias fotos/vídeos em um único balão no WhatsApp</p>
+                </div>
+              </div>
+              <button onClick={() => setIsAlbumModalOpen(false)} className="text-slate-400 hover:text-white">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-slate-300 block mb-1.5">Selecione de 2 a 10 Fotos ou Vídeos</label>
+              <input
+                type="file"
+                multiple
+                accept="image/*,video/*"
+                onChange={(e) => {
+                  const files = Array.from(e.target.files || []).slice(0, 10);
+                  setAlbumFiles(files);
+                }}
+                className="w-full text-xs text-slate-300 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-purple-600 file:text-white hover:file:bg-purple-500 cursor-pointer"
+              />
+              {albumFiles.length > 0 && (
+                <p className="text-[11px] text-emerald-400 font-semibold mt-1.5">
+                  ✅ {albumFiles.length} arquivos selecionados para o álbum agrupado
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-slate-300 block mb-1">Legenda do Álbum (Opcional)</label>
+              <input
+                type="text"
+                value={albumCaption}
+                onChange={(e) => setAlbumCaption(e.target.value)}
+                placeholder="Ex: Confira nossas promoções de hoje! 🍔🔥"
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsAlbumModalOpen(false)}
+                className="px-4 py-2 rounded-xl bg-slate-800 text-xs font-semibold text-slate-300"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={isSendingAlbum || albumFiles.length < 2}
+                onClick={async () => {
+                  setIsSendingAlbum(true);
+                  try {
+                    const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
+                    const resolvedId = await resolveInstanceUuid(tenantInfo?.id || '', properTargetInstance);
+                    if (!resolvedId || !tenantInfo?.id) return;
+                    const uploadedMedias: { url: string; type: 'image' | 'video' }[] = [];
+                    for (const f of albumFiles) {
+                      const safeName = `${Date.now()}_${f.name.replace(/[^a-zA-Z0-9.\-]/g, '_')}`;
+                      const path = `tenant_${tenantInfo.id}/instance_${resolvedId}/albums/${safeName}`;
+                      const { error: upErr } = await supabase.storage.from('chat_media').upload(path, f, {
+                        contentType: f.type,
+                        upsert: false
+                      });
+                      if (!upErr) {
+                        const { data: pub } = supabase.storage.from('chat_media').getPublicUrl(path);
+                        if (pub?.publicUrl) {
+                          uploadedMedias.push({
+                            url: pub.publicUrl,
+                            type: f.type.startsWith('video') ? 'video' : 'image'
+                          });
+                        }
+                      }
+                    }
+                    if (uploadedMedias.length > 0) {
+                      await invokeBaileysAction(tenantInfo.id, resolvedId, 'sendAlbum', {
+                        jid: activeChat.whatsapp_jid || activeChat.phone,
+                        medias: uploadedMedias,
+                        caption: albumCaption
+                      });
+                      setIsAlbumModalOpen(false);
+                      setAlbumFiles([]);
+                      setAlbumCaption('');
+                    }
+                  } finally {
+                    setIsSendingAlbum(false);
+                  }
+                }}
+                className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-xs font-bold text-white flex items-center gap-2 cursor-pointer"
+              >
+                {isSendingAlbum ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                Enviar Álbum ({albumFiles.length})
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

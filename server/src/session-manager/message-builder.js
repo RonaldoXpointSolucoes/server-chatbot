@@ -30,6 +30,8 @@ export function buildWhatsAppMessage({
     fileName = null,
     responseType = 'STANDARD',
     ptt = false,
+    ptv = false,
+    viewOnce = false,
     forceDocument = false
 }) {
     const finalCaption = caption || text || '';
@@ -123,21 +125,28 @@ export function buildWhatsAppMessage({
     } else if (isImage) {
         mediaPayload.image = { url: mediaUrl };
         mediaPayload.mimetype = mimetype || 'image/jpeg';
+        if (viewOnce) mediaPayload.viewOnce = true;
     } else if (isVideo) {
         mediaPayload.video = { url: mediaUrl };
         mediaPayload.mimetype = mimetype || 'video/mp4';
-        mediaPayload.gifPlayback = false;
+        if (ptv) {
+            mediaPayload.ptv = true;
+        } else {
+            mediaPayload.gifPlayback = false;
+        }
+        if (viewOnce) mediaPayload.viewOnce = true;
     } else if (isAudio) {
         mediaPayload.audio = { url: mediaUrl };
         mediaPayload.mimetype = mimetype || 'audio/ogg; codecs=opus';
         mediaPayload.ptt = ptt || mediaUrl.includes('ptt') || mediaUrl.includes('audio');
+        if (viewOnce) mediaPayload.viewOnce = true;
     } else {
         mediaPayload.document = { url: mediaUrl };
         mediaPayload.mimetype = mimetype || getMimeTypeFromFileName(cleanFileName);
         mediaPayload.fileName = cleanFileName || 'documento';
     }
 
-    if (finalCaption) {
+    if (finalCaption && !ptv) {
         mediaPayload.caption = finalCaption;
     }
 

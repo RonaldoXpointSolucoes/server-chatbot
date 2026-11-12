@@ -31,6 +31,7 @@ export const BLOCK_THEMES: Record<string, BlockTheme> = {
     rating: { category: 'Inputs', iconColor: 'text-orange-500', iconHex: '#ea580c', tagBg: 'bg-orange-500/20', tagText: 'text-orange-300', tagBorder: 'border-orange-500/30' },
     file_input: { category: 'Inputs', iconColor: 'text-orange-500', iconHex: '#ea580c', tagBg: 'bg-orange-500/20', tagText: 'text-orange-300', tagBorder: 'border-orange-500/30' },
     cards: { category: 'Inputs', iconColor: 'text-orange-500', iconHex: '#ea580c', tagBg: 'bg-orange-500/20', tagText: 'text-orange-300', tagBorder: 'border-orange-500/30' },
+    poll: { category: 'Inputs', iconColor: 'text-orange-500', iconHex: '#ea580c', tagBg: 'bg-orange-500/20', tagText: 'text-orange-300', tagBorder: 'border-orange-500/30' },
 
     // Condicionais (Roxo / Violeta)
     set_variable: { category: 'Condicionais', iconColor: 'text-purple-400', iconHex: '#a855f7', tagBg: 'bg-purple-900/60', tagText: 'text-purple-200', tagBorder: 'border-purple-500/40' },

@@ -535,6 +535,8 @@ class QueueProcessor {
                             fileName: msg.options?.fileName || cleanFileName,
                             responseType: 'STANDARD',
                             ptt: msg.options?.ptt || msg.media_url.includes('ptt') || msg.media_url.includes('audio'),
+                            ptv: Boolean(msg.options?.ptv),
+                            viewOnce: Boolean(msg.options?.viewOnce),
                             forceDocument
                         });
 

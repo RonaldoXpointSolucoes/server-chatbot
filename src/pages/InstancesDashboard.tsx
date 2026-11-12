@@ -25,11 +25,13 @@ interface TenantItem {
 
 import { supabase } from '../services/supabase';
 import { createInstance, migrateInstanceHistory } from '../services/whatsappEngine';
+import { BaileysInstanceHubModal } from '../components/modals/BaileysInstanceHubModal';
 
 const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
 
 export default function InstancesDashboard() {
   const [instances, setInstances] = useState<WhatsAppInstance[]>([]);
+  const [hubInstance, setHubInstance] = useState<WhatsAppInstance | null>(null);
   const [stats, setStats] = useState<Record<string, { contacts: number, messages: number }>>({});
   const [loading, setLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
@@ -1608,6 +1610,15 @@ export default function InstancesDashboard() {
                        </>
                     )}
 
+                    {/* Botão Central Avançada Baileys (Perfil, Privacidade, Catálogo GastroFood, Anti-Chamadas) */}
+                    <button
+                      onClick={() => setHubInstance(inst)}
+                      className="px-3.5 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2 shadow-md shadow-indigo-500/20 active:scale-95 cursor-pointer"
+                      title="Abrir Central Avançada do Chip (Perfil, Privacidade, Catálogo WhatsApp Business, Anti-Chamadas, Etiquetas CRM)"
+                    >
+                      <Zap size={16} /> Central WhatsApp
+                    </button>
+
                     {/* Botão Link de Conexão Direta ConectaZap (Sem Login) */}
                     <button
                       onClick={() => {
@@ -1651,6 +1662,16 @@ export default function InstancesDashboard() {
               </div>
             ))}
           </div>
+        )}
+
+        {hubInstance && (
+          <BaileysInstanceHubModal
+            isOpen={Boolean(hubInstance)}
+            onClose={() => setHubInstance(null)}
+            tenantId={hubInstance.tenant_id || localStorage.getItem('current_tenant_id') || ''}
+            instanceId={hubInstance.id}
+            instanceName={hubInstance.display_name}
+          />
         )}
 
       </div>

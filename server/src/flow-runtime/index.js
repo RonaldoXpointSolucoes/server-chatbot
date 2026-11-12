@@ -303,8 +303,8 @@ class FlowEngine {
     resolveNextPoint(nodes, edges, currentGroup, currentBlock, userResponse = '', variables = {}) {
         const flowType = currentBlock.flowType || currentBlock.type;
 
-        // Se for buttons ou selection, tenta bater com as arestas de saída de cada opção
-        if (flowType === 'buttons' || flowType === 'cards' || flowType === 'pic_choice') {
+        // Se for buttons, poll ou selection, tenta bater com as arestas de saída de cada opção
+        if (flowType === 'buttons' || flowType === 'cards' || flowType === 'pic_choice' || flowType === 'poll') {
             const options = currentBlock.options || [];
             const cleanResp = userResponse.toLowerCase().trim();
 
@@ -719,6 +719,42 @@ class FlowEngine {
                         });
                     }
                     isPaused = true; // Aguarda escolha do cliente
+                }
+                // 3.1 Enquete Nativa Clicável do WhatsApp (poll)
+                else if (flowType === 'poll') {
+                    const rawPrompt = block.text || block.label || 'Selecione uma opção na enquete abaixo:';
+                    const parsedPrompt = normalizeUrlsInText(this.parseVariables(rawPrompt, convState.variables));
+                    const rawOptions = Array.isArray(block.options) && block.options.length >= 2
+                        ? block.options
+                        : ['Opção 1', 'Opção 2'];
+                    let parsedOptions = rawOptions
+                        .map(opt => this.parseVariables(String(opt || '').trim(), convState.variables))
+                        .filter(Boolean)
+                        .slice(0, 12);
+                    if (parsedOptions.length < 2) {
+                        parsedOptions = ['Opção 1', 'Opção 2'];
+                    }
+                    const selectableCount = Math.max(1, Math.min(parsedOptions.length, Number(block.selectableCount || block.data?.selectableCount || 1)));
+
+                    const pollTextSummary = `📊 *Enquete:* ${parsedPrompt}\n` + parsedOptions.map((o, idx) => `${idx + 1}. ${o}`).join('\n');
+
+                    await this.sendFlowMessageResilient({
+                        tenantId,
+                        instanceId,
+                        conversationId,
+                        jid: convState.remote_jid,
+                        sock,
+                        payload: {
+                            poll: {
+                                name: parsedPrompt,
+                                values: parsedOptions,
+                                selectableCount
+                            }
+                        },
+                        textContent: pollTextSummary,
+                        messageType: 'text'
+                    });
+                    isPaused = true; // Aguarda voto na enquete ou resposta do cliente
                 }
                 // 4. Definição de Variável
                 else if (flowType === 'set_variable') {

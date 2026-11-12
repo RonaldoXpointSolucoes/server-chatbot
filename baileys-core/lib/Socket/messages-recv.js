@@ -1076,6 +1076,16 @@ export const makeMessagesRecvSocket = (config) => {
         const newValue = ((await msgRetryCache.get(key)) || 0) + 1;
         await msgRetryCache.set(key, newValue);
     };
+    const acceptRetryIds = async (ids, participant) => {
+        const accepted = [];
+        for (const id of ids) {
+            if (id && (await willSendMessageAgain(id, participant))) {
+                accepted.push(id);
+                await updateSendMessageAgainCount(id, participant);
+            }
+        }
+        return accepted;
+    };
     const sendMessagesAgain = async (key, ids, retryNode, receiptNode) => {
         const remoteJid = key.remoteJid;
         const participant = key.participant || remoteJid;
@@ -1176,11 +1186,11 @@ export const makeMessagesRecvSocket = (config) => {
         }
         logger.debug({ participant, sendToAll, shouldRecreateSession, recreateReason, injectedFromBundle }, 'prepared session for retry resend');
         for (const [i, msg] of msgs.entries()) {
-            if (!ids[i])
+            const id = ids[i];
+            if (!id)
                 continue;
-            if (msg && (await willSendMessageAgain(ids[i], participant))) {
-                await updateSendMessageAgainCount(ids[i], participant);
-                const msgRelayOpts = { messageId: ids[i] };
+            if (msg) {
+                const msgRelayOpts = { messageId: id };
                 if (sendToAll) {
                     msgRelayOpts.useUserDevicesCache = false;
                 }
@@ -1193,7 +1203,7 @@ export const makeMessagesRecvSocket = (config) => {
                 await relayMessage(key.remoteJid, msg, msgRelayOpts);
             }
             else {
-                logger.debug({ jid: key.remoteJid, id: ids[i] }, 'recv retry request, but message not available');
+                logger.debug({ jid: key.remoteJid, id }, 'recv retry request, but message not available');
             }
         }
     };
@@ -1245,23 +1255,21 @@ export const makeMessagesRecvSocket = (config) => {
                         // correctly set who is asking for the retry
                         key.participant = key.participant || attrs.from;
                         const retryNode = getBinaryNodeChild(node, 'retry');
-                        if (ids[0] && key.participant && (await willSendMessageAgain(ids[0], key.participant))) {
-                            if (key.fromMe) {
-                                try {
-                                    await updateSendMessageAgainCount(ids[0], key.participant);
-                                    logger.debug({ attrs, key }, 'recv retry request');
-                                    await sendMessagesAgain(key, ids, retryNode, node);
-                                }
-                                catch (error) {
-                                    logger.error({ key, ids, trace: error instanceof Error ? error.stack : 'Unknown error' }, 'error in sending message again');
-                                }
-                            }
-                            else {
-                                logger.info({ attrs, key }, 'recv retry for not fromMe message');
-                            }
+                        if (!key.fromMe) {
+                            logger.info({ attrs, key }, 'recv retry for not fromMe message');
+                            return;
                         }
-                        else {
-                            logger.info({ attrs, key }, 'will not send message again, as sent too many times');
+                        try {
+                            const acceptedIds = key.participant ? await acceptRetryIds(ids, key.participant) : [];
+                            if (acceptedIds.length === 0) {
+                                logger.info({ attrs, key }, 'will not send message again, as sent too many times');
+                                return;
+                            }
+                            logger.debug({ attrs, key }, 'recv retry request');
+                            await sendMessagesAgain(key, acceptedIds, retryNode, node);
+                        }
+                        catch (error) {
+                            logger.error({ key, ids, trace: error instanceof Error ? error.stack : 'Unknown error' }, 'error in sending message again');
                         }
                     }
                 })
@@ -1636,11 +1644,24 @@ export const makeMessagesRecvSocket = (config) => {
             return exec(node, false).catch(err => onUnexpectedError(err, identifier));
         }
     };
+    // Some accounts now get contacts' statuses as a top-level <status> stanza
+    // instead of <message from="status@broadcast">. It isn't decoded here, but it
+    // must be acked: otherwise the server ends the stream ~50 minutes later with
+    // <stream:error><ack class="status"/></stream:error> and redelivers it on reconnect.
+    const handleStatus = async (node) => {
+        try {
+            await sendMessageAck(node);
+        }
+        catch (error) {
+            onUnexpectedError(error, 'acking status stanza');
+        }
+    };
     const offlineNodeProcessor = makeOfflineNodeProcessor(new Map([
         ['message', handleMessage],
         ['call', handleCall],
         ['receipt', handleReceipt],
-        ['notification', handleNotification]
+        ['notification', handleNotification],
+        ['status', handleStatus]
     ]), {
         isWsOpen: () => ws.isOpen,
         onUnexpectedError,
@@ -1700,6 +1721,9 @@ export const makeMessagesRecvSocket = (config) => {
         catch (err) {
             logger.warn({ err: err?.message || err }, 'failed processing incoming notification node');
         }
+    });
+    ws.on('CB:status', async (node) => {
+        await processNode('status', node, 'acking status stanza', handleStatus).catch(error => onUnexpectedError(error, 'acking status stanza'));
     });
     ws.on('CB:ack,class:message', (node) => {
         handleBadAck(node).catch(error => onUnexpectedError(error, 'handling bad ack'));

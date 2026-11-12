@@ -582,3 +582,38 @@ export const migrateInstanceHistory = async (oldInstanceId: string, newInstanceI
 
   console.log(`[migrateInstanceHistory] Sucesso na migração de ${oldInstanceId} para ${newInstanceId}.`);
 };
+
+
+/**
+ * Invoca qualquer macro ou método avançado da Baileys no motor da instância.
+ */
+export const invokeBaileysAction = async (
+  tenantId: string,
+  instanceId: string,
+  method: string,
+  payloadOrArgs: any = {},
+  apiKey: string = 'INTERNAL_KEY'
+) => {
+  const apiUrl = getInstanceApiUrl(instanceId);
+  if (!apiUrl) throw new Error('URL do motor Antigravity não definida (.env)');
+  const args = Array.isArray(payloadOrArgs) ? payloadOrArgs : [payloadOrArgs];
+
+  const res = await fetch(`${apiUrl}/api/v1/instances/${instanceId}/invoke`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-tenant-id': tenantId,
+      'apikey': apiKey
+    },
+    body: JSON.stringify({ method, args })
+  });
+
+  let resJson: any = {};
+  try {
+    resJson = await res.json();
+  } catch (e) {
+    resJson = { ok: false, error: `HTTP ${res.status}` };
+  }
+
+  return resJson;
+};

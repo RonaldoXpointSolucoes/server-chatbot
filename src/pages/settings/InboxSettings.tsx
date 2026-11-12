@@ -5,6 +5,7 @@ import { useChatStore } from '../../store/chatStore';
 import { ChevronLeft, Save, Plus, Settings2, Users, Clock, Star, Bot, Server, ToggleLeft, ToggleRight, Loader2, MessageSquare, X, QrCode, RefreshCcw, LogOut, CheckCircle, Sparkles, Bell, BellOff, Volume2, VolumeX, Smartphone, PhoneCall, AtSign, Ticket, CheckCircle2, Building2 } from 'lucide-react';
 import { NOTIFICATION_SOUNDS, playNotificationSound } from '../../utils/AudioEngine';
 import { fetchUserInboxNotificationPreferences, toggleInboxNotification, updateInboxEventTypePreference, NotificationEventType, UserInboxNotificationPreference } from '../../services/notificationPreferences';
+import { BaileysInstanceHubModal } from '../../components/modals/BaileysInstanceHubModal';
 interface InstanceData {
   id: string;
   display_name: string;
@@ -399,6 +400,7 @@ export default function InboxSettings() {
 
   const tabs = [
     { id: 'settings', label: 'Configurações' },
+    { id: 'baileys_hub', label: '⚡ Recursos Avançados WhatsApp' },
     { id: 'notifications', label: 'Notificações' },
     { id: 'agents', label: 'Usuários' },
     { id: 'hours', label: 'Horário de funcionamento' },
@@ -436,6 +438,20 @@ export default function InboxSettings() {
 
           {/* ACTIVE TAB CONTENT */}
           <div className="flex flex-col gap-10 mt-6 pb-20 animate-in fade-in duration-300">
+
+              {/* BAILEYS HUB TAB (18 FUNCIONALIDADES AVANÇADAS) */}
+              {activeTab === 'baileys_hub' && instance && (
+                 <div className="w-full animate-in fade-in duration-300">
+                    <BaileysInstanceHubModal
+                      isOpen={true}
+                      onClose={() => {}}
+                      tenantId={instance.tenant_id || tenantId || ''}
+                      instanceId={instance.id}
+                      instanceName={instance.display_name}
+                      embedded={true}
+                    />
+                 </div>
+              )}
              
               {/* NOTIFICATIONS TAB */}
               {activeTab === 'notifications' && (

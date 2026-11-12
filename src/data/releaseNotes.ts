@@ -20,6 +20,61 @@ export interface VersionRelease {
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.1.2',
+    date: '2026-11-11',
+    summary: 'Suíte Completa de 18 Funcionalidades Nativas da Baileys v7 (Enquetes Typebot, Auto-Pin Cardápio 30d, Vídeo Redondo PTV, Visualização Única, Álbuns, Catálogo GastroFood, Carrinho Nativo e Central WhatsApp Business) + Blindagem Anti-Crash',
+    notes: [
+      {
+        id: '8.1.2-1',
+        category: 'features',
+        title: 'Fixação de Mensagens e Auto-Pin de Cardápio Digital por 30 Dias (pinInChatMessage)',
+        description: 'Links de cardápio digital enviados no chat são fixados automaticamente por 30 dias no topo da conversa do cliente, além de novos botões no ChatInbox para fixar/desafixar qualquer mensagem por 24h, 7d ou 30d e enviar o cardápio fixado com 1 clique.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '8.1.2-2',
+        category: 'features',
+        title: 'Enquetes Nativas Clicáveis no Construtor de Fluxos (Typebot) e no ChatInbox (Polls)',
+        description: 'Novo bloco "Enquete Nativa" no FlowBuilder com decifragem automática de votos (decryptPollVote) para roteamento inteligente de caminhos no robô, além de criador de enquetes direto no Chat.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '8.1.2-3',
+        category: 'features',
+        title: 'Recado de Vídeo Redondo (PTV), Visualização Única (ViewOnce) e Álbuns de Mídia Agrupados',
+        description: 'Envio e renderização de vídeos circulares instantâneos (PTV), mídias de visualização única (1x) para fotos/vídeos/áudios e envio de 4 a 10 fotos agrupadas em um único balão de Álbum.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '8.1.2-4',
+        category: 'features',
+        title: 'Sincronização GastroFood ➔ Catálogo WhatsApp Business e Leitura Automática de Carrinhos',
+        description: 'Sincronize todos os produtos ativos do GastroFood direto para a vitrine nativa do WhatsApp Business, envie cards de produtos individuais no chat e receba os itens/quantidades/totais detalhados quando o cliente enviar um carrinho.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '8.1.2-5',
+        category: 'features',
+        title: 'Central Avançada do Chip: Perfil Comercial, Privacidade, Rejeição de Chamadas, Saúde Meta, Etiquetas e Histórico',
+        description: 'Novo hub visual nas conexões para editar Nome/Bio/Foto/Capa/Horários, configurar Privacidade do chip, ativar Rejeição Automática de Ligações com resposta de texto, consultar limites anti-bloqueio da Meta (Reachout Timelock / NewChatCap), sincronizar Respostas Rápidas e Etiquetas do CRM, favoritar mensagens, arquivar/silenciar conversas, carregar histórico antigo sob demanda e bloquear contatos.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      },
+      {
+        id: '8.1.2-6',
+        category: 'improvements',
+        title: 'Blindagem Anti-Crash e Anti-Hang nas 18 Operações Baileys v7',
+        description: 'Timeouts estritos por operação (withBaileysTimeout), auto-injeção de lastMessages no chatModify, auto-resolução de LID no bloqueio de contatos, lock anti-concorrência no catálogo e cooldown anti-flood em chamadas.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-sky-500/20 text-sky-300 border-sky-500/30'
+      }
+    ]
+  },
+  {
     version: '8.1.1',
     date: '2026-11-11',
     summary: 'Envio Paralelo de Mídia (Baileys + Storage), Fallback Direto de Upload no Navegador, Tratamento de Request Aborted no Multer e Otimização de I/O de Logs',

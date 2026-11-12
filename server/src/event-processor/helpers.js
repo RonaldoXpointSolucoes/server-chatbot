@@ -54,13 +54,35 @@ export function extractTextFromMessage(msg) {
     else if (content.extendedTextMessage) text = content.extendedTextMessage.text;
     else if (content.imageMessage) text = content.imageMessage.caption || '📸 Imagem / Foto';
     else if (content.audioMessage) text = '🎵 Áudio';
-    else if (content.videoMessage) text = content.videoMessage.caption || '🎥 Vídeo';
+    else if (content.videoMessage) text = content.videoMessage.caption || (content.videoMessage.ptv ? '🎥 Recado de Vídeo Redondo (PTV)' : '🎥 Vídeo');
+    else if (content.ptvMessage) text = content.ptvMessage.caption || '🎥 Recado de Vídeo Redondo (PTV)';
     else if (content.documentMessage) text = content.documentMessage.caption || '';
     else if (content.reactionMessage) text = '❤️ Reação: ' + content.reactionMessage.text;
     else if (content.contactMessage) text = '👤 Contato: ' + (content.contactMessage.displayName || '');
     else if (content.contactsArrayMessage) text = '👥 Múltiplos Contatos';
     else if (content.locationMessage) text = '📍 Localização';
     else if (content.stickerMessage) text = '🎫 Figurinha';
+    else if (content.pollCreationMessage || content.pollCreationMessageV2 || content.pollCreationMessageV3) {
+        const poll = content.pollCreationMessage || content.pollCreationMessageV2 || content.pollCreationMessageV3;
+        const opts = (poll.options || []).map((o, idx) => `${idx + 1}. ${o.optionName || o}`).join('\n');
+        text = `📊 *Enquete:* ${poll.name || 'Enquete'}\n${opts}`;
+    }
+    else if (content.pollUpdateMessage) {
+        text = '🗳️ Voto em Enquete';
+    }
+    else if (content.orderMessage) {
+        const om = content.orderMessage;
+        const total = om.totalAmount1000 ? ` - Total: R$ ${(Number(om.totalAmount1000) / 1000).toFixed(2)}` : '';
+        text = `🛒 *Pedido do Catálogo WhatsApp* (${om.itemCount || 1} ${(om.itemCount || 1) === 1 ? 'item' : 'itens'}${total})${om.message ? `\n💬 ${om.message}` : ''}`;
+    }
+    else if (content.productMessage) {
+        const prod = content.productMessage.product || {};
+        const price = prod.priceAmount1000 ? ` - R$ ${(Number(prod.priceAmount1000) / 1000).toFixed(2)}` : '';
+        text = `🛍️ *Produto:* ${prod.title || 'Item do Catálogo'}${price}${prod.description ? `\n${prod.description}` : ''}`;
+    }
+    else if (content.pinInChatMessage) {
+        text = content.pinInChatMessage.type === 2 ? '📌 Mensagem desafixada' : '📌 Mensagem fixada no topo';
+    }
     else if (content.templateButtonReplyMessage) text = content.templateButtonReplyMessage.selectedDisplayText;
     else if (content.buttonsResponseMessage) text = content.buttonsResponseMessage.selectedDisplayText;
     else if (content.listResponseMessage) text = content.listResponseMessage.title;
@@ -99,7 +121,10 @@ export function extractTextFromMessage(msg) {
             text = parts.length > 0 ? parts.join('\n\n') : '📱 Mensagem Estruturada (HSM)';
         } catch (e) { text = '📱 Mensagem Estruturada (HSM)'; }
     }
-    else if (content.albumMessage) text = '📸 Álbum de Fotos';
+    else if (content.albumMessage) {
+        const totalAlbum = (content.albumMessage.expectedImageCount || 0) + (content.albumMessage.expectedVideoCount || 0);
+        text = `📸 Álbum de Mídia${totalAlbum > 0 ? ` (${totalAlbum} itens)` : ''}`;
+    }
     else if (content.secretEncryptedMessage) text = '✏️ Mensagem Editada';
     else if (content.buttonsMessage || content.listMessage) text = '📱 Mensagem Interativa';
     else text = '📎 Mensagem não suportada';
@@ -114,6 +139,7 @@ export function extractMediaMeta(rawMsg, msgType) {
     let content = extractMessageContent(rawMsg);
     if (!content) return {};
 
+    if (msgType === 'video' && content.ptvMessage) return { ...content.ptvMessage, ptv: true };
     if (content[msgType + 'Message']) return content[msgType + 'Message'];
     
     if (content.templateMessage) {
@@ -136,7 +162,7 @@ export function extractTypeFromMessage(msg) {
     if (!content) return 'text';
     if (content.imageMessage) return 'image';
     if (content.audioMessage) return 'audio';
-    if (content.videoMessage) return 'video';
+    if (content.videoMessage || content.ptvMessage) return 'video';
     if (content.documentMessage) return 'document';
     if (content.contactMessage || content.contactsArrayMessage) return 'contact';
     if (content.locationMessage) return 'location';

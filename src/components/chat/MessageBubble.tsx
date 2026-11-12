@@ -6,7 +6,7 @@ import {
   FileText, MapPin, Sparkles, Check, CheckCheck, RefreshCw,
   LayoutTemplate, Smartphone, Eye, EyeOff, ClipboardList, CheckSquare,
   UserCheck, Copy, Ticket, BrainCircuit, Calendar, Zap, ExternalLink,
-  AlertCircle, Clock
+  AlertCircle, Clock, Pin, Star, ShoppingBag
 } from 'lucide-react';
 import { format, isToday, isYesterday } from 'date-fns';
 import { cn, getContactDisplayName, formatPhoneNumber } from '../../pages/ChatDashboard';
@@ -15,6 +15,7 @@ import { ImageIcon, Download } from 'lucide-react';
 import { VideoPlayerPremium } from './VideoPlayerPremium';
 import { AudioPlayerBubble } from './AudioPlayerBubble';
 import { useChatStore } from '../../store/chatStore';
+import { invokeBaileysAction } from '../../services/whatsappEngine';
 
 // Necessitamos tipagens básicas
 interface MessageBubbleProps {
@@ -479,6 +480,32 @@ export const MessageBubble = memo(({
               ? "bg-[#d9fdd3]/90 dark:bg-[#005c4b]/95 text-[#111b21] dark:text-[#e9edef] rounded-tr-sm" 
               : "bg-white/95 dark:bg-[#202c33]/90 text-[#111b21] dark:text-[#e9edef] rounded-tl-sm border border-black/5 dark:border-white/5 border-l-4 border-l-[#00a884]")
       )}>
+         {/* Badges de Estado Nativo Baileys (Fixada, Favorita, Visualização Única, PTV) */}
+         {(msg.raw_payload?.pinned || msg.payload?.pinned || msg.raw_payload?.starred || msg.payload?.starred || msg.raw_payload?.viewOnce || msg.raw_payload?.ptv) && (
+           <div className="flex flex-wrap items-center gap-1.5 mb-1">
+             {(msg.raw_payload?.pinned || msg.payload?.pinned) && (
+               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-600 dark:text-amber-300 border border-amber-500/30">
+                 <Pin size={10} /> Fixada no topo
+               </span>
+             )}
+             {(msg.raw_payload?.starred || msg.payload?.starred) && (
+               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-yellow-500/20 text-yellow-600 dark:text-yellow-300 border border-yellow-500/30">
+                 <Star size={10} className="fill-current" /> Favorita
+               </span>
+             )}
+             {(msg.raw_payload?.viewOnce || msg.payload?.viewOnce) && (
+               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                 1️⃣ Visualização Única
+               </span>
+             )}
+             {(msg.raw_payload?.ptv || msg.payload?.ptv) && (
+               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-500/20 text-sky-700 dark:text-sky-300 border border-sky-500/30">
+                 🎥 Recado Redondo (PTV)
+               </span>
+             )}
+           </div>
+         )}
+
          {/* Badge Indicador de Seleção RAG */}
          {isRagSelectedQuestion && (
            <div className="absolute -top-3 left-3 bg-purple-600 text-white text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full shadow-md flex items-center gap-1 z-20 animate-bounce">
@@ -597,6 +624,63 @@ export const MessageBubble = memo(({
                     className="w-full text-left px-4 py-2 hover:bg-[#f5f6f6] dark:hover:bg-[#111b21] flex items-center gap-3 transition-colors text-[14px] text-[#3b4a54] dark:text-[#d1d7db]"
                   >
                     Encaminhar
+                  </button>
+
+                  {/* Fixar / Desafixar Mensagem no Topo por 30 Dias (Baileys Pin) */}
+                  <button
+                    onClick={async () => {
+                      setActiveMsgDropdown(null);
+                      const tenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id') || '';
+                      const instId = msg.instance_id || activeChat?.instance_id || '';
+                      const targetJid = activeChat?.whatsapp_jid || activeChat?.phone || '';
+                      const waId = msg.whatsapp_message_id || msg.raw_payload?.key?.id || msg.id;
+                      const isCurrentlyPinned = Boolean(msg.raw_payload?.pinned || msg.payload?.pinned);
+                      if (!instId || !targetJid) return;
+                      try {
+                        await invokeBaileysAction(tenantId, instId, 'pinMessage', {
+                          jid: targetJid,
+                          key: { remoteJid: targetJid, fromMe: isMe, id: waId },
+                          type: isCurrentlyPinned ? 2 : 1,
+                          time: 2592000 // 30 dias
+                        });
+                        if (msg.raw_payload) msg.raw_payload.pinned = !isCurrentlyPinned;
+                      } catch (e) {
+                        console.warn('Erro ao fixar/desafixar mensagem:', e);
+                      }
+                    }}
+                    className="w-full text-left px-4 py-2 hover:bg-amber-50 dark:hover:bg-amber-950/30 flex items-center gap-3 transition-colors text-[14px] text-amber-600 dark:text-amber-400 font-medium"
+                  >
+                    <Pin size={16} />
+                    {(msg.raw_payload?.pinned || msg.payload?.pinned) ? 'Desafixar do topo' : 'Fixar 30 dias no topo'}
+                  </button>
+
+                  {/* Favoritar / Desfavoritar Mensagem no Aparelho (Baileys Star) */}
+                  <button
+                    onClick={async () => {
+                      setActiveMsgDropdown(null);
+                      const tenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id') || '';
+                      const instId = msg.instance_id || activeChat?.instance_id || '';
+                      const targetJid = activeChat?.whatsapp_jid || activeChat?.phone || '';
+                      const waId = msg.whatsapp_message_id || msg.raw_payload?.key?.id || msg.id;
+                      const isCurrentlyStarred = Boolean(msg.raw_payload?.starred || msg.payload?.starred);
+                      if (!instId || !targetJid) return;
+                      try {
+                        await invokeBaileysAction(tenantId, instId, 'starMessage', {
+                          jid: targetJid,
+                          messageId: msg.id,
+                          whatsappId: waId,
+                          fromMe: isMe,
+                          star: !isCurrentlyStarred
+                        });
+                        if (msg.raw_payload) msg.raw_payload.starred = !isCurrentlyStarred;
+                      } catch (e) {
+                        console.warn('Erro ao favoritar mensagem:', e);
+                      }
+                    }}
+                    className="w-full text-left px-4 py-2 hover:bg-yellow-50 dark:hover:bg-yellow-950/30 flex items-center gap-3 transition-colors text-[14px] text-yellow-600 dark:text-yellow-400 font-medium"
+                  >
+                    <Star size={16} />
+                    {(msg.raw_payload?.starred || msg.payload?.starred) ? 'Remover dos Favoritos' : 'Favoritar no Aparelho'}
                   </button>
 
                   {msg.mediaUrl && msg.status !== 'deleted' && (
@@ -893,8 +977,57 @@ export const MessageBubble = memo(({
                )}
                
                {msg.mediaUrl && (msg.mediaType === 'video' || msg.mediaUrl.endsWith('.mp4')) && (
-                  <VideoPlayerPremium src={msg.mediaUrl} />
+                  (msg.raw_payload?.ptv || msg.payload?.ptv || msg.text?.includes('PTV')) ? (
+                    <div className="w-56 h-56 rounded-full overflow-hidden border-4 border-[#00a884] shadow-xl mx-auto my-2 relative bg-black flex items-center justify-center">
+                      <video
+                        src={msg.mediaUrl}
+                        controls
+                        playsInline
+                        className="w-full h-full object-cover rounded-full"
+                      />
+                    </div>
+                  ) : (
+                    <VideoPlayerPremium src={msg.mediaUrl} />
+                  )
                )}
+
+               {/* Card Rico de Carrinho / Pedido Recebido do Catálogo WhatsApp (Item 6: getOrderDetails) */}
+               {(msg.raw_payload?.orderDetails || msg.payload?.orderDetails) && (() => {
+                  const od = msg.raw_payload?.orderDetails || msg.payload?.orderDetails;
+                  return (
+                    <div className="my-2 p-3.5 rounded-2xl bg-gradient-to-br from-emerald-950/80 via-slate-900 to-slate-950 border border-emerald-500/40 text-white shadow-lg min-w-[250px]">
+                      <div className="flex items-center justify-between border-b border-emerald-500/20 pb-2 mb-2.5">
+                        <div className="flex items-center gap-2 text-emerald-400 font-bold text-xs uppercase tracking-wider">
+                          <ShoppingBag size={16} />
+                          <span>Carrinho do Catálogo WhatsApp</span>
+                        </div>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-semibold">
+                          {od.itemCount || od.products?.length || 1} {(od.itemCount || od.products?.length || 1) === 1 ? 'item' : 'itens'}
+                        </span>
+                      </div>
+                      {Array.isArray(od.products) && od.products.length > 0 && (
+                        <div className="space-y-1.5 mb-2.5">
+                          {od.products.map((prod: any, pIdx: number) => (
+                            <div key={prod.id || pIdx} className="flex items-center justify-between text-xs bg-white/5 px-2.5 py-1.5 rounded-lg">
+                              <span className="font-medium text-slate-200 truncate pr-2">
+                                <b className="text-emerald-400">{prod.quantity}x</b> {prod.name}
+                              </span>
+                              <span className="font-bold text-emerald-300 shrink-0">
+                                R$ {(Number(prod.price || 0) * Number(prod.quantity || 1)).toFixed(2)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {od.totalAmount !== null && od.totalAmount !== undefined && (
+                        <div className="flex items-center justify-between pt-2 border-t border-white/10 text-xs font-extrabold">
+                          <span className="text-slate-300">Total do Pedido:</span>
+                          <span className="text-sm text-emerald-400">R$ {Number(od.totalAmount).toFixed(2)}</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+               })()}
                
                {!msg.mediaUrl && msg.mediaType === 'image' && (
                   <div className="flex items-center gap-3 bg-gradient-to-br from-indigo-50/60 to-white dark:from-[#2a3942] dark:to-[#202c33] p-3 rounded-xl mb-1 border border-indigo-100/60 dark:border-indigo-900/30">

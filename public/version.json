@@ -1,5 +1,5 @@
 {
-  "version": "8.1.0",
-  "buildDate": "2026-11-11T22:00:31.024Z",
-  "summary": "Auto-Reparo Ativo de WebSocket Realtime (Zero Chat Congelado), Fast-Path Direto para Envio de Mídia Sem Timeout e Varredura Integral da Fila Outbox"
+  "version": "8.1.2",
+  "buildDate": "2026-11-12T02:41:04.793Z",
+  "summary": "Suíte Completa de 18 Funcionalidades Nativas da Baileys v7 (Enquetes Typebot, Auto-Pin Cardápio 30d, Vídeo Redondo PTV, Visualização Única, Álbuns, Catálogo GastroFood, Carrinho Nativo e Central WhatsApp Business) + Blindagem Anti-Crash"
 }

@@ -247,12 +247,16 @@ const baileysHistory = [
         repoUrl: 'https://github.com/WhiskeySockets/Baileys/releases/tag/v7.0.0-rc14',
         commit: '7e7b075',
         highlights: [
+            'ACK Obrigatório em Stanzas <status> de Topo: previne encerramento de WebSocket pela Meta após ~50 minutos (PR #2883)',
+            'Orçamento Real de Retry Resend: corrige contagem dupla em acceptRetryIds para respeitar integralmente maxMsgRetryCount (PR #2892)',
+            'Preservação de Timestamp de Envio no EventBuffer: impede que recibos de entrega/leitura sobrescrevam messageTimestamp original (PR #2896)',
+            'Integridade de Sender-Key em Grupos: grava senderKeyMap apenas para dispositivos que receberam SKDM encriptado com sucesso (PR #2891)',
             'Desbloqueio Crítico da Fila Offline: ack sem NACK para status@broadcast undecryptable, eliminando o congelamento da fila do WhatsApp (PR #2779)',
             'Classificação Realtime Online vs Offline: isOfflineNode trata offline="0" como online, eliminando atrasos e enfileiramento indevido no offlineNodeProcessor (PR #2840)',
             'Prevenção de Dupla Criptografia no Retry Resend: eliminação do erro 479 (smax-invalid) em 1:1 LID retries (PR #2839)',
             'Captura Proativa de TC-Token: extração oportunista do nó tctoken em mensagens recebidas, mitigando erro 463 e delays de handshake (PR #2752)',
             'Compatibilidade Nativa WIN_HYBRID: substitui WIN32 aposentado pela Meta prevenindo erro 428 (Commit 0af2386 / PR #2741)',
-            'Versão Estável WhatsApp Web: atualização para 2.3000.1049232487 e fallback resiliente no fetchLatestBaileysVersion (PR #2773 e #2844)'
+            'Versão Estável WhatsApp Web: atualização para 2.3000.1053614044 e fallback resiliente no fetchLatestBaileysVersion (PR #2890)'
         ]
     },
     {

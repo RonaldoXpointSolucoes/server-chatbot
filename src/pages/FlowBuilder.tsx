@@ -97,6 +97,7 @@ const NODE_TYPES = [
     { type: 'date_input', label: 'Data', icon: Calendar, category: 'Inputs' },
     { type: 'phone_input', label: 'Telefone', icon: Phone, category: 'Inputs' },
     { type: 'buttons', label: 'Botão', icon: MousePointerClick, category: 'Inputs' },
+    { type: 'poll', label: 'Enquete Nativa', icon: LayoutGrid, category: 'Inputs' },
     { type: 'pic_choice', label: 'Seleção de Imagem', icon: ImagePlay, category: 'Inputs' },
     { type: 'payment', label: 'Pagamento', icon: CreditCard, category: 'Inputs' },
     { type: 'rating', label: 'Avaliação', icon: Star, category: 'Inputs' },
@@ -432,7 +433,7 @@ function FlowBuilderContent() {
                             ...b,
                             id: b.id || `block-${n.id}-${bIdx}`,
                             flowType: b.flowType === 'message' ? 'send_message' : b.flowType === 'input' ? 'ask' : (b.flowType || 'send_message'),
-                            label: b.label || (b.flowType === 'message' || b.flowType === 'send_message' ? 'Mensagem' : b.flowType === 'buttons' ? 'Botões' : b.flowType === 'input' || b.flowType === 'ask' ? 'Pergunta' : b.flowType === 'handoff' ? 'Atendente Humano' : b.flowType),
+                            label: b.label || (b.flowType === 'message' || b.flowType === 'send_message' ? 'Mensagem' : b.flowType === 'buttons' ? 'Botões' : b.flowType === 'poll' ? 'Enquete Nativa' : b.flowType === 'input' || b.flowType === 'ask' ? 'Pergunta' : b.flowType === 'handoff' ? 'Atendente Humano' : b.flowType),
                             text: b.text ?? b.content ?? '',
                             var_name: b.var_name ?? b.variable ?? '',
                             url: b.url ?? b.webhookUrl ?? ''
@@ -1464,7 +1465,7 @@ function FlowBuilderContent() {
                                                     <span className="text-xs font-semibold text-slate-200">{block.label || 'Bloco'}</span>
                                                 </div>
 
-                                                {['send_message', 'ask', 'buttons', 'pic_choice', 'handoff', 'set_variable', 'email_input', 'number_input', 'phone_input', 'website_input', 'date_input', 'time_input', 'payment', 'rating', 'file_input'].includes(block.flowType) && (
+                                                {['send_message', 'ask', 'buttons', 'poll', 'pic_choice', 'handoff', 'set_variable', 'email_input', 'number_input', 'phone_input', 'website_input', 'date_input', 'time_input', 'payment', 'rating', 'file_input'].includes(block.flowType) && (
                                                     <div className="space-y-2">
                                                         <div className="flex items-center justify-between">
                                                             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Texto / Pergunta</label>
@@ -1627,19 +1628,41 @@ function FlowBuilderContent() {
                                                     </div>
                                                 )}
 
-                                                {['buttons', 'pic_choice', 'cards'].includes(block.flowType) && (
-                                                    <div>
-                                                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 block">Opções (Separadas por vírgula)</label>
-                                                        <textarea
-                                                            rows={3}
-                                                            value={(block.options || []).join(', ')}
-                                                            onChange={(e) => {
-                                                                const opts = e.target.value.split(',').map(s => s.trim()).filter(Boolean);
-                                                                updateBlock('options', opts as any);
-                                                            }}
-                                                            placeholder="1 - Fazer Pedido, 2 - Cardápio, 3 - Atendente"
-                                                            className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2 rounded-lg text-xs focus:ring-1 focus:ring-indigo-500 outline-none resize-none transition-all"
-                                                        />
+                                                {['buttons', 'pic_choice', 'cards', 'poll'].includes(block.flowType) && (
+                                                    <div className="space-y-3">
+                                                        <div>
+                                                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 block">Opções (Separadas por vírgula)</label>
+                                                            <textarea
+                                                                rows={3}
+                                                                value={(block.options || []).join(', ')}
+                                                                onChange={(e) => {
+                                                                    const opts = e.target.value.split(',').map(s => s.trim()).filter(Boolean);
+                                                                    updateBlock('options', opts as any);
+                                                                }}
+                                                                placeholder="Fazer Pedido, Ver Cardápio, Falar com Atendente"
+                                                                className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2 rounded-lg text-xs focus:ring-1 focus:ring-indigo-500 outline-none resize-none transition-all"
+                                                            />
+                                                        </div>
+                                                        {block.flowType === 'poll' && (
+                                                            <div className="p-2.5 bg-emerald-950/30 border border-emerald-500/30 rounded-xl space-y-1.5">
+                                                                <label className="text-[10px] font-bold text-emerald-300 uppercase tracking-wider block">
+                                                                    Quantidade Máxima de Escolhas (Enquete Nativa)
+                                                                </label>
+                                                                <select
+                                                                    value={block.selectableCount || 1}
+                                                                    onChange={(e) => updateBlock('selectableCount', Number(e.target.value) as any)}
+                                                                    className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs focus:ring-1 focus:ring-emerald-500 outline-none"
+                                                                >
+                                                                    <option value={1}>Escolha Única (1 opção - Recomendado para Menu/NPS)</option>
+                                                                    <option value={2}>Até 2 opções</option>
+                                                                    <option value={3}>Até 3 opções</option>
+                                                                    <option value={5}>Múltipla Escolha (Até 5 opções)</option>
+                                                                </select>
+                                                                <p className="text-[10px] text-slate-400">
+                                                                    O cliente vota com 1 toque na enquete nativa do WhatsApp e o fluxo segue para a ramificação da opção escolhida.
+                                                                </p>
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 )}
 
@@ -1909,7 +1932,7 @@ function FlowBuilderContent() {
                                                     </div>
                                                 )}
 
-                                                {(block.flowType === 'set_variable' || block.flowType.endsWith('_input') || block.flowType === 'ask' || block.flowType === 'buttons' || block.flowType === 'pic_choice' || block.flowType === 'payment' || block.flowType === 'rating' || block.flowType === 'file_input') && (
+                                                {(block.flowType === 'set_variable' || block.flowType.endsWith('_input') || block.flowType === 'ask' || block.flowType === 'buttons' || block.flowType === 'poll' || block.flowType === 'pic_choice' || block.flowType === 'payment' || block.flowType === 'rating' || block.flowType === 'file_input') && (
                                                     <div>
                                                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 block">Salvar em Variável</label>
                                                         <input
