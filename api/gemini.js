@@ -1,10 +1,21 @@
-// Vercel Serverless Function Proxy para Google Generative AI (Gemini)
-// Contorna bloqueios de extensões (AdBlock/Shields), firewalls corporativos, preflight CORS e quedas QUIC/HTTP3 no navegador.
+// Vercel Serverless Function Proxy Seguro para Google Generative AI (Gemini)
+// Encaminha requisições autenticadas para o Backend Oficial (IP restrito no Google Cloud)
+// e bloqueia qualquer uso não autorizado ou abuso externo de chaves de API.
 
-const MASTER_FALLBACK_KEY = Buffer.from(
-  "QVEuQWI4Uk42STNSWHloNWtNLXpURUhidlZ5WnlHUDBsMXh2eFpRbWRHZFF1dWlYS1lEa2c=",
-  "base64"
-).toString("utf-8");
+const rateLimitWindowMs = 60 * 1000;
+const maxRequestsPerMinutePerIp = 20;
+const ipCounters = new Map();
+
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const entry = ipCounters.get(ip);
+  if (!entry || now - entry.start > rateLimitWindowMs) {
+    ipCounters.set(ip, { start: now, count: 1 });
+    return true;
+  }
+  entry.count += 1;
+  return entry.count <= maxRequestsPerMinutePerIp;
+}
 
 function sanitizeKey(raw) {
   if (!raw || typeof raw !== "string") return "";
@@ -12,9 +23,18 @@ function sanitizeKey(raw) {
 }
 
 export default async function handler(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  const origin = req.headers.origin || "";
+  const referer = req.headers.referer || "";
+  const allowedOrigin =
+    !origin ||
+    origin.includes("vercel.app") ||
+    origin.includes("localhost") ||
+    origin.includes("127.0.0.1") ||
+    origin.includes("xpointsolucoes.com");
+
+  res.setHeader("Access-Control-Allow-Origin", allowedOrigin && origin ? origin : "https://chat-boot-theta.vercel.app");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-gemini-api-key");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-gemini-api-key, x-tenant-id");
 
   if (req.method === "OPTIONS") {
     return res.status(200).end();
@@ -24,8 +44,35 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: { message: "Method Not Allowed" } });
   }
 
+  const callerIp =
+    (req.headers["x-forwarded-for"] || "").split(",")[0].trim() ||
+    req.socket?.remoteAddress ||
+    "unknown";
+
+  if (!checkRateLimit(callerIp)) {
+    return res.status(429).json({
+      error: { message: "Limite de requisições de IA excedido. Aguarde um minuto." },
+    });
+  }
+
   try {
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
+    const tenantId = req.headers["x-tenant-id"] || body.tenantId || "";
+
+    // Bloqueia chamadas de bots externos que não venham da aplicação nem informem tenantId ou chave própria
+    const customUserKey = sanitizeKey(body.apiKey || req.headers["x-gemini-api-key"]);
+    const isInternalReferer =
+      referer.includes("vercel.app") ||
+      referer.includes("localhost") ||
+      referer.includes("127.0.0.1") ||
+      referer.includes("xpointsolucoes.com");
+
+    if (!tenantId && !customUserKey && !isInternalReferer) {
+      return res.status(403).json({
+        error: { message: "Acesso negado ao proxy Gemini: contexto de tenant ausente." },
+      });
+    }
+
     const requestedModel = (body.model || "gemini-2.5-flash").replace(/^models\//, "");
     const payload = body.payload || {
       contents: body.contents,
@@ -34,26 +81,54 @@ export default async function handler(req, res) {
       safetySettings: body.safetySettings,
     };
 
+    // 1. Prioridade Máxima: Encaminhar para o Motor Backend Oficial (IP autorizado na Google Cloud)
+    const engineUrl = (
+      process.env.VITE_WHATSAPP_ENGINE_URL ||
+      "https://owckk0k8w8soo40w40owc4ss.69.62.92.212.sslip.io"
+    )
+      .replace(/\/$/, "")
+      .trim();
+
+    try {
+      const backendRes = await fetch(`${engineUrl}/api/v1/knowledge/gemini-proxy`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-tenant-id": tenantId || "8b1e427b-2321-4ea7-9d7e-90f7d5cbad21",
+        },
+        body: JSON.stringify({
+          model: requestedModel,
+          payload,
+          apiKey: customUserKey || undefined,
+        }),
+      });
+
+      const backendData = await backendRes.json().catch(() => ({}));
+      if (backendRes.ok && !backendData.error && backendData.candidates) {
+        return res.status(200).json(backendData);
+      }
+    } catch (_) {
+      // Prossegue para tentativa com chave explícita caso o usuário tenha passado uma chave própria
+    }
+
+    // 2. Fallback apenas se houver chave explícita sem restrição de IP configurada no ambiente
     const candidateKeys = Array.from(
       new Set(
         [
-          sanitizeKey(body.apiKey),
-          sanitizeKey(req.headers["x-gemini-api-key"]),
-          sanitizeKey(process.env.VITE_GEMINI_API_KEY),
+          customUserKey,
           sanitizeKey(process.env.GEMINI_API_KEY),
-          sanitizeKey(MASTER_FALLBACK_KEY),
         ].filter((k) => k && k.length >= 20 && (k.startsWith("AIza") || k.startsWith("AQ.")))
       )
     );
 
     if (candidateKeys.length === 0) {
-      return res.status(400).json({
-        error: { message: "Nenhuma chave Gemini válida disponível para processar a requisição." },
+      return res.status(403).json({
+        error: { message: "Proxy Gemini protegido por restrição de IP no servidor principal." },
       });
     }
 
     const candidateModels = Array.from(
-      new Set([requestedModel, "gemini-2.5-flash", "gemini-2.0-flash"])
+      new Set(["gemini-2.5-flash", "gemini-2.0-flash"])
     );
 
     let lastError = null;
@@ -80,8 +155,7 @@ export default async function handler(req, res) {
           lastStatus = upstreamRes.status || 500;
           lastError = data.error || { message: `HTTP ${upstreamRes.status}` };
 
-          // Se for erro de autenticação (400/401/403), pula para a próxima chave imediatamente
-          if (lastStatus === 401 || lastStatus === 403 || (lastStatus === 400 && String(lastError.message || "").toLowerCase().includes("key"))) {
+          if (lastStatus === 401 || lastStatus === 403 || lastStatus === 400) {
             break;
           }
         } catch (fetchErr) {

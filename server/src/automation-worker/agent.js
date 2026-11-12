@@ -1404,7 +1404,7 @@ class AutomationWorker {
             if (!k || typeof k !== 'string') return false;
             const clean = k.replace(/^['"]|['"]$/g, '').trim();
             // Aceita formatos oficiais da Google: AIza (Google AI Studio) e AQ. (Google Cloud / Vertex AI)
-            return clean.length >= 30 && clean.startsWith('AIza') && !invalidGeminiKeysBlacklist.has(clean);
+            return clean.length >= 25 && (clean.startsWith('AIza') || clean.startsWith('AQ.')) && !clean.includes('SERVER_MANAGED') && !invalidGeminiKeysBlacklist.has(clean);
         };
 
         let keyToUse = '';

@@ -2200,7 +2200,7 @@ class SessionManager {
                                 .select('reject_calls, call_reject_message')
                                 .eq('id', instanceId)
                                 .maybeSingle()
-                                .catch(() => ({ data: null }));
+                                .then(r => r, () => ({ data: null }));
                             callCfg = {
                                 rejectCalls: Boolean(instRow?.reject_calls),
                                 rejectMessage: instRow?.call_reject_message || 'Olá! 🤖 Não atendemos chamadas de voz ou vídeo por este número. Por favor, envie uma mensagem de texto ou áudio que responderemos em instantes!',

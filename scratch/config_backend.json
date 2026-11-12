@@ -1,5 +1,0 @@
-{
-  "base_directory": "/server",
-  "start_command": "node src/index.js",
-  "install_command": "npm install"
-}

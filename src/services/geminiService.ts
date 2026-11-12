@@ -1,16 +1,12 @@
 import { useChatStore } from "../store/chatStore";
 import { SUPERPOWERS_SKILLS, formatSkillsMarkdownSection } from "../data/superpowersSkills";
 
-// Resolução de credencial de contingência mestra do ecossistema ChatBoot
-const getGlobalMasterKey = (): string => {
-  try {
-    return atob("QVEuQWI4Uk42STNSWHloNWtNLXpURUhidlZ5WnlHUDBsMXh2eFpRbWRHZFF1dWlYS1lEa2c=");
-  } catch {
-    return "";
-  }
-};
-const fallbackApiKey = import.meta.env.VITE_GEMINI_API_KEY || "";
-const fallbackGcpKey = import.meta.env.VITE_GOOGLE_CLOUD_API_KEY || "";
+// Token simbólico que representa a chave gerenciada exclusivamente no Backend (IP Restrito no Google Cloud).
+// NUNCA expor chaves reais (AIza... ou AQ....) no bundle cliente ou no repositório público.
+const SERVER_MANAGED_PROXY_TOKEN = "AQ.SERVER_MANAGED_SECURE_PROXY_TOKEN_V1";
+const getGlobalMasterKey = (): string => SERVER_MANAGED_PROXY_TOKEN;
+const fallbackApiKey = "";
+const fallbackGcpKey = "";
 
 const formatValueToString = (val: any): string => {
   if (val === null || val === undefined) return '';
@@ -213,13 +209,88 @@ class GeminiService {
   private async executeResilientGenerateContent(modelParams: any, requestInput: any, customKey?: string): Promise<any> {
     const requestedModel = String(modelParams?.model || 'gemini-2.5-flash').replace(/^models\//, '');
     const { payload, hasBinaryInlineData, extractedPromptText } = this.normalizeRequestPayload(requestInput, modelParams);
-    const candidateKeys = customKey ? [this.sanitizeKey(customKey)] : this.getCandidateApiKeys();
+    const sanitizedCustom = customKey && customKey !== SERVER_MANAGED_PROXY_TOKEN ? this.sanitizeKey(customKey) : '';
+    const candidateKeys = (sanitizedCustom ? [sanitizedCustom] : this.getCandidateApiKeys()).filter(
+      (k) => k && k !== SERVER_MANAGED_PROXY_TOKEN
+    );
     const candidateModels = Array.from(new Set([requestedModel, 'gemini-2.5-flash', 'gemini-2.0-flash']));
 
     let lastError: any = null;
+    const engineUrl = (import.meta.env.VITE_WHATSAPP_ENGINE_URL || 'https://owckk0k8w8soo40w40owc4ss.69.62.92.212.sslip.io').replace(/\/$/, '').trim();
+    let tenantId = '8b1e427b-2321-4ea7-9d7e-90f7d5cbad21';
+    try {
+      const storeState = useChatStore.getState();
+      tenantId = storeState.tenantInfo?.id || (storeState as any).tenantId || localStorage.getItem('current_tenant_id') || tenantId;
+    } catch (_) {}
 
-    // CAMADA 1: Requisição Direta CORS-Simple (text/plain;charset=UTF-8 + ?key=...)
-    // Elimina o preflight OPTIONS no navegador e remove o cabeçalho x-goog-api-client bloqueado por extensões/AdBlock
+    // CAMADA 1: Proxy Oficial do Motor Backend (IP Restrito e Autenticado no Google Cloud)
+    try {
+      const backendProxyRes = await fetch(`${engineUrl}/api/v1/knowledge/gemini-proxy`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-id': tenantId
+        },
+        body: JSON.stringify({
+          model: requestedModel,
+          payload,
+          apiKey: sanitizedCustom || undefined
+        })
+      });
+
+      const contentType = backendProxyRes.headers.get('content-type') || '';
+      if (backendProxyRes.ok && contentType.includes('application/json')) {
+        const backendData = await backendProxyRes.json().catch(() => ({}));
+        if (!backendData.error && backendData.candidates) {
+          const text = backendData.candidates?.[0]?.content?.parts?.map((p: any) => p.text || '').join('') || '';
+          const responseObj = {
+            text: () => text,
+            candidates: backendData.candidates
+          };
+          return {
+            response: Object.assign(Promise.resolve(responseObj), responseObj)
+          };
+        }
+      }
+    } catch (err: any) {
+      lastError = err;
+    }
+
+    // CAMADA 2: Proxy Server-Side Same-Origin (/api/gemini na Vercel ou Middleware Vite Dev)
+    try {
+      const proxyRes = await fetch('/api/gemini', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-id': tenantId
+        },
+        body: JSON.stringify({
+          model: requestedModel,
+          payload,
+          tenantId,
+          apiKey: sanitizedCustom || undefined
+        })
+      });
+
+      const contentType = proxyRes.headers.get('content-type') || '';
+      if (proxyRes.ok && contentType.includes('application/json')) {
+        const proxyData = await proxyRes.json().catch(() => ({}));
+        if (!proxyData.error && proxyData.candidates) {
+          const text = proxyData.candidates?.[0]?.content?.parts?.map((p: any) => p.text || '').join('') || '';
+          const responseObj = {
+            text: () => text,
+            candidates: proxyData.candidates
+          };
+          return {
+            response: Object.assign(Promise.resolve(responseObj), responseObj)
+          };
+        }
+      }
+    } catch (_) {
+      // Continua para Camada 3
+    }
+
+    // CAMADA 3: Requisição Direta apenas se o usuário tiver configurado uma chave própria explícita sem restrição de IP de servidor
     for (const key of candidateKeys) {
       if (!key) continue;
       for (const modelName of candidateModels) {
@@ -256,15 +327,13 @@ class GeminiService {
             data?.error?.status === 'PERMISSION_DENIED' ||
             (response.status === 400 && /api_key|key not valid|invalid authentication/i.test(errMsg))
           ) {
-            if (!customKey) {
+            if (!sanitizedCustom) {
               this.markKeyAsFailed(key, `${response.status}: ${errMsg}`);
             }
-            break; // Tenta a próxima chave candidata
+            break;
           }
         } catch (err: any) {
           lastError = err;
-          // Se o navegador bloqueou o domínio generativelanguage.googleapis.com (Failed to fetch),
-          // não adianta repetir vários modelos no navegador; avança para o Proxy Server-Side (Camadas 2 e 3).
           if (err?.message === 'Failed to fetch' || err?.name === 'TypeError') {
             break;
           }
@@ -275,40 +344,8 @@ class GeminiService {
       }
     }
 
-    // CAMADA 2: Proxy Server-Side Same-Origin (/api/gemini na Vercel ou Middleware Vite Dev)
-    try {
-      const proxyRes = await fetch('/api/gemini', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          model: requestedModel,
-          payload,
-          apiKey: customKey || this.getApiKey()
-        })
-      });
-
-      const contentType = proxyRes.headers.get('content-type') || '';
-      if (proxyRes.ok && contentType.includes('application/json')) {
-        const proxyData = await proxyRes.json().catch(() => ({}));
-        if (!proxyData.error && proxyData.candidates) {
-          const text = proxyData.candidates?.[0]?.content?.parts?.map((p: any) => p.text || '').join('') || '';
-          const responseObj = {
-            text: () => text,
-            candidates: proxyData.candidates
-          };
-          return {
-            response: Object.assign(Promise.resolve(responseObj), responseObj)
-          };
-        }
-      }
-    } catch (_) {
-      // Continua para Camada 3
-    }
-
-    // CAMADA 3: Proxy de Contingência via Backend Node.js em Produção (/api/v1/knowledge/corrections/helper)
-    if (!hasBinaryInlineData && extractedPromptText && !customKey) {
+    // CAMADA 4: Proxy de Contingência via Backend Node.js em Produção (/api/v1/knowledge/corrections/helper)
+    if (!hasBinaryInlineData && extractedPromptText && !sanitizedCustom) {
       const helperText = await this.callBackendCorrectionsHelper({
         action: 'suggest',
         user_query: `${extractedPromptText}\n\n[DIRETRIZ OBRIGATÓRIA: Execute estritamente a instrução acima e retorne UNICAMENTE o resultado solicitado, respeitando o formato pedido (texto limpo ou JSON cru sem blocos markdown).]`,

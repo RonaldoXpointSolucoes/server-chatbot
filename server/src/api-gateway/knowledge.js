@@ -1247,4 +1247,60 @@ router.post('/train-multimodal/save-rag', async (req, res) => {
     }
 });
 
+// ==========================================
+// PROXY SEGURO GEMINI (SERVER-SIDE COM RATE LIMIT E RESTRIÇÃO DE IP)
+// ==========================================
+const geminiProxyIpCounters = new Map();
+const GEMINI_PROXY_WINDOW_MS = 60 * 1000;
+const GEMINI_PROXY_MAX_PER_MIN = 25;
+
+router.post('/gemini-proxy', async (req, res) => {
+    try {
+        const tenant_id = req.headers['x-tenant-id'] || req.body?.tenantId;
+        if (!tenant_id) {
+            return res.status(403).json({ error: { message: 'x-tenant-id obrigatório para uso do motor Gemini.' } });
+        }
+
+        const callerIp = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.ip || 'unknown';
+        const now = Date.now();
+        const rateKey = `${callerIp}:${tenant_id}`;
+        const entry = geminiProxyIpCounters.get(rateKey);
+        if (!entry || now - entry.start > GEMINI_PROXY_WINDOW_MS) {
+            geminiProxyIpCounters.set(rateKey, { start: now, count: 1 });
+        } else {
+            entry.count += 1;
+            if (entry.count > GEMINI_PROXY_MAX_PER_MIN) {
+                return res.status(429).json({ error: { message: 'Limite de segurança de requisições por minuto atingido.' } });
+            }
+        }
+
+        const rawKey = req.body?.apiKey || process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
+        const apiKey = rawKey ? String(rawKey).replace(/['"\s\r\n]+/g, '').trim() : '';
+        if (!apiKey || apiKey.includes('SERVER_MANAGED')) {
+            return res.status(503).json({ error: { message: 'Nenhuma chave Gemini ativa configurada no servidor.' } });
+        }
+
+        const requestedModel = String(req.body?.model || 'gemini-2.5-flash').replace(/^models\//, '');
+        // Bloqueia modelos caros (Pro/Ultra) em chamadas genéricas para proteção de orçamento
+        const safeModel = requestedModel.includes('flash') ? requestedModel : 'gemini-2.5-flash';
+        const payload = req.body?.payload;
+        if (!payload || !Array.isArray(payload.contents)) {
+            return res.status(400).json({ error: { message: 'Payload contents inválido.' } });
+        }
+
+        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${safeModel}:generateContent?key=${encodeURIComponent(apiKey)}`;
+        const upstreamRes = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        const data = await upstreamRes.json().catch(() => ({}));
+        return res.status(upstreamRes.status).json(data);
+    } catch (e) {
+        console.error('[GeminiProxy API] Erro:', e.message);
+        return res.status(500).json({ error: { message: e.message } });
+    }
+});
+
 export default router;

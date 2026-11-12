@@ -939,7 +939,7 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                         .select('id, raw_payload')
                         .eq('whatsapp_message_id', pinKey.id)
                         .maybeSingle()
-                        .catch(() => ({ data: null }));
+                        .then(r => r, () => ({ data: null }));
                     if (existingMsg) {
                         const updatedPayload = {
                             ...(existingMsg.raw_payload || {}),
@@ -947,7 +947,7 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                             pin_time: isPinned ? safePinTime : null,
                             pinned_at: isPinned ? new Date().toISOString() : null
                         };
-                        await supabase.from('messages').update({ raw_payload: updatedPayload }).eq('id', existingMsg.id).catch(() => {});
+                        await supabase.from('messages').update({ raw_payload: updatedPayload }).eq('id', existingMsg.id).then(r => r, () => {});
                     }
                 }
                 return res.json({ ok: true, result, pinned: isPinned });
@@ -967,7 +967,7 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                         .select('gastrofood_url, menu_url, display_name')
                         .eq('id', instanceId)
                         .maybeSingle()
-                        .catch(() => ({ data: null }));
+                        .then(r => r, () => ({ data: null }));
                     finalUrl = instData?.menu_url || instData?.gastrofood_url || 'https://cardapiodigital.io';
                 }
                 const finalBody = text || `🍔 *CARDÁPIO DIGITAL OFICIAL*\n\nFaça seu pedido de forma rápida e prática pelo nosso link abaixo:\n👉 ${finalUrl}`;
@@ -1107,7 +1107,7 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                         .eq('ativo', true)
                         .order('nome', { ascending: true })
                         .limit(safeLimit)
-                        .catch(() => ({ data: [] }));
+                        .then(r => r, () => ({ data: [] }));
 
                     if (!dbProducts || dbProducts.length === 0) {
                         try {
@@ -1121,7 +1121,7 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                                     .eq('ativo', true)
                                     .order('nome', { ascending: true })
                                     .limit(safeLimit)
-                                    .catch(() => ({ data: [] }));
+                                    .then(r => r, () => ({ data: [] }));
                                 dbProducts = retryRes.data || [];
                             }
                         } catch (syncErr) {
@@ -1275,7 +1275,7 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                         .select('*')
                         .eq('tenant_id', req.tenantId)
                         .limit(50)
-                        .catch(() => ({ data: [] }));
+                        .then(r => r, () => ({ data: [] }));
                     replies = dbReplies || [];
                 }
                 let synced = 0;
@@ -1315,7 +1315,7 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                         .eq('tenant_id', req.tenantId)
                         .order('position', { ascending: true })
                         .limit(20)
-                        .catch(() => ({ data: [] }));
+                        .then(r => r, () => ({ data: [] }));
                     columns = stages && stages.length > 0 ? stages : [
                         { name: 'Novo Lead', color: 1 },
                         { name: 'Em Atendimento', color: 2 },
@@ -1375,7 +1375,7 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                     .or(`id.eq.${messageId || targetWaId},whatsapp_message_id.eq.${targetWaId}`)
                     .limit(1)
                     .maybeSingle()
-                    .catch(() => ({ data: null }));
+                    .then(r => r, () => ({ data: null }));
 
                 if (existingMsg) {
                     const updatedPayload = {
@@ -1383,7 +1383,7 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                         starred: Boolean(star),
                         starred_at: star ? new Date().toISOString() : null
                     };
-                    await supabase.from('messages').update({ raw_payload: updatedPayload }).eq('id', existingMsg.id).catch(() => {});
+                    await supabase.from('messages').update({ raw_payload: updatedPayload }).eq('id', existingMsg.id).then(r => r, () => {});
                 }
                 return res.json({ ok: true, starred: Boolean(star) });
             }
@@ -1428,7 +1428,7 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                                 .eq('phone', cleanPhone)
                                 .limit(1)
                                 .maybeSingle()
-                                .catch(() => ({ data: null }));
+                                .then(r => r, () => ({ data: null }));
                             if (contactRow?.id) {
                                 const { data: lastConv } = await supabase
                                     .from('conversations')
@@ -1438,7 +1438,7 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                                     .order('updated_at', { ascending: false })
                                     .limit(1)
                                     .maybeSingle()
-                                    .catch(() => ({ data: null }));
+                                    .then(r => r, () => ({ data: null }));
                                 if (lastConv?.id) {
                                     const { data: lastMsgRow } = await supabase
                                         .from('messages')
@@ -1448,7 +1448,7 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                                         .order('timestamp', { ascending: false })
                                         .limit(1)
                                         .maybeSingle()
-                                        .catch(() => ({ data: null }));
+                                        .then(r => r, () => ({ data: null }));
                                     if (lastMsgRow?.whatsapp_message_id) {
                                         fallbackLastMsg = {
                                             key: {
@@ -1570,7 +1570,7 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                     .select('reject_calls, call_reject_message')
                     .eq('id', instanceId)
                     .maybeSingle()
-                    .catch(() => ({ data: null }));
+                    .then(r => r, () => ({ data: null }));
                 return res.json({
                     ok: true,
                     rejectCalls: Boolean(instRow?.reject_calls),
@@ -1588,7 +1588,7 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                         updated_at: new Date().toISOString()
                     })
                     .eq('id', instanceId)
-                    .catch(() => {});
+                    .then(r => r, () => {});
                 if (!sessionManager.callSettingsCache) sessionManager.callSettingsCache = new Map();
                 sessionManager.callSettingsCache.set(instanceId, {
                     rejectCalls: Boolean(rejectCalls),
@@ -1604,7 +1604,7 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                 const myJid = sock.user?.id ? `${sock.user.id.split(':')[0].split('@')[0]}@s.whatsapp.net` : null;
                 if (name && typeof sock.updateProfileName === 'function') {
                     await withBaileysTimeout(sock.updateProfileName(String(name).trim()), 10000, 'UPDATE_PROFILE_NAME');
-                    await supabase.from('whatsapp_instances').update({ display_name: String(name).trim() }).eq('id', instanceId).catch(() => {});
+                    await supabase.from('whatsapp_instances').update({ display_name: String(name).trim() }).eq('id', instanceId).then(r => r, () => {});
                 }
                 if (status !== undefined && typeof sock.updateProfileStatus === 'function') {
                     await withBaileysTimeout(sock.updateProfileStatus(String(status).trim()), 10000, 'UPDATE_PROFILE_STATUS');

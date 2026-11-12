@@ -1,5 +1,0 @@
-{
-  "base_directory": "/",
-  "build_command": "npm run build",
-  "install_command": "npm install"
-}
