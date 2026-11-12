@@ -18,11 +18,13 @@ class LocalEmbeddingsPipeline {
 class AutoRagTrainer {
     constructor() {
         this.genAI = null;
+        this.keySuspended = false;
     }
 
     init() {
+        if (this.keySuspended) return;
         const rawKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
-        const apiKey = rawKey ? rawKey.replace(/^['"]|['"]$/g, '') : '';
+        const apiKey = rawKey ? rawKey.replace(/^['"]|['"]$/g, '').trim() : '';
         if (apiKey && !this.genAI) {
             this.genAI = new GoogleGenerativeAI(apiKey);
         }
@@ -34,8 +36,8 @@ class AutoRagTrainer {
     async trainFromResolvedConversation(tenantId, conversationId) {
         try {
             this.init();
-            if (!this.genAI) {
-                console.warn("[AutoRagTrainer] GEMINI_API_KEY não configurada. Abortando treinamento.");
+            if (!this.genAI || this.keySuspended) {
+                console.info("[AutoRagTrainer] GEMINI_API_KEY ausente ou em contingência. Treinamento ignorado.");
                 return;
             }
 
@@ -176,6 +178,13 @@ Retorne os fatos extraídos um por linha, iniciando diretamente pelo fato sem nu
             console.log(`[AutoRagTrainer] Treinamento concluído com sucesso para chat: ${conversationId}`);
 
         } catch (err) {
+            const errMsg = String(err?.message || err || '');
+            if (errMsg.includes('401') || errMsg.includes('403') || errMsg.includes('ACCESS_TOKEN_TYPE_UNSUPPORTED') || errMsg.includes('UNAUTHENTICATED') || errMsg.includes('API key not valid')) {
+                this.keySuspended = true;
+                this.genAI = null;
+                console.info('[AutoRagTrainer] Chave Gemini suspensa por falha 401/403. Auto-treinamento em modo contingência.');
+                return;
+            }
             console.error('[AutoRagTrainer] Falha crítica no pipeline de auto-treinamento:', err);
         }
     }

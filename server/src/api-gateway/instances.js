@@ -1649,7 +1649,7 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
             }
         } catch (macroErr) {
             const safeMsg = macroErr?.message || (typeof macroErr === 'string' ? macroErr : 'Falha na execução da macro Baileys');
-            console.warn(`[API Gateway / Invoke] Aviso na macro "${method}" para instância ${instanceId}: ${safeMsg}`);
+            console.log(`[API Gateway / Invoke] Aviso controlado na macro "${method}" para instância ${instanceId}: ${safeMsg}`);
             return res.status(200).json({ ok: false, error: safeMsg, method });
         }
 

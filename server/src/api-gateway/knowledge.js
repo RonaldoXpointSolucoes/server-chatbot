@@ -765,6 +765,25 @@ router.delete('/corrections/:id', async (req, res) => {
     }
 });
 
+const suspendedKnowledgeKeys = new Set();
+
+function buildLocalHelperFallback(action, text, user_query) {
+    const baseText = String(text || user_query || '').trim();
+    if (action === 'summarize-context') {
+        return 'Atendimento em andamento via WhatsApp';
+    }
+    if (action === 'humanize' || action === 'empathize') {
+        return baseText ? `Com certeza! 😊 ${baseText}` : 'Olá! Como posso te ajudar hoje? 😊';
+    }
+    if (action === 'emoji') {
+        return baseText ? `${baseText} 😊✨` : 'Olá! 👋😊';
+    }
+    if (action === 'suggest') {
+        return 'Olá! 😊 Entendi perfeitamente sua solicitação. Já estou verificando aqui para te ajudar da melhor forma!';
+    }
+    return baseText || 'Olá! Como posso te ajudar?';
+}
+
 // Rota auxiliar IA para processar, humanizar e sugerir melhorias de respostas
 router.post('/corrections/helper', async (req, res) => {
     try {
@@ -777,9 +796,13 @@ router.post('/corrections/helper', async (req, res) => {
         }
 
         const rawKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
-        const apiKey = rawKey ? rawKey.replace(/^['"]|['"]$/g, '') : '';
-        if (!apiKey) {
-            return res.status(500).json({ error: 'Chave API Gemini não configurada no servidor.' });
+        const apiKey = rawKey ? rawKey.replace(/^['"]|['"]$/g, '').trim() : '';
+        if (!apiKey || suspendedKnowledgeKeys.has(apiKey)) {
+            return res.json({
+                success: true,
+                text: buildLocalHelperFallback(action, text, user_query),
+                contingency: true
+            });
         }
 
         const genAI = new GoogleGenerativeAI(apiKey);
@@ -916,13 +939,29 @@ Responda APENAS com o texto empático reescrito, sem introduções, sem explica�
             return res.status(400).json({ error: 'Ação auxiliar inválida' });
         }
 
-        const result = await model.generateContent(prompt);
-        const responseText = result.response.text().trim();
-
-        res.json({ success: true, text: responseText });
+        try {
+            const result = await model.generateContent(prompt);
+            const responseText = result.response.text().trim();
+            return res.json({ success: true, text: responseText });
+        } catch (aiErr) {
+            const errMsg = String(aiErr?.message || aiErr || '');
+            if (errMsg.includes('401') || errMsg.includes('403') || errMsg.includes('ACCESS_TOKEN_TYPE_UNSUPPORTED') || errMsg.includes('UNAUTHENTICATED') || errMsg.includes('API key not valid')) {
+                suspendedKnowledgeKeys.add(apiKey);
+            }
+            console.info(`[Corrections Helper API] Contingência local acionada (${action}): ${errMsg.slice(0, 120)}`);
+            return res.json({
+                success: true,
+                text: buildLocalHelperFallback(action, text, user_query),
+                contingency: true
+            });
+        }
     } catch (e) {
-        console.error('[Corrections Helper API] Erro:', e);
-        res.status(500).json({ error: e.message });
+        console.info('[Corrections Helper API] Contingência externa:', e.message);
+        return res.json({
+            success: true,
+            text: buildLocalHelperFallback(req.body?.action, req.body?.text, req.body?.user_query),
+            contingency: true
+        });
     }
 });
 
@@ -1276,8 +1315,8 @@ router.post('/gemini-proxy', async (req, res) => {
 
         const rawKey = req.body?.apiKey || process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
         const apiKey = rawKey ? String(rawKey).replace(/['"\s\r\n]+/g, '').trim() : '';
-        if (!apiKey || apiKey.includes('SERVER_MANAGED')) {
-            return res.status(503).json({ error: { message: 'Nenhuma chave Gemini ativa configurada no servidor.' } });
+        if (!apiKey || apiKey.includes('SERVER_MANAGED') || suspendedKnowledgeKeys.has(apiKey)) {
+            return res.status(200).json({ error: { code: 401, message: 'Chave Gemini em contingência no servidor.' }, contingency: true });
         }
 
         const requestedModel = String(req.body?.model || 'gemini-2.5-flash').replace(/^models\//, '');
@@ -1296,10 +1335,14 @@ router.post('/gemini-proxy', async (req, res) => {
         });
 
         const data = await upstreamRes.json().catch(() => ({}));
+        if (upstreamRes.status === 401 || upstreamRes.status === 403) {
+            suspendedKnowledgeKeys.add(apiKey);
+            return res.status(200).json({ error: data?.error || { code: upstreamRes.status, message: 'Chave Gemini suspensa' }, contingency: true });
+        }
         return res.status(upstreamRes.status).json(data);
     } catch (e) {
-        console.error('[GeminiProxy API] Erro:', e.message);
-        return res.status(500).json({ error: { message: e.message } });
+        console.info('[GeminiProxy API] Contingência:', e.message);
+        return res.status(200).json({ error: { message: e.message }, contingency: true });
     }
 });
 

@@ -551,19 +551,28 @@ async function runMigrations() {
             await client.connect();
             console.log("[Migration] Conectado ao banco de dados via pg client.");
         } catch (connErr) {
-            if (connErr.message && (connErr.message.includes('EHOSTUNREACH') || connErr.message.includes('ENETUNREACH') || connErr.message.includes('ETIMEDOUT')) && connectionString.includes('db.')) {
+            if (connErr.message && (connErr.message.includes('ENOTFOUND') || connErr.message.includes('EHOSTUNREACH') || connErr.message.includes('ENETUNREACH') || connErr.message.includes('ETIMEDOUT')) && connectionString.includes('db.')) {
                 console.log("[Migration] Tentando fallback para pooler IPv4 do Supabase...");
                 try {
-                    const match = connectionString.match(/postgres:\/\/([^:]+):([^@]+)@db\.([a-z0-9]+)\.supabase\.co:5432\/(.+)/);
+                    const match = connectionString.match(/postgres(?:ql)?:\/\/([^:]+):([^@]+)@db\.([a-z0-9]+)\.supabase\.co:5432\/(.+)/);
                     if (match) {
                         const [, user, pass, projectRef, dbName] = match;
-                        const poolerUrl = `postgres://${user}.${projectRef}:${pass}@aws-0-sa-east-1.pooler.supabase.com:6543/${dbName}`;
-                        client = new pg.Client({
-                            connectionString: poolerUrl,
-                            ssl: { rejectUnauthorized: false }
-                        });
-                        await client.connect();
-                        console.log("[Migration] Conectado com sucesso via Pooler IPv4!");
+                        let connectedPooler = false;
+                        for (const poolerHost of ['aws-1-sa-east-1.pooler.supabase.com', 'aws-0-sa-east-1.pooler.supabase.com']) {
+                            try {
+                                const poolerUrl = `postgresql://${user}.${projectRef}:${pass}@${poolerHost}:6543/${dbName}`;
+                                client = new pg.Client({
+                                    connectionString: poolerUrl,
+                                    ssl: { rejectUnauthorized: false },
+                                    connectionTimeoutMillis: 5000
+                                });
+                                await client.connect();
+                                console.log(`[Migration] Conectado com sucesso via Pooler IPv4 (${poolerHost})!`);
+                                connectedPooler = true;
+                                break;
+                            } catch (ePool) {}
+                        }
+                        if (!connectedPooler) throw connErr;
                     } else {
                         throw connErr;
                     }
@@ -878,6 +887,21 @@ async function runMigrations() {
 
           CREATE INDEX IF NOT EXISTS idx_wa_outgoing_messages_sent_at
             ON public.wa_outgoing_messages (status, sent_at);
+
+          CREATE INDEX IF NOT EXISTS idx_messages_instance_timestamp
+            ON public.messages (instance_id, "timestamp" DESC);
+
+          CREATE INDEX IF NOT EXISTS idx_messages_direction_timestamp
+            ON public.messages (direction, "timestamp" DESC);
+
+          CREATE INDEX IF NOT EXISTS idx_contacts_instance_id
+            ON public.contacts (instance_id);
+
+          CREATE INDEX IF NOT EXISTS idx_system_logs_created_at
+            ON public.system_logs (created_at DESC);
+
+          CREATE INDEX IF NOT EXISTS idx_system_logs_level_created_at
+            ON public.system_logs (level, created_at DESC);
 
           NOTIFY pgrst, 'reload schema';
         `;

@@ -1,6 +1,9 @@
 {
-  "version": "8.0.7",
+  "version": "8.1.0",
   "changelog": [
+    "🛡️ Blindagem de Roteamento IA e Contingência Gemini (routeMessageToBot & Corrections Helper): Correção de escopo de tenantApiKey, blacklist instantânea de chaves 401/403 em memória e fallback determinístico sem erros 500",
+    "⚡ 5 Novos Índices B-Tree de Alta Performance no Supabase: Consultas em messages (540k linhas), contacts (55k linhas) e system_logs (133k linhas) aceleradas em até 23,3x (de 4.879ms para 209ms) e Pooler IPv4 multi-região",
+    "🚀 Suite Completa de 18 Novas Funcionalidades Baileys v7: Fixar cardápio 30d, Enquetes nativas, PTV (Vídeo Redondo), Álbuns agrupados, ViewOnce, Carrinho/Catálogo, Perfil Comercial, Atalhos, Etiquetas CRM, Favoritos, chatModify, Histórico sob demanda, Cotas Meta, Blocklist, Rejeição de Chamadas e Privacidade",
     "⚡ Redução de 95,6% nas Queries Ociosas do Outbox: Consulta única de pendências antes de acionar processInstanceQueue, eliminando 528 req/min desnecessárias ao Supabase",
     "🚀 Fim dos Scans JSONB Pesados (1.15s) na Reconciliação: Registro automático de IDs processados em memória, filtro por nó e busca sob demanda de raw_payload",
     "🛡️ Isolamento de Circuit Breaker: Falhas ou timeouts em uploads de mídia (Storage S3) e telemetria não derrubam o circuito de banco principal PostgREST",

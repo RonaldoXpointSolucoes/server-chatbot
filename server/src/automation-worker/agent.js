@@ -87,7 +87,7 @@ function blacklistGeminiKey(key, reason = 'Falha 401/403 ou credenciais inválid
     const lastWarn = geminiAuthWarnTracker.get(`bl_${clean.slice(0, 8)}`) || 0;
     if (now - lastWarn > 60 * 60 * 1000) {
       geminiAuthWarnTracker.set(`bl_${clean.slice(0, 8)}`, now);
-      console.warn(`[AutomationWorker] Chave de API Gemini (${clean.slice(0, 8)}...) suspensa temporariamente: ${reason}. Ativando contingência e fallback global.`);
+      console.info(`[AutomationWorker] Chave de API Gemini (${clean.slice(0, 8)}...) suspensa temporariamente: ${reason}. Ativando contingência e fallback global.`);
     }
   }
 }
@@ -132,7 +132,7 @@ async function callWithGeminiRetry(fn, operationName = 'Gemini Operation', maxRe
         const lastWarn = geminiAuthWarnTracker.get(operationName) || 0;
         if (now - lastWarn > 60 * 60 * 1000) {
           geminiAuthWarnTracker.set(operationName, now);
-          console.warn(`[AutomationWorker] Falha de autenticação/permissão/modelo na API Gemini em "${operationName}": ${errMsg.slice(0, 160)}`);
+          console.info(`[AutomationWorker] Contingência de autenticação/modelo na API Gemini em "${operationName}": ${errMsg.slice(0, 160)}`);
         }
         throw err;
       }
@@ -1439,7 +1439,9 @@ class AutomationWorker {
 
         if (!this.genAICache.has(keyToUse)) {
             try {
-                this.genAICache.set(keyToUse, new GoogleGenerativeAI(keyToUse));
+                const inst = new GoogleGenerativeAI(keyToUse);
+                inst._apiKey = keyToUse;
+                this.genAICache.set(keyToUse, inst);
             } catch (err) {
                 console.error('[AutomationWorker] Falha ao instanciar GoogleGenerativeAI com a chave fornecida:', err.message);
                 return null;
@@ -1899,8 +1901,11 @@ class AutomationWorker {
         }
         if (candidates.length === 1) return candidates[0];
 
+        let tenantApiKey = null;
+        let activeGenAI = null;
+        let prompt = '';
+
         try {
-            let tenantApiKey = null;
             if (tenantId) {
                 try {
                     const { data: comp } = await supabase.from('companies').select('settings').eq('id', tenantId).maybeSingle();
@@ -1908,7 +1913,7 @@ class AutomationWorker {
                 } catch (eComp) {}
             }
 
-            const activeGenAI = this.getGenAI(tenantApiKey) || this.genAI;
+            activeGenAI = this.getGenAI(tenantApiKey);
             if (!activeGenAI) {
                 const now = Date.now();
                 const lastWarn = botRouterWarnTracker.get(`no_gemini_${tenantId || 'global'}`) || 0;
@@ -1929,7 +1934,7 @@ class AutomationWorker {
                 }
             }
 
-            const prompt = `Você é o Orquestrador de atendimento inteligente do ecossistema de robôs. Analise a mensagem atual do cliente e o histórico recente da conversa para decidir qual dos seguintes agentes especialistas é o mais adequado para responder ao cliente com base em seus nomes e descrições.
+            prompt = `Você é o Orquestrador de atendimento inteligente do ecossistema de robôs. Analise a mensagem atual do cliente e o histórico recente da conversa para decidir qual dos seguintes agentes especialistas é o mais adequado para responder ao cliente com base em seus nomes e descrições.
 
 Agentes especialistas disponíveis para responder:
 ${candidates.map(b => `- ID: "${b.id}" | Nome: "${b.name}" | Descrição: "${b.description || 'Sem descrição.'}"`).join('\n')}
@@ -1962,12 +1967,17 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
             const errMsg = err?.message || String(err);
             const isAuthError = errMsg.includes('401') || errMsg.includes('Unauthorized') || errMsg.includes('ACCESS_TOKEN_TYPE_UNSUPPORTED') || errMsg.includes('UNAUTHENTICATED') || errMsg.includes('403') || errMsg.includes('PERMISSION_DENIED');
             
-            if (isAuthError && tenantApiKey) {
-                blacklistGeminiKey(tenantApiKey, errMsg.slice(0, 100));
-                // Tenta re-executar o roteamento com a chave global se disponível
-                if (this.genAI && this.genAI !== activeGenAI) {
+            if (isAuthError) {
+                const usedKey = activeGenAI?._apiKey || tenantApiKey || process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+                if (usedKey) blacklistGeminiKey(usedKey, errMsg.slice(0, 100));
+                if (tenantApiKey) blacklistGeminiKey(tenantApiKey, errMsg.slice(0, 100));
+                this.genAI = this.getGenAI();
+
+                // Tenta re-executar o roteamento com a chave global se disponível e diferente da que falhou
+                const fallbackGenAI = this.getGenAI();
+                if (fallbackGenAI && fallbackGenAI !== activeGenAI && prompt) {
                     try {
-                        const fallbackModel = this.genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+                        const fallbackModel = fallbackGenAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
                         const fallbackResult = await callWithGeminiRetry(() => fallbackModel.generateContent(prompt), 'routeMessageToBot (fallback global)');
                         const fallbackText = fallbackResult.response.text().trim();
                         const fallbackBot = candidates.find(b => fallbackText.includes(b.id) || b.id === fallbackText);
@@ -1976,19 +1986,20 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                             return fallbackBot;
                         }
                     } catch (eFallback) {
-                        // continua para o fallback de primeiro especialista
+                        if (fallbackGenAI?._apiKey) blacklistGeminiKey(fallbackGenAI._apiKey, String(eFallback?.message || '').slice(0, 100));
+                        this.genAI = this.getGenAI();
                     }
                 }
             }
 
             if (errMsg.includes('PROHIBITED_CONTENT')) {
-                console.warn(`[BotRouter] Roteamento inteligente bloqueado pela API do Gemini devido a conteúdo proibido (PROHIBITED_CONTENT). Mensagem do cliente: "${textMessage}". Usando fallback do primeiro especialista.`);
+                console.info(`[BotRouter] Roteamento inteligente bloqueado pela API do Gemini devido a conteúdo proibido (PROHIBITED_CONTENT). Mensagem do cliente: "${textMessage}". Usando fallback do primeiro especialista.`);
             } else {
                 const now = Date.now();
                 const lastLog = botRouterWarnTracker.get(`err_${tenantId || 'global'}`) || 0;
                 if (now - lastLog > 60 * 60 * 1000) {
                     botRouterWarnTracker.set(`err_${tenantId || 'global'}`, now);
-                    console.warn(`[BotRouter] Roteamento inteligente em contingência para o tenant ${tenantId || 'global'}: ${errMsg.slice(0, 140)}. Utilizando especialista padrão.`);
+                    console.info(`[BotRouter] Roteamento inteligente em contingência para o tenant ${tenantId || 'global'}: ${errMsg.slice(0, 140)}. Utilizando especialista padrão.`);
                 }
             }
             return candidates[0];
@@ -2365,7 +2376,7 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
  
             // Valida se há instância ativa do Google Generative AI (chave personalizada da empresa ou chave global do servidor)
             const tenantApiKey = companySettings?.gemini_api_key;
-            const activeGenAI = this.getGenAI(tenantApiKey) || this.genAI;
+            const activeGenAI = this.getGenAI(tenantApiKey);
             if (!activeGenAI) {
                 const now = Date.now();
                 const lastWarn = AutomationWorker.noGeminiWarnTracker.get(tenantId) || 0;
@@ -2454,17 +2465,18 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                 console.error('[AutomationWorker] Erro ao buscar correções de IA:', errCorr);
             }
 
-            // Determina se é a primeira mensagem do bot nesta conversa
+            // Determina se é a primeira mensagem do bot nesta conversa (usando LIMIT 1 em vez de count exact)
             let isFirstMessage = false;
             if (conversationId) {
                 try {
-                    const { count } = await supabase
+                    const { data: firstOut } = await supabase
                         .from('messages')
-                        .select('*', { count: 'exact', head: true })
+                        .select('id')
                         .eq('tenant_id', tenantId)
                         .eq('conversation_id', conversationId)
-                        .eq('direction', 'outbound');
-                    isFirstMessage = (count === 0);
+                        .eq('direction', 'outbound')
+                        .limit(1);
+                    isFirstMessage = (!firstOut || firstOut.length === 0);
                 } catch (errFirstMsg) {
                     console.error('[AutomationWorker] Erro ao verificar primeira mensagem:', errFirstMsg);
                 }
@@ -4138,16 +4150,18 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                         console.warn(`[AutomationWorker] O processamento da conversa ${conversationId} foi bloqueado pela API do Gemini devido a conteúdo proibido (PROHIBITED_CONTENT). Mensagem do cliente: "${textMessage}"`);
                         finalResponseText = "Desculpe, não posso responder a essa pergunta devido às diretrizes de segurança de conteúdo do sistema.";
                     } else if (errMsg.includes('401') || errMsg.includes('Unauthorized') || errMsg.includes('ACCESS_TOKEN_TYPE_UNSUPPORTED') || errMsg.includes('UNAUTHENTICATED') || errMsg.includes('API_KEY_INVALID') || errMsg.includes('API_KEY_SERVICE_BLOCKED') || errMsg.includes('API key not valid') || errMsg.includes('403') || errMsg.includes('PERMISSION_DENIED') || errMsg.includes('leaked')) {
-                        if (tenantApiKey) {
-                            blacklistGeminiKey(tenantApiKey, errMsg.slice(0, 100));
-                        }
+                        const usedKey = activeGenAI?._apiKey || tenantApiKey || process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+                        if (usedKey) blacklistGeminiKey(usedKey, errMsg.slice(0, 100));
+                        if (tenantApiKey) blacklistGeminiKey(tenantApiKey, errMsg.slice(0, 100));
+                        this.genAI = this.getGenAI();
                         const now = Date.now();
                         const lastWarn = geminiAuthWarnTracker.get(`auth_${tenantId}`) || 0;
                         if (now - lastWarn > 60 * 60 * 1000) {
                             geminiAuthWarnTracker.set(`auth_${tenantId}`, now);
-                            console.warn(`[AutomationWorker] ⚠️ Alerta de Autenticação/Chave Gemini para o tenant ${tenantId}: ${errMsg.slice(0, 140)}. Acionando contingência inteligente.`);
+                            console.info(`[AutomationWorker] Contingência de Autenticação/Chave Gemini para o tenant ${tenantId}: ${errMsg.slice(0, 140)}. Acionando contingência inteligente.`);
                         }
                         finalResponseText = await this.generateContingencyResponse({ textMessage, companySettings, companyName, conversationId, contactInfo, tenantId, isClosed, vars });
+                        keepLooping = false;
                     } else if (errMsg.includes('404') || errMsg.includes('NOT_FOUND') || errMsg.includes('is not found')) {
                         const now = Date.now();
                         const lastWarn = geminiAuthWarnTracker.get(`404_${modelName}`) || 0;
@@ -4198,7 +4212,7 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                         const historyForDraft = passedHistory || [];
                         const formattedHist = historyForDraft.map(h => `${h.role === 'model' ? 'Bot' : 'Cliente'}: ${h.parts[0].text}`).join('\n') + `\nCliente: ${textMessage}\nBot: ${finalResponseText}`;
 
-                        const draftGenAI = this.getGenAI(companySettings?.gemini_api_key) || this.genAI;
+                        const draftGenAI = this.getGenAI(companySettings?.gemini_api_key);
                         if (!draftGenAI) return;
 
                         const draftModel = draftGenAI.getGenerativeModel({ 
