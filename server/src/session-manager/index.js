@@ -1436,14 +1436,6 @@ class SessionManager {
                 const { connection, lastDisconnect } = update;
                 if (isRealAuthConnection) {
                     this.startWatchdog(tenantId, instanceId, sock);
-                    setTimeout(() => {
-                        try {
-                            if (this.sessions.get(instanceId)?.sock === sock && typeof sock.ev?.isBuffering === 'function' && sock.ev.isBuffering()) {
-                                console.warn(`[SessionManager] EventBuffer ainda em retenção 12s após conexão aberta em ${instanceId}. Executando flush preventivo...`);
-                                sock.ev.flush();
-                            }
-                        } catch (_) {}
-                    }, 12000);
                     
                     // Proteção contra duplicação de chip (mesmo número em múltiplas instâncias) e Auto-Migração de Histórico
                     const ownerJid = sock.user?.id;
@@ -3061,6 +3053,7 @@ class SessionManager {
 
     startWatchdog(tenantId, instanceId, sock) {
         this.clearWatchdog(instanceId);
+        let consecutiveBufferingTicks = 0;
         
         // Verifica a saúde real do WebSocket a cada 30 segundos sem desconectar instâncias ociosas legítimas
         const interval = setInterval(() => {
@@ -3085,16 +3078,23 @@ class SessionManager {
                 // Se está conectando, em handshake ou com timer ativo, não interrompe prematuramente
                 const isConnecting = ws.isConnecting || (rawState === 0) || this.connectingState.has(instanceId) || this.reconnectingTimers.has(instanceId);
                 if (isConnecting) {
+                    consecutiveBufferingTicks = 0;
                     return;
                 }
 
                 // Se o WebSocket estiver aberto ou a sessão estiver autenticada e operacional, está perfeitamente saudável.
-                // Garante também que o EventBuffer do Baileys não fique retendo eventos messages.upsert após conexão aberta.
+                // O Baileys possui auto-flush nativo de 100ms/30s; só atua se ficar retido continuamente por 2 ciclos (>60s).
                 if (ws.isOpen || isSocketOpen(activeSock)) {
                     try {
                         if (typeof activeSock.ev?.isBuffering === 'function' && activeSock.ev.isBuffering()) {
-                            console.warn(`[SessionManager/Watchdog] EventBuffer retido detectado na instância ${instanceId} com socket aberto. Forçando flush de eventos pendentes...`);
-                            activeSock.ev.flush();
+                            consecutiveBufferingTicks++;
+                            if (consecutiveBufferingTicks >= 2) {
+                                consecutiveBufferingTicks = 0;
+                                console.log(`[SessionManager/Watchdog] EventBuffer retido por >60s na instância ${instanceId}. Executando flush silencioso...`);
+                                activeSock.ev.flush();
+                            }
+                        } else {
+                            consecutiveBufferingTicks = 0;
                         }
                     } catch (_) {}
                     return;

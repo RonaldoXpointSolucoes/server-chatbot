@@ -1083,12 +1083,16 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
             if (method === 'getCatalog') {
                 const { jid, limit = 50 } = macroArg;
                 const safeLimit = Math.max(1, Math.min(100, Number(limit || 50)));
-                const catalog = await withBaileysTimeout(
-                    sock.getCatalog({ jid: jid || sock.user?.id, limit: safeLimit }),
-                    12000,
-                    'GET_CATALOG'
-                );
-                return res.json({ ok: true, result: catalog });
+                try {
+                    const catalog = await withBaileysTimeout(
+                        sock.getCatalog({ jid: jid || sock.user?.id, limit: safeLimit }),
+                        12000,
+                        'GET_CATALOG'
+                    );
+                    return res.json({ ok: true, result: catalog });
+                } catch (catErr) {
+                    return res.json({ ok: false, result: { products: [] }, error: catErr.message });
+                }
             }
 
             if (method === 'syncGastrofoodCatalog') {
@@ -1101,40 +1105,23 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                 sessionManager.activeCatalogSyncs.add(instanceId);
                 try {
                     const safeLimit = Math.max(1, Math.min(50, Number(macroArg.limit || 40)));
-                    // 1. Busca produtos já sincronizados do GastroFood na tabela cardapio_produtos (ou força sync se vazio)
-                    let { data: dbProducts } = await supabase
-                        .from('cardapio_produtos')
-                        .select('*')
-                        .eq('instance_id', instanceId)
-                        .eq('ativo', true)
-                        .order('nome', { ascending: true })
-                        .limit(safeLimit)
-                        .then(r => r, () => ({ data: [] }));
-
-                    if (!dbProducts || dbProducts.length === 0) {
-                        try {
-                            const { default: cardapioSync } = await import('../services/cardapioSync.js');
-                            if (cardapioSync && typeof cardapioSync.syncInstance === 'function') {
-                                await withBaileysTimeout(cardapioSync.syncInstance(instanceId), 15000, 'GASTROFOOD_SYNC');
-                                const retryRes = await supabase
-                                    .from('cardapio_produtos')
-                                    .select('*')
-                                    .eq('instance_id', instanceId)
-                                    .eq('ativo', true)
-                                    .order('nome', { ascending: true })
-                                    .limit(safeLimit)
-                                    .then(r => r, () => ({ data: [] }));
-                                dbProducts = retryRes.data || [];
-                            }
-                        } catch (syncErr) {
-                            console.warn('[Invoke/syncGastrofoodCatalog] Aviso ao acionar cardapioSync:', syncErr.message);
-                        }
-                    }
+                    const effectiveTenantId = req.tenantId;
+                    // 1. Busca produtos já sincronizados do GastroFood na tabela cardapio_produtos (escopo por tenant_id)
+                    let { data: dbProducts } = (effectiveTenantId && effectiveTenantId !== '00000000-0000-0000-0000-000000000000')
+                        ? await supabase
+                            .from('cardapio_produtos')
+                            .select('*')
+                            .eq('tenant_id', effectiveTenantId)
+                            .or('ativo.eq.true,ativo.is.null')
+                            .order('name', { ascending: true })
+                            .limit(safeLimit)
+                            .then(r => r, () => ({ data: [] }))
+                        : { data: [] };
 
                     if (!dbProducts || dbProducts.length === 0) {
                         return res.json({
                             ok: false,
-                            error: 'Nenhum produto ativo encontrado no cardápio desta instância. Verifique o token GastroFood na aba Integrações.'
+                            error: 'Nenhum produto ativo encontrado no cardápio desta empresa. Verifique o token GastroFood na aba Integrações.'
                         });
                     }
 
@@ -1147,7 +1134,7 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                         );
                         existingProducts = currentCat?.products || [];
                     } catch (catErr) {
-                        console.warn('[Invoke/syncGastrofoodCatalog] Aviso ao ler catálogo atual:', catErr.message);
+                        console.log('[Invoke/syncGastrofoodCatalog] Catálogo inicial indisponível ou vazio:', catErr.message);
                     }
 
                     const defaultImage = 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=600&q=80';
@@ -1157,10 +1144,11 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
 
                     for (const prod of dbProducts) {
                         try {
-                            const prodName = String(prod.nome || 'Produto').trim().slice(0, 100);
-                            const prodPrice = Math.max(100, Math.round(Number(prod.preco || 0) * 1000));
-                            const prodDesc = String(prod.descricao || prod.categoria || prodName).trim().slice(0, 500);
-                            const imgUrl = prod.imagem_url && String(prod.imagem_url).startsWith('http') ? prod.imagem_url : defaultImage;
+                            const prodName = String(prod.name || prod.nome || 'Produto').trim().slice(0, 100);
+                            const prodPrice = Math.max(100, Math.round(Number(prod.price ?? prod.preco ?? 0) * 1000));
+                            const prodDesc = String(prod.description || prod.descricao || prod.categoria || prodName).trim().slice(0, 500);
+                            const rawImg = prod.image || prod.imagem_url;
+                            const imgUrl = rawImg && String(rawImg).startsWith('http') ? rawImg : defaultImage;
                             const retailerId = String(prod.external_id || prod.id).slice(0, 50);
 
                             const existingMatch = existingProducts.find(
@@ -1187,7 +1175,7 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                             }
                         } catch (itemErr) {
                             failedCount++;
-                            console.warn(`[Invoke/syncGastrofoodCatalog] Falha ao sincronizar produto "${prod?.nome}":`, itemErr.message);
+                            console.log(`[Invoke/syncGastrofoodCatalog] Falha ao sincronizar produto "${prod?.name || prod?.nome}":`, itemErr.message);
                         }
                     }
 

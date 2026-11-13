@@ -1,6 +1,7 @@
 {
-  "version": "8.1.3",
+  "version": "8.1.4",
   "changelog": [
+    "🛡️ Refinamento do EventBuffer Watchdog & Sincronização de Catálogo GastroFood por Tenant: Eliminação de falsos alertas WARN em lotes transitórios do Baileys (atuação silenciosa apenas >60s) e correção de escopo tenant_id/colunas reais em cardapio_produtos",
     "🛡️ Blindagem Anti-Deadlock em Ingestão de Mensagens (EventProcessor & Supabase Fetch): Eliminação definitiva de congelamento perpétuo em getInstanceConfig/instanceConfigInFlight por timeout de body stream, auto-evicção >6s, watchdog de flushQueue e reconciliação automática multi-instância",
     "🛡️ Blindagem de Roteamento IA e Contingência Gemini (routeMessageToBot & Corrections Helper): Correção de escopo de tenantApiKey, blacklist instantânea de chaves 401/403 em memória e fallback determinístico sem erros 500",
     "⚡ 5 Novos Índices B-Tree de Alta Performance no Supabase: Consultas em messages (540k linhas), contacts (55k linhas) e system_logs (133k linhas) aceleradas em até 23,3x (de 4.879ms para 209ms) e Pooler IPv4 multi-região",
