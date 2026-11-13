@@ -1106,6 +1106,21 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                 try {
                     const safeLimit = Math.max(1, Math.min(50, Number(macroArg.limit || 40)));
                     const effectiveTenantId = req.tenantId;
+                    if (effectiveTenantId && effectiveTenantId !== '00000000-0000-0000-0000-000000000000') {
+                        const { data: compRow } = await supabase
+                            .from('companies')
+                            .select('settings')
+                            .eq('id', effectiveTenantId)
+                            .maybeSingle();
+                        const globalMenuLink = String(compRow?.settings?.link_cardapio || '').trim();
+                        if (!globalMenuLink) {
+                            return res.json({
+                                ok: false,
+                                error: 'Sincronização de cardápio desativada: preencha o Link do Cardápio Digital nas Variáveis Globais da Empresa.'
+                            });
+                        }
+                    }
+
                     // 1. Busca produtos já sincronizados do GastroFood na tabela cardapio_produtos (escopo por tenant_id)
                     let { data: dbProducts } = (effectiveTenantId && effectiveTenantId !== '00000000-0000-0000-0000-000000000000')
                         ? await supabase

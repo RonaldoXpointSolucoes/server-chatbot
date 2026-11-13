@@ -555,6 +555,17 @@ function extractGastrofoodProductsAndGroups(parsed) {
 async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) {
     return tenantStorage.run(tenantId, async () => {
         const now = Date.now();
+        const configuredMenuLink = String(companySettings?.link_cardapio || '').trim();
+        if (!configuredMenuLink) {
+            return {
+                produtos: [],
+                grupos: [],
+                adicionais: new Map(),
+                timestamp: now,
+                origem: 'sem_link_cardapio'
+            };
+        }
+
         const cacheKey = tenantId + '_' + (botSettings?.id || 'default');
         let cache = cardapioInMemoryCache.get(cacheKey);
         const previousValidCache = (cache && cache.produtos && cache.produtos.length > 0) ? cache : null;
@@ -1782,9 +1793,11 @@ class AutomationWorker {
                 for (const company of companies) {
                     const tenantId = company.id;
                     const companySettings = company.settings || {};
+                    const linkCardapio = String(companySettings.link_cardapio || '').trim();
                     const cardapioUrl = companySettings.cardapio_json_url;
                     
-                    if (!cardapioUrl) {
+                    // Regra Global: Sincronização de cardápio só deve ocorrer se existir Link do Cardápio Digital preenchido nas Variáveis Globais
+                    if (!linkCardapio || !cardapioUrl) {
                         continue;
                     }
 
