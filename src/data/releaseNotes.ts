@@ -712,6 +712,38 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.1.6',
+    date: '2026-11-13',
+    summary: 'Correção Definitiva de Loop de Atualização PWA Mobile + Aceleração de Carregamento (-67% no Bundle Inicial via Lazy Code-Splitting) + Índices de Alta Performance no Supabase',
+    notes: [
+      {
+        id: 'fix-pwa-update-loop-816',
+        category: 'fixes',
+        title: 'Correção Definitiva do Botão "Atualizar Sistema Agora" e Modal de Atualização PWA',
+        description: 'Eliminado o loop de reabertura da tela de atualização no celular e desktop: preservação do workbox-precache ativo, roteamento SPA Network-First resiliente no Service Worker, headers anti-cache em /sw.js e /version.json e fechamento imediato garantido.',
+        tag: 'CORREÇÃO CRÍTICA',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      },
+      {
+        id: 'perf-lazy-code-splitting-816',
+        category: 'improvements',
+        title: 'Carregamento Inicial 67% Mais Rápido (Lazy Code-Splitting & Vendor Chunks)',
+        description: 'Redução do bundle principal de 5,68 MB para 1,88 MB (469 KB gzip) com carregamento sob demanda das telas secundárias (React.lazy + auto-retry) e separação de bibliotecas pesadas (FlowBuilder, XLSX e Canvas).',
+        tag: 'ALTA PERFORMANCE',
+        badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
+      },
+      {
+        id: 'perf-supabase-indexes-pgrst-816',
+        category: 'improvements',
+        title: 'Índices Compostos de Alta Velocidade no Supabase e Blindagem PostgREST (PGRST002)',
+        description: 'Aplicados índices compostos em conversas e fila de entrada de mensagens para consultas instantâneas no chat ao vivo, além de tratamento resiliente de recargas transitórias de schema cache.',
+        tag: 'BANCO & ESTABILIDADE',
+        badgeColor: 'bg-sky-500/20 text-sky-300 border-sky-500/30'
+      },
+      ...BAILEYS_18_FEATURES_NOTES
+    ]
+  },
+  {
     version: '8.1.5',
     date: '2026-11-12',
     summary: 'Cofre Zero-Trust AES-256-GCM para Gemini API Key + Novo Estúdio de Robôs & Typebot Multi-Tenant (Com Scroll & Biblioteca Global) + Blindagem Anti-503 no Chat ao Vivo',

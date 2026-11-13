@@ -193,10 +193,14 @@ export function UpdatePrompt() {
   const [targetVersion, setTargetVersion] = useState<string>(APP_RELEASES[0]?.version || currentRunningVersion);
   const [releaseNotes, setReleaseNotes] = useState<ReleaseNoteItem[]>(APP_RELEASES[0]?.notes || []);
 
-  // Estado manual/pós-update para permitir abrir o Guia & Mapa Mental a qualquer momento
-  const [isManualHubOpen, setIsManualHubOpen] = useState<boolean>(() => {
-    const seenKey = `chatboot_seen_guide_${APP_RELEASES[0]?.version || '8.1.3'}`;
-    return localStorage.getItem(seenKey) !== 'true';
+  // Estado manual para abrir o Guia & Mapa Mental apenas quando solicitado pelo usuário no topo/sidebar
+  const [isManualHubOpen, setIsManualHubOpen] = useState<boolean>(false);
+  const [dismissedVersion, setDismissedVersion] = useState<string | null>(() => {
+    try {
+      return sessionStorage.getItem('chatboot_dismissed_update_version');
+    } catch {
+      return null;
+    }
   });
 
   // Abre por padrão em modo amplo (panorâmico) para nunca espremer os textos!
@@ -324,75 +328,118 @@ export function UpdatePrompt() {
   }, [needRefresh, isManualHubOpen, installedVersion, currentRunningVersion]);
 
   const close = () => {
-    if (isUpdating) return;
-    const seenKey = `chatboot_seen_guide_${APP_RELEASES[0]?.version || '8.1.3'}`;
-    localStorage.setItem(seenKey, 'true');
+    try {
+      const seenTarget = `chatboot_seen_guide_${targetVersion}`;
+      const seenLatest = `chatboot_seen_guide_${APP_RELEASES[0]?.version || currentRunningVersion}`;
+      localStorage.setItem(seenTarget, 'true');
+      localStorage.setItem(seenLatest, 'true');
+      sessionStorage.setItem('chatboot_dismissed_update_version', targetVersion);
+    } catch {
+      // Ignora bloqueio de storage privado
+    }
+    setDismissedVersion(targetVersion);
+    setIsUpdating(false);
+    setUpdatePhase('idle');
     setNeedRefresh(false);
     setIsManualHubOpen(false);
   };
 
   const handleUpdate = async () => {
     if (isUpdating) return;
-    const seenKey = `chatboot_seen_guide_${APP_RELEASES[0]?.version || '8.1.3'}`;
-    localStorage.setItem(seenKey, 'true');
+
+    const nowStr = String(Date.now());
+    try {
+      const seenTarget = `chatboot_seen_guide_${targetVersion}`;
+      const seenRunning = `chatboot_seen_guide_${currentRunningVersion}`;
+      const seenLatest = `chatboot_seen_guide_${APP_RELEASES[0]?.version || currentRunningVersion}`;
+      localStorage.setItem(seenTarget, 'true');
+      localStorage.setItem(seenRunning, 'true');
+      localStorage.setItem(seenLatest, 'true');
+      localStorage.setItem('chatboot_installed_version', targetVersion);
+      localStorage.setItem('chatboot_update_applied_ts', nowStr);
+      sessionStorage.setItem('chatboot_update_applied_ts', nowStr);
+      sessionStorage.setItem('chatboot_dismissed_update_version', targetVersion);
+    } catch {
+      // Ignora bloqueio de storage
+    }
 
     if (!needRefresh) {
+      setDismissedVersion(targetVersion);
       setIsManualHubOpen(false);
       return;
     }
 
     setIsUpdating(true);
     setUpdatePhase('updating');
-    localStorage.setItem('chatboot_installed_version', targetVersion);
 
     let reloaded = false;
-    const performReload = () => {
-      if (!reloaded) {
-        reloaded = true;
-        setUpdatePhase('reloading');
-        setTimeout(() => {
+    const finalizeAndReload = () => {
+      if (reloaded) return;
+      reloaded = true;
+      setUpdatePhase('reloading');
+
+      setTimeout(() => {
+        // Fecha o modal antes do reload para garantir que em WebViews mobile nunca trave na tela
+        setDismissedVersion(targetVersion);
+        setNeedRefresh(false);
+        setIsManualHubOpen(false);
+        setIsUpdating(false);
+        setUpdatePhase('idle');
+
+        try {
+          const url = new URL(window.location.href);
+          url.searchParams.set('_v', targetVersion);
+          window.location.replace(url.pathname + url.search + url.hash);
+        } catch {
           window.location.reload();
-        }, 300);
-      }
+        }
+      }, 200);
     };
 
     try {
       if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.addEventListener('controllerchange', performReload, { once: true });
+        navigator.serviceWorker.addEventListener('controllerchange', finalizeAndReload, { once: true });
       }
+
+      // Timeout estrito de 800ms para nunca travar caso não exista SW em estado waiting
       try {
-        await updateServiceWorker(true);
+        await Promise.race([
+          updateServiceWorker(true),
+          new Promise((resolve) => setTimeout(resolve, 800))
+        ]);
       } catch (err) {
         console.warn('[UpdatePrompt] updateServiceWorker falhou, usando fallback direto:', err);
       }
+
       if ('serviceWorker' in navigator) {
         try {
           const registrations = await navigator.serviceWorker.getRegistrations();
           for (const reg of registrations) {
-            if (reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
-            if (reg.installing) reg.installing.postMessage({ type: 'SKIP_WAITING' });
+            // Envia SKIP_WAITING apenas para SW já instalado (waiting), nunca destruindo o workbox-precache ativo
+            if (reg.waiting) {
+              reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+            }
           }
         } catch (swErr) {
           console.warn('[UpdatePrompt] Erro ao notificar registrations:', swErr);
         }
       }
+
+      // Limpa apenas o cache runtime complementar (NUNCA apagar workbox-precache do novo SW!)
       if ('caches' in window) {
         try {
           const cacheKeys = await caches.keys();
-          const staleCaches = cacheKeys.filter(
-            key => key.includes('static-resources') || key.includes('workbox-precache')
-          );
-          await Promise.all(staleCaches.map(key => caches.delete(key)));
+          const runtimeOnlyCaches = cacheKeys.filter(key => key === 'static-resources');
+          await Promise.all(runtimeOnlyCaches.map(key => caches.delete(key)));
         } catch (cacheErr) {
-          console.warn('[UpdatePrompt] Erro ao limpar caches legados:', cacheErr);
+          console.warn('[UpdatePrompt] Erro ao limpar cache runtime:', cacheErr);
         }
       }
-      setTimeout(() => {
-        performReload();
-      }, 1200);
+
+      setTimeout(finalizeAndReload, 650);
     } catch (criticalErr) {
       console.error('[UpdatePrompt] Erro no pipeline de atualização:', criticalErr);
-      performReload();
+      finalizeAndReload();
     }
   };
 
@@ -475,7 +522,18 @@ export function UpdatePrompt() {
     location.pathname.startsWith('/voucher/') ||
     location.pathname.startsWith('/totem');
 
-  const shouldRenderCard = needRefresh || (isManualHubOpen && !isPublicScreen);
+  const recentlyAppliedUpdate = (() => {
+    try {
+      const ts = Number(sessionStorage.getItem('chatboot_update_applied_ts') || localStorage.getItem('chatboot_update_applied_ts') || '0');
+      return ts > 0 && Date.now() - ts < 90000;
+    } catch {
+      return false;
+    }
+  })();
+
+  const isRefreshSuppressed = recentlyAppliedUpdate || (dismissedVersion !== null && dismissedVersion === targetVersion);
+  const effectiveNeedRefresh = needRefresh && !isRefreshSuppressed;
+  const shouldRenderCard = effectiveNeedRefresh || (isManualHubOpen && !isPublicScreen);
 
   return (
     <>
@@ -541,7 +599,7 @@ export function UpdatePrompt() {
                   <div>
                     <div className="flex items-center gap-2.5 flex-wrap">
                       <h2 className="font-black text-base sm:text-lg tracking-tight text-white">
-                        {needRefresh
+                        {effectiveNeedRefresh
                           ? 'Nova Atualização Disponível — Mapa Mental & Guia Visual'
                           : '🎉 Sistema Atualizado — Mapa Mental & Guia com Prints das 18 Funções'}
                       </h2>
@@ -595,7 +653,6 @@ export function UpdatePrompt() {
                   <button
                     type="button"
                     onClick={close}
-                    disabled={isUpdating}
                     className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
                     title="Fechar guia"
                   >
@@ -994,7 +1051,6 @@ export function UpdatePrompt() {
                 <button
                   type="button"
                   onClick={close}
-                  disabled={isUpdating}
                   className="px-4 py-2 rounded-xl text-xs font-bold text-slate-300 hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
                 >
                   Fechar Guia
@@ -1012,7 +1068,7 @@ export function UpdatePrompt() {
                       ? 'Aplicando atualização...'
                       : updatePhase === 'reloading'
                       ? 'Recarregando sistema...'
-                      : needRefresh
+                      : effectiveNeedRefresh
                       ? 'Atualizar Sistema Agora'
                       : 'Entendi • Concluir Leitura'}
                   </span>

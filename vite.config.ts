@@ -90,6 +90,24 @@ export default defineConfig({
     'import.meta.env.PACKAGE_VERSION': JSON.stringify(packageJson.version),
     'import.meta.env.PACKAGE_BUILD_DATE': JSON.stringify(new Date().toISOString())
   },
+  build: {
+    chunkSizeWarningLimit: 1600,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return;
+          if (id.includes('@xyflow')) return 'vendor-flow';
+          if (id.includes('xlsx')) return 'vendor-xlsx';
+          if (id.includes('html2canvas')) return 'vendor-canvas';
+          if (id.includes('@supabase')) return 'vendor-supabase';
+          if (id.includes('framer-motion')) return 'vendor-motion';
+          if (id.includes('lucide-react')) return 'vendor-icons';
+          if (id.includes('date-fns')) return 'vendor-date';
+          if (id.includes('react-dom') || id.includes('react-router') || id.includes('/react/')) return 'vendor-react';
+        }
+      }
+    }
+  },
   plugins: [
     generateVersionFilePlugin(),
     localApiGeminiPlugin(),
@@ -102,6 +120,20 @@ export default defineConfig({
       injectRegister: 'auto',
       injectManifest: {
         maximumFileSizeToCacheInBytes: 8000000,
+        globIgnores: [
+          '**/vendor-xlsx-*.js',
+          '**/vendor-flow-*.js',
+          '**/vendor-canvas-*.js',
+          '**/FlowBuilder-*.js',
+          '**/VoucherDashboard-*.js',
+          '**/VoucherViewer-*.js',
+          '**/VoucherScanner-*.js',
+          '**/CompanyPortal*.js',
+          '**/ChecklistBuilder-*.js',
+          '**/AdminDashboard-*.js',
+          '**/BotsList-*.js',
+          '**/CrmKanban-*.js'
+        ],
       },
       includeAssets: [
         'manifest-totem.webmanifest',

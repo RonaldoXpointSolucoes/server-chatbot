@@ -1,5 +1,5 @@
 {
-  "version": "8.1.5",
-  "buildDate": "2026-11-13T01:45:00.000Z",
-  "summary": "Cofre Zero-Trust AES-256-GCM para Gemini API Key + Novo Estúdio de Robôs & Typebot Multi-Tenant (Com Scroll & Biblioteca Global) + Blindagem Anti-503 no Chat ao Vivo"
+  "version": "8.1.6",
+  "buildDate": "2026-11-13T10:02:58.959Z",
+  "summary": "Correção Definitiva de Loop de Atualização PWA Mobile + Aceleração de Carregamento (-67% no Bundle Inicial via Lazy Code-Splitting) + Índices de Alta Performance no Supabase"
 }

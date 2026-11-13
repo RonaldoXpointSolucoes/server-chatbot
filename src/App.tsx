@@ -1,56 +1,85 @@
+import { Suspense, lazy, ComponentType } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import ChatDashboard from './pages/ChatDashboard';
-import ContactsManager from './pages/ContactsManager';
-import CrmDashboard from './pages/CrmDashboard';
-import CrmKanban from './pages/CrmKanban';
-import AdminDashboard from './pages/AdminDashboard';
-import AdminLogin from './pages/AdminLogin';
 import ClientLogin from './pages/ClientLogin';
-import BaileysFeatures from './pages/BaileysFeatures';
-import InstancesDashboard from './pages/InstancesDashboard';
-import KnowledgeBase from './pages/KnowledgeBase';
-import HelpCenter from './pages/HelpCenter';
-import InboxesList from './pages/settings/InboxesList';
-import InboxSettings from './pages/settings/InboxSettings';
-import InstanceSettings from './pages/settings/InstanceSettings';
-import AgentsList from './pages/settings/AgentsList';
-import LabelsSettings from './pages/settings/LabelsSettings';
-import BotsList from './pages/settings/BotsList';
-import FlowManager from './pages/FlowManager';
-import FlowBuilder from './pages/FlowBuilder';
-import PromptBuilder from './pages/settings/PromptBuilder';
-import AutomationSettings from './pages/settings/AutomationSettings';
-import OperationLogs from './pages/settings/OperationLogs';
 import DevLogger from './components/DevLogger';
 import { InstallPWA } from './components/InstallPWA';
 import { UpdatePrompt } from './components/UpdatePrompt';
 import { usePushNotifications } from './hooks/usePushNotifications';
 import { MainLayout } from './components/MainLayout';
-import { CannedResponses } from './pages/CannedResponses';
-import PortalApp from './pages/PortalApp';
-import DeliveryApp from './pages/DeliveryApp';
-import KdsApp from './pages/KdsApp';
-import CardapioApp from './pages/CardapioApp';
-import FinanceiroApp from './pages/FinanceiroApp';
-import AccountSettings from './pages/settings/AccountSettings';
-import Integrations from './pages/settings/Integrations';
-import { ScheduleManager } from './pages/ScheduleManager';
-import ChecklistDashboard from './pages/checklist/ChecklistDashboard';
-import ChecklistBuilder from './pages/checklist/ChecklistBuilder';
-import ChecklistTablet from './pages/checklist/ChecklistTablet';
-import ChecklistSettings from './pages/checklist/ChecklistSettings';
 import { NetworkStatusToast } from './components/NetworkStatusToast';
 import { GlobalToast } from './components/GlobalToast';
-import InstanceManagerStandalone from './pages/InstanceManagerStandalone';
-import ConnectInstanceStandalone from './pages/ConnectInstanceStandalone';
-import VoucherDashboard from './pages/voucher/VoucherDashboard';
-import VoucherViewer from './pages/voucher/VoucherViewer';
-import VoucherScanner from './pages/voucher/VoucherScanner';
-import CompanyPortalLogin from './pages/voucher/CompanyPortalLogin';
-import CompanyPortalDashboard from './pages/voucher/CompanyPortalDashboard';
-import TechnicalDocumentationPage from './pages/TechnicalDocumentationPage';
+
+function lazyWithRetry<T extends ComponentType<any>>(factory: () => Promise<{ default: T }>): React.LazyExoticComponent<T> {
+  return lazy(async () => {
+    try {
+      return await factory();
+    } catch (error: any) {
+      const msg = String(error?.message || '');
+      const isChunkError =
+        msg.includes('Failed to fetch dynamically imported module') ||
+        msg.includes('Importing a module script failed') ||
+        msg.includes('Unable to preload CSS');
+      if (isChunkError && !sessionStorage.getItem('lazy_chunk_reloaded')) {
+        sessionStorage.setItem('lazy_chunk_reloaded', '1');
+        window.location.reload();
+      }
+      throw error;
+    }
+  });
+}
+
+const ContactsManager = lazyWithRetry(() => import('./pages/ContactsManager'));
+const CrmDashboard = lazyWithRetry(() => import('./pages/CrmDashboard'));
+const CrmKanban = lazyWithRetry(() => import('./pages/CrmKanban'));
+const AdminDashboard = lazyWithRetry(() => import('./pages/AdminDashboard'));
+const AdminLogin = lazyWithRetry(() => import('./pages/AdminLogin'));
+const BaileysFeatures = lazyWithRetry(() => import('./pages/BaileysFeatures'));
+const InstancesDashboard = lazyWithRetry(() => import('./pages/InstancesDashboard'));
+const KnowledgeBase = lazyWithRetry(() => import('./pages/KnowledgeBase'));
+const HelpCenter = lazyWithRetry(() => import('./pages/HelpCenter'));
+const InboxesList = lazyWithRetry(() => import('./pages/settings/InboxesList'));
+const InboxSettings = lazyWithRetry(() => import('./pages/settings/InboxSettings'));
+const InstanceSettings = lazyWithRetry(() => import('./pages/settings/InstanceSettings'));
+const AgentsList = lazyWithRetry(() => import('./pages/settings/AgentsList'));
+const LabelsSettings = lazyWithRetry(() => import('./pages/settings/LabelsSettings'));
+const BotsList = lazyWithRetry(() => import('./pages/settings/BotsList'));
+const FlowManager = lazyWithRetry(() => import('./pages/FlowManager'));
+const FlowBuilder = lazyWithRetry(() => import('./pages/FlowBuilder'));
+const PromptBuilder = lazyWithRetry(() => import('./pages/settings/PromptBuilder'));
+const AutomationSettings = lazyWithRetry(() => import('./pages/settings/AutomationSettings'));
+const OperationLogs = lazyWithRetry(() => import('./pages/settings/OperationLogs'));
+const CannedResponses = lazyWithRetry(() => import('./pages/CannedResponses').then(m => ({ default: m.CannedResponses })));
+const PortalApp = lazyWithRetry(() => import('./pages/PortalApp'));
+const DeliveryApp = lazyWithRetry(() => import('./pages/DeliveryApp'));
+const KdsApp = lazyWithRetry(() => import('./pages/KdsApp'));
+const CardapioApp = lazyWithRetry(() => import('./pages/CardapioApp'));
+const FinanceiroApp = lazyWithRetry(() => import('./pages/FinanceiroApp'));
+const AccountSettings = lazyWithRetry(() => import('./pages/settings/AccountSettings'));
+const Integrations = lazyWithRetry(() => import('./pages/settings/Integrations'));
+const ScheduleManager = lazyWithRetry(() => import('./pages/ScheduleManager').then(m => ({ default: m.ScheduleManager })));
+const ChecklistDashboard = lazyWithRetry(() => import('./pages/checklist/ChecklistDashboard'));
+const ChecklistBuilder = lazyWithRetry(() => import('./pages/checklist/ChecklistBuilder'));
+const ChecklistTablet = lazyWithRetry(() => import('./pages/checklist/ChecklistTablet'));
+const ChecklistSettings = lazyWithRetry(() => import('./pages/checklist/ChecklistSettings'));
+const InstanceManagerStandalone = lazyWithRetry(() => import('./pages/InstanceManagerStandalone'));
+const ConnectInstanceStandalone = lazyWithRetry(() => import('./pages/ConnectInstanceStandalone'));
+const VoucherDashboard = lazyWithRetry(() => import('./pages/voucher/VoucherDashboard'));
+const VoucherViewer = lazyWithRetry(() => import('./pages/voucher/VoucherViewer'));
+const VoucherScanner = lazyWithRetry(() => import('./pages/voucher/VoucherScanner'));
+const CompanyPortalLogin = lazyWithRetry(() => import('./pages/voucher/CompanyPortalLogin'));
+const CompanyPortalDashboard = lazyWithRetry(() => import('./pages/voucher/CompanyPortalDashboard'));
+const TechnicalDocumentationPage = lazyWithRetry(() => import('./pages/TechnicalDocumentationPage'));
+
+function RouteLoadingFallback() {
+  return (
+    <div className="flex h-full min-h-[50vh] w-full items-center justify-center bg-transparent">
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-emerald-500 border-t-transparent" />
+    </div>
+  );
+}
 
 // Inicializa o tema globalmente no boot
 const savedTheme = localStorage.getItem('theme') || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
@@ -115,6 +144,7 @@ export default function App() {
       <PushNotificationManager />
       <NetworkStatusToast />
       <GlobalToast />
+      <Suspense fallback={<RouteLoadingFallback />}>
       <Routes>
         {/* Rota Raiz Inteligente (ChatBoot vs Portal Voucher Corporativo vs Totem Cozinha PWA) */}
         <Route path="/" element={<RootRouter />} />
@@ -214,6 +244,7 @@ export default function App() {
         {/* Fallback */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      </Suspense>
     </BrowserRouter>
   );
 }

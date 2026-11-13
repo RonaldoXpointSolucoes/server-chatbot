@@ -6,7 +6,6 @@ import { supabase, masterSupabase } from '../services/supabase';
 import { ServerLogsTerminal } from './ServerLogsTerminal';
 import { useChatStore } from '../store/chatStore';
 import { geminiService } from '../services/geminiService';
-import html2canvas from 'html2canvas';
 
 export default function DevLogger() {
   const navigate = useNavigate();
@@ -1759,6 +1758,7 @@ export default function DevLogger() {
 
       if (devLoggerModalRef.current) {
         try {
+          const { default: html2canvas } = await import('html2canvas');
           const capturePromise = html2canvas(devLoggerModalRef.current, {
             backgroundColor: '#070c10',
             scale: 1.0,

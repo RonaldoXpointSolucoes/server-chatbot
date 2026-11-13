@@ -15,18 +15,32 @@ import { registerRoute, NavigationRoute } from 'workbox-routing';
 import { StaleWhileRevalidate, CacheFirst } from 'workbox-strategies';
 import { CacheableResponsePlugin } from 'workbox-cacheable-response';
 import { ExpirationPlugin } from 'workbox-expiration';
-import { createHandlerBoundToURL } from 'workbox-precaching';
+import { matchPrecache } from 'workbox-precaching';
 
-// 1. Roteamento de Fallback de Navegação para SPA (index.html)
+// 1. Roteamento Resiliente de Navegação para SPA (Network-First para index.html com fallback offline no precache)
 try {
-  const handler = createHandlerBoundToURL('/index.html');
-  const navigationRoute = new NavigationRoute(handler, {
-    denylist: [
-      /\/_matrix/, // Ignorar rotas de chat motor/baileys se existirem no mesmo domínio
-      /\/api\//,    // Ignorar requisições de API
-      /\/v1\//      // Ignorar funções Supabase Edge
-    ]
-  });
+  const navigationRoute = new NavigationRoute(
+    async ({ request }) => {
+      try {
+        const networkResponse = await fetch(request, { cache: 'no-cache' });
+        if (networkResponse && networkResponse.ok) {
+          return networkResponse;
+        }
+      } catch {
+        // Sem rede: recorre ao precache local
+      }
+      const precached = (await matchPrecache('/index.html')) || (await caches.match('/index.html'));
+      if (precached) return precached;
+      return fetch('/index.html');
+    },
+    {
+      denylist: [
+        /\/_matrix/, // Ignorar rotas de chat motor/baileys se existirem no mesmo domínio
+        /\/api\//,    // Ignorar requisições de API
+        /\/v1\//      // Ignorar funções Supabase Edge
+      ]
+    }
+  );
   registerRoute(navigationRoute);
 } catch (e) {
   console.warn('[SW] Falha ao registrar NavigationRoute fallback:', e);
