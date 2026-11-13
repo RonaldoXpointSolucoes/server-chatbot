@@ -712,6 +712,90 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.1.5',
+    date: '2026-11-12',
+    summary: 'Cofre Zero-Trust AES-256-GCM para Gemini API Key + Novo Estúdio de Robôs & Typebot Multi-Tenant (Com Scroll & Biblioteca Global) + Blindagem Anti-503 no Chat ao Vivo',
+    notes: [
+      {
+        id: 'feat-gemini-vault-aes256-815',
+        category: 'features',
+        title: 'Cofre Criptografado AES-256-GCM & Firewall Anti-Hacker para Chave Gemini (Zero-Trust)',
+        description: 'Blindagem militar para a chave de API do Google Gemini: criptografia em repouso AES-256-GCM (ENCv1:...), remoção total de chaves do bundle público e do navegador, bloqueio de bots externos e trava automática de orçamento.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+        guide: {
+          moduleGroup: 'system',
+          moduleLabel: 'Configurações • Integrações de API & Cofre de IA',
+          purpose: 'Impedir qualquer vazamento ou uso indevido da chave Gemini API por hackers, ocultando 100% do segredo na rede/F12 e roteando chamadas exclusivamente pelo Cofre criptografado do servidor.',
+          whereToAccess: [
+            '1. Menu Lateral Esquerdo ➔ Configurações ➔ Integrações (/settings/integrations)',
+            '2. Role até o card "Chave de API do Google Gemini (I.A.)"',
+            '3. Clique em "Testar Conexão" ou "Substituir Chave" para operar no Cofre Zero-Trust'
+          ],
+          howToTest: [
+            '1. Acesse Configurações ➔ Integrações (/settings/integrations).',
+            '2. No card "Chave de API do Google Gemini (I.A.)", clique em "Testar Conexão".',
+            '3. Verifique a confirmação de latência em tempo real via Cofre Blindado sem expor a chave na aba Network (F12).'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Tela: Configurações ➔ Integrações (/settings/integrations)',
+            contextElements: ['🔒 Segredo protegido (53 caracteres)', 'INÍCIO: AQ.Ab8RN •••• FIM: nMnaw', '🔄 Substituir Chave'],
+            targetButtonLabel: '⚡ Testar Conexão',
+            targetButtonPosition: 'Rodapé esquerdo do card "Chave de API do Google Gemini (I.A.)"',
+            visualPreviewVariant: 'hub-account-limits'
+          },
+          quickAction: {
+            label: 'Abrir Cofre Gemini em Integrações',
+            route: '/settings/integrations'
+          }
+        }
+      },
+      {
+        id: 'feat-typebot-multitenant-studio-815',
+        category: 'features',
+        title: 'Estúdio de Robôs & Fluxos Typebot Multi-Tenant com Biblioteca de Modelos e Editor Inline',
+        description: 'Isolamento rigoroso de fluxos por empresa com aba dedicada "Biblioteca de Modelos" para clonagem em 1 clique, preview das etapas nos cards, edição inline no canvas e simulador interativo completo.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+        guide: {
+          moduleGroup: 'typebot-flow',
+          moduleLabel: 'Configurações • Robôs & Fluxos Typebot (/settings/bots)',
+          purpose: 'Permitir gerenciar e rolar livremente todos os robôs da empresa ativa sem misturar fluxos de outros clientes, além de clonar templates prontos e editar blocos direto no construtor visual.',
+          whereToAccess: [
+            '1. Menu Lateral Esquerdo ➔ Configurações ➔ Robôs (/settings/bots)',
+            '2. Alterne entre a aba "Fluxos de Conversa (Typebot)" e "Agentes Especialistas (I.A.)"',
+            '3. Use os filtros "Fluxos da Empresa" ou "Biblioteca de Modelos" e clique em "Abrir no Builder"'
+          ],
+          howToTest: [
+            '1. Acesse Configurações ➔ Robôs (/settings/bots) e role a página livremente.',
+            '2. Clique em "Biblioteca de Modelos" para clonar um modelo oficial para a empresa atual.',
+            '3. Clique em "Abrir no Builder", dê duplo-clique em qualquer bloco para editar na hora e clique em "Testar Fluxo".'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Tela: Configurações ➔ Robôs (/settings/bots)',
+            contextElements: ['🏢 Fluxos da Empresa', '📚 Biblioteca de Modelos', '▶️ Testar Fluxo'],
+            targetButtonLabel: '✏️ Abrir no Builder',
+            targetButtonPosition: 'Botão principal esmeralda no rodapé de cada card de Fluxo Typebot',
+            visualPreviewVariant: 'typebot-poll'
+          },
+          quickAction: {
+            label: 'Ir para Tela de Robôs & Typebot',
+            route: '/settings/bots'
+          }
+        }
+      },
+      {
+        id: 'fix-chat-503-resilience-815',
+        category: 'fixes',
+        title: 'Blindagem Anti-503 e Auto-Promoção de Caixa Conectada no Chat ao Vivo (Burguer Plus & Geral)',
+        description: 'Persistência local instantânea das caixas de entrada da empresa, promoção automática da caixa conectada (iPhone) quando outra caixa está offline e recuperação imediata no botão Reconectar.',
+        tag: 'CORREÇÃO CRÍTICA',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      },
+      ...BAILEYS_18_FEATURES_NOTES
+    ]
+  },
+  {
     version: '8.1.4',
     date: '2026-11-12',
     summary: 'Estúdio Panorâmico de 18 Novidades Baileys v7 (1.240px s/ Textos Cortados) + Roteamento Multi-Nó em Buscar Histórico (ALFA-A/PROD-C) + Autenticação Master Key em Enquetes',

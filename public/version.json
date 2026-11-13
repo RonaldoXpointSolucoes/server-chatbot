@@ -1,5 +1,5 @@
 {
-  "version": "8.1.4",
-  "buildDate": "2026-11-12T23:56:00.000Z",
-  "summary": "Estúdio Panorâmico de 18 Novidades Baileys v7 (1.240px s/ Textos Cortados) + Roteamento Multi-Nó em Buscar Histórico (ALFA-A/PROD-C) + Autenticação Master Key em Enquetes"
+  "version": "8.1.5",
+  "buildDate": "2026-11-13T01:45:00.000Z",
+  "summary": "Cofre Zero-Trust AES-256-GCM para Gemini API Key + Novo Estúdio de Robôs & Typebot Multi-Tenant (Com Scroll & Biblioteca Global) + Blindagem Anti-503 no Chat ao Vivo"
 }

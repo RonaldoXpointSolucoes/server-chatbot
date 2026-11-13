@@ -34,7 +34,7 @@ export default async function handler(req, res) {
 
   res.setHeader("Access-Control-Allow-Origin", allowedOrigin && origin ? origin : "https://chat-boot-theta.vercel.app");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-gemini-api-key, x-tenant-id");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-gemini-api-key, x-tenant-id, x-chatboot-shield");
 
   if (req.method === "OPTIONS") {
     return res.status(200).end();
@@ -59,24 +59,31 @@ export default async function handler(req, res) {
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
     const tenantId = req.headers["x-tenant-id"] || body.tenantId || "";
 
-    // Bloqueia chamadas de bots externos que não venham da aplicação nem informem tenantId ou chave própria
+    // Bloqueia chamadas de bots externos que não venham da aplicação nem apresentem o escudo de integridade
     const customUserKey = sanitizeKey(body.apiKey || req.headers["x-gemini-api-key"]);
+    const shieldHeader = String(req.headers["x-chatboot-shield"] || "");
+    const userAgent = String(req.headers["user-agent"] || "").toLowerCase();
     const isInternalReferer =
       referer.includes("vercel.app") ||
       referer.includes("localhost") ||
       referer.includes("127.0.0.1") ||
       referer.includes("xpointsolucoes.com");
 
-    if (!tenantId && !customUserKey && !isInternalReferer) {
+    const isSuspiciousBotUa = /curl|wget|python|scrapy|httpclient|postman|insomnia|go-http-client/i.test(userAgent);
+    if ((isSuspiciousBotUa && !shieldHeader.startsWith("cbshield_v1_")) || (!isInternalReferer && !shieldHeader.startsWith("cbshield_v1_"))) {
       return res.status(403).json({
-        error: { message: "Acesso negado ao proxy Gemini: contexto de tenant ausente." },
+        error: { message: "Acesso negado pelo Firewall Anti-Hacker: origem ou assinatura inválida." },
       });
     }
 
-    const requestedModel = (body.model || "gemini-2.5-flash").replace(/^models\//, "");
+    const rawRequestedModel = (body.model || "gemini-2.5-flash").replace(/^models\//, "");
+    const requestedModel = rawRequestedModel.includes("flash") ? rawRequestedModel : "gemini-2.5-flash";
     const payload = body.payload || {
       contents: body.contents,
-      generationConfig: body.generationConfig,
+      generationConfig: {
+        ...(body.generationConfig || {}),
+        maxOutputTokens: Math.min(Number(body.generationConfig?.maxOutputTokens) || 1024, 2048),
+      },
       systemInstruction: body.systemInstruction,
       safetySettings: body.safetySettings,
     };
@@ -95,6 +102,7 @@ export default async function handler(req, res) {
         headers: {
           "Content-Type": "application/json",
           "x-tenant-id": tenantId || "8b1e427b-2321-4ea7-9d7e-90f7d5cbad21",
+          "x-chatboot-shield": shieldHeader || "cbshield_v1_vercel_internal",
         },
         body: JSON.stringify({
           model: requestedModel,

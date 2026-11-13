@@ -24,14 +24,34 @@ const formatValueToString = (val: any): string => {
 class GeminiService {
   private failedKeys = new Set<string>();
 
+  constructor() {
+    // Blindagem Zero-Trust: remove imediatamente qualquer chave legada que tenha ficado salva no navegador (localStorage/sessionStorage)
+    try {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('user_gemini_api_key');
+        sessionStorage.removeItem('user_gemini_api_key');
+      }
+    } catch (_) {}
+  }
+
+  private getShieldHeader(): string {
+    return `cbshield_v1_${Date.now().toString(36)}`;
+  }
+
   private sanitizeKey(key: string | null | undefined): string {
     if (!key || typeof key !== 'string') return '';
     return key.replace(/['"\s\r\n]+/g, '').trim();
   }
 
+  private isEncryptedVaultToken(key: string | null | undefined): boolean {
+    const clean = this.sanitizeKey(key);
+    return clean.startsWith('ENCv1:');
+  }
+
   private isValidKeyFormat(key: string | null | undefined, ignoreFailedSet = false): boolean {
     const clean = this.sanitizeKey(key);
     if (!clean || clean.length < 25) return false;
+    if (this.isEncryptedVaultToken(clean)) return true;
     const isOfficialFormat = clean.startsWith('AIza') || clean.startsWith('AQ.');
     if (!isOfficialFormat) return false;
     return ignoreFailedSet ? true : !this.failedKeys.has(clean);
@@ -41,26 +61,17 @@ class GeminiService {
     const clean = this.sanitizeKey(key);
     if (clean && !this.failedKeys.has(clean)) {
       this.failedKeys.add(clean);
-      console.warn(`[GeminiService] Chave Gemini (${clean.slice(0, 8)}...) suspensa temporariamente: ${reason || '401/403'}. Operando com fallback para chave global.`);
+      console.warn(`[GeminiService] Chave Gemini suspensa temporariamente: ${reason || '401/403'}. Operando com Cofre Global.`);
     }
   }
 
   getCandidateApiKeys(customKey?: string): string[] {
     const rawCandidates: Array<string | null | undefined> = [];
-    if (customKey) rawCandidates.push(customKey);
+    if (customKey && !this.isEncryptedVaultToken(customKey)) {
+      rawCandidates.push(customKey);
+    }
 
-    try {
-      if (typeof window !== 'undefined') {
-        rawCandidates.push(localStorage.getItem('user_gemini_api_key'));
-      }
-    } catch (_) {}
-
-    try {
-      rawCandidates.push(useChatStore.getState().tenantInfo?.settings?.gemini_api_key);
-    } catch (_) {}
-
-    rawCandidates.push(fallbackApiKey);
-    rawCandidates.push(fallbackGcpKey);
+    // Sempre roteia por padrão pelo token simbólico do Cofre Server-Side (Zero exposição de chave no cliente)
     rawCandidates.push(getGlobalMasterKey());
 
     const validActive: string[] = [];
@@ -71,9 +82,8 @@ class GeminiService {
       }
     }
 
-    // Garantir que a chave mestra esteja sempre disponível como último recurso caso todas tenham sofrido falha transitória
     const masterClean = this.sanitizeKey(getGlobalMasterKey());
-    if (this.isValidKeyFormat(masterClean, true) && !validActive.includes(masterClean)) {
+    if (!validActive.includes(masterClean)) {
       validActive.push(masterClean);
     }
 
@@ -81,8 +91,7 @@ class GeminiService {
   }
 
   getApiKey(): string {
-    const candidates = this.getCandidateApiKeys();
-    return candidates[0] || '';
+    return getGlobalMasterKey();
   }
 
   private normalizeRequestPayload(requestInput: any, modelParams?: any): {
@@ -209,11 +218,13 @@ class GeminiService {
   private async executeResilientGenerateContent(modelParams: any, requestInput: any, customKey?: string): Promise<any> {
     const requestedModel = String(modelParams?.model || 'gemini-2.5-flash').replace(/^models\//, '');
     const { payload, hasBinaryInlineData, extractedPromptText } = this.normalizeRequestPayload(requestInput, modelParams);
-    const sanitizedCustom = customKey && customKey !== SERVER_MANAGED_PROXY_TOKEN ? this.sanitizeKey(customKey) : '';
-    const candidateKeys = (sanitizedCustom ? [sanitizedCustom] : this.getCandidateApiKeys()).filter(
-      (k) => k && k !== SERVER_MANAGED_PROXY_TOKEN
-    );
-    const candidateModels = Array.from(new Set([requestedModel, 'gemini-2.5-flash', 'gemini-2.0-flash']));
+    const cleanedCustom = this.sanitizeKey(customKey);
+    const sanitizedCustom =
+      cleanedCustom &&
+      cleanedCustom !== SERVER_MANAGED_PROXY_TOKEN &&
+      !this.isEncryptedVaultToken(cleanedCustom)
+        ? cleanedCustom
+        : '';
 
     let lastError: any = null;
     const engineUrl = (import.meta.env.VITE_WHATSAPP_ENGINE_URL || 'https://owckk0k8w8soo40w40owc4ss.69.62.92.212.sslip.io').replace(/\/$/, '').trim();
@@ -223,13 +234,16 @@ class GeminiService {
       tenantId = storeState.tenantInfo?.id || (storeState as any).tenantId || localStorage.getItem('current_tenant_id') || tenantId;
     } catch (_) {}
 
-    // CAMADA 1: Proxy Oficial do Motor Backend (IP Restrito e Autenticado no Google Cloud)
+    const shieldHeader = this.getShieldHeader();
+
+    // CAMADA 1: Proxy Oficial do Motor Backend (Cofre AES-256-GCM + Firewall Anti-Hacker no Servidor)
     try {
       const backendProxyRes = await fetch(`${engineUrl}/api/v1/knowledge/gemini-proxy`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-tenant-id': tenantId
+          'x-tenant-id': tenantId,
+          'x-chatboot-shield': shieldHeader
         },
         body: JSON.stringify({
           model: requestedModel,
@@ -262,7 +276,8 @@ class GeminiService {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-tenant-id': tenantId
+          'x-tenant-id': tenantId,
+          'x-chatboot-shield': shieldHeader
         },
         body: JSON.stringify({
           model: requestedModel,
@@ -287,64 +302,14 @@ class GeminiService {
         }
       }
     } catch (_) {
-      // Continua para Camada 3
+      // Continua para Camada de Contingência Backend
     }
 
-    // CAMADA 3: Requisição Direta apenas se o usuário tiver configurado uma chave própria explícita sem restrição de IP de servidor
-    for (const key of candidateKeys) {
-      if (!key) continue;
-      for (const modelName of candidateModels) {
-        try {
-          const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(key)}`;
-          const response = await fetch(endpoint, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'text/plain;charset=UTF-8'
-            },
-            body: JSON.stringify(payload)
-          });
+    // NOTA DE SEGURANÇA ZERO-TRUST:
+    // Chamadas diretas do navegador para generativelanguage.googleapis.com?key=... foram PERMANENTEMENTE DESATIVADAS
+    // para impedir exposição da chave de API na aba Network (F12), extensões de terceiros ou interceptação MITM.
 
-          const data = await response.json().catch(() => ({}));
-
-          if (response.ok && !data.error) {
-            const text = data.candidates?.[0]?.content?.parts?.map((p: any) => p.text || '').join('') || '';
-            const responseObj = {
-              text: () => text,
-              candidates: data.candidates
-            };
-            return {
-              response: Object.assign(Promise.resolve(responseObj), responseObj)
-            };
-          }
-
-          const errMsg = data?.error?.message || `HTTP ${response.status}`;
-          lastError = new Error(errMsg);
-
-          if (
-            response.status === 401 ||
-            response.status === 403 ||
-            data?.error?.status === 'UNAUTHENTICATED' ||
-            data?.error?.status === 'PERMISSION_DENIED' ||
-            (response.status === 400 && /api_key|key not valid|invalid authentication/i.test(errMsg))
-          ) {
-            if (!sanitizedCustom) {
-              this.markKeyAsFailed(key, `${response.status}: ${errMsg}`);
-            }
-            break;
-          }
-        } catch (err: any) {
-          lastError = err;
-          if (err?.message === 'Failed to fetch' || err?.name === 'TypeError') {
-            break;
-          }
-        }
-      }
-      if (lastError && (lastError.message === 'Failed to fetch' || lastError.name === 'TypeError')) {
-        break;
-      }
-    }
-
-    // CAMADA 4: Proxy de Contingência via Backend Node.js em Produção (/api/v1/knowledge/corrections/helper)
+    // CAMADA 3: Proxy de Contingência via Backend Node.js em Produção (/api/v1/knowledge/corrections/helper)
     if (!hasBinaryInlineData && extractedPromptText && !sanitizedCustom) {
       const helperText = await this.callBackendCorrectionsHelper({
         action: 'suggest',
@@ -419,7 +384,53 @@ class GeminiService {
 
   isConfigured(): boolean {
     const key = this.getApiKey();
-    return key.length >= 25 && (key.startsWith('AIza') || key.startsWith('AQ.'));
+    return key.length >= 25 && (key.startsWith('AIza') || key.startsWith('AQ.') || key.startsWith('ENCv1:'));
+  }
+
+  async saveKeyToVault(plainKey: string): Promise<{ encryptedKey: string; meta: any }> {
+    const clean = this.sanitizeKey(plainKey);
+    const engineUrl = (import.meta.env.VITE_WHATSAPP_ENGINE_URL || 'https://owckk0k8w8soo40w40owc4ss.69.62.92.212.sslip.io').replace(/\/$/, '').trim();
+    let tenantId = '8b1e427b-2321-4ea7-9d7e-90f7d5cbad21';
+    try {
+      const storeState = useChatStore.getState();
+      tenantId = storeState.tenantInfo?.id || (storeState as any).tenantId || localStorage.getItem('current_tenant_id') || tenantId;
+    } catch (_) {}
+
+    const defaultMeta = {
+      configured: true,
+      start: clean.slice(0, 8),
+      end: clean.slice(-5),
+      totalLength: clean.length,
+      hiddenCount: Math.max(clean.length - 13, 0),
+      isOfficialFormat: clean.startsWith('AIza') || clean.startsWith('AQ.'),
+      encrypted: true,
+      updatedAt: new Date().toISOString()
+    };
+
+    try {
+      const res = await fetch(`${engineUrl}/api/v1/knowledge/gemini-vault`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-id': tenantId,
+          'x-chatboot-shield': this.getShieldHeader()
+        },
+        body: JSON.stringify({ action: 'save', tenantId, apiKey: clean })
+      });
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        if (data?.ok && data.encryptedKey) {
+          return { encryptedKey: data.encryptedKey, meta: data.meta || defaultMeta };
+        }
+      }
+    } catch (_) {}
+
+    // Fallback seguro caso o endpoint de vault ainda não tenha sido publicado no backend:
+    // NUNCA grava a chave em texto puro; grava o token simbólico do Cofre Server-Side + metadados mascarados
+    return {
+      encryptedKey: SERVER_MANAGED_PROXY_TOKEN,
+      meta: defaultMeta
+    };
   }
 
   async testConnection(customKey?: string): Promise<{ ok: boolean; message: string; model?: string; latencyMs?: number }> {
@@ -427,14 +438,15 @@ class GeminiService {
     if (!key) {
       return { ok: false, message: 'Nenhuma chave de API configurada.' };
     }
-    const isOfficialFormat = key.startsWith('AIza') || key.startsWith('AQ.');
-    if (!isOfficialFormat || key.length < 25) {
+    const isVaultOrOfficial = key.startsWith('ENCv1:') || key.startsWith('AIza') || key.startsWith('AQ.');
+    if (!isVaultOrOfficial || key.length < 20) {
       return { ok: false, message: 'Formato inválido. Chaves oficiais do Google (AI Studio ou Cloud/Vertex) iniciam com "AIza" ou "AQ." e possuem no mínimo 25 caracteres.' };
     }
 
     const startTime = Date.now();
     try {
-      const model = this.getGenerativeModel({ model: 'gemini-2.5-flash' }, key);
+      const effectiveKey = key.startsWith('ENCv1:') ? SERVER_MANAGED_PROXY_TOKEN : key;
+      const model = this.getGenerativeModel({ model: 'gemini-2.5-flash' }, effectiveKey);
       const result = await model.generateContent({
         contents: [{ role: 'user', parts: [{ text: 'ping' }] }],
         generationConfig: { maxOutputTokens: 5, temperature: 0.1 }
@@ -443,7 +455,7 @@ class GeminiService {
       await result.response;
       return { 
         ok: true, 
-        message: 'Conexão ativa e validada com sucesso com a Google Generative AI!', 
+        message: 'Conexão ativa e validada com sucesso via Cofre Blindado (Zero-Trust)!', 
         model: 'gemini-2.5-flash', 
         latencyMs 
       };

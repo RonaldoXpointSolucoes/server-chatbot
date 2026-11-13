@@ -11,8 +11,8 @@ class SupabaseCircuitBreaker {
   private state: 'CLOSED' | 'OPEN' | 'HALF_OPEN' = 'CLOSED';
   private consecutiveFailures = 0;
   private lastStateChange = Date.now();
-  private readonly failureThreshold = 5;
-  private readonly cooldownMs = 10000;
+  private readonly failureThreshold = 12;
+  private readonly cooldownMs = 4000;
 
   public canRequest(): boolean {
     if (this.state === 'CLOSED') return true;
@@ -54,6 +54,12 @@ class SupabaseCircuitBreaker {
 const supabaseCircuitBreaker = new SupabaseCircuitBreaker();
 let hasReportedServiceError = false;
 let lastSupabaseOscillationLog = 0;
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('supabase-manual-retry', () => {
+    supabaseCircuitBreaker.recordSuccess();
+  });
+}
 
 const customFetch = async (input: RequestInfo | URL, init?: RequestInit, retries = 5, delay = 1000): Promise<Response> => {
   const urlStr = typeof input === 'string' ? input : input.toString();

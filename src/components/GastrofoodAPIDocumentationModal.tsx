@@ -247,14 +247,7 @@ export const GastrofoodAPIDocumentationModal: React.FC<GastrofoodAPIDocumentatio
 
       setMatchedProducts(matches);
 
-      // 4. Invocar Google Gemini API com o System Instruction oficial da Luna Menu
-      const rawApiKey = (
-        localStorage.getItem('user_gemini_api_key') || 
-        tenantInfo?.settings?.gemini_api_key || 
-        import.meta.env.VITE_GEMINI_API_KEY || 
-        ''
-      ).replace(/^['"]|['"]$/g, '').trim();
-
+      // 4. Invocar Google Gemini API via Cofre Blindado Server-Side (Zero exposição de chave no navegador)
       const systemPrompt = `Você é a Luna Menu (#3), especialista oficial de cardápio e atendimento da empresa "${companyName}" no WhatsApp.
 Seu objetivo é responder perguntas de clientes sobre itens, ingredientes, preços, sabores e adicionais com 100% de precisão e extrema simpatia.
 
@@ -271,7 +264,7 @@ ${ragContext}`;
 
       let finalResponse = '';
 
-      if (rawApiKey && rawApiKey.length > 10) {
+      if (geminiService.isConfigured()) {
         try {
           const model = geminiService.getGenerativeModel({ 
             model: "gemini-2.5-flash",
@@ -279,7 +272,7 @@ ${ragContext}`;
               role: "system",
               parts: [{ text: systemPrompt }]
             }
-          }, rawApiKey);
+          });
 
           const result = await model.generateContent(question);
           finalResponse = (await result.response).text().trim();

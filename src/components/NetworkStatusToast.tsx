@@ -81,8 +81,11 @@ export function NetworkStatusToast() {
   const handleManualRetry = async () => {
     setIsRetrying(true);
     try {
+      window.dispatchEvent(new CustomEvent('supabase-manual-retry'));
       const { useChatStore } = await import('../store/chatStore');
+      await useChatStore.getState().fetchTenantConfig();
       await useChatStore.getState().fetchInitialData();
+      setIsVisible(false);
     } catch (err) {
       console.warn("Retry failed:", err);
     } finally {

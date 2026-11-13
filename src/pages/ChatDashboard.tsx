@@ -558,7 +558,20 @@ export default function ChatDashboard() {
   const [filterContextMenu, setFilterContextMenu] = useState<{ type: string, x: number, y: number } | null>(null);
   const [instanceNamesMap, setInstanceNamesMap] = useState<Record<string, string>>({});
   const [instanceColorsMap, setInstanceColorsMap] = useState<Record<string, string>>({});
-  const [availableInstancesList, setAvailableInstancesList] = useState<{id: string, display_name: string, color: string, tenant_id?: string}[]>([]);
+  const [availableInstancesList, setAvailableInstancesList] = useState<{id: string, display_name: string, color: string, tenant_id?: string}[]>(() => {
+    try {
+      const tid = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+      if (tid) {
+        const cached = localStorage.getItem(`cached_available_instances_${tid}`);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      }
+    } catch (_) {}
+    return [];
+  });
+  const [hasConfirmedZeroInstances, setHasConfirmedZeroInstances] = useState(false);
 
   const [copiedDoc, setCopiedDoc] = useState(false);
   const [copiedPhone, setCopiedPhone] = useState(false);
@@ -3985,9 +3998,9 @@ export default function ChatDashboard() {
       }
     })();
 
-    (async () => {
+    const loadAllowedInstances = async () => {
       try {
-        const tenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id') || tenantInfo?.id;
+        const tenantId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id') || useChatStore.getState().tenantInfo?.id;
         if (!tenantId) return;
 
         // 1. Buscar informações da empresa logada para ver seu grupo econômico
@@ -4011,12 +4024,12 @@ export default function ChatDashboard() {
         }
 
         // 2. Buscar instâncias pertencentes ao grupo econômico
-        const { data } = await supabase
+        const { data, error: instError } = await supabase
           .from('whatsapp_instances')
           .select('id, display_name, color, status, tenant_id')
           .in('tenant_id', allowedTenants);
 
-        if (data) {
+        if (!instError && data) {
           const nameMap: Record<string, string> = {};
           const colorMap: Record<string, string> = {};
           
@@ -4026,10 +4039,16 @@ export default function ChatDashboard() {
              try { allowedInstances = JSON.parse(allowedStr); } catch(e) {}
           }
           
-          const availableInstances = data.filter(d => {
+          let availableInstances = data.filter(d => {
              if (allowedInstances.length > 0 && !allowedInstances.includes(d.id)) return false;
              return true;
           });
+
+          // Se allowed_instances em storage estava desatualizado e filtrou todas as caixas do tenant atual, restaura as caixas do próprio tenant
+          if (availableInstances.length === 0 && data.length > 0) {
+            const ownTenantInstances = data.filter(d => d.tenant_id === tenantId);
+            availableInstances = ownTenantInstances.length > 0 ? ownTenantInstances : data;
+          }
 
           const newStatuses: Record<string, string> = {};
           data.forEach(d => { 
@@ -4048,6 +4067,13 @@ export default function ChatDashboard() {
           setInstanceNamesMap(nameMap);
           setInstanceColorsMap(colorMap);
           setAvailableInstancesList(availableInstances);
+          setHasConfirmedZeroInstances(data.length === 0);
+
+          if (availableInstances.length > 0) {
+            try {
+              localStorage.setItem(`cached_available_instances_${tenantId}`, JSON.stringify(availableInstances));
+            } catch (_) {}
+          }
 
           // Sincroniza activeChannelName e higieniza filtros órfãos de outras empresas
           const currentStore = useChatStore.getState();
@@ -4074,8 +4100,20 @@ export default function ChatDashboard() {
       } catch (err) {
         console.error("Erro ao carregar instâncias permitidas no ChatDashboard:", err);
       }
-    })();
-  }, []);
+    };
+
+    loadAllowedInstances();
+
+    const handleRetryOrRecover = () => {
+      loadAllowedInstances();
+    };
+    window.addEventListener('supabase-service-recovered', handleRetryOrRecover);
+    window.addEventListener('supabase-manual-retry', handleRetryOrRecover);
+    return () => {
+      window.removeEventListener('supabase-service-recovered', handleRetryOrRecover);
+      window.removeEventListener('supabase-manual-retry', handleRetryOrRecover);
+    };
+  }, [tenantInfo?.id]);
 
   // Solução PWA: Atualiza conversas e o chat aberto (Catch-up Sync) com Cooldown de 15s quando volta do background e repara WebSockets zumbis
   useEffect(() => {
@@ -12356,7 +12394,7 @@ export default function ChatDashboard() {
             )}
           </div>
         </div>
-      ) : availableInstancesList.length === 0 ? (
+      ) : (availableInstancesList.length === 0 && hasConfirmedZeroInstances && contacts.length === 0 && !isChannelLoading) ? (
         <div className="hidden sm:flex flex-1 flex-col items-center justify-center bg-[#f0f2f5] dark:bg-[#111b21] p-8 border-l border-white/5 relative z-10 text-center animate-in fade-in zoom-in-95 duration-300">
           <div className="w-20 h-20 bg-[#00a884]/15 border border-[#00a884]/30 rounded-3xl flex items-center justify-center mb-5 text-[#00a884] shadow-lg shadow-[#00a884]/10 animate-bounce">
             <Smartphone size={38} />

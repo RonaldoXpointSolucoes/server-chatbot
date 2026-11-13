@@ -5799,7 +5799,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 get().setInstanceStatus(inst.id, inst.status);
               }
             });
-            set(s => ({ instancesStatus: { ...s.instancesStatus, ...statusUpdates } }));
+            set(s => ({ rawInstances: instances, instancesStatus: { ...s.instancesStatus, ...statusUpdates } }));
+
+            // Se a caixa primária (evolution_api_instance) estiver offline ou vazia, mas existir outra caixa conectada no tenant, promove-a automaticamente
+            const primaryInst = instances.find(i => i.id === tenantData.evolution_api_instance);
+            const anyConnectedInst = instances.find(i => i.status === 'connected');
+            if (anyConnectedInst && (!primaryInst || primaryInst.status !== 'connected')) {
+              tenantData.evolution_api_instance = anyConnectedInst.id;
+              set({ connectedInstanceName: anyConnectedInst.id });
+            }
 
             // Higienização multi-tenant: valida se activeChannelFilter ou selectedChannelFilters pertencem ao tenant ativo
             const validInstanceIds = new Set(instances.map(inst => inst.id));
@@ -5871,7 +5879,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       if (error) throw error;
 
-      await get().logOperation('UPDATE', 'companies', tenant.id, currentSettings, mergedSettings);
+      // Redige chaves de API nos logs de auditoria para nunca gravar segredos em texto puro
+      const redactSettingsForAudit = (obj: any) => {
+        if (!obj || typeof obj !== 'object') return obj;
+        const copy = { ...obj };
+        if (copy.gemini_api_key) {
+          copy.gemini_api_key = '[COFRE_AES256_PROTEGIDO]';
+        }
+        return copy;
+      };
+
+      await get().logOperation(
+        'UPDATE',
+        'companies',
+        tenant.id,
+        redactSettingsForAudit(currentSettings),
+        redactSettingsForAudit(mergedSettings)
+      );
 
       set({ tenantInfo: { ...tenant, settings: mergedSettings } });
     } catch (error) {

@@ -25,6 +25,9 @@ dist-ssr
 .env
 chatboot-engine/.env
 .env.*
+.env*
+*.env
+*.env.*
 *.txt
 
 .vercel
