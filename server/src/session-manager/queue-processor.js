@@ -1,4 +1,4 @@
-import { supabase, NODE_ID, retryWithBackoff, resolveTargetJid } from '../supabase.js';
+import { supabase, NODE_ID, retryWithBackoff, resolveTargetJid, isTransientSupabaseError } from '../supabase.js';
 import { buildWhatsAppMessage } from './message-builder.js';
 import { runOutgoingReconciliation } from './reconciler.js';
 
@@ -64,8 +64,23 @@ class QueueProcessor {
                 .delete()
                 .in('status', ['sent', 'failed'])
                 .lte('created_at', sevenDaysAgo);
+
+            // Housekeeping automático a cada 6 horas para impedir acúmulo em wa_incoming_messages e logs técnicos
+            const nowMs = Date.now();
+            if (!this.lastTelemetryPruneAt || (nowMs - this.lastTelemetryPruneAt) > 6 * 60 * 60 * 1000) {
+                this.lastTelemetryPruneAt = nowMs;
+                const threeDaysAgo = new Date(nowMs - 3 * 24 * 60 * 60 * 1000).toISOString();
+                await Promise.allSettled([
+                    supabase.from('wa_incoming_messages').delete().lte('created_at', threeDaysAgo),
+                    supabase.from('system_logs').delete().lte('created_at', sevenDaysAgo),
+                    supabase.from('wa_instance_monitoring_logs').delete().lte('created_at', sevenDaysAgo),
+                    supabase.from('wa_connection_events').delete().lte('created_at', sevenDaysAgo)
+                ]);
+            }
         } catch (err) {
-            console.warn(`[QueueProcessor/TTL] Aviso ao limpar mensagens expiradas:`, err.message);
+            if (!isTransientSupabaseError(err)) {
+                console.warn(`[QueueProcessor/TTL] Aviso ao limpar mensagens expiradas:`, err.message);
+            }
         }
     }
 
@@ -114,7 +129,9 @@ class QueueProcessor {
                     .eq('status', 'processing');
             }
         } catch (e) {
-            console.warn(`[QueueProcessor/SelfHealing] Aviso na recuperação de mensagens presas:`, e.message);
+            if (!isTransientSupabaseError(e)) {
+                console.warn(`[QueueProcessor/SelfHealing] Aviso na recuperação de mensagens presas:`, e.message);
+            }
         }
     }
 
@@ -228,10 +245,10 @@ class QueueProcessor {
                 }
             }
         } catch (err) {
-            if (err.message && (err.message.includes('fetch failed') || err.message.includes('timeout') || err.message.includes('Timeout') || err.message.includes('Network') || err.message.includes('CircuitBreaker'))) {
-                console.info(`[QueueProcessor/Loop] Oscilação temporária de rede no loop de outbox. Auto-recuperando em 3s...`);
+            if (isTransientSupabaseError(err) || (err.message && (err.message.includes('fetch failed') || err.message.includes('timeout') || err.message.includes('Timeout') || err.message.includes('Network') || err.message.includes('CircuitBreaker') || err.message.includes('schema cache')))) {
+                console.info(`[QueueProcessor/Loop] Oscilação temporária de rede/schema no loop de outbox. Auto-recuperando...`);
             } else {
-                console.error(`[QueueProcessor/Loop] Erro no loop de outbox:`, err.message);
+                console.error(`[QueueProcessor/Loop] Erro no loop de outbox:`, err.message || err);
             }
         }
 

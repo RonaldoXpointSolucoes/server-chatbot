@@ -129,10 +129,21 @@ export function isTransientSupabaseError(err) {
     msg.includes('SocketError') ||
     msg.includes('Connection closed') ||
     msg.includes('database connection') ||
+    msg.includes('schema cache') ||
+    msg.includes('Could not query the database') ||
+    msg.includes('could not translate host name') ||
+    msg.includes('connection pool') ||
     code === 'UND_ERR_CONNECT_TIMEOUT' ||
     code === 'UND_ERR_SOCKET' ||
     code === 'UND_ERR_BODY_TIMEOUT' ||
     code === 'UND_ERR_HEADERS_TIMEOUT' ||
+    code === 'PGRST000' ||
+    code === 'PGRST001' ||
+    code === 'PGRST002' ||
+    code === '57P01' ||
+    code === '57P02' ||
+    code === '57P03' ||
+    code === '53300' ||
     name === 'AbortError' ||
     name === 'TimeoutError'
   );
@@ -267,6 +278,7 @@ export async function retryWithBackoff(fn, retries = 1, delay = 600) {
     const status = error?.status || error?.statusCode;
 
     const isNetworkError = 
+      isTransientSupabaseError(error) ||
       errorMsg.includes('fetch failed') ||
       errorMsg.includes('Timeout') ||
       errorMsg.includes('timeout') ||
@@ -278,6 +290,8 @@ export async function retryWithBackoff(fn, retries = 1, delay = 600) {
       errorMsg.includes('SocketError') ||
       errorMsg.includes('Connection closed') ||
       errorMsg.includes('database connection') ||
+      errorMsg.includes('schema cache') ||
+      errorMsg.includes('Could not query the database') ||
       errorMsg.includes('ECONNRESET') ||
       errorMsg.includes('ETIMEDOUT') ||
       errorMsg.includes('EPIPE') ||

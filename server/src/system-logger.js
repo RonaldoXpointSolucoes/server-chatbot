@@ -152,6 +152,9 @@ function interceptConsole() {
                                            text.includes('Request aborted') ||
                                            text.includes('request aborted') ||
                                            text.includes('make-middleware.js') ||
+                                           text.includes('schema cache') ||
+                                           text.includes('Could not query the database') ||
+                                           text.includes('[QueueProcessor/Loop] Oscilação temporária') ||
                                            (text.includes('[EventProcessor] Erro ao buscar config da instância') && text.includes('TimeoutError')) ||
                                            text.includes('Contato não pôde ser inserido nem recuperado: Error: Supabase Node CircuitBreaker') ||
                                            text.includes('[BatchProcessor] Erro ao buscar instâncias válidas') ||

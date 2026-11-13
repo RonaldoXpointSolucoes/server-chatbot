@@ -5,6 +5,7 @@ import { AsyncLocalStorage } from 'async_hooks';
 import { getBrPhoneVariations, getCanonicalBrPhone } from '../event-processor/helpers.js';
 import { gastrofoodCache } from './gastrofood-cache.js';
 import { normalizeUrlsInText } from '../flow-runtime/url-helper.js';
+import { decryptGeminiKey } from '../utils/geminiVault.js';
 
 const tenantStorage = new AsyncLocalStorage();
 
@@ -1409,7 +1410,7 @@ class AutomationWorker {
 
         let keyToUse = '';
         if (customKey && typeof customKey === 'string') {
-            const clean = customKey.replace(/^['"]|['"]$/g, '').trim();
+            const clean = decryptGeminiKey(customKey);
             if (isKeyValid(clean)) {
                 keyToUse = clean;
             } else if (clean.length > 0 && invalidGeminiKeysBlacklist.has(clean)) {
@@ -1422,8 +1423,8 @@ class AutomationWorker {
             }
         }
         if (!keyToUse) {
-            const rawKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
-            const clean = rawKey ? rawKey.replace(/^['"]|['"]$/g, '').trim() : '';
+            const rawKey = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
+            const clean = rawKey ? decryptGeminiKey(rawKey) : '';
             if (isKeyValid(clean)) {
                 keyToUse = clean;
             }

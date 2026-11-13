@@ -1,4 +1,4 @@
-import { supabase, isTransientSupabaseError, nodeSupabaseCircuitBreaker } from './supabase.js';
+import { supabase, isTransientSupabaseError, nodeSupabaseCircuitBreaker, retryWithBackoff } from './supabase.js';
 
 class SnoozeManager {
   constructor() {
@@ -26,12 +26,14 @@ class SnoozeManager {
       if (nodeSupabaseCircuitBreaker && typeof nodeSupabaseCircuitBreaker.isCircuitOpen === 'function' && nodeSupabaseCircuitBreaker.isCircuitOpen()) return;
       const now = new Date().toISOString();
       
-      // Buscar todas as conversas cujo snooze expirou
-      const { data: expiredConvs, error: selectError } = await supabase
-        .from('conversations')
-        .select('id, tenant_id, instance_id')
-        .eq('status', 'snoozed')
-        .lte('snoozed_until', now);
+      // Buscar todas as conversas cujo snooze expirou (com retry automático para oscilações de schema cache / rede)
+      const { data: expiredConvs, error: selectError } = await retryWithBackoff(() =>
+        supabase
+          .from('conversations')
+          .select('id, tenant_id, instance_id')
+          .eq('status', 'snoozed')
+          .lte('snoozed_until', now)
+      );
 
       if (selectError) {
         const isFetchError = selectError.message && (

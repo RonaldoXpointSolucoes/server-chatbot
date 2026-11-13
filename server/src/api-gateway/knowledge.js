@@ -5,6 +5,17 @@ import { supabase } from '../supabase.js';
 import { PDFParse } from 'pdf-parse';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import autoRagTrainer from '../automation-worker/auto-rag-trainer.js';
+import {
+    encryptGeminiKey,
+    decryptGeminiKey,
+    buildGeminiKeyMeta,
+    resolveServerOrTenantGeminiKey,
+    invalidateTenantGeminiKeyCache,
+    verifyGeminiProxySecurity,
+    enforceGeminiBudgetGuardrails,
+    redactGeminiSecrets,
+    isValidPlainGeminiKey
+} from '../utils/geminiVault.js';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } }); // 100MB
@@ -795,8 +806,7 @@ router.post('/corrections/helper', async (req, res) => {
             return res.status(400).json({ error: 'text is required' });
         }
 
-        const rawKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
-        const apiKey = rawKey ? rawKey.replace(/^['"]|['"]$/g, '').trim() : '';
+        const apiKey = await resolveServerOrTenantGeminiKey(supabase, tenant_id);
         if (!apiKey || suspendedKnowledgeKeys.has(apiKey)) {
             return res.json({
                 success: true,
@@ -974,8 +984,7 @@ router.post('/train-multimodal/analyze', async (req, res) => {
         if (!tenant_id) return res.status(400).json({ error: 'x-tenant-id required' });
         if (!botId) return res.status(400).json({ error: 'botId required' });
 
-        const rawKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
-        const apiKey = rawKey ? rawKey.replace(/^['"]|['"]$/g, '') : '';
+        const apiKey = await resolveServerOrTenantGeminiKey(supabase, tenant_id);
         if (!apiKey) {
             return res.status(500).json({ error: 'Chave API Gemini não configurada no servidor.' });
         }
@@ -1287,11 +1296,91 @@ router.post('/train-multimodal/save-rag', async (req, res) => {
 });
 
 // ==========================================
-// PROXY SEGURO GEMINI (SERVER-SIDE COM RATE LIMIT E RESTRIÇÃO DE IP)
+// PROXY SEGURO GEMINI & COFRE AES-256-GCM (SERVER-SIDE COM FIREWALL ANTI-HACKER)
 // ==========================================
-const geminiProxyIpCounters = new Map();
-const GEMINI_PROXY_WINDOW_MS = 60 * 1000;
-const GEMINI_PROXY_MAX_PER_MIN = 25;
+
+/**
+ * POST /api/v1/knowledge/gemini-vault
+ * Criptografa uma chave Gemini com AES-256-GCM (ENCv1:...) e persiste no banco com metadados mascarados,
+ * garantindo que a chave em texto puro JAMAIS fique exposta em companies.settings ou no navegador.
+ */
+router.post('/gemini-vault', async (req, res) => {
+    try {
+        const tenant_id = req.headers['x-tenant-id'] || req.body?.tenantId;
+        if (!tenant_id) {
+            return res.status(403).json({ error: 'x-tenant-id obrigatório para acesso ao Cofre Gemini.' });
+        }
+
+        const security = verifyGeminiProxySecurity(req, tenant_id);
+        if (!security.allowed) {
+            return res.status(security.status).json({ error: security.reason });
+        }
+
+        const action = req.body?.action || 'save';
+        const { data: comp, error: compErr } = await supabase
+            .from('companies')
+            .select('settings')
+            .eq('id', tenant_id)
+            .maybeSingle();
+
+        if (compErr) {
+            return res.status(500).json({ error: 'Falha ao consultar empresa no Cofre.' });
+        }
+
+        const currentSettings = comp?.settings || {};
+
+        if (action === 'remove') {
+            const updatedSettings = {
+                ...currentSettings,
+                gemini_api_key: '',
+                gemini_key_meta: null
+            };
+            const { error: updErr } = await supabase
+                .from('companies')
+                .update({ settings: updatedSettings })
+                .eq('id', tenant_id);
+            if (updErr) throw updErr;
+            invalidateTenantGeminiKeyCache(tenant_id);
+            return res.json({ ok: true, removed: true });
+        }
+
+        const rawKey = String(req.body?.apiKey || '').trim();
+        if (!isValidPlainGeminiKey(rawKey)) {
+            return res.status(400).json({
+                ok: false,
+                error: 'Formato inválido. Chaves oficiais do Google iniciam com "AIza" ou "AQ." e possuem no mínimo 25 caracteres.'
+            });
+        }
+
+        const encryptedKey = encryptGeminiKey(rawKey);
+        const meta = buildGeminiKeyMeta(rawKey);
+
+        const updatedSettings = {
+            ...currentSettings,
+            gemini_api_key: encryptedKey,
+            gemini_key_meta: meta
+        };
+
+        const { error: updErr } = await supabase
+            .from('companies')
+            .update({ settings: updatedSettings })
+            .eq('id', tenant_id);
+
+        if (updErr) throw updErr;
+
+        invalidateTenantGeminiKeyCache(tenant_id);
+        suspendedKnowledgeKeys.delete(rawKey);
+
+        return res.json({
+            ok: true,
+            encryptedKey,
+            meta
+        });
+    } catch (e) {
+        console.error('[GeminiVault API] Erro:', redactGeminiSecrets(e.message));
+        return res.status(500).json({ ok: false, error: redactGeminiSecrets(e.message) });
+    }
+});
 
 router.post('/gemini-proxy', async (req, res) => {
     try {
@@ -1300,49 +1389,43 @@ router.post('/gemini-proxy', async (req, res) => {
             return res.status(403).json({ error: { message: 'x-tenant-id obrigatório para uso do motor Gemini.' } });
         }
 
-        const callerIp = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.ip || 'unknown';
-        const now = Date.now();
-        const rateKey = `${callerIp}:${tenant_id}`;
-        const entry = geminiProxyIpCounters.get(rateKey);
-        if (!entry || now - entry.start > GEMINI_PROXY_WINDOW_MS) {
-            geminiProxyIpCounters.set(rateKey, { start: now, count: 1 });
-        } else {
-            entry.count += 1;
-            if (entry.count > GEMINI_PROXY_MAX_PER_MIN) {
-                return res.status(429).json({ error: { message: 'Limite de segurança de requisições por minuto atingido.' } });
-            }
+        // 1. Firewall Anti-Hacker, Validação de Origem/Escudo e Rate Limiting com Auto-Ban
+        const security = verifyGeminiProxySecurity(req, tenant_id);
+        if (!security.allowed) {
+            return res.status(security.status).json({ error: { message: security.reason } });
         }
 
-        const rawKey = req.body?.apiKey || process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
-        const apiKey = rawKey ? String(rawKey).replace(/['"\s\r\n]+/g, '').trim() : '';
+        // 2. Resolução segura da chave no Cofre (Descriptografia em memória RAM exclusivamente no backend)
+        const apiKey = await resolveServerOrTenantGeminiKey(supabase, tenant_id, req.body?.apiKey);
         if (!apiKey || apiKey.includes('SERVER_MANAGED') || suspendedKnowledgeKeys.has(apiKey)) {
             return res.status(200).json({ error: { code: 401, message: 'Chave Gemini em contingência no servidor.' }, contingency: true });
         }
 
-        const requestedModel = String(req.body?.model || 'gemini-2.5-flash').replace(/^models\//, '');
-        // Bloqueia modelos caros (Pro/Ultra) em chamadas genéricas para proteção de orçamento
-        const safeModel = requestedModel.includes('flash') ? requestedModel : 'gemini-2.5-flash';
         const payload = req.body?.payload;
         if (!payload || !Array.isArray(payload.contents)) {
             return res.status(400).json({ error: { message: 'Payload contents inválido.' } });
         }
 
+        // 3. Proteção de Orçamento (Bloqueio de modelos caros Pro/Ultra e limite de tokens)
+        const { safeModel, safePayload } = enforceGeminiBudgetGuardrails(req.body?.model, payload);
+
         const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${safeModel}:generateContent?key=${encodeURIComponent(apiKey)}`;
         const upstreamRes = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+            body: JSON.stringify(safePayload)
         });
 
         const data = await upstreamRes.json().catch(() => ({}));
         if (upstreamRes.status === 401 || upstreamRes.status === 403) {
             suspendedKnowledgeKeys.add(apiKey);
-            return res.status(200).json({ error: data?.error || { code: upstreamRes.status, message: 'Chave Gemini suspensa' }, contingency: true });
+            return res.status(200).json({ error: { code: upstreamRes.status, message: 'Chave Gemini suspensa ou revogada.' }, contingency: true });
         }
         return res.status(upstreamRes.status).json(data);
     } catch (e) {
-        console.info('[GeminiProxy API] Contingência:', e.message);
-        return res.status(200).json({ error: { message: e.message }, contingency: true });
+        const safeMsg = redactGeminiSecrets(e.message || 'Erro no proxy Gemini');
+        console.info('[GeminiProxy API] Contingência:', safeMsg);
+        return res.status(200).json({ error: { message: safeMsg }, contingency: true });
     }
 });
 

@@ -13,6 +13,7 @@ import { ensureResilientUrlInfo } from '../flow-runtime/url-helper.js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import AutomationWorker from '../automation-worker/agent.js';
 import pushService from '../push-service/index.js';
+import { resolveServerOrTenantGeminiKey, decryptGeminiKey } from '../utils/geminiVault.js';
 
 const router = express.Router();
 
@@ -489,8 +490,8 @@ router.delete('/v1/admin/economic-groups/:id', async (req, res) => {
 // Helper de orquestração na simulação
 async function orchestrateSimulate(eligibleBots, textMessage) {
     try {
-        const rawKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
-        const apiKey = rawKey ? rawKey.replace(/^['"]|['"]$/g, '').trim() : '';
+        const rawKey = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
+        const apiKey = rawKey ? decryptGeminiKey(rawKey) : '';
         if (!apiKey || apiKey.length < 20) {
             console.warn("[SimulateOrchestrator] Chave Gemini ausente ou incompatível. Usando fallback do primeiro robô.");
             return {
@@ -811,9 +812,9 @@ ${sampleErrors}`,
     };
 
     try {
-        // Resolução flexível da chave Gemini: corpo > cabeçalho > env backend
-        const rawKey = geminiApiKey || req.headers['x-gemini-api-key'] || process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
-        const apiKey = rawKey ? String(rawKey).replace(/^['"]|['"]$/g, '').trim() : '';
+        // Resolução flexível da chave Gemini: corpo > cabeçalho > cofre tenant > env backend
+        const rawKey = geminiApiKey || req.headers['x-gemini-api-key'];
+        const apiKey = await resolveServerOrTenantGeminiKey(supabase, tenant_id, rawKey);
         
         // Validação de formato: chaves vazias ou muito curtas
         const isInvalidFormat = !apiKey || apiKey.length < 20;
@@ -981,7 +982,7 @@ DIRETRIZES TÉCNICAS:
         console.error('[API Gateway] Erro na análise de logs com IA:', err?.message || err);
         const errMsg = err?.message || String(err);
         const isAuthError = errMsg.includes('401') || errMsg.includes('Unauthorized') || errMsg.includes('ACCESS_TOKEN_TYPE_UNSUPPORTED') || errMsg.includes('UNAUTHENTICATED');
-        const serverGlobalKey = (process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || '').replace(/^['"]|['"]$/g, '').trim();
+        const serverGlobalKey = decryptGeminiKey(process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY || '');
 
         // Se a chave fornecida na requisição falhou por autenticação e o servidor tem chave global válida, tenta utilizá-la
         if (isAuthError && serverGlobalKey && serverGlobalKey !== apiKey && serverGlobalKey.length >= 20) {
@@ -1163,8 +1164,9 @@ router.post('/v1/crm/cards/create-ai-card', async (req, res) => {
  */
 const handleAnalyzeScreen = async (req, res) => {
     try {
-        const rawKey = req.body?.geminiApiKey || req.headers['x-gemini-api-key'] || process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
-        const apiKey = rawKey ? String(rawKey).replace(/^['"]|['"]$/g, '').trim() : '';
+        const tenantIdHeader = req.headers['x-tenant-id'] || req.body?.tenantId;
+        const rawKey = req.body?.geminiApiKey || req.headers['x-gemini-api-key'];
+        const apiKey = await resolveServerOrTenantGeminiKey(supabase, tenantIdHeader, rawKey);
         if (!apiKey || apiKey.length < 20 || (!apiKey.startsWith('AIza') && !apiKey.startsWith('AQ.'))) {
             return res.status(400).json({ ok: false, error: 'GEMINI_API_KEY ausente ou no formato incorreto (deve ser uma chave válida do Google iniciando com AIza... ou AQ....).' });
         }

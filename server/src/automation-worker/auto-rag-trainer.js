@@ -1,6 +1,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { supabase } from '../supabase.js';
 import { pipeline } from '../embeddings/pipeline.js';
+import { decryptGeminiKey } from '../utils/geminiVault.js';
 
 class LocalEmbeddingsPipeline {
   static task = 'feature-extraction';
@@ -23,8 +24,8 @@ class AutoRagTrainer {
 
     init() {
         if (this.keySuspended) return;
-        const rawKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
-        const apiKey = rawKey ? rawKey.replace(/^['"]|['"]$/g, '').trim() : '';
+        const rawKey = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
+        const apiKey = rawKey ? decryptGeminiKey(rawKey) : '';
         if (apiKey && !this.genAI) {
             this.genAI = new GoogleGenerativeAI(apiKey);
         }
