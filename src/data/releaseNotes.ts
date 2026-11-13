@@ -712,6 +712,72 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.1.7',
+    date: '2026-11-13',
+    summary: 'Encaminhamento Multi-Destinatário & Multi-Caixa + Sincronização Realtime Determinística de Contadores & Relatórios IA + Correção do Catálogo GastroFood no Hub Baileys',
+    notes: [
+      {
+        id: 'feat-hub-catalog-gastrofood-817',
+        category: 'features',
+        title: 'Vitrine & Catálogo GastroFood por Empresa no Hub Baileys (Envio Rápido com Preço Real)',
+        description: 'Carregamento unificado do cardápio ativo da empresa (cardapio_produtos por tenant_id) no Hub da Instância com conversão exata de preços em BRL, miniaturas reais e envio direto do card nativo para a conversa ativa.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+        guide: {
+          moduleGroup: 'baileys-hub-catalog',
+          moduleLabel: 'Hub Baileys • Aba Catálogo & GastroFood',
+          purpose: 'Permitir visualizar os produtos sincronizados do GastroFood e enviá-los como card nativo de produto diretamente na conversa do cliente, mesmo quando a vitrine inicial do aparelho está vazia.',
+          whereToAccess: [
+            '1. Menu Lateral Esquerdo ➔ Chat ao Vivo (/chat)',
+            '2. No topo da conversa (ou em Conexões), clique no botão do Hub de Recursos Baileys',
+            '3. Selecione a aba "Catálogo & GastroFood" para listar ou sincronizar os produtos'
+          ],
+          howToTest: [
+            '1. Abra o Hub Baileys de qualquer instância da empresa na aba "Catálogo & GastroFood".',
+            '2. Clique em "Atualizar Lista" e valide os produtos carregados sem erro 400 na rede.',
+            '3. Clique em "Enviar" em qualquer produto para disparar o card com foto e valor real na conversa.'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Modal: Hub Baileys ➔ Aba Catálogo & GastroFood',
+            contextElements: ['🛍️ Catálogo & GastroFood', '🔄 Atualizar Lista', '📦 Produtos Disponíveis para Envio Rápido'],
+            targetButtonLabel: '👆 Clique Aqui: Sincronizar Cardápio GastroFood Agora',
+            targetButtonPosition: 'Canto superior direito do card principal da aba Catálogo & GastroFood',
+            visualPreviewVariant: 'hub-catalog-gastrofood'
+          },
+          quickAction: {
+            label: 'Abrir Catálogo no Hub Baileys',
+            route: '/chat',
+            openBaileysHubTab: 'catalog'
+          }
+        }
+      },
+      {
+        id: 'imp-forward-modal-multibox-817',
+        category: 'improvements',
+        title: 'Modal de Encaminhamento Multi-Destinatário & Seleção de Caixa Remetente',
+        description: 'Aprimorado o encaminhamento de mensagens com busca instantânea no banco de contatos, filtros rápidos (Todos, Mesma Caixa, Contatos e Grupos), deduplicação canônica de telefones e escolha da caixa de disparo.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
+      },
+      {
+        id: 'fix-realtime-counters-ai-reports-817',
+        category: 'fixes',
+        title: 'Sincronização Realtime de Contadores Multi-PC & Filtro de Relatórios IA por Caixa',
+        description: 'Corrigida a divergência de contagem de tickets abertos entre estações simultâneas, blindagem de TDZ na inicialização de componentes e restrição estrita dos relatórios de tickets fechados com I.A. apenas às caixas habilitadas.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      },
+      {
+        id: 'fix-cardapio-tenant-watchdog-817',
+        category: 'fixes',
+        title: 'Correção de Escopo Tenant em cardapio_produtos (HTTP 400) & Refinamento do EventBuffer Watchdog',
+        description: 'Eliminado o erro PostgREST 42703 ao consultar produtos locais por tenant_id e suprimidos falsos alertas WARN em lotes transitórios normais de 100ms–30s do EventBuffer no motor Node.js.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      }
+    ]
+  },
+  {
     version: '8.1.6',
     date: '2026-11-13',
     summary: 'Correção Definitiva de Loop de Atualização PWA Mobile + Aceleração de Carregamento (-67% no Bundle Inicial via Lazy Code-Splitting) + Índices de Alta Performance no Supabase',

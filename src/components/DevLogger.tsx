@@ -1560,6 +1560,8 @@ export default function DevLogger() {
           msg.includes('Restabelecendo o socket com as credenciais preservadas') ||
           msg.includes('Stream Errored') ||
           msg.includes('failed to sync regular_') ||
+          msg.includes('blocked on missing key') ||
+          msg.includes('failed to find key') ||
           msg.includes('invalid wire type') ||
           msg.includes('[forwardMessage]') ||
           msg.includes('[handleMicClick]') ||
@@ -1896,6 +1898,8 @@ export default function DevLogger() {
           msg.includes('Restabelecendo o socket com as credenciais preservadas') ||
           msg.includes('Stream Errored') ||
           msg.includes('failed to sync regular_') ||
+          msg.includes('blocked on missing key') ||
+          msg.includes('failed to find key') ||
           msg.includes('invalid wire type') ||
           msg.includes('[forwardMessage]') ||
           msg.includes('[handleMicClick]') ||

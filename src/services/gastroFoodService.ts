@@ -98,20 +98,20 @@ export class GastroFoodService {
   private static apiBaseUrl = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || window.location.origin;
 
   /**
-   * Obtém as credenciais e URLs configuradas para o tenant no Supabase
+   * Obtém as credenciais e URLs configuradas para o tenant no Supabase (companies.settings)
    */
   private static async getTenantSettings(tenantId?: string): Promise<Record<string, any>> {
     try {
-      const resolvedTenantId = tenantId || localStorage.getItem('current_tenant_id') || 'default';
-      const { data: tenant } = await supabase
-        .from('tenants')
+      const resolvedTenantId = tenantId || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id') || 'default';
+      const { data: company } = await supabase
+        .from('companies')
         .select('settings')
         .eq('id', resolvedTenantId)
         .maybeSingle();
 
-      return tenant?.settings || {};
+      return company?.settings || {};
     } catch (e) {
-      console.warn('[GastroFoodService] Falha ao recuperar configurações do tenant:', e);
+      console.warn('[GastroFoodService] Falha ao recuperar configurações da empresa:', e);
       return {};
     }
   }

@@ -662,7 +662,8 @@ export default function InstanceManagerStandalone() {
       const newChatEnabled = !currentSettings.chat_enabled;
       const updatedSettings = {
         ...currentSettings,
-        chat_enabled: newChatEnabled
+        chat_enabled: newChatEnabled,
+        is_api_only: !newChatEnabled
       };
       const { error } = await supabase
         .from('whatsapp_instances')

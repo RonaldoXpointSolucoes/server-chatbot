@@ -1473,7 +1473,7 @@ export default function EvolutionModal({
       const cId = localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
       if (!cId) throw new Error("Tenant não encontrado");
 
-      const { data: tenantData } = await supabase.from('tenants').select('settings').eq('id', cId).single();
+      const { data: tenantData } = await supabase.from('companies').select('settings').eq('id', cId).single();
       let settings = tenantData?.settings || {};
       let contactGroups = settings.contactGroups || [];
       
@@ -1490,7 +1490,7 @@ export default function EvolutionModal({
         contactGroups.push(targetTag);
         settings.contactGroups = contactGroups;
         
-        await supabase.from('tenants').update({ settings }).eq('id', cId);
+        await supabase.from('companies').update({ settings }).eq('id', cId);
         useChatStore.getState().fetchTenantInfo(cId);
       }
 

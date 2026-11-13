@@ -164,16 +164,21 @@ export const BaileysInstanceHubModal: React.FC<BaileysInstanceHubModalProps> = (
     setLoading(true);
     try {
       const res = await invokeBaileysAction(tenantId, selectedInstanceId, 'getCatalog', { limit: 40 });
-      if (res?.ok && res.result?.products) {
+      if (res?.ok && Array.isArray(res.result?.products) && res.result.products.length > 0) {
         setCatalogProducts(res.result.products);
-      } else {
+      } else if (tenantId && tenantId !== '00000000-0000-0000-0000-000000000000') {
         const { data: localProds } = await supabase
           .from('cardapio_produtos')
           .select('*')
-          .eq('instance_id', selectedInstanceId)
-          .eq('ativo', true)
+          .eq('tenant_id', tenantId)
+          .or('ativo.eq.true,ativo.is.null')
+          .order('name', { ascending: true })
           .limit(40);
-        if (localProds) setCatalogProducts(localProds);
+        if (localProds) {
+          setCatalogProducts(localProds.map((p: any) => ({ ...p, _fromCardapioDb: true })));
+        }
+      } else {
+        setCatalogProducts([]);
       }
     } catch (e) {
       // silent
@@ -289,14 +294,15 @@ export const BaileysInstanceHubModal: React.FC<BaileysInstanceHubModalProps> = (
     if (!target) return;
     setLoading(true);
     try {
+      const isLocalDbProd = Boolean(prod._fromCardapioDb || 'grupo_id' in prod);
       const res = await invokeBaileysAction(tenantId, selectedInstanceId, 'sendProduct', {
         jid: target,
         product: {
           id: prod.id,
           title: prod.name || prod.nome,
           description: prod.description || prod.descricao || '',
-          price: prod.price ? Number(prod.price) / 1000 : Number(prod.preco || 0),
-          imageUrl: prod.imageUrls?.original || prod.imagem_url || prod.imageUrl,
+          price: isLocalDbProd ? Number(prod.price ?? prod.preco ?? 0) : (prod.price ? Number(prod.price) / 1000 : Number(prod.preco || 0)),
+          imageUrl: prod.imageUrls?.original || prod.image || prod.imagem_url || prod.imageUrl,
           url: prod.url
         }
       });
@@ -566,9 +572,10 @@ export const BaileysInstanceHubModal: React.FC<BaileysInstanceHubModalProps> = (
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 max-h-[340px] overflow-y-auto pr-1">
                   {catalogProducts.map((prod, idx) => {
+                    const isLocalDbProd = Boolean(prod._fromCardapioDb || 'grupo_id' in prod);
                     const title = prod.name || prod.nome || 'Produto';
-                    const price = prod.price ? Number(prod.price) / 1000 : Number(prod.preco || 0);
-                    const img = prod.imageUrls?.original || prod.imagem_url || prod.imageUrl;
+                    const price = isLocalDbProd ? Number(prod.price ?? prod.preco ?? 0) : (prod.price ? Number(prod.price) / 1000 : Number(prod.preco || 0));
+                    const img = prod.imageUrls?.original || prod.image || prod.imagem_url || prod.imageUrl;
                     return (
                       <div key={prod.id || idx} className="p-3 rounded-xl bg-slate-800/50 border border-slate-700/60 flex items-center justify-between gap-3 hover:border-emerald-500/40 transition-all">
                         <div className="flex items-center gap-3 min-w-0">

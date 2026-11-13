@@ -1771,132 +1771,728 @@ export function ContactLabelsModal({ isOpen, onClose, contactId, contactName }: 
 // -- Encaminhar Mensagem Modal
 export interface ForwardMessageModalProps extends BaseModalProps {
   contacts: any[];
-  onForward: (contactId: string) => void;
+  onForward: (target: any) => Promise<void> | void;
   messagePreview?: string;
+  message?: any;
+  activeInstanceId?: string;
 }
 
-export function ForwardMessageModal({ isOpen, onClose, contacts, onForward, messagePreview }: ForwardMessageModalProps) {
+function normalizeForwardText(val: string | null | undefined): string {
+  return String(val || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function normalizePhoneCanonicalKey(phone?: string | null, jid?: string | null): string {
+  const rawJid = String(jid || '').trim();
+  if (rawJid.endsWith('@g.us')) {
+    return `group:${rawJid}`;
+  }
+  const digits = String(phone || rawJid.split('@')[0] || '').replace(/\D/g, '');
+  if (!digits) return '';
+  // Normaliza números brasileiros com ou sem DDI 55 e 9º dígito para evitar duplicatas como Daniela Clemente 3x
+  if (digits.startsWith('55') && digits.length >= 12) {
+    return digits;
+  }
+  if (digits.length === 10 || digits.length === 11) {
+    return `55${digits}`;
+  }
+  return digits;
+}
+
+function formatForwardPhoneDisplay(phone?: string | null, jid?: string | null): string {
+  if (String(jid || '').endsWith('@g.us')) return 'Grupo de WhatsApp';
+  const digits = String(phone || String(jid || '').split('@')[0] || '').replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.startsWith('55') && (digits.length === 12 || digits.length === 13)) {
+    const ddd = digits.slice(2, 4);
+    const local = digits.slice(4);
+    return local.length === 9
+      ? `(${ddd}) ${local.slice(0, 5)}-${local.slice(5)}`
+      : `(${ddd}) ${local.slice(0, 4)}-${local.slice(4)}`;
+  }
+  if (digits.length === 11) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+  }
+  if (digits.length === 10) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+  }
+  return digits;
+}
+
+function ForwardContactAvatar({ name, avatar, isGroup }: { name: string; avatar?: string | null; isGroup?: boolean }) {
+  const [imgFailed, setImgFailed] = useState(false);
+
+  useEffect(() => {
+    setImgFailed(false);
+  }, [avatar]);
+
+  const initials = useMemo(() => {
+    const clean = String(name || '').replace(/[^\p{L}\p{N}\s]/gu, '').trim();
+    if (!clean) return isGroup ? 'GP' : 'CT';
+    const parts = clean.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) {
+      return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    }
+    return clean.slice(0, 2).toUpperCase();
+  }, [name, isGroup]);
+
+  const validAvatar = avatar && !imgFailed && /^https?:\/\//i.test(avatar) && !avatar.includes('ui-avatars.com');
+
+  if (validAvatar) {
+    return (
+      <img
+        src={avatar!}
+        alt={name}
+        onError={() => setImgFailed(true)}
+        className="w-11 h-11 rounded-full object-cover shadow-sm bg-[#202c33] shrink-0 border border-white/10"
+      />
+    );
+  }
+
+  return (
+    <div className={cn(
+      'w-11 h-11 rounded-full flex items-center justify-center font-bold text-sm shrink-0 shadow-sm border border-white/10',
+      isGroup
+        ? 'bg-gradient-to-br from-indigo-500/30 to-purple-600/30 text-indigo-300'
+        : 'bg-gradient-to-br from-emerald-500/30 to-teal-600/30 text-emerald-300'
+    )}>
+      {isGroup ? <Users size={18} /> : initials}
+    </div>
+  );
+}
+
+export function ForwardMessageModal({
+  isOpen,
+  onClose,
+  contacts,
+  onForward,
+  messagePreview,
+  message,
+  activeInstanceId
+}: ForwardMessageModalProps) {
+  const tenantInfo = useChatStore(state => state.tenantInfo);
+  const rawInstances = useChatStore(state => state.rawInstances);
+  const activeChannelFilter = useChatStore(state => state.activeChannelFilter);
+  const connectedInstanceName = useChatStore(state => state.connectedInstanceName);
+
   const [search, setSearch] = useState('');
+  const [filterScope, setFilterScope] = useState<'all' | 'same_inbox' | 'contacts' | 'groups'>('all');
+  const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
+  const [remoteContacts, setRemoteContacts] = useState<any[]>([]);
+  const [isSearchingDb, setIsSearchingDb] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Caixas disponíveis do tenant atual
+  const availableInstances = useMemo(() => {
+    const list = Array.isArray(rawInstances) ? rawInstances : [];
+    const currentTenantId = tenantInfo?.id;
+    return list.filter((inst: any) => {
+      if (currentTenantId && inst.tenant_id && inst.tenant_id !== currentTenantId) return false;
+      return inst.status === 'connected' || inst.status === 'connected_local' || inst.id === activeInstanceId;
+    });
+  }, [rawInstances, tenantInfo?.id, activeInstanceId]);
+
+  const defaultSendingInstance = useMemo(() => {
+    const candidates = [activeInstanceId, activeChannelFilter, connectedInstanceName];
+    for (const cand of candidates) {
+      if (!cand || cand === 'all' || cand === 'default') continue;
+      const byId = availableInstances.find((i: any) => i.id === cand || i.display_name === cand || i.whatsapp_name === cand);
+      if (byId) return byId.id;
+      return cand;
+    }
+    return availableInstances[0]?.id || '';
+  }, [activeInstanceId, activeChannelFilter, connectedInstanceName, availableInstances]);
+
+  const [selectedInstanceId, setSelectedInstanceId] = useState<string>(defaultSendingInstance);
+
+  useEffect(() => {
+    if (isOpen) {
+      setSearch('');
+      setFilterScope('all');
+      setSelectedKeys([]);
+      setRemoteContacts([]);
+      setErrorMsg(null);
+      setSelectedInstanceId(defaultSendingInstance);
+    }
+  }, [isOpen, defaultSendingInstance]);
+
+  // Busca híbrida no Supabase (tabela contacts da empresa atual) ao digitar >= 2 caracteres
+  useEffect(() => {
+    if (!isOpen || !tenantInfo?.id) return;
+    const q = search.trim();
+    if (q.length < 2) {
+      setRemoteContacts([]);
+      setIsSearchingDb(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsSearchingDb(true);
+    const timer = setTimeout(async () => {
+      try {
+        const { supabase } = await import('../services/supabase');
+        const safeQ = q.replace(/[%_,()]/g, ' ').trim();
+        const digitsOnly = q.replace(/\D/g, '');
+        const orClauses = [
+          `name.ilike.%${safeQ}%`,
+          `custom_name.ilike.%${safeQ}%`,
+          `fantasy_name.ilike.%${safeQ}%`
+        ];
+        if (digitsOnly.length >= 3) {
+          orClauses.push(`phone.ilike.%${digitsOnly}%`);
+        }
+
+        const { data } = await supabase
+          .from('contacts')
+          .select('id, name, custom_name, fantasy_name, phone, whatsapp_jid, profile_picture_url, instance_id, tenant_id, tags')
+          .eq('tenant_id', tenantInfo.id)
+          .or(orClauses.join(','))
+          .limit(40);
+
+        if (!cancelled && Array.isArray(data)) {
+          setRemoteContacts(data);
+        }
+      } catch (err) {
+        console.warn('[ForwardMessageModal] Aviso na busca remota de contatos:', err);
+      } finally {
+        if (!cancelled) setIsSearchingDb(false);
+      }
+    }, 220);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [isOpen, search, tenantInfo?.id]);
+
+  // Consolidação e Deduplicação estrita por telefone/JID (elimina contatos repetidos em múltiplas caixas)
+  const unifiedContacts = useMemo(() => {
+    const map = new Map<string, any>();
+    const currentTenantId = tenantInfo?.id;
+
+    const extractInstId = (c: any): string => {
+      if (c.instance_id && c.instance_id !== 'default' && c.instance_id !== 'all') return String(c.instance_id);
+      const rawId = String(c.id || '');
+      const idx = rawId.indexOf('_');
+      return idx > 0 ? rawId.slice(idx + 1) : '';
+    };
+
+    // 1. Conversas em memória (ordenadas das mais recentes para as mais antigas)
+    for (const c of contacts || []) {
+      if (!c) continue;
+      if (currentTenantId && c.tenant_id && c.tenant_id !== currentTenantId) continue;
+
+      const jid = c.whatsapp_jid || '';
+      const isGroup = String(jid).endsWith('@g.us') || Boolean(c.is_group);
+      const canonicalKey = normalizePhoneCanonicalKey(c.phone, jid) || `id:${c.contact_id || c.id}`;
+      const cInstId = extractInstId(c);
+      const isOnSendingBox = Boolean(selectedInstanceId && cInstId === selectedInstanceId);
+      const displayName = (c.custom_name || c.name || c.push_name || c.fantasy_name || formatForwardPhoneDisplay(c.phone, jid) || 'Contato').trim();
+      const avatarUrl = c.avatar || c.profile_picture_url || null;
+      const lastTs = c.last_message_at ? new Date(c.last_message_at).getTime() : (c.updated_at ? new Date(c.updated_at).getTime() : 0);
+
+      const existing = map.get(canonicalKey);
+      if (!existing) {
+        map.set(canonicalKey, {
+          key: canonicalKey,
+          id: c.id,
+          contactId: c.contact_id || String(c.id || '').split('_')[0],
+          name: displayName,
+          custom_name: c.custom_name || null,
+          fantasy_name: c.fantasy_name || null,
+          phone: c.phone || String(jid).split('@')[0] || '',
+          whatsapp_jid: jid || '',
+          avatar: avatarUrl,
+          isGroup,
+          isSameInbox: isOnSendingBox,
+          tags: Array.isArray(c.tags) ? c.tags : [],
+          lastTs: isNaN(lastTs) ? 0 : lastTs
+        });
+      } else {
+        // Mescla inteligente: prioriza o ID da caixa selecionada para envio, preserva o melhor nome e avatar válido
+        if (isOnSendingBox && !existing.isSameInbox) {
+          existing.id = c.id;
+          existing.isSameInbox = true;
+        }
+        if (c.custom_name && !existing.custom_name) {
+          existing.custom_name = c.custom_name;
+          existing.name = c.custom_name;
+        } else if ((!existing.name || /^\d+$/.test(existing.name.replace(/\D/g, ''))) && displayName && !/^\d+$/.test(displayName)) {
+          existing.name = displayName;
+        }
+        if (!existing.avatar && avatarUrl) {
+          existing.avatar = avatarUrl;
+        }
+        if (!isNaN(lastTs) && lastTs > existing.lastTs) {
+          existing.lastTs = lastTs;
+        }
+        if (Array.isArray(c.tags) && c.tags.length > existing.tags.length) {
+          existing.tags = c.tags;
+        }
+      }
+    }
+
+    // 2. Contatos buscados diretamente do banco Supabase (caso não tenham conversa aberta na memória)
+    for (const rc of remoteContacts) {
+      if (!rc) continue;
+      const jid = rc.whatsapp_jid || '';
+      const isGroup = String(jid).endsWith('@g.us');
+      const canonicalKey = normalizePhoneCanonicalKey(rc.phone, jid) || `id:${rc.id}`;
+      const isOnSendingBox = Boolean(selectedInstanceId && rc.instance_id === selectedInstanceId);
+      const displayName = (rc.custom_name || rc.name || rc.fantasy_name || formatForwardPhoneDisplay(rc.phone, jid) || 'Contato').trim();
+
+      const existing = map.get(canonicalKey);
+      if (!existing) {
+        map.set(canonicalKey, {
+          key: canonicalKey,
+          id: rc.id,
+          contactId: rc.id,
+          name: displayName,
+          custom_name: rc.custom_name || null,
+          fantasy_name: rc.fantasy_name || null,
+          phone: rc.phone || String(jid).split('@')[0] || '',
+          whatsapp_jid: jid || '',
+          avatar: rc.profile_picture_url || null,
+          isGroup,
+          isSameInbox: isOnSendingBox,
+          tags: Array.isArray(rc.tags) ? rc.tags : [],
+          lastTs: 0
+        });
+      } else {
+        if (!existing.avatar && rc.profile_picture_url) existing.avatar = rc.profile_picture_url;
+        if (rc.custom_name && !existing.custom_name) {
+          existing.custom_name = rc.custom_name;
+          existing.name = rc.custom_name;
+        }
+        if (isOnSendingBox) existing.isSameInbox = true;
+      }
+    }
+
+    return Array.from(map.values()).sort((a, b) => {
+      if (a.isSameInbox !== b.isSameInbox && !search.trim()) {
+        return a.isSameInbox ? -1 : 1;
+      }
+      if (b.lastTs !== a.lastTs) return b.lastTs - a.lastTs;
+      return a.name.localeCompare(b.name, 'pt-BR');
+    });
+  }, [contacts, remoteContacts, tenantInfo?.id, selectedInstanceId, search]);
+
+  // Aplicação dos filtros rápidos + busca sem acentos + busca por dígitos do telefone
+  const filteredContacts = useMemo(() => {
+    const normQuery = normalizeForwardText(search);
+    const queryDigits = search.replace(/\D/g, '');
+
+    return unifiedContacts.filter(item => {
+      if (filterScope === 'same_inbox' && !item.isSameInbox) return false;
+      if (filterScope === 'contacts' && item.isGroup) return false;
+      if (filterScope === 'groups' && !item.isGroup) return false;
+
+      if (!normQuery) return true;
+
+      const hayName = normalizeForwardText(`${item.custom_name || ''} ${item.name || ''} ${item.fantasy_name || ''} ${(item.tags || []).join(' ')}`);
+      if (hayName.includes(normQuery)) return true;
+
+      if (queryDigits.length >= 2) {
+        const phoneDigits = String(item.phone || item.whatsapp_jid || '').replace(/\D/g, '');
+        if (phoneDigits.includes(queryDigits)) return true;
+      }
+
+      return false;
+    });
+  }, [unifiedContacts, filterScope, search]);
+
+  // Suporte a envio direto para número digitado que ainda não esteja salvo na agenda
+  const directTypedPhoneTarget = useMemo(() => {
+    const digits = search.replace(/\D/g, '');
+    if (digits.length < 10 || digits.length > 13) return null;
+    const canonical = normalizePhoneCanonicalKey(digits, null);
+    const alreadyListed = filteredContacts.some(c => c.key === canonical);
+    if (alreadyListed) return null;
+    const normalizedDigits = (digits.length === 10 || digits.length === 11) ? `55${digits}` : digits;
+    return {
+      key: `direct:${normalizedDigits}`,
+      id: `direct_${normalizedDigits}`,
+      name: formatForwardPhoneDisplay(normalizedDigits, null),
+      phone: normalizedDigits,
+      whatsapp_jid: `${normalizedDigits}@s.whatsapp.net`,
+      isGroup: false,
+      isSameInbox: false,
+      isDirectNumber: true,
+      tags: []
+    };
+  }, [search, filteredContacts]);
+
+  const selectedContactsMap = useMemo(() => {
+    const byKey = new Map<string, any>();
+    for (const c of unifiedContacts) byKey.set(c.key, c);
+    if (directTypedPhoneTarget) byKey.set(directTypedPhoneTarget.key, directTypedPhoneTarget);
+    return byKey;
+  }, [unifiedContacts, directTypedPhoneTarget]);
 
   if (!isOpen) return null;
 
-  // Filtro de busca
-  const parsedSearch = search.toLowerCase().trim();
-  const filtered = contacts.filter(c => 
-    (c.custom_name || c.name || c.push_name || c.phone || '').toLowerCase().includes(parsedSearch)
-  );
+  const toggleSelect = (key: string) => {
+    if (isSending) return;
+    setErrorMsg(null);
+    setSelectedKeys(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]);
+  };
 
-  // Considerar que 'contacts' já vem ordenado pelos mais recentes pelo useChatStore
-  const top10 = parsedSearch ? [] : filtered.slice(0, 10);
-  const listToShow = parsedSearch ? filtered : filtered.slice(10);
-
-  const handleForward = async (id: string) => {
+  const executeForward = async (targetsToProcess: any[]) => {
+    if (targetsToProcess.length === 0 || isSending) return;
     setIsSending(true);
+    setErrorMsg(null);
     try {
-      await onForward(id);
+      const payload = targetsToProcess.map(t => ({
+        ...t,
+        targetInstanceId: selectedInstanceId
+      }));
+      await onForward(payload.length === 1 ? payload[0] : payload);
       onClose();
-    } catch (e) {
-      console.error(e);
-      alert('Erro ao encaminhar mensagem.');
+    } catch (e: any) {
+      console.error('[ForwardMessageModal] Erro ao encaminhar:', e);
+      setErrorMsg(e?.message || 'Não foi possível encaminhar a mensagem. Verifique a conexão da caixa.');
     } finally {
       setIsSending(false);
     }
   };
 
-  const renderContact = (c: any) => (
-    <div 
-      key={c.id} 
-      onClick={() => !isSending && handleForward(c.id)}
-      className={`group flex items-center gap-3 p-3 rounded-2xl cursor-pointer transition-all border border-transparent ${isSending ? 'opacity-50' : 'hover:bg-[#f0f2f5] dark:hover:bg-white/5'}`}
-    >
-      <img src={c.avatar || 'https://ui-avatars.com/api/?background=random&name='+(c.name || c.phone)} alt={c.name} className="w-12 h-12 rounded-full object-cover shadow-sm bg-gray-200 dark:bg-gray-800" />
-      <div className="flex flex-col flex-1 min-w-0">
-        <span className="font-semibold text-[#111b21] dark:text-[#e9edef] truncate">{c.custom_name || c.name || c.push_name || c.phone}</span>
-        {c.phone && <span className="text-xs text-gray-500 dark:text-[#8696a0] truncate">{c.phone}</span>}
-      </div>
-      <button disabled={isSending} className="p-2 text-[#00a884] opacity-0 group-hover:opacity-100 transition-opacity">
-         <CheckCircle2 size={20} />
-      </button>
-    </div>
-  );
+  const recentSlice = !search.trim() && filterScope === 'all' ? filteredContacts.slice(0, 8) : [];
+  const mainSlice = !search.trim() && filterScope === 'all' ? filteredContacts.slice(8) : filteredContacts;
 
-  return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-md animate-in fade-in duration-200" onClick={onClose}>
-      <div 
-        onClick={e => e.stopPropagation()}
-        className="bg-white dark:bg-[#111b21] border border-black/5 dark:border-white/5 rounded-[32px] shadow-2xl w-full max-w-md flex flex-col max-h-[85vh] animate-in zoom-in-95 slide-in-from-bottom-10 duration-300 overflow-hidden"
+  const cleanPreviewText = String(message?.text || messagePreview || '')
+    .replace(/[_*~`]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const mediaBadgeLabel =
+    message?.mediaType === 'image' ? '📷 Imagem' :
+    message?.mediaType === 'video' ? '🎥 Vídeo' :
+    message?.mediaType === 'audio' ? '🎵 Áudio' :
+    message?.mediaType === 'document' ? '📄 Documento' : null;
+
+  const renderContactRow = (c: any) => {
+    const isSelected = selectedKeys.includes(c.key);
+    const formattedPhone = formatForwardPhoneDisplay(c.phone, c.whatsapp_jid);
+
+    return (
+      <div
+        key={c.key}
+        onClick={() => toggleSelect(c.key)}
+        className={cn(
+          'group flex items-center gap-3 px-3 py-2.5 rounded-2xl cursor-pointer transition-all border',
+          isSending && 'opacity-50 pointer-events-none',
+          isSelected
+            ? 'bg-[#00a884]/15 border-[#00a884]/40'
+            : 'border-transparent hover:bg-[#f0f2f5] dark:hover:bg-white/[0.04]'
+        )}
       >
-        {/* Header */}
-        <div className="p-5 bg-[#f0f2f5] dark:bg-[#202c33] flex items-center justify-between border-b border-black/5 dark:border-white/5 shrink-0">
-          <div className="flex flex-col">
-             <h2 className="text-xl font-bold text-[#111b21] dark:text-[#e9edef] flex items-center gap-2">
-                Encaminhar Mensagem
-             </h2>
-             {messagePreview && (
-                <span className="text-sm text-[#54656f] dark:text-[#8696a0] truncate max-w-[280px]">
-                  {messagePreview}
-                </span>
-             )}
-          </div>
-          <button onClick={onClose} disabled={isSending} className="p-2.5 text-[#54656f] dark:text-[#8696a0] hover:text-[#111b21] dark:hover:text-[#e9edef] bg-black/5 dark:bg-white/5 rounded-full transition-colors">
-            <X size={20} />
-          </button>
+        {/* Checkbox visual */}
+        <div className={cn(
+          'w-5 h-5 rounded-md flex items-center justify-center border transition-all shrink-0',
+          isSelected
+            ? 'bg-[#00a884] border-[#00a884] text-white shadow-sm'
+            : 'border-gray-300 dark:border-white/20 group-hover:border-[#00a884]/60'
+        )}>
+          {isSelected && <Check size={13} strokeWidth={3} />}
         </div>
 
-        {/* Search */}
-        <div className="px-5 py-4 bg-white dark:bg-[#111b21] shrink-0 border-b border-black/5 dark:border-white/5">
+        <ForwardContactAvatar name={c.name} avatar={c.avatar} isGroup={c.isGroup} />
+
+        <div className="flex flex-col flex-1 min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="font-semibold text-sm text-[#111b21] dark:text-[#e9edef] truncate">
+              {c.name}
+            </span>
+            {c.isSameInbox && (
+              <span className="px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide rounded-md bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25 shrink-0">
+                Nesta caixa
+              </span>
+            )}
+            {c.isDirectNumber && (
+              <span className="px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide rounded-md bg-sky-500/15 text-sky-400 border border-sky-500/25 shrink-0">
+                Novo número
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2 text-xs text-[#54656f] dark:text-[#8696a0] truncate mt-0.5">
+            {formattedPhone && <span>{formattedPhone}</span>}
+            {Array.isArray(c.tags) && c.tags.length > 0 && (
+              <span className="text-[10px] px-1.5 py-0.2 rounded bg-black/5 dark:bg-white/5 text-[#54656f] dark:text-[#aebac1] truncate max-w-[120px]">
+                {c.tags[0]}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Envio rápido em 1 clique caso nenhum outro esteja marcado */}
+        {selectedKeys.length === 0 && (
+          <button
+            type="button"
+            disabled={isSending}
+            onClick={(e) => {
+              e.stopPropagation();
+              executeForward([c]);
+            }}
+            className="px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-[#00a884]/15 hover:bg-[#00a884] text-[#00a884] hover:text-white opacity-0 group-hover:opacity-100 focus:opacity-100 transition-all shrink-0"
+            title="Encaminhar imediatamente para este contato"
+          >
+            Enviar
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in duration-200"
+      onClick={() => !isSending && onClose()}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        className="relative bg-white dark:bg-[#111b21] border border-black/5 dark:border-white/10 rounded-[28px] shadow-2xl w-full max-w-lg flex flex-col max-h-[88vh] animate-in zoom-in-95 duration-200 overflow-hidden"
+      >
+        {/* Header + Preview rico da mensagem + Seletor da Caixa de Envio */}
+        <div className="p-4 sm:p-5 bg-[#f0f2f5] dark:bg-[#202c33] border-b border-black/5 dark:border-white/5 shrink-0 space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              {message?.mediaType === 'image' && message?.mediaUrl && (
+                <img
+                  src={message.mediaUrl}
+                  alt="Preview"
+                  className="w-11 h-11 rounded-xl object-cover border border-white/10 shrink-0 bg-black/20"
+                />
+              )}
+              <div className="flex flex-col min-w-0">
+                <h2 className="text-lg font-bold text-[#111b21] dark:text-[#e9edef] leading-tight">
+                  Encaminhar Mensagem
+                </h2>
+                <div className="flex items-center gap-1.5 mt-1 min-w-0">
+                  {mediaBadgeLabel && (
+                    <span className="px-2 py-0.5 text-[11px] font-semibold rounded-md bg-[#00a884]/15 text-[#00a884] shrink-0">
+                      {mediaBadgeLabel}
+                    </span>
+                  )}
+                  {cleanPreviewText && (
+                    <span className="text-xs text-[#54656f] dark:text-[#8696a0] truncate">
+                      {cleanPreviewText}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={onClose}
+              disabled={isSending}
+              className="p-2 text-[#54656f] dark:text-[#8696a0] hover:text-[#111b21] dark:hover:text-[#e9edef] bg-black/5 dark:bg-white/5 rounded-full transition-colors shrink-0"
+            >
+              <X size={18} />
+            </button>
+          </div>
+
+          {/* Seletor transparente de qual Caixa de WhatsApp fará o disparo */}
+          {availableInstances.length > 0 && (
+            <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-white/70 dark:bg-[#111b21]/70 border border-black/5 dark:border-white/5 text-xs">
+              <span className="text-[#54656f] dark:text-[#8696a0] font-medium shrink-0">
+                Enviar pela caixa:
+              </span>
+              <select
+                value={selectedInstanceId}
+                onChange={e => setSelectedInstanceId(e.target.value)}
+                disabled={isSending}
+                className="bg-transparent font-bold text-[#00a884] outline-none cursor-pointer text-right truncate max-w-[240px]"
+              >
+                {availableInstances.map((inst: any) => (
+                  <option key={inst.id} value={inst.id} className="bg-[#111b21] text-[#e9edef]">
+                    🟢 {inst.display_name || inst.whatsapp_name || inst.phone_number || inst.id}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+
+        {/* Barra de Pesquisa + Pílulas de Filtro Inteligente */}
+        <div className="px-4 sm:px-5 pt-3.5 pb-3 bg-white dark:bg-[#111b21] shrink-0 border-b border-black/5 dark:border-white/5 space-y-2.5">
           <div className="relative">
-            <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input 
-              type="text" 
-              placeholder="Pesquisar contatos..." 
+            <Search size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Buscar por nome, telefone, etiqueta ou digitar número..."
               value={search}
               onChange={e => setSearch(e.target.value)}
               autoFocus
-              className="w-full pl-11 pr-4 py-3 bg-[#f0f2f5] dark:bg-[#202c33] border border-transparent focus:border-[#00a884]/50 focus:bg-white dark:focus:bg-[#2a3942] rounded-2xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all text-sm"
+              className="w-full pl-10 pr-9 py-2.5 bg-[#f0f2f5] dark:bg-[#202c33] border border-transparent focus:border-[#00a884]/60 focus:bg-white dark:focus:bg-[#2a3942] rounded-xl outline-none text-[#111b21] dark:text-[#e9edef] transition-all text-sm"
             />
+            {search ? (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white p-0.5"
+              >
+                <X size={15} />
+              </button>
+            ) : isSearchingDb ? (
+              <Loader2 size={15} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#00a884] animate-spin" />
+            ) : null}
           </div>
+
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+            {[
+              { id: 'all', label: `Todos (${unifiedContacts.length})` },
+              { id: 'same_inbox', label: 'Desta Caixa' },
+              { id: 'contacts', label: 'Contatos' },
+              { id: 'groups', label: 'Grupos' }
+            ].map(tab => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setFilterScope(tab.id as any)}
+                className={cn(
+                  'px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition-all border',
+                  filterScope === tab.id
+                    ? 'bg-[#00a884] text-white border-[#00a884] shadow-sm'
+                    : 'bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#8696a0] border-transparent hover:text-[#111b21] dark:hover:text-[#e9edef]'
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Chips dos destinatários selecionados */}
+          {selectedKeys.length > 0 && (
+            <div className="flex items-center gap-1.5 flex-wrap pt-1 max-h-20 overflow-y-auto custom-scrollbar">
+              {selectedKeys.map(k => {
+                const item = selectedContactsMap.get(k);
+                if (!item) return null;
+                return (
+                  <span
+                    key={k}
+                    onClick={() => toggleSelect(k)}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-[#00a884]/15 text-[#00a884] border border-[#00a884]/30 cursor-pointer hover:bg-[#00a884]/25"
+                  >
+                    <span className="truncate max-w-[140px]">{item.name}</span>
+                    <X size={12} />
+                  </span>
+                );
+              })}
+            </div>
+          )}
         </div>
 
-        {/* Lists */}
-        <div className="flex-1 overflow-y-auto px-4 py-2 custom-scrollbar">
-          {top10.length > 0 && (
-            <div className="mb-4">
-              <h3 className="px-2 py-2.5 text-xs font-bold uppercase tracking-wider text-[#00a884]">Recentes</h3>
-              <div className="flex flex-col gap-1">
-                {top10.map(renderContact)}
+        {/* Alerta de erro visível caso ocorra falha */}
+        {errorMsg && (
+          <div className="mx-4 mt-3 px-3.5 py-2.5 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs flex items-center gap-2">
+            <AlertCircle size={15} className="shrink-0 text-rose-400" />
+            <span className="flex-1">{errorMsg}</span>
+          </div>
+        )}
+
+        {/* Lista de Contatos Deduplicada */}
+        <div className="flex-1 overflow-y-auto px-3 sm:px-4 py-2 custom-scrollbar">
+          {directTypedPhoneTarget && (
+            <div className="mb-3">
+              <h3 className="px-2 py-1.5 text-[11px] font-bold uppercase tracking-wider text-sky-400">
+                Enviar para Número Digitado
+              </h3>
+              {renderContactRow(directTypedPhoneTarget)}
+            </div>
+          )}
+
+          {recentSlice.length > 0 && (
+            <div className="mb-3">
+              <h3 className="px-2 py-1.5 text-[11px] font-bold uppercase tracking-wider text-[#00a884]">
+                Recentes
+              </h3>
+              <div className="flex flex-col gap-0.5">
+                {recentSlice.map(renderContactRow)}
               </div>
             </div>
           )}
-          
-          <div className="pb-4">
-            {parsedSearch && <h3 className="px-2 py-2.5 text-xs font-bold uppercase tracking-wider text-[#00a884]">Resultados</h3>}
-            {!parsedSearch && listToShow.length > 0 && <h3 className="px-2 py-2.5 text-xs font-bold uppercase tracking-wider text-[#54656f] dark:text-[#8696a0]">Outros Contatos</h3>}
-            <div className="flex flex-col gap-1">
-              {listToShow.map(renderContact)}
-            </div>
-          </div>
 
-          {filtered.length === 0 && (
-             <div className="flex flex-col items-center justify-center py-12 text-center">
-                <div className="w-16 h-16 bg-[#f0f2f5] dark:bg-[#202c33] flex items-center justify-center rounded-full mb-4">
-                  <Search size={28} className="text-[#54656f] dark:text-[#8696a0]" />
-                </div>
-                <span className="text-[#111b21] dark:text-[#e9edef] font-semibold text-lg">Nenhum contato</span>
-                <span className="text-sm text-[#54656f] dark:text-[#8696a0] mt-1">Busque por nome ou número</span>
-             </div>
+          {mainSlice.length > 0 && (
+            <div className="pb-3">
+              <h3 className="px-2 py-1.5 text-[11px] font-bold uppercase tracking-wider text-[#00a884]">
+                {search.trim()
+                  ? `Resultados Únicos (${filteredContacts.length})`
+                  : recentSlice.length > 0
+                    ? 'Todos os Contatos'
+                    : `Contatos (${filteredContacts.length})`}
+              </h3>
+              <div className="flex flex-col gap-0.5">
+                {mainSlice.map(renderContactRow)}
+              </div>
+            </div>
+          )}
+
+          {filteredContacts.length === 0 && !directTypedPhoneTarget && (
+            <div className="flex flex-col items-center justify-center py-10 text-center">
+              <div className="w-14 h-14 bg-[#f0f2f5] dark:bg-[#202c33] flex items-center justify-center rounded-full mb-3">
+                {isSearchingDb ? (
+                  <Loader2 size={24} className="text-[#00a884] animate-spin" />
+                ) : (
+                  <Search size={24} className="text-[#54656f] dark:text-[#8696a0]" />
+                )}
+              </div>
+              <span className="text-[#111b21] dark:text-[#e9edef] font-semibold text-base">
+                {isSearchingDb ? 'Buscando contatos na base...' : 'Nenhum contato encontrado'}
+              </span>
+              <span className="text-xs text-[#54656f] dark:text-[#8696a0] mt-1 max-w-[260px]">
+                Pesquise por nome, telefone ou digite o DDD + número completo para encaminhar direto.
+              </span>
+            </div>
           )}
         </div>
-        
-        {isSending && (
-          <div className="absolute inset-0 bg-white/60 dark:bg-black/60 backdrop-blur-sm flex items-center justify-center z-10 transition-opacity">
-            <div className="bg-white dark:bg-[#202c33] p-5 rounded-2xl shadow-xl flex items-center gap-4">
-               <Loader2 size={24} className="text-[#00a884] animate-spin" />
-               <span className="text-[#111b21] dark:text-[#e9edef] font-semibold">Encaminhando...</span>
-            </div>
+
+        {/* Barra Inferior de Confirmação (Multi-Seleção ou Seleção Única) */}
+        <div className="p-4 bg-[#f0f2f5] dark:bg-[#202c33] border-t border-black/5 dark:border-white/5 flex items-center justify-between gap-3 shrink-0">
+          <span className="text-xs text-[#54656f] dark:text-[#8696a0]">
+            {selectedKeys.length > 0
+              ? `${selectedKeys.length} destinatário(s) selecionado(s)`
+              : 'Selecione 1 ou mais contatos (ou clique em Enviar)'}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={isSending}
+              className="px-3.5 py-2 rounded-xl text-xs font-semibold text-[#54656f] dark:text-[#8696a0] hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              disabled={selectedKeys.length === 0 || isSending}
+              onClick={() => {
+                const chosen = selectedKeys.map(k => selectedContactsMap.get(k)).filter(Boolean);
+                executeForward(chosen);
+              }}
+              className={cn(
+                'px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-md',
+                selectedKeys.length > 0 && !isSending
+                  ? 'bg-[#00a884] hover:bg-[#009675] text-white cursor-pointer'
+                  : 'bg-gray-300 dark:bg-white/10 text-gray-500 dark:text-white/30 cursor-not-allowed shadow-none'
+              )}
+            >
+              {isSending ? (
+                <>
+                  <Loader2 size={15} className="animate-spin" />
+                  <span>Encaminhando...</span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 size={15} />
+                  <span>Encaminhar{selectedKeys.length > 0 ? ` (${selectedKeys.length})` : ''}</span>
+                </>
+              )}
+            </button>
           </div>
-        )}
+        </div>
       </div>
     </div>
   );

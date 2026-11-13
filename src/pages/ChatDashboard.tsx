@@ -4482,6 +4482,124 @@ export default function ChatDashboard() {
     setRagAnswerMsg(null);
   };
 
+  /**
+   * Interpola os tokens das Variáveis Globais da Empresa salvas em Configurações > Conta > Variáveis Globais (companies.settings)
+   */
+  const interpolateClientGlobalVars = (rawText: string, overrideSettings?: Record<string, any>, overrideCompanyName?: string): string => {
+    if (!rawText || typeof rawText !== 'string') return rawText;
+    const settings = overrideSettings || tenantInfo?.settings || {};
+    const companyName = (settings.nome_ia || overrideCompanyName || tenantInfo?.name || '').trim();
+    const linkCardapio = (settings.link_cardapio || '').trim();
+    const endereco = (settings.endereco || '').trim();
+    const horario = (settings.horario_funcionamento || '').trim();
+    const instagram = (settings.instagram || '').trim();
+    const googleMaps = (settings.google_maps || '').trim();
+    const youtube = (settings.youtube || '').trim();
+    const tiktok = (settings.tiktok || '').trim();
+
+    let result = rawText;
+    if (companyName) {
+      result = result.replace(/\[NOME_DA_EMPRESA\]/gi, companyName).replace(/\{\{?\s*NomeEmpresa\s*\}?\}/gi, companyName);
+    }
+    if (linkCardapio) {
+      result = result.replace(/\[LINK_CARDAPIO\]/gi, linkCardapio).replace(/\{\{?\s*cardapio\s*\}?\}/gi, linkCardapio);
+    }
+    if (endereco) {
+      result = result
+        .replace(/\[ENDERECO_DA_EMPRESA\]/gi, endereco)
+        .replace(/\[ENDERECO_FISICO\]/gi, endereco)
+        .replace(/\{\{?\s*EnderecoEmpresa\s*\}?\}/gi, endereco);
+    }
+    if (horario) {
+      result = result.replace(/\[HORARIO_FUNCIONAMENTO\]/gi, horario).replace(/\{\{?\s*HoraFuncionamento\s*\}?\}/gi, horario);
+    }
+    if (instagram) {
+      result = result.replace(/\[LINK_INSTAGRAM\]/gi, instagram).replace(/\[INSTAGRAM\]/gi, instagram);
+    }
+    if (googleMaps) {
+      result = result
+        .replace(/\[LINK_GOOGLE_MAPS\]/gi, googleMaps)
+        .replace(/\[GOOGLE_MAPS\]/gi, googleMaps)
+        .replace(/\{\{?\s*GoogleMaps\s*\}?\}/gi, googleMaps);
+    }
+    if (youtube) {
+      result = result.replace(/\[LINK_YOUTUBE\]/gi, youtube).replace(/\[YOUTUBE\]/gi, youtube);
+    }
+    if (tiktok) {
+      result = result.replace(/\[LINK_TIKTOK\]/gi, tiktok).replace(/\[TIKTOK\]/gi, tiktok);
+    }
+    return result;
+  };
+
+  /**
+   * Envia e fixa por 30 dias no topo do WhatsApp o Link do Cardápio Digital
+   * específico da empresa ativa salvo em Configurações > Conta > Variáveis Globais (companies.settings.link_cardapio).
+   */
+  const handlePinClientMenuLink = async () => {
+    if (!activeChat || !tenantInfo?.id) return;
+    const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
+    const resolvedId = await resolveInstanceUuid(tenantInfo.id, properTargetInstance);
+    if (!resolvedId) {
+      alert('⚠️ Nenhuma caixa de entrada conectada foi localizada para enviar o cardápio.');
+      return;
+    }
+
+    let companySettings: Record<string, any> = tenantInfo?.settings || {};
+    let companyDisplayName = tenantInfo?.name || '';
+
+    // Busca sempre a versão mais recente de companies.settings no banco caso link_cardapio não esteja em memória
+    if (!companySettings?.link_cardapio) {
+      try {
+        const { data: freshCompany } = await supabase
+          .from('companies')
+          .select('name, settings')
+          .eq('id', tenantInfo.id)
+          .maybeSingle();
+        if (freshCompany) {
+          companySettings = freshCompany.settings || companySettings;
+          companyDisplayName = freshCompany.name || companyDisplayName;
+        }
+      } catch (err) {
+        console.warn('[handlePinClientMenuLink] Aviso ao consultar companies.settings:', err);
+      }
+    }
+
+    const clientMenuUrl = String(companySettings?.link_cardapio || '').trim();
+    const clientBrandName = String(companySettings?.nome_ia || companyDisplayName || '').trim();
+
+    if (!clientMenuUrl) {
+      alert(
+        `⚠️ O Link do Cardápio Digital ainda não está salvo nas Variáveis Globais desta empresa (${clientBrandName || 'Conta Atual'}).\n\n` +
+        `Acesse: Configurações ➔ Conta ➔ Variáveis Globais da Empresa e preencha o campo "Link do Cardápio Digital" ([LINK_CARDAPIO]).`
+      );
+      return;
+    }
+
+    const normalizedMenuUrl = /^https?:\/\//i.test(clientMenuUrl) ? clientMenuUrl : `https://${clientMenuUrl}`;
+    const titleHeader = clientBrandName
+      ? `🍔 *CARDÁPIO DIGITAL OFICIAL — ${clientBrandName.toUpperCase()}*`
+      : `🍔 *CARDÁPIO DIGITAL OFICIAL*`;
+
+    const menuBodyText = interpolateClientGlobalVars(
+      `${titleHeader}\n\nFaça seu pedido de forma rápida e prática pelo nosso link oficial abaixo:\n👉 ${normalizedMenuUrl}`,
+      companySettings,
+      clientBrandName
+    );
+
+    const res = await invokeBaileysAction(tenantInfo.id, resolvedId, 'pinMenuLink', {
+      jid: activeChat.whatsapp_jid || activeChat.phone,
+      menuUrl: normalizedMenuUrl,
+      text: menuBodyText,
+      time: 2592000 // 30 dias
+    });
+
+    if (res?.ok) {
+      alert(`📌 Link do Cardápio Digital (${normalizedMenuUrl}) enviado e fixado no topo da conversa por 30 dias!`);
+    } else {
+      alert(`⚠️ Não foi possível enviar/fixar o cardápio: ${res?.error || 'Verifique a conexão da caixa de entrada.'}`);
+    }
+  };
+
   const handleSendHuman = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSendingRef.current) {
@@ -4491,7 +4609,7 @@ export default function ChatDashboard() {
 
     const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
     const isChecklistFilled = isTaskMode && checklistDraft.filter(i => i.trim()).length > 0;
-    const rawTextToSend = inputText.trim();
+    const rawTextToSend = interpolateClientGlobalVars(inputText.trim());
     const textToSend = (chatMode !== 'internal_note' && rawTextToSend.includes('\n\n') && !/(\*[^*\n]+\*|^#{1,4}\s+)/m.test(rawTextToSend))
       ? formatStructuredPlainText(rawTextToSend)
       : rawTextToSend;
@@ -5772,8 +5890,10 @@ export default function ChatDashboard() {
         isOpen={!!messageToForward}
         onClose={() => setMessageToForward(null)}
         contacts={contacts}
-        onForward={(contactId) => forwardMessage(contactId, messageToForward, activeChat?.instance_id || connectedInstanceName || '')}
-        messagePreview={messageToForward?.text ? messageToForward.text.substring(0, 40) + '...' : (messageToForward?.mediaType ? `Mídia: ${messageToForward.mediaType}` : undefined)}
+        message={messageToForward}
+        activeInstanceId={activeChat?.instance_id || activeChannelFilter || connectedInstanceName || ''}
+        onForward={(target) => forwardMessage(target, messageToForward, activeChat?.instance_id || activeChannelFilter || connectedInstanceName || '')}
+        messagePreview={messageToForward?.text ? messageToForward.text.substring(0, 60) : (messageToForward?.mediaType ? `Mídia: ${messageToForward.mediaType}` : undefined)}
       />
 
       {/* Modal Premium para Extração e Validação de Regras RAG */}
@@ -9362,20 +9482,13 @@ export default function ChatDashboard() {
                 {/* Botão Rápido #01: Fixar Cardápio Digital 30 Dias */}
                 <button
                   type="button"
-                  onClick={async () => {
-                    const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
-                    const resolvedId = await resolveInstanceUuid(tenantInfo?.id || '', properTargetInstance);
-                    if (!resolvedId || !tenantInfo?.id) return;
-                    const res = await invokeBaileysAction(tenantInfo.id, resolvedId, 'pinMenuLink', {
-                      jid: activeChat.whatsapp_jid || activeChat.phone,
-                      time: 2592000
-                    });
-                    if (res?.ok) {
-                      alert('📌 Link do Cardápio Digital enviado e fixado no topo da conversa por 30 dias!');
-                    }
-                  }}
+                  onClick={handlePinClientMenuLink}
                   className="flex items-center justify-center gap-1.5 h-8 px-2.5 bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-500/25 rounded-full transition-all text-xs font-bold border border-amber-200 dark:border-amber-500/30 shadow-sm active:scale-95 whitespace-nowrap cursor-pointer"
-                  title="#01 — Enviar e Fixar Link do Cardápio Digital por 30 Dias no Topo do WhatsApp"
+                  title={
+                    tenantInfo?.settings?.link_cardapio
+                      ? `#01 — Enviar e Fixar por 30 dias o Cardápio Digital desta empresa (${tenantInfo.settings.link_cardapio})`
+                      : '#01 — Enviar e Fixar Link do Cardápio Digital por 30 Dias (Salvo em Configurações > Conta > Variáveis Globais)'
+                  }
                 >
                   <Pin size={13} />
                   <span className="hidden xl:inline">Cardápio 30d</span>
@@ -9665,23 +9778,21 @@ export default function ChatDashboard() {
                     <button
                       onClick={async () => {
                         setActiveChatDropdown(false);
-                        const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
-                        const resolvedId = await resolveInstanceUuid(tenantInfo?.id || '', properTargetInstance);
-                        if (!resolvedId || !tenantInfo?.id) return;
-                        const res = await invokeBaileysAction(tenantInfo.id, resolvedId, 'pinMenuLink', {
-                          jid: activeChat.whatsapp_jid || activeChat.phone,
-                          time: 2592000 // 30 dias
-                        });
-                        if (res?.ok) {
-                          alert('📌 Link do Cardápio Digital enviado e fixado no topo da conversa por 30 dias!');
-                        }
+                        await handlePinClientMenuLink();
                       }}
                       className="w-full text-left px-4 py-2.5 hover:bg-amber-50 dark:hover:bg-amber-950/30 flex items-center gap-3 transition-colors"
                     >
                       <Pin size={16} className="text-amber-500" />
-                      <span className="text-[14px] text-amber-600 dark:text-amber-400 font-medium">
-                        Fixar Cardápio 30 Dias
-                      </span>
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-[14px] text-amber-600 dark:text-amber-400 font-medium">
+                          Fixar Cardápio 30 Dias
+                        </span>
+                        {tenantInfo?.settings?.link_cardapio && (
+                          <span className="text-[10px] text-gray-500 dark:text-gray-400 truncate max-w-[180px]">
+                            {tenantInfo.settings.link_cardapio}
+                          </span>
+                        )}
+                      </div>
                     </button>
 
                     {/* 12. Modificar Estado do Chat no Aparelho (Fixar / Arquivar no Celular) */}
@@ -11835,7 +11946,7 @@ export default function ChatDashboard() {
                           const handleSelectReply = (qr: typeof quickReplies[0]) => {
                             setShowQuickReplies(false);
                             setActiveQuickReplyFolderId(null);
-                            setInputText(qr.content);
+                            setInputText(interpolateClientGlobalVars(qr.content));
                             
                             if (qr.type === 'TUTORIAL') {
                               if (!qr.media_url) {

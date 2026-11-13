@@ -745,7 +745,7 @@ interface ChatState {
   shareContactMessage: (contactId: string, selectedContact: Partial<ContactRow>, instanceName: string) => Promise<void>;
   editHumanMessage: (contactId: string, messageId: string, newText: string, instanceName: string) => Promise<void>;
   deleteHumanMessage: (contactId: string, messageId: string, instanceName: string) => Promise<void>;
-  forwardMessage: (contactId: string, message: MessageType, instanceName: string) => Promise<void>;
+  forwardMessage: (target: string | any | any[], message: MessageType, instanceName: string) => Promise<void>;
   sendMediaFromUrl: (contactId: string, mediaUrl: string, mediaType: 'image' | 'video' | 'audio' | 'document', instanceName: string, caption?: string, fileName?: string, responseType?: CannedResponseType) => Promise<void>;
   uploadAndSendMedia: (contactId: string, file: File, mediaType: 'image' | 'video' | 'audio' | 'document', instanceName: string, isPtt?: boolean, caption?: string) => Promise<void>;
   updateContactCRM: (contactId: string, payload: Partial<ContactRow>) => Promise<void>;
@@ -3274,9 +3274,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     );
     const resolvedInstanceId = await resolveInstanceUuid(state.tenantInfo.id, finalTargetInstance);
 
-    if (!resolvedInstanceId || !state.instancesStatus[resolvedInstanceId] || (state.instancesStatus[resolvedInstanceId] !== 'connected' && state.instancesStatus[resolvedInstanceId] !== 'connected_local')) {
+    if (!resolvedInstanceId || state.instancesStatus[resolvedInstanceId] === 'offline') {
       set({ modalReason: 'A instância do WhatsApp está offline. Por favor, reconecte para enviar arquivos.' });
-      return;
+      throw new Error('whatsapp_offline');
     }
 
     // Injeção Mágica de Assinatura Síncrona na mídia para evitar atrasos na UI
@@ -3484,52 +3484,308 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  forwardMessage: async (contactId, message, instanceName) => {
+  forwardMessage: async (targetInput, message, instanceName) => {
     const state = get();
-    // Se a mensagem original tiver texto ou caption e não tiver media, envia como text
-    if (!message.mediaUrl) {
-      await state.sendHumanMessage(contactId, message.text || "Mensagem encaminhada vazia", instanceName);
-      return;
+    if (!state.tenantInfo?.id) {
+      throw new Error('Sessão da empresa expirada. Recarregue a página e tente novamente.');
+    }
+    if (!message) {
+      throw new Error('Mensagem inválida para encaminhamento.');
     }
 
-    // Se tiver media, precisamos baixar para subir localmente
+    const targetsList = Array.isArray(targetInput) ? targetInput : [targetInput];
+    if (targetsList.length === 0) return;
+
+    // Monta assinatura do atendente uma única vez (sem duplicar se a mensagem já contiver)
+    let agentSignature = '';
     try {
-      const response = await fetch(message.mediaUrl);
-      if (!response.ok) throw new Error("Erro ao obter a mídia para encaminhamento.");
-      const blob = await response.blob();
-
-      const initialType = blob.type;
-      let ext = initialType.split('/')[1] || 'bin';
-
-      // Mapeia extensões
-      if (ext.startsWith('ogg')) ext = 'ogg';
-      else if (ext.startsWith('jpeg')) ext = 'jpg';
-      else if (ext.startsWith('png')) ext = 'png';
-      else if (initialType.includes('pdf')) ext = 'pdf';
-      else if (ext.startsWith('mp4')) ext = 'mp4';
-
-      const file = new File([blob], `encaminhado_${Date.now()}.${ext}`, { type: initialType });
-
-      const basicType = message.mediaType || (initialType.includes('image') ? 'image' : initialType.includes('video') ? 'video' : initialType.includes('audio') ? 'audio' : 'document');
-
-      await state.uploadAndSendMedia(contactId, file, basicType as any, instanceName, false, message.text);
-    } catch (err) {
-      if (message.mediaUrl && /^https?:\/\//i.test(message.mediaUrl)) {
-        try {
-          await state.sendMediaFromUrl(
-            contactId,
-            message.mediaUrl,
-            (message.mediaType || 'document') as any,
-            instanceName,
-            message.text
-          );
-          return;
-        } catch {
-          // Segue para fallback
+      const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
+      if (currentUserEmail) {
+        const agent = state.agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail.toLowerCase());
+        const useSig = agent ? !!agent.use_signature : localStorage.getItem('current_user_use_signature') === 'true';
+        const sigText = (agent ? (agent.signature || '') : (localStorage.getItem('current_user_signature') || '')).trim();
+        if (useSig && sigText.length > 0) {
+          agentSignature = sigText;
         }
       }
-      console.warn("[forwardMessage] Aviso ao extrair/encaminhar media:", err);
-      window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Houve uma falha ao preparar a mídia para o envio. Se possível, faça o download e envio manual.', type: 'error' } }));
+    } catch {}
+
+    const rawText = (message.text || '').trim();
+    const withSignature = (baseText: string) => {
+      if (!agentSignature) return baseText;
+      const prefix = `*${agentSignature}*`;
+      if (baseText.startsWith(prefix)) return baseText;
+      return baseText ? `${prefix}\n\n${baseText}` : prefix;
+    };
+
+    const { getInstanceApiUrl, sendTextMessage } = await import('../services/whatsappEngine');
+
+    let successCount = 0;
+    let lastRecipientLabel = '';
+    let usedInstanceLabel = '';
+    const errors: string[] = [];
+
+    for (const item of targetsList) {
+      const isObj = item && typeof item === 'object';
+      const targetId = isObj ? String(item.id || item.contactId || '') : String(item || '');
+      const explicitSendInst = isObj && item.targetInstanceId && item.targetInstanceId !== 'all' && item.targetInstanceId !== 'default'
+        ? String(item.targetInstanceId)
+        : null;
+      const fallbackActiveInst = (instanceName && instanceName !== 'all' && instanceName !== 'default' ? instanceName : null) ||
+        (state.activeChannelFilter && state.activeChannelFilter !== 'all' && state.activeChannelFilter !== 'default' ? state.activeChannelFilter : null) ||
+        state.connectedInstanceName ||
+        getInstanceIdFromContact(targetId);
+
+      const candidateInstance = explicitSendInst || fallbackActiveInst;
+      const resolvedInstanceId = await resolveInstanceUuid(state.tenantInfo.id, candidateInstance);
+
+      if (!resolvedInstanceId) {
+        errors.push('Nenhuma caixa de WhatsApp ativa selecionada para enviar.');
+        continue;
+      }
+      if (state.instancesStatus[resolvedInstanceId] === 'offline') {
+        set({ modalReason: 'A caixa de WhatsApp selecionada está offline. Reconecte ou selecione outra caixa conectada.' });
+        errors.push('Caixa de WhatsApp offline.');
+        continue;
+      }
+
+      const instMeta = state.rawInstances?.find((ri: any) => ri.id === resolvedInstanceId);
+      usedInstanceLabel = instMeta?.display_name || instMeta?.whatsapp_name || instanceCache.getName(resolvedInstanceId) || '';
+
+      // Localiza conversa existente na caixa de envio (se houver) ou usa dados diretos do destinatário
+      const existingContactOnSendingBox = findContactByIdAndInstance(state.contacts, targetId, resolvedInstanceId);
+      const anyExistingContact = existingContactOnSendingBox || findContactByIdAndInstance(state.contacts, targetId);
+
+      let targetJid = '';
+      if (isObj && item.whatsapp_jid && String(item.whatsapp_jid).includes('@')) {
+        targetJid = String(item.whatsapp_jid).trim();
+      } else if (isObj && item.phone) {
+        const cleanDigits = String(item.phone).replace(/\D/g, '');
+        if (cleanDigits.length >= 10) {
+          const normalizedDigits = (cleanDigits.length === 10 || cleanDigits.length === 11) ? `55${cleanDigits}` : cleanDigits;
+          targetJid = `${normalizedDigits}@s.whatsapp.net`;
+        }
+      }
+      if (!targetJid && anyExistingContact) {
+        targetJid = getContactJid(anyExistingContact);
+      }
+      if (!targetJid) {
+        errors.push(`Telefone inválido para ${isObj ? (item.name || targetId) : targetId}`);
+        continue;
+      }
+
+      lastRecipientLabel = (isObj && (item.custom_name || item.name)) ||
+        anyExistingContact?.custom_name ||
+        anyExistingContact?.name ||
+        targetJid.split('@')[0];
+
+      const apiUrl = getInstanceApiUrl(resolvedInstanceId);
+      const apiKey = await getOrFetchApiKey(resolvedInstanceId);
+      const rawPayload = (message as any).raw_payload;
+      const mediaUrl = message.mediaUrl || '';
+      const isPublicHttpMedia = /^https?:\/\//i.test(mediaUrl) && !mediaUrl.includes('mmg.whatsapp.net');
+      const hasMedia = Boolean(mediaUrl) || ['image', 'video', 'audio', 'document'].includes(String(message.mediaType || ''));
+
+      try {
+        if (!hasMedia) {
+          const finalText = withSignature(rawText || 'Mensagem encaminhada');
+          const res = await sendTextMessage(state.tenantInfo.id, resolvedInstanceId, targetJid, finalText, apiKey);
+          const msgWaId = res?.result?.key?.id || res?.key?.id || `FWD_${Date.now()}`;
+          if (existingContactOnSendingBox) {
+            state.addMessageLocally(existingContactOnSendingBox.id, {
+              id: msgWaId,
+              whatsapp_id: msgWaId,
+              text: finalText,
+              sender: 'human',
+              status: 'sent',
+              timestamp: new Date()
+            });
+          }
+          successCount++;
+          continue;
+        }
+
+        const resolvedMediaType: 'image' | 'video' | 'audio' | 'document' =
+          (message.mediaType === 'image' || message.mediaType === 'video' || message.mediaType === 'audio' || message.mediaType === 'document')
+            ? message.mediaType
+            : 'document';
+        const finalCaption = resolvedMediaType === 'audio' ? '' : withSignature(rawText);
+        let mediaDelivered = false;
+        let deliveredUrl = mediaUrl;
+        let deliveredWaId = '';
+
+        // TIER 1: Fast-Path Direto no Servidor via URL pública (Supabase Storage / CDN pública) — Zero re-upload pelo navegador!
+        if (isPublicHttpMedia) {
+          try {
+            let guessedMime = 'application/octet-stream';
+            if (resolvedMediaType === 'image') guessedMime = mediaUrl.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
+            else if (resolvedMediaType === 'video') guessedMime = 'video/mp4';
+            else if (resolvedMediaType === 'audio') guessedMime = 'audio/ogg';
+            else if (resolvedMediaType === 'document') guessedMime = mediaUrl.toLowerCase().includes('.pdf') ? 'application/pdf' : 'application/octet-stream';
+
+            const urlCtrl = new AbortController();
+            const urlTimer = setTimeout(() => urlCtrl.abort(), 20000);
+            const urlRes = await fetch(`${apiUrl}/api/v1/instances/${resolvedInstanceId}/send-media-url`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-tenant-id': state.tenantInfo.id,
+                'apikey': apiKey
+              },
+              body: JSON.stringify({
+                jid: targetJid,
+                messageType: resolvedMediaType,
+                mimetype: guessedMime,
+                caption: finalCaption,
+                mediaUrl,
+                fileName: `encaminhado_${Date.now()}`,
+                ptt: resolvedMediaType === 'audio',
+                responseType: 'STANDARD'
+              }),
+              signal: urlCtrl.signal
+            }).finally(() => clearTimeout(urlTimer));
+
+            const urlJson = await urlRes.json().catch(() => ({}));
+            if (urlRes.ok && (urlJson.ok || urlJson.result?.key?.id)) {
+              mediaDelivered = true;
+              deliveredUrl = urlJson.media_url || mediaUrl;
+              deliveredWaId = urlJson.result?.key?.id || `FWDURL_${Date.now()}`;
+            }
+          } catch (tier1Err) {
+            console.warn('[forwardMessage] Tier 1 (send-media-url) oscilou, tentando Tier 2 (Blob upload):', tier1Err);
+          }
+        }
+
+        // TIER 2: Download do Blob no navegador + Upload Multipart para /send-media
+        if (!mediaDelivered && mediaUrl) {
+          try {
+            const blobRes = await fetch(mediaUrl);
+            if (blobRes.ok) {
+              const blob = await blobRes.blob();
+              const mime = blob.type || (resolvedMediaType === 'image' ? 'image/jpeg' : resolvedMediaType === 'video' ? 'video/mp4' : resolvedMediaType === 'audio' ? 'audio/ogg' : 'application/pdf');
+              let ext = (mime.split('/')[1] || 'bin').split(';')[0];
+              if (ext === 'jpeg') ext = 'jpg';
+              const file = new File([blob], `encaminhado_${Date.now()}.${ext}`, { type: mime });
+
+              const formData = new FormData();
+              formData.append('media', file);
+              formData.append('jid', targetJid);
+              formData.append('messageType', resolvedMediaType);
+              if (finalCaption) formData.append('caption', finalCaption);
+              if (resolvedMediaType === 'audio') formData.append('ptt', 'true');
+
+              const upRes = await fetch(`${apiUrl}/api/v1/instances/${resolvedInstanceId}/send-media`, {
+                method: 'POST',
+                headers: {
+                  'x-tenant-id': state.tenantInfo.id,
+                  'apikey': apiKey
+                },
+                body: formData
+              });
+              const upJson = await upRes.json().catch(() => ({}));
+              if (upRes.ok && (upJson.ok || upJson.result?.key?.id)) {
+                mediaDelivered = true;
+                deliveredUrl = upJson.media_url || mediaUrl;
+                deliveredWaId = upJson.result?.key?.id || `FWDBLOB_${Date.now()}`;
+              }
+            }
+          } catch (tier2Err) {
+            console.warn('[forwardMessage] Tier 2 (send-media multipart) oscilou, tentando Tier 3:', tier2Err);
+          }
+        }
+
+        // TIER 3: Encaminhamento Nativo Baileys via raw_payload (para mídias antigas sem media_url no Storage)
+        if (!mediaDelivered && rawPayload && rawPayload.message) {
+          try {
+            const invRes = await fetch(`${apiUrl}/api/v1/instances/${resolvedInstanceId}/invoke`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-tenant-id': state.tenantInfo.id,
+                'apikey': apiKey
+              },
+              body: JSON.stringify({
+                method: 'sendMessage',
+                args: [targetJid, { forward: rawPayload }]
+              })
+            });
+            const invJson = await invRes.json().catch(() => ({}));
+            if (invRes.ok && (invJson.ok || invJson.result?.key?.id)) {
+              mediaDelivered = true;
+              deliveredWaId = invJson.result?.key?.id || `FWDRAW_${Date.now()}`;
+            }
+          } catch (tier3Err) {
+            console.warn('[forwardMessage] Tier 3 (native raw forward) falhou:', tier3Err);
+          }
+        }
+
+        // TIER 4: Contingência Direta no Outbox (wa_outgoing_messages) caso o motor HTTP esteja reiniciando
+        if (!mediaDelivered && isPublicHttpMedia) {
+          const { data: outboxRow, error: outboxErr } = await supabase
+            .from('wa_outgoing_messages')
+            .insert({
+              tenant_id: state.tenantInfo.id,
+              instance_id: resolvedInstanceId,
+              chat_jid: targetJid,
+              message_type: 'media',
+              body: finalCaption,
+              media_url: mediaUrl,
+              options: {
+                messageType: resolvedMediaType,
+                ptt: resolvedMediaType === 'audio',
+                responseType: 'STANDARD'
+              },
+              status: 'pending',
+              priority: 1
+            })
+            .select()
+            .single();
+
+          if (!outboxErr && outboxRow) {
+            mediaDelivered = true;
+            deliveredWaId = `EDGE_${outboxRow.id.replace(/-/g, '')}`;
+          }
+        }
+
+        if (!mediaDelivered) {
+          throw new Error('Não foi possível encaminhar esta mídia. Verifique se o arquivo ainda está disponível.');
+        }
+
+        if (existingContactOnSendingBox) {
+          state.addMessageLocally(existingContactOnSendingBox.id, {
+            id: deliveredWaId || `FWD_${Date.now()}`,
+            whatsapp_id: deliveredWaId || undefined,
+            text: finalCaption,
+            sender: 'human',
+            mediaType: resolvedMediaType,
+            mediaUrl: deliveredUrl,
+            status: 'sent',
+            timestamp: new Date()
+          });
+        }
+        successCount++;
+      } catch (err: any) {
+        console.warn('[forwardMessage] Erro ao encaminhar para', targetJid, err);
+        errors.push(err?.message || 'Falha no envio');
+      }
+    }
+
+    if (successCount > 0) {
+      const boxSuffix = usedInstanceLabel ? ` via ${usedInstanceLabel}` : '';
+      const msgToast = successCount === 1
+        ? `Mensagem encaminhada para ${lastRecipientLabel}${boxSuffix}!`
+        : `Mensagem encaminhada para ${successCount} contatos${boxSuffix}!`;
+      window.dispatchEvent(new CustomEvent('toast', {
+        detail: { message: msgToast, type: 'success', duration: 4000 }
+      }));
+    }
+
+    if (successCount === 0 && errors.length > 0) {
+      const errText = errors[0];
+      window.dispatchEvent(new CustomEvent('toast', {
+        detail: { message: `Falha ao encaminhar: ${errText}`, type: 'error', duration: 5000 }
+      }));
+      throw new Error(errText);
     }
   },
 
@@ -3633,7 +3889,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       );
       const resolvedInstanceId = await resolveInstanceUuid(state.tenantInfo.id, finalTargetInstance);
 
-      if (!resolvedInstanceId || !state.instancesStatus[resolvedInstanceId] || (state.instancesStatus[resolvedInstanceId] !== 'connected' && state.instancesStatus[resolvedInstanceId] !== 'connected_local')) {
+      if (!resolvedInstanceId || state.instancesStatus[resolvedInstanceId] === 'offline') {
         set({ modalReason: 'A instância do WhatsApp está offline. Por favor, reconecte para enviar mídias.' });
         throw new Error('whatsapp_offline');
       }

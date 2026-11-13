@@ -35,16 +35,25 @@ interface Message {
 const getInitialSimulatorVars = (): Record<string, string> => {
   const tenantInfo = useChatStore.getState().tenantInfo;
   const settings = (tenantInfo as any)?.settings || {};
+  const companyName = settings.nome_ia || tenantInfo?.name || 'Nossa Empresa';
   return {
     pushName: 'Cliente Teste',
     saudacao: 'Boa tarde',
-    NomeEmpresa: tenantInfo?.name || settings.nome_ia || 'Burguer Plus',
-    cardapio: settings.link_cardapio || 'https://burguerplus.com.br',
-    GoogleMaps: settings.google_maps || 'https://maps.app.goo.gl/6souriEL2Fnmk9bh8',
-    EnderecoEmpresa: settings.endereco || 'Praça Miguel Ortega, 380 - Taboão da Serra - SP',
+    NomeEmpresa: companyName,
+    NOME_DA_EMPRESA: companyName,
+    cardapio: settings.link_cardapio || '',
+    LINK_CARDAPIO: settings.link_cardapio || '',
+    GoogleMaps: settings.google_maps || '',
+    LINK_GOOGLE_MAPS: settings.google_maps || '',
+    EnderecoEmpresa: settings.endereco || '',
+    ENDERECO_DA_EMPRESA: settings.endereco || '',
     DiaFuncionamento: 'Segunda a Sábado',
-    HoraFuncionamento: settings.horario_funcionamento || '11:00h às 22:45h',
-    NumeroTelefoneEmpresa: '(11) 94321-6659',
+    HoraFuncionamento: settings.horario_funcionamento || '',
+    HORARIO_FUNCIONAMENTO: settings.horario_funcionamento || '',
+    LINK_INSTAGRAM: settings.instagram || '',
+    LINK_YOUTUBE: settings.youtube || '',
+    LINK_TIKTOK: settings.tiktok || '',
+    NumeroTelefoneEmpresa: settings.phone || '',
     AbertoFechado: 'true',
     NumeroMenu: '1',
     message: 'Olá, gostaria de atendimento'
@@ -134,10 +143,15 @@ export default function TestSimulator({ nodes, edges, onClose, startNodeId }: Te
 
   const parseText = (text: string, vars: Record<string, string>) => {
     if (!text) return '';
-    return text.replace(/\{\{?([^}]+)\}?\}/g, (_, param) => {
-      const key = param.trim();
-      return vars[key] !== undefined ? vars[key] : `{{${key}}}`;
-    });
+    return text
+      .replace(/\{\{?([^}]+)\}?\}/g, (_, param) => {
+        const key = param.trim();
+        return vars[key] !== undefined ? vars[key] : `{{${key}}}`;
+      })
+      .replace(/\[([A-Z0-9_]+)\]/g, (full, param) => {
+        const key = param.trim();
+        return vars[key] !== undefined && vars[key] !== '' ? vars[key] : full;
+      });
   };
 
   // Encontra o próximo bloco seguindo o encadeamento interno ou arestas

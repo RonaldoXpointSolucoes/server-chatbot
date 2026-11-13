@@ -1,5 +1,5 @@
 {
-  "version": "8.1.6",
-  "buildDate": "2026-11-13T10:02:58.959Z",
-  "summary": "Correção Definitiva de Loop de Atualização PWA Mobile + Aceleração de Carregamento (-67% no Bundle Inicial via Lazy Code-Splitting) + Índices de Alta Performance no Supabase"
+  "version": "8.1.7",
+  "buildDate": "2026-11-13T22:27:44.933Z",
+  "summary": "Encaminhamento Multi-Destinatário & Multi-Caixa + Sincronização Realtime Determinística de Contadores & Relatórios IA + Correção do Catálogo GastroFood no Hub Baileys"
 }
