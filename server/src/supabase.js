@@ -164,15 +164,41 @@ async function resilientFetch(url, options = {}, retries = 2, delay = 600) {
   const timeoutMs = isStorageRequest ? 60000 : 15000;
   const effectiveRetries = (isStorageRequest || isNonCriticalTelemetry) ? Math.min(retries, 1) : retries;
 
-  const fetchOptions = options.signal
-    ? options
-    : { ...options, signal: AbortSignal.timeout(timeoutMs) };
+  const fetchOptions = (() => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      controller.abort(new Error(`SUPABASE_FETCH_TIMEOUT_${timeoutMs}MS`));
+    }, timeoutMs);
+    if (options.signal) {
+      if (options.signal.aborted) {
+        clearTimeout(timer);
+        controller.abort(options.signal.reason);
+      } else {
+        options.signal.addEventListener('abort', () => {
+          clearTimeout(timer);
+          controller.abort(options.signal.reason);
+        }, { once: true });
+      }
+    }
+    return { merged: { ...options, signal: controller.signal }, timer, controller };
+  })();
 
+  let raceTimer = null;
   try {
-    const response = await fetch(url, fetchOptions);
+    const response = await Promise.race([
+      fetch(url, fetchOptions.merged),
+      new Promise((_, reject) => {
+        raceTimer = setTimeout(() => {
+          try { fetchOptions.controller.abort(new Error('SUPABASE_WALL_TIMEOUT')); } catch {}
+          reject(new Error(`Timeout ao conectar ao Supabase (${timeoutMs}ms)`));
+        }, timeoutMs + 500);
+      })
+    ]);
+    if (raceTimer) { clearTimeout(raceTimer); raceTimer = null; }
     
     // Tratamento de instabilidade HTTP 5xx do gateway / servidor Supabase Cloud (500, 502, 503, 504, 520-524)
     if (response.status >= 500 && effectiveRetries > 0) {
+      clearTimeout(fetchOptions.timer);
       const jitter = Math.floor(Math.random() * 300);
       const waitTime = delay + jitter;
       if (effectiveRetries <= 1) {
@@ -181,15 +207,56 @@ async function resilientFetch(url, options = {}, retries = 2, delay = 600) {
       await new Promise(resolve => setTimeout(resolve, waitTime));
       return resilientFetch(url, options, effectiveRetries - 1, Math.min(Math.round(delay * 1.5), 4000));
     }
+
+    // Para chamadas REST/Auth/RPC (não-Storage), consome o body dentro da janela de timeout estrita
+    // prevenindo travamento perpétuo de Promises caso o stream TCP/TLS congele após os headers (Node Undici GC bug)
+    let safeResponse = response;
+    if (!isStorageRequest) {
+      const methodUpper = String(options.method || 'GET').toUpperCase();
+      const isNullBodyStatus = response.status === 204 || response.status === 205 || response.status === 304 || methodUpper === 'HEAD';
+      if (isNullBodyStatus) {
+        clearTimeout(fetchOptions.timer);
+        safeResponse = new Response(null, {
+          status: response.status,
+          statusText: response.statusText,
+          headers: response.headers
+        });
+      } else {
+        let bodyTimer = null;
+        try {
+          const bodyBuffer = await Promise.race([
+            response.arrayBuffer(),
+            new Promise((_, reject) => {
+              bodyTimer = setTimeout(() => {
+                try { fetchOptions.controller.abort(new Error('SUPABASE_BODY_TIMEOUT')); } catch {}
+                reject(new Error(`Timeout na leitura de resposta do Supabase (${timeoutMs}ms)`));
+              }, timeoutMs);
+            })
+          ]);
+          safeResponse = new Response(bodyBuffer, {
+            status: response.status,
+            statusText: response.statusText,
+            headers: response.headers
+          });
+        } finally {
+          if (bodyTimer) clearTimeout(bodyTimer);
+          clearTimeout(fetchOptions.timer);
+        }
+      }
+    } else {
+      clearTimeout(fetchOptions.timer);
+    }
     
-    if (response.ok) {
+    if (safeResponse.ok) {
       nodeSupabaseCircuitBreaker.recordSuccess();
-    } else if (response.status >= 500 && effectiveRetries === 0 && !isStorageRequest && !isNonCriticalTelemetry) {
+    } else if (safeResponse.status >= 500 && effectiveRetries === 0 && !isStorageRequest && !isNonCriticalTelemetry) {
       nodeSupabaseCircuitBreaker.recordFailure();
     }
 
-    return response;
+    return safeResponse;
   } catch (error) {
+    if (raceTimer) clearTimeout(raceTimer);
+    clearTimeout(fetchOptions.timer);
     const errorMsg = error?.message || String(error);
     const errorCode = error?.code || '';
     const errorName = error?.name || '';
@@ -256,19 +323,27 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
 export const NODE_ID = (process.env.NODE_ID || `worker-local-${Math.random().toString(36).substring(7)}`).trim();
 console.log(`[Worker Boot] Inicializado com NODE_ID: ${NODE_ID}`);
 
-export async function retryWithBackoff(fn, retries = 1, delay = 600) {
+export async function retryWithBackoff(fn, retries = 1, delay = 600, maxWallMs = 20000) {
+  let opTimer = null;
   try {
-    const res = await fn();
+    const res = await Promise.race([
+      Promise.resolve().then(() => fn()),
+      new Promise((_, reject) => {
+        opTimer = setTimeout(() => reject(new Error(`Timeout em operação retryWithBackoff (${maxWallMs}ms)`)), maxWallMs);
+      })
+    ]);
+    if (opTimer) { clearTimeout(opTimer); opTimer = null; }
     if (res && typeof res === 'object' && res.error && retries > 0) {
       if (isTransientSupabaseError(res.error) && !nodeSupabaseCircuitBreaker.isCircuitOpen()) {
         const jitter = Math.floor(Math.random() * 300);
         const nextDelay = delay + jitter;
         await new Promise(resolve => setTimeout(resolve, nextDelay));
-        return retryWithBackoff(fn, retries - 1, Math.min(Math.round(delay * 1.5), 4000));
+        return retryWithBackoff(fn, retries - 1, Math.min(Math.round(delay * 1.5), 4000), maxWallMs);
       }
     }
     return res;
   } catch (error) {
+    if (opTimer) { clearTimeout(opTimer); opTimer = null; }
     const errorMsg = error?.message || String(error);
     if (errorMsg.includes('CircuitBreaker') || nodeSupabaseCircuitBreaker.isCircuitOpen()) {
       throw error;
@@ -307,7 +382,7 @@ export async function retryWithBackoff(fn, retries = 1, delay = 600) {
       const nextDelay = delay + jitter;
       console.info(`[Supabase/Network] Recuperando oscilação temporária (${errorMsg || errorCode}) em ${nextDelay}ms... (${retries} retentativas restantes)`);
       await new Promise(resolve => setTimeout(resolve, nextDelay));
-      return retryWithBackoff(fn, retries - 1, Math.min(Math.round(delay * 1.5), 4000));
+      return retryWithBackoff(fn, retries - 1, Math.min(Math.round(delay * 1.5), 4000), maxWallMs);
     }
     throw error;
   }

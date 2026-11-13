@@ -199,8 +199,13 @@ class EventProcessor {
     }
 
     async flushStatusQueue() {
+        if (this.isFlushingStatus && this.flushingStatusStartedAt && (Date.now() - this.flushingStatusStartedAt > 30000)) {
+            console.warn('[EventProcessor/Watchdog] Liberando lock isFlushingStatus estagnado (>30s).');
+            this.isFlushingStatus = false;
+        }
         if (this.isFlushingStatus || this.statusUpdateQueue.size === 0 || nodeSupabaseCircuitBreaker.isCircuitOpen()) return;
         this.isFlushingStatus = true;
+        this.flushingStatusStartedAt = Date.now();
 
         try {
             const now = Date.now();
@@ -286,16 +291,25 @@ class EventProcessor {
             return cached.config;
         }
 
+        let timer = null;
         try {
-            const { data } = await retryWithBackoff(() => 
-                supabase.from('companies').select('ignore_groups').eq('tenant_id', tenantId).single()
-            );
+            const { data } = await Promise.race([
+                retryWithBackoff(() => 
+                    supabase.from('companies').select('ignore_groups').eq('tenant_id', tenantId).single(),
+                    1, 400, 5000
+                ),
+                new Promise((_, reject) => {
+                    timer = setTimeout(() => reject(new Error('TENANT_CONFIG_TIMEOUT')), 5000);
+                })
+            ]);
             // Default é true (ignorar grupos) para retrocompatibilidade
             const config = { ignore_groups: data && data.ignore_groups !== null ? data.ignore_groups : true };
             this.tenantConfigs.set(tenantId, { config, timestamp: Date.now() });
             return config;
         } catch (e) {
-            return { ignore_groups: true }; 
+            return cached?.config || { ignore_groups: true }; 
+        } finally {
+            if (timer) clearTimeout(timer);
         }
     }
 
@@ -309,14 +323,28 @@ class EventProcessor {
             return cached?.config || {};
         }
         if (this.instanceConfigInFlight?.has(instanceId)) {
-            return this.instanceConfigInFlight.get(instanceId);
+            const existingEntry = this.instanceConfigInFlight.get(instanceId);
+            const entryPromise = existingEntry?.promise || existingEntry;
+            const entryStartedAt = existingEntry?.startedAt || 0;
+            if (entryPromise && entryStartedAt > 0 && (Date.now() - entryStartedAt < 6000)) {
+                return entryPromise;
+            }
+            console.warn(`[EventProcessor/SelfHealing] Removendo consulta getInstanceConfig estagnada (>6s) da instância ${instanceId} para impedir bloqueio de recebimento.`);
+            this.instanceConfigInFlight.delete(instanceId);
         }
 
         const fetchPromise = (async () => {
+            let cfgTimer = null;
             try {
-                const { data, error } = await retryWithBackoff(() =>
-                    supabase.from('whatsapp_instances').select('settings, tenant_id').eq('id', instanceId).single()
-                );
+                const { data, error } = await Promise.race([
+                    retryWithBackoff(() =>
+                        supabase.from('whatsapp_instances').select('settings, tenant_id').eq('id', instanceId).single(),
+                        1, 400, 5000
+                    ),
+                    new Promise((_, reject) => {
+                        cfgTimer = setTimeout(() => reject(new Error('INSTANCE_CONFIG_TIMEOUT')), 5000);
+                    })
+                ]);
                 if (error) {
                     if (!isTransientSupabaseError(error)) {
                         console.warn('[EventProcessor] Aviso ao buscar config da instância:', error.message || error);
@@ -334,15 +362,19 @@ class EventProcessor {
                 return config;
             } catch (e) {
                 if (!isTransientSupabaseError(e)) {
-                    console.warn('[EventProcessor] Exceção ao buscar config da instância:', e?.message || e);
+                    console.warn(`[EventProcessor] Exceção/Timeout ao buscar config da instância ${instanceId}:`, e?.message || e);
                 }
                 return cached?.config || {};
             } finally {
-                this.instanceConfigInFlight?.delete(instanceId);
+                if (cfgTimer) clearTimeout(cfgTimer);
+                const currentEntry = this.instanceConfigInFlight?.get(instanceId);
+                if (!currentEntry || currentEntry === fetchPromise || currentEntry.promise === fetchPromise) {
+                    this.instanceConfigInFlight?.delete(instanceId);
+                }
             }
         })();
 
-        this.instanceConfigInFlight?.set(instanceId, fetchPromise);
+        this.instanceConfigInFlight?.set(instanceId, { promise: fetchPromise, startedAt: Date.now() });
         return fetchPromise;
     }
 
@@ -534,9 +566,20 @@ class EventProcessor {
                 if (msg.key.remoteJidAlt && msg.key.remoteJidAlt.includes('@s.whatsapp.net')) {
                     jid = msg.key.remoteJidAlt;
                 } else {
-                    const resolvedPn = await this.resolveLidToPhone(instanceId, jid, sock);
-                    if (resolvedPn) {
-                        jid = resolvedPn;
+                    let lidTimer = null;
+                    try {
+                        const resolvedPn = await Promise.race([
+                            this.resolveLidToPhone(instanceId, jid, sock),
+                            new Promise((resolve) => {
+                                lidTimer = setTimeout(() => resolve(null), 4000);
+                            })
+                        ]);
+                        if (resolvedPn) {
+                            jid = resolvedPn;
+                        }
+                    } catch (_) {
+                    } finally {
+                        if (lidTimer) clearTimeout(lidTimer);
                     }
                 }
             }
@@ -946,8 +989,13 @@ class EventProcessor {
     }
 
     async flushQueue() {
+        if (this.isFlushing && this.flushingStartedAt && (Date.now() - this.flushingStartedAt > 35000)) {
+            console.warn('[BatchProcessor/Watchdog] Liberando lock isFlushing estagnado (>35s) para garantir continuidade de ingestão.');
+            this.isFlushing = false;
+        }
         if (this.isFlushing || this.messageQueue.length === 0 || nodeSupabaseCircuitBreaker.isCircuitOpen()) return;
         this.isFlushing = true;
+        this.flushingStartedAt = Date.now();
         let hadTransientRetry = false;
         
         // Puxa até 1000 mensagens do buffer (Batch limit)
@@ -2112,8 +2160,10 @@ class EventProcessor {
                  this.aiSendRateLimiter.set(convId, rateData);
                  
                  this.getInstanceConfig(b.instanceId).then(async (instanceConfig) => {
-                      // 1. Verifica se o robô está ativo para esta caixa de entrada (padrão true se undefined) ou se é caixa exclusiva de API
-                      const botActive = instanceConfig.bot_active !== false && instanceConfig.is_api_only !== true;
+                      // 1. Verifica se o robô está ativo para esta caixa de entrada (padrão true se undefined).
+                      // Se `chat_enabled === true`, a caixa foi habilitada no Chat e não deve ser silenciada por resíduo legado de `is_api_only: true`.
+                      const isExclusivelyApiOnly = instanceConfig.is_api_only === true && instanceConfig.chat_enabled !== true;
+                      const botActive = instanceConfig.bot_active !== false && !isExclusivelyApiOnly;
                       if (!botActive) {
                           console.log(`[EventProcessor] Robô desativado nas configurações da caixa de entrada (${b.instanceId}). Silenciando robô.`);
                           return;
@@ -2179,29 +2229,32 @@ class EventProcessor {
                           }
                           const { companyData, botsData } = cachedTenantAi;
 
-                          // Se o IA estiver desativado globalmente e NÃO for o simulador admin (teste_robo), aborta o processamento.
-                          if (companyData && companyData.global_ai_enabled === false && b.convStatus !== 'teste_robo') {
-                              console.log(`[BatchProcessor] IA e Automações Globais estão DESATIVADAS para o tenant ${b.tenantId}`);
-                              return;
+                          // 1. Prioridade do Flow Engine (Typebot Visual): executa independentemente do toggle de IA Generativa (`global_ai_enabled`),
+                          // pois possui controle próprio de publicação (`active_version_id` em `flows`).
+                          if (b.tenantId && b.tenantId !== '00000000-0000-0000-0000-000000000000') {
+                              try {
+                                  const handledByFlow = await FlowEngine.processIncomingMessage({
+                                      tenantId: b.tenantId,
+                                      instanceId: b.instanceId,
+                                      conversationId: b.conversationId,
+                                      jid: b.jid,
+                                      textMessage: b.textMessage,
+                                      rawPayload: b.rawMsg,
+                                      sock: b.sock
+                                  });
+                                  if (handledByFlow) {
+                                      console.log(`[EventProcessor] Mensagem de ${b.phone || b.jid} tratada com sucesso pelo FlowEngine. Silenciando IA para evitar double-talk.`);
+                                      return;
+                                  }
+                              } catch (flowErr) {
+                                  console.error("[EventProcessor] Erro ao executar FlowEngine:", flowErr);
+                              }
                           }
 
-                          // 1. Prioridade do Flow Engine: se houver estado de conversa ativo no fluxo ou se a mensagem disparar um fluxo
-                          try {
-                              const handledByFlow = await FlowEngine.processIncomingMessage({
-                                  tenantId: b.tenantId,
-                                  instanceId: b.instanceId,
-                                  conversationId: b.conversationId,
-                                  jid: b.jid,
-                                  textMessage: b.textMessage,
-                                  rawPayload: b.rawMsg,
-                                  sock: b.sock
-                              });
-                              if (handledByFlow) {
-                                  console.log(`[EventProcessor] Mensagem de ${b.phone || b.jid} tratada com sucesso pelo FlowEngine. Silenciando IA para evitar double-talk.`);
-                                  return;
-                              }
-                          } catch (flowErr) {
-                              console.error("[EventProcessor] Erro ao executar FlowEngine:", flowErr);
+                          // 2. Se a IA Generativa estiver desativada globalmente e NÃO for o simulador admin (teste_robo), encerra antes do AutomationWorker.
+                          if (companyData && companyData.global_ai_enabled === false && b.convStatus !== 'teste_robo') {
+                              console.log(`[BatchProcessor] IA Generativa Global está DESATIVADA para o tenant ${b.tenantId}`);
+                              return;
                           }
 
                           // Helper para identificar robôs com papel de Orquestrador/Maestro (não respondem diretamente)

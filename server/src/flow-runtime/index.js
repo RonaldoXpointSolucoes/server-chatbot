@@ -14,18 +14,38 @@ class FlowEngine {
         if (!textMessage) return false;
         
         try {
-            // 1. Procurar estado de conversa ativo no BOT
-            const { data: convState, error: stateErr } = await supabase
+            // 1. Procurar estado de conversa ativo no BOT (ordenado pelo mais recente para evitar falha caso haja duplicata histórica)
+            const { data: activeStates, error: stateErr } = await supabase
                 .from('conversation_states')
                 .select('*')
                 .eq('tenant_id', tenantId)
                 .eq('remote_jid', jid)
                 .eq('status', 'BOT_ACTIVE')
-                .maybeSingle();
+                .order('updated_at', { ascending: false })
+                .limit(5);
 
             if (stateErr) {
                 console.error('[FlowEngine] Erro ao buscar state:', stateErr);
                 return false;
+            }
+
+            let convState = activeStates && activeStates.length > 0 ? activeStates[0] : null;
+
+            // Higieniza eventuais estados BOT_ACTIVE duplicados antigos do mesmo contato
+            if (activeStates && activeStates.length > 1) {
+                const duplicateIds = activeStates.slice(1).map(s => s.id);
+                await supabase.from('conversation_states').update({ status: 'FINISHED' }).in('id', duplicateIds);
+            }
+
+            // Expiração automática (TTL de 12h) para sessões BOT_ACTIVE abandonadas pelo cliente
+            if (convState) {
+                const lastTouch = new Date(convState.updated_at || convState.created_at || 0).getTime();
+                const STALE_TTL_MS = 12 * 60 * 60 * 1000;
+                if (lastTouch > 0 && (Date.now() - lastTouch) > STALE_TTL_MS) {
+                    console.log(`[FlowEngine] Sessão BOT_ACTIVE expirada (>12h) para ${jid} (state: ${convState.id}). Reiniciando avaliação de gatilhos.`);
+                    await this.finishState(convState.id);
+                    convState = null;
+                }
             }
 
             if (convState) {
@@ -79,21 +99,25 @@ class FlowEngine {
 
                 console.log(`[FlowEngine] Disparando fluxo [${flow.name}] para ${jid}`);
 
-                // Busca dados da empresa (tenant)
+                // Busca dados da empresa na tabela oficial `companies` (com fallback para `tenants`)
+                let companyData = null;
                 let tenantData = null;
                 try {
-                    const { data: t } = await supabase
-                        .from('tenants')
-                        .select('name, settings')
-                        .eq('id', tenantId)
-                        .maybeSingle();
+                    const [{ data: c }, { data: t }] = await Promise.all([
+                        supabase.from('companies').select('name, settings').eq('id', tenantId).maybeSingle(),
+                        supabase.from('tenants').select('name, settings').eq('id', tenantId).maybeSingle()
+                    ]);
+                    companyData = c;
                     tenantData = t;
                 } catch (tErr) {
-                    console.warn('[FlowEngine] Falha ao consultar tenant:', tErr.message);
+                    console.warn('[FlowEngine] Falha ao consultar dados da empresa:', tErr.message);
                 }
 
-                const tSettings = tenantData?.settings || {};
-                const companyName = tSettings.businessName || tSettings.nome_ia || tenantData?.name || 'Nossa Empresa';
+                const tSettings = {
+                    ...(tenantData?.settings || {}),
+                    ...(companyData?.settings || {})
+                };
+                const companyName = tSettings.businessName || tSettings.nome_ia || companyData?.name || tenantData?.name || 'Nossa Empresa';
                 const companyAddress = tSettings.endereco || tSettings.street || '';
                 const menuLink = tSettings.link_cardapio || '';
                 const mapsLink = tSettings.google_maps || '';
@@ -118,10 +142,16 @@ class FlowEngine {
                     console.warn('[FlowEngine] Falha ao consultar nome do contato:', cErr.message);
                 }
 
-                // Calcula saudação com base no horário atual
-                const currentHour = new Date().getHours();
-                const saudacao = currentHour >= 5 && currentHour < 12 ? 'Bom dia' : (currentHour >= 12 && currentHour < 18 ? 'Boa tarde' : 'Boa noite');
+                // Calcula saudação com base no fuso horário de Brasília (America/Sao_Paulo)
                 const now = new Date();
+                const brtHour = Number(
+                    new Intl.DateTimeFormat('en-US', {
+                        hour: 'numeric',
+                        hour12: false,
+                        timeZone: 'America/Sao_Paulo'
+                    }).format(now)
+                ) % 24;
+                const saudacao = brtHour >= 5 && brtHour < 12 ? 'Bom dia' : (brtHour >= 12 && brtHour < 18 ? 'Boa tarde' : 'Boa noite');
 
                 const { data: newState, error: insertErr } = await supabase
                     .from('conversation_states')
@@ -144,8 +174,8 @@ class FlowEngine {
                             telefone_empresa: companyPhone,
                             remoteJid: jid,
                             telefone: jid.split('@')[0],
-                            data_atual: now.toLocaleDateString('pt-BR'),
-                            hora_atual: now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+                            data_atual: now.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
+                            hora_atual: now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })
                         },
                         status: 'BOT_ACTIVE',
                         history: []
@@ -718,7 +748,19 @@ class FlowEngine {
                             messageType: 'text'
                         });
                     }
-                    isPaused = true; // Aguarda escolha do cliente
+                    const groupBlocks = parentGroup?.data?.blocks || [];
+                    const blockIdx = groupBlocks.findIndex(b => b.id === block.id);
+                    const hasMoreInGroup = blockIdx !== -1 && blockIdx < groupBlocks.length - 1;
+                    const hasOutgoingEdge = edges.some(e =>
+                        e.source === parentGroup?.id ||
+                        e.sourceHandle === block.id ||
+                        String(e.sourceHandle || '').startsWith(`${block.id}-`)
+                    );
+                    if (hasMoreInGroup || hasOutgoingEdge) {
+                        isPaused = true; // Aguarda escolha do cliente
+                    } else {
+                        currentPoint = null; // Menu informativo final sem saída: conclui fluxo sem prender em BOT_ACTIVE
+                    }
                 }
                 // 3.1 Enquete Nativa Clicável do WhatsApp (poll)
                 else if (flowType === 'poll') {
@@ -754,7 +796,19 @@ class FlowEngine {
                         textContent: pollTextSummary,
                         messageType: 'text'
                     });
-                    isPaused = true; // Aguarda voto na enquete ou resposta do cliente
+                    const groupBlocks = parentGroup?.data?.blocks || [];
+                    const blockIdx = groupBlocks.findIndex(b => b.id === block.id);
+                    const hasMoreInGroup = blockIdx !== -1 && blockIdx < groupBlocks.length - 1;
+                    const hasOutgoingEdge = edges.some(e =>
+                        e.source === parentGroup?.id ||
+                        e.sourceHandle === block.id ||
+                        String(e.sourceHandle || '').startsWith(`${block.id}-`)
+                    );
+                    if (hasMoreInGroup || hasOutgoingEdge) {
+                        isPaused = true; // Aguarda voto na enquete ou resposta do cliente
+                    } else {
+                        currentPoint = null;
+                    }
                 }
                 // 4. Definição de Variável
                 else if (flowType === 'set_variable') {

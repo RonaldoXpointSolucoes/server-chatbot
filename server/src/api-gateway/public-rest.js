@@ -966,7 +966,7 @@ router.post(['/message/sendMedia', '/message/sendMedia/:instance'], requireApiKe
  *       200:
  *         description: Localização enviada com sucesso
  *  */
-router.post('/message/sendLocation', requireApiKey, async (req, res) => {
+router.post('/message/sendLocation', requireApiKey, routeExternalMessage, async (req, res) => {
     const { number, latitude, longitude, name, address } = req.body;
     const { id, tenant_id, display_name } = req.instanceData;
     const originIp = req.originIp || 'N/A';
@@ -1053,7 +1053,7 @@ router.post('/message/sendLocation', requireApiKey, async (req, res) => {
  *       200:
  *         description: Contato enviado com sucesso
  *  */
-router.post('/message/sendContact', requireApiKey, async (req, res) => {
+router.post('/message/sendContact', requireApiKey, routeExternalMessage, async (req, res) => {
     const { number, contactName, contactNumber } = req.body;
     const { id, tenant_id, display_name } = req.instanceData;
     const originIp = req.originIp || 'N/A';
@@ -1154,7 +1154,7 @@ router.post('/message/sendContact', requireApiKey, async (req, res) => {
  *       200:
  *         description: Reação enviada com sucesso
  *  */
-router.post('/message/sendReaction', requireApiKey, async (req, res) => {
+router.post('/message/sendReaction', requireApiKey, routeExternalMessage, async (req, res) => {
     const { number, messageId, reaction, fromMe = false } = req.body;
     const { id, tenant_id, display_name } = req.instanceData;
     const originIp = req.originIp || 'N/A';
@@ -1236,7 +1236,7 @@ router.post('/message/sendReaction', requireApiKey, async (req, res) => {
  *       200:
  *         description: Instância reiniciada
  */
-router.put('/instance/:name/restart', requireApiKey, async (req, res) => {
+router.put('/instance/:name/restart', requireApiKey, routeExternalMessage, async (req, res) => {
     try {
         const { id, tenant_id } = req.instanceData;
         const sock = await sessionManager.getSocketOrWake(tenant_id, id);

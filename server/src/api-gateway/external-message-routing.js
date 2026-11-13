@@ -87,13 +87,75 @@ export async function forwardInternalInstanceRequest(req, res, instanceId, optio
     }
 }
 
-export function uploadedMediaBody(fields, file) {
+export function uploadedMediaBody(fields, file, fileFieldName = 'file') {
     const form = new FormData();
     for (const [name, value] of Object.entries(fields || {})) {
+        if (value === undefined || value === null) continue;
         for (const item of Array.isArray(value) ? value : [value]) form.append(name, String(item));
     }
-    if (file) form.append('file', new Blob([file.buffer], { type: file.mimetype }), file.originalname || 'file');
+    if (file) form.append(fileFieldName, new Blob([file.buffer], { type: file.mimetype }), file.originalname || 'file');
     return form;
+}
+
+export async function forwardInternalMultipartRequest(req, res, instanceId, fileFieldName = 'media', options = {}) {
+    if (!instanceId || req.headers['x-api-owner-hop']) return false;
+
+    const appEnv = String(process.env.APP_ENV || '').toLowerCase();
+    const currentNodeId = String(options.nodeId || process.env.NODE_ID || process.env.WORKER_NODE_ID || process.env.COOLIFY_CONTAINER_NAME || 'production-worker').toLowerCase();
+    const isAlphaNode = appEnv === 'alpha' || appEnv === 'staging' || appEnv === 'homolog' || currentNodeId.includes('alpha') || currentNodeId.includes('homolog') || currentNodeId.includes('staging');
+    const isAlphaInstance = ALPHA_INSTANCES.has(instanceId);
+
+    let targetOrigin = null;
+    if (isAlphaInstance && !isAlphaNode) {
+        const rawUrl = options.alphaUrl || process.env.ALPHA_API_URL || DEFAULT_ALPHA_URL;
+        targetOrigin = new URL(rawUrl).origin;
+    } else if (!isAlphaInstance && isAlphaNode) {
+        const rawUrl = options.prodUrl || process.env.PROD_API_URL || DEFAULT_PROD_URL;
+        targetOrigin = new URL(rawUrl).origin;
+    }
+
+    if (!targetOrigin) return false;
+
+    const timeoutMs = options.timeoutMs || 25000;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+        const headers = {
+            'x-api-owner-hop': '1'
+        };
+        if (req.headers.authorization) headers.authorization = req.headers.authorization;
+        if (req.headers.apikey) headers.apikey = req.headers.apikey;
+        if (req.headers.globalapikey) headers.globalapikey = req.headers.globalapikey;
+        if (req.headers['x-tenant-id']) headers['x-tenant-id'] = req.headers['x-tenant-id'];
+        if (req.headers['x-trace-id']) headers['x-trace-id'] = req.headers['x-trace-id'];
+
+        const formBody = uploadedMediaBody(req.body, req.file, fileFieldName);
+        const response = await fetch(targetOrigin + req.originalUrl, {
+            method: 'POST',
+            headers,
+            body: formBody,
+            signal: controller.signal,
+            redirect: 'follow'
+        });
+
+        if (response.ok) {
+            const payload = await response.text();
+            res.status(response.status);
+            res.setHeader('Content-Type', response.headers.get('content-type') || 'application/json');
+            res.setHeader('x-api-owner-node', isAlphaInstance ? 'alpha-worker' : 'production-worker');
+            res.send(payload);
+            return true;
+        }
+
+        console.log(`[InternalRouting/Multipart] Worker proprietário (${targetOrigin}) retornou HTTP ${response.status} para instância ${instanceId}. Aplicando fallback Outbox local.`);
+        return false;
+    } catch (err) {
+        console.log(`[InternalRouting/Multipart] Falha ao encaminhar mídia da instância ${instanceId} para ${targetOrigin} (${err?.message || err?.name}). Aplicando fallback Outbox local.`);
+        return false;
+    } finally {
+        clearTimeout(timer);
+    }
 }
 
 // Only an already authenticated request can reach another worker. The receiving

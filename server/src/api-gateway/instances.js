@@ -1,12 +1,12 @@
 import express from 'express';
 import sessionManager, { isSocketOpen, isInstanceAllowedForNode } from '../session-manager/index.js';
 import queueProcessor from '../session-manager/queue-processor.js';
-import { supabase, NODE_ID, resolveTargetJid } from '../supabase.js';
+import { supabase, NODE_ID, resolveTargetJid, retryWithBackoff } from '../supabase.js';
 import { activePairingAttempts, logAndNotifyConnectionEvent } from '../event-processor/connection-notifier.js';
 import { beginConnectionAttempt, getConnectionDiagnostics, connectDecision, shouldClearCredentials, connectionProgress, diagnosticLogDetails } from '../session-manager/connection-lifecycle.js';
 import { recordStructuredEvent } from '../diagnostics/telemetry.js';
 import { sessionConnectionDiagnostics } from '../session-manager/socket-state.js';
-import { forwardInternalInstanceRequest } from './external-message-routing.js';
+import { forwardInternalInstanceRequest, forwardInternalMultipartRequest } from './external-message-routing.js';
 import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
@@ -706,7 +706,9 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                                     processor.handleMessageUpsert(req.tenantId, instanceId, activeSock, {
                                         messages: [sentResult],
                                         type: 'notify'
-                                    }).catch(() => {});
+                                    }).catch(epErr => {
+                                        console.warn(`[API Gateway] [FastPath] Aviso ao sincronizar EventProcessor para ${instanceId}:`, epErr?.message || epErr);
+                                    });
                                 }
                             }
                         } catch (e) {}
@@ -1716,30 +1718,133 @@ router.post('/instances/:instanceId/send-media-url', requireTenant, express.json
         const finalResponseType = responseType === 'TUTORIAL' ? 'TUTORIAL' : 'STANDARD';
         console.log(`[send-media-url] Queueing ${messageType} (${finalResponseType}) from URL: ${mediaUrl} to ${jid}`);
 
-        const { data: newOutbox, error: outboxErr } = await supabase
-            .from('wa_outgoing_messages')
-            .insert({
-                instance_id: instanceId,
-                tenant_id: req.tenantId,
-                chat_jid: jid,
-                message_type: 'media',
-                body: caption || '',
-                media_url: mediaUrl,
-                response_type: finalResponseType,
-                options: {
-                    mimetype,
-                    fileName,
-                    messageType,
-                    ptt: Boolean(ptt),
-                    ptv: Boolean(ptv),
-                    viewOnce: Boolean(viewOnce),
-                    responseType: finalResponseType
-                },
-                status: 'pending',
-                priority: 1
-            })
-            .select()
-            .single();
+        // FAST-PATH DIRETO EM MEMÓRIA PARA MÍDIA VIA URL (Encaminhamentos e Respostas Rápidas < 300ms)
+        const activeUrlSock = isAllowedOnThisNode ? (sessionManager.getSocket(instanceId) || sessionManager.sessions.get(instanceId)?.sock) : null;
+        if (activeUrlSock && isSocketOpen(activeUrlSock) && /^https?:\/\//i.test(String(mediaUrl)) && finalResponseType === 'STANDARD') {
+            try {
+                let targetJid = String(jid).trim();
+                if (!targetJid.includes('@')) {
+                    targetJid = `${targetJid.replace(/\D/g, '')}@s.whatsapp.net`;
+                }
+
+                const fetchCtrl = new AbortController();
+                const fetchTimer = setTimeout(() => fetchCtrl.abort(), 12000);
+                const mediaFetchRes = await fetch(mediaUrl, { signal: fetchCtrl.signal }).finally(() => clearTimeout(fetchTimer));
+                if (!mediaFetchRes.ok) {
+                    throw new Error(`HTTP ${mediaFetchRes.status} ao baixar mediaUrl no Fast-Path`);
+                }
+                const mediaBuffer = Buffer.from(await mediaFetchRes.arrayBuffer());
+                const detectedMime = mimetype && mimetype !== 'application/octet-stream'
+                    ? mimetype
+                    : (mediaFetchRes.headers.get('content-type') || 'application/octet-stream');
+
+                let mediaPayload = {};
+                if (messageType === 'image') {
+                    mediaPayload = { image: mediaBuffer, caption: caption || '', mimetype: detectedMime, ...(viewOnce ? { viewOnce: true } : {}) };
+                } else if (messageType === 'video') {
+                    mediaPayload = { video: mediaBuffer, caption: ptv ? undefined : (caption || ''), mimetype: detectedMime, ...(ptv ? { ptv: true } : {}), ...(viewOnce ? { viewOnce: true } : {}) };
+                } else if (messageType === 'audio') {
+                    mediaPayload = { audio: mediaBuffer, mimetype: detectedMime.includes('ogg') ? 'audio/ogg; codecs=opus' : detectedMime, ptt: Boolean(ptt), ...(viewOnce ? { viewOnce: true } : {}) };
+                } else {
+                    mediaPayload = { document: mediaBuffer, mimetype: detectedMime, fileName: fileName || 'documento', caption: caption || '' };
+                }
+
+                const sendFn = activeUrlSock.originalSendMessage || activeUrlSock.sendMessage.bind(activeUrlSock);
+                const directRes = await Promise.race([
+                    sendFn(targetJid, mediaPayload),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT_FASTPATH_MEDIA_URL')), 25000))
+                ]);
+                const realWaId = directRes?.key?.id || `FASTURL_${Date.now()}`;
+
+                Promise.resolve().then(async () => {
+                    try {
+                        const { default: eventProcessor } = await import('../event-processor/index.js');
+                        const msgPayload = directRes?.message || (
+                            messageType === 'image' ? { imageMessage: { url: mediaUrl, mimetype: detectedMime, caption: caption || '' } } :
+                            messageType === 'video' ? { videoMessage: { url: mediaUrl, mimetype: detectedMime, caption: caption || '' } } :
+                            messageType === 'audio' ? { audioMessage: { url: mediaUrl, mimetype: detectedMime, ptt: Boolean(ptt) } } :
+                            { documentMessage: { url: mediaUrl, mimetype: detectedMime, fileName: fileName || 'documento', caption: caption || '' } }
+                        );
+                        await eventProcessor.handleMessageUpsert(req.tenantId, instanceId, activeUrlSock, {
+                            type: 'notify',
+                            messages: [{
+                                key: directRes?.key || { remoteJid: targetJid, fromMe: true, id: realWaId },
+                                message: msgPayload,
+                                messageTimestamp: directRes?.messageTimestamp || Math.floor(Date.now() / 1000),
+                                status: 2
+                            }]
+                        });
+                    } catch (epErr) {
+                        console.warn(`[API Gateway] [send-media-url] Aviso ao sincronizar EventProcessor no Fast-Path:`, epErr.message);
+                    }
+                    try {
+                        await retryWithBackoff(() =>
+                            supabase.from('wa_outgoing_messages').insert({
+                                instance_id: instanceId,
+                                tenant_id: req.tenantId,
+                                chat_jid: targetJid,
+                                message_type: 'media',
+                                body: caption || '',
+                                media_url: mediaUrl,
+                                response_type: finalResponseType,
+                                options: {
+                                    mimetype: detectedMime,
+                                    fileName,
+                                    messageType,
+                                    ptt: Boolean(ptt),
+                                    ptv: Boolean(ptv),
+                                    viewOnce: Boolean(viewOnce),
+                                    responseType: finalResponseType,
+                                    whatsapp_message_id: realWaId
+                                },
+                                status: 'sent',
+                                priority: 1,
+                                updated_at: new Date().toISOString()
+                            })
+                        );
+                    } catch {}
+                });
+
+                return res.json({
+                    ok: true,
+                    fastPath: true,
+                    result: {
+                        key: directRes?.key || { remoteJid: targetJid, fromMe: true, id: realWaId },
+                        messageTimestamp: directRes?.messageTimestamp || Math.floor(Date.now() / 1000)
+                    },
+                    media_url: mediaUrl
+                });
+            } catch (fastUrlErr) {
+                console.warn(`[API Gateway] [send-media-url] Fast-Path oscilou para ${instanceId} (${fastUrlErr.message}). Usando fila de contingência...`);
+            }
+        }
+
+        const { data: newOutbox, error: outboxErr } = await retryWithBackoff(() =>
+            supabase
+                .from('wa_outgoing_messages')
+                .insert({
+                    instance_id: instanceId,
+                    tenant_id: req.tenantId,
+                    chat_jid: jid,
+                    message_type: 'media',
+                    body: caption || '',
+                    media_url: mediaUrl,
+                    response_type: finalResponseType,
+                    options: {
+                        mimetype,
+                        fileName,
+                        messageType,
+                        ptt: Boolean(ptt),
+                        ptv: Boolean(ptv),
+                        viewOnce: Boolean(viewOnce),
+                        responseType: finalResponseType
+                    },
+                    status: 'pending',
+                    priority: 1
+                })
+                .select()
+                .single()
+        );
 
         if (outboxErr) throw outboxErr;
 
@@ -1771,8 +1876,14 @@ router.post('/instances/:instanceId/send-media', requireTenant, upload.single('m
     try {
         const { instanceId } = req.params;
 
+        // Roteamento transparente multi-nó (PROD-C <-> ALFA-A) para upload multipart de mídia
+        if (await forwardInternalMultipartRequest(req, res, instanceId, 'media')) {
+            return;
+        }
+        const isAllowedOnThisNode = isInstanceAllowedForNode(instanceId, req.tenantId);
+
         // 1. Verificação prévia de integridade no banco / memória para suportar cluster multi-nó
-        const localSock = sessionManager.getSocket(instanceId);
+        const localSock = isAllowedOnThisNode ? sessionManager.getSocket(instanceId) : null;
         if (!localSock) {
             const { data: instCheck } = await supabase
                 .from('whatsapp_instances')
@@ -1794,7 +1905,9 @@ router.post('/instances/:instanceId/send-media', requireTenant, upload.single('m
                 });
             }
 
-            sessionManager.getSocketOrWake(req.tenantId, instanceId).catch(() => {});
+            if (isAllowedOnThisNode) {
+                sessionManager.getSocketOrWake(req.tenantId, instanceId).catch(() => {});
+            }
         }
 
         const tenantId = req.tenantId;
@@ -1928,7 +2041,7 @@ router.post('/instances/:instanceId/send-media', requireTenant, upload.single('m
                             messageType === 'audio' ? { audioMessage: { url: mediaUrl, mimetype: 'audio/ogg; codecs=opus', ptt: isPttAudio } } :
                             { documentMessage: { url: mediaUrl, mimetype: file.mimetype, fileName: file.originalname, caption: caption || '' } }
                         );
-                        await eventProcessor.handleMessagesUpsert(tenantId, instanceId, {
+                        await eventProcessor.handleMessageUpsert(tenantId, instanceId, activeSock, {
                             type: 'notify',
                             messages: [{
                                 key: directRes?.key || { remoteJid: targetJid, fromMe: true, id: realWaId },
@@ -2011,8 +2124,10 @@ router.post('/instances/:instanceId/send-media', requireTenant, upload.single('m
 
         if (outboxErr) throw outboxErr;
 
-        // Despacha a mensagem instantaneamente acordando o QueueProcessor
-        queueProcessor.trigger(tenantId, instanceId);
+        // Despacha a mensagem instantaneamente acordando o QueueProcessor apenas se pertencer a este nó
+        if (isAllowedOnThisNode) {
+            queueProcessor.trigger(tenantId, instanceId);
+        }
 
         res.json({ 
             ok: true, 

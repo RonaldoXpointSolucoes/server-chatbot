@@ -173,6 +173,7 @@ class SessionManager {
         this.connectingSessions = new Set();
         this.syncedInstancePhones = new Map();
         this.recentRawMessagesCache = new Map();
+        this.appStateKeyRequestCooldowns = new Map();
         this.activeInitSlots = 0;
         this.maxConcurrentInits = 3;
         this.initSlotQueue = [];
@@ -214,6 +215,7 @@ class SessionManager {
                         'invalid wire type',
                         'decodeSyncd',
                         'failed to find key',
+                        'blocked on missing key',
                         'critical_unblock',
                         'Closing session:',
                         'Closing session in favor of incoming prekey bundle',
@@ -235,6 +237,18 @@ class SessionManager {
                         'newsletter notification'
                     ];
                     
+                    // Auto-resync ativo de chave de App State ausente (ex: regular_low blocked on missing key "AAAAAGNY")
+                    const rawErrorText = typeof parsed.error === 'string'
+                        ? parsed.error
+                        : (parsed.error && typeof parsed.error === 'object' ? JSON.stringify(parsed.error) : '');
+                    if ((parsed.msg && parsed.msg.includes('blocked on missing key')) || rawErrorText.includes('failed to find key')) {
+                        const keyMatch = rawErrorText.match(/failed to find key "([^"]+)"/);
+                        if (keyMatch && keyMatch[1]) {
+                            this.requestMissingAppStateSyncKey(parsed.instanceId || null, keyMatch[1]).catch(() => {});
+                        }
+                        return; // Solicita a chave silenciosamente ao celular principal sem poluir logs com falso WARN
+                    }
+
                     if (parsed.msg && ignoredLogs.some(text => parsed.msg.includes(text))) {
                         return; // Ignora silenciosamente
                     }
@@ -250,11 +264,8 @@ class SessionManager {
                         return; // Ignora silenciosamente
                     }
 
-                    if (parsed.error && typeof parsed.error === 'object') {
-                        const errStr = JSON.stringify(parsed.error);
-                        if (ignoredLogs.some(text => errStr.includes(text))) {
-                            return; // Ignora silenciosamente
-                        }
+                    if (rawErrorText && ignoredLogs.some(text => rawErrorText.includes(text))) {
+                        return; // Ignora silenciosamente tanto strings de stack quanto objetos serializados
                     }
 
                     if (parsed.msg && parsed.msg.includes('stream errored out')) {
@@ -1167,7 +1178,7 @@ class SessionManager {
 
             const sock = createSocket({
                 version,
-                logger: this.logger,
+                logger: this.logger.child({ instanceId }),
                 printQRInTerminal: false,
                 auth: state,
                 browser: Browsers.ubuntu('Chrome'),
@@ -1425,6 +1436,14 @@ class SessionManager {
                 const { connection, lastDisconnect } = update;
                 if (isRealAuthConnection) {
                     this.startWatchdog(tenantId, instanceId, sock);
+                    setTimeout(() => {
+                        try {
+                            if (this.sessions.get(instanceId)?.sock === sock && typeof sock.ev?.isBuffering === 'function' && sock.ev.isBuffering()) {
+                                console.warn(`[SessionManager] EventBuffer ainda em retenção 12s após conexão aberta em ${instanceId}. Executando flush preventivo...`);
+                                sock.ev.flush();
+                            }
+                        } catch (_) {}
+                    }, 12000);
                     
                     // Proteção contra duplicação de chip (mesmo número em múltiplas instâncias) e Auto-Migração de Histórico
                     const ownerJid = sock.user?.id;
@@ -3070,8 +3089,14 @@ class SessionManager {
                 }
 
                 // Se o WebSocket estiver aberto ou a sessão estiver autenticada e operacional, está perfeitamente saudável.
-                // O keep-alive oficial do WhatsApp é gerenciado nativamente pela Baileys via Noise Protocol (keepAliveIntervalMs).
+                // Garante também que o EventBuffer do Baileys não fique retendo eventos messages.upsert após conexão aberta.
                 if (ws.isOpen || isSocketOpen(activeSock)) {
+                    try {
+                        if (typeof activeSock.ev?.isBuffering === 'function' && activeSock.ev.isBuffering()) {
+                            console.warn(`[SessionManager/Watchdog] EventBuffer retido detectado na instância ${instanceId} com socket aberto. Forçando flush de eventos pendentes...`);
+                            activeSock.ev.flush();
+                        }
+                    } catch (_) {}
                     return;
                 }
 
@@ -3282,6 +3307,65 @@ class SessionManager {
         );
 
         return data;
+    }
+
+    async requestMissingAppStateSyncKey(instanceId, missingKeyBase64) {
+        if (!missingKeyBase64) return false;
+        const now = Date.now();
+        const cooldownKey = `${instanceId || 'any'}:${missingKeyBase64}`;
+        const lastAttempt = this.appStateKeyRequestCooldowns.get(cooldownKey) || 0;
+        if (now - lastAttempt < 5 * 60 * 1000) {
+            return false;
+        }
+        this.appStateKeyRequestCooldowns.set(cooldownKey, now);
+
+        if (this.appStateKeyRequestCooldowns.size > 500) {
+            for (const [k, ts] of this.appStateKeyRequestCooldowns.entries()) {
+                if (now - ts > 15 * 60 * 1000) this.appStateKeyRequestCooldowns.delete(k);
+            }
+        }
+
+        const sessionEntry = instanceId ? this.sessions.get(instanceId) : null;
+        const sock = sessionEntry?.sock || (instanceId ? this.getSocket(instanceId) : null);
+        if (!sock || !isSocketOpen(sock) || typeof sock.relayMessage !== 'function') {
+            return false;
+        }
+
+        const rawMeId = sock.user?.id || sock.authState?.creds?.me?.id;
+        if (!rawMeId) return false;
+        const meUser = String(rawMeId).split('@')[0].split(':')[0];
+        if (!meUser) return false;
+        const meJid = `${meUser}@s.whatsapp.net`;
+
+        try {
+            const keyIdBuffer = Buffer.from(missingKeyBase64, 'base64');
+            await sock.relayMessage(
+                meJid,
+                {
+                    protocolMessage: {
+                        type: 7, // APP_STATE_SYNC_KEY_REQUEST
+                        appStateSyncKeyRequest: {
+                            keyIds: [{ keyId: keyIdBuffer }]
+                        }
+                    }
+                },
+                {
+                    additionalAttributes: {
+                        category: 'peer',
+                        push_priority: 'high_force'
+                    },
+                    additionalNodes: [
+                        {
+                            tag: 'meta',
+                            attrs: { appdata: 'default' }
+                        }
+                    ]
+                }
+            );
+            return true;
+        } catch {
+            return false;
+        }
     }
 }
 

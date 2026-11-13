@@ -7,14 +7,37 @@ import { isInstanceAllowedForNode } from './index.js';
  * mas por alguma eventualidade de rede/concorrência ainda não constam na tabela messages.
  */
 let isReconciling = false;
+let reconcilingStartedAt = 0;
+let isFirstBootReconcile = true;
 const reconciledOutboxIds = new Set();
 
+function getReconcilePhoneVariations(phoneStr) {
+    if (!phoneStr) return [];
+    const clean = String(phoneStr).replace(/\D/g, '');
+    if (!clean) return [];
+    const res = [clean];
+    if (clean.startsWith('55') && clean.length === 13 && clean.charAt(4) === '9') {
+        res.push(clean.substring(0, 4) + clean.substring(5));
+    } else if (clean.startsWith('55') && clean.length === 12) {
+        res.push(clean.substring(0, 4) + '9' + clean.substring(4));
+    }
+    return Array.from(new Set(res));
+}
+
 export async function runOutgoingReconciliation() {
+    if (isReconciling && reconcilingStartedAt && (Date.now() - reconcilingStartedAt > 45000)) {
+        isReconciling = false;
+    }
     if (isReconciling) return;
     isReconciling = true;
+    reconcilingStartedAt = Date.now();
 
     try {
-        const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+        const lookbackMs = isFirstBootReconcile ? (4 * 60 * 60 * 1000) : (10 * 60 * 1000);
+        const batchLimit = isFirstBootReconcile ? 60 : 25;
+        isFirstBootReconcile = false;
+
+        const lookbackIso = new Date(Date.now() - lookbackMs).toISOString();
         const sixtySecondsAgo = new Date(Date.now() - 60 * 1000).toISOString();
 
         // Busca mensagens enviadas com mais de 60 segundos de janela (evita colidir com upserts ao vivo do Baileys)
@@ -22,10 +45,10 @@ export async function runOutgoingReconciliation() {
             .from('wa_outgoing_messages')
             .select('*')
             .eq('status', 'sent')
-            .gte('sent_at', fiveMinutesAgo)
+            .gte('sent_at', lookbackIso)
             .lte('sent_at', sixtySecondsAgo)
             .order('sent_at', { ascending: true })
-            .limit(20);
+            .limit(batchLimit);
 
         if (outErr || !outMsgs || outMsgs.length === 0) {
             return;
@@ -52,12 +75,14 @@ export async function runOutgoingReconciliation() {
             const options = typeof msg.options === 'object' && msg.options !== null ? msg.options : {};
             const realWaMsgId = options?.messageId;
 
-            // 1. Checagem direta por whatsapp_message_id oficial se já foi registrado
+            // 1. Checagem direta por whatsapp_message_id oficial na mesma instância (outbound)
             if (realWaMsgId) {
                 const { data: existingById } = await supabase
                     .from('messages')
                     .select('id')
                     .eq('tenant_id', msg.tenant_id)
+                    .eq('instance_id', msg.instance_id)
+                    .eq('direction', 'outbound')
                     .eq('whatsapp_message_id', realWaMsgId)
                     .limit(1);
 
@@ -78,12 +103,14 @@ export async function runOutgoingReconciliation() {
                 continue;
             }
 
-            // 2. Verifica se a mensagem já está salva na tabela clássica messages (janela robusta de +-120s)
+            // 2. Verifica se a mensagem já está salva na tabela clássica messages nesta instância (janela robusta de +-120s)
             const msgTime = new Date(msg.sent_at || msg.created_at).getTime();
             const { data: existing } = await supabase
                 .from('messages')
                 .select('id')
                 .eq('tenant_id', msg.tenant_id)
+                .eq('instance_id', msg.instance_id)
+                .eq('direction', 'outbound')
                 .eq('text_content', rawBody)
                 .gte('timestamp', new Date(msgTime - 120000).toISOString())
                 .lte('timestamp', new Date(msgTime + 120000).toISOString())
@@ -94,12 +121,14 @@ export async function runOutgoingReconciliation() {
                 continue;
             }
 
-            // Localizar contato
+            // Localizar contato (suportando variações de 8 e 9 dígitos em DDDs brasileiros)
+            const phoneVars = getReconcilePhoneVariations(cleanPhone);
+            const orFilter = phoneVars.map(p => `phone.eq.${p},whatsapp_jid.ilike.%${p}%`).join(',');
             const { data: cData } = await supabase
                 .from('contacts')
                 .select('id, name')
                 .eq('tenant_id', msg.tenant_id)
-                .or(`phone.eq.${cleanPhone},whatsapp_jid.ilike.%${cleanPhone}%`)
+                .or(orFilter)
                 .limit(1);
 
             if (!cData || cData.length === 0) {

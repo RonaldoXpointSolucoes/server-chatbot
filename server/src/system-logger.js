@@ -181,6 +181,9 @@ function interceptConsole() {
                                   text.includes('USync fetch yielded no results') ||
                                   text.includes('Own LID session created successfully') ||
                                   text.includes('sent retry receipt') ||
+                                  text.includes('blocked on missing key') ||
+                                  text.includes('failed to find key') ||
+                                  text.includes('decodeSyncd') ||
                                   text.includes('Connection Terminated') ||
                                   text.includes('Connection Closed') ||
                                   text.includes('Connection was lost') ||

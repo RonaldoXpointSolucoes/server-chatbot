@@ -420,11 +420,14 @@ export async function useSupabaseAuthState(tenantId, instanceId, forceCleanState
                                             }
                                         }
                                     }
-                                    // Negative Caching: Chaves que foram buscadas e NÃO existem no DB são salvas como null na RAM
-                                    // Isso impede tempestades de SELECTs repetidos para chaves inexistentes no Baileys
-                                    for (const kName of chunk) {
-                                        if (!foundNames.has(kName)) {
-                                            memCache.set(kName, null);
+                                    // Negative Caching: Chaves Signal que foram buscadas e NÃO existem no DB são salvas como null na RAM
+                                    // Isso impede tempestades de SELECTs repetidos para chaves inexistentes no Baileys.
+                                    // Exceção: 'app-state-sync-key' nunca recebe cache negativo permanente, pois chega de forma assíncrona via APP_STATE_SYNC_KEY_SHARE.
+                                    if (type !== 'app-state-sync-key') {
+                                        for (const kName of chunk) {
+                                            if (!foundNames.has(kName)) {
+                                                memCache.set(kName, null);
+                                            }
                                         }
                                     }
                                 }
