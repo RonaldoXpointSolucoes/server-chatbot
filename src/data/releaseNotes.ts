@@ -712,6 +712,64 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.1.9',
+    date: '2026-11-14',
+    summary: 'Central de Diagnóstico Preventivo Real no DevLogger + Auditoria Multi-Camada de Banco/WhatsApp/Outbox/IA + Correções ASTS & Layout Console',
+    notes: [
+      {
+        id: 'feat-devlogger-preventive-studio-819',
+        category: 'features',
+        title: 'Central de Diagnóstico Preventivo & Simulação Real no Antigravity Cockpit (DevLogger)',
+        description: 'Substituição do antigo modal de 3 botões estáticos por uma central em 3 abas (Varredura Real, Suítes ASTS/E2E e Sandbox Captura) com seletor de empresa alvo para detectar falhas reais antes que afetem os clientes: Disjuntor Supabase, WebSocket Realtime, caixas offline ou desincronizadas, RBAC de atendentes órfãos, fila Outbox travada (wa_outgoing_messages), Event Loop/Listeners Baileys, Cofre Gemini AES, variável link_cardapio e erros históricos reais das últimas 2 horas em system_logs/Buffer Node.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+        guide: {
+          moduleGroup: 'system',
+          moduleLabel: 'Antigravity Cockpit (DevLogger) • Ações de Teste & Diagnóstico',
+          purpose: 'Rastrear e validar falhas reais em produção (Supabase, WhatsApp, Outbox, Node.js, Store e Gemini Vault) sem sujar o banco ou gerar erros falsos, permitindo antecipar correções e enviar anomalias diretamente para análise da I.A CRM.',
+          whereToAccess: [
+            '1. Clique no botão flutuante verde ">_" (Antigravity Cockpit) no canto inferior direito',
+            '2. Na aba CONSOLE, clique em "⚡ Ações de Teste" na barra superior ou "🛡️ Varredura Preventiva Real" no centro da tela',
+            '3. Escolha a empresa desejada no seletor superior (ou "Empresa Ativa") para visualizar o score e recomendações preventivas em tempo real',
+            '4. Alterne entre "Varredura Real", "Suítes (ASTS/E2E)" e "Sandbox Captura" conforme a necessidade'
+          ],
+          howToTest: [
+            '1. Abra o botão flutuante ">_" (DevLogger) e clique em "⚡ Ações de Teste".',
+            '2. A varredura preventiva executa automaticamente e exibe Críticos, Alertas e OK com recomendações de antecipação.',
+            '3. Teste a aba "Sandbox Captura" para disparar sondas reais ([SANDBOX-VALIDAÇÃO]) de interceptação HTTP, Promise Rejection, Buffer Node e pipeline reportError -> system_logs.'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Tela: Antigravity Cockpit (>_) ➔ Sub-barra do Console ➔ Central Preventiva',
+            contextElements: ['📦 Agrupado', '🕒 Linha do Tempo', '📋 Filtro Logs', '✨ Analisar c/ IA'],
+            targetButtonLabel: '👆 Clique Aqui: ⚡ Ações de Teste',
+            targetButtonPosition: 'Barra de controles da aba CONSOLE no Cockpit DevLogger (canto inferior direito da tela)',
+            visualPreviewVariant: 'hub-account-limits'
+          },
+          quickAction: {
+            label: 'Abrir Painel & Testar Cockpit (>_) Agora',
+            route: '/chat'
+          }
+        }
+      },
+      {
+        id: 'imp-devlogger-subtoolbar-wrap-819',
+        category: 'improvements',
+        title: 'Layout Multi-Linha Responsivo na Sub-Barra do Console & Painel Detalhado no ASTS',
+        description: 'Eliminação do corte horizontal no botão Ações de Teste e remoção da barra de rolagem lateral na aba CONSOLE (flex-wrap adaptativo Mobile-First em Bottom Sheet), além da exibição direta de erros capturados (testErrors) e console passo a passo (testLogs) dentro da aba ASTS.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-300/30'
+      },
+      {
+        id: 'fix-asts-stale-score-and-storage-819',
+        category: 'fixes',
+        title: 'Correção de Score Obsoleto no ASTS, Validação DDL real, Bucket chat_media & Loop de system_logs',
+        description: 'Corrigido bug de closure obsoleta no cálculo do healthScore ao final da bateria ASTS (usando rastreamento síncrono de módulos), ajustado o teste DDL para UUID válido com limpeza garantida, corrigida checagem do bucket oficial chat_media e adicionado skipPersist na hidratação de logs históricos para evitar duplicação em loop no Supabase.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      }
+    ]
+  },
+  {
     version: '8.1.8',
     date: '2026-11-13',
     summary: 'Novo Submenu "Recursos" e Cabeçalho Compacto do Chat + Regra Global Inteligente de Cardápio ([LINK_CARDAPIO]) + Correção CORS & Tokens do Escudo Gemini',

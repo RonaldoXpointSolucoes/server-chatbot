@@ -49,6 +49,14 @@ class SupabaseCircuitBreaker {
   public isCircuitOpen(): boolean {
     return this.state === 'OPEN' && (Date.now() - this.lastStateChange <= this.cooldownMs);
   }
+
+  public getStatus(): { state: 'CLOSED' | 'OPEN' | 'HALF_OPEN'; consecutiveFailures: number; isOpen: boolean } {
+    return {
+      state: this.state,
+      consecutiveFailures: this.consecutiveFailures,
+      isOpen: this.isCircuitOpen(),
+    };
+  }
 }
 
 const supabaseCircuitBreaker = new SupabaseCircuitBreaker();
@@ -248,6 +256,17 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     fetch: customFetch
   }
 });
+
+/** Retorna o estado atual do Circuit Breaker e sinalizador de indisponibilidade do Supabase Cloud. */
+export const getSupabaseHealthStatus = () => {
+  const breaker = supabaseCircuitBreaker.getStatus();
+  return {
+    circuitState: breaker.state,
+    consecutiveFailures: breaker.consecutiveFailures,
+    isCircuitOpen: breaker.isOpen,
+    hasReportedServiceError,
+  };
+};
 
 const MASTER_SERVICE_ROLE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl6YnhzeGFiem5jZHp1eHZscHB0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTIyMDcwMywiZXhwIjoyMDkwNzk2NzAzfQ.rU4sjTTwrIu1YrF-bkHKN9vvfBUGr2cIWppepT1uY0k';
 export const masterSupabase = createClient(supabaseUrl, MASTER_SERVICE_ROLE_KEY, {

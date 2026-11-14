@@ -27,7 +27,7 @@ interface DevStore {
   isVisible: boolean;
   isEnabled: boolean;
   showServerLogs: boolean;
-  addLog: (log: Omit<LogEntry, 'id' | 'timestamp'>) => void;
+  addLog: (log: Omit<LogEntry, 'id' | 'timestamp'> & { timestamp?: string; skipPersist?: boolean }) => void;
   addBreadcrumb: (
     stepIndex: number,
     totalSteps: number,
@@ -156,12 +156,14 @@ export const useDevStore = create<DevStore>()(
           (msg.match(/instância\s+([a-zA-Z0-9_-]+)/i)?.[1]) ||
           undefined;
 
+        const { skipPersist, timestamp: customTimestamp, ...restLog } = log;
+
         const newLog: LogEntry = {
-          ...log,
+          ...restLog,
           type: finalType,
           details: sanitizedDetails,
           id: uuidv4(),
-          timestamp: new Date().toISOString(),
+          timestamp: customTimestamp || new Date().toISOString(),
           tenantId: extractedTenant,
           instanceId: extractedInstance,
           requiresAction: isActionRequired,
@@ -169,7 +171,7 @@ export const useDevStore = create<DevStore>()(
         };
         
         const state = get();
-        if (state.isEnabled) {
+        if (state.isEnabled && !skipPersist) {
             const tenantId = extractedTenant || localStorage.getItem('tenantId');
             
             // Evitar loops recursivos e duplicação: não envia ao banco erros gerados pelo próprio Supabase, DevLogger ou rotas de diagnóstico

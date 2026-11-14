@@ -2,10 +2,11 @@ import { useEffect, useRef, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDevStore } from '../store/devStore';
 import { Terminal, AlertTriangle, Bug, Info, CheckCircle2, ChevronDown, ChevronUp, Trash2, Copy, Activity, Layers, Calendar, Rocket, Database, Smartphone, AppWindow, ExternalLink, Network, Cpu, Play, Pause, RefreshCw, UserCheck, ShieldAlert, Sparkles, Wand2, BrainCircuit, Check, Loader2, Send, ArrowUpRight, FileCode, CheckCircle, X, Zap, Mic, MicOff, Image as ImageIcon, Paperclip, Volume2, UploadCloud, Square, Plus, Radio, Film, Gauge, Server, Clock, HardDrive, Search, SlidersHorizontal, ChevronRight } from 'lucide-react';
-import { supabase, masterSupabase } from '../services/supabase';
+import { supabase, masterSupabase, getSupabaseHealthStatus } from '../services/supabase';
 import { ServerLogsTerminal } from './ServerLogsTerminal';
 import { useChatStore } from '../store/chatStore';
 import { geminiService } from '../services/geminiService';
+import { runPreventiveAudit, runControlledCaptureProbe, fetchRecentRealLogs, PreventiveAuditReport, CaptureProbeKind } from '../utils/preventiveDiagnostics';
 
 export default function DevLogger() {
   const navigate = useNavigate();
@@ -22,6 +23,12 @@ export default function DevLogger() {
   const [telemetry, setTelemetry] = useState<{ cpu: number, memory: number, uptime: number } | null>(null);
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
   const [showSimulationModal, setShowSimulationModal] = useState(false);
+  const [simModalTab, setSimModalTab] = useState<'preventive' | 'suites' | 'sandbox'>('preventive');
+  const [auditTenantOverride, setAuditTenantOverride] = useState<string>('');
+  const [preventiveReport, setPreventiveReport] = useState<PreventiveAuditReport | null>(null);
+  const [isRunningPreventive, setIsRunningPreventive] = useState(false);
+  const [runningProbe, setRunningProbe] = useState<CaptureProbeKind | null>(null);
+  const [probeResult, setProbeResult] = useState<{ kind: CaptureProbeKind; ok: boolean; summary: string } | null>(null);
   
   // Draggable Floating Button logic
   const [position, setPosition] = useState<{ x: number; y: number }>(() => {
@@ -295,20 +302,6 @@ export default function DevLogger() {
 
   const errorLogsCount = useMemo(() => logs.filter(l => l.type === 'error').length, [logs]);
   const warnLogsCount = useMemo(() => logs.filter(l => l.type === 'warn').length, [logs]);
-
-  const handleSimulateNodeError = () => {
-    addLog({
-      type: 'error',
-      message: '[FlowEngine Node.js] Falha de Execução / Loop de Execução Detectado: Error: Maximum call stack size exceeded em session-manager/index.js:412',
-      source: 'Servidor Node.js',
-      details: {
-        error: 'Logic Loop Exception',
-        file: 'session-manager/index.js',
-        line: 412,
-        timestamp: new Date().toISOString()
-      }
-    });
-  };
 
   const groupedGastrofoodLogs = useMemo(() => {
     const grouped: any[] = [];
@@ -758,6 +751,135 @@ export default function DevLogger() {
       return null;
     }
   };
+
+  /** Resolve o tenant alvo para varreduras preventivas (seletor manual do cockpit ou empresa ativa). */
+  const resolveAuditTenantId = (override?: string): string | null => {
+    const manual = typeof override === 'string' ? override : auditTenantOverride;
+    if (manual && manual !== '__all__') return manual;
+    if (manual === '__all__') return null;
+    const storeTenantId = (useChatStore.getState() as any)?.tenantInfo?.id;
+    if (storeTenantId) return storeTenantId;
+    return sessionStorage.getItem('current_tenant_id') || localStorage.getItem('current_tenant_id') || null;
+  };
+
+  /** Hidrata logs reais de system_logs/Buffer Node no Console sem duplicar ou regravar no banco. */
+  const hydrateRealLogsIntoStore = (pulledLogs: Awaited<ReturnType<typeof fetchRecentRealLogs>>): number => {
+    const existingKeys = new Set(
+      useDevStore.getState().logs.map((l) => `${l.source}:${(l.message || '').slice(0, 100)}`)
+    );
+    let added = 0;
+
+    pulledLogs.forEach((item) => {
+      const key = `${item.source}:${item.message.slice(0, 100)}`;
+      if (existingKeys.has(key)) return;
+      existingKeys.add(key);
+      added++;
+
+      addLog({
+        type: item.level === 'warn' ? 'warn' : 'error',
+        message: `[HISTÓRICO REAL] ${item.message}`,
+        source: item.source,
+        timestamp: item.created_at,
+        details: item.payload,
+        tenantId: item.company_id || undefined,
+        requiresAction: item.level === 'error' || item.level === 'fatal',
+        severity: item.level === 'error' || item.level === 'fatal' ? 'critical' : 'medium',
+        skipPersist: true
+      });
+    });
+
+    return added;
+  };
+
+  /** Executa auditoria preventiva multi-camada não destrutiva e registra anomalias reais no Console. */
+  const handleRunPreventiveAudit = async (tenantOverride?: string) => {
+    if (isRunningPreventive) return;
+    setIsRunningPreventive(true);
+    try {
+      const targetTenant = resolveAuditTenantId(tenantOverride);
+      const report = await runPreventiveAudit(targetTenant, engineUrl);
+      setPreventiveReport(report);
+
+      hydrateRealLogsIntoStore(report.pulledLogs);
+
+      const actionable = report.findings.filter((f) => f.severity === 'critical' || f.severity === 'warn');
+      if (actionable.length === 0) {
+        addLog({
+          type: 'success',
+          message: `Varredura Preventiva Concluída (Saúde ${report.score}% em ${report.durationMs}ms): todas as ${report.findings.length} camadas auditadas estão saudáveis.`,
+          source: 'Auditoria Preventiva',
+          skipPersist: true
+        });
+      } else {
+        actionable.forEach((item) => {
+          addLog({
+            type: item.severity === 'critical' ? 'error' : 'warn',
+            message: `[PREVENTIVO • ${item.title}] ${item.summary} — Ação: ${item.recommendation}`,
+            source: 'Auditoria Preventiva',
+            details: item.detail ? { detalhe: item.detail, raw: item.rawPayload } : item.rawPayload,
+            tenantId: targetTenant || undefined,
+            requiresAction: item.severity === 'critical',
+            severity: item.severity === 'critical' ? 'critical' : 'medium',
+            skipPersist: true
+          });
+        });
+      }
+    } catch (err: any) {
+      addLog({
+        type: 'error',
+        message: `Falha ao executar Varredura Preventiva: ${err?.message || String(err)}`,
+        source: 'Auditoria Preventiva',
+        skipPersist: true
+      });
+    } finally {
+      setIsRunningPreventive(false);
+    }
+  };
+
+  /** Puxa erros e warnings reais das últimas 2 horas (Supabase system_logs + Buffer Node). */
+  const handleSyncHistoricalLogs = async () => {
+    if (isRunningPreventive) return;
+    setIsRunningPreventive(true);
+    try {
+      const pulled = await fetchRecentRealLogs(resolveAuditTenantId(), engineUrl);
+      const added = hydrateRealLogsIntoStore(pulled);
+      addLog({
+        type: pulled.some((p) => p.level === 'error' || p.level === 'fatal') ? 'warn' : 'info',
+        message: `Sincronização Real (2h): ${pulled.length} evento(s) inspecionados, ${added} novo(s) carregado(s) no Console.`,
+        source: 'Auditoria Preventiva',
+        skipPersist: true
+      });
+    } finally {
+      setIsRunningPreventive(false);
+    }
+  };
+
+  /** Dispara sonda controlada de pipeline para provar captura real de erros/HTTP/promises. */
+  const handleRunCaptureProbe = async (kind: CaptureProbeKind) => {
+    if (runningProbe) return;
+    setRunningProbe(kind);
+    setProbeResult(null);
+    try {
+      const res = await runControlledCaptureProbe(kind, engineUrl, resolveAuditTenantId());
+      setProbeResult({ kind, ...res });
+      if (kind === 'node_logs_sync') {
+        const pulled = await fetchRecentRealLogs(resolveAuditTenantId(), engineUrl);
+        hydrateRealLogsIntoStore(pulled);
+      }
+    } catch (err: any) {
+      setProbeResult({ kind, ok: false, summary: err?.message || 'Erro ao executar sonda.' });
+    } finally {
+      setRunningProbe(null);
+    }
+  };
+
+  useEffect(() => {
+    if (!showSimulationModal) return;
+    const isStale = !preventiveReport || (Date.now() - new Date(preventiveReport.ranAt).getTime() > 45000);
+    if (isStale) {
+      handleRunPreventiveAudit();
+    }
+  }, [showSimulationModal]);
 
   useEffect(() => {
     if (!isVisible) return;
@@ -1738,8 +1860,36 @@ export default function DevLogger() {
   };
 
   const handleTestApp = () => {
-    addLog({ type: 'info', message: `Diagnóstico do React App...\n🔗 Host local ativo: ${window.location.origin}`, source: 'Tester' });
-    addLog({ type: 'success', message: `App React em Execução. Hooks ativos.\nHost: ${window.location.origin}`, source: 'Tester' });
+    const sbHealth = getSupabaseHealthStatus();
+    const storeState = useChatStore.getState() as any;
+    const contactsList: any[] = Array.isArray(storeState?.contacts) ? storeState.contacts : [];
+    const realtimeState = storeState?.realtimeStatus || 'desconhecido';
+    const requiredMethods = ['sendHumanMessage', 'fetchInitialData', 'setActiveChat', 'upsertContactLocally'];
+    const missingMethods = storeState ? requiredMethods.filter((fn) => typeof storeState[fn] !== 'function') : requiredMethods;
+
+    const phoneSet = new Set<string>();
+    let duplicatePhones = 0;
+    contactsList.forEach((c) => {
+      if (c?.phone && c?.tenant_id) {
+        const key = `${c.tenant_id}:${c.phone}`;
+        if (phoneSet.has(key)) duplicatePhones++;
+        else phoneSet.add(key);
+      }
+    });
+
+    const hasProblem = sbHealth.isCircuitOpen || missingMethods.length > 0 || realtimeState === 'disconnected' || !navigator.onLine;
+    addLog({
+      type: hasProblem ? 'error' : duplicatePhones > 0 ? 'warn' : 'success',
+      message: [
+        `Diagnóstico Local React App (${window.location.origin})`,
+        `• Rede: ${navigator.onLine ? 'Online' : 'OFFLINE'} | Disjuntor Supabase: ${sbHealth.circuitState} (${sbHealth.consecutiveFailures} falhas)`,
+        `• Realtime WSS: ${realtimeState} | Store Contatos: ${contactsList.length} (${duplicatePhones} duplicados por telefone)`,
+        missingMethods.length > 0 ? `• CRÍTICO Métodos ausentes no ChatStore: ${missingMethods.join(', ')}` : '• Assinaturas críticas do ChatStore: OK'
+      ].join('\n'),
+      source: 'Tester',
+      requiresAction: hasProblem,
+      skipPersist: true
+    });
   };
 
   const handleAnalyzeLogsAndCreateKanbanCard = async (options?: {
@@ -2221,6 +2371,21 @@ export default function DevLogger() {
     
     const startTime = Date.now();
     let errorsCaptured: Array<{ step: string; message: string; suggestion: string }> = [];
+    // Rastreio síncrono de módulos para evitar stale closure do state React ao calcular o healthScore final
+    const modStatus = {
+      supabase: 'testing' as 'testing' | 'passed' | 'failed',
+      baileys: 'testing' as 'testing' | 'passed' | 'failed',
+      chatStore: 'testing' as 'testing' | 'passed' | 'failed',
+      auth: 'testing' as 'testing' | 'passed' | 'failed',
+    };
+    const markModule = (key: keyof typeof modStatus, val: 'passed' | 'failed') => {
+      if (modStatus[key] === 'failed' && val === 'passed') return;
+      modStatus[key] = val;
+      setTestResults((prev) => {
+        if (prev[key] === 'failed' && val === 'passed') return prev;
+        return { ...prev, [key]: val };
+      });
+    };
     
     const addTestLog = (msg: string) => {
       setTestLogs(prev => [...prev, msg]);
@@ -2292,14 +2457,14 @@ export default function DevLogger() {
       
       if (metaData) {
         addTestLog(`[ASTS] ✅ Motor Baileys online (RTT: ${rtt}ms). Versão: ${metaData.engineVersion || '2.2.9'}`);
-        setTestResults(prev => ({ ...prev, baileys: 'passed' }));
+        markModule('baileys', 'passed');
       } else {
         errorsCaptured.push({
           step: 'Motor Baileys',
           message: `Falha de comunicação HTTP com o Motor Baileys no endereço ${engineUrl}.`,
           suggestion: 'Verifique se o backend do servidor Node.js/Coolify está rodando ou se a URL VITE_WHATSAPP_ENGINE_URL está correta.'
         });
-        setTestResults(prev => ({ ...prev, baileys: 'failed' }));
+        markModule('baileys', 'failed');
       }
       
       // PASSO 3: Teste de Conexão Supabase (Leitura REST) & Isolamento Multi-Tenant
@@ -2320,7 +2485,7 @@ export default function DevLogger() {
           message: `Erro ao executar SELECT na tabela 'contacts': ${sbReadError.message}`,
           suggestion: 'Verifique se o banco Supabase está ativo, se a URL/Key são válidas ou se há problemas de rede REST.'
         });
-        setTestResults(prev => ({ ...prev, supabase: 'failed' }));
+        markModule('supabase', 'failed');
       } else {
         addTestLog('[ASTS] ✅ Canal de leitura Supabase OK.');
         
@@ -2338,7 +2503,7 @@ export default function DevLogger() {
               message: `FALHA GRAVE DE SEGURANÇA: Foi possível ler ${rlsTestData.length} contatos usando um tenant_id falso.`,
               suggestion: 'CRÍTICO: Suas políticas de Row Level Security (RLS) no Supabase não estão restringindo o acesso por tenant_id na tabela contacts. Revise IMEDIATAMENTE as políticas de SELECT no painel do Supabase.'
             });
-            setTestResults(prev => ({ ...prev, supabase: 'failed' }));
+            markModule('supabase', 'failed');
           } else {
             addTestLog('[ASTS] ✅ Auditoria RLS Concluída: Barreiras lógicas do Postgres íntegras (Nenhum vazamento detectado).');
           }
@@ -2370,22 +2535,24 @@ export default function DevLogger() {
       if (insertError) {
         errorsCaptured.push({
           step: 'Supabase Escrita & RLS',
-          message: `Flha de inserção na tabela 'contacts': ${insertError.message}`,
-          suggestion: 'As políticas de RLS, triggers ou chave estrangeira impediram a gravação. Revise as permissões de INSERT e se o tenant_id existe na tabela tenants.'
+          message: `Falha de inserção na tabela 'contacts': ${insertError.message}`,
+          suggestion: 'As políticas de RLS, triggers ou chave estrangeira impediram a gravação. Revise as permissões de INSERT e se o tenant_id existe na tabela companies.'
         });
-        setTestResults(prev => ({ ...prev, supabase: 'failed' }));
+        markModule('supabase', 'failed');
       } else {
         addTestLog('[ASTS] 💾 Registro temporário de teste inserido com sucesso.');
         
+        const invalidDdlId = generateUUIDv4();
         const { error: integrityError } = await injectTestHeader(
           supabase.from('contacts').insert({
-            id: tempContactId + '-invalid',
+            id: invalidDdlId,
             name: 'ASTS Inconsistente',
             tenant_id: tenantId
           })
         );
         
         if (!integrityError) {
+          await injectTestHeader(supabase.from('contacts').delete().eq('id', invalidDdlId));
           errorsCaptured.push({
             step: 'Integridade física do DDL',
             message: 'O banco permitiu gravar um contato sem número de telefone.',
@@ -2405,10 +2572,7 @@ export default function DevLogger() {
           addTestLog('[ASTS] 🗑️ Registro temporário de teste removido com sucesso.');
         }
         
-        setTestResults(prev => {
-          if (prev.supabase === 'failed') return prev;
-          return { ...prev, supabase: 'passed' };
-        });
+        markModule('supabase', 'passed');
       }
       
       // PASSO 5: Consistência da Store Zustand, Assinatura de Funções e Contatos Duplicados
@@ -2427,7 +2591,7 @@ export default function DevLogger() {
           message: 'Não foi possível acessar o estado ativo do useChatStore.',
           suggestion: 'Verifique se a store Zustand está sendo inicializada corretamente ou se há problemas de exportação no arquivo src/store/chatStore.ts.'
         });
-        setTestResults(prev => ({ ...prev, chatStore: 'failed' }));
+        markModule('chatStore', 'failed');
       } else {
         const criticalMethods = ['sendHumanMessage', 'fetchInitialData', 'setActiveChat', 'upsertContactLocally'];
         const missingMethods = criticalMethods.filter(m => typeof storeState[m] !== 'function');
@@ -2438,7 +2602,7 @@ export default function DevLogger() {
             message: `Funções vitais ausentes ou corrompidas no chatStore: ${missingMethods.join(', ')}`,
             suggestion: 'ALERTA DE COMPILAÇÃO E LÓGICA: Métodos essenciais foram removidos ou alterados na store. Isso causará quebras no app (erros "is not a function"). Restabeleça as assinaturas corretas.'
           });
-          setTestResults(prev => ({ ...prev, chatStore: 'failed' }));
+          markModule('chatStore', 'failed');
         } else {
           addTestLog('[ASTS] ✅ Assinaturas de funções vitais validadas (chatStore consistente).');
         }
@@ -2453,7 +2617,7 @@ export default function DevLogger() {
             message: 'Detectados contatos com o mesmo ID exato duplicados no estado da Store.',
             suggestion: 'Execute uma limpeza de cache local ou ajuste a rotina de fetch no chatStore para evitar carregar IDs idênticos.'
           });
-          setTestResults(prev => ({ ...prev, chatStore: 'failed' }));
+          markModule('chatStore', 'failed');
         }
 
         const phoneMap: Record<string, string[]> = {};
@@ -2481,15 +2645,12 @@ export default function DevLogger() {
             message: `BREADCRUMB PREVENTIVO: Detectadas ${duplicatePhonesFound} duplicações de contatos com o mesmo número no mesmo tenant: ${detailsDuplicate}`,
             suggestion: 'PREVENÇÃO DE ERRO VISUAL: Isso causa o bug de nomes duplicados na lista de conversas de uma mesma caixa. Ajuste a função upsertContactLocally ou crie um trigger UNIQUE no Postgres no par (tenant_id, phone).'
           });
-          setTestResults(prev => ({ ...prev, chatStore: 'failed' }));
+          markModule('chatStore', 'failed');
         } else {
           addTestLog(`[ASTS] ✅ Auditoria de consistência de telefones: Nenhum contato duplicado em cache (${localContacts.length} contatos auditados).`);
         }
 
-        setTestResults(prev => {
-          if (prev.chatStore === 'failed') return prev;
-          return { ...prev, chatStore: 'passed' };
-        });
+        markModule('chatStore', 'passed');
       }
       
       // PASSO 6: Simulação de Carga e Vazamento de Memória
@@ -2557,33 +2718,34 @@ export default function DevLogger() {
           message: 'Sessão de usuário local expirada ou sem nível de permissão (Role) definido.',
           suggestion: 'Efetue o login novamente para restabelecer os metadados de sessão em localStorage/sessionStorage.'
         });
-        setTestResults(prev => ({ ...prev, auth: 'failed' }));
+        markModule('auth', 'failed');
       } else {
         addTestLog(`[ASTS] ✅ Autenticação ativa como ${userRole.toUpperCase()} para o usuário ${userEmail}.`);
-        setTestResults(prev => ({ ...prev, auth: 'passed' }));
+        markModule('auth', 'passed');
       }
       
-      // PASSO 9: Canais de Armazenamento e Mídias
+      // PASSO 9: Canais de Armazenamento e Mídias (Bucket Oficial chat_media)
       setTestStepIndex(9);
       setTestProgress(90);
-      setTestCurrentTask('Checando infraestrutura de Storage e envio de mídias...');
-      addTestLog('[ASTS] 📁 [9/10] Verificando integridade e acesso aos canais de arquivos e mídias (Storage)...');
+      setTestCurrentTask('Checando infraestrutura de Storage (chat_media) e envio de mídias...');
+      addTestLog('[ASTS] 📁 [9/10] Verificando integridade e acesso ao bucket oficial chat_media (Storage)...');
       await sleep(800);
       setTestTimeRemaining(1);
       
-      const storageUrl = `${sbUrl}/storage/v1/object/public/media`;
       try {
-        const storageResponse = await fetch(storageUrl, { 
-          method: 'HEAD',
-          headers: { 'x-asts-test': 'true' }
-        });
-        if (storageResponse.status === 404 || storageResponse.status >= 500) {
-          addTestLog(`[ASTS] ⚠️ O bucket de Storage retornou código HTTP ${storageResponse.status}.`);
+        const { error: storageErr } = await supabase.storage.from('chat_media').list('', { limit: 1 });
+        if (storageErr) {
+          errorsCaptured.push({
+            step: 'Storage de Mídias (chat_media)',
+            message: `Bucket chat_media retornou erro de leitura: ${storageErr.message}`,
+            suggestion: 'Revise as políticas RLS do Storage bucket chat_media para garantir envio/visualização de imagens e áudios.'
+          });
+          addTestLog(`[ASTS] ⚠️ Bucket chat_media retornou aviso: ${storageErr.message}`);
         } else {
-          addTestLog('[ASTS] ✅ Links de armazenamento de mídias e imagens integrados e operacionais.');
+          addTestLog('[ASTS] ✅ Bucket chat_media integrado e operacional.');
         }
-      } catch {
-        addTestLog('[ASTS] ⚠️ Erro HEAD no Storage. Ignorado pois pode requerer autenticação ou bucket privado.');
+      } catch (stErr: any) {
+        addTestLog(`[ASTS] ⚠️ Falha ao checar Storage chat_media: ${stErr?.message || 'Erro de rede'}`);
       }
       
       // PASSO 10: Consolidação do Relatório
@@ -2597,12 +2759,13 @@ export default function DevLogger() {
       const duration = ((Date.now() - startTime) / 1000);
       const totalErrors = errorsCaptured.length;
       
-      // Calcular score (100 base, reduz 25 por falha crítica)
+      // Calcular score usando modStatus síncrono (corrige leitura obsoleta da closure React)
       let score = 100;
-      if (testResults.supabase === 'failed') score -= 25;
-      if (testResults.baileys === 'failed') score -= 25;
-      if (testResults.chatStore === 'failed') score -= 25;
-      if (testResults.auth === 'failed') score -= 25;
+      if (modStatus.supabase === 'failed') score -= 25;
+      if (modStatus.baileys === 'failed') score -= 25;
+      if (modStatus.chatStore === 'failed') score -= 25;
+      if (modStatus.auth === 'failed') score -= 25;
+      if (totalErrors > 0 && score === 100) score = Math.max(0, 100 - totalErrors * 10);
       score = Math.max(score, 0);
       
       let diagnosis = '';
@@ -3400,6 +3563,42 @@ export default function DevLogger() {
                     </p>
                   </div>
                 )}
+
+                {/* Erros e Recomendações Detectadas no ASTS */}
+                {testErrors.length > 0 && (
+                  <div className="flex flex-col gap-2 bg-rose-950/20 border border-rose-500/30 rounded-2xl p-3.5 relative z-10">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-black font-mono uppercase text-rose-300 flex items-center gap-1.5">
+                        <AlertTriangle size={13} className="text-rose-400" /> {testErrors.length} Anomalia(s) & Recomendações ASTS
+                      </span>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      {testErrors.map((err, idx) => (
+                        <div key={idx} className="p-2.5 rounded-xl bg-[#0c1319] border border-rose-500/25 flex flex-col gap-1">
+                          <span className="text-[10px] font-black font-mono uppercase text-rose-300">{err.step}</span>
+                          <p className="text-xs text-rose-100 leading-snug">{err.message}</p>
+                          <p className="text-[11px] text-amber-300/90 bg-amber-500/10 border border-amber-500/20 rounded-lg px-2 py-1 mt-1">
+                            💡 {err.suggestion}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Trilha de Logs em Tempo Real do ASTS */}
+                {testLogs.length > 0 && (
+                  <div className="bg-[#0a1015] border border-white/10 rounded-2xl p-3 font-mono text-[11px] relative z-10">
+                    <div className="text-[10px] font-bold uppercase text-[#8696a0] mb-2">
+                      Execução Passo a Passo ({testLogs.length} eventos)
+                    </div>
+                    <div className="max-h-40 overflow-y-auto custom-scrollbar space-y-1 text-[#cbd5e1]">
+                      {testLogs.map((line, i) => (
+                        <div key={i} className="leading-relaxed break-words">{line}</div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : activeTab === 'gastrofood' ? (
               /* Gastrofood API Logs Monitor */
@@ -3993,11 +4192,11 @@ export default function DevLogger() {
               /* Console & Server Logs - COM SUPORTE A AGRUPAMENTO DE ERROS IDENTICOS E FILTRAGEM DE NOVO PADRÃO */
               <div className="flex-1 overflow-y-auto flex flex-col font-mono text-xs custom-scrollbar min-h-[180px] bg-[#070c10] rounded-b-[28px]">
                 
-                {/* Sub-Barra de Controles: Responsiva, Compacta e Mobile-First */}
-                <div className="p-2 sm:p-2.5 px-3 sm:px-4 bg-[#080e13]/95 border-b border-white/10 text-xs font-mono select-none flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 sticky top-0 z-20 backdrop-blur-2xl">
+                {/* Sub-Barra de Controles: Responsiva, Multi-linha sem corte horizontal */}
+                <div className="p-2.5 px-3 sm:px-4 bg-[#080e13]/95 border-b border-white/10 text-xs font-mono select-none flex flex-wrap items-center justify-between gap-2 sticky top-0 z-20 backdrop-blur-2xl overflow-x-hidden">
                   
-                  {/* Linha 1 no Mobile / Lado Esquerdo no Desktop: Toggle de Modo + Dropdown Tipo de Log */}
-                  <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap sm:flex-nowrap justify-between sm:justify-start">
+                  {/* Bloco 1: Toggle de Modo + Dropdown Tipo de Log */}
+                  <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
                     {/* Seletor de Modo: Agrupado vs Linha do Tempo */}
                     <div className="flex items-center gap-0.5 bg-[#0e161c] p-0.5 rounded-xl border border-white/10 shrink-0">
                       <button
@@ -4053,10 +4252,10 @@ export default function DevLogger() {
                     </div>
                   </div>
 
-                  {/* Linha 2 no Mobile / Lado Central & Direito no Desktop: Busca + Tempo + Ações */}
-                  <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap sm:flex-nowrap">
+                  {/* Bloco 2: Busca + Tempo + Ações (wrap automático para nunca cortar "Ações de Teste") */}
+                  <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap flex-1 min-w-0 justify-between sm:justify-end">
                     {/* Input de Busca Textual */}
-                    <div className="relative flex items-center flex-1 min-w-[120px] sm:min-w-[150px]">
+                    <div className="relative flex items-center flex-1 min-w-[130px] max-w-xs">
                       <Search size={11} className="absolute left-2.5 text-[#8696a0] pointer-events-none" />
                       <input
                         type="text"
@@ -4123,14 +4322,19 @@ export default function DevLogger() {
                         </button>
                       )}
 
-                      {/* Botão Unificado: Ações de Teste e Simulação */}
+                      {/* Botão Unificado: Diagnóstico Preventivo & Ações de Teste */}
                       <button
                         onClick={() => setShowSimulationModal(true)}
-                        className="bg-gradient-to-r from-amber-500/20 to-rose-500/20 hover:from-amber-500/30 hover:to-rose-500/30 text-amber-200 border border-amber-500/30 hover:border-amber-400 px-2.5 sm:px-3 py-1.5 rounded-xl text-[10px] font-black transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 shadow-sm min-h-[34px]"
-                        title="Abrir opções de teste rápido e simulação de erros"
+                        className="bg-gradient-to-r from-amber-500/20 to-rose-500/20 hover:from-amber-500/30 hover:to-rose-500/30 text-amber-200 border border-amber-500/30 hover:border-amber-400 px-3 py-1.5 rounded-xl text-[10px] font-black transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 shadow-sm min-h-[34px] whitespace-nowrap shrink-0"
+                        title="Abrir Central de Diagnóstico Preventivo Real e Simulação de Erros"
                       >
-                        <Zap size={12} className="text-amber-400" />
+                        <Zap size={12} className="text-amber-400 shrink-0" />
                         <span>Ações de Teste</span>
+                        {preventiveReport && (preventiveReport.counts.critical + preventiveReport.counts.warn > 0) && (
+                          <span className="px-1.5 py-0.5 rounded-full text-[9px] font-black bg-rose-500 text-white">
+                            {preventiveReport.counts.critical + preventiveReport.counts.warn}
+                          </span>
+                        )}
                       </button>
                     </div>
                   </div>
@@ -4208,10 +4412,22 @@ export default function DevLogger() {
                         </button>
                       )}
 
-                      <div className="flex items-center gap-3 pt-2 z-10 flex-wrap justify-center">
+                      <div className="flex items-center gap-2.5 pt-2 z-10 flex-wrap justify-center">
+                        <button
+                          onClick={handleRunPreventiveAudit}
+                          disabled={isRunningPreventive}
+                          className="bg-gradient-to-r from-emerald-500/25 to-teal-500/25 hover:from-emerald-500/35 hover:to-teal-500/35 text-emerald-200 border border-emerald-500/40 text-xs font-bold px-4 py-2.5 min-h-[44px] rounded-2xl transition-all cursor-pointer shadow-lg shadow-emerald-500/15 active:scale-95 flex items-center gap-2 font-mono disabled:opacity-60"
+                        >
+                          {isRunningPreventive ? (
+                            <Loader2 size={14} className="animate-spin text-emerald-300" />
+                          ) : (
+                            <ShieldAlert size={14} className="text-emerald-400" />
+                          )}
+                          {isRunningPreventive ? 'Auditando Sistema Real...' : 'Varredura Preventiva Real'}
+                        </button>
                         <button
                           onClick={() => setShowSimulationModal(true)}
-                          className="bg-gradient-to-r from-indigo-500/20 via-purple-500/20 to-emerald-500/20 hover:from-indigo-500/30 hover:to-emerald-500/30 text-indigo-200 border border-indigo-500/30 text-xs font-bold px-4 py-2.5 rounded-2xl transition-all cursor-pointer shadow-lg shadow-indigo-500/10 active:scale-95 flex items-center gap-2 font-mono"
+                          className="bg-gradient-to-r from-indigo-500/20 via-purple-500/20 to-emerald-500/20 hover:from-indigo-500/30 hover:to-emerald-500/30 text-indigo-200 border border-indigo-500/30 text-xs font-bold px-4 py-2.5 min-h-[44px] rounded-2xl transition-all cursor-pointer shadow-lg shadow-indigo-500/10 active:scale-95 flex items-center gap-2 font-mono"
                         >
                           <SlidersHorizontal size={14} className="text-indigo-400" /> Ações de Teste e Simulação
                         </button>
@@ -4869,87 +5085,409 @@ export default function DevLogger() {
         </div>
       )}
 
-      {/* Modal de Simulações e Testes Unificado (Reduz poluição visual no mobile) */}
+      {/* Central de Diagnóstico Preventivo, Suítes & Sandbox Real (Mobile-First Bottom Sheet / Glass Desktop) */}
       {showSimulationModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
-          <div className="bg-[#0b1015] border border-white/10 rounded-2xl max-w-md w-full p-5 shadow-2xl flex flex-col gap-4 animate-in fade-in zoom-in-95 duration-200">
-            <div className="flex items-center justify-between pb-3 border-b border-white/10">
-              <div className="flex items-center gap-2">
-                <SlidersHorizontal size={18} className="text-indigo-400" />
-                <h3 className="font-bold text-white text-sm">Ações de Teste & Simulação</h3>
-              </div>
-              <button
-                onClick={() => setShowSimulationModal(false)}
-                className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-white/5 transition-all cursor-pointer"
-              >
-                <X size={18} />
-              </button>
+        <div
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100000] flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200"
+          onClick={() => setShowSimulationModal(false)}
+        >
+          <div
+            className="bg-[#0a1016]/95 backdrop-blur-2xl border-t sm:border border-white/15 rounded-t-[28px] sm:rounded-3xl max-w-2xl w-full max-h-[90vh] flex flex-col shadow-[0_24px_80px_rgba(0,0,0,0.85)] overflow-hidden animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Alça Mobile Bottom-Sheet */}
+            <div className="flex justify-center pt-2.5 pb-1 sm:hidden shrink-0">
+              <div className="w-10 h-1 rounded-full bg-white/20" />
             </div>
 
-            <p className="text-xs text-gray-400">
-              Execute testes automatizados no sistema ou simule condições de erro para validar a telemetria e o DevLogger.
-            </p>
-
-            <div className="flex flex-col gap-2.5">
-              <button
-                onClick={() => {
-                  setShowSimulationModal(false);
-                  handleTestApp();
-                }}
-                className="w-full flex items-center justify-between p-3.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 font-semibold text-xs transition-all text-left group cursor-pointer"
-              >
-                <div className="flex items-center gap-3">
-                  <Activity size={18} className="text-emerald-400 group-hover:scale-110 transition-transform" />
-                  <div>
-                    <div className="font-bold text-white">Executar Teste Rápido (ASTS)</div>
-                    <div className="text-[11px] text-emerald-400/80 font-normal">Testa conexões Supabase, LocalStorage e integridade</div>
+            {/* Cabeçalho */}
+            <div className="px-4 sm:px-5 pt-2 sm:pt-4 pb-3 border-b border-white/10 flex flex-col gap-3 shrink-0 bg-gradient-to-b from-white/[0.03] to-transparent">
+              <div className="flex items-start sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-emerald-500/25 via-teal-500/20 to-indigo-500/25 border border-emerald-500/35 flex items-center justify-center shrink-0">
+                    <ShieldAlert size={18} className="text-emerald-400" />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="font-black text-white text-sm sm:text-base tracking-tight truncate">
+                      Diagnóstico Preventivo & Simulação Real
+                    </h3>
+                    <p className="text-[11px] text-slate-400 truncate">
+                      Rastreia falhas latentes em produção antes que afetem seus clientes
+                    </p>
                   </div>
                 </div>
-                <ChevronRight size={16} className="text-emerald-400/60" />
-              </button>
+                <button
+                  onClick={() => setShowSimulationModal(false)}
+                  className="text-slate-400 hover:text-white min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl hover:bg-white/10 transition-all cursor-pointer active:scale-95 shrink-0"
+                  aria-label="Fechar central de diagnóstico"
+                >
+                  <X size={18} />
+                </button>
+              </div>
 
-              <button
-                onClick={() => {
-                  setShowSimulationModal(false);
-                  handleSimulateNodeError();
-                }}
-                className="w-full flex items-center justify-between p-3.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-300 font-semibold text-xs transition-all text-left group cursor-pointer"
-              >
-                <div className="flex items-center gap-3">
-                  <Bug size={18} className="text-rose-400 group-hover:scale-110 transition-transform" />
-                  <div>
-                    <div className="font-bold text-white">Simular Erro do Servidor Node</div>
-                    <div className="text-[11px] text-rose-400/80 font-normal">Gera evento 500 no log do servidor para testes de captura</div>
-                  </div>
+              {/* Seletor de Empresa Alvo + Navegação em 3 Abas */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-1 bg-[#060a0e] p-1 rounded-2xl border border-white/10 overflow-x-auto">
+                  {[
+                    { id: 'preventive', label: 'Varredura Real', badge: preventiveReport ? preventiveReport.counts.critical + preventiveReport.counts.warn : null },
+                    { id: 'suites', label: 'Suítes (ASTS/E2E)', badge: null },
+                    { id: 'sandbox', label: 'Sandbox Captura', badge: null },
+                  ].map((tab) => (
+                    <button
+                      key={tab.id}
+                      onClick={() => setSimModalTab(tab.id as any)}
+                      className={`px-3 py-2 min-h-[38px] rounded-xl text-[11px] font-bold font-mono transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                        simModalTab === tab.id
+                          ? 'bg-gradient-to-r from-emerald-500 to-teal-400 text-black font-black shadow-md shadow-emerald-500/20'
+                          : 'text-slate-400 hover:text-white hover:bg-white/5'
+                      }`}
+                    >
+                      <span>{tab.label}</span>
+                      {tab.badge !== null && tab.badge > 0 && (
+                        <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-black ${
+                          simModalTab === tab.id ? 'bg-black/25 text-black' : 'bg-rose-500 text-white'
+                        }`}>
+                          {tab.badge}
+                        </span>
+                      )}
+                    </button>
+                  ))}
                 </div>
-                <ChevronRight size={16} className="text-rose-400/60" />
-              </button>
 
+                {/* Escopo de Empresa Auditada */}
+                <select
+                  value={auditTenantOverride}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setAuditTenantOverride(val);
+                    handleRunPreventiveAudit(val);
+                  }}
+                  className="bg-[#060a0e] border border-white/15 rounded-xl px-3 py-2 min-h-[40px] text-[11px] font-mono text-slate-200 focus:outline-none focus:border-emerald-500/60 cursor-pointer max-w-full sm:max-w-[210px]"
+                  title="Escolher empresa para auditoria preventiva"
+                >
+                  <option value="">🏢 Empresa Ativa (Auto)</option>
+                  <option value="__all__">🌐 Visão Global (Sem Tenant)</option>
+                  {companies.map((comp: any) => (
+                    <option key={comp.id} value={comp.id}>
+                      🏢 {comp.name || comp.id.slice(0, 8)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Corpo Rolável */}
+            <div className="flex-1 overflow-y-auto p-4 sm:p-5 flex flex-col gap-3.5 custom-scrollbar">
+              {simModalTab === 'preventive' && (
+                <>
+                  {/* Card de Resumo & Ações da Varredura */}
+                  <div className="rounded-2xl bg-gradient-to-br from-slate-900/90 via-[#0d151d] to-[#0b1218] border border-white/10 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className={`w-12 h-12 rounded-2xl border flex items-center justify-center font-mono font-black text-sm shrink-0 ${
+                        !preventiveReport
+                          ? 'bg-slate-800/60 border-white/10 text-slate-400'
+                          : preventiveReport.status === 'healthy'
+                            ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                            : preventiveReport.status === 'degraded'
+                              ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                              : 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+                      }`}>
+                        {isRunningPreventive ? <Loader2 size={18} className="animate-spin" /> : preventiveReport ? `${preventiveReport.score}%` : '--'}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs font-black text-white flex items-center gap-2 flex-wrap">
+                          <span>
+                            {isRunningPreventive
+                              ? 'Auditando camadas reais em paralelo...'
+                              : preventiveReport
+                                ? preventiveReport.status === 'healthy'
+                                  ? 'Operação Íntegra • Sem Riscos Críticos'
+                                  : preventiveReport.status === 'degraded'
+                                    ? 'Atenção Preventiva Recomendada'
+                                    : 'Anomalias Críticas Detectadas'
+                                : 'Pronto para Auditoria Real'}
+                          </span>
+                        </div>
+                        {preventiveReport && (
+                          <div className="text-[11px] font-mono text-slate-400 mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                            <span className="text-rose-300 font-bold">{preventiveReport.counts.critical} críticos</span>
+                            <span>•</span>
+                            <span className="text-amber-300 font-bold">{preventiveReport.counts.warn} alertas</span>
+                            <span>•</span>
+                            <span className="text-emerald-300 font-bold">{preventiveReport.counts.ok} OK</span>
+                            <span>•</span>
+                            <span>{preventiveReport.durationMs}ms</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-wrap shrink-0">
+                      <button
+                        onClick={() => handleSyncHistoricalLogs()}
+                        disabled={isRunningPreventive}
+                        className="px-3 py-2 min-h-[42px] rounded-xl bg-white/5 hover:bg-white/10 border border-white/15 text-slate-200 text-[11px] font-bold font-mono transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 disabled:opacity-50"
+                        title="Puxar erros e warnings reais de system_logs e do Buffer Node (últimas 2h)"
+                      >
+                        <Clock size={13} className="text-cyan-400" />
+                        <span>Sincronizar 2h</span>
+                      </button>
+                      <button
+                        onClick={() => handleRunPreventiveAudit()}
+                        disabled={isRunningPreventive}
+                        className="px-3.5 py-2 min-h-[42px] rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 hover:brightness-110 text-black text-[11px] font-black font-mono transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 shadow-lg shadow-emerald-500/20 disabled:opacity-50"
+                      >
+                        <RefreshCw size={13} className={isRunningPreventive ? 'animate-spin' : ''} />
+                        <span>{isRunningPreventive ? 'Auditando...' : 'Reescanear Real'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Checklist de Achados Reais (Críticos -> Alertas -> OK) */}
+                  {preventiveReport && (
+                    <div className="flex flex-col gap-2">
+                      {[...preventiveReport.findings]
+                        .sort((a, b) => {
+                          const order = { critical: 0, warn: 1, ok: 2 };
+                          return order[a.severity] - order[b.severity];
+                        })
+                        .map((item) => {
+                          const isCrit = item.severity === 'critical';
+                          const isWarn = item.severity === 'warn';
+                          return (
+                            <div
+                              key={item.id}
+                              className={`p-3.5 rounded-2xl border transition-all flex flex-col gap-1.5 ${
+                                isCrit
+                                  ? 'bg-rose-950/25 border-rose-500/40'
+                                  : isWarn
+                                    ? 'bg-amber-950/20 border-amber-500/35'
+                                    : 'bg-emerald-950/10 border-emerald-500/20'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between gap-2 flex-wrap">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  {isCrit ? (
+                                    <AlertTriangle size={15} className="text-rose-400 shrink-0" />
+                                  ) : isWarn ? (
+                                    <AlertTriangle size={15} className="text-amber-400 shrink-0" />
+                                  ) : (
+                                    <CheckCircle2 size={15} className="text-emerald-400 shrink-0" />
+                                  )}
+                                  <span className="font-bold text-white text-xs truncate">{item.title}</span>
+                                </div>
+                                <div className="flex items-center gap-1.5 shrink-0 font-mono text-[10px]">
+                                  {typeof item.latencyMs === 'number' && (
+                                    <span className="px-2 py-0.5 rounded-lg bg-white/5 border border-white/10 text-slate-300">
+                                      {item.latencyMs}ms
+                                    </span>
+                                  )}
+                                  <span
+                                    className={`px-2 py-0.5 rounded-lg font-black uppercase ${
+                                      isCrit
+                                        ? 'bg-rose-500/25 text-rose-200 border border-rose-500/40'
+                                        : isWarn
+                                          ? 'bg-amber-500/20 text-amber-200 border border-amber-500/40'
+                                          : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+                                    }`}
+                                  >
+                                    {isCrit ? 'Crítico' : isWarn ? 'Alerta' : 'OK'}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <p className="text-xs text-slate-200 leading-relaxed">{item.summary}</p>
+                              {item.detail && (
+                                <p className="text-[11px] font-mono text-slate-400 bg-black/30 px-2.5 py-1.5 rounded-xl border border-white/5 break-words">
+                                  {item.detail}
+                                </p>
+                              )}
+                              {(isCrit || isWarn) && (
+                                <p className="text-[11px] text-amber-200/90 bg-amber-500/10 border border-amber-500/20 rounded-xl px-2.5 py-1.5">
+                                  💡 <strong>Antecipação:</strong> {item.recommendation}
+                                </p>
+                              )}
+                            </div>
+                          );
+                        })}
+                    </div>
+                  )}
+
+                  {/* Atalho de Correção IA se houver anomalias */}
+                  {preventiveReport && (preventiveReport.counts.critical > 0 || preventiveReport.counts.warn > 0) && (
+                    <button
+                      onClick={() => {
+                        setShowSimulationModal(false);
+                        setActiveTab('console');
+                        setLogFilter(preventiveReport.counts.critical > 0 ? 'action' : 'all');
+                        setShowAiMediaPromptModal(true);
+                      }}
+                      className="w-full min-h-[48px] px-4 py-3 rounded-2xl bg-gradient-to-r from-purple-600/30 via-indigo-600/30 to-pink-600/30 hover:from-purple-600/45 hover:to-pink-600/45 border border-purple-400/40 text-white text-xs font-black font-mono transition-all cursor-pointer active:scale-95 flex items-center justify-center gap-2 shadow-lg shadow-purple-500/15"
+                    >
+                      <Sparkles size={15} className="text-purple-300" />
+                      <span>Analisar Erros Capturados c/ I.A & Abrir Card no Kanban</span>
+                    </button>
+                  )}
+                </>
+              )}
+
+              {simModalTab === 'suites' && (
+                <div className="flex flex-col gap-3">
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    Execute suítes completas de ponta a ponta para validar banco (RLS + escrita + DDL), Motor Node/Baileys, Store React e WebSocket Realtime ao vivo.
+                  </p>
+
+                  <button
+                    onClick={() => {
+                      setShowSimulationModal(false);
+                      setActiveTab('asts');
+                      runApplicationTests();
+                    }}
+                    className="w-full min-h-[56px] flex items-center justify-between p-4 rounded-2xl bg-gradient-to-r from-amber-500/15 to-orange-500/10 hover:from-amber-500/25 hover:to-orange-500/20 border border-amber-500/35 text-left transition-all cursor-pointer active:scale-95 group"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <Activity size={20} className="text-amber-400 shrink-0 group-hover:scale-110 transition-transform" />
+                      <div className="min-w-0">
+                        <div className="font-bold text-white text-xs sm:text-sm">Executar ASTS Completo (10 Checkpoints)</div>
+                        <div className="text-[11px] text-amber-200/80">
+                          Valida RLS multitenant, escrita/DDL contacts, Store duplicada, Storage chat_media e Realtime
+                        </div>
+                      </div>
+                    </div>
+                    <ChevronRight size={18} className="text-amber-400/70 shrink-0" />
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setShowSimulationModal(false);
+                      setActiveTab('e2e');
+                      runE2EValidationSuite();
+                    }}
+                    className="w-full min-h-[56px] flex items-center justify-between p-4 rounded-2xl bg-gradient-to-r from-cyan-500/15 to-indigo-500/10 hover:from-cyan-500/25 hover:to-indigo-500/20 border border-cyan-500/35 text-left transition-all cursor-pointer active:scale-95 group"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <Radio size={20} className="text-cyan-400 shrink-0 group-hover:scale-110 transition-transform" />
+                      <div className="min-w-0">
+                        <div className="font-bold text-white text-xs sm:text-sm">Executar E2E Telemetry Suite (9 Estágios Live)</div>
+                        <div className="text-[11px] text-cyan-200/80">
+                          Audita Event Loop Node, listeners Baileys, sockets abertos, Trace ID no servidor e canal WSS
+                        </div>
+                      </div>
+                    </div>
+                    <ChevronRight size={18} className="text-cyan-400/70 shrink-0" />
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      handleTestApp();
+                      setActiveTab('console');
+                      setShowSimulationModal(false);
+                    }}
+                    className="w-full min-h-[56px] flex items-center justify-between p-4 rounded-2xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-left transition-all cursor-pointer active:scale-95 group"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <Layers size={20} className="text-emerald-400 shrink-0 group-hover:scale-110 transition-transform" />
+                      <div className="min-w-0">
+                        <div className="font-bold text-white text-xs sm:text-sm">Checagem Instantânea Local (Store + Disjuntor)</div>
+                        <div className="text-[11px] text-emerald-200/80">
+                          Verifica estado real do Circuit Breaker Supabase, duplicidade em memória e funções do ChatStore
+                        </div>
+                      </div>
+                    </div>
+                    <ChevronRight size={18} className="text-emerald-400/70 shrink-0" />
+                  </button>
+                </div>
+              )}
+
+              {simModalTab === 'sandbox' && (
+                <div className="flex flex-col gap-3">
+                  <div className="p-3 rounded-2xl bg-indigo-500/10 border border-indigo-500/25 text-[11px] text-indigo-200 leading-relaxed">
+                    <strong>Validação de Captura em Tempo Real:</strong> Dispara sondas controladas e rotuladas com <code className="px-1 py-0.5 rounded bg-black/40">[SANDBOX-VALIDAÇÃO]</code> para confirmar que os interceptadores de erro, HTTP, Promise e sincronização Node estão gravando no Console.
+                  </div>
+
+                  {probeResult && (
+                    <div className={`p-3 rounded-2xl border text-xs font-mono flex items-start gap-2 ${
+                      probeResult.ok
+                        ? 'bg-emerald-500/10 border-emerald-500/35 text-emerald-200'
+                        : 'bg-rose-500/15 border-rose-500/40 text-rose-200'
+                    }`}>
+                      {probeResult.ok ? <CheckCircle2 size={15} className="shrink-0 mt-0.5 text-emerald-400" /> : <AlertTriangle size={15} className="shrink-0 mt-0.5 text-rose-400" />}
+                      <span>{probeResult.summary}</span>
+                    </div>
+                  )}
+
+                  {[
+                    {
+                      kind: 'node_logs_sync' as CaptureProbeKind,
+                      title: 'Puxar Erros Reais do Buffer Node (/recent-errors)',
+                      desc: 'Consulta diretamente o servidor Node no Coolify sem injetar erros falsos.',
+                      icon: <Server size={18} className="text-purple-400" />,
+                      style: 'bg-purple-500/10 hover:bg-purple-500/20 border-purple-500/30'
+                    },
+                    {
+                      kind: 'http_404' as CaptureProbeKind,
+                      title: 'Testar Interceptador HTTP Real (window.fetch 404)',
+                      desc: 'Executa GET em rota inexistente para comprovar captura de status HTTP >= 400 e latência.',
+                      icon: <Network size={18} className="text-amber-400" />,
+                      style: 'bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/30'
+                    },
+                    {
+                      kind: 'report_error' as CaptureProbeKind,
+                      title: 'Testar Pipeline Completo reportError() -> system_logs',
+                      desc: 'Valida se falhas capturadas pelo React chegam ao DevLogger, Supabase e Node.',
+                      icon: <Bug size={18} className="text-rose-400" />,
+                      style: 'bg-rose-500/10 hover:bg-rose-500/20 border-rose-500/30'
+                    },
+                    {
+                      kind: 'promise_rejection' as CaptureProbeKind,
+                      title: 'Testar Trap Assíncrona (Unhandled Promise Rejection)',
+                      desc: 'Emite uma rejeição controlada para validar captura de falhas assíncronas não tratadas.',
+                      icon: <Zap size={18} className="text-cyan-400" />,
+                      style: 'bg-cyan-500/10 hover:bg-cyan-500/20 border-cyan-500/30'
+                    }
+                  ].map((probe) => (
+                    <button
+                      key={probe.kind}
+                      onClick={() => handleRunCaptureProbe(probe.kind)}
+                      disabled={runningProbe !== null}
+                      className={`w-full min-h-[54px] flex items-center justify-between p-3.5 rounded-2xl border text-left transition-all cursor-pointer active:scale-95 disabled:opacity-50 ${probe.style}`}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="shrink-0">
+                          {runningProbe === probe.kind ? <Loader2 size={18} className="animate-spin text-white" /> : probe.icon}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="font-bold text-white text-xs">{probe.title}</div>
+                          <div className="text-[11px] text-slate-300/80">{probe.desc}</div>
+                        </div>
+                      </div>
+                      <ChevronRight size={16} className="text-white/50 shrink-0" />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Rodapé Fixo */}
+            <div className="px-4 sm:px-5 py-3 border-t border-white/10 bg-[#070b10] flex items-center justify-between gap-2 flex-wrap shrink-0">
               <button
                 onClick={() => {
-                  setShowSimulationModal(false);
                   clearLogs();
                   setTestErrors([]);
                   setTestLogs([]);
                   setTestSummary(null);
+                  setPreventiveReport(null);
+                  setProbeResult(null);
                 }}
-                className="w-full flex items-center justify-between p-3.5 rounded-xl bg-gray-800/40 hover:bg-gray-800/80 border border-white/10 text-gray-300 font-semibold text-xs transition-all text-left group cursor-pointer"
+                className="px-3.5 py-2 min-h-[42px] bg-white/5 hover:bg-rose-500/15 border border-white/10 hover:border-rose-500/30 text-slate-300 hover:text-rose-200 rounded-xl text-xs font-semibold transition-all cursor-pointer active:scale-95 flex items-center gap-2"
               >
-                <div className="flex items-center gap-3">
-                  <Trash2 size={18} className="text-gray-400 group-hover:scale-110 transition-transform" />
-                  <div>
-                    <div className="font-bold text-white">Limpar Todos os Logs & Testes</div>
-                    <div className="text-[11px] text-gray-400 font-normal">Reseta contadores de telemetria da sessão</div>
-                  </div>
-                </div>
-                <ChevronRight size={16} className="text-gray-400/60" />
+                <Trash2 size={14} />
+                <span>Limpar Console & Cache</span>
               </button>
-            </div>
 
-            <div className="pt-2 flex justify-end">
               <button
                 onClick={() => setShowSimulationModal(false)}
-                className="px-4 py-2 bg-white/10 hover:bg-white/15 text-white rounded-xl text-xs font-semibold transition-all cursor-pointer"
+                className="px-5 py-2 min-h-[42px] bg-white/10 hover:bg-white/15 text-white rounded-xl text-xs font-bold transition-all cursor-pointer active:scale-95 ml-auto"
               >
                 Fechar
               </button>
