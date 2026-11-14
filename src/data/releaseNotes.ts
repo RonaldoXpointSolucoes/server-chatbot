@@ -712,6 +712,29 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.2.0',
+    date: '2026-11-14',
+    summary: 'Calibração de Precisão da Auditoria Preventiva (Escopo Multi-Caixa + Duplicidade Física no Postgres + Janela Real 2h no Outbox)',
+    notes: [
+      {
+        id: 'fix-preventive-multibox-dedup-820',
+        category: 'fixes',
+        title: 'Deduplicação Multi-Caixa (tenant_id + instance_id + phone) & Auditoria Física na Tabela contacts',
+        description: 'Eliminado falso alerta na Central Preventiva e no ASTS quando o mesmo número conversa em caixas WhatsApp distintas (FoodNext, Ronaldo-Web, etc.) via chave getContactBoxPhoneKey, mantendo detecção real de duplicidade na mesma caixa e adicionando leitura direta de telefones duplicados físicos no Postgres.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      },
+      {
+        id: 'imp-preventive-outbox-window-820',
+        category: 'improvements',
+        title: 'Filtro Temporal Real (Últimas 2h) na Auditoria da Fila Outbox (wa_outgoing_messages)',
+        description: 'A auditoria da fila de saída agora separa falhas recentes das últimas 2 horas (exibindo o last_error real e destinatário afetado) de registros expirados antigos (>2h), evitando alertas persistentes por histórico arquivado de dias anteriores.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-300/30'
+      }
+    ]
+  },
+  {
     version: '8.1.9',
     date: '2026-11-14',
     summary: 'Central de Diagnóstico Preventivo Real no DevLogger + Auditoria Multi-Camada de Banco/WhatsApp/Outbox/IA + Correções ASTS & Layout Console',

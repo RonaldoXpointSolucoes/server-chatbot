@@ -44,6 +44,14 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 
 const isValidUuid = (val?: string | null): val is string => Boolean(val && UUID_REGEX.test(val.trim()));
 
+/** Gera chave única multi-caixa `(tenant_id, instance_id, phone)` para não confundir conversas em caixas diferentes com duplicidade real. */
+export const getContactBoxPhoneKey = (c: any): string => {
+  const rawId = String(c?.id || '');
+  const boxFromId = rawId.includes('_') ? rawId.split('_')[1] : '';
+  const boxId = c?.instance_id || boxFromId || 'default';
+  return `${c?.tenant_id}:${boxId}:${c?.phone}`;
+};
+
 /**
  * Executa um GET HTTP com timeout protegido para endpoints de diagnóstico do backend Node.
  */
@@ -345,11 +353,25 @@ async function auditWhatsAppInboxesAndRbac(tenantId: string | null): Promise<Pre
 /**
  * Audita Outbox (`wa_outgoing_messages`), Event Loop Lag, Vazamento de Listeners Baileys e Reconnect Storms no Servidor Node.
  */
-async function auditOutboxAndEngineTelemetry(engineUrl: string): Promise<PreventiveFinding[]> {
-  const [healthProbe, msgProbe, telemetryProbe] = await Promise.all([
+async function auditOutboxAndEngineTelemetry(tenantId: string | null, engineUrl: string): Promise<PreventiveFinding[]> {
+  const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+  let recentFailedQuery = supabase
+    .from('wa_outgoing_messages')
+    .select('id, chat_jid, last_error, created_at, instance_id')
+    .eq('status', 'failed')
+    .gte('created_at', twoHoursAgo)
+    .order('created_at', { ascending: false })
+    .limit(10);
+
+  if (isValidUuid(tenantId)) {
+    recentFailedQuery = recentFailedQuery.eq('tenant_id', tenantId);
+  }
+
+  const [healthProbe, msgProbe, telemetryProbe, recentFailedRes] = await Promise.all([
     probeEndpointJson(`${engineUrl}/debug/healthz`, 4000),
     probeEndpointJson(`${engineUrl}/debug/messages-health`, 4500),
-    probeEndpointJson(`${engineUrl}/api/v1/diagnostics/telemetry`, 4500)
+    probeEndpointJson(`${engineUrl}/api/v1/diagnostics/telemetry`, 4500),
+    recentFailedQuery.then((r) => r, (err) => ({ data: null, error: err }))
   ]);
 
   const findings: PreventiveFinding[] = [];
@@ -379,25 +401,34 @@ async function auditOutboxAndEngineTelemetry(engineUrl: string): Promise<Prevent
       : 'Gateway Node respondendo com baixa latência.'
   });
 
-  // Outbox wa_outgoing_messages
+  // Outbox wa_outgoing_messages: separa falhas reais recentes (últimas 2h) do histórico antigo (>2h)
   if (msgProbe.ok && msgProbe.data?.outbox) {
     const ob = msgProbe.data.outbox;
     const stuck = Number(ob.stuckInProcessing || 0);
-    const failed = Number(ob.failed || 0);
+    const totalFailedHistorical = Number(ob.failed || 0);
+    const recentFailedList: any[] = Array.isArray(recentFailedRes?.data) ? recentFailedRes.data : [];
+    const recentFailedCount = recentFailedList.length;
     const pending = Number(ob.pending || 0);
     const sentHour = Number(ob.sentLastHour || 0);
 
-    if (stuck > 0 || failed > 0) {
+    if (stuck > 0 || recentFailedCount > 0) {
+      const sampleErrors = recentFailedList
+        .slice(0, 2)
+        .map((f) => `${String(f.chat_jid || '').split('@')[0]}: ${f.last_error || 'sem motivo'}`)
+        .join(' | ');
+
       findings.push({
         id: 'outbox_queue',
         category: 'outbox',
         title: 'Fila Outbox (wa_outgoing_messages)',
-        severity: stuck > 0 ? 'critical' : 'warn',
-        count: stuck + failed,
-        summary: `${stuck} travada(s) >5min em processing • ${failed} falhada(s) • ${pending} pendente(s) (${sentHour} enviadas/1h)`,
-        detail: stuck > 0 ? 'Mensagens presas em "processing" indicam trava de socket ou falha no QueueProcessor.' : undefined,
-        recommendation: 'Inspecione o QueueProcessor e reconecte sessões com socket travado.',
-        rawPayload: ob.stuckSamples
+        severity: stuck > 0 || recentFailedCount >= 5 ? 'critical' : 'warn',
+        count: stuck + recentFailedCount,
+        summary: `${stuck} travada(s) >5min em processing • ${recentFailedCount} falha(s) nas últimas 2h • ${pending} pendente(s) (${sentHour} enviadas/1h)`,
+        detail: stuck > 0
+          ? 'Mensagens presas em "processing" indicam trava de socket ou falha no QueueProcessor.'
+          : sampleErrors || undefined,
+        recommendation: 'Inspecione o erro recente acima, valide conexão do socket da caixa afetada e acompanhe o QueueProcessor.',
+        rawPayload: stuck > 0 ? ob.stuckSamples : recentFailedList.slice(0, 5)
       });
     } else if (pending > 15) {
       findings.push({
@@ -415,8 +446,8 @@ async function auditOutboxAndEngineTelemetry(engineUrl: string): Promise<Prevent
         category: 'outbox',
         title: 'Fila Outbox (wa_outgoing_messages)',
         severity: 'ok',
-        summary: `Fila saudável (${pending} pendentes, 0 travadas, ${sentHour} enviadas na última 1h).`,
-        recommendation: 'Entrega assíncrona fluindo sem represamento.'
+        summary: `Fila saudável (${pending} pendentes, 0 travadas, 0 falhas nas últimas 2h • ${sentHour} enviadas/1h${totalFailedHistorical > 0 ? ` • ${totalFailedHistorical} expiradas antigas >2h no histórico` : ''}).`,
+        recommendation: 'Entrega assíncrona atual fluindo sem travamentos.'
       });
     }
   }
@@ -545,9 +576,9 @@ async function auditAiVaultAndGlobalVars(tenantId: string | null): Promise<Preve
 }
 
 /**
- * Audita integridade do estado em memória do Zustand (`useChatStore`) e acesso real ao bucket `chat_media`.
+ * Audita integridade do estado em memória do Zustand (`useChatStore`), duplicidade real de contatos no Postgres e acesso ao bucket `chat_media`.
  */
-async function auditStoreAndStorageIntegrity(): Promise<PreventiveFinding[]> {
+async function auditStoreAndStorageIntegrity(tenantId: string | null): Promise<PreventiveFinding[]> {
   const findings: PreventiveFinding[] = [];
   const storeState = useChatStore.getState() as any;
 
@@ -567,37 +598,59 @@ async function auditStoreAndStorageIntegrity(): Promise<PreventiveFinding[]> {
     const contacts: any[] = Array.isArray(storeState.contacts) ? storeState.contacts : [];
     const seenIds = new Set<string>();
     const dupIds: string[] = [];
-    const phoneGroups = new Map<string, string[]>();
+    const boxPhoneGroups = new Map<string, string[]>();
 
     contacts.forEach((c) => {
       if (seenIds.has(c.id)) dupIds.push(c.id);
       seenIds.add(c.id);
       if (c.phone && c.tenant_id) {
-        const key = `${c.tenant_id}:${c.phone}`;
-        const list = phoneGroups.get(key) || [];
+        const key = getContactBoxPhoneKey(c);
+        const list = boxPhoneGroups.get(key) || [];
         list.push(c.id);
-        phoneGroups.set(key, list);
+        boxPhoneGroups.set(key, list);
       }
     });
 
-    const dupPhones = Array.from(phoneGroups.entries()).filter(([, ids]) => ids.length > 1);
+    const dupPhonesSameBox = Array.from(boxPhoneGroups.entries()).filter(([, ids]) => ids.length > 1);
 
-    if (missing.length > 0 || dupIds.length > 0 || dupPhones.length > 0) {
+    // Audita também se existem telefones duplicados na tabela física `contacts` do tenant no Supabase
+    let dbDupPhones: Array<[string, number]> = [];
+    if (isValidUuid(tenantId)) {
+      const { data: dbRows } = await supabase
+        .from('contacts')
+        .select('id, phone')
+        .eq('tenant_id', tenantId)
+        .not('phone', 'is', null)
+        .limit(1000);
+
+      if (Array.isArray(dbRows)) {
+        const dbPhoneCounts = new Map<string, number>();
+        dbRows.forEach((row: any) => {
+          const p = String(row.phone || '').trim();
+          if (p) dbPhoneCounts.set(p, (dbPhoneCounts.get(p) || 0) + 1);
+        });
+        dbDupPhones = Array.from(dbPhoneCounts.entries()).filter(([, count]) => count > 1);
+      }
+    }
+
+    if (missing.length > 0 || dupIds.length > 0 || dupPhonesSameBox.length > 0 || dbDupPhones.length > 0) {
       findings.push({
         id: 'store_integrity',
         category: 'store_realtime',
         title: 'Integridade do ChatStore & Contatos',
-        severity: missing.length > 0 ? 'critical' : 'warn',
-        count: missing.length + dupIds.length + dupPhones.length,
+        severity: missing.length > 0 || dbDupPhones.length > 0 ? 'critical' : 'warn',
+        count: missing.length + dupIds.length + dupPhonesSameBox.length + dbDupPhones.length,
         summary: [
           missing.length > 0 ? `Funções ausentes: ${missing.join(', ')}` : null,
-          dupIds.length > 0 ? `${dupIds.length} IDs duplicados` : null,
-          dupPhones.length > 0 ? `${dupPhones.length} telefones duplicados no mesmo tenant` : null
+          dupIds.length > 0 ? `${dupIds.length} IDs compostos duplicados na Store` : null,
+          dupPhonesSameBox.length > 0 ? `${dupPhonesSameBox.length} telefones duplicados na mesma caixa` : null,
+          dbDupPhones.length > 0 ? `${dbDupPhones.length} telefones duplicados no banco (contacts)` : null
         ].filter(Boolean).join(' • '),
-        detail: dupPhones.length > 0
-          ? `Exemplo: ${dupPhones.slice(0, 3).map(([k, ids]) => `${k.split(':')[1]} (${ids.length}x)`).join(', ')}`
-          : undefined,
-        recommendation: 'Deduplique contatos em upsertContactLocally e execute resync da store (fetchInitialData).'
+        detail: [
+          dupPhonesSameBox.length > 0 ? `Store: ${dupPhonesSameBox.slice(0, 3).map(([k, ids]) => `${k.split(':')[2]} (${ids.length}x na caixa)`).join(', ')}` : null,
+          dbDupPhones.length > 0 ? `Banco: ${dbDupPhones.slice(0, 3).map(([p, cnt]) => `${p} (${cnt}x)`).join(', ')}` : null
+        ].filter(Boolean).join(' | ') || undefined,
+        recommendation: 'Deduplique contatos na mesma caixa ou unifique registros repetidos na tabela contacts.'
       });
     } else {
       findings.push({
@@ -605,8 +658,8 @@ async function auditStoreAndStorageIntegrity(): Promise<PreventiveFinding[]> {
         category: 'store_realtime',
         title: 'Integridade do ChatStore & Contatos',
         severity: 'ok',
-        summary: `${contacts.length} contatos em cache sem duplicidade de ID ou telefone.`,
-        recommendation: 'Store React/Zustand consistente.'
+        summary: `${contacts.length} conversas em cache multi-caixa sem duplicidade na mesma caixa ou no banco.`,
+        recommendation: 'Store React/Zustand e tabela contacts consistentes.'
       });
     }
   }
@@ -650,9 +703,9 @@ export async function runPreventiveAudit(tenantId: string | null, engineUrl: str
   const [dbFindings, waFindings, outboxFindings, aiFindings, storeFindings, pulledLogs] = await Promise.all([
     auditDatabaseAndCircuitBreaker(),
     auditWhatsAppInboxesAndRbac(tenantId),
-    auditOutboxAndEngineTelemetry(engineUrl),
+    auditOutboxAndEngineTelemetry(tenantId, engineUrl),
     auditAiVaultAndGlobalVars(tenantId),
-    auditStoreAndStorageIntegrity(),
+    auditStoreAndStorageIntegrity(tenantId),
     fetchRecentRealLogs(tenantId, engineUrl)
   ]);
 

@@ -6,7 +6,7 @@ import { supabase, masterSupabase, getSupabaseHealthStatus } from '../services/s
 import { ServerLogsTerminal } from './ServerLogsTerminal';
 import { useChatStore } from '../store/chatStore';
 import { geminiService } from '../services/geminiService';
-import { runPreventiveAudit, runControlledCaptureProbe, fetchRecentRealLogs, PreventiveAuditReport, CaptureProbeKind } from '../utils/preventiveDiagnostics';
+import { runPreventiveAudit, runControlledCaptureProbe, fetchRecentRealLogs, getContactBoxPhoneKey, PreventiveAuditReport, CaptureProbeKind } from '../utils/preventiveDiagnostics';
 
 export default function DevLogger() {
   const navigate = useNavigate();
@@ -1871,7 +1871,7 @@ export default function DevLogger() {
     let duplicatePhones = 0;
     contactsList.forEach((c) => {
       if (c?.phone && c?.tenant_id) {
-        const key = `${c.tenant_id}:${c.phone}`;
+        const key = getContactBoxPhoneKey(c);
         if (phoneSet.has(key)) duplicatePhones++;
         else phoneSet.add(key);
       }
@@ -2623,7 +2623,7 @@ export default function DevLogger() {
         const phoneMap: Record<string, string[]> = {};
         localContacts.forEach((c: any) => {
           if (c.phone && c.tenant_id) {
-            const key = `${c.tenant_id}_${c.phone}`;
+            const key = getContactBoxPhoneKey(c);
             if (!phoneMap[key]) phoneMap[key] = [];
             phoneMap[key].push(c.id);
           }
@@ -2634,8 +2634,8 @@ export default function DevLogger() {
         Object.entries(phoneMap).forEach(([key, idsList]) => {
           if (idsList.length > 1) {
             duplicatePhonesFound++;
-            const phoneOnly = key.split('_')[1];
-            detailsDuplicate += `Telefone ${phoneOnly} está associado aos IDs [${idsList.join(', ')}]. `;
+            const phoneOnly = key.split(':')[2] || key;
+            detailsDuplicate += `Telefone ${phoneOnly} está duplicado na mesma caixa (${idsList.length}x: [${idsList.join(', ')}]). `;
           }
         });
 
