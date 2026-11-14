@@ -1853,7 +1853,7 @@ export default function AccountSettings() {
               </button>
               <button
                 type="button"
-                disabled={index === sectionsOrder.length - 1}
+                disabled={index === sectionsOrder.filter((s) => s !== 'cardapio' || Boolean(linkCardapio.trim())).length - 1}
                 onClick={(e) => { e.stopPropagation(); handleMoveSection(id, 'down'); }}
                 title="Mover para baixo"
                 className="p-1.5 text-gray-400 hover:text-indigo-600 dark:text-gray-400 dark:hover:text-indigo-400 disabled:opacity-20 disabled:cursor-not-allowed hover:bg-white dark:hover:bg-slate-700 rounded-lg transition-all"
@@ -2029,7 +2029,7 @@ export default function AccountSettings() {
                     className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-gray-400"
                   />
                   <p className="text-xs text-gray-500 dark:text-[#8696a0] mt-2">
-                    Substituído no token <code className="bg-gray-200 dark:bg-black/30 px-1 py-0.5 rounded font-mono text-[10px] text-indigo-500 dark:text-indigo-300">[LINK_CARDAPIO]</code>.
+                    Substituído no token <code className="bg-gray-200 dark:bg-black/30 px-1 py-0.5 rounded font-mono text-[10px] text-indigo-500 dark:text-indigo-300">[LINK_CARDAPIO]</code>. Quando preenchido, habilita o <strong>Cardápio 30d</strong> e a <strong>Sincronização de Cardápio</strong>.
                   </p>
                 </div>
               </div>
@@ -2414,6 +2414,7 @@ export default function AccountSettings() {
           </div>
         );
       case 'cardapio':
+        if (!linkCardapio.trim()) return null;
         return renderDraggableCard(
           'cardapio',
           index,
@@ -3853,7 +3854,9 @@ export default function AccountSettings() {
           </div>
 
           {/* Renderização Ordenada Dinâmica dos Cards */}
-          {sectionsOrder.map((sectionId, index) => renderSection(sectionId, index))}
+          {sectionsOrder
+            .filter((sectionId) => sectionId !== 'cardapio' || Boolean(linkCardapio.trim()))
+            .map((sectionId, index) => renderSection(sectionId, index))}
         </div>
       </div>
 

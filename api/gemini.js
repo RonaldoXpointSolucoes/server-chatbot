@@ -34,7 +34,7 @@ export default async function handler(req, res) {
 
   res.setHeader("Access-Control-Allow-Origin", allowedOrigin && origin ? origin : "https://chat-boot-theta.vercel.app");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-gemini-api-key, x-tenant-id, x-chatboot-shield");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-gemini-api-key, x-tenant-id, x-chatboot-shield, x-e2e-source");
 
   if (req.method === "OPTIONS") {
     return res.status(200).end();
@@ -82,7 +82,7 @@ export default async function handler(req, res) {
       contents: body.contents,
       generationConfig: {
         ...(body.generationConfig || {}),
-        maxOutputTokens: Math.min(Number(body.generationConfig?.maxOutputTokens) || 1024, 2048),
+        maxOutputTokens: Math.min(Number(body.generationConfig?.maxOutputTokens) || 3072, 4096),
       },
       systemInstruction: body.systemInstruction,
       safetySettings: body.safetySettings,

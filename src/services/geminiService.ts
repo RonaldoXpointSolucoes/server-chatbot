@@ -716,7 +716,13 @@ Nunca esqueça dessa formatação JSON quando for a hora da entrega. Até lá, a
     if (!this.isConfigured()) {
       throw new Error('Chave de API do Gemini não configurada. Configure a sua chave de API nas Configurações.');
     }
-    const model = this.getGenAI().getGenerativeModel({ model: "gemini-2.5-flash" });
+    const model = this.getGenAI().getGenerativeModel({
+      model: "gemini-2.5-flash",
+      generationConfig: {
+        maxOutputTokens: 3072,
+        responseMimeType: "application/json"
+      }
+    });
 
     // Format the context
     const historyText = contextHistory.map(m => `${m.role === 'user' ? 'Cliente' : 'Atendente (VOCÊ)'}: ${m.text}`).join('\n');
@@ -763,16 +769,30 @@ ATENÇÃO E REGRAS DE FORMATO CRÍTICAS:
     }
 
     if (text) {
+      const cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();
       try {
-        const cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();
         const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
         const parsed = JSON.parse(arrayMatch ? arrayMatch[0] : cleaned);
         if (Array.isArray(parsed) && parsed.length > 0) {
           return parsed.map(String).slice(0, 3);
         }
       } catch (e) {
+        // Recupera strings completas caso a resposta tenha sofrido corte de tokens antes do fechamento do array
+        const completeStrings = Array.from(cleaned.matchAll(/"((?:\\.|[^"\\])*)"/g))
+          .map((m) => {
+            try {
+              return JSON.parse(`"${m[1]}"`);
+            } catch (_) {
+              return m[1].replace(/\\n/g, '\n');
+            }
+          })
+          .map((s) => String(s || '').trim())
+          .filter((s) => s.length >= 10);
+        if (completeStrings.length > 0) {
+          return completeStrings.slice(0, 3);
+        }
         console.warn("Fallback de parse nas sugestões do Gemini:", text);
-        return [text.substring(0, 300).replace(/^["\[\]]+|["\[\]]+$/g, '').trim()];
+        return [cleaned.substring(0, 300).replace(/^["\[\]]+|["\[\]]+$/g, '').trim()];
       }
     }
 

@@ -107,8 +107,22 @@ process.on('unhandledRejection', (reason, promise) => {
 
 app.use(cors({
     origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-tenant-id', 'x-agent-id', 'apikey', 'x-trace-id', 'x-asts-test', 'X-Asts-Test']
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: [
+        'Content-Type',
+        'Authorization',
+        'x-tenant-id',
+        'x-agent-id',
+        'apikey',
+        'x-trace-id',
+        'x-asts-test',
+        'X-Asts-Test',
+        'x-chatboot-shield',
+        'X-Chatboot-Shield',
+        'x-gemini-api-key',
+        'x-e2e-source',
+        'X-E2E-Source'
+    ]
 }));
 app.use(helmet());
 app.use(express.json({ limit: '100mb' }));

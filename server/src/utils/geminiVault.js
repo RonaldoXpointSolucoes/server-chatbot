@@ -250,15 +250,28 @@ export function enforceGeminiBudgetGuardrails(requestedModel, payload) {
     const safeModel = cleanModel.includes('flash') ? cleanModel : 'gemini-2.5-flash';
 
     const safePayload = { ...(payload || {}) };
-    const serialized = JSON.stringify(safePayload.contents || []);
-    if (serialized.length > 35000) {
+    const contentsArr = Array.isArray(safePayload.contents) ? safePayload.contents : [];
+    let hasInlineData = false;
+    let totalTextChars = 0;
+    for (const c of contentsArr) {
+        if (Array.isArray(c?.parts)) {
+            for (const p of c.parts) {
+                if (p?.inlineData) hasInlineData = true;
+                if (typeof p?.text === 'string') totalTextChars += p.text.length;
+            }
+        }
+    }
+
+    const serialized = JSON.stringify(contentsArr);
+    const maxSerializedBytes = hasInlineData ? 15_000_000 : 180_000;
+    if (totalTextChars > 150_000 || serialized.length > maxSerializedBytes) {
         throw new Error('Payload excede o limite máximo de segurança permitido pelo escudo Anti-Fraude.');
     }
 
-    // Limita maxOutputTokens para evitar geração maliciosa de textos gigantescos
+    // Limita maxOutputTokens com folga para thinking tokens do gemini-2.5-flash sem permitir abuso externo
     safePayload.generationConfig = {
         ...(safePayload.generationConfig || {}),
-        maxOutputTokens: Math.min(Number(safePayload.generationConfig?.maxOutputTokens) || 1024, 2048)
+        maxOutputTokens: Math.min(Number(safePayload.generationConfig?.maxOutputTokens) || 3072, 4096)
     };
 
     return { safeModel, safePayload };

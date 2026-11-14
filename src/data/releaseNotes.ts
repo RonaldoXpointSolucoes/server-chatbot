@@ -712,6 +712,64 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.1.8',
+    date: '2026-11-13',
+    summary: 'Novo Submenu "Recursos" e Cabeçalho Compacto do Chat + Regra Global Inteligente de Cardápio ([LINK_CARDAPIO]) + Correção CORS & Tokens do Escudo Gemini',
+    notes: [
+      {
+        id: 'feat-chat-header-submenu-818',
+        category: 'features',
+        title: 'Novo Submenu Glassmorphic "Recursos" e Popover de Dados & Vínculos no Topo do Chat',
+        description: 'Reorganização completa do cabeçalho da conversa para eliminar sobreposições e poluição visual: criação do submenu "Recursos ▾" (centralizando Cardápio 30d, Hub Baileys v7 e Auditoria IA), redução de 53% no botão de Acesso Remoto e agrupamento de CNPJ/Financeiro no badge clicável "Dados & Vínculos".',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+        guide: {
+          moduleGroup: 'chat-header',
+          moduleLabel: 'Chat ao Vivo • Cabeçalho Superior da Conversa',
+          purpose: 'Garantir leitura limpa em uma única linha sem cortar textos ou botões em qualquer resolução de tela, agrupando as ferramentas avançadas no menu elegante "Recursos ▾" e os dados cadastrais em um popover dedicado.',
+          whereToAccess: [
+            '1. Menu Lateral Esquerdo ➔ Conversas (/chat)',
+            '2. Selecione qualquer conversa ativa na lista',
+            '3. Na Barra Superior Direita da conversa, clique no botão violeta "Recursos ▾" (ou em "Dados ▾" ao lado da empresa para ver CNPJ e Financeiro)'
+          ],
+          howToTest: [
+            '1. Abra qualquer conversa no Chat ao Vivo (/chat) e observe o cabeçalho limpo sem botões cortados à direita.',
+            '2. Clique em "Recursos ▾" para acessar rapidamente o Hub Baileys v7, Auditoria IA e (quando configurado) Fixar Cardápio 30d.',
+            '3. Clique no selo "Dados" na faixa abaixo do nome do contato para inspecionar ou copiar CNPJ e status financeiro.'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Tela: Chat ao Vivo (/chat) ➔ Cabeçalho Superior Refatorado',
+            contextElements: ['🖥️ Remoto (Compacto)', '✅ Resolver', '👤+ Atribuir'],
+            targetButtonLabel: '👆 Clique Aqui: Recursos ▾',
+            targetButtonPosition: 'Barra superior direita da conversa aberta (ao lado do indicador compacto de Acesso Remoto)',
+            visualPreviewVariant: 'chat-header-pin'
+          },
+          quickAction: {
+            label: 'Ver Novo Cabeçalho no Chat',
+            route: '/chat',
+            chatAction: 'highlight-header'
+          }
+        }
+      },
+      {
+        id: 'imp-global-cardapio-link-rule-818',
+        category: 'improvements',
+        title: 'Exibição e Sincronização de Cardápio Condicionadas ao Link Global ([LINK_CARDAPIO])',
+        description: 'Os botões "Cardápio 30d", "Sincronizar Cardápio GastroFood", a aba "Catálogo & GastroFood" do Hub Baileys e a sincronização automática no servidor agora só são ativados quando o campo global "Link do Cardápio Digital" está preenchido nas Configurações da Empresa.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-300/30'
+      },
+      {
+        id: 'fix-gemini-shield-cors-tokens-818',
+        category: 'fixes',
+        title: 'Correção de Preflight CORS no Escudo Gemini (x-chatboot-shield) & Teto de Tokens JSON',
+        description: 'Liberados os cabeçalhos de integridade do Cofre Gemini no gateway Express (eliminando falsos alertas de Rede Instável na Camada 1) e ampliado o limite de geração do gemini-2.5-flash para evitar cortes de array JSON nas sugestões de resposta.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      }
+    ]
+  },
+  {
     version: '8.1.7',
     date: '2026-11-13',
     summary: 'Encaminhamento Multi-Destinatário & Multi-Caixa + Sincronização Realtime Determinística de Contadores & Relatórios IA + Correção do Catálogo GastroFood no Hub Baileys',

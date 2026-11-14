@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { invokeBaileysAction } from '../../services/whatsappEngine';
 import { supabase } from '../../services/supabase';
+import { useChatStore } from '../../store/chatStore';
 
 interface BaileysInstanceHubModalProps {
   isOpen: boolean;
@@ -28,13 +29,60 @@ export const BaileysInstanceHubModal: React.FC<BaileysInstanceHubModalProps> = (
   embedded = false,
   initialTab
 }) => {
-  const [activeTab, setActiveTab] = useState<'profile' | 'business' | 'catalog' | 'shortcuts' | 'security'>(initialTab || 'catalog');
+  const tenantInfo = useChatStore((state) => state.tenantInfo);
+  const [fetchedMenuLink, setFetchedMenuLink] = useState<string>('');
+  const configuredMenuLink = tenantInfo?.id === tenantId
+    ? String(tenantInfo?.settings?.link_cardapio || '').trim()
+    : fetchedMenuLink;
+  const hasGlobalMenuLink = configuredMenuLink.length > 0;
+
+  const [activeTab, setActiveTab] = useState<'profile' | 'business' | 'catalog' | 'shortcuts' | 'security'>(() => {
+    const initialHasMenu = Boolean(String(useChatStore.getState().tenantInfo?.settings?.link_cardapio || '').trim());
+    if (initialTab && (initialTab !== 'catalog' || initialHasMenu)) return initialTab;
+    return initialHasMenu ? 'catalog' : 'business';
+  });
+
+  useEffect(() => {
+    if (!isOpen && !embedded) return;
+    if (!tenantId || tenantId === '00000000-0000-0000-0000-000000000000') {
+      setFetchedMenuLink('');
+      return;
+    }
+    if (tenantInfo?.id === tenantId) {
+      setFetchedMenuLink(String(tenantInfo?.settings?.link_cardapio || '').trim());
+      return;
+    }
+    let cancelled = false;
+    supabase
+      .from('companies')
+      .select('settings')
+      .eq('id', tenantId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!cancelled) {
+          setFetchedMenuLink(String((data as any)?.settings?.link_cardapio || '').trim());
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, embedded, tenantId, tenantInfo?.id, tenantInfo?.settings?.link_cardapio]);
 
   useEffect(() => {
     if (initialTab && isOpen) {
-      setActiveTab(initialTab);
+      if (initialTab === 'catalog' && !hasGlobalMenuLink) {
+        setActiveTab('business');
+      } else {
+        setActiveTab(initialTab);
+      }
     }
-  }, [initialTab, isOpen]);
+  }, [initialTab, isOpen, hasGlobalMenuLink]);
+
+  useEffect(() => {
+    if (!hasGlobalMenuLink && activeTab === 'catalog') {
+      setActiveTab('business');
+    }
+  }, [hasGlobalMenuLink, activeTab]);
   const [selectedInstanceId, setSelectedInstanceId] = useState<string>(instanceId || '');
   const [instancesList, setInstancesList] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -110,12 +158,12 @@ export const BaileysInstanceHubModal: React.FC<BaileysInstanceHubModalProps> = (
       loadPrivacySettings();
     } else if (activeTab === 'business') {
       loadBusinessProfile();
-    } else if (activeTab === 'catalog') {
+    } else if (activeTab === 'catalog' && hasGlobalMenuLink) {
       loadCatalog();
     } else if (activeTab === 'security') {
       loadSecurityAndCalls();
     }
-  }, [activeTab, selectedInstanceId, isOpen, embedded]);
+  }, [activeTab, selectedInstanceId, isOpen, embedded, hasGlobalMenuLink]);
 
   const showToast = (type: 'success' | 'error', text: string) => {
     setFeedback({ type, text });
@@ -428,7 +476,9 @@ export const BaileysInstanceHubModal: React.FC<BaileysInstanceHubModalProps> = (
               </span>
             </h2>
             <p className="text-xs text-slate-400">
-              Catálogo GastroFood, Perfil Comercial, Privacidade do Chip, Etiquetas CRM, Anti-Chamadas e Limites da Meta
+              {hasGlobalMenuLink
+                ? 'Catálogo GastroFood, Perfil Comercial, Privacidade do Chip, Etiquetas CRM, Anti-Chamadas e Limites da Meta'
+                : 'Perfil Comercial, Privacidade do Chip, Etiquetas CRM, Anti-Chamadas e Limites da Meta'}
             </p>
           </div>
         </div>
@@ -478,7 +528,7 @@ export const BaileysInstanceHubModal: React.FC<BaileysInstanceHubModalProps> = (
       {/* Navigation Tabs */}
       <div className="px-6 pt-3 border-b border-slate-800 flex items-center gap-2 overflow-x-auto scrollbar-none bg-slate-950/40">
         {[
-          { id: 'catalog', label: 'Catálogo & GastroFood', icon: ShoppingBag },
+          ...(hasGlobalMenuLink ? [{ id: 'catalog', label: 'Catálogo & GastroFood', icon: ShoppingBag }] : []),
           { id: 'business', label: 'Perfil Comercial & Capa', icon: Store },
           { id: 'profile', label: 'Perfil & Privacidade do Chip', icon: Shield },
           { id: 'shortcuts', label: 'Atalhos / & Etiquetas CRM', icon: Tag },
@@ -506,7 +556,7 @@ export const BaileysInstanceHubModal: React.FC<BaileysInstanceHubModalProps> = (
       {/* Body Content */}
       <div className="p-6 overflow-y-auto flex-1 space-y-6">
         {/* ABA 3: CATÁLOGO & GASTROFOOD (ITEM 7) */}
-        {activeTab === 'catalog' && (
+        {activeTab === 'catalog' && hasGlobalMenuLink && (
           <div className="space-y-5">
             <div className="p-5 rounded-2xl bg-gradient-to-br from-emerald-950/50 via-slate-900 to-slate-900 border border-emerald-500/30 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
               <div className="space-y-1">

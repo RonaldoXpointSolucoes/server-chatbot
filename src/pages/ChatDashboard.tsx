@@ -1147,18 +1147,40 @@ export default function ChatDashboard() {
   // Estados para o Modal Premium de Atribuição de Implantação Completa CRM
   const [showRecordingModal, setShowRecordingModal] = useState(false);
   const [showPauseMenu, setShowPauseMenu] = useState(false);
+  const [showHeaderToolsMenu, setShowHeaderToolsMenu] = useState(false);
+  const [showContactMetaMenu, setShowContactMetaMenu] = useState(false);
+
+  // Regra Global: Cardápio 30d e Sincronização de Cardápio só aparecem se existir Link do Cardápio Digital salvo nas Variáveis Globais
+  const configuredMenuLink = String(tenantInfo?.settings?.link_cardapio || '').trim();
+  const hasGlobalMenuLink = configuredMenuLink.length > 0;
   
-  // Ref para cliques fora do menu de pausa
+  // Refs para cliques fora dos submenus do cabeçalho
   const pauseMenuRef = useRef<HTMLDivElement>(null);
+  const headerToolsMenuRef = useRef<HTMLDivElement>(null);
+  const contactMetaMenuRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (pauseMenuRef.current && !pauseMenuRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (pauseMenuRef.current && !pauseMenuRef.current.contains(target)) {
         setShowPauseMenu(false);
+      }
+      if (headerToolsMenuRef.current && !headerToolsMenuRef.current.contains(target)) {
+        setShowHeaderToolsMenu(false);
+      }
+      if (contactMetaMenuRef.current && !contactMetaMenuRef.current.contains(target)) {
+        setShowContactMetaMenu(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  useEffect(() => {
+    setShowHeaderToolsMenu(false);
+    setShowContactMetaMenu(false);
+    setShowPauseMenu(false);
+  }, [activeChatId]);
 
   const [showImplantacaoModal, setShowImplantacaoModal] = useState(false);
   const [implantacaoSelectedAgent, setImplantacaoSelectedAgent] = useState<string | null>(null);
@@ -8926,15 +8948,15 @@ export default function ChatDashboard() {
               </div>
             </div>
           ) : (
-            <div className="relative h-16 shrink-0 bg-[#f0f2f5] dark:bg-[#202c33] flex items-center justify-between px-4 z-20 shadow-sm border-l border-white/5">
-            <div className="flex items-center gap-3 relative">
+            <div className="relative min-h-[64px] py-1.5 shrink-0 bg-[#f0f2f5]/95 dark:bg-[#202c33]/95 backdrop-blur-md flex items-center justify-between gap-2 sm:gap-3 px-3 sm:px-4 z-20 shadow-sm border-b border-black/5 dark:border-white/5 border-l">
+            <div className="flex items-center gap-2.5 relative min-w-0 flex-1">
               <button 
                 type="button"
                 aria-label="Voltar para a lista de conversas"
                 title={otherUnreadInfo.count > 0 ? `Voltar (${otherUnreadInfo.count} conversa(s) não lida(s) aguardando)` : "Voltar para todas as conversas"}
                 className={cn(
                   isXPointRemoteOpen && xpointRemoteWidthMode === 'expanded' ? "2xl:hidden" : "md:hidden",
-                  "relative flex items-center justify-center p-2 -ml-2 mr-1 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#aebac1] transition-colors cursor-pointer shrink-0"
+                  "relative flex items-center justify-center p-2 -ml-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#aebac1] transition-colors active:scale-95 cursor-pointer shrink-0"
                 )}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -8947,7 +8969,7 @@ export default function ChatDashboard() {
                   }
                 }}
               >
-                <ChevronLeft size={24} />
+                <ChevronLeft size={22} />
                 {otherUnreadInfo.count > 0 && (
                   <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-[#00a884] text-white text-[10px] font-black flex items-center justify-center shadow-md ring-2 ring-[#f0f2f5] dark:ring-[#202c33] animate-bounce">
                     {otherUnreadInfo.count > 99 ? '99+' : otherUnreadInfo.count}
@@ -8955,7 +8977,7 @@ export default function ChatDashboard() {
                 )}
               </button>
               
-              <div className="flex items-center gap-3 relative">
+              <div className="flex items-center gap-2.5 relative min-w-0 flex-1">
                 <div className="relative shrink-0">
                   <img 
                       src={activeChat.avatar} 
@@ -8976,9 +8998,9 @@ export default function ChatDashboard() {
                     </div>
                   )}
                 </div>
-                <div className="flex flex-col justify-center min-w-0">
-                  <h2 className="font-medium text-[#111b21] dark:text-[#e9edef] leading-tight flex items-center gap-2">
-                    <span className="truncate max-w-[120px] sm:max-w-[180px] md:max-w-[220px] lg:max-w-[150px] xl:max-w-[320px]">{getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone)}</span>
+                <div className="flex flex-col justify-center min-w-0 flex-1">
+                  <h2 className="text-[14px] sm:text-[15px] font-semibold text-[#111b21] dark:text-[#e9edef] leading-snug flex items-center gap-2 min-w-0">
+                    <span className="truncate">{getContactDisplayName(activeChat.custom_name || activeChat.name, activeChat.push_name, activeChat.phone)}</span>
                     {isGroupContact(activeChat) && (
                       <span className="px-2 py-0.5 text-[9px] font-black uppercase tracking-wider bg-gradient-to-r from-indigo-500/20 to-purple-500/20 text-indigo-600 dark:text-indigo-400 rounded-full border border-indigo-500/30 flex items-center gap-1 shrink-0 shadow-sm select-none">
                         <Users size={10} strokeWidth={2.5} />
@@ -8987,15 +9009,16 @@ export default function ChatDashboard() {
                     )}
                   </h2>
                   
-                  {/* Premium Group Pill, Company Info Button or Phone with Copy Option */}
-                  <div className="flex items-center gap-2 mt-0.5 animate-in fade-in slide-in-from-top-1 duration-300 flex-nowrap whitespace-nowrap">
+                  {/* Linha Única Compacta de Metadados (Sem Encavalamento Vertical + Submenu de Vínculos/CNPJ) */}
+                  <div className="flex items-center gap-1.5 mt-0.5 flex-nowrap min-w-0">
                     {isGroupContact(activeChat) ? (
-                      <div className="flex items-center gap-1.5 bg-gradient-to-r from-indigo-500/10 to-purple-500/10 dark:from-indigo-500/15 dark:to-purple-500/15 px-2.5 py-0.5 rounded-full border border-indigo-500/25 text-indigo-600 dark:text-indigo-400 text-[11px] font-medium transition-all duration-200">
-                        <Users size={11} className="shrink-0 text-indigo-500" />
-                        <span className="font-mono text-[10.5px]">
+                      <div className="inline-flex items-center gap-1.5 bg-gradient-to-r from-indigo-500/10 to-purple-500/10 dark:from-indigo-500/15 dark:to-purple-500/15 h-5 px-2 rounded-full border border-indigo-500/25 text-indigo-600 dark:text-indigo-400 text-[10.5px] font-medium shrink-0 max-w-full">
+                        <Users size={10} className="shrink-0 text-indigo-500" />
+                        <span className="font-mono text-[10px] truncate max-w-[160px] sm:max-w-[240px]">
                           ID: {(activeChat.whatsapp_jid || activeChat.phone || activeChat.id || '').split('@')[0]}
                         </span>
                         <button
+                          type="button"
                           onClick={(e) => {
                             e.stopPropagation();
                             const jidToCopy = activeChat.whatsapp_jid || activeChat.phone || activeChat.id;
@@ -9003,281 +9026,371 @@ export default function ChatDashboard() {
                             setCopiedPhone(true);
                             setTimeout(() => setCopiedPhone(false), 2000);
                           }}
-                          className="p-0.5 rounded hover:bg-indigo-500/20 transition-colors flex items-center justify-center"
+                          className="p-0.5 rounded hover:bg-indigo-500/20 transition-colors flex items-center justify-center shrink-0 cursor-pointer"
                           title="Copiar ID do Grupo"
                         >
                           {copiedPhone ? (
-                            <CheckCircle2 size={11} className="text-emerald-500 animate-in zoom-in-95 duration-200" />
+                            <CheckCircle2 size={10} className="text-emerald-500 animate-in zoom-in-95 duration-200" />
                           ) : (
-                            <Copy size={11} className="opacity-70 hover:opacity-100 hover:scale-110 active:scale-95 transition-all duration-200" />
+                            <Copy size={10} className="opacity-70 hover:opacity-100 transition-all duration-200" />
                           )}
                         </button>
                       </div>
                     ) : (
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        {/* Celular com botão de cópia rápida */}
-                        {activeChat.phone && (
-                          <div className="flex items-center gap-1.5 bg-blue-500/10 dark:bg-blue-500/5 px-2.5 py-0.5 rounded-full border border-blue-500/20 text-blue-600 dark:text-blue-400 text-[11px] font-medium transition-all duration-200">
-                            <span className="font-mono">{formatPhoneNumber(activeChat.phone)}</span>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                navigator.clipboard.writeText(activeChat.phone);
-                                setCopiedPhone(true);
-                                setTimeout(() => setCopiedPhone(false), 2000);
-                              }}
-                              className="p-0.5 rounded hover:bg-blue-500/20 transition-colors flex items-center justify-center"
-                              title="Copiar Celular"
-                            >
-                              {copiedPhone ? (
-                                <CheckCircle2 size={11} className="text-emerald-500 animate-in zoom-in-95 duration-200" />
-                              ) : (
-                                <Copy size={11} className="opacity-70 hover:opacity-100 hover:scale-110 active:scale-95 transition-all duration-200" />
-                              )}
-                            </button>
-                          </div>
-                        )}
+                      (() => {
+                        const contactGroups = tenantInfo?.settings?.contactGroups || [];
+                        let linkedCompanies = (Array.isArray(activeChat.company_ids) ? activeChat.company_ids : [])
+                          .map((id: string) => allCompanies.find((c: any) => c.id === id))
+                          .filter(Boolean);
 
-                        {/* Empresa direta (se o contato for empresa ou tiver fantasy_name) */}
-                        {(activeChat.fantasy_name || (activeChat.document_type === 'cnpj' && (activeChat.custom_name || activeChat.name))) && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setCompanyDetailsOpen(activeChat);
-                            }}
-                            className="flex items-center gap-1 bg-[#00a884]/10 hover:bg-[#00a884]/20 px-2.5 py-0.5 rounded-full border border-[#00a884]/25 text-[#00a884] text-[11px] font-semibold transition-all duration-200 shadow-sm"
-                            title="Ver Dados da Empresa e Faturamento"
-                          >
-                            <Building2 size={11} className="shrink-0" />
-                            <span className="truncate max-w-[150px]">{activeChat.fantasy_name || activeChat.custom_name || activeChat.name}</span>
-                          </button>
-                        )}
+                        if (linkedCompanies.length === 0 && (activeChat.document_number || activeChat.phone)) {
+                          const cleanDoc = activeChat.document_number ? activeChat.document_number.replace(/\D/g, '') : null;
+                          const cleanPhone = activeChat.phone ? activeChat.phone.replace(/\D/g, '').slice(-8) : null;
+                          const matched = allCompanies.find((c: any) => {
+                            if (c.id === activeChat.id) return false;
+                            const compDoc = c.document_number ? c.document_number.replace(/\D/g, '') : null;
+                            const compPhone = c.phone ? c.phone.replace(/\D/g, '').slice(-8) : null;
+                            return (cleanDoc && compDoc && cleanDoc === compDoc) || (cleanPhone && compPhone && cleanPhone === compPhone);
+                          });
+                          if (matched) linkedCompanies = [matched];
+                        }
 
-                        {/* Empresas Vinculadas via company_ids ou auto-match & Grupos & Botão + Empresa */}
-                        {(() => {
-                          const contactGroups = tenantInfo?.settings?.contactGroups || [];
-                          let linkedCompanies = (Array.isArray(activeChat.company_ids) ? activeChat.company_ids : [])
-                            .map((id: string) => allCompanies.find((c: any) => c.id === id))
-                            .filter(Boolean);
+                        const matchingGroups = contactGroups.filter((g: any) => 
+                          (Array.isArray(activeChat.tags) && activeChat.tags.includes(g.id)) ||
+                          linkedCompanies.some((c: any) => Array.isArray(c.tags) && c.tags.includes(g.id))
+                        );
 
-                          if (linkedCompanies.length === 0 && (activeChat.document_number || activeChat.phone)) {
-                            const cleanDoc = activeChat.document_number ? activeChat.document_number.replace(/\D/g, '') : null;
-                            const cleanPhone = activeChat.phone ? activeChat.phone.replace(/\D/g, '').slice(-8) : null;
-                            const matched = allCompanies.find((c: any) => {
-                              if (c.id === activeChat.id) return false;
-                              const compDoc = c.document_number ? c.document_number.replace(/\D/g, '') : null;
-                              const compPhone = c.phone ? c.phone.replace(/\D/g, '').slice(-8) : null;
-                              return (cleanDoc && compDoc && cleanDoc === compDoc) || (cleanPhone && compPhone && cleanPhone === compPhone);
-                            });
-                            if (matched) linkedCompanies = [matched];
-                          }
+                        const hasGroup = matchingGroups.length > 0;
+                        const isDirectCompany = !!(activeChat.fantasy_name || (activeChat.document_type === 'cnpj' && (activeChat.custom_name || activeChat.name)));
+                        const hasLinkedCompany = linkedCompanies.length > 0;
+                        const hasAssociatedEntity = isDirectCompany || hasLinkedCompany || hasGroup;
 
-                          const matchingGroups = contactGroups.filter((g: any) => 
-                            (Array.isArray(activeChat.tags) && activeChat.tags.includes(g.id)) ||
-                            linkedCompanies.some((c: any) => Array.isArray(c.tags) && c.tags.includes(g.id))
-                          );
+                        const docNumber = activeChat.document_number || linkedCompanies.find((c: any) => !!c.document_number)?.document_number;
+                        const rawCnpj = docNumber ? docNumber.replace(/\D/g, '') : null;
+                        const needsCnpjAlert = !docNumber && !hasGroup && (activeChat.fantasy_name || activeChat.document_type === 'cnpj' || linkedCompanies.length > 0);
 
-                          const hasGroup = matchingGroups.length > 0;
-                          const isDirectCompany = !!(activeChat.fantasy_name || (activeChat.document_type === 'cnpj' && (activeChat.custom_name || activeChat.name)));
-                          const hasLinkedCompany = linkedCompanies.length > 0;
-                          const hasAssociatedEntity = isDirectCompany || hasLinkedCompany || hasGroup;
+                        const primaryCompanyTarget = isDirectCompany ? activeChat : (linkedCompanies[0] || null);
+                        const primaryCompanyLabel = isDirectCompany
+                          ? (activeChat.fantasy_name || activeChat.custom_name || activeChat.name)
+                          : linkedCompanies[0]
+                          ? (linkedCompanies[0].fantasy_name || linkedCompanies[0].custom_name || linkedCompanies[0].name)
+                          : null;
 
-                          return (
-                            <>
-                              {/* Empresas Vinculadas */}
-                              {linkedCompanies.map((comp: any) => (
+                        const extraCompaniesCount = isDirectCompany ? linkedCompanies.length : Math.max(0, linkedCompanies.length - 1);
+                        const extraGroupsCount = primaryCompanyTarget ? matchingGroups.length : Math.max(0, matchingGroups.length - 1);
+                        const hasDetailsPopover = Boolean(docNumber || extraCompaniesCount > 0 || extraGroupsCount > 0 || (primaryCompanyLabel && matchingGroups.length > 0));
+
+                        return (
+                          <div className="flex items-center gap-1.5 flex-nowrap min-w-0">
+                            {/* 1. Celular com cópia rápida */}
+                            {activeChat.phone && (
+                              <div className="inline-flex items-center gap-1 bg-blue-500/10 dark:bg-blue-500/10 h-5 px-2 rounded-full border border-blue-500/20 text-blue-600 dark:text-blue-400 text-[10.5px] font-medium shrink-0">
+                                <span className="font-mono leading-none">{formatPhoneNumber(activeChat.phone)}</span>
                                 <button
-                                  key={comp.id}
+                                  type="button"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    setCompanyDetailsOpen(comp);
+                                    navigator.clipboard.writeText(activeChat.phone);
+                                    setCopiedPhone(true);
+                                    setTimeout(() => setCopiedPhone(false), 2000);
                                   }}
-                                  className="flex items-center gap-1 bg-emerald-500/10 hover:bg-emerald-500/20 px-2.5 py-0.5 rounded-full border border-emerald-500/25 text-emerald-600 dark:text-emerald-400 text-[11px] font-semibold transition-all duration-200 shadow-sm hover:scale-105 active:scale-95"
-                                  title={`Empresa Vinculada: ${comp.fantasy_name || comp.name}`}
+                                  className="p-0.5 rounded hover:bg-blue-500/20 transition-colors flex items-center justify-center cursor-pointer"
+                                  title="Copiar Celular"
                                 >
-                                  <Building2 size={11} className="shrink-0" />
-                                  <span className="truncate max-w-[140px]">{comp.fantasy_name || comp.custom_name || comp.name}</span>
+                                  {copiedPhone ? (
+                                    <CheckCircle2 size={10} className="text-emerald-500 animate-in zoom-in-95 duration-200" />
+                                  ) : (
+                                    <Copy size={10} className="opacity-70 hover:opacity-100 active:scale-95 transition-all duration-150" />
+                                  )}
                                 </button>
-                              ))}
+                              </div>
+                            )}
 
-                              {/* Botão + Empresa (Apenas se NÃO houver nenhuma empresa e NENHUM grupo empresarial associado E habilitado na caixa) */}
-                              {!hasAssociatedEntity && (() => {
+                            {/* 2. Empresa Principal ou Grupo Principal (Inline Compacto) */}
+                            {primaryCompanyTarget && primaryCompanyLabel ? (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setCompanyDetailsOpen(primaryCompanyTarget);
+                                }}
+                                className="hidden sm:inline-flex items-center gap-1 bg-emerald-500/10 hover:bg-emerald-500/20 h-5 px-2 rounded-full border border-emerald-500/25 text-emerald-600 dark:text-emerald-400 text-[10.5px] font-semibold transition-all duration-200 shadow-sm active:scale-95 max-w-[130px] xl:max-w-[175px] shrink-0 cursor-pointer"
+                                title={`Ver Dados da Empresa e Faturamento: ${primaryCompanyLabel}`}
+                              >
+                                <Building2 size={10} className="shrink-0" />
+                                <span className="truncate leading-none">{primaryCompanyLabel}</span>
+                              </button>
+                            ) : hasGroup ? (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setCompanyDetailsOpen(linkedCompanies[0] || activeChat);
+                                }}
+                                className="hidden sm:inline-flex items-center gap-1 h-5 px-2 rounded-full border text-[10.5px] font-bold shadow-sm transition-all duration-200 active:scale-95 max-w-[130px] shrink-0 cursor-pointer"
+                                style={{
+                                  backgroundColor: `${matchingGroups[0].color}15`,
+                                  borderColor: `${matchingGroups[0].color}30`,
+                                  color: matchingGroups[0].color
+                                }}
+                                title={`Grupo Empresarial: ${matchingGroups[0].name}`}
+                              >
+                                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: matchingGroups[0].color }} />
+                                <span className="truncate leading-none">{matchingGroups[0].name}</span>
+                              </button>
+                            ) : !hasAssociatedEntity ? (
+                              (() => {
                                 const currentInst = getStrictInstance(activeChat) || activeChannelFilter;
                                 const isAssociateCompanyEnabled = instanceCache.isAssociateCompanyEnabled(currentInst);
                                 if (!isAssociateCompanyEnabled) return null;
 
                                 return (
                                   <button
+                                    type="button"
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       setCompanyDetailsOpen(activeChat);
                                     }}
-                                    className="flex items-center gap-1 bg-gray-500/10 hover:bg-[#00a884]/15 px-2 py-0.5 rounded-full border border-dashed border-gray-400/40 hover:border-[#00a884]/40 text-gray-500 dark:text-gray-400 hover:text-[#00a884] text-[10.5px] font-medium transition-all duration-200 active:scale-95"
+                                    className="hidden sm:inline-flex items-center gap-1 bg-gray-500/10 hover:bg-[#00a884]/15 h-5 px-2 rounded-full border border-dashed border-gray-400/40 hover:border-[#00a884]/40 text-gray-500 dark:text-gray-400 hover:text-[#00a884] text-[10px] font-medium transition-all duration-200 active:scale-95 shrink-0 cursor-pointer"
                                     title="Associar Empresa a este Contato"
                                   >
                                     <Building2 size={10} className="shrink-0" />
-                                    <span>+ Empresa</span>
+                                    <span className="leading-none">+ Empresa</span>
                                   </button>
                                 );
-                              })()}
+                              })()
+                            ) : null}
 
-                              {/* Grupos Empresariais */}
-                              {matchingGroups.map((g: any) => (
+                            {/* 3. Submenu Compacto de Documento (CNPJ/CPF), Faturamento ($) e Múltiplos Vínculos */}
+                            {hasDetailsPopover && (
+                              <div className="relative shrink-0" ref={contactMetaMenuRef}>
                                 <button
-                                  key={g.id}
+                                  type="button"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    setCompanyDetailsOpen(linkedCompanies[0] || activeChat);
+                                    setShowContactMetaMenu((prev) => !prev);
                                   }}
-                                  className="flex items-center gap-1 px-2.5 py-0.5 rounded-full border text-[11px] font-bold shadow-sm transition-all duration-200 hover:scale-105 active:scale-95"
-                                  style={{
-                                    backgroundColor: `${g.color}15`,
-                                    borderColor: `${g.color}30`,
-                                    color: g.color
-                                  }}
-                                  title={`Grupo Empresarial: ${g.name}. Clique para detalhes.`}
-                                >
-                                  <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: g.color }} />
-                                  <span>{g.name}</span>
-                                </button>
-                              ))}
-                            </>
-                          );
-                        })()}
-
-                        {/* Documento CNPJ / CPF e Acesso a Faturamento */}
-                        {(() => {
-                          let linkedCompanies = (Array.isArray(activeChat.company_ids) ? activeChat.company_ids : [])
-                            .map((id: string) => allCompanies.find((c: any) => c.id === id))
-                            .filter(Boolean);
-
-                          if (linkedCompanies.length === 0 && (activeChat.document_number || activeChat.phone)) {
-                            const cleanDoc = activeChat.document_number ? activeChat.document_number.replace(/\D/g, '') : null;
-                            const cleanPhone = activeChat.phone ? activeChat.phone.replace(/\D/g, '').slice(-8) : null;
-                            const matched = allCompanies.find((c: any) => {
-                              if (c.id === activeChat.id) return false;
-                              const compDoc = c.document_number ? c.document_number.replace(/\D/g, '') : null;
-                              const compPhone = c.phone ? c.phone.replace(/\D/g, '').slice(-8) : null;
-                              return (cleanDoc && compDoc && cleanDoc === compDoc) || (cleanPhone && compPhone && cleanPhone === compPhone);
-                            });
-                            if (matched) linkedCompanies = [matched];
-                          }
-
-                          const docNumber = activeChat.document_number || linkedCompanies.find((c: any) => !!c.document_number)?.document_number;
-                          const rawCnpj = docNumber ? docNumber.replace(/\D/g, '') : null;
-
-                          if (docNumber) {
-                            return (
-                              <div className="flex items-center gap-1 bg-slate-500/10 dark:bg-slate-500/5 px-2.5 py-0.5 rounded-full border border-slate-500/20 text-slate-600 dark:text-slate-400 text-[11px] font-mono font-medium transition-all duration-200">
-                                <span>{formatDocumentNumber(docNumber)}</span>
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    navigator.clipboard.writeText(docNumber);
-                                    setCopiedDoc(true);
-                                    setTimeout(() => setCopiedDoc(false), 2000);
-                                  }}
-                                  className="p-0.5 rounded hover:bg-slate-500/20 transition-colors flex items-center justify-center"
-                                  title="Copiar CNPJ/CPF"
-                                >
-                                  {copiedDoc ? (
-                                    <CheckCircle2 size={11} className="text-emerald-500 animate-in zoom-in-95 duration-200" />
-                                  ) : (
-                                    <Copy size={11} className="opacity-70 hover:opacity-100 hover:scale-110 active:scale-95 transition-all duration-200" />
+                                  className={cn(
+                                    "inline-flex items-center gap-1 h-5 px-2 rounded-full border text-[10px] font-semibold transition-all duration-200 active:scale-95 cursor-pointer",
+                                    showContactMetaMenu
+                                      ? "bg-slate-600/20 dark:bg-white/15 border-slate-400/40 dark:border-white/25 text-slate-800 dark:text-white"
+                                      : "bg-slate-500/10 hover:bg-slate-500/20 dark:bg-white/[0.06] dark:hover:bg-white/[0.12] border-slate-500/20 dark:border-white/10 text-slate-600 dark:text-slate-300"
                                   )}
+                                  title={docNumber ? `Dados Fiscais & Vínculos (${formatDocumentNumber(docNumber)})` : "Ver empresas e grupos vinculados"}
+                                >
+                                  {rawCnpj && rawCnpj.length === 14 ? (
+                                    <CircleDollarSign size={11} className="text-emerald-500 shrink-0" />
+                                  ) : (
+                                    <FileText size={10} className="shrink-0 opacity-80" />
+                                  )}
+                                  <span className="hidden xl:inline font-mono leading-none">
+                                    {docNumber ? formatDocumentNumber(docNumber) : `+${extraCompaniesCount + extraGroupsCount} vínculo(s)`}
+                                  </span>
+                                  <span className="xl:hidden leading-none">
+                                    {docNumber ? 'CNPJ' : `+${extraCompaniesCount + extraGroupsCount}`}
+                                  </span>
+                                  <ChevronDown size={10} className={cn("transition-transform duration-200 opacity-70", showContactMetaMenu && "rotate-180")} />
                                 </button>
-                                {rawCnpj && rawCnpj.length === 14 && (
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      window.open(`https://mensalidadedatadivas.vercel.app/?e=${rawCnpj}`, '_blank');
-                                    }}
-                                    className="p-0.5 rounded hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 transition-colors flex items-center justify-center"
-                                    title="Abrir Portal de Mensalidades / Faturamento"
-                                  >
-                                    <CircleDollarSign size={12} />
-                                  </button>
-                                )}
+
+                                <AnimatePresence>
+                                  {showContactMetaMenu && (
+                                    <motion.div
+                                      initial={{ opacity: 0, y: 8, scale: 0.96 }}
+                                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                                      exit={{ opacity: 0, y: 8, scale: 0.96 }}
+                                      transition={{ duration: 0.15 }}
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="absolute left-0 top-full mt-2 w-72 bg-white/95 dark:bg-[#1b262c]/95 backdrop-blur-xl rounded-2xl shadow-[0_12px_40px_rgb(0,0,0,0.25)] border border-slate-200/80 dark:border-white/10 p-3 z-[85] space-y-2.5"
+                                    >
+                                      <div className="text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 flex items-center justify-between">
+                                        <span>Dados & Vínculos do Contato</span>
+                                      </div>
+
+                                      {/* CNPJ / CPF + Copiar + Portal Mensalidades */}
+                                      {docNumber && (
+                                        <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-[#111b21]/80 border border-slate-200/70 dark:border-white/5 space-y-2">
+                                          <div className="flex items-center justify-between gap-2">
+                                            <div className="min-w-0">
+                                              <div className="text-[10px] font-bold uppercase text-slate-400">Documento Fiscal</div>
+                                              <div className="text-xs font-mono font-bold text-slate-700 dark:text-slate-200 truncate">
+                                                {formatDocumentNumber(docNumber)}
+                                              </div>
+                                            </div>
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                navigator.clipboard.writeText(docNumber);
+                                                setCopiedDoc(true);
+                                                setTimeout(() => setCopiedDoc(false), 2000);
+                                              }}
+                                              className="px-2.5 py-1.5 rounded-lg bg-slate-200/70 dark:bg-white/10 hover:bg-slate-300/70 dark:hover:bg-white/15 text-slate-700 dark:text-slate-200 text-[11px] font-semibold flex items-center gap-1 transition-colors active:scale-95 cursor-pointer shrink-0"
+                                              title="Copiar CNPJ/CPF"
+                                            >
+                                              {copiedDoc ? <CheckCircle2 size={12} className="text-emerald-500" /> : <Copy size={12} />}
+                                              <span>{copiedDoc ? 'Copiado' : 'Copiar'}</span>
+                                            </button>
+                                          </div>
+
+                                          {rawCnpj && rawCnpj.length === 14 && (
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                setShowContactMetaMenu(false);
+                                                window.open(`https://mensalidadedatadivas.vercel.app/?e=${rawCnpj}`, '_blank');
+                                              }}
+                                              className="w-full py-1.5 px-2.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors active:scale-95 cursor-pointer"
+                                            >
+                                              <CircleDollarSign size={13} />
+                                              <span>Portal de Mensalidades / Faturamento</span>
+                                              <ExternalLink size={11} className="opacity-70" />
+                                            </button>
+                                          )}
+                                        </div>
+                                      )}
+
+                                      {/* Empresas Vinculadas / Direta */}
+                                      {(isDirectCompany || linkedCompanies.length > 0) && (
+                                        <div className="space-y-1">
+                                          <div className="text-[10px] font-bold uppercase text-slate-400 px-0.5">Empresas</div>
+                                          <div className="flex flex-col gap-1">
+                                            {isDirectCompany && (
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  setShowContactMetaMenu(false);
+                                                  setCompanyDetailsOpen(activeChat);
+                                                }}
+                                                className="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-[#00a884]/10 hover:bg-[#00a884]/20 border border-[#00a884]/25 text-[#00a884] text-xs font-semibold transition-all cursor-pointer"
+                                              >
+                                                <span className="flex items-center gap-1.5 truncate">
+                                                  <Building2 size={12} className="shrink-0" />
+                                                  <span className="truncate">{activeChat.fantasy_name || activeChat.custom_name || activeChat.name}</span>
+                                                </span>
+                                                <ChevronRight size={12} className="shrink-0 opacity-70" />
+                                              </button>
+                                            )}
+                                            {linkedCompanies.map((comp: any) => (
+                                              <button
+                                                key={comp.id}
+                                                type="button"
+                                                onClick={() => {
+                                                  setShowContactMetaMenu(false);
+                                                  setCompanyDetailsOpen(comp);
+                                                }}
+                                                className="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/25 text-emerald-600 dark:text-emerald-400 text-xs font-semibold transition-all cursor-pointer"
+                                              >
+                                                <span className="flex items-center gap-1.5 truncate">
+                                                  <Building2 size={12} className="shrink-0" />
+                                                  <span className="truncate">{comp.fantasy_name || comp.custom_name || comp.name}</span>
+                                                </span>
+                                                <ChevronRight size={12} className="shrink-0 opacity-70" />
+                                              </button>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      {/* Grupos Empresariais */}
+                                      {matchingGroups.length > 0 && (
+                                        <div className="space-y-1">
+                                          <div className="text-[10px] font-bold uppercase text-slate-400 px-0.5">Grupos Empresariais</div>
+                                          <div className="flex flex-wrap gap-1.5">
+                                            {matchingGroups.map((g: any) => (
+                                              <button
+                                                key={g.id}
+                                                type="button"
+                                                onClick={() => {
+                                                  setShowContactMetaMenu(false);
+                                                  setCompanyDetailsOpen(linkedCompanies[0] || activeChat);
+                                                }}
+                                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border text-[11px] font-bold transition-all active:scale-95 cursor-pointer"
+                                                style={{
+                                                  backgroundColor: `${g.color}15`,
+                                                  borderColor: `${g.color}30`,
+                                                  color: g.color
+                                                }}
+                                              >
+                                                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: g.color }} />
+                                                <span>{g.name}</span>
+                                              </button>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
+                                    </motion.div>
+                                  )}
+                                </AnimatePresence>
                               </div>
-                            );
-                          }
+                            )}
 
-                          // Se não tem CNPJ nem grupo, mostrar badge FALTA CNPJ
-                          const contactGroups = tenantInfo?.settings?.contactGroups || [];
-                          const hasGroup = contactGroups.some((g: any) => 
-                            (Array.isArray(activeChat.tags) && activeChat.tags.includes(g.id)) ||
-                            linkedCompanies.some((c: any) => Array.isArray(c.tags) && c.tags.includes(g.id))
-                          );
-
-                          if (!hasGroup && (activeChat.fantasy_name || activeChat.document_type === 'cnpj' || linkedCompanies.length > 0)) {
-                            return (
-                              <span className="flex items-center gap-1 bg-rose-500/10 text-rose-500 px-2 py-0.5 rounded-full border border-rose-500/20 text-[10.5px] font-bold">
+                            {/* 4. Alerta FALTA CNPJ (quando aplicável) */}
+                            {needsCnpjAlert && (
+                              <span className="hidden sm:inline-flex items-center gap-1 bg-rose-500/10 text-rose-500 h-5 px-2 rounded-full border border-rose-500/20 text-[10px] font-bold shrink-0">
                                 <AlertTriangle size={10} className="shrink-0 animate-pulse" />
-                                FALTA CNPJ
+                                <span className="leading-none">FALTA CNPJ</span>
                               </span>
-                            );
-                          }
-
-                          return null;
-                        })()}
-                      </div>
+                            )}
+                          </div>
+                        );
+                      })()
                     )}
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* Right Header Area */}
-            <div className="flex items-center gap-2 sm:gap-3">
+            {/* Right Header Area — Compacta, Sem Overflow e com Submenu Glassmorphism */}
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
               
-              {/* Botão de Acesso Remoto (XPoint Remote v1.4.8) */}
+              {/* Botão Compacto de Acesso Remoto (XPoint Remote) */}
               {activeChat && (
                 <button
+                  type="button"
                   onClick={() => {
                     const ctx = resolveContactRemoteContext(activeChat, allCompanies, contacts);
                     toggleXPointRemotePanel(ctx);
                   }}
                   className={cn(
-                    "relative flex items-center justify-center gap-1.5 h-8 px-2.5 xl:px-3 rounded-full transition-all duration-300 text-xs font-semibold border shadow-sm hover:scale-105 active:scale-95 whitespace-nowrap shrink-0",
+                    "hidden sm:inline-flex relative items-center justify-center gap-1.5 h-8 px-2.5 rounded-full transition-all duration-200 text-[11px] font-semibold border shadow-sm active:scale-95 whitespace-nowrap shrink-0 cursor-pointer",
                     xpointRemoteActiveSession
-                      ? "bg-amber-500/15 hover:bg-amber-500/25 border-amber-500/40 text-amber-600 dark:text-amber-300 shadow-[0_0_15px_rgba(245,158,11,0.25)]"
+                      ? "bg-amber-500/15 hover:bg-amber-500/25 border-amber-500/40 text-amber-600 dark:text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.2)]"
                       : isXPointRemoteOpen
-                      ? "bg-cyan-500/15 hover:bg-cyan-500/25 border-cyan-500/40 text-cyan-600 dark:text-cyan-300 shadow-[0_0_15px_rgba(6,182,212,0.2)]"
+                      ? "bg-cyan-500/15 hover:bg-cyan-500/25 border-cyan-500/40 text-cyan-600 dark:text-cyan-300 shadow-[0_0_12px_rgba(6,182,212,0.18)]"
                       : xpointRemoteResolvedInfo && xpointRemoteResolvedInfo.onlineDevices > 0
                       ? "bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-500/30 text-emerald-600 dark:text-emerald-400"
                       : xpointRemoteActiveContext?.cnpj
                       ? "bg-cyan-500/10 hover:bg-cyan-500/20 border-cyan-500/25 text-cyan-600 dark:text-cyan-400"
-                      : "bg-slate-500/10 hover:bg-slate-500/20 border-slate-500/20 text-[#54656f] dark:text-[#aebac1]"
+                      : "bg-slate-500/10 hover:bg-slate-500/20 dark:bg-white/[0.06] dark:hover:bg-white/[0.12] border-black/5 dark:border-white/10 text-[#54656f] dark:text-[#aebac1]"
                   )}
                   title={
                     xpointRemoteActiveSession
                       ? `Em Atendimento Remoto (${xpointRemoteActiveSession.protocolNumber}) — Máquina: ${xpointRemoteActiveSession.displayName || xpointRemoteActiveSession.rustdeskId}`
                       : xpointRemoteResolvedInfo
-                      ? `XPoint Remote • ${xpointRemoteResolvedInfo.companyName || xpointRemoteActiveContext?.companyName || 'Cliente'} (${xpointRemoteResolvedInfo.onlineDevices} online / ${xpointRemoteResolvedInfo.totalDevices} PCs) — CNPJ: ${xpointRemoteResolvedInfo.formattedCnpj || xpointRemoteActiveContext?.formattedCnpj}`
+                      ? `XPoint Remote • ${xpointRemoteResolvedInfo.companyName || xpointRemoteActiveContext?.companyName || 'Cliente'} (${xpointRemoteResolvedInfo.onlineDevices} online de ${xpointRemoteResolvedInfo.totalDevices} PCs) — CNPJ: ${xpointRemoteResolvedInfo.formattedCnpj || xpointRemoteActiveContext?.formattedCnpj}`
                       : xpointRemoteActiveContext?.cnpj
                       ? `Abrir Acesso Remoto (XPoint Remote) — CNPJ vinculado: ${xpointRemoteActiveContext.formattedCnpj || xpointRemoteActiveContext.cnpj}`
                       : "Abrir Acesso Remoto (XPoint Remote) — Contato sem CNPJ vinculado (clique para vincular em 1 clique)"
                   }
                 >
-                  <div className="relative flex items-center justify-center">
+                  <div className="relative flex items-center justify-center shrink-0">
                     {xpointRemoteActiveSession ? (
-                      <Radio size={14} className="text-amber-500 animate-pulse" />
+                      <Radio size={13} className="text-amber-500 animate-pulse" />
                     ) : (
-                      <Monitor size={14} className={cn(isXPointRemoteOpen && "text-cyan-500")} />
+                      <Monitor size={13} className={cn(isXPointRemoteOpen && "text-cyan-500")} />
                     )}
                     {xpointRemoteActiveContext?.cnpj && !xpointRemoteResolvedInfo && !xpointRemoteActiveSession && (
-                      <span className="absolute -top-1 -right-1 flex h-2 w-2" title="CNPJ vinculado ao contato">
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
+                      <span className="absolute -top-1 -right-1 flex h-1.5 w-1.5" title="CNPJ vinculado ao contato">
+                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-cyan-500"></span>
                       </span>
                     )}
                   </div>
 
                   {xpointRemoteActiveSession ? (
-                    <span className="hidden md:inline font-bold">
-                      Em Atendimento Remoto ({xpointRemoteActiveSession.protocolNumber})
+                    <span className="hidden xl:inline font-bold">
+                      Ativo
                     </span>
                   ) : (
-                    <span className="hidden xl:inline">Acesso Remoto</span>
+                    <span className="hidden 2xl:inline">Remoto</span>
                   )}
 
                   {xpointRemoteResolvedInfo && (
@@ -9291,38 +9404,28 @@ export default function ChatDashboard() {
                     >
                       <span
                         className={cn(
-                          "w-1.5 h-1.5 rounded-full",
+                          "w-1.5 h-1.5 rounded-full shrink-0",
                           xpointRemoteResolvedInfo.onlineDevices > 0 ? "bg-emerald-500 animate-pulse" : "bg-slate-400"
                         )}
                       />
                       <span>
-                        {xpointRemoteResolvedInfo.onlineDevices} online / {xpointRemoteResolvedInfo.totalDevices} PCs
+                        {xpointRemoteResolvedInfo.onlineDevices}/{xpointRemoteResolvedInfo.totalDevices}
                       </span>
                     </span>
                   )}
                 </button>
               )}
 
-              {/* Botão de Chamada de Voz WaCalls */}
-              {activeChat && activeChat.phone && isCurrentBoxVoipReady && (
-                <button
-                  onClick={handleCallContact}
-                  className="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[#54656f] dark:text-[#aebac1] hover:text-[#00a884] dark:hover:text-[#00a884] transition-all duration-200 flex items-center justify-center"
-                  title="Fazer ligação de voz via WhatsApp"
-                >
-                  <Phone size={18} className="stroke-[2.5]" />
-                </button>
-              )}
-
-              {/* Botão de Controle da I.A (Visível em Mobile, Tablet e Desktop quando globalAiEnabled estiver ativo) */}
+              {/* Botão de Controle da I.A Compacto */}
               {globalAiEnabled && (
                 <div className="relative shrink-0" ref={pauseMenuRef}>
                   <button 
+                    type="button"
                     onClick={() => setShowPauseMenu(!showPauseMenu)}
                     className={cn(
-                      "flex items-center justify-center gap-1.5 h-8 w-8 xl:w-auto xl:px-3 rounded-full transition-all duration-300 text-xs font-semibold border shadow-sm hover:scale-105 active:scale-95 whitespace-nowrap",
+                      "flex items-center justify-center gap-1.5 h-8 w-8 2xl:w-auto 2xl:px-2.5 rounded-full transition-all duration-200 text-xs font-semibold border shadow-sm active:scale-95 whitespace-nowrap cursor-pointer",
                       !activeChat.ai_paused 
-                        ? "bg-indigo-500/10 hover:bg-indigo-500/20 border-indigo-500/30 text-indigo-600 dark:text-indigo-400 shadow-[0_0_15px_rgba(99,102,241,0.15)]"
+                        ? "bg-indigo-500/10 hover:bg-indigo-500/20 border-indigo-500/30 text-indigo-600 dark:text-indigo-400 shadow-[0_0_12px_rgba(99,102,241,0.12)]"
                         : activeChat.bot_paused_until
                         ? "bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/30 text-amber-600 dark:text-amber-400"
                         : "bg-rose-500/10 hover:bg-rose-500/20 border-rose-500/30 text-rose-600 dark:text-rose-400"
@@ -9338,7 +9441,7 @@ export default function ChatDashboard() {
                     <div className="relative flex items-center justify-center">
                       {!activeChat.ai_paused ? (
                         <>
-                          <BrainCircuit size={15} className="animate-pulse" />
+                          <BrainCircuit size={14} className="animate-pulse" />
                           <span className="absolute -top-1 -right-1 flex h-2 w-2">
                             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
                             <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
@@ -9350,14 +9453,14 @@ export default function ChatDashboard() {
                         <StopCircle size={14} className="text-rose-500" />
                       )}
                     </div>
-                    <span className="hidden xl:inline">
+                    <span className="hidden 2xl:inline">
                       {!activeChat.ai_paused 
-                        ? "I.A Ativa" 
+                        ? "I.A." 
                         : activeChat.bot_paused_until 
-                        ? "I.A Pausada (Temp)" 
-                        : "I.A Pausada"}
+                        ? "Pausada" 
+                        : "I.A. Off"}
                     </span>
-                    <ChevronDown size={12} className={cn("transition-transform duration-200 hidden xl:inline", showPauseMenu && "rotate-180")} />
+                    <ChevronDown size={12} className={cn("transition-transform duration-200 hidden 2xl:inline", showPauseMenu && "rotate-180")} />
                   </button>
 
                   <AnimatePresence>
@@ -9367,7 +9470,7 @@ export default function ChatDashboard() {
                         animate={{ opacity: 1, y: 0, scale: 1 }}
                         exit={{ opacity: 0, y: 10, scale: 0.95 }}
                         transition={{ duration: 0.15 }}
-                        className="absolute right-0 top-full mt-2 w-64 bg-white/95 dark:bg-slate-800/95 backdrop-blur-md rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700/60 py-2 z-[70] overflow-hidden"
+                        className="absolute right-0 top-full mt-2 w-64 bg-white/95 dark:bg-slate-800/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700/60 py-2 z-[85] overflow-hidden"
                       >
                         {activeChat.ai_paused ? (
                           <>
@@ -9394,7 +9497,8 @@ export default function ChatDashboard() {
                             </div>
 
                             <button
-                              className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 transition-colors active:scale-98"
+                              type="button"
+                              className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 transition-colors active:scale-98 cursor-pointer"
                               onClick={() => {
                                  useChatStore.getState().updateConversationField(activeChat.id, { 
                                    ai_paused: false,
@@ -9413,7 +9517,8 @@ export default function ChatDashboard() {
                               <>
                                 <div className="my-1 border-t border-slate-200 dark:border-slate-700/50"></div>
                                 <button
-                                  className="w-full flex items-center gap-3 px-4 py-2 text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/20 transition-colors active:scale-98"
+                                  type="button"
+                                  className="w-full flex items-center gap-3 px-4 py-2 text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/20 transition-colors active:scale-98 cursor-pointer"
                                   onClick={() => {
                                      useChatStore.getState().updateConversationField(activeChat.id, { 
                                        ai_paused: true,
@@ -9437,7 +9542,8 @@ export default function ChatDashboard() {
                             {[10, 60, 720].map((mins) => (
                               <button
                                 key={mins}
-                                className="w-full flex items-center gap-3 px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors active:scale-98"
+                                type="button"
+                                className="w-full flex items-center gap-3 px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors active:scale-98 cursor-pointer"
                                 onClick={() => {
                                    const pauseUntil = new Date(Date.now() + mins * 60000).toISOString();
                                    useChatStore.getState().updateConversationField(activeChat.id, { 
@@ -9454,7 +9560,8 @@ export default function ChatDashboard() {
                             ))}
                             <div className="my-1 border-t border-slate-200 dark:border-slate-700/50"></div>
                             <button
-                                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/20 transition-colors active:scale-98"
+                                type="button"
+                                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/20 transition-colors active:scale-98 cursor-pointer"
                                 onClick={() => {
                                    useChatStore.getState().updateConversationField(activeChat.id, { 
                                      ai_paused: true,
@@ -9478,63 +9585,189 @@ export default function ChatDashboard() {
                 </div>
               )}
 
-              <div className="hidden lg:flex items-center gap-2">
-                {/* Botão Rápido #01: Fixar Cardápio Digital 30 Dias */}
-                <button
-                  type="button"
-                  onClick={handlePinClientMenuLink}
-                  className="flex items-center justify-center gap-1.5 h-8 px-2.5 bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-500/25 rounded-full transition-all text-xs font-bold border border-amber-200 dark:border-amber-500/30 shadow-sm active:scale-95 whitespace-nowrap cursor-pointer"
-                  title={
-                    tenantInfo?.settings?.link_cardapio
-                      ? `#01 — Enviar e Fixar por 30 dias o Cardápio Digital desta empresa (${tenantInfo.settings.link_cardapio})`
-                      : '#01 — Enviar e Fixar Link do Cardápio Digital por 30 Dias (Salvo em Configurações > Conta > Variáveis Globais)'
-                  }
-                >
-                  <Pin size={13} />
-                  <span className="hidden xl:inline">Cardápio 30d</span>
-                </button>
+              {/* Controles Desktop: Submenu Elegante de Recursos + Resolver + Atribuir */}
+              <div className="hidden lg:flex items-center gap-1.5 shrink-0">
+                {/* Submenu Glassmorphism: Recursos & Ferramentas do Chat */}
+                <div className="relative shrink-0" ref={headerToolsMenuRef}>
+                  <button
+                    type="button"
+                    onClick={() => setShowHeaderToolsMenu((prev) => !prev)}
+                    className={cn(
+                      "flex items-center justify-center gap-1.5 h-8 px-2.5 rounded-full transition-all duration-200 text-xs font-semibold border shadow-sm active:scale-95 whitespace-nowrap cursor-pointer",
+                      showHeaderToolsMenu
+                        ? "bg-purple-500/15 text-purple-700 dark:text-purple-300 border-purple-500/35 shadow-[0_0_12px_rgba(168,85,247,0.18)]"
+                        : "bg-slate-500/10 hover:bg-slate-500/20 dark:bg-white/[0.06] dark:hover:bg-white/[0.12] text-slate-700 dark:text-slate-200 border-black/5 dark:border-white/10"
+                    )}
+                    title="Abrir Submenu de Recursos e Ferramentas Rápidas"
+                  >
+                    <Layers size={13} className="text-purple-500 dark:text-purple-400 shrink-0" />
+                    <span className="hidden xl:inline">Recursos</span>
+                    <ChevronDown size={12} className={cn("transition-transform duration-200 opacity-70", showHeaderToolsMenu && "rotate-180")} />
+                  </button>
 
-                {/* Botão Rápido: Central Avançada Baileys v7 (5 Abas) */}
-                <button
-                  type="button"
-                  onClick={() => setIsBaileysHubOpen(true)}
-                  className="flex items-center justify-center gap-1.5 h-8 px-2.5 bg-purple-50 text-purple-700 dark:bg-purple-500/15 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-500/25 rounded-full transition-all text-xs font-bold border border-purple-200 dark:border-purple-500/30 shadow-sm active:scale-95 whitespace-nowrap cursor-pointer"
-                  title="Abrir Central Avançada do Chip (Catálogo GastroFood, Perfil Business, Etiquetas, Chamadas e Privacidade)"
-                >
-                  <Zap size={13} />
-                  <span className="hidden xl:inline">Baileys v7</span>
-                </button>
+                  <AnimatePresence>
+                    {showHeaderToolsMenu && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 8, scale: 0.96 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 8, scale: 0.96 }}
+                        transition={{ duration: 0.15 }}
+                        className="absolute right-0 top-full mt-2 w-72 bg-white/95 dark:bg-[#1b262c]/95 backdrop-blur-xl rounded-2xl shadow-[0_12px_40px_rgb(0,0,0,0.25)] border border-slate-200/80 dark:border-white/10 p-1.5 z-[85] overflow-hidden"
+                      >
+                        <div className="px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                          Recursos & Atalhos do Chat
+                        </div>
 
-                {/* Botão Rápido: Abrir Mapa Mental & Prints das 18 Novidades */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    window.dispatchEvent(new CustomEvent('open-release-notes-hub', { detail: { tab: 'mindmap', expand: true } }));
-                  }}
-                  className="flex items-center justify-center gap-1.5 h-8 px-2.5 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-500/25 rounded-full transition-all text-xs font-bold border border-emerald-200 dark:border-emerald-500/30 shadow-sm active:scale-95 whitespace-nowrap cursor-pointer"
-                  title="Abrir Mapa Mental Interativo e Prints de Onde Clicar nas 18 Novidades"
-                >
-                  <Sparkles size={13} />
-                  <span className="hidden 2xl:inline">18 Novidades</span>
-                </button>
+                        {/* Fixar Cardápio 30d — Exibido SOMENTE se Link do Cardápio Digital estiver preenchido nas Variáveis Globais */}
+                        {hasGlobalMenuLink && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              setShowHeaderToolsMenu(false);
+                              await handlePinClientMenuLink();
+                            }}
+                            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-amber-500/10 transition-colors text-left group cursor-pointer"
+                          >
+                            <div className="w-8 h-8 rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                              <Pin size={15} />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="text-xs font-bold text-slate-800 dark:text-slate-100">Fixar Cardápio 30 Dias</div>
+                              <div className="text-[10px] text-slate-500 dark:text-slate-400 truncate">{configuredMenuLink}</div>
+                            </div>
+                          </button>
+                        )}
+
+                        {/* Ligação de Voz WaCalls (quando habilitado na caixa) */}
+                        {activeChat && activeChat.phone && isCurrentBoxVoipReady && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowHeaderToolsMenu(false);
+                              handleCallContact();
+                            }}
+                            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-emerald-500/10 transition-colors text-left group cursor-pointer"
+                          >
+                            <div className="w-8 h-8 rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                              <Phone size={15} />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="text-xs font-bold text-slate-800 dark:text-slate-100">Ligação de Voz WhatsApp</div>
+                              <div className="text-[10px] text-slate-500 dark:text-slate-400">Iniciar chamada via WaCalls</div>
+                            </div>
+                          </button>
+                        )}
+
+                        {/* Central Avançada Baileys v7 */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowHeaderToolsMenu(false);
+                            setIsBaileysHubOpen(true);
+                          }}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-purple-500/10 transition-colors text-left group cursor-pointer"
+                        >
+                          <div className="w-8 h-8 rounded-xl bg-purple-500/15 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                            <Zap size={15} />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="text-xs font-bold text-slate-800 dark:text-slate-100">Central WhatsApp (Baileys v7)</div>
+                            <div className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                              {hasGlobalMenuLink
+                                ? 'Catálogo, Perfil Comercial, Etiquetas e Segurança'
+                                : 'Perfil Comercial, Privacidade, Etiquetas e Segurança'}
+                            </div>
+                          </div>
+                        </button>
+
+                        {/* Mapa Mental & Guia de Novidades */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowHeaderToolsMenu(false);
+                            window.dispatchEvent(new CustomEvent('open-release-notes-hub', { detail: { tab: 'mindmap', expand: true } }));
+                          }}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-emerald-500/10 transition-colors text-left group cursor-pointer"
+                        >
+                          <div className="w-8 h-8 rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                            <Sparkles size={15} />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="text-xs font-bold text-slate-800 dark:text-slate-100">Mapa Mental & Novidades</div>
+                            <div className="text-[10px] text-slate-500 dark:text-slate-400">Guia interativo de recursos da plataforma</div>
+                          </div>
+                        </button>
+
+                        <div className="my-1 border-t border-slate-200/70 dark:border-white/10" />
+                        <div className="px-3 py-1 text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                          Sincronização com o Aparelho
+                        </div>
+
+                        <button
+                          type="button"
+                          disabled={isSyncingHistory[activeChat.id]}
+                          onClick={async () => {
+                            setShowHeaderToolsMenu(false);
+                            const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
+                            if (properTargetInstance) {
+                              await loadHistoricalMessages(activeChat.id, properTargetInstance, true);
+                              const resolvedId = await resolveInstanceUuid(tenantInfo?.id || '', properTargetInstance);
+                              if (resolvedId && tenantInfo?.id) {
+                                invokeBaileysAction(tenantInfo.id, resolvedId, 'fetchMessageHistory', {
+                                  jid: activeChat.whatsapp_jid || activeChat.phone,
+                                  count: 50
+                                }).catch(() => {});
+                              }
+                            }
+                          }}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-slate-100 dark:hover:bg-white/5 transition-colors text-left text-xs font-medium text-slate-700 dark:text-slate-200 cursor-pointer"
+                        >
+                          <History size={14} className={cn("text-[#00a884] shrink-0", isSyncingHistory[activeChat.id] && "animate-spin")} />
+                          <span>{isSyncingHistory[activeChat.id] ? "Buscando histórico..." : "Buscar Histórico do Aparelho"}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            setShowHeaderToolsMenu(false);
+                            const properTargetInstance = getStrictInstance(activeChat) || activeChannelFilter || connectedInstanceName;
+                            const resolvedId = await resolveInstanceUuid(tenantInfo?.id || '', properTargetInstance);
+                            if (!resolvedId || !tenantInfo?.id) return;
+                            await invokeBaileysAction(tenantInfo.id, resolvedId, 'chatModify', {
+                              jid: activeChat.whatsapp_jid || activeChat.phone,
+                              mod: { pin: true }
+                            });
+                            alert('📱 Conversa fixada no topo do aparelho WhatsApp!');
+                          }}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-slate-100 dark:hover:bg-white/5 transition-colors text-left text-xs font-medium text-slate-700 dark:text-slate-200 cursor-pointer"
+                        >
+                          <Smartphone size={14} className="text-indigo-500 shrink-0" />
+                          <span>Fixar Conversa no Celular</span>
+                        </button>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
 
                 {activeChat.conv_status === 'resolved' ? (
                   <button 
+                    type="button"
                     onClick={() => {
                       reopenConversation(activeChat.id);
                     }}
-                    className="flex items-center justify-center gap-1.5 h-8 w-8 xl:w-auto xl:px-3 bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-full transition-all duration-300 text-xs font-semibold border border-blue-200 dark:border-blue-500/20 shadow-sm animate-in fade-in hover:scale-105 active:scale-95 whitespace-nowrap"
+                    className="flex items-center justify-center gap-1.5 h-8 w-8 xl:w-auto xl:px-2.5 bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-full transition-all duration-200 text-xs font-semibold border border-blue-200 dark:border-blue-500/20 shadow-sm active:scale-95 whitespace-nowrap cursor-pointer"
                     title="Reabrir Conversa"
                   >
                     <RotateCcw size={14} className="animate-spin-once" />
-                    <span className="hidden xl:inline">Reabrir Conversa</span>
+                    <span className="hidden xl:inline">Reabrir</span>
                   </button>
                 ) : (
                   <button 
+                    type="button"
                     onClick={() => {
                       handleResolveConversation(activeChat.id);
                     }}
-                    className="flex items-center justify-center gap-1.5 h-8 w-8 xl:w-auto xl:px-3 bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 rounded-full transition-all duration-300 text-xs font-semibold border border-emerald-200 dark:border-emerald-500/20 shadow-sm animate-in fade-in hover:scale-105 active:scale-95 whitespace-nowrap"
+                    className="flex items-center justify-center gap-1.5 h-8 w-8 xl:w-auto xl:px-2.5 bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 rounded-full transition-all duration-200 text-xs font-semibold border border-emerald-200 dark:border-emerald-500/20 shadow-sm active:scale-95 whitespace-nowrap cursor-pointer"
                     title="Resolver Conversa"
                   >
                     <CheckCircle2 size={14} />
@@ -9573,9 +9806,10 @@ export default function ChatDashboard() {
               </div>
 
               {/* Mobile Actions Menu (Responsive Menu) */}
-              <div className="lg:hidden relative">
+              <div className="lg:hidden relative shrink-0">
                 <button 
-                  className="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-all text-[#54656f] dark:text-[#aebac1]"
+                  type="button"
+                  className="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-all active:scale-95 text-[#54656f] dark:text-[#aebac1]"
                   onClick={(e) => {
                     e.stopPropagation();
                     setMobileHeaderMenuOpen(!mobileHeaderMenuOpen);
@@ -9586,14 +9820,15 @@ export default function ChatDashboard() {
                   <Menu size={20} />
                 </button>
                 {mobileHeaderMenuOpen && (
-                   <div className="absolute right-0 top-12 w-[260px] bg-white dark:bg-[#233138] rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-gray-100 dark:border-[#304046] p-3 z-[100] animate-in fade-in zoom-in-95 duration-200 flex flex-col gap-3">
+                   <div className="absolute right-0 top-12 w-[272px] bg-white/95 dark:bg-[#233138]/95 backdrop-blur-xl rounded-2xl shadow-[0_12px_40px_rgb(0,0,0,0.22)] border border-gray-100 dark:border-white/10 p-3 z-[100] animate-in fade-in zoom-in-95 duration-200 flex flex-col gap-2.5">
                       <button
+                        type="button"
                         onClick={() => {
                           const ctx = resolveContactRemoteContext(activeChat, allCompanies, contacts);
                           toggleXPointRemotePanel(ctx);
                           setMobileHeaderMenuOpen(false);
                         }}
-                        className="flex items-center justify-between gap-2 px-3 py-2.5 bg-cyan-50 text-cyan-700 dark:bg-cyan-500/10 dark:text-cyan-300 hover:bg-cyan-100 dark:hover:bg-cyan-500/20 rounded-xl transition-all text-sm font-semibold border border-cyan-200 dark:border-cyan-500/20 w-full shadow-sm hover:scale-[1.02]"
+                        className="flex items-center justify-between gap-2 px-3 py-2.5 bg-cyan-50 text-cyan-700 dark:bg-cyan-500/10 dark:text-cyan-300 hover:bg-cyan-100 dark:hover:bg-cyan-500/20 rounded-xl transition-all text-sm font-semibold border border-cyan-200 dark:border-cyan-500/20 w-full shadow-sm active:scale-95"
                       >
                         <div className="flex items-center gap-2">
                           <Monitor size={16} />
@@ -9601,9 +9836,35 @@ export default function ChatDashboard() {
                         </div>
                         {xpointRemoteResolvedInfo && (
                           <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-600 dark:text-emerald-300">
-                            {xpointRemoteResolvedInfo.onlineDevices} ON
+                            {xpointRemoteResolvedInfo.onlineDevices}/{xpointRemoteResolvedInfo.totalDevices}
                           </span>
                         )}
+                      </button>
+
+                      {hasGlobalMenuLink && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            setMobileHeaderMenuOpen(false);
+                            await handlePinClientMenuLink();
+                          }}
+                          className="flex items-center justify-center gap-2 px-3 py-2.5 bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-500/20 rounded-xl transition-all text-sm font-semibold border border-amber-200 dark:border-amber-500/20 w-full shadow-sm active:scale-95"
+                        >
+                          <Pin size={15} />
+                          <span>Fixar Cardápio 30 Dias</span>
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMobileHeaderMenuOpen(false);
+                          setIsBaileysHubOpen(true);
+                        }}
+                        className="flex items-center justify-center gap-2 px-3 py-2.5 bg-purple-50 text-purple-700 dark:bg-purple-500/10 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-500/20 rounded-xl transition-all text-sm font-semibold border border-purple-200 dark:border-purple-500/20 w-full shadow-sm active:scale-95"
+                      >
+                        <Zap size={15} />
+                        <span>Central WhatsApp (Baileys v7)</span>
                       </button>
 
                       {activeChat.conv_status === 'resolved' ? (
@@ -9700,15 +9961,17 @@ export default function ChatDashboard() {
               </div>
               
               {/* Chat Actions Dropdown Premium */}
-              <div className="relative">
+              <div className="relative shrink-0">
                 <button 
-                  className="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-all text-[#54656f] dark:text-[#aebac1]"
+                  type="button"
+                  className="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-all active:scale-95 text-[#54656f] dark:text-[#aebac1] cursor-pointer"
                   onClick={(e) => {
                     e.stopPropagation();
                     setActiveChatDropdown(!activeChatDropdown);
                   }}
+                  title="Mais opções da conversa"
                 >
-                  <MoreVertical size={20} />
+                  <MoreVertical size={19} />
                 </button>
                 
                 {activeChatDropdown && (
@@ -9774,26 +10037,27 @@ export default function ChatDashboard() {
                       </span>
                     </button>
 
-                    {/* 1. Fixar Link do Cardápio Digital por 30 Dias */}
-                    <button
-                      onClick={async () => {
-                        setActiveChatDropdown(false);
-                        await handlePinClientMenuLink();
-                      }}
-                      className="w-full text-left px-4 py-2.5 hover:bg-amber-50 dark:hover:bg-amber-950/30 flex items-center gap-3 transition-colors"
-                    >
-                      <Pin size={16} className="text-amber-500" />
-                      <div className="flex flex-col min-w-0">
-                        <span className="text-[14px] text-amber-600 dark:text-amber-400 font-medium">
-                          Fixar Cardápio 30 Dias
-                        </span>
-                        {tenantInfo?.settings?.link_cardapio && (
-                          <span className="text-[10px] text-gray-500 dark:text-gray-400 truncate max-w-[180px]">
-                            {tenantInfo.settings.link_cardapio}
+                    {/* 1. Fixar Link do Cardápio Digital por 30 Dias (Somente se houver Link do Cardápio nas Variáveis Globais) */}
+                    {hasGlobalMenuLink && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          setActiveChatDropdown(false);
+                          await handlePinClientMenuLink();
+                        }}
+                        className="w-full text-left px-4 py-2.5 hover:bg-amber-50 dark:hover:bg-amber-950/30 flex items-center gap-3 transition-colors"
+                      >
+                        <Pin size={16} className="text-amber-500 shrink-0" />
+                        <div className="flex flex-col min-w-0">
+                          <span className="text-[14px] text-amber-600 dark:text-amber-400 font-medium">
+                            Fixar Cardápio 30 Dias
                           </span>
-                        )}
-                      </div>
-                    </button>
+                          <span className="text-[10px] text-gray-500 dark:text-gray-400 truncate max-w-[180px]">
+                            {configuredMenuLink}
+                          </span>
+                        </div>
+                      </button>
+                    )}
 
                     {/* 12. Modificar Estado do Chat no Aparelho (Fixar / Arquivar no Celular) */}
                     <button
@@ -11837,23 +12101,25 @@ export default function ChatDashboard() {
                                   </div>
                                 </button>
 
-                                {/* 7. Enviar Produto do Catálogo / Fixar Cardápio 30 Dias */}
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setIsAttachmentMenuOpen(false);
-                                    setIsBaileysHubOpen(true);
-                                  }}
-                                  className="flex items-center gap-3 w-full p-2.5 text-sm rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/5 transition-all group font-medium active:scale-[0.98]"
-                                >
-                                  <div className="w-8 h-8 rounded-xl bg-teal-500/10 text-teal-600 dark:text-teal-400 flex items-center justify-center group-hover:scale-110 transition-transform shadow-sm">
-                                    <ShoppingBag size={16} />
-                                  </div>
-                                  <div className="text-left">
-                                    <p className="text-xs font-bold leading-none">Catálogo & Central WhatsApp</p>
-                                    <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">Enviar produto ou sincronizar cardápio</p>
-                                  </div>
-                                </button>
+                                {/* 7. Enviar Produto do Catálogo / Sincronizar Cardápio (Somente se houver Link do Cardápio nas Variáveis Globais) */}
+                                {hasGlobalMenuLink && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setIsAttachmentMenuOpen(false);
+                                      setIsBaileysHubOpen(true);
+                                    }}
+                                    className="flex items-center gap-3 w-full p-2.5 text-sm rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/5 transition-all group font-medium active:scale-[0.98]"
+                                  >
+                                    <div className="w-8 h-8 rounded-xl bg-teal-500/10 text-teal-600 dark:text-teal-400 flex items-center justify-center group-hover:scale-110 transition-transform shadow-sm">
+                                      <ShoppingBag size={16} />
+                                    </div>
+                                    <div className="text-left">
+                                      <p className="text-xs font-bold leading-none">Catálogo & Sincronização de Cardápio</p>
+                                      <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">Enviar produto ou sincronizar cardápio</p>
+                                    </div>
+                                  </button>
+                                )}
                               </div>
                             </>
                           )}
