@@ -712,6 +712,63 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.2.1',
+    date: '2026-11-14',
+    summary: 'Vouchers Corporativos B2B Enterprise v2 (Multi-Tenant + Portal Empresas Parceiras + Créditos Mensais/Desconto + WhatsApp Baileys + Antifraude QR/PIN)',
+    notes: [
+      {
+        id: 'feat-vouchers-b2b-portal-and-credits-821',
+        category: 'features',
+        title: 'Ecossistema Completo de Vouchers Corporativos Multi-Tenant & Portal B2B Próprio',
+        description: 'Nova arquitetura multi-tenant reativa à conta selecionada no menu superior: cadastre empresas parceiras com login e senha próprios (hash bcrypt no Postgres), configure créditos mensais automáticos (Renovar Teto ou Acumular), venda pacotes de créditos com desconto (% OFF e aprovação de pedidos) e permita que a empresa emita vouchers para seus colaboradores diretamente pelo Portal B2B (/voucher-empresa/login), com envio automático pelo WhatsApp da loja e Ledger/Extrato imutável.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+        guide: {
+          moduleGroup: 'system',
+          moduleLabel: 'Vouchers Corporativos • Painel Gestão & Portal Parceiro B2B',
+          purpose: 'Permitir que cada estabelecimento conectado emita vouchers avulsos ou gerencie empresas parceiras B2B com acesso independente, saldo mensal recorrente, compra de créditos com desconto, envio automático para o WhatsApp do colaborador e baixa antifraude no caixa.',
+          whereToAccess: [
+            '1. Selecione a empresa/estabelecimento desejada no seletor do topo esquerdo do menu lateral',
+            '2. No menu lateral, expanda "Vouchers Corporativos" e clique em "Painel de Vouchers" (/vouchers)',
+            '3. Use "+ EMITIR VOUCHER / LOTE" para vouchers individuais/campanhas ou acesse a aba "EMPRESAS" para criar parceiras com login B2B e enviar credenciais no WhatsApp'
+          ],
+          howToTest: [
+            '1. Em "Vouchers Corporativos > Painel de Vouchers", abra a aba "EMPRESAS" e crie uma parceira definindo login/senha, plano mensal recorrente ou desconto em créditos.',
+            '2. Clique em "Acesso Portal" para copiar o link /voucher-empresa/login ou enviar credenciais via WhatsApp da loja.',
+            '3. Faça login no Portal B2B com o usuário/senha da empresa parceira, cadastre um colaborador e emita um voucher — confira o débito automático do saldo e o disparo pelo WhatsApp.'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Tela: Menu Lateral ➔ Vouchers Corporativos ➔ Painel de Vouchers & Empresas Parceiras',
+            contextElements: ['Vouchers', 'Campanhas', 'Empresas', 'Extrato / Ledger'],
+            targetButtonLabel: '👆 Clique Aqui: + EMITIR VOUCHER / LOTE ou Nova Empresa Parceira',
+            targetButtonPosition: 'Cabeçalho e aba EMPRESAS do módulo Voucher Gestão (/vouchers)',
+            visualPreviewVariant: 'hub-account-limits'
+          },
+          quickAction: {
+            label: 'Abrir Painel de Vouchers Agora',
+            route: '/vouchers'
+          }
+        }
+      },
+      {
+        id: 'imp-vouchers-scanner-and-whatsapp-821',
+        category: 'improvements',
+        title: 'Terminal Caixa (PIN Antifraude, QR JWT 30s) & Motor Unificado de WhatsApp Multi-Tenant',
+        description: 'O Terminal Scanner (/vouchers/scanner) e o Express Gateway agora exigem sessão do estabelecimento ou PIN numérico do caixa, validam QR JWT HMAC-SHA256 com renovação a cada 30s e executam reserva atômica contra duplo resgate; envios de WhatsApp operam exclusivamente nas caixas conectadas do próprio tenant com fallback na fila Outbox.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-300/30'
+      },
+      {
+        id: 'fix-vouchers-security-and-isolation-821',
+        category: 'fixes',
+        title: 'Blindagem Multi-Tenant, Hashing bcrypt de Senhas & Correção de Status/Saldo',
+        description: 'Removido armazenamento de senhas em texto puro, fechada exposição de RPCs internas para anon, corrigido fallback cruzado de empresas entre tenants, unificada lógica de voucher ativo (CRIADO/DISPONIVEL/VISUALIZADO), estorno automático em cancelamentos e controle transacional anti-race-condition (FOR UPDATE).',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      }
+    ]
+  },
+  {
     version: '8.2.0',
     date: '2026-11-14',
     summary: 'Calibração de Precisão da Auditoria Preventiva (Escopo Multi-Caixa + Duplicidade Física no Postgres + Janela Real 2h no Outbox)',

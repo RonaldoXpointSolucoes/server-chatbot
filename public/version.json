@@ -1,5 +1,5 @@
 {
-  "version": "8.2.0",
-  "buildDate": "2026-11-14T23:30:21.840Z",
-  "summary": "Calibração de Precisão da Auditoria Preventiva (Escopo Multi-Caixa + Duplicidade Física no Postgres + Janela Real 2h no Outbox)"
+  "version": "8.2.1",
+  "buildDate": "2026-11-15T01:19:34.877Z",
+  "summary": "Vouchers Corporativos B2B Enterprise v2 (Multi-Tenant + Portal Empresas Parceiras + Créditos Mensais/Desconto + WhatsApp Baileys + Antifraude QR/PIN)"
 }

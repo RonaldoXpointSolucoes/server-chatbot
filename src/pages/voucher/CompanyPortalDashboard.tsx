@@ -1,1716 +1,1559 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import QRCode from 'react-qr-code';
 import {
-  Building2,
   Ticket,
+  Users,
+  Wallet,
+  History,
   Plus,
-  Search,
-  Calendar,
-  Clock,
   Send,
-  ExternalLink,
-  ShieldCheck,
-  Printer,
+  Search,
+  LogOut,
+  CheckCircle2,
+  XCircle,
+  Clock,
   Copy,
   Check,
-  QrCode,
-  LogOut,
+  ExternalLink,
+  RefreshCw,
+  Loader2,
+  Building2,
   Sparkles,
   AlertCircle,
+  Percent,
+  CreditCard,
+  Trash2,
+  Edit2,
+  Upload,
+  CheckSquare,
+  Square,
+  Store,
+  Phone,
+  Ban,
+  Calendar,
   TrendingUp,
-  Wallet,
-  CheckCircle2,
   X,
-  Smartphone,
-  Info,
-  Gift,
-  ArrowUpRight,
-  ArrowDownLeft,
-  Filter,
-  Loader2,
-  Lock
+  MessageCircle
 } from 'lucide-react';
-import { supabase } from '../../services/supabase';
+import {
+  voucherService,
+  VoucherPartnerCompany,
+  StoreProfile,
+  VoucherRecord,
+  VoucherColaborador,
+  VoucherCreditOrder,
+  VoucherEventRecord,
+  formatBRL,
+  formatPhoneDisplay,
+  parseColaboradoresCsv
+} from '../../services/voucherService';
+
+type PortalTab = 'vouchers' | 'colaboradores' | 'creditos' | 'extrato';
 
 export default function CompanyPortalDashboard() {
   const navigate = useNavigate();
+  const [portalToken, setPortalToken] = useState<string | null>(() => localStorage.getItem('voucher_portal_token'));
+  const [empresa, setEmpresa] = useState<VoucherPartnerCompany | null>(null);
+  const [restaurante, setRestaurante] = useState<StoreProfile | null>(null);
+  const [vouchers, setVouchers] = useState<VoucherRecord[]>([]);
+  const [colaboradores, setColaboradores] = useState<VoucherColaborador[]>([]);
+  const [creditOrders, setCreditOrders] = useState<VoucherCreditOrder[]>([]);
+  const [events, setEvents] = useState<VoucherEventRecord[]>([]);
 
-  // 1. Sessão da Empresa Parceira
-  const [companySession, setCompanySession] = useState<any | null>(null);
-  const [companyData, setCompanyData] = useState<any | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [activeTab, setActiveTab] = useState<PortalTab>('vouchers');
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
 
-  // Dados do Restaurante Concedente (Onde os vouchers são válidos)
-  const [restaurantInfo, setRestaurantInfo] = useState<{
-    nome: string;
-    endereco: string;
-    cardapioUrl: string;
-    instagram: string;
-  }>({
-    nome: 'Burguer Plus',
-    endereco: 'Praça Miguel Ortega, 340 - Parque Assunção - Taboão da Serra/SP',
-    cardapioUrl: 'https://www.burguerplus.com.br',
-    instagram: 'https://instagram.com/burguerplus'
-  });
+  // Filters & Selections
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'TODOS' | 'ATIVOS' | 'RESGATADOS' | 'CANCELADOS'>('TODOS');
+  const [selectedVouchers, setSelectedVouchers] = useState<string[]>([]);
+  const [selectedColabs, setSelectedColabs] = useState<string[]>([]);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [sendingWaIds, setSendingWaIds] = useState<Record<string, boolean>>({});
+  const [cancelingId, setCancelingId] = useState<string | null>(null);
 
-  // 2. Vouchers e Ledger
-  const [vouchers, setVouchers] = useState<any[]>([]);
-  const [searchTerm, setSearchTerm] = useState<string>('');
-  const [statusFilter, setStatusFilter] = useState<'ALL' | 'CRIADO' | 'UTILIZADO' | 'EXPIRADO'>('ALL');
+  // Issue Single Modal
+  const [showIssueModal, setShowIssueModal] = useState(false);
+  const [issueColabId, setIssueColabId] = useState('');
+  const [issueNome, setIssueNome] = useState('');
+  const [issueWhatsapp, setIssueWhatsapp] = useState('');
+  const [issueValor, setIssueValor] = useState('50');
+  const [issueValidadeDias, setIssueValidadeDias] = useState('30');
+  const [issueObs, setIssueObs] = useState('');
+  const [issueAutoSendWa, setIssueAutoSendWa] = useState(true);
+  const [issuing, setIssuing] = useState(false);
 
-  // 3. Modais
-  const [showIssueModal, setShowIssueModal] = useState<boolean>(false);
-  const [showSuccessModal, setShowSuccessModal] = useState<boolean>(false);
-  const [issuedVoucher, setIssuedVoucher] = useState<any | null>(null);
-  const [selectedQrVoucher, setSelectedQrVoucher] = useState<any | null>(null);
+  // Batch Issue Modal (selected collaborators)
+  const [showBatchModal, setShowBatchModal] = useState(false);
+  const [batchValor, setBatchValor] = useState('50');
+  const [batchValidadeDias, setBatchValidadeDias] = useState('30');
+  const [batchObs, setBatchObs] = useState('');
+  const [batchAutoSendWa, setBatchAutoSendWa] = useState(true);
+  const [batchIssuing, setBatchIssuing] = useState(false);
 
-  // 4. Formulário de Emissão
-  const [beneficiarioNome, setBeneficiarioNome] = useState<string>('');
-  const [beneficiarioWhatsapp, setBeneficiarioWhatsapp] = useState<string>('');
-  const [voucherValor, setVoucherValor] = useState<number>(50);
-  const [voucherValorInput, setVoucherValorInput] = useState<string>('R$ 50,00');
-  const [voucherValidade, setVoucherValidade] = useState<string>('');
-  const [voucherObs, setVoucherObs] = useState<string>('');
-  const [issueLoading, setIssueLoading] = useState<boolean>(false);
-  const [issueError, setIssueError] = useState<string | null>(null);
+  // Collaborator Modal & CSV Import Modal
+  const [showColabModal, setShowColabModal] = useState(false);
+  const [editingColab, setEditingColab] = useState<VoucherColaborador | null>(null);
+  const [colabNome, setColabNome] = useState('');
+  const [colabWhats, setColabWhats] = useState('');
+  const [colabCpf, setColabCpf] = useState('');
+  const [colabEmail, setColabEmail] = useState('');
+  const [colabCargo, setColabCargo] = useState('');
+  const [savingColab, setSavingColab] = useState(false);
 
-  const handleVoucherCurrencyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const rawDigits = e.target.value.replace(/\D/g, '');
-    if (!rawDigits) {
-      setVoucherValor(0);
-      setVoucherValorInput('');
-      return;
-    }
-    const num = Number(rawDigits) / 100;
-    setVoucherValor(num);
-    setVoucherValorInput(num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }));
-  };
+  const [showCsvModal, setShowCsvModal] = useState(false);
+  const [csvText, setCsvText] = useState('');
+  const [importingCsv, setImportingCsv] = useState(false);
 
-  const [copiedLink, setCopiedLink] = useState<boolean>(false);
+  // Buy Credits State
+  const [buyCreditAmount, setBuyCreditAmount] = useState('500');
+  const [buyPaymentMethod, setBuyPaymentMethod] = useState<'PIX' | 'BOLETO' | 'TRANSFERENCIA' | 'CARTAO' | 'FATURADO'>('PIX');
+  const [buyObs, setBuyObs] = useState('');
+  const [requestingCredit, setRequestingCredit] = useState(false);
 
-  // Carrega a sessão inicial
-  useEffect(() => {
-    try {
-      const raw = sessionStorage.getItem('active_company_session') || localStorage.getItem('active_company_session');
-      if (!raw) {
-        navigate('/voucher-empresa/login');
-        return;
-      }
-      const session = JSON.parse(raw);
-      if (!session?.id || !session?.tenant_id) {
-        navigate('/voucher-empresa/login');
-        return;
-      }
-      setCompanySession(session);
-    } catch (_) {
-      navigate('/voucher-empresa/login');
-    }
+  const showToast = useCallback((type: 'success' | 'error', msg: string) => {
+    setToast({ type, msg });
+    setTimeout(() => setToast(null), 5000);
+  }, []);
+
+  const clearAndRedirect = useCallback(() => {
+    localStorage.removeItem('voucher_portal_token');
+    localStorage.removeItem('voucher_empresa_session');
+    localStorage.removeItem('voucher_restaurante_info');
+    navigate('/voucher-empresa/login', { replace: true });
   }, [navigate]);
 
-  // Carrega e sincroniza os dados da empresa e seus vouchers
-  const loadCompanyAndVouchers = async () => {
-    if (!companySession?.id || !companySession?.tenant_id) return;
-    const tenantId = companySession.tenant_id;
-    const companyId = companySession.id;
-
-    try {
-      // 0. Busca informações institucionais do Restaurante Concedente
-      try {
-        const { data: compDb } = await supabase
-          .from('companies')
-          .select('name, settings')
-          .eq('id', tenantId)
-          .maybeSingle();
-
-        if (compDb) {
-          const s = compDb.settings || {};
-          setRestaurantInfo({
-            nome: compDb.name || s.nome_ia || s.nome_empresa || s.businessName || 'Burguer Plus',
-            endereco: s.endereco || (s.street ? `${s.street}, ${s.number || ''} - ${s.neighborhood || ''} - ${s.city || ''}/${s.state || ''}` : 'Praça Miguel Ortega, 340 - Parque Assunção - Taboão da Serra/SP'),
-            cardapioUrl: s.link_cardapio || 'https://www.burguerplus.com.br',
-            instagram: s.instagram || 'https://instagram.com/burguerplus'
-          });
-        }
-      } catch (_) {}
-
-      // 1. Busca dados atualizados da empresa (LocalStorage + Supabase)
-      const compRaw = localStorage.getItem(`voucher_companies_${tenantId}`) || localStorage.getItem('voucher_companies_global');
-      let companies: any[] = [];
-      if (compRaw) {
-        try { companies = JSON.parse(compRaw); } catch (_) {}
+  const loadDashboard = useCallback(
+    async (silent = false) => {
+      const token = localStorage.getItem('voucher_portal_token');
+      if (!token) {
+        clearAndRedirect();
+        return;
       }
-      let currentComp = companies.find((c: any) => c.id === companyId) || companySession;
+      setPortalToken(token);
 
       try {
-        const { data: dbComp } = await supabase
-          .from('voucher_empresas_parceiras')
-          .select('*')
-          .eq('id', companyId)
-          .maybeSingle();
-        if (dbComp) {
-          currentComp = { ...currentComp, ...dbComp };
+        if (!silent) setLoading(true);
+        else setRefreshing(true);
+
+        const data = await voucherService.portalGetDashboard(token);
+        setEmpresa(data.empresa);
+        setRestaurante(data.restaurante);
+        setVouchers(data.vouchers || []);
+        setColaboradores(data.colaboradores || []);
+        setCreditOrders(data.credit_orders || []);
+        setEvents(data.events || []);
+
+        localStorage.setItem('voucher_empresa_session', JSON.stringify(data.empresa));
+        localStorage.setItem('voucher_restaurante_info', JSON.stringify(data.restaurante));
+      } catch (err: any) {
+        const msg = err?.message || '';
+        if (msg.toLowerCase().includes('expirada') || msg.toLowerCase().includes('inválida') || msg.toLowerCase().includes('inativa')) {
+          clearAndRedirect();
+          return;
         }
-      } catch (_) {}
-
-      // Fallback garantido se for Terras Gonçalves
-      if (!currentComp.saldo_credito && (currentComp.id === 'emp-ecbz1mn' || currentComp.cnpj?.includes('24.474.477'))) {
-        currentComp = {
-          ...currentComp,
-          razao_social: 'TERRAS GONÇALVES SOCIEDADE DE ADVOGADOS',
-          nome_fantasia: 'Terras Gonçalves Advogados',
-          cnpj: '24.474.477/0001-77',
-          saldo_credito: 659.00,
-          saldo_global: 659.00,
-          credito_fim: currentComp.credito_fim || '2026-10-02T23:59:59Z'
-        };
+        showToast('error', msg || 'Erro ao carregar dados do portal.');
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
       }
-
-      // 2. Busca vouchers da empresa diretamente no Supabase (Fonte da Verdade)
-      let companyVouchersList: any[] = [];
-      try {
-        const { data: dbVouchers, error: dbErr } = await supabase
-          .from('vouchers')
-          .select('*')
-          .eq('tenant_id', tenantId);
-
-        if (!dbErr && dbVouchers) {
-          companyVouchersList = dbVouchers.filter((dbV: any) =>
-            dbV.empresa_id === companyId || 
-            (dbV.empresa_nome && currentComp.razao_social && dbV.empresa_nome.toLowerCase().includes(currentComp.razao_social.toLowerCase()))
-          );
-        } else {
-          // Fallback somente se offline
-          const vRaw = localStorage.getItem(`voucher_items_${tenantId}`) || localStorage.getItem('voucher_items_global');
-          if (vRaw) {
-            try {
-              const parsed = JSON.parse(vRaw);
-              companyVouchersList = parsed.filter((v: any) => v.empresa_id === companyId);
-            } catch (_) {}
-          }
-        }
-      } catch (sbErr) {
-        console.warn('[B2B Portal] Erro ao carregar vouchers do Supabase:', sbErr);
-      }
-
-      setCompanyData(currentComp);
-      setVouchers(companyVouchersList);
-
-      // 4. Define data limite padrão do formulário
-      if (currentComp.credito_fim) {
-        setVoucherValidade(currentComp.credito_fim.split('T')[0]);
-      } else {
-        const defaultDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-        setVoucherValidade(defaultDate);
-      }
-    } catch (err) {
-      console.warn('[CompanyPortal] Erro ao carregar dados:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
+    },
+    [clearAndRedirect, showToast]
+  );
 
   useEffect(() => {
-    loadCompanyAndVouchers();
+    loadDashboard();
+  }, [loadDashboard]);
 
-    if (!companySession?.id || !companySession?.tenant_id) return;
-
-    // Escuta em tempo real baixas e alterações na tabela vouchers
-    const channel = supabase
-      .channel(`public:vouchers:company_portal:${companySession.id}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'vouchers' },
-        () => {
-          loadCompanyAndVouchers();
-        }
-      )
-      .subscribe();
-
-    const interval = setInterval(() => {
-      loadCompanyAndVouchers();
-    }, 4000);
-
-    return () => {
-      supabase.removeChannel(channel);
-      clearInterval(interval);
-    };
-  }, [companySession]);
-
-  const handleLogout = () => {
-    sessionStorage.removeItem('active_company_session');
-    localStorage.removeItem('active_company_session');
-    navigate('/voucher-empresa/login');
-  };
-
-  // ==============================================================================
-  // CÁLCULOS DE CRÉDITO & MÉTRICAS
-  // ==============================================================================
-  const saldoCredito = Number(companyData?.saldo_credito ?? companyData?.saldo_global ?? 500.0);
-  const totalConcedido = Number(companyData?.credito_total_concedido ?? ((saldoCredito + vouchers.reduce((acc, v) => acc + Number(v.valor || 0), 0)) || 500.0));
-  const percentConsumido = totalConcedido > 0 ? Math.min(100, Math.max(0, ((totalConcedido - saldoCredito) / totalConcedido) * 100)) : 0;
-
-  // Cálculo de Validade
-  const diasRestantes = useMemo(() => {
-    if (!companyData?.credito_fim) return 30;
-    const diff = new Date(companyData.credito_fim).getTime() - Date.now();
-    return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
-  }, [companyData]);
-
-  const totalVouchersEmitidos = vouchers.length;
-  const totalValorEmitido = vouchers.reduce((acc, v) => acc + Number(v.valor || 0), 0);
-  const vouchersUtilizados = vouchers.filter((v) => v.status === 'UTILIZADO' || v.status === 'used' || v.status === 'RESGATADO');
-  const totalValorUtilizado = vouchersUtilizados.reduce((acc, v) => acc + Number(v.valor || 0), 0);
-
-  // ==============================================================================
-  // AUTO-EMISSÃO DE VOUCHER PELO PORTAL DA EMPRESA
-  // ==============================================================================
-  const handleIssueVoucher = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIssueError(null);
-
-    const valorNum = voucherValor;
-    if (isNaN(valorNum) || valorNum <= 0) {
-      setIssueError('Informe um valor válido em R$ para o voucher.');
-      return;
-    }
-
-    if (valorNum > saldoCredito) {
-      setIssueError(`Saldo insuficiente! O valor de R$ ${valorNum.toFixed(2)} ultrapassa seu crédito disponível de R$ ${saldoCredito.toFixed(2)}.`);
-      return;
-    }
-
-    if (!beneficiarioNome.trim()) {
-      setIssueError('Por favor, informe o nome do beneficiário (colaborador ou cliente).');
-      return;
-    }
-
-    const cleanWhats = beneficiarioWhatsapp.replace(/\D/g, '');
-    if (!cleanWhats || cleanWhats.length < 10) {
-      setIssueError('Informe um número de WhatsApp válido com DDD (ex: 11988887777).');
-      return;
-    }
-
-    try {
-      setIssueLoading(true);
-      const tenantId = companySession.tenant_id;
-      const companyId = companySession.id;
-
-      // Gera código e tokens seguros
-      const randomSuffix = Math.random().toString(36).substring(2, 8).toUpperCase();
-      const publicToken = 'vch-' + Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 10);
-      const qrSecret = 'sec-' + Math.random().toString(36).substring(2, 14);
-
-      const novoVoucher = {
-        id: 'vch-' + Math.random().toString(36).substring(2, 9),
-        tenant_id: tenantId,
-        empresa_id: companyId,
-        empresa_nome: companyData.razao_social || companyData.nome_fantasia,
-        campanha_id: null,
-        campanha_nome: 'Crédito Corporativo Direto',
-        public_token: publicToken,
-        qr_secret: qrSecret,
-        status: 'CRIADO',
-        valor: valorNum,
-        tipo_desconto: 'VALOR_FIXO',
-        valor_desconto: valorNum,
-        beneficiario_nome: beneficiarioNome.trim(),
-        beneficiario_whatsapp: cleanWhats,
-        validade_fim: voucherValidade ? new Date(voucherValidade + 'T23:59:59').toISOString() : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-        atendente_id: `PORTAL_B2B (${companyData.login_usuario || companyData.razao_social})`,
-        mensagem_envio_status: 'PENDENTE',
-        observacoes: voucherObs.trim() || `Emitido via Portal B2B por ${companyData.razao_social}`,
-        created_at: new Date().toISOString()
-      };
-
-      // 1. Debita o saldo da empresa
-      const novoSaldo = Math.max(0, saldoCredito - valorNum);
-      const updatedCompany = {
-        ...companyData,
-        saldo_credito: novoSaldo,
-        saldo_global: novoSaldo,
-        updated_at: new Date().toISOString()
-      };
-
-      // Atualiza lista de empresas no storage
-      const compRaw = localStorage.getItem(`voucher_companies_${tenantId}`) || '[]';
-      const compList = JSON.parse(compRaw);
-      const newCompList = compList.map((c: any) => (c.id === companyId ? updatedCompany : c));
-      localStorage.setItem(`voucher_companies_${tenantId}`, JSON.stringify(newCompList));
-      setCompanyData(updatedCompany);
-
-      // 2. Salva o voucher gerado
-      const vRaw = localStorage.getItem(`voucher_items_${tenantId}`) || '[]';
-      const allVouchers = JSON.parse(vRaw);
-      const newVouchersList = [novoVoucher, ...allVouchers];
-      localStorage.setItem(`voucher_items_${tenantId}`, JSON.stringify(newVouchersList));
-      setVouchers(newVouchersList.filter((v: any) => v.empresa_id === companyId));
-
-      // 3. Registra no Ledger / Extrato
-      const evRaw = localStorage.getItem(`voucher_events_${tenantId}`) || '[]';
-      const allEvents = JSON.parse(evRaw);
-      const novoEvento = {
-        id: 'ev-' + Math.random().toString(36).substring(2, 9),
-        tenant_id: tenantId,
-        voucher_id: novoVoucher.id,
-        voucher_token: novoVoucher.public_token,
-        tipo_operacao: 'CREDITO_EMISSAO_B2B',
-        valor: valorNum,
-        status_anterior: 'SALDO_CORPORATIVO',
-        status_novo: 'CRIADO',
-        data_hora: new Date().toISOString(),
-        usuario_responsavel: `Portal Empresa (${companyData.razao_social})`,
-        beneficiario_nome: novoVoucher.beneficiario_nome,
-        motivo: `Auto-emissão B2B no valor de R$ ${valorNum.toFixed(2)} para ${novoVoucher.beneficiario_nome}`,
-        created_at: new Date().toISOString()
-      };
-      localStorage.setItem(`voucher_events_${tenantId}`, JSON.stringify([novoEvento, ...allEvents]));
-
-      // Persiste no Supabase em tempo real
+  const handleLogout = async () => {
+    if (portalToken) {
       try {
-        const voucherDbPayload = {
-          id: novoVoucher.id,
-          tenant_id: tenantId,
-          empresa_id: companyId,
-          empresa_nome: companyData.razao_social || companyData.nome_fantasia,
-          empresa_razao_social: companyData.razao_social || companyData.nome_fantasia,
-          campanha_id: null,
-          public_token: novoVoucher.public_token,
-          valor: valorNum,
-          status: 'CRIADO',
-          beneficiario_nome: beneficiarioNome.trim(),
-          beneficiario_whatsapp: cleanWhats,
-          observacoes: voucherObs.trim() || `Emitido via Portal B2B por ${companyData.razao_social}`,
-          validade_fim: novoVoucher.validade_fim,
-          atendente_id: `PORTAL_B2B (${companyData.login_usuario || companyData.razao_social})`,
-          created_at: novoVoucher.created_at,
-          updated_at: new Date().toISOString()
-        };
+        await voucherService.portalLogout(portalToken);
+      } catch {}
+    }
+    clearAndRedirect();
+  };
 
-        await supabase.from('vouchers').upsert([voucherDbPayload]);
-        await supabase
-          .from('voucher_empresas_parceiras')
-          .update({ saldo_global: novoSaldo, saldo_credito: novoSaldo, updated_at: new Date().toISOString() })
-          .eq('id', companyId);
-      } catch (errDb) {
-        console.warn('[CompanyPortal] Erro ao salvar no Supabase:', errDb);
+  // Filtered Vouchers
+  const filteredVouchers = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase();
+    return vouchers.filter(v => {
+      const isUsed = v.status === 'RESGATADO' || v.status === 'UTILIZADO';
+      const isCancelled = v.status === 'CANCELADO';
+      const isExpired = v.status === 'EXPIRADO' || (v.validade_fim && new Date(v.validade_fim) < new Date() && !isUsed && !isCancelled);
+      const isActive = !isUsed && !isCancelled && !isExpired;
+
+      if (statusFilter === 'ATIVOS' && !isActive) return false;
+      if (statusFilter === 'RESGATADOS' && !isUsed) return false;
+      if (statusFilter === 'CANCELADOS' && !isCancelled && !isExpired) return false;
+
+      if (!q) return true;
+      return (
+        (v.public_token || '').toLowerCase().includes(q) ||
+        (v.beneficiario_nome || '').toLowerCase().includes(q) ||
+        (v.beneficiario_whatsapp || '').includes(q)
+      );
+    });
+  }, [vouchers, searchTerm, statusFilter]);
+
+  const metrics = useMemo(() => {
+    let totalEmitido = 0;
+    let ativosCount = 0;
+    let ativosValor = 0;
+    let resgatadosCount = 0;
+    let resgatadosValor = 0;
+
+    for (const v of vouchers) {
+      const val = Number(v.valor || 0);
+      if (v.status !== 'CANCELADO') totalEmitido += val;
+      if (v.status === 'RESGATADO' || v.status === 'UTILIZADO') {
+        resgatadosCount++;
+        resgatadosValor += val;
+      } else if (v.status !== 'CANCELADO' && v.status !== 'EXPIRADO') {
+        ativosCount++;
+        ativosValor += val;
       }
-
-      // Limpa formulário e abre modal de sucesso
-      setIssuedVoucher(novoVoucher);
-      setShowIssueModal(false);
-      setShowSuccessModal(true);
-      setBeneficiarioNome('');
-      setBeneficiarioWhatsapp('');
-      setVoucherValor(50);
-      setVoucherValorInput('R$ 50,00');
-      setVoucherObs('');
-    } catch (err: any) {
-      setIssueError(err.message || 'Erro ao emitir voucher.');
-    } finally {
-      setIssueLoading(false);
     }
+    return { totalEmitido, ativosCount, ativosValor, resgatadosCount, resgatadosValor };
+  }, [vouchers]);
+
+  // Copy voucher link
+  const handleCopyLink = (v: VoucherRecord) => {
+    const url = `${window.location.origin}/voucher/${v.public_token}`;
+    navigator.clipboard.writeText(url);
+    setCopiedId(v.id);
+    setTimeout(() => setCopiedId(null), 2000);
   };
 
-  // Helpers de Compartilhamento
-  const getProductionBaseUrl = () => {
-    if (typeof window !== 'undefined' && window.location.origin) {
-      return window.location.origin;
-    }
-    return 'https://chat-boot-theta.vercel.app';
-  };
-
-  const getVoucherUrl = (token: string) => `${getProductionBaseUrl()}/voucher/${token}`;
-
-  const copyVoucherLink = (token: string, isUtilizado?: boolean) => {
-    if (isUtilizado) {
-      setWhatsappFeedback({
-        type: 'error',
-        text: '❌ Este voucher já foi utilizado e resgatado no restaurante. Não é permitido compartilhar um voucher já utilizado.'
-      });
-      return;
-    }
-    navigator.clipboard.writeText(getVoucherUrl(token));
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 3000);
-  };
-
-  const [sendingWhatsappId, setSendingWhatsappId] = useState<string | null>(null);
-  const [whatsappFeedback, setWhatsappFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-
-  const ENGINE_URL = 'https://owckk0k8w8soo40w40owc4ss.69.62.92.212.sslip.io';
-  const FOODNEXT_INSTANCE_ID = 'cc4efe36-f391-4b3d-a24c-ddcd8a293cf6';
-
-  // Disparo 100% Direto e Silencioso via API Baileys da Instância FoodNext
-  const sendDirectWhatsappViaFoodNext = async (vItem: any) => {
-    if (!vItem) return;
-
-    if (vItem.status === 'UTILIZADO') {
-      setWhatsappFeedback({
-        type: 'error',
-        text: `❌ O voucher ${vItem.public_token} já foi utilizado no caixa e não pode ser reenviado.`
-      });
-      return;
-    }
-
-    const rawPhone = (vItem.beneficiario_whatsapp || '').replace(/\D/g, '');
-
-    if (!rawPhone || rawPhone.length < 10) {
-      setWhatsappFeedback({
-        type: 'error',
-        text: `O voucher ${vItem.public_token} não possui WhatsApp válido com DDD cadastrado.`
-      });
-      return;
-    }
-
-    const cleanPhone = rawPhone.startsWith('55') ? rawPhone : `55${rawPhone}`;
-    const targetJid = `${cleanPhone}@s.whatsapp.net`;
-    const link = getVoucherUrl(vItem.public_token);
-    const empresaNome = companyData?.nome_fantasia || companyData?.razao_social || 'Empresa Parceira';
-    const valorFormatado = Number(vItem.valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-    const dataValidade = new Date(vItem.validade_fim).toLocaleDateString('pt-BR');
-
-    const restauranteNome = restaurantInfo.nome || 'Burguer Plus';
-    const restauranteEndereco = restaurantInfo.endereco || 'Praça Miguel Ortega, 340 - Parque Assunção - Taboão da Serra/SP';
-    const cardapioUrl = restaurantInfo.cardapioUrl || 'https://www.burguerplus.com.br';
-
-    const msg = `✨ *PRESENTE CORPORATIVO EXCLUSIVO* ✨\n` +
-      `🏢 *Oferecido por:* ${empresaNome}\n\n` +
-      `Olá, *${vItem.beneficiario_nome || 'Colaborador'}*! 🎉\n\n` +
-      `Você acaba de ser presenteado com um *Voucher Digital VIP* no valor de:\n` +
-      `💳 *${valorFormatado}*\n\n` +
-      `🍔 *Local de Resgate Exclusivo:* ${restauranteNome}\n` +
-      `📍 *Endereço:* ${restauranteEndereco}\n` +
-      `🍽️ *Cardápio Online:* ${cardapioUrl}\n\n` +
-      `🎟️ *Código do Voucher:* \`${vItem.public_token}\`\n` +
-      `⏳ *Válido até:* ${dataValidade}\n` +
-      `🏷️ *Finalidade:* ${vItem.observacoes || 'Crédito Corporativo Direto'}\n\n` +
-      `📲 *Acesse seu Voucher com QR Code Oficial:*\n${link}\n\n` +
-      `_Basta apresentar o QR Code acima no caixa da ${restauranteNome} para validar seu benefício._`;
+  // Send Single WhatsApp via secure backend portal endpoint
+  const handleSendWhatsApp = async (voucherIds: string[]) => {
+    if (!portalToken || voucherIds.length === 0) return;
+    const mapUpdate: Record<string, boolean> = {};
+    voucherIds.forEach(id => (mapUpdate[id] = true));
+    setSendingWaIds(prev => ({ ...prev, ...mapUpdate }));
 
     try {
-      setSendingWhatsappId(vItem.id);
-      setWhatsappFeedback(null);
-
-      const foodnextTenantId = '8b1e427b-2321-4ea7-9d7e-90f7d5cbad21';
-
-      // 1. Invoca envio nativo Baileys no motor da instância FoodNext
-      let res = await fetch(`${ENGINE_URL}/api/v1/instances/${FOODNEXT_INSTANCE_ID}/invoke`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-tenant-id': foodnextTenantId,
-          'apikey': 'chatboot-secret-key'
-        },
-        body: JSON.stringify({
-          method: 'sendMessage',
-          args: [targetJid, { text: msg }]
-        })
-      });
-
-      let resJson = await res.json().catch(() => ({}));
-
-      // Se falhar na rota /invoke, tenta a rota alternativa /send-text
-      if (!res.ok || resJson.ok === false) {
-        res = await fetch(`${ENGINE_URL}/api/v1/instances/${FOODNEXT_INSTANCE_ID}/send-text`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-tenant-id': foodnextTenantId,
-            'apikey': 'chatboot-secret-key'
-          },
-          body: JSON.stringify({
-            number: cleanPhone,
-            text: msg
-          })
-        });
-        resJson = await res.json().catch(() => ({}));
-      }
-
-      if (res.ok && resJson.ok !== false) {
-        setWhatsappFeedback({
-          type: 'success',
-          text: `✅ Mensagem enviada com sucesso no WhatsApp de ${vItem.beneficiario_nome} (${rawPhone}) via FoodNext!`
-        });
-
-        // Atualiza status do voucher para ENVIADO
-        const tenantId = companySession?.tenant_id || foodnextTenantId;
-        const compId = companySession?.id;
-        const vRaw = localStorage.getItem(`voucher_items_${tenantId}`) || '[]';
-        const allVouchers = JSON.parse(vRaw);
-        const updatedList = allVouchers.map((v: any) => (v.id === vItem.id ? { ...v, status: 'ENVIADO' } : v));
-        localStorage.setItem(`voucher_items_${tenantId}`, JSON.stringify(updatedList));
-        setVouchers(updatedList.filter((v: any) => v.empresa_id === compId));
+      const res = await voucherService.portalSendWhatsApp(portalToken, voucherIds);
+      if (res.sentCount > 0 && res.failedCount === 0) {
+        showToast('success', `${res.sentCount} voucher(s) enviado(s) com sucesso para o WhatsApp!`);
+      } else if (res.sentCount > 0) {
+        showToast('error', `Enviados: ${res.sentCount}. Falharam: ${res.failedCount}. Verifique os telefones ou conexão WhatsApp da loja.`);
       } else {
-        throw new Error(resJson.error || resJson.message || 'Falha ao enviar mensagem pela instância FoodNext');
+        const firstErr = res.results?.[0]?.error || 'Não foi possível enviar via WhatsApp.';
+        showToast('error', firstErr);
       }
+      await loadDashboard(true);
     } catch (err: any) {
-      console.error('[FoodNext Error]', err);
-      setWhatsappFeedback({
-        type: 'error',
-        text: `❌ Falha no envio via FoodNext: ${err.message || 'Instância temporariamente ocupada ou número inválido.'}`
-      });
+      showToast('error', err?.message || 'Erro ao disparar WhatsApp.');
     } finally {
-      setSendingWhatsappId(null);
+      setSendingWaIds(prev => {
+        const next = { ...prev };
+        voucherIds.forEach(id => delete next[id]);
+        return next;
+      });
     }
   };
 
-  const shareViaWhatsapp = sendDirectWhatsappViaFoodNext;
+  // Issue Single Voucher
+  const handleIssueSingle = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!portalToken) return;
+    const valorNum = parseFloat(issueValor.replace(',', '.'));
+    if (!issueNome.trim()) {
+      showToast('error', 'Informe o nome do colaborador / beneficiário.');
+      return;
+    }
+    if (isNaN(valorNum) || valorNum <= 0) {
+      showToast('error', 'Informe um valor válido maior que zero.');
+      return;
+    }
 
-  // Motor de Impressão VIP de Show / Ingresso com Canhoto Destacável
-  const handlePrintVoucher = (vItem: any) => {
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
+    setIssuing(true);
+    try {
+      const validadeFim = new Date(Date.now() + (parseInt(issueValidadeDias, 10) || 30) * 86400000).toISOString();
+      const res = await voucherService.portalIssueVouchers(
+        portalToken,
+        [
+          {
+            colaborador_id: issueColabId || null,
+            beneficiario_nome: issueNome.trim(),
+            beneficiario_whatsapp: issueWhatsapp.trim() || null,
+            valor: valorNum,
+            observacoes: issueObs.trim() || null
+          }
+        ],
+        validadeFim,
+        issueObs.trim() || undefined
+      );
 
-    const formattedVal = Number(vItem.valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-    const formattedDate = new Date(vItem.validade_fim).toLocaleDateString('pt-BR');
-    const empresaNome = companyData?.razao_social || companyData?.nome_fantasia || 'Empresa Parceira';
-    const qrUrl = getVoucherUrl(vItem.public_token);
+      setShowIssueModal(false);
+      setIssueColabId('');
+      setIssueNome('');
+      setIssueWhatsapp('');
+      setIssueObs('');
 
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="utf-8" />
-          <title>VIP Pass Ticket - ${vItem.public_token}</title>
-          <style>
-            @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;900&family=JetBrains+Mono:wght@700;900&display=swap');
-            
-            * { box-sizing: border-box; margin: 0; padding: 0; }
-            body {
-              font-family: 'Montserrat', sans-serif;
-              background: #f4f6f8;
-              padding: 40px 20px;
-              display: flex;
-              justify-content: center;
-              align-items: center;
-              color: #111;
-              -webkit-print-color-adjust: exact;
-              print-color-adjust: exact;
-            }
+      const created = res.vouchers || [];
+      if (issueAutoSendWa && created.length > 0 && created[0].beneficiario_whatsapp) {
+        showToast('success', `Voucher ${created[0].public_token} emitido! Enviando WhatsApp...`);
+        await handleSendWhatsApp([created[0].id]);
+      } else {
+        showToast('success', `Voucher emitido! Saldo atualizado: ${formatBRL(res.saldo_novo)}`);
+        await loadDashboard(true);
+      }
+    } catch (err: any) {
+      showToast('error', err?.message || 'Falha ao emitir voucher.');
+    } finally {
+      setIssuing(false);
+    }
+  };
 
-            .ticket-container {
-              width: 820px;
-              background: #ffffff;
-              border-radius: 24px;
-              box-shadow: 0 20px 50px rgba(0,0,0,0.15);
-              display: flex;
-              position: relative;
-              overflow: hidden;
-              border: 2px solid #00a884;
-            }
+  // Issue Batch to Selected Collaborators
+  const handleIssueBatch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!portalToken || selectedColabs.length === 0) return;
 
-            .ticket-container::before {
-              content: '';
-              position: absolute;
-              top: -14px;
-              right: 234px;
-              width: 28px;
-              height: 28px;
-              background: #f4f6f8;
-              border-radius: 50%;
-              border-bottom: 2px solid #00a884;
-              z-index: 10;
-            }
+    const valorUnit = parseFloat(batchValor.replace(',', '.'));
+    if (isNaN(valorUnit) || valorUnit <= 0) {
+      showToast('error', 'Informe um valor unitário válido.');
+      return;
+    }
 
-            .ticket-container::after {
-              content: '';
-              position: absolute;
-              bottom: -14px;
-              right: 234px;
-              width: 28px;
-              height: 28px;
-              background: #f4f6f8;
-              border-radius: 50%;
-              border-top: 2px solid #00a884;
-              z-index: 10;
-            }
+    const targets = colaboradores.filter(c => selectedColabs.includes(c.id));
+    if (targets.length === 0) return;
 
-            .ticket-main {
-              flex: 1;
-              padding: 32px 36px;
-              background: linear-gradient(135deg, #0b141a 0%, #111b21 100%);
-              color: #ffffff;
-              position: relative;
-            }
+    setBatchIssuing(true);
+    try {
+      const validadeFim = new Date(Date.now() + (parseInt(batchValidadeDias, 10) || 30) * 86400000).toISOString();
+      const items = targets.map(c => ({
+        colaborador_id: c.id,
+        beneficiario_nome: c.nome,
+        beneficiario_whatsapp: c.whatsapp || null,
+        valor: valorUnit,
+        observacoes: batchObs.trim() || null
+      }));
 
-            .ticket-main::before {
-              content: 'VIP PASS';
-              position: absolute;
-              bottom: 10px;
-              right: 20px;
-              font-size: 80px;
-              font-weight: 900;
-              color: rgba(255,255,255,0.03);
-              letter-spacing: 6px;
-              pointer-events: none;
-            }
+      const res = await voucherService.portalIssueVouchers(portalToken, items, validadeFim, batchObs.trim() || undefined);
+      setShowBatchModal(false);
+      setSelectedColabs([]);
 
-            .badge-gold {
-              display: inline-flex;
-              align-items: center;
-              gap: 6px;
-              background: linear-gradient(90deg, #d97706, #f59e0b);
-              color: #0b141a;
-              font-size: 11px;
-              font-weight: 900;
-              text-transform: uppercase;
-              letter-spacing: 1.5px;
-              padding: 5px 14px;
-              border-radius: 20px;
-              margin-bottom: 12px;
-            }
+      const withPhone = (res.vouchers || []).filter(v => Boolean(v.beneficiario_whatsapp)).map(v => v.id);
+      if (batchAutoSendWa && withPhone.length > 0) {
+        showToast('success', `${res.vouchers.length} voucher(s) gerados! Disparando ${withPhone.length} WhatsApp(s)...`);
+        await handleSendWhatsApp(withPhone);
+      } else {
+        showToast('success', `${res.vouchers.length} voucher(s) emitidos com sucesso!`);
+        await loadDashboard(true);
+      }
+    } catch (err: any) {
+      showToast('error', err?.message || 'Erro ao emitir lote de vouchers.');
+    } finally {
+      setBatchIssuing(false);
+    }
+  };
 
-            .company-name {
-              font-size: 18px;
-              font-weight: 900;
-              color: #00a884;
-              text-transform: uppercase;
-              letter-spacing: 0.5px;
-              margin-bottom: 4px;
-            }
+  // Cancel & Refund Voucher
+  const handleCancelVoucher = async (v: VoucherRecord) => {
+    if (!portalToken) return;
+    if (!window.confirm(`Cancelar o voucher ${v.public_token} (${v.beneficiario_nome}) e estornar ${formatBRL(v.valor)} para o saldo da empresa?`)) {
+      return;
+    }
+    setCancelingId(v.id);
+    try {
+      const res = await voucherService.portalCancelVoucher(portalToken, v.id, 'Cancelado e estornado pelo Portal B2B');
+      showToast('success', `Voucher cancelado! ${formatBRL(res.saldo_estornado)} estornados ao seu saldo.`);
+      await loadDashboard(true);
+    } catch (err: any) {
+      showToast('error', err?.message || 'Erro ao cancelar voucher.');
+    } finally {
+      setCancelingId(null);
+    }
+  };
 
-            .company-subtitle {
-              font-size: 11px;
-              color: #94a3b8;
-              text-transform: uppercase;
-              letter-spacing: 1px;
-              font-weight: 600;
-              margin-bottom: 20px;
-            }
+  // Save Collaborator
+  const openColabModal = (col?: VoucherColaborador) => {
+    if (col) {
+      setEditingColab(col);
+      setColabNome(col.nome);
+      setColabWhats(col.whatsapp || '');
+      setColabCpf(col.cpf || '');
+      setColabEmail(col.email || '');
+      setColabCargo(col.cargo || '');
+    } else {
+      setEditingColab(null);
+      setColabNome('');
+      setColabWhats('');
+      setColabCpf('');
+      setColabEmail('');
+      setColabCargo('');
+    }
+    setShowColabModal(true);
+  };
 
-            .middle-row {
-              display: flex;
-              align-items: center;
-              justify-content: space-between;
-              background: rgba(255,255,255,0.04);
-              border: 1px solid rgba(255,255,255,0.1);
-              padding: 16px 20px;
-              border-radius: 16px;
-              margin-bottom: 20px;
-            }
+  const handleSaveColab = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!portalToken || !colabNome.trim()) return;
+    setSavingColab(true);
+    try {
+      await voucherService.portalSaveColaborador(portalToken, {
+        id: editingColab?.id || null,
+        nome: colabNome.trim(),
+        whatsapp: colabWhats.trim(),
+        cpf: colabCpf.trim(),
+        email: colabEmail.trim(),
+        cargo: colabCargo.trim(),
+        ativo: true
+      });
+      setShowColabModal(false);
+      showToast('success', editingColab ? 'Colaborador atualizado!' : 'Colaborador cadastrado!');
+      await loadDashboard(true);
+    } catch (err: any) {
+      showToast('error', err?.message || 'Erro ao salvar colaborador.');
+    } finally {
+      setSavingColab(false);
+    }
+  };
 
-            .value-block .label {
-              font-size: 10px;
-              color: #94a3b8;
-              text-transform: uppercase;
-              font-weight: 700;
-              letter-spacing: 1px;
-            }
+  const handleDeleteColab = async (c: VoucherColaborador) => {
+    if (!portalToken) return;
+    if (!window.confirm(`Remover o colaborador "${c.nome}" da lista?`)) return;
+    try {
+      await voucherService.portalDeleteColaborador(portalToken, c.id);
+      setSelectedColabs(prev => prev.filter(id => id !== c.id));
+      showToast('success', 'Colaborador removido.');
+      await loadDashboard(true);
+    } catch (err: any) {
+      showToast('error', err?.message || 'Erro ao remover colaborador.');
+    }
+  };
 
-            .value-block .amount {
-              font-size: 32px;
-              font-weight: 900;
-              color: #00a884;
-              line-height: 1.1;
-              margin-top: 2px;
-            }
+  const handleImportCsv = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!portalToken) return;
+    const rows = parseColaboradoresCsv(csvText);
+    if (rows.length === 0) {
+      showToast('error', 'Nenhum colaborador identificado. Use formato: Nome; WhatsApp; CPF; Cargo');
+      return;
+    }
 
-            .beneficiary-block {
-              text-align: right;
-            }
+    setImportingCsv(true);
+    try {
+      let ok = 0;
+      for (const r of rows) {
+        await voucherService.portalSaveColaborador(portalToken, r);
+        ok++;
+      }
+      setShowCsvModal(false);
+      setCsvText('');
+      showToast('success', `${ok} colaborador(es) importado(s) com sucesso!`);
+      await loadDashboard(true);
+    } catch (err: any) {
+      showToast('error', err?.message || 'Erro durante importação.');
+    } finally {
+      setImportingCsv(false);
+    }
+  };
 
-            .beneficiary-block .name {
-              font-size: 16px;
-              font-weight: 800;
-              color: #ffffff;
-            }
+  // Request Discounted Credit Purchase Order
+  const creditNumeric = Math.max(parseFloat(buyCreditAmount.replace(',', '.')) || 0, 0);
+  const discountPct = Number(empresa?.desconto_compra_percent || 0);
+  const discountMoney = Number((creditNumeric * (discountPct / 100)).toFixed(2));
+  const netToPay = Number((creditNumeric - discountMoney).toFixed(2));
 
-            .token-pill {
-              display: inline-block;
-              font-family: 'JetBrains Mono', monospace;
-              font-size: 12px;
-              background: rgba(0,168,132,0.15);
-              color: #00a884;
-              border: 1px solid rgba(0,168,132,0.3);
-              padding: 4px 10px;
-              border-radius: 8px;
-              margin-top: 4px;
-              font-weight: 700;
-            }
-
-            .footer-info {
-              display: flex;
-              justify-content: space-between;
-              align-items: flex-end;
-              font-size: 11px;
-              color: #94a3b8;
-            }
-
-            .perforation-line {
-              width: 0px;
-              border-left: 2px dashed #00a884;
-              position: relative;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-            }
-
-            .cut-label {
-              position: absolute;
-              background: #0b141a;
-              color: #00a884;
-              font-size: 9px;
-              font-weight: 900;
-              text-transform: uppercase;
-              letter-spacing: 1px;
-              padding: 6px 4px;
-              writing-mode: vertical-rl;
-              text-orientation: mixed;
-              border: 1px dashed #00a884;
-              border-radius: 6px;
-              white-space: nowrap;
-            }
-
-            .ticket-stub {
-              width: 248px;
-              padding: 28px 22px;
-              background: #0d171d;
-              color: #ffffff;
-              display: flex;
-              flex-direction: column;
-              align-items: center;
-              justify-content: space-between;
-              text-align: center;
-              border-left: 1px solid rgba(255,255,255,0.05);
-            }
-
-            .stub-header {
-              font-size: 10px;
-              font-weight: 900;
-              text-transform: uppercase;
-              letter-spacing: 1px;
-              color: #94a3b8;
-            }
-
-            .qr-box {
-              background: #ffffff;
-              padding: 10px;
-              border-radius: 14px;
-              box-shadow: 0 6px 16px rgba(0,0,0,0.3);
-              margin: 12px 0;
-            }
-
-            .stub-amount {
-              font-size: 18px;
-              font-weight: 900;
-              color: #00a884;
-              margin-bottom: 4px;
-            }
-
-            .stub-beneficiary {
-              font-size: 11px;
-              color: #ffffff;
-              font-weight: 700;
-              margin-bottom: 8px;
-              max-width: 180px;
-              white-space: nowrap;
-              overflow: hidden;
-              text-overflow: ellipsis;
-            }
-
-            .signature-box {
-              width: 100%;
-              border-top: 1px solid rgba(255,255,255,0.2);
-              padding-top: 6px;
-              font-size: 9px;
-              color: #64748b;
-              text-transform: uppercase;
-            }
-
-            .restaurant-box {
-              background: rgba(0, 168, 132, 0.08);
-              border: 1px solid rgba(0, 168, 132, 0.3);
-              border-radius: 14px;
-              padding: 12px 16px;
-              margin-bottom: 16px;
-            }
-
-            .restaurant-tag {
-              font-size: 9.5px;
-              font-weight: 900;
-              text-transform: uppercase;
-              letter-spacing: 1px;
-              color: #34d399;
-              display: flex;
-              align-items: center;
-              gap: 4px;
-              margin-bottom: 3px;
-            }
-
-            .restaurant-name {
-              font-size: 15px;
-              font-weight: 900;
-              color: #ffffff;
-              text-transform: uppercase;
-            }
-
-            .restaurant-address {
-              font-size: 10.5px;
-              color: #94a3b8;
-              margin-top: 2px;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="ticket-container">
-            <div class="ticket-main">
-              <div class="badge-gold">★ VIP COMPLIMENTARY PASS ★</div>
-              <div class="company-name">${empresaNome}</div>
-              <div class="company-subtitle">Programa de Benefício & Cortesia Corporativa</div>
-
-              <!-- Estabelecimento de Consumo -->
-              <div class="restaurant-box">
-                <div class="restaurant-tag">🍔 LOCAL DE CONSUMO EXCLUSIVO:</div>
-                <div class="restaurant-name">${restaurantInfo.nome}</div>
-                <div class="restaurant-address">📍 ${restaurantInfo.endereco}</div>
-              </div>
-
-              <div class="middle-row">
-                <div class="value-block">
-                  <div class="label">Valor Liberado</div>
-                  <div class="amount">${formattedVal}</div>
-                </div>
-                <div class="beneficiary-block">
-                  <div class="label">Beneficiário</div>
-                  <div class="name">${vItem.beneficiario_nome}</div>
-                  <div class="token-pill">${vItem.public_token}</div>
-                </div>
-              </div>
-
-              <div class="footer-info">
-                <div>
-                  <strong>Validade:</strong> ${formattedDate}<br/>
-                  <strong>Site / Cardápio:</strong> ${restaurantInfo.cardapioUrl}
-                </div>
-                <div style="text-align: right;">
-                  Apresente este voucher no balcão da ${restaurantInfo.nome} para resgate.
-                </div>
-              </div>
-            </div>
-
-            <div class="perforation-line">
-              <span class="cut-label">✂ DESTACAR NO CAIXA</span>
-            </div>
-
-            <div class="ticket-stub">
-              <div>
-                <div class="stub-header">CANHOTO DO CAIXA</div>
-                <div style="font-size: 10px; font-weight: 800; color: #00a884; text-transform: uppercase; margin-top: 2px;">${restaurantInfo.nome}</div>
-              </div>
-              
-              <div class="qr-box">
-                <img src="https://api.qrserver.com/v1/create-qr-code/?size=110x110&data=${encodeURIComponent(qrUrl)}" width="110" height="110" alt="QR Code" />
-              </div>
-
-              <div class="stub-amount">${formattedVal}</div>
-              <div class="stub-beneficiary">${vItem.beneficiario_nome}</div>
-              
-              <div class="signature-box">
-                Visto do Caixa / Data:<br/>____/____/________
-              </div>
-            </div>
-          </div>
-
-          <script>
-            window.onload = function() { window.print(); }
-          </script>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
+  const handleRequestCredit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!portalToken) return;
+    if (creditNumeric < 10) {
+      showToast('error', 'Informe um valor mínimo de R$ 10,00 em créditos.');
+      return;
+    }
+    setRequestingCredit(true);
+    try {
+      await voucherService.portalRequestCreditOrder(portalToken, creditNumeric, buyPaymentMethod, buyObs.trim() || undefined);
+      setBuyObs('');
+      showToast('success', `Pedido de ${formatBRL(creditNumeric)} em créditos enviado para aprovação do estabelecimento!`);
+      await loadDashboard(true);
+    } catch (err: any) {
+      showToast('error', err?.message || 'Erro ao solicitar créditos.');
+    } finally {
+      setRequestingCredit(false);
+    }
   };
 
   if (loading) {
     return (
-      <div className="h-full h-[100dvh] bg-[#0b141a] flex items-center justify-center text-white overflow-y-auto">
-        <div className="text-center space-y-3">
-          <div className="w-10 h-10 border-3 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="text-xs text-slate-400 font-bold">Carregando portal corporativo...</p>
-        </div>
+      <div className="min-h-screen bg-[#070b0e] text-slate-200 flex flex-col items-center justify-center gap-3 p-4">
+        <Loader2 className="w-8 h-8 animate-spin text-emerald-400" />
+        <span className="text-sm font-semibold text-slate-400">Carregando Portal Corporativo...</span>
       </div>
     );
   }
 
   return (
-    <div className="h-full h-[100dvh] w-full bg-[#0b141a] text-slate-100 font-sans overflow-x-hidden overflow-y-auto overscroll-y-contain pb-12">
-      
-      {/* ========================================================= */}
-      {/* 1. CABEÇALHO CORPORATIVO PREMIUM */}
-      {/* ========================================================= */}
-      <header className="sticky top-0 z-40 bg-[#0b141a]/85 backdrop-blur-xl border-b border-white/10 px-4 sm:px-8 py-3.5 flex items-center justify-between shadow-lg">
-        
-        {/* Logo & Dados da Empresa */}
-        <div className="flex items-center gap-3.5">
-          <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center shadow-md shadow-emerald-500/20 text-[#0b141a]">
-            <Building2 className="w-5 h-5" />
-          </div>
-          <div className="text-left">
-            <div className="flex items-center gap-2">
-              <h1 className="text-sm sm:text-base font-black text-white leading-tight">
-                {companyData?.nome_fantasia || companyData?.razao_social || 'Empresa Parceira'}
-              </h1>
-              <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[9px] font-black uppercase tracking-wider">
-                B2B Parceiro
-              </span>
+    <div className="min-h-screen bg-[#070b0e] text-slate-100 pb-20">
+      {/* Toast Notification */}
+      {toast && (
+        <div
+          className={`fixed top-4 right-4 left-4 sm:left-auto sm:max-w-md z-50 p-4 rounded-2xl border backdrop-blur-xl shadow-2xl flex items-start gap-3 animate-in slide-in-from-top-4 ${
+            toast.type === 'success'
+              ? 'bg-emerald-950/95 border-emerald-500/50 text-emerald-200'
+              : 'bg-rose-950/95 border-rose-500/50 text-rose-200'
+          }`}
+        >
+          {toast.type === 'success' ? (
+            <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+          ) : (
+            <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+          )}
+          <span className="text-xs sm:text-sm font-medium flex-1">{toast.msg}</span>
+          <button type="button" onClick={() => setToast(null)} className="text-slate-400 hover:text-white">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Top Header */}
+      <header className="sticky top-0 z-30 bg-[#0b1116]/85 backdrop-blur-xl border-b border-slate-800/80">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3.5 min-w-0">
+            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-emerald-500/20 to-teal-500/20 border border-emerald-500/30 flex items-center justify-center shrink-0">
+              <Building2 className="w-5 h-5 text-emerald-400" />
             </div>
-            <p className="text-[11px] text-slate-400 flex items-center gap-1 mt-0.5">
-              <span>CNPJ:</span>
-              <span className="font-mono text-slate-300 font-semibold">{companyData?.cnpj || 'Sem CNPJ'}</span>
-            </p>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-base sm:text-lg font-extrabold text-white truncate">
+                  {empresa?.nome_fantasia || empresa?.razao_social}
+                </h1>
+                <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold uppercase">
+                  Portal B2B
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 flex items-center gap-1.5 truncate mt-0.5">
+                <Store className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                Convênio ativo em <strong className="text-slate-200">{restaurante?.name || 'Estabelecimento'}</strong>
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 self-end sm:self-auto">
+            <button
+              type="button"
+              onClick={() => loadDashboard(true)}
+              disabled={refreshing}
+              className="min-h-[42px] px-3.5 rounded-xl bg-slate-800/80 hover:bg-slate-800 border border-slate-700 text-xs font-bold text-slate-300 flex items-center gap-1.5 transition-all"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin text-emerald-400' : ''}`} />
+              Atualizar
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowIssueModal(true)}
+              className="min-h-[42px] px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs flex items-center gap-1.5 shadow-lg shadow-emerald-950/50 transition-all"
+            >
+              <Plus className="w-4 h-4" /> Emitir Voucher
+            </button>
+            <button
+              type="button"
+              onClick={handleLogout}
+              title="Sair do Portal"
+              className="min-h-[42px] px-3 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-300 text-xs font-bold flex items-center gap-1.5 transition-all"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Sair</span>
+            </button>
           </div>
         </div>
-
-        {/* Ações Topo */}
-        <div className="flex items-center gap-2.5">
-          <button
-            type="button"
-            onClick={() => setShowIssueModal(true)}
-            className="px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-400 text-[#0b141a] font-black text-xs uppercase tracking-wider rounded-xl hover:opacity-95 active:scale-95 transition-all shadow-md shadow-emerald-500/20 flex items-center gap-1.5 cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            <span className="hidden sm:inline">Emitir Novo Voucher</span>
-            <span className="sm:hidden">Emitir</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="p-2 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-colors cursor-pointer"
-            title="Sair do Portal"
-          >
-            <LogOut className="w-4 h-4" />
-          </button>
-        </div>
-
       </header>
 
-      {/* ========================================================= */}
-      {/* 2. CORPO PRINCIPAL */}
-      {/* ========================================================= */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-8 pt-6 space-y-6">
-
-        {/* Banner Institucional do Restaurante Concedente */}
-        <div className="bg-gradient-to-r from-emerald-500/15 via-teal-500/10 to-transparent border border-emerald-500/30 rounded-3xl p-4 sm:p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 text-left shadow-lg relative overflow-hidden">
-          <div className="flex items-center gap-3.5">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 text-[#0b141a] flex items-center justify-center shrink-0 shadow-md shadow-emerald-500/20">
-              <Building2 className="w-6 h-6" />
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 space-y-6">
+        {/* KPI Overview Grid */}
+        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="rounded-3xl bg-gradient-to-br from-emerald-950/50 via-slate-900/80 to-slate-900/90 border border-emerald-500/30 p-5 flex flex-col justify-between gap-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-400">Saldo Disponível</span>
+              <Wallet className="w-5 h-5 text-emerald-400" />
             </div>
             <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[11px] font-black uppercase tracking-wider text-emerald-400">
-                  Restaurante Parceiro Conveniado
-                </span>
-                <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-black uppercase tracking-wider border border-emerald-500/30">
-                  Uso Exclusivo
-                </span>
-              </div>
-              <h2 className="text-base sm:text-lg font-black text-white mt-0.5">
-                {restaurantInfo.nome}
-              </h2>
-              <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-1.5 flex-wrap">
-                <span>📍 {restaurantInfo.endereco}</span>
-                <span>•</span>
-                <span className="text-slate-300">Vouchers emitidos aqui são válidos exclusivamente para resgate no restaurante <strong>{restaurantInfo.nome}</strong>.</span>
-              </p>
-            </div>
-          </div>
-
-          {restaurantInfo.cardapioUrl && (
-            <a
-              href={restaurantInfo.cardapioUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-4 py-2.5 bg-white/5 hover:bg-white/10 text-slate-200 hover:text-white rounded-xl text-xs font-bold border border-white/10 transition-all flex items-center gap-2 shrink-0 self-stretch md:self-auto justify-center"
-            >
-              <ExternalLink className="w-4 h-4 text-emerald-400" />
-              <span>Cardápio Online {restaurantInfo.nome}</span>
-            </a>
-          )}
-        </div>
-
-        {/* Grid de Métricas Principais */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          
-          {/* Card 1: Saldo Disponível */}
-          <div className="bg-gradient-to-br from-emerald-500/15 via-emerald-500/5 to-white/[0.02] backdrop-blur-md border border-emerald-500/30 p-5 rounded-3xl space-y-3 text-left relative overflow-hidden shadow-lg">
-            <div className="flex items-center justify-between text-emerald-400">
-              <span className="text-[11px] font-black uppercase tracking-wider">Saldo de Crédito Disponível</span>
-              <Wallet className="w-5 h-5" />
-            </div>
-            <div className="space-y-1">
-              <div className="text-3xl font-black text-emerald-400 tracking-tight">
-                {saldoCredito.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-              </div>
-              <p className="text-[11px] text-slate-400">
-                Crédito concedido por {restaurantInfo.nome}
-              </p>
-            </div>
-            {/* Barra de Progresso de Consumo */}
-            <div className="space-y-1 pt-1">
-              <div className="w-full bg-black/40 h-2 rounded-full overflow-hidden">
-                <div 
-                  className="bg-gradient-to-r from-emerald-400 to-teal-300 h-full rounded-full transition-all duration-500"
-                  style={{ width: `${100 - percentConsumido}%` }}
-                />
-              </div>
-              <div className="flex items-center justify-between text-[10px] text-slate-400 font-medium">
-                <span>{(100 - percentConsumido).toFixed(0)}% restante</span>
-                <span>{percentConsumido.toFixed(0)}% consumido</span>
+              <div className="text-3xl font-black text-white">{formatBRL(empresa?.saldo_credito)}</div>
+              <div className="flex items-center gap-2 flex-wrap mt-2">
+                {empresa?.credito_mensal_ativo && Number(empresa.valor_credito_mensal) > 0 && (
+                  <span className="px-2 py-0.5 rounded-lg bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 text-[10px] font-bold">
+                    Mensal: {formatBRL(empresa.valor_credito_mensal)} (Dia {empresa.dia_renovacao_mensal})
+                  </span>
+                )}
+                {Number(empresa?.desconto_compra_percent || 0) > 0 && (
+                  <span className="px-2 py-0.5 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[10px] font-bold">
+                    {empresa?.desconto_compra_percent}% OFF recarga
+                  </span>
+                )}
               </div>
             </div>
           </div>
 
-          {/* Card 2: Validade do Crédito */}
-          <div className="bg-white/[0.03] backdrop-blur-md border border-white/10 p-5 rounded-3xl space-y-3 text-left shadow-lg">
-            <div className="flex items-center justify-between text-amber-400">
-              <span className="text-[11px] font-black uppercase tracking-wider">Validade do Crédito</span>
-              <Clock className="w-5 h-5" />
+          <div className="rounded-3xl bg-slate-900/75 border border-slate-800/80 p-5 flex flex-col justify-between gap-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Vouchers Ativos</span>
+              <Ticket className="w-5 h-5 text-cyan-400" />
             </div>
-            <div className="space-y-1">
-              <div className="text-3xl font-black text-white tracking-tight">
-                {diasRestantes} dias
-              </div>
-              <p className="text-[11px] text-slate-400">
-                {companyData?.credito_fim 
-                  ? `Válido até ${new Date(companyData.credito_fim).toLocaleDateString('pt-BR')}`
-                  : 'Vigência de 30 dias'}
-              </p>
-            </div>
-            <div className="pt-2">
-              <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold ${
-                diasRestantes > 5 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'
-              }`}>
-                <Calendar className="w-3 h-3" />
-                {diasRestantes > 0 ? 'Crédito Ativo & Liberado' : 'Período Expirado'}
-              </span>
-            </div>
-          </div>
-
-          {/* Card 3: Total de Vouchers Emitidos */}
-          <div className="bg-white/[0.03] backdrop-blur-md border border-white/10 p-5 rounded-3xl space-y-3 text-left shadow-lg">
-            <div className="flex items-center justify-between text-blue-400">
-              <span className="text-[11px] font-black uppercase tracking-wider">Vouchers Emitidos</span>
-              <Ticket className="w-5 h-5" />
-            </div>
-            <div className="space-y-1">
-              <div className="text-3xl font-black text-white tracking-tight">
-                {totalVouchersEmitidos}
-              </div>
-              <p className="text-[11px] text-slate-400">
-                Totalizando {totalValorEmitido.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-              </p>
-            </div>
-            <div className="pt-2">
-              <span className="text-[11px] text-slate-400 font-medium">
-                {vouchers.filter(v => v.status === 'CRIADO').length} ativos disponíveis para uso
-              </span>
-            </div>
-          </div>
-
-          {/* Card 4: Vouchers Resgatados no Restaurante */}
-          <div className="bg-white/[0.03] backdrop-blur-md border border-white/10 p-5 rounded-3xl space-y-3 text-left shadow-lg">
-            <div className="flex items-center justify-between text-teal-400">
-              <span className="text-[11px] font-black uppercase tracking-wider">Resgatados no Restaurante</span>
-              <CheckCircle2 className="w-5 h-5" />
-            </div>
-            <div className="space-y-1">
-              <div className="text-3xl font-black text-teal-400 tracking-tight">
-                {vouchersUtilizados.length}
-              </div>
-              <p className="text-[11px] text-slate-400">
-                {totalValorUtilizado.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} já consumidos
-              </p>
-            </div>
-            <div className="pt-2">
-              <span className="inline-flex items-center gap-1 text-[11px] text-teal-300 font-bold">
-                <Check className="w-3.5 h-3.5" />
-                {totalVouchersEmitidos > 0 ? ((vouchersUtilizados.length / totalVouchersEmitidos) * 100).toFixed(0) : 0}% taxa de aproveitamento
-              </span>
-            </div>
-          </div>
-
-        </div>
-
-        {/* ========================================================= */}
-        {/* 3. LISTA E GESTÃO DOS VOUCHERS DA EMPRESA */}
-        {/* ========================================================= */}
-        <div className="bg-white/[0.02] backdrop-blur-md border border-white/10 rounded-3xl p-6 shadow-xl space-y-4 text-left">
-          
-          {/* Header da Tabela com Filtros */}
-          <div className="flex flex-col md:flex-row items-center justify-between gap-4">
             <div>
-              <h2 className="text-base font-black text-white flex items-center gap-2">
-                <Ticket className="w-4 h-4 text-emerald-400" />
-                <span>Vouchers Emitidos por {companyData?.nome_fantasia || companyData?.razao_social}</span>
-              </h2>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Consulte o status em tempo real de cada voucher compartilhado com colaboradores e convidados
+              <div className="text-2xl font-black text-white">{formatBRL(metrics.ativosValor)}</div>
+              <p className="text-xs text-slate-400 mt-1">{metrics.ativosCount} cupons disponíveis p/ uso</p>
+            </div>
+          </div>
+
+          <div className="rounded-3xl bg-slate-900/75 border border-slate-800/80 p-5 flex flex-col justify-between gap-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Resgatados na Loja</span>
+              <TrendingUp className="w-5 h-5 text-emerald-400" />
+            </div>
+            <div>
+              <div className="text-2xl font-black text-white">{formatBRL(metrics.resgatadosValor)}</div>
+              <p className="text-xs text-slate-400 mt-1">{metrics.resgatadosCount} baixas confirmadas</p>
+            </div>
+          </div>
+
+          <div className="rounded-3xl bg-slate-900/75 border border-slate-800/80 p-5 flex flex-col justify-between gap-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Equipe Cadastrada</span>
+              <Users className="w-5 h-5 text-purple-400" />
+            </div>
+            <div>
+              <div className="text-2xl font-black text-white">{colaboradores.length}</div>
+              <p className="text-xs text-slate-400 mt-1">
+                {empresa?.permitir_compra_creditos ? (
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('creditos')}
+                    className="text-emerald-400 hover:underline font-bold"
+                  >
+                    + Comprar créditos com desconto
+                  </button>
+                ) : (
+                  'Colaboradores ativos no convênio'
+                )}
               </p>
             </div>
+          </div>
+        </section>
 
-            <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
-              
-              {/* Campo de Busca */}
-              <div className="relative flex-1 md:w-64">
-                <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+        {/* Responsive Navigation Tabs */}
+        <nav className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+          {[
+            { id: 'vouchers' as PortalTab, label: `Vouchers (${vouchers.length})`, icon: Ticket },
+            { id: 'colaboradores' as PortalTab, label: `Colaboradores (${colaboradores.length})`, icon: Users },
+            { id: 'creditos' as PortalTab, label: 'Créditos & Desconto', icon: Percent },
+            { id: 'extrato' as PortalTab, label: `Extrato (${events.length})`, icon: History }
+          ].map(tab => {
+            const Icon = tab.icon;
+            const active = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                className={`min-h-[46px] px-4 rounded-2xl text-xs font-extrabold flex items-center gap-2 shrink-0 border transition-all ${
+                  active
+                    ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow-lg shadow-emerald-950/50'
+                    : 'bg-slate-900/75 text-slate-300 border-slate-800 hover:bg-slate-800'
+                }`}
+              >
+                <Icon className="w-4 h-4" />
+                {tab.label}
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* ==================== TAB 1: VOUCHERS ==================== */}
+        {activeTab === 'vouchers' && (
+          <section className="space-y-4">
+            <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
                   value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Buscar beneficiário ou código..."
-                  className="w-full bg-black/30 border border-white/10 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition-colors"
+                  onChange={e => setSearchTerm(e.target.value)}
+                  placeholder="Buscar por token, nome do colaborador ou WhatsApp..."
+                  className="w-full min-h-[46px] pl-10 pr-4 rounded-2xl bg-slate-900/80 border border-slate-800 text-sm text-white outline-none focus:border-emerald-500"
                 />
               </div>
 
-              {/* Filtros de Status com Rastreabilidade Total */}
-              <div className="flex items-center gap-1 bg-black/30 p-1 rounded-xl border border-white/10 overflow-x-auto scrollbar-none">
-                {[
-                  { id: 'ALL', label: 'Todos' },
-                  { id: 'CRIADO', label: 'Disponíveis' },
-                  { id: 'UTILIZADO', label: 'Resgatados' },
-                  { id: 'CANCELADO', label: 'Cancelados' }
-                ].map((f) => (
+              <div className="flex items-center gap-1.5 overflow-x-auto">
+                {(['TODOS', 'ATIVOS', 'RESGATADOS', 'CANCELADOS'] as const).map(st => (
                   <button
-                    key={f.id}
+                    key={st}
                     type="button"
-                    onClick={() => setStatusFilter(f.id as any)}
-                    className={`px-3 py-1.5 rounded-lg text-[11px] font-black uppercase transition-all cursor-pointer whitespace-nowrap ${
-                      statusFilter === f.id
-                        ? f.id === 'CANCELADO'
-                          ? 'bg-red-500 text-white'
-                          : 'bg-emerald-500 text-[#0b141a]'
-                        : 'text-slate-400 hover:text-white'
+                    onClick={() => setStatusFilter(st)}
+                    className={`min-h-[42px] px-3.5 rounded-xl text-xs font-bold border shrink-0 transition-all ${
+                      statusFilter === st
+                        ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
+                        : 'bg-slate-900/70 border-slate-800 text-slate-400 hover:text-white'
                     }`}
                   >
-                    {f.label}
+                    {st}
                   </button>
                 ))}
               </div>
-
             </div>
-          </div>
 
-          {/* Lista de Vouchers */}
-          <div className="space-y-2.5 pt-2">
-            {vouchers.length === 0 ? (
-              <div className="py-12 text-center space-y-3 border border-dashed border-white/10 rounded-2xl">
-                <Gift className="w-10 h-10 mx-auto text-slate-500 opacity-60" />
-                <div className="space-y-1">
-                  <p className="text-sm font-bold text-white">Nenhum voucher emitido ainda</p>
-                  <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                    Você possui {saldoCredito.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} em créditos. Comece presenteando seus colaboradores agora!
-                  </p>
+            {selectedVouchers.length > 0 && (
+              <div className="rounded-2xl bg-emerald-950/50 border border-emerald-500/40 p-3.5 flex flex-wrap items-center justify-between gap-3">
+                <span className="text-xs font-bold text-emerald-300">
+                  {selectedVouchers.length} voucher(s) selecionado(s)
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleSendWhatsApp(selectedVouchers)}
+                    className="min-h-[40px] px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs flex items-center gap-1.5"
+                  >
+                    <Send className="w-3.5 h-3.5" /> Enviar Selecionados no WhatsApp
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedVouchers([])}
+                    className="min-h-[40px] px-3 rounded-xl bg-slate-800 text-slate-300 text-xs font-bold"
+                  >
+                    Limpar
+                  </button>
                 </div>
+              </div>
+            )}
+
+            {filteredVouchers.length === 0 ? (
+              <div className="rounded-3xl bg-slate-900/60 border border-slate-800 p-10 text-center space-y-3">
+                <Ticket className="w-10 h-10 text-slate-600 mx-auto" />
+                <h3 className="text-base font-bold text-white">Nenhum voucher encontrado</h3>
+                <p className="text-xs text-slate-400 max-w-md mx-auto">
+                  Clique em "Emitir Voucher" ou selecione colaboradores na aba Colaboradores para gerar e enviar no WhatsApp automaticamente.
+                </p>
                 <button
                   type="button"
                   onClick={() => setShowIssueModal(true)}
-                  className="px-4 py-2 bg-emerald-500 text-[#0b141a] font-black text-xs uppercase tracking-wider rounded-xl hover:opacity-95 cursor-pointer shadow-md"
+                  className="min-h-[46px] px-5 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs inline-flex items-center gap-2"
                 >
-                  Emitir Primeiro Voucher
+                  <Plus className="w-4 h-4" /> Emitir Primeiro Voucher
                 </button>
               </div>
             ) : (
-              vouchers
-                .filter((v) => {
-                  const matchesSearch =
-                    !searchTerm ||
-                    (v.beneficiario_nome && v.beneficiario_nome.toLowerCase().includes(searchTerm.toLowerCase())) ||
-                    (v.public_token && v.public_token.toLowerCase().includes(searchTerm.toLowerCase())) ||
-                    (v.beneficiario_whatsapp && v.beneficiario_whatsapp.includes(searchTerm));
-
-                  if (!matchesSearch) return false;
-                  if (statusFilter === 'CRIADO') {
-                    return v.status === 'CRIADO' || v.status === 'DISPONIBILIZADO' || v.status === 'ATIVO' || v.status === 'ENVIADO';
-                  }
-                  if (statusFilter === 'UTILIZADO') {
-                    return v.status === 'UTILIZADO';
-                  }
-                  if (statusFilter === 'CANCELADO') {
-                    return v.status === 'CANCELADO' || v.status === 'EXCLUIDO';
-                  }
-                  return true;
-                })
-                .map((vItem) => {
-                  const isUtilizado = vItem.status === 'UTILIZADO';
-                  const isDisponivel = vItem.status === 'CRIADO' || vItem.status === 'DISPONIBILIZADO';
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredVouchers.map(v => {
+                  const isUsed = v.status === 'RESGATADO' || v.status === 'UTILIZADO';
+                  const isCancelled = v.status === 'CANCELADO';
+                  const checked = selectedVouchers.includes(v.id);
+                  const isSending = Boolean(sendingWaIds[v.id]);
 
                   return (
                     <div
-                      key={vItem.id}
-                      className={`p-4 rounded-2xl transition-all flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 ${
-                        isUtilizado
-                          ? 'bg-gradient-to-r from-purple-950/30 via-[#101920] to-[#0c1418] border-l-4 border-l-purple-500 border-t border-t-purple-500/20 border-r border-r-purple-500/20 border-b border-b-purple-500/20 shadow-md shadow-purple-950/30 ring-1 ring-purple-500/10'
-                          : 'bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 hover:border-emerald-500/20 shadow-sm'
+                      key={v.id}
+                      className={`rounded-3xl border p-5 flex flex-col justify-between gap-4 transition-all ${
+                        isUsed
+                          ? 'bg-slate-900/50 border-slate-800/80'
+                          : isCancelled
+                          ? 'bg-rose-950/15 border-rose-900/40 opacity-75'
+                          : 'bg-slate-900/80 border-slate-800 hover:border-emerald-500/40'
                       }`}
                     >
-                      {/* Lado Esquerdo: Código + Beneficiário */}
-                      <div className="flex items-center gap-3.5 min-w-0">
-                        <button
-                          type="button"
-                          onClick={() => setSelectedQrVoucher(vItem)}
-                          className={`w-12 h-12 rounded-xl bg-white p-1 flex items-center justify-center shrink-0 hover:scale-105 transition-transform cursor-pointer shadow-sm ${
-                            isUtilizado ? 'opacity-80 ring-2 ring-purple-500/40' : ''
-                          }`}
-                          title="Clique para ampliar o QR Code"
-                        >
-                          <QRCode value={getVoucherUrl(vItem.public_token)} size={40} />
-                        </button>
-
-                        <div className="min-w-0 space-y-1 text-left">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className={`font-mono font-black text-xs ${isUtilizado ? 'text-purple-400' : 'text-emerald-400'}`}>
-                              {vItem.public_token}
-                            </span>
-                            <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${
-                              isUtilizado
-                                ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-sm'
-                                : isDisponivel
-                                ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                                : 'bg-red-500/15 text-red-400 border border-red-500/30'
-                            }`}>
-                              {isUtilizado ? '✓ Resgatado no Restaurante' : isDisponivel ? 'Ativo / Disponível' : vItem.status}
-                            </span>
-                          </div>
-
-                          <div className="text-xs text-white font-bold truncate">
-                            {vItem.beneficiario_nome || 'Beneficiário Avulso'}
-                          </div>
-
-                          <div className="text-[11px] text-slate-400 flex items-center gap-2 flex-wrap">
-                            <span>Whats: {vItem.beneficiario_whatsapp || 'Não informado'}</span>
-                            <span>•</span>
-                            <span>Validade: {new Date(vItem.validade_fim).toLocaleDateString('pt-BR')}</span>
-                            {isUtilizado && vItem.data_resgate && (
-                              <>
-                                <span>•</span>
-                                <span className="text-purple-300 font-semibold">Baixa: {new Date(vItem.data_resgate).toLocaleString('pt-BR')}</span>
-                              </>
+                      <div className="space-y-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            {!isUsed && !isCancelled && v.beneficiario_whatsapp && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setSelectedVouchers(prev =>
+                                    prev.includes(v.id) ? prev.filter(x => x !== v.id) : [...prev, v.id]
+                                  )
+                                }
+                                className="text-slate-400 hover:text-emerald-400 shrink-0"
+                              >
+                                {checked ? <CheckSquare className="w-4 h-4 text-emerald-400" /> : <Square className="w-4 h-4" />}
+                              </button>
                             )}
+                            <span className="font-mono font-black text-sm text-emerald-400 truncate">{v.public_token}</span>
                           </div>
-                        </div>
-                      </div>
 
-                      {/* Lado Direito: Valor + Ações de Envio e Impressão */}
-                      <div className="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto pt-2 sm:pt-0 border-t sm:border-t-0 border-white/5">
-                        <div className="text-left sm:text-right pr-2">
-                          <span className="text-[10px] text-slate-400 uppercase font-black tracking-wider block">Valor</span>
-                          <span className="text-lg font-black text-white">
-                            {Number(vItem.valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                          <span
+                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase shrink-0 ${
+                              isUsed
+                                ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30'
+                                : isCancelled
+                                ? 'bg-rose-500/15 text-rose-300 border border-rose-500/30'
+                                : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+                            }`}
+                          >
+                            {v.status}
                           </span>
                         </div>
 
-                        {isUtilizado ? (
-                          <div className="flex items-center gap-2">
-                            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-teal-500/10 border border-teal-500/30 text-teal-300 rounded-xl text-xs font-black">
-                              <Lock className="w-3.5 h-3.5 text-teal-400" />
-                              <span>Utilizado no Caixa</span>
+                        <div>
+                          <div className="text-base font-bold text-white truncate">{v.beneficiario_nome}</div>
+                          <div className="text-xs text-slate-400 flex items-center gap-2 mt-0.5">
+                            <Phone className="w-3 h-3 text-slate-500" />
+                            <span>{formatPhoneDisplay(v.beneficiario_whatsapp)}</span>
+                            {v.mensagem_envio_status && (
+                              <span
+                                className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                                  v.mensagem_envio_status === 'ENVIADO' || v.mensagem_envio_status === 'NA_FILA'
+                                    ? 'bg-emerald-500/15 text-emerald-300'
+                                    : v.mensagem_envio_status === 'ERRO'
+                                    ? 'bg-rose-500/15 text-rose-300'
+                                    : 'bg-slate-800 text-slate-400'
+                                }`}
+                              >
+                                WA: {v.mensagem_envio_status}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex items-end justify-between pt-2 border-t border-slate-800/80">
+                          <div>
+                            <div className="text-[10px] uppercase text-slate-500 font-bold">Valor</div>
+                            <div className="text-2xl font-black text-white">{formatBRL(v.valor)}</div>
+                          </div>
+                          <div className="text-right text-[11px] text-slate-400">
+                            <div>Validade</div>
+                            <div className="font-semibold text-slate-200">
+                              {new Date(v.validade_fim).toLocaleDateString('pt-BR')}
                             </div>
-                            <button
-                              type="button"
-                              disabled
-                              className="p-2 bg-white/5 text-slate-600 rounded-xl cursor-not-allowed opacity-40"
-                              title="Voucher já utilizado no caixa da Burguer Plus. Reenvio bloqueado."
-                            >
-                              <Send className="w-4 h-4" />
-                            </button>
                           </div>
-                        ) : (
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            {/* Botão WhatsApp API FoodNext */}
-                            <button
-                              type="button"
-                              disabled={sendingWhatsappId === vItem.id}
-                              onClick={() => sendDirectWhatsappViaFoodNext(vItem)}
-                              className="p-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-xl transition-all cursor-pointer disabled:opacity-50 flex items-center justify-center min-w-[36px] min-h-[36px]"
-                              title="Enviar Voucher via WhatsApp (FoodNext)"
-                            >
-                              {sendingWhatsappId === vItem.id ? (
-                                <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
-                              ) : (
-                                <Send className="w-4 h-4" />
-                              )}
-                            </button>
-
-                            {/* Botão Copiar Link */}
-                            <button
-                              type="button"
-                              onClick={() => copyVoucherLink(vItem.public_token, isUtilizado)}
-                              className="p-2 bg-white/5 hover:bg-white/10 text-slate-300 rounded-xl transition-all cursor-pointer"
-                              title="Copiar Link do Voucher"
-                            >
-                              <Copy className="w-4 h-4" />
-                            </button>
-
-                            {/* Botão Imprimir */}
-                            <button
-                              type="button"
-                              onClick={() => handlePrintVoucher(vItem)}
-                              className="p-2 bg-white/5 hover:bg-white/10 text-slate-300 rounded-xl transition-all cursor-pointer"
-                              title="Imprimir Voucher"
-                            >
-                              <Printer className="w-4 h-4" />
-                            </button>
-
-                            {/* Botão Ver Página Pública */}
-                            <a
-                              href={getVoucherUrl(vItem.public_token)}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="p-2 bg-white/5 hover:bg-white/10 text-slate-300 rounded-xl transition-all"
-                              title="Abrir página pública"
-                            >
-                              <ExternalLink className="w-4 h-4" />
-                            </a>
-                          </div>
-                        )}
+                        </div>
                       </div>
 
+                      <div className="grid grid-cols-2 gap-2 pt-1">
+                        {!isCancelled && (
+                          <button
+                            type="button"
+                            onClick={() => handleSendWhatsApp([v.id])}
+                            disabled={isSending || !v.beneficiario_whatsapp}
+                            className="min-h-[42px] px-3 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 disabled:opacity-40 border border-emerald-500/30 text-emerald-300 text-xs font-bold flex items-center justify-center gap-1.5"
+                          >
+                            {isSending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                            WhatsApp
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => handleCopyLink(v)}
+                          className="min-h-[42px] px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold flex items-center justify-center gap-1.5"
+                        >
+                          {copiedId === v.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                          {copiedId === v.id ? 'Copiado' : 'Copiar Link'}
+                        </button>
+
+                        <a
+                          href={`/voucher/${v.public_token}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="min-h-[40px] px-3 rounded-xl bg-slate-800/70 hover:bg-slate-800 text-slate-300 text-xs font-semibold flex items-center justify-center gap-1.5"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" /> Abrir Cupom
+                        </a>
+
+                        {!isUsed && !isCancelled && (
+                          <button
+                            type="button"
+                            onClick={() => handleCancelVoucher(v)}
+                            disabled={cancelingId === v.id}
+                            className="min-h-[40px] px-3 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-300 text-xs font-bold flex items-center justify-center gap-1.5"
+                          >
+                            {cancelingId === v.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Ban className="w-3.5 h-3.5" />}
+                            Cancelar
+                          </button>
+                        )}
+                      </div>
                     </div>
                   );
-                })
+                })}
+              </div>
             )}
-          </div>
+          </section>
+        )}
 
-        </div>
+        {/* ==================== TAB 2: COLABORADORES ==================== */}
+        {activeTab === 'colaboradores' && (
+          <section className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => openColabModal()}
+                  className="min-h-[46px] px-4 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs flex items-center gap-2"
+                >
+                  <Plus className="w-4 h-4" /> Cadastrar Colaborador
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowCsvModal(true)}
+                  className="min-h-[46px] px-4 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold text-xs flex items-center gap-2"
+                >
+                  <Upload className="w-4 h-4 text-cyan-400" /> Importar em Lote (CSV)
+                </button>
+              </div>
 
-      </main>
+              {selectedColabs.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowBatchModal(true)}
+                  className="min-h-[46px] px-5 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-black text-xs flex items-center gap-2 shadow-lg"
+                >
+                  <Ticket className="w-4 h-4" /> Gerar Voucher p/ {selectedColabs.length} Selecionado(s)
+                </button>
+              )}
+            </div>
 
-      {/* ========================================================= */}
-      {/* 4. MODAL: EMITIR NOVO VOUCHER (AUTO-EMISSÃO B2B) */}
-      {/* ========================================================= */}
-      {showIssueModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#111b21] border border-white/10 rounded-3xl max-w-lg w-full p-6 space-y-5 shadow-2xl animate-in zoom-in-95 text-left">
-            
-            {/* Header Modal */}
-            <div className="flex items-center justify-between border-b border-white/5 pb-3">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
-                  <Gift className="w-4 h-4" />
+            {colaboradores.length === 0 ? (
+              <div className="rounded-3xl bg-slate-900/60 border border-slate-800 p-10 text-center space-y-3">
+                <Users className="w-10 h-10 text-slate-600 mx-auto" />
+                <h3 className="text-base font-bold text-white">Nenhum colaborador cadastrado</h3>
+                <p className="text-xs text-slate-400 max-w-md mx-auto">
+                  Cadastre sua equipe para gerar vouchers individuais ou mensais em lote com apenas 1 clique e disparo automático no WhatsApp.
+                </p>
+              </div>
+            ) : (
+              <div className="rounded-3xl bg-slate-900/75 border border-slate-800 overflow-hidden">
+                <div className="p-4 border-b border-slate-800 flex items-center justify-between text-xs text-slate-400">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSelectedColabs(
+                        selectedColabs.length === colaboradores.length ? [] : colaboradores.map(c => c.id)
+                      )
+                    }
+                    className="font-bold text-emerald-400 flex items-center gap-2"
+                  >
+                    {selectedColabs.length === colaboradores.length ? (
+                      <CheckSquare className="w-4 h-4" />
+                    ) : (
+                      <Square className="w-4 h-4" />
+                    )}
+                    Selecionar Todos ({colaboradores.length})
+                  </button>
+                  <span>Selecione para emitir em lote</span>
                 </div>
-                <div>
-                  <h3 className="font-black text-sm text-white">Emitir Voucher Corporativo</h3>
-                  <p className="text-[11px] text-slate-400">Debitado do seu saldo de créditos</p>
+
+                <div className="divide-y divide-slate-800/70">
+                  {colaboradores.map(col => {
+                    const isChecked = selectedColabs.includes(col.id);
+                    return (
+                      <div key={col.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-800/30">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setSelectedColabs(prev =>
+                                prev.includes(col.id) ? prev.filter(id => id !== col.id) : [...prev, col.id]
+                              )
+                            }
+                            className="p-1 text-slate-400 hover:text-emerald-400 shrink-0"
+                          >
+                            {isChecked ? <CheckSquare className="w-5 h-5 text-emerald-400" /> : <Square className="w-5 h-5" />}
+                          </button>
+                          <div className="min-w-0">
+                            <div className="font-bold text-white text-sm truncate">{col.nome}</div>
+                            <div className="text-xs text-slate-400 flex items-center gap-3 flex-wrap mt-0.5">
+                              <span>📱 {formatPhoneDisplay(col.whatsapp)}</span>
+                              {col.cargo && <span>• {col.cargo}</span>}
+                              {col.cpf && <span>• CPF: {col.cpf}</span>}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 self-end sm:self-auto">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIssueColabId(col.id);
+                              setIssueNome(col.nome);
+                              setIssueWhatsapp(col.whatsapp || '');
+                              setShowIssueModal(true);
+                            }}
+                            className="min-h-[40px] px-3 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 text-xs font-bold flex items-center gap-1.5"
+                          >
+                            <Ticket className="w-3.5 h-3.5" /> Gerar Voucher
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openColabModal(col)}
+                            className="min-h-[40px] px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteColab(col)}
+                            className="min-h-[40px] px-3 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-xs font-bold"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setShowIssueModal(false)}
-                className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer"
-              >
+            )}
+          </section>
+        )}
+
+        {/* ==================== TAB 3: CREDITOS & DESCONTO ==================== */}
+        {activeTab === 'creditos' && (
+          <section className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Plan & Monthly Allowance Info */}
+            <div className="lg:col-span-5 space-y-4">
+              <div className="rounded-3xl bg-slate-900/75 border border-slate-800 p-6 space-y-4">
+                <div className="flex items-center gap-2.5 text-cyan-400 font-extrabold text-sm">
+                  <Calendar className="w-5 h-5" /> Plano Recorrente Mensal
+                </div>
+                {empresa?.credito_mensal_ativo ? (
+                  <div className="space-y-3 text-sm">
+                    <div className="p-4 rounded-2xl bg-cyan-500/10 border border-cyan-500/30">
+                      <div className="text-xs text-cyan-300 font-bold uppercase">Crédito Mensal Ativo</div>
+                      <div className="text-2xl font-black text-white mt-1">
+                        {formatBRL(empresa.valor_credito_mensal)} / mês
+                      </div>
+                      <div className="text-xs text-slate-300 mt-1">
+                        Renovação todo <strong>dia {empresa.dia_renovacao_mensal}</strong> •{' '}
+                        {empresa.modo_renovacao_mensal === 'ACUMULAR'
+                          ? 'Soma ao saldo anterior'
+                          : 'Completa o teto mensal'}
+                      </div>
+                      {empresa.ultima_renovacao_competencia && (
+                        <div className="text-[11px] text-emerald-400 font-semibold mt-2">
+                          ✓ Competência renovada: {empresa.ultima_renovacao_competencia}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-400">
+                    Sua empresa opera atualmente no modo pré-pago / sob demanda. Caso queira habilitar um limite mensal fixo automático, solicite ao estabelecimento.
+                  </p>
+                )}
+
+                {restaurante?.whatsapp && (
+                  <a
+                    href={`https://wa.me/${restaurante.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(
+                      `Olá ${restaurante.name}! Aqui é da empresa ${empresa?.nome_fantasia || empresa?.razao_social}. Gostaria de falar sobre nossos créditos de vouchers.`
+                    )}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="w-full min-h-[46px] rounded-2xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-bold text-slate-200 flex items-center justify-center gap-2"
+                  >
+                    <MessageCircle className="w-4 h-4 text-emerald-400" /> Falar com Financeiro do Estabelecimento
+                  </a>
+                )}
+              </div>
+            </div>
+
+            {/* Buy Credits with Negotiated Discount */}
+            <div className="lg:col-span-7 space-y-5">
+              <div className="rounded-3xl bg-slate-900/75 border border-emerald-500/30 p-6 space-y-5">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div>
+                    <h2 className="text-base font-extrabold text-white flex items-center gap-2">
+                      <CreditCard className="w-5 h-5 text-emerald-400" /> Comprar Créditos com Desconto
+                    </h2>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      O crédito é adicionado ao saldo assim que o estabelecimento confirmar o pagamento.
+                    </p>
+                  </div>
+                  {discountPct > 0 && (
+                    <span className="px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/40 text-amber-300 text-xs font-black">
+                      SEU DESCONTO: {discountPct}% OFF
+                    </span>
+                  )}
+                </div>
+
+                {!empresa?.permitir_compra_creditos ? (
+                  <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 text-xs text-slate-400">
+                    A solicitação autônoma de créditos não está habilitada neste contrato. Entre em contato com {restaurante?.name}.
+                  </div>
+                ) : (
+                  <form onSubmit={handleRequestCredit} className="space-y-4">
+                    <div className="flex flex-wrap gap-2">
+                      {[300, 500, 1000, 2000].map(preset => (
+                        <button
+                          key={preset}
+                          type="button"
+                          onClick={() => setBuyCreditAmount(String(preset))}
+                          className={`min-h-[40px] px-4 rounded-xl text-xs font-extrabold border transition-all ${
+                            creditNumeric === preset
+                              ? 'bg-emerald-500 text-slate-950 border-emerald-400'
+                              : 'bg-slate-950/70 text-slate-300 border-slate-800 hover:border-emerald-500/40'
+                          }`}
+                        >
+                          +{formatBRL(preset)}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1">
+                          Valor em Créditos (R$)
+                        </label>
+                        <input
+                          type="number"
+                          min="10"
+                          step="10"
+                          value={buyCreditAmount}
+                          onChange={e => setBuyCreditAmount(e.target.value)}
+                          className="w-full min-h-[48px] px-4 rounded-2xl bg-slate-950/80 border border-slate-700 text-white font-bold text-base outline-none focus:border-emerald-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1">
+                          Forma de Pagamento
+                        </label>
+                        <select
+                          value={buyPaymentMethod}
+                          onChange={e => setBuyPaymentMethod(e.target.value as any)}
+                          className="w-full min-h-[48px] px-4 rounded-2xl bg-slate-950/80 border border-slate-700 text-white text-sm font-bold outline-none focus:border-emerald-500"
+                        >
+                          <option value="PIX">PIX (Aprovação Rápida)</option>
+                          <option value="TRANSFERENCIA">Transferência TED / DOC</option>
+                          <option value="BOLETO">Boleto Corporativo</option>
+                          <option value="CARTAO">Cartão de Crédito Corporativo</option>
+                          <option value="FATURADO">Faturamento Mensal</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Discount Summary Breakdown */}
+                    <div className="rounded-2xl bg-slate-950/75 border border-slate-800 p-4 space-y-2 text-xs">
+                      <div className="flex justify-between text-slate-400">
+                        <span>Crédito que entra para seus colaboradores:</span>
+                        <span className="font-bold text-white">{formatBRL(creditNumeric)}</span>
+                      </div>
+                      <div className="flex justify-between text-amber-300">
+                        <span>Desconto exclusivo da parceria ({discountPct}%):</span>
+                        <span className="font-bold">- {formatBRL(discountMoney)}</span>
+                      </div>
+                      <div className="pt-2 border-t border-slate-800 flex justify-between items-center text-sm">
+                        <span className="font-bold text-emerald-300">Valor líquido a pagar:</span>
+                        <span className="text-xl font-black text-emerald-400">{formatBRL(netToPay)}</span>
+                      </div>
+                    </div>
+
+                    <input
+                      type="text"
+                      value={buyObs}
+                      onChange={e => setBuyObs(e.target.value)}
+                      placeholder="Observação opcional (ex: Centro de Custo / CNPJ faturamento)"
+                      className="w-full min-h-[44px] px-4 rounded-2xl bg-slate-950/80 border border-slate-800 text-xs text-white outline-none focus:border-emerald-500"
+                    />
+
+                    <button
+                      type="submit"
+                      disabled={requestingCredit}
+                      className="w-full min-h-[50px] rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-sm flex items-center justify-center gap-2"
+                    >
+                      {requestingCredit ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                      Solicitar Compra de {formatBRL(creditNumeric)} (Pagar {formatBRL(netToPay)})
+                    </button>
+                  </form>
+                )}
+              </div>
+
+              {/* Orders History */}
+              {creditOrders.length > 0 && (
+                <div className="rounded-3xl bg-slate-900/75 border border-slate-800 p-5 space-y-3">
+                  <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-400">
+                    Histórico de Compras & Recargas
+                  </h3>
+                  <div className="space-y-2.5">
+                    {creditOrders.map(ord => (
+                      <div key={ord.id} className="p-3.5 rounded-2xl bg-slate-950/60 border border-slate-800 flex items-center justify-between gap-3 text-xs">
+                        <div>
+                          <div className="font-bold text-white">
+                            +{formatBRL(ord.valor_credito)} em créditos{' '}
+                            <span className="text-slate-400 font-normal">
+                              (Pago: {formatBRL(ord.valor_pago)} • {ord.forma_pagamento})
+                            </span>
+                          </div>
+                          <div className="text-slate-500 mt-0.5">
+                            {new Date(ord.created_at).toLocaleString('pt-BR')}
+                            {ord.desconto_percent > 0 && ` • ${ord.desconto_percent}% OFF`}
+                          </div>
+                        </div>
+                        <span
+                          className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase shrink-0 ${
+                            ord.status === 'APROVADO'
+                              ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+                              : ord.status === 'REJEITADO'
+                              ? 'bg-rose-500/15 text-rose-300 border border-rose-500/30'
+                              : 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
+                          }`}
+                        >
+                          {ord.status}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
+        {/* ==================== TAB 4: EXTRATO LEDGER ==================== */}
+        {activeTab === 'extrato' && (
+          <section className="rounded-3xl bg-slate-900/75 border border-slate-800 overflow-hidden">
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
+              <h2 className="text-sm font-extrabold text-white flex items-center gap-2">
+                <History className="w-4 h-4 text-emerald-400" /> Extrato Auditável de Movimentações
+              </h2>
+              <span className="text-xs text-slate-400">Últimos {events.length} eventos</span>
+            </div>
+            {events.length === 0 ? (
+              <div className="p-10 text-center text-xs text-slate-500">Nenhuma movimentação registrada ainda.</div>
+            ) : (
+              <div className="divide-y divide-slate-800/70">
+                {events.map(ev => {
+                  const isCreditIn =
+                    ev.tipo_operacao.includes('RECARGA') ||
+                    ev.tipo_operacao.includes('RENOVACAO') ||
+                    ev.tipo_operacao.includes('ESTORN') ||
+                    ev.tipo_operacao.includes('APROVADA') ||
+                    ev.tipo_operacao === 'CREDITO_INICIAL';
+                  return (
+                    <div key={ev.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-200 font-bold text-[10px]">
+                            {ev.tipo_operacao}
+                          </span>
+                          {ev.voucher_token && (
+                            <span className="font-mono font-bold text-emerald-400">{ev.voucher_token}</span>
+                          )}
+                          <span className="text-slate-400">• {ev.beneficiario_nome}</span>
+                        </div>
+                        <p className="text-slate-400 mt-1">{ev.motivo}</p>
+                      </div>
+                      <div className="sm:text-right shrink-0">
+                        <div className={`text-sm font-black ${isCreditIn ? 'text-emerald-400' : 'text-slate-200'}`}>
+                          {isCreditIn ? '+' : ''}
+                          {formatBRL(ev.valor)}
+                        </div>
+                        <div className="text-[11px] text-slate-500">
+                          {new Date(ev.data_hora || ev.created_at || Date.now()).toLocaleString('pt-BR')}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        )}
+      </main>
+
+      {/* ==================== MODAL: EMITIR VOUCHER INDIVIDUAL ==================== */}
+      {showIssueModal && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-lg rounded-3xl bg-slate-900 border border-slate-700 p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-extrabold text-white flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-emerald-400" /> Emitir Voucher Corporativo
+              </h3>
+              <button type="button" onClick={() => setShowIssueModal(false)} className="text-slate-400 hover:text-white">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Aviso de Saldo Disponível */}
-            <div className="p-3.5 bg-emerald-500/10 border border-emerald-500/25 rounded-2xl flex items-center justify-between">
+            <form onSubmit={handleIssueSingle} className="space-y-3.5">
+              {colaboradores.length > 0 && (
+                <div>
+                  <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1">
+                    Selecionar Colaborador Cadastrado (Opcional)
+                  </label>
+                  <select
+                    value={issueColabId}
+                    onChange={e => {
+                      const id = e.target.value;
+                      setIssueColabId(id);
+                      const found = colaboradores.find(c => c.id === id);
+                      if (found) {
+                        setIssueNome(found.nome);
+                        setIssueWhatsapp(found.whatsapp || '');
+                      }
+                    }}
+                    className="w-full min-h-[46px] px-3.5 rounded-2xl bg-slate-950 border border-slate-700 text-sm text-white outline-none focus:border-emerald-500"
+                  >
+                    <option value="">-- Digitar manualmente --</option>
+                    {colaboradores.map(c => (
+                      <option key={c.id} value={c.id}>
+                        {c.nome} {c.whatsapp ? `(${formatPhoneDisplay(c.whatsapp)})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div>
-                <span className="text-[10px] uppercase font-black text-emerald-400 block">Saldo Atual Disponível</span>
-                <span className="text-lg font-black text-emerald-400">
-                  {saldoCredito.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                </span>
-              </div>
-              <span className="text-[11px] text-slate-400 font-semibold">
-                Validade até: {companyData?.credito_fim ? new Date(companyData.credito_fim).toLocaleDateString('pt-BR') : '30 dias'}
-              </span>
-            </div>
-
-            {/* Erro de Emissão */}
-            {issueError && (
-              <div className="p-3 bg-red-500/10 border border-red-500/25 rounded-xl flex items-center gap-2 text-xs text-red-400">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                <span>{issueError}</span>
-              </div>
-            )}
-
-            {/* Formulário */}
-            <form onSubmit={handleIssueVoucher} className="space-y-4">
-              
-              <div className="space-y-1">
-                <label className="text-[11px] font-black uppercase text-slate-400 pl-1 block">
-                  Nome do Beneficiário (Colaborador / Convidado) *
+                <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1">
+                  Nome do Beneficiário *
                 </label>
                 <input
                   type="text"
-                  value={beneficiarioNome}
-                  onChange={(e) => setBeneficiarioNome(e.target.value)}
-                  placeholder="Ex: Ronaldo Clemente"
                   required
-                  className="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                  value={issueNome}
+                  onChange={e => setIssueNome(e.target.value)}
+                  placeholder="Ex: Maria Clara Oliveira"
+                  className="w-full min-h-[46px] px-4 rounded-2xl bg-slate-950 border border-slate-700 text-sm text-white outline-none focus:border-emerald-500"
                 />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-[11px] font-black uppercase text-slate-400 pl-1 block">
-                    WhatsApp com DDD *
+                <div>
+                  <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1">
+                    WhatsApp (para envio)
                   </label>
                   <input
                     type="tel"
-                    value={beneficiarioWhatsapp}
-                    onChange={(e) => setBeneficiarioWhatsapp(e.target.value)}
-                    placeholder="11988887777"
-                    required
-                    className="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-mono"
+                    value={issueWhatsapp}
+                    onChange={e => setIssueWhatsapp(e.target.value)}
+                    placeholder="11999998888"
+                    className="w-full min-h-[46px] px-4 rounded-2xl bg-slate-950 border border-slate-700 text-sm text-white outline-none focus:border-emerald-500"
                   />
-                  <span className="text-[10px] text-slate-400 pl-1 block">
-                    O WhatsApp do destinatário do voucher.
-                  </span>
                 </div>
-
-                <div className="space-y-1">
-                  <label className="text-[11px] font-black uppercase text-slate-400 pl-1 block">
-                    Valor do Voucher (R$) *
-                  </label>
+                <div>
+                  <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1">Valor (R$) *</label>
                   <input
-                    type="text"
-                    inputMode="numeric"
-                    value={voucherValorInput}
-                    onChange={handleVoucherCurrencyChange}
-                    placeholder="R$ 50,00"
+                    type="number"
+                    step="0.01"
+                    min="1"
                     required
-                    className="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-emerald-400 font-black focus:outline-none focus:border-emerald-500 font-mono"
+                    value={issueValor}
+                    onChange={e => setIssueValor(e.target.value)}
+                    className="w-full min-h-[46px] px-4 rounded-2xl bg-slate-950 border border-slate-700 text-sm font-bold text-emerald-400 outline-none focus:border-emerald-500"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-[11px] font-black uppercase text-slate-400 pl-1 block">
-                    Data Limite de Resgate
-                  </label>
+                <div>
+                  <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1">Validade (dias)</label>
                   <input
-                    type="date"
-                    value={voucherValidade}
-                    onChange={(e) => setVoucherValidade(e.target.value)}
-                    className="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500"
+                    type="number"
+                    min="1"
+                    max="365"
+                    value={issueValidadeDias}
+                    onChange={e => setIssueValidadeDias(e.target.value)}
+                    className="w-full min-h-[46px] px-4 rounded-2xl bg-slate-950 border border-slate-700 text-sm text-white outline-none focus:border-emerald-500"
                   />
                 </div>
-
-                <div className="space-y-1">
-                  <label className="text-[11px] font-black uppercase text-slate-400 pl-1 block">
-                    Mensagem de Cortesia
-                  </label>
+                <div>
+                  <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1">Observação</label>
                   <input
                     type="text"
-                    value={voucherObs}
-                    onChange={(e) => setVoucherObs(e.target.value)}
-                    placeholder="Ex: Aniversário / Reconhecimento"
-                    className="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                    value={issueObs}
+                    onChange={e => setIssueObs(e.target.value)}
+                    placeholder="Ex: Meta mensal / Almoço"
+                    className="w-full min-h-[46px] px-4 rounded-2xl bg-slate-950 border border-slate-700 text-sm text-white outline-none focus:border-emerald-500"
                   />
                 </div>
               </div>
 
-              {/* Aviso de Uso Exclusivo no Restaurante */}
-              <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-center gap-2.5 text-[11px] text-emerald-300">
-                <span className="text-base">🍔</span>
-                <span>
-                  Este voucher gerado será de <strong>uso exclusivo no restaurante {restaurantInfo.nome}</strong>.
+              <label className="flex items-center gap-2.5 p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={issueAutoSendWa}
+                  onChange={e => setIssueAutoSendWa(e.target.checked)}
+                  className="w-4 h-4 accent-emerald-500"
+                />
+                <span className="text-xs font-semibold text-emerald-200">
+                  Enviar automaticamente o QR Code para o WhatsApp do colaborador via {restaurante?.name || 'loja'}
                 </span>
-              </div>
+              </label>
 
-              {/* Botão Emitir */}
-              <div className="pt-2">
+              <div className="flex items-center justify-between pt-2 text-xs text-slate-400">
+                <span>Saldo disponível: <strong className="text-white">{formatBRL(empresa?.saldo_credito)}</strong></span>
                 <button
                   type="submit"
-                  disabled={issueLoading || saldoCredito <= 0}
-                  className="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-400 text-[#0b141a] font-black text-xs uppercase tracking-wider rounded-2xl hover:opacity-95 active:scale-[0.99] transition-all shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  disabled={issuing}
+                  className="min-h-[48px] px-6 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-sm flex items-center gap-2"
                 >
-                  {issueLoading ? (
-                    <span>Processando Emissão...</span>
-                  ) : (
-                    <>
-                      <Sparkles className="w-4 h-4" />
-                      <span>Confirmar e Debitar {voucherValor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                    </>
-                  )}
+                  {issuing ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                  Confirmar Emissão
                 </button>
               </div>
-
             </form>
-
           </div>
         </div>
       )}
 
-      {/* ========================================================= */}
-      {/* 5. MODAL: VOUCHER EMITIDO COM SUCESSO (DISPARO & QR) */}
-      {/* ========================================================= */}
-      {showSuccessModal && issuedVoucher && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-[#111b21] border border-emerald-500/30 rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl animate-in zoom-in-95 text-center">
-            
-            <div className="w-14 h-14 bg-emerald-500/20 text-emerald-400 rounded-2xl flex items-center justify-center mx-auto shadow-md">
-              <CheckCircle2 className="w-8 h-8" />
-            </div>
-
-            <div className="space-y-1">
-              <h3 className="text-lg font-black text-white">Voucher Emitido com Sucesso!</h3>
-              <p className="text-xs text-slate-400">
-                O valor de {Number(issuedVoucher.valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} foi debitado do seu crédito corporativo.
-              </p>
-            </div>
-
-            {/* Cartão do Voucher com QR Code */}
-            <div className="bg-black/40 border border-white/10 rounded-2xl p-4 space-y-3 text-center">
-              <div className="w-32 h-32 bg-white p-2 rounded-xl mx-auto flex items-center justify-center shadow-md">
-                <QRCode value={getVoucherUrl(issuedVoucher.public_token)} size={112} />
-              </div>
-              <div>
-                <span className="font-mono font-black text-emerald-400 text-sm block">
-                  {issuedVoucher.public_token}
-                </span>
-                <span className="text-xs text-white font-bold block mt-0.5">
-                  Beneficiário: {issuedVoucher.beneficiario_nome}
-                </span>
-              </div>
-            </div>
-
-            {/* Ações de Compartilhamento */}
-            <div className="space-y-2 pt-1">
-              <button
-                type="button"
-                disabled={sendingWhatsappId === issuedVoucher.public_token || sendingWhatsappId === issuedVoucher.id}
-                onClick={() => sendDirectWhatsappViaFoodNext(issuedVoucher)}
-                className="w-full py-3 bg-emerald-500 text-[#0b141a] font-black text-xs uppercase tracking-wider rounded-xl hover:opacity-95 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-emerald-500/20 disabled:opacity-50"
-              >
-                {sendingWhatsappId === issuedVoucher.public_token || sendingWhatsappId === issuedVoucher.id ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Disparando via FoodNext...</span>
-                  </>
-                ) : (
-                  <>
-                    <Send className="w-4 h-4" />
-                    <span>Enviar no WhatsApp do Beneficiário</span>
-                  </>
-                )}
-              </button>
-
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => copyVoucherLink(issuedVoucher.public_token)}
-                  className="py-2.5 bg-white/5 hover:bg-white/10 text-white font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  {copiedLink ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4 text-slate-300" />}
-                  <span>{copiedLink ? 'Copiado!' : 'Copiar Link'}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handlePrintVoucher(issuedVoucher)}
-                  className="py-2.5 bg-white/5 hover:bg-white/10 text-white font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <Printer className="w-4 h-4 text-slate-300" />
-                  <span>Imprimir</span>
-                </button>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setShowSuccessModal(false)}
-              className="text-xs text-slate-400 hover:text-white font-bold pt-2 cursor-pointer block mx-auto"
-            >
-              Fechar
-            </button>
-
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================= */}
-      {/* 6. MODAL: VISUALIZAR QR CODE AMPLIADO */}
-      {/* ========================================================= */}
-      {selectedQrVoucher && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-[#111b21] border border-white/10 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl animate-in zoom-in-95 text-center">
-            
-            <div className="flex items-center justify-between border-b border-white/5 pb-2">
-              <span className="text-xs font-black uppercase text-slate-400">QR Code Oficial</span>
-              <button
-                type="button"
-                onClick={() => setSelectedQrVoucher(null)}
-                className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer"
-              >
-                <X className="w-4 h-4" />
+      {/* ==================== MODAL: EMISSAO EM LOTE (COLABORADORES) ==================== */}
+      {showBatchModal && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-3xl bg-slate-900 border border-slate-700 p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-extrabold text-white">Gerar Lote p/ {selectedColabs.length} Colaboradores</h3>
+              <button type="button" onClick={() => setShowBatchModal(false)} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
               </button>
             </div>
-
-            <div className="w-48 h-48 bg-white p-3 rounded-2xl mx-auto flex items-center justify-center shadow-lg">
-              <QRCode value={getVoucherUrl(selectedQrVoucher.public_token)} size={168} />
-            </div>
-
-            <div className="space-y-0.5">
-              <span className="font-mono font-black text-emerald-400 text-sm">
-                {selectedQrVoucher.public_token}
-              </span>
-              <p className="text-xs text-white font-bold">
-                {selectedQrVoucher.beneficiario_nome} • {Number(selectedQrVoucher.valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-              </p>
-            </div>
-
-            <div className="pt-2">
-              <button
-                type="button"
-                disabled={sendingWhatsappId === selectedQrVoucher.id}
-                onClick={() => sendDirectWhatsappViaFoodNext(selectedQrVoucher)}
-                className="w-full py-2.5 bg-emerald-500 text-[#0b141a] font-black text-xs uppercase rounded-xl hover:opacity-95 flex items-center justify-center gap-2 cursor-pointer shadow-md disabled:opacity-50"
-              >
-                {sendingWhatsappId === selectedQrVoucher.id ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Disparando...</span>
-                  </>
-                ) : (
-                  <>
-                    <Send className="w-4 h-4" />
-                    <span>Reenviar WhatsApp (FoodNext)</span>
-                  </>
-                )}
-              </button>
-            </div>
-
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================= */}
-      {/* TOAST FLUTUANTE DE FEEDBACK WHATSAPP FOODNEXT */}
-      {/* ========================================================= */}
-      {whatsappFeedback && (
-        <div className="fixed top-5 right-5 z-50 max-w-sm w-full animate-in slide-in-from-top-4 duration-300">
-          <div className={`p-4 rounded-2xl border backdrop-blur-xl shadow-2xl flex items-start justify-between gap-3 ${
-            whatsappFeedback.type === 'success'
-              ? 'bg-emerald-950/95 border-emerald-500/50 text-emerald-100 shadow-emerald-950/50'
-              : 'bg-rose-950/95 border-rose-500/50 text-rose-100 shadow-rose-950/50'
-          }`}>
-            <div className="flex items-start gap-2.5">
-              {whatsappFeedback.type === 'success' ? (
-                <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
-              ) : (
-                <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
-              )}
-              <div className="text-xs leading-relaxed text-left">
-                <strong className="block font-bold text-white mb-0.5">
-                  {whatsappFeedback.type === 'success' ? 'Disparo WhatsApp Realizado' : 'Aviso de Envio WhatsApp'}
+            <form onSubmit={handleIssueBatch} className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1">Valor Unitário (R$)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="1"
+                    value={batchValor}
+                    onChange={e => setBatchValor(e.target.value)}
+                    className="w-full min-h-[46px] px-3.5 rounded-2xl bg-slate-950 border border-slate-700 text-white font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1">Validade (dias)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={batchValidadeDias}
+                    onChange={e => setBatchValidadeDias(e.target.value)}
+                    className="w-full min-h-[46px] px-3.5 rounded-2xl bg-slate-950 border border-slate-700 text-white"
+                  />
+                </div>
+              </div>
+              <input
+                type="text"
+                value={batchObs}
+                onChange={e => setBatchObs(e.target.value)}
+                placeholder="Motivo do lote (ex: Vale refeição mês atual)"
+                className="w-full min-h-[46px] px-3.5 rounded-2xl bg-slate-950 border border-slate-700 text-sm text-white"
+              />
+              <label className="flex items-center gap-2.5 p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={batchAutoSendWa}
+                  onChange={e => setBatchAutoSendWa(e.target.checked)}
+                  className="w-4 h-4 accent-emerald-500"
+                />
+                <span className="text-xs font-semibold text-emerald-200">Disparar WhatsApp para todos com telefone</span>
+              </label>
+              <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800 text-xs flex justify-between">
+                <span className="text-slate-400">Débito total do lote:</span>
+                <strong className="text-emerald-400 font-black">
+                  {formatBRL((parseFloat(batchValor) || 0) * selectedColabs.length)}
                 </strong>
-                <span>{whatsappFeedback.text}</span>
               </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => setWhatsappFeedback(null)}
-              className="text-slate-400 hover:text-white p-1 rounded-lg transition-colors cursor-pointer shrink-0"
-            >
-              <X className="w-4 h-4" />
-            </button>
+              <button
+                type="submit"
+                disabled={batchIssuing}
+                className="w-full min-h-[48px] rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-sm flex items-center justify-center gap-2"
+              >
+                {batchIssuing ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                Emitir {selectedColabs.length} Vouchers Agora
+              </button>
+            </form>
           </div>
         </div>
       )}
 
+      {/* ==================== MODAL: CADASTRAR/EDITAR COLABORADOR ==================== */}
+      {showColabModal && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-3xl bg-slate-900 border border-slate-700 p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-extrabold text-white">
+                {editingColab ? 'Editar Colaborador' : 'Novo Colaborador'}
+              </h3>
+              <button type="button" onClick={() => setShowColabModal(false)} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleSaveColab} className="space-y-3">
+              <input
+                type="text"
+                required
+                value={colabNome}
+                onChange={e => setColabNome(e.target.value)}
+                placeholder="Nome completo *"
+                className="w-full min-h-[46px] px-4 rounded-2xl bg-slate-950 border border-slate-700 text-sm text-white"
+              />
+              <input
+                type="tel"
+                value={colabWhats}
+                onChange={e => setColabWhats(e.target.value)}
+                placeholder="WhatsApp com DDD (ex: 11999998888)"
+                className="w-full min-h-[46px] px-4 rounded-2xl bg-slate-950 border border-slate-700 text-sm text-white"
+              />
+              <div className="grid grid-cols-2 gap-3">
+                <input
+                  type="text"
+                  value={colabCpf}
+                  onChange={e => setColabCpf(e.target.value)}
+                  placeholder="CPF (opcional)"
+                  className="w-full min-h-[46px] px-4 rounded-2xl bg-slate-950 border border-slate-700 text-sm text-white"
+                />
+                <input
+                  type="text"
+                  value={colabCargo}
+                  onChange={e => setColabCargo(e.target.value)}
+                  placeholder="Cargo / Setor"
+                  className="w-full min-h-[46px] px-4 rounded-2xl bg-slate-950 border border-slate-700 text-sm text-white"
+                />
+              </div>
+              <input
+                type="email"
+                value={colabEmail}
+                onChange={e => setColabEmail(e.target.value)}
+                placeholder="E-mail (opcional)"
+                className="w-full min-h-[46px] px-4 rounded-2xl bg-slate-950 border border-slate-700 text-sm text-white"
+              />
+              <button
+                type="submit"
+                disabled={savingColab}
+                className="w-full min-h-[48px] rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-sm flex items-center justify-center gap-2"
+              >
+                {savingColab ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                Salvar Colaborador
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== MODAL: IMPORTAR CSV ==================== */}
+      {showCsvModal && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-lg rounded-3xl bg-slate-900 border border-slate-700 p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-extrabold text-white">Importar Equipe via CSV / Planilha</h3>
+              <button type="button" onClick={() => setShowCsvModal(false)} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <p className="text-xs text-slate-400">
+              Cole linhas no formato <code className="text-emerald-400">Nome; WhatsApp; CPF; Cargo</code> (uma pessoa por linha):
+            </p>
+            <form onSubmit={handleImportCsv} className="space-y-3">
+              <textarea
+                rows={6}
+                value={csvText}
+                onChange={e => setCsvText(e.target.value)}
+                placeholder={'Ana Souza; 11988887777; 12345678900; Vendas\nBruno Lima; 11977776666; ; Cozinha'}
+                className="w-full p-3.5 rounded-2xl bg-slate-950 border border-slate-700 text-xs font-mono text-white outline-none focus:border-emerald-500"
+              />
+              <button
+                type="submit"
+                disabled={importingCsv}
+                className="w-full min-h-[48px] rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-sm flex items-center justify-center gap-2"
+              >
+                {importingCsv ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                Importar Colaboradores Agora
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

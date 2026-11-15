@@ -28,9 +28,8 @@ import {
   Compass,
   Store
 } from 'lucide-react';
-import { supabase } from '../../services/supabase';
+import { voucherService } from '../../services/voucherService';
 
-const ENGINE_URL = 'https://owckk0k8w8soo40w40owc4ss.69.62.92.212.sslip.io';
 const QR_INTERVAL = 30; // Segundos para auto-renovação do JWT
 
 interface RestaurantInfo {
@@ -45,11 +44,11 @@ export default function VoucherViewer() {
   const { token } = useParams<{ token: string }>();
   const [voucherData, setVoucherData] = useState<any>(null);
   const [restaurantInfo, setRestaurantInfo] = useState<RestaurantInfo>({
-    nome: 'BURGUER PLUS',
-    endereco: 'Praça Miguel Ortega, 340 - Parque Assunção - Taboão da Serra/SP',
-    cardapioUrl: 'https://www.burguerplus.com.br',
-    instagram: 'https://instagram.com/burguerplus',
-    googleMapsUrl: 'https://maps.google.com/?q=Praça+Miguel+Ortega+340+Taboão+da+Serra+SP'
+    nome: 'Estabelecimento Conveniado',
+    endereco: '',
+    cardapioUrl: '',
+    instagram: '',
+    googleMapsUrl: ''
   });
 
   const [qrJwt, setQrJwt] = useState<string | null>(null);
@@ -63,336 +62,102 @@ export default function VoucherViewer() {
   const countdownTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Helper para resolver dados institucionais do restaurante (onde consumir o voucher)
-  const fetchRestaurantInfo = async (tenantId?: string) => {
-    const defaultInfo: RestaurantInfo = {
-      nome: 'BURGUER PLUS',
-      endereco: 'Praça Miguel Ortega, 340 - Parque Assunção - Taboão da Serra/SP',
-      cardapioUrl: 'https://www.burguerplus.com.br',
-      instagram: 'https://instagram.com/burguerplus',
-      googleMapsUrl: 'https://maps.google.com/?q=Praça+Miguel+Ortega+340+Taboão+da+Serra+SP'
-    };
-
-    try {
-      const tId = tenantId || '8b1e427b-2321-4ea7-9d7e-90f7d5cbad21';
-
-      // 1. Tenta recuperar do localStorage específico do tenant
-      const specificKeys = [
-        `account_settings_${tId}`,
-        `tenant_settings_${tId}`,
-        `company_profile_${tId}`
-      ];
-
-      for (const key of specificKeys) {
-        const raw = localStorage.getItem(key);
-        if (raw) {
-          try {
-            const parsed = JSON.parse(raw);
-            if (parsed) {
-              const resName = parsed.nome_ia || parsed.nome_empresa || parsed.name || parsed.businessName || defaultInfo.nome;
-              const resEnd = parsed.endereco || defaultInfo.endereco;
-              const resCardapio = parsed.link_cardapio || defaultInfo.cardapioUrl;
-              const resInsta = parsed.instagram || defaultInfo.instagram;
-              const resMaps = parsed.google_maps || `https://maps.google.com/?q=${encodeURIComponent(resEnd)}`;
-              setRestaurantInfo({
-                nome: resName,
-                endereco: resEnd,
-                cardapioUrl: resCardapio,
-                instagram: resInsta,
-                googleMapsUrl: resMaps
-              });
-              return;
-            }
-          } catch (_) {}
-        }
-      }
-
-      // 2. Busca do Supabase
-      const { data: comp } = await supabase
-        .from('companies')
-        .select('name, settings')
-        .eq('id', tId)
-        .maybeSingle();
-
-      if (comp) {
-        const s = comp.settings || {};
-        const resName = comp.name || s.nome_ia || s.nome_empresa || s.businessName || defaultInfo.nome;
-        const resEnd = s.endereco || (s.street ? `${s.street}, ${s.number || ''} - ${s.neighborhood || ''} - ${s.city || ''}/${s.state || ''}` : defaultInfo.endereco);
-        const resCardapio = s.link_cardapio || defaultInfo.cardapioUrl;
-        const resInsta = s.instagram || defaultInfo.instagram;
-        const resMaps = s.google_maps || `https://maps.google.com/?q=${encodeURIComponent(resEnd)}`;
-
-        setRestaurantInfo({
-          nome: resName,
-          endereco: resEnd,
-          cardapioUrl: resCardapio,
-          instagram: resInsta,
-          googleMapsUrl: resMaps
-        });
-      }
-    } catch (e) {
-      console.warn('[VoucherViewer] Erro ao carregar info do restaurante:', e);
-    }
+  const applyRestauranteProfile = (rest?: any, fallbackName?: string) => {
+    if (!rest && !fallbackName) return;
+    const nome = rest?.name || fallbackName || 'Estabelecimento Conveniado';
+    const endereco = rest?.endereco || '';
+    const instagramRaw = rest?.instagram || '';
+    const instaUrl = instagramRaw
+      ? (instagramRaw.startsWith('http') ? instagramRaw : `https://instagram.com/${instagramRaw.replace(/^@/, '')}`)
+      : '';
+    setRestaurantInfo({
+      nome,
+      endereco,
+      cardapioUrl: rest?.link_cardapio || '',
+      instagram: instaUrl,
+      googleMapsUrl: endereco ? `https://maps.google.com/?q=${encodeURIComponent(endereco)}` : ''
+    });
   };
 
   // Helper para resolver o nome real da empresa parceira (concedente do benefício)
-  const resolveCompanyName = (voucher: any): { razaoSocial: string; nomeFantasia?: string } => {
-    let razao = voucher.voucher_empresas_parceiras?.razao_social || voucher.empresa_razao_social || voucher.empresa_nome || '';
-    let fantasia = voucher.voucher_empresas_parceiras?.nome_fantasia || voucher.empresa_nome_fantasia || '';
-
-    if (!razao || razao === 'Empresa Parceira' || razao === 'Cliente Avulso (Sem Vínculo B2B)') {
-      try {
-        const empId = voucher.empresa_id;
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i);
-          if (key && key.startsWith('voucher_companies_')) {
-            const raw = localStorage.getItem(key);
-            if (raw) {
-              const list = JSON.parse(raw);
-              if (Array.isArray(list)) {
-                const found = empId ? list.find((c: any) => c.id === empId) : list[0];
-                if (found) {
-                  razao = found.razao_social || razao;
-                  fantasia = found.nome_fantasia || fantasia;
-                  break;
-                }
-              }
-            }
-          }
-        }
-      } catch (_) {}
-    }
-
-    return {
-      razaoSocial: razao || 'TERRAS GONÇALVES SOCIEDADE DE ADVOGADOS',
-      nomeFantasia: fantasia || undefined
-    };
+  const resolveCompanyName = (voucher: any, restName?: string): { razaoSocial: string; nomeFantasia?: string } => {
+    const razao = voucher.empresa_razao_social || voucher.empresa_nome || restName || 'Estabelecimento Conveniado';
+    const fantasia = voucher.empresa_nome_fantasia || voucher.empresa_nome || undefined;
+    return { razaoSocial: razao, nomeFantasia: fantasia };
   };
 
-  // 1. Carrega dados do voucher com prioridade absoluta para o Supabase em tempo real
-  const loadVoucher = useCallback(async () => {
+  // 1. Carrega dados do voucher estritamente via Engine / RPC público seguro (sem exposição anon direta de tabela)
+  const loadVoucher = useCallback(async (silent = false) => {
     if (!token) return;
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       setError(null);
 
       const cleanToken = token.trim();
+      const res = await voucherService.publicGetVoucher(cleanToken);
+      const data = res.voucher;
+      const rest = res.restaurante;
+      const comp = resolveCompanyName(data, rest?.name);
 
-      // --- CAMADA 1: Supabase em Tempo Real (Fonte da Verdade) ---
-      try {
-        const { data, error: dbErr } = await supabase
-          .from('vouchers')
-          .select('*')
-          .or(`public_token.ilike.${cleanToken},id.eq.${cleanToken}`)
-          .maybeSingle();
+      const formatted = {
+        id: data.id,
+        tenant_id: data.tenant_id,
+        public_token: data.public_token,
+        status: data.status || 'CRIADO',
+        valor: Number(data.valor) || 0,
+        beneficiario_nome: data.beneficiario_nome || 'Colaborador / Beneficiário',
+        beneficiario_whatsapp: data.beneficiario_whatsapp || '',
+        validade_fim: data.validade_fim,
+        campanha_nome: data.campanha_nome || res?.campanha?.nome || 'Benefício Corporativo',
+        campanha_descricao: data.observacoes || res?.campanha?.descricao || `Válido em ${rest?.name || 'Estabelecimento Conveniado'}`,
+        empresa_razao_social: data.empresa_razao_social || data.empresa_nome || comp.razaoSocial,
+        empresa_nome_fantasia: comp.nomeFantasia,
+        observacoes: data.observacoes,
+        data_resgate: data.data_resgate,
+        atendente_id: data.atendente_id,
+        created_at: data.created_at
+      };
 
-        if (!dbErr && data) {
-          const comp = resolveCompanyName(data);
-          const formatted = {
-            id: data.id,
-            tenant_id: data.tenant_id,
-            public_token: data.public_token,
-            status: data.status || 'CRIADO',
-            valor: Number(data.valor) || 50.0,
-            beneficiario_nome: data.beneficiario_nome || 'Colaborador / Convidado',
-            beneficiario_whatsapp: data.beneficiario_whatsapp || '',
-            validade_fim: data.validade_fim,
-            campanha_nome: data.campanha_nome || 'Presente Corporativo Especial',
-            campanha_descricao: data.observacoes || 'Benefício exclusivo BURGUER PLUS',
-            empresa_razao_social: data.empresa_razao_social || data.empresa_nome || comp.razaoSocial,
-            empresa_nome_fantasia: comp.nomeFantasia,
-            observacoes: data.observacoes,
-            data_resgate: data.data_resgate,
-            atendente_id: data.atendente_id,
-            created_at: data.created_at
-          };
-          setVoucherData(formatted);
-          setQrJwt(data.public_token);
-          setCountdown(QR_INTERVAL);
-          fetchRestaurantInfo(data.tenant_id);
-          setLoading(false);
-
-          // Atualiza cache local sincronizado
-          try {
-            localStorage.setItem(`voucher_token_${cleanToken}`, JSON.stringify(formatted));
-            localStorage.setItem(`voucher_token_${cleanToken.toLowerCase()}`, JSON.stringify(formatted));
-          } catch (_) {}
-          return;
-        }
-      } catch (supabaseErr) {
-        console.warn('[VoucherViewer] Erro ao consultar Supabase em nuvem:', supabaseErr);
-      }
-
-      // --- CAMADA 2: Backend REST Engine ---
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 4000);
-
-        const res = await fetch(`${ENGINE_URL}/api/v1/vouchers/public/${cleanToken}?_t=${Date.now()}`, {
-          signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-
-        if (res.ok) {
-          const json = await res.json();
-          if (json.success && json.voucher) {
-            const comp = resolveCompanyName(json.voucher);
-            const formatted = {
-              ...json.voucher,
-              empresa_razao_social: comp.razaoSocial,
-              empresa_nome_fantasia: comp.nomeFantasia
-            };
-            setVoucherData(formatted);
-            setQrJwt(json.qrJwt || json.voucher.public_token);
-            setCountdown(json.expiresInSeconds || QR_INTERVAL);
-            fetchRestaurantInfo(json.voucher.tenant_id);
-            setLoading(false);
-            localStorage.setItem(`voucher_token_${cleanToken}`, JSON.stringify(formatted));
-            return;
-          }
-        }
-      } catch (apiErr) {
-        console.warn('[VoucherViewer] Backend REST indisponível:', apiErr);
-      }
-
-      // --- CAMADA 3: LocalStorage (Fallback offline) ---
-      try {
-        const directCached = localStorage.getItem(`voucher_token_${cleanToken}`) || localStorage.getItem(`voucher_token_${cleanToken.toLowerCase()}`);
-        if (directCached) {
-          const v = JSON.parse(directCached);
-          if (v && (v.public_token === cleanToken || v.id === cleanToken || (v.public_token || '').toLowerCase() === cleanToken.toLowerCase())) {
-            const comp = resolveCompanyName(v);
-            setVoucherData({
-              ...v,
-              public_token: v.public_token || cleanToken,
-              empresa_razao_social: comp.razaoSocial,
-              empresa_nome_fantasia: comp.nomeFantasia,
-              valor: Number(v.valor) || 50.0
-            });
-            setQrJwt(v.public_token || cleanToken);
-            setCountdown(QR_INTERVAL);
-            fetchRestaurantInfo(v.tenant_id);
-            setLoading(false);
-            return;
-          }
-        }
-
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i);
-          if (key && (key.startsWith('voucher_items_') || key.startsWith('vouchers_'))) {
-            const raw = localStorage.getItem(key);
-            if (raw) {
-              const list = JSON.parse(raw);
-              if (Array.isArray(list)) {
-                const found = list.find((item: any) => 
-                  (item.public_token || '').toLowerCase() === cleanToken.toLowerCase() || 
-                  (item.id || '').toLowerCase() === cleanToken.toLowerCase()
-                );
-                if (found) {
-                  const comp = resolveCompanyName(found);
-                  const formatted = {
-                    ...found,
-                    public_token: found.public_token || cleanToken,
-                    empresa_razao_social: comp.razaoSocial,
-                    empresa_nome_fantasia: comp.nomeFantasia,
-                    valor: Number(found.valor) || 50.0
-                  };
-                  setVoucherData(formatted);
-                  setQrJwt(found.public_token || cleanToken);
-                  setCountdown(QR_INTERVAL);
-                  fetchRestaurantInfo(found.tenant_id);
-                  setLoading(false);
-                  localStorage.setItem(`voucher_token_${cleanToken}`, JSON.stringify(formatted));
-                  return;
-                }
-              }
-            }
-          }
-        }
-      } catch (localErr) {
-        console.warn('[VoucherViewer] Erro ao ler local:', localErr);
-      }
-
-      // Fallback gracioso
-      fetchRestaurantInfo();
-      throw new Error('Voucher não localizado ou expirado.');
+      setVoucherData(formatted);
+      setQrJwt(res.qrJwt || data.public_token);
+      setCountdown(res.expiresInSeconds || QR_INTERVAL);
+      applyRestauranteProfile(rest, data.empresa_nome);
     } catch (err: any) {
-      setError(err.message || 'Erro ao carregar voucher.');
+      if (!silent) setError(err.message || 'Erro ao carregar voucher.');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [token]);
 
-  // Listener Realtime: atualiza instantaneamente quando o voucher for resgatado no caixa
-  useEffect(() => {
-    if (!token) return;
-    const cleanToken = token.trim().toLowerCase();
-
-    const channel = supabase
-      .channel(`voucher_realtime_viewer_${cleanToken}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'vouchers'
-        },
-        (payload) => {
-          const updated = payload.new as any;
-          if (
-            (updated.public_token && updated.public_token.toLowerCase() === cleanToken) ||
-            (updated.id && updated.id.toLowerCase() === cleanToken)
-          ) {
-            setVoucherData((prev: any) => {
-              if (!prev) return prev;
-              const merged = {
-                ...prev,
-                status: updated.status,
-                data_resgate: updated.data_resgate,
-                atendente_id: updated.atendente_id,
-                updated_at: updated.updated_at
-              };
-              try {
-                localStorage.setItem(`voucher_token_${cleanToken}`, JSON.stringify(merged));
-              } catch (_) {}
-              return merged;
-            });
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [token]);
-
-  // 2. Renova o JWT do QR Code dinâmico a cada 30 segundos
+  // 2. Renova o JWT do QR Code dinâmico e sincroniza status a cada 30 segundos
   const renewQrToken = useCallback(async () => {
-    if (!token || voucherData?.status === 'UTILIZADO') return;
+    if (!token) return;
+    if (voucherData?.status === 'RESGATADO' || voucherData?.status === 'UTILIZADO' || voucherData?.status === 'CANCELADO' || voucherData?.status === 'EXPIRADO') {
+      return;
+    }
     try {
       setIsRenewing(true);
-      const res = await fetch(`${ENGINE_URL}/api/v1/vouchers/renew-qr/${token}?_t=${Date.now()}`);
-      if (res.ok) {
-        const json = await res.json();
-        if (json.success && json.qrJwt) {
-          setQrJwt(json.qrJwt);
-          setCountdown(QR_INTERVAL);
-        }
+      const json = await voucherService.publicRenewQrToken(token);
+      if (json.success && json.qrJwt) {
+        setQrJwt(json.qrJwt);
+        setCountdown(json.expiresInSeconds || QR_INTERVAL);
       }
     } catch (e) {
-      console.warn('Erro ao renovar token QR:', e);
+      // Se voucher acabou de ser resgatado, recarrega status definitivo para exibir selo RESGATADO
+      loadVoucher(true);
     } finally {
       setIsRenewing(false);
     }
-  }, [token, voucherData?.status]);
+  }, [token, voucherData?.status, loadVoucher]);
 
   useEffect(() => {
     loadVoucher();
   }, [loadVoucher]);
 
-  // 3. Loop do Countdown
+  // 3. Loop do Countdown & sincronização periódica
   useEffect(() => {
-    if (voucherData?.status === 'UTILIZADO' || voucherData?.status === 'CANCELADO') return;
+    const st = voucherData?.status;
+    if (!st || st === 'RESGATADO' || st === 'UTILIZADO' || st === 'CANCELADO' || st === 'EXPIRADO') return;
 
     countdownTimerRef.current = setInterval(() => {
       setCountdown((prev) => {
@@ -404,67 +169,15 @@ export default function VoucherViewer() {
       });
     }, 1000);
 
+    const statusPoll = setInterval(() => {
+      loadVoucher(true);
+    }, 12000);
+
     return () => {
       if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+      clearInterval(statusPoll);
     };
-  }, [renewQrToken, voucherData?.status]);
-
-  // 4. Realtime no Supabase para escutar resgate no caixa (por id e public_token)
-  useEffect(() => {
-    if (!token && !voucherData?.id) return;
-    const cleanToken = (token || voucherData?.public_token || voucherData?.id || '').trim();
-
-    const channel = supabase
-      .channel(`public:vouchers:viewer:${cleanToken}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'vouchers' },
-        (payload: any) => {
-          const updated = payload.new;
-          if (updated && (
-            updated.id === voucherData?.id || 
-            updated.public_token === cleanToken || 
-            (updated.public_token && updated.public_token.toLowerCase() === cleanToken.toLowerCase())
-          )) {
-            setVoucherData((prev: any) => ({
-              ...prev,
-              ...updated,
-              status: updated.status,
-              data_resgate: updated.data_resgate,
-              atendente_id: updated.atendente_id
-            }));
-          }
-        }
-      )
-      .subscribe();
-
-    // Polling de alta frequência como garantia contra perda de websocket
-    const interval = setInterval(async () => {
-      if (voucherData?.status === 'UTILIZADO' || voucherData?.data_resgate) return;
-      try {
-        const { data } = await supabase
-          .from('vouchers')
-          .select('*')
-          .or(`public_token.ilike.${cleanToken},id.eq.${cleanToken}`)
-          .maybeSingle();
-
-        if (data && (data.status === 'UTILIZADO' || data.status === 'used' || data.status === 'RESGATADO' || data.data_resgate)) {
-          setVoucherData((prev: any) => ({
-            ...prev,
-            ...data,
-            status: 'UTILIZADO',
-            data_resgate: data.data_resgate || new Date().toISOString(),
-            atendente_id: data.atendente_id || 'Balcão / Caixa Principal'
-          }));
-        }
-      } catch (_) {}
-    }, 3000);
-
-    return () => {
-      supabase.removeChannel(channel);
-      clearInterval(interval);
-    };
-  }, [token, voucherData?.id, voucherData?.public_token, voucherData?.status, voucherData?.data_resgate]);
+  }, [renewQrToken, loadVoucher, voucherData?.status]);
 
   const copyVoucherLink = () => {
     navigator.clipboard.writeText(window.location.href);
@@ -480,7 +193,7 @@ export default function VoucherViewer() {
 
     const formattedVal = Number(voucherData.valor || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
     const formattedDate = new Date(voucherData.validade_fim).toLocaleDateString('pt-BR');
-    const empresaNome = voucherData.empresa_razao_social || 'TERRAS GONÇALVES SOCIEDADE DE ADVOGADOS';
+    const empresaNome = voucherData.empresa_razao_social || voucherData.empresa_nome || restaurantInfo.nome;
     const qrUrl = window.location.href;
 
     printWindow.document.write(`
@@ -811,7 +524,7 @@ export default function VoucherViewer() {
               <div class="footer-info">
                 <div>
                   <strong>Validade Original:</strong> ${formattedDate}<br/>
-                  <strong>Site / Cardápio:</strong> ${restaurantInfo.cardapioUrl || 'www.burguerplus.com.br'}
+                  ${restaurantInfo.cardapioUrl ? `<strong>Site / Cardápio:</strong> ${restaurantInfo.cardapioUrl}` : ''}
                 </div>
                 <div style="text-align: right;">
                   ${isUtilizado ? `Baixa confirmada no PDV da ${restaurantInfo.nome}.` : `Apresente este voucher no balcão da ${restaurantInfo.nome} para resgate.`}
@@ -882,10 +595,11 @@ export default function VoucherViewer() {
   }
 
   const isUtilizado = voucherData.status === 'UTILIZADO' || voucherData.status === 'used' || voucherData.status === 'RESGATADO' || Boolean(voucherData.data_resgate);
-  const isValidado = voucherData.status === 'VALIDADO';
-  const isExpirado = voucherData.status === 'EXPIRADO' || (voucherData.validade_fim && new Date(voucherData.validade_fim) < new Date());
+  const isCancelado = voucherData.status === 'CANCELADO';
+  const isValidado = voucherData.status === 'VALIDADO' || voucherData.status === 'RESERVADO';
+  const isExpirado = isCancelado || voucherData.status === 'EXPIRADO' || (voucherData.validade_fim && new Date(voucherData.validade_fim) < new Date());
   const valorFormatado = Number(voucherData.valor || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-  const empresaExibicao = voucherData.empresa_razao_social || 'TERRAS GONÇALVES SOCIEDADE DE ADVOGADOS';
+  const empresaExibicao = voucherData.empresa_razao_social || voucherData.empresa_nome || restaurantInfo.nome;
 
   return (
     <div className="h-full h-[100dvh] w-full bg-[#060a0d] text-slate-100 flex flex-col items-center justify-start pt-3 pb-24 px-3 sm:pt-6 sm:pb-12 sm:px-6 font-sans relative overflow-x-hidden overflow-y-auto overscroll-y-contain">

@@ -35,6 +35,7 @@ import AutomationWorker from './automation-worker/agent.js';
 import { startWaCallsListener } from './wacalls-listener.js';
 import { startWaCallsProcess } from './wacalls-process.js';
 import { dispatchWebhookTriggers } from './event-processor/index.js';
+import voucherEngine from './voucher-engine/index.js';
 import fs from 'fs';
 import pidusage from 'pidusage';
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
@@ -121,7 +122,11 @@ app.use(cors({
         'X-Chatboot-Shield',
         'x-gemini-api-key',
         'x-e2e-source',
-        'X-E2E-Source'
+        'X-E2E-Source',
+        'x-portal-token',
+        'X-Portal-Token',
+        'x-api-key',
+        'X-Api-Key'
     ]
 }));
 app.use(helmet());
@@ -751,7 +756,8 @@ async function runMigrations() {
           ALTER VIEW public.v_checklist_operators SET (security_invoker = false);
 
           -- =========================================================================
-          -- TABELAS DO MÓDULO DE VOUCHERS CORPORATIVOS
+          -- TABELAS DO MÓDULO DE VOUCHERS CORPORATIVOS (Enterprise Multi-Tenant v2)
+          -- Políticas RLS e RPCs de segurança são governadas por 20261114_voucher_v2_enterprise.sql
           -- =========================================================================
           CREATE TABLE IF NOT EXISTS public.voucher_empresas_parceiras (
             id text PRIMARY KEY,
@@ -764,49 +770,61 @@ async function runMigrations() {
             email_empresa text,
             login_usuario text,
             login_senha text,
+            senha_hash text,
             saldo_global numeric(10,2) DEFAULT 0.00,
             saldo_credito numeric(10,2) DEFAULT 0.00,
             credito_total_concedido numeric(10,2) DEFAULT 0.00,
+            credito_inicio timestamp with time zone DEFAULT now(),
             credito_fim timestamp with time zone,
             ativo boolean DEFAULT true,
+            limite_vouchers integer DEFAULT 0,
+            credito_mensal_ativo boolean NOT NULL DEFAULT false,
+            valor_credito_mensal numeric(10,2) NOT NULL DEFAULT 0.00,
+            dia_renovacao_mensal integer NOT NULL DEFAULT 1,
+            modo_renovacao_mensal text NOT NULL DEFAULT 'RENOVAR_TETO',
+            ultima_renovacao_competencia text,
+            permitir_compra_creditos boolean NOT NULL DEFAULT true,
+            desconto_compra_percent numeric(5,2) NOT NULL DEFAULT 0.00,
             created_at timestamp with time zone DEFAULT now(),
             updated_at timestamp with time zone DEFAULT now()
           );
           ALTER TABLE public.voucher_empresas_parceiras ENABLE ROW LEVEL SECURITY;
-          ALTER TABLE public.voucher_empresas_parceiras ADD COLUMN IF NOT EXISTS limite_vouchers integer DEFAULT 100;
-          ALTER TABLE public.voucher_empresas_parceiras ADD COLUMN IF NOT EXISTS cep text;
-          ALTER TABLE public.voucher_empresas_parceiras ADD COLUMN IF NOT EXISTS logradouro text;
-          ALTER TABLE public.voucher_empresas_parceiras ADD COLUMN IF NOT EXISTS numero text;
-          ALTER TABLE public.voucher_empresas_parceiras ADD COLUMN IF NOT EXISTS complemento text;
-          ALTER TABLE public.voucher_empresas_parceiras ADD COLUMN IF NOT EXISTS bairro text;
-          ALTER TABLE public.voucher_empresas_parceiras ADD COLUMN IF NOT EXISTS municipio text;
-          ALTER TABLE public.voucher_empresas_parceiras ADD COLUMN IF NOT EXISTS uf text;
-          ALTER TABLE public.voucher_empresas_parceiras ADD COLUMN IF NOT EXISTS telefone_empresa text;
-          ALTER TABLE public.voucher_empresas_parceiras ADD COLUMN IF NOT EXISTS atividade_principal text;
-          ALTER TABLE public.voucher_empresas_parceiras ADD COLUMN IF NOT EXISTS natureza_juridica text;
-          ALTER TABLE public.voucher_empresas_parceiras ADD COLUMN IF NOT EXISTS data_abertura_cnpj text;
-          ALTER TABLE public.voucher_empresas_parceiras ADD COLUMN IF NOT EXISTS status_cnpj text DEFAULT 'ATIVA';
-          ALTER TABLE public.voucher_empresas_parceiras ADD COLUMN IF NOT EXISTS credito_inicio timestamp with time zone DEFAULT now();
-          DROP POLICY IF EXISTS "Permitir tudo em voucher_empresas_parceiras" ON public.voucher_empresas_parceiras;
-          CREATE POLICY "Permitir tudo em voucher_empresas_parceiras" ON public.voucher_empresas_parceiras FOR ALL USING (true) WITH CHECK (true);
-          GRANT ALL ON public.voucher_empresas_parceiras TO authenticated, anon, service_role;
+          ALTER TABLE public.voucher_empresas_parceiras ADD COLUMN IF NOT EXISTS senha_hash text;
+          ALTER TABLE public.voucher_empresas_parceiras ADD COLUMN IF NOT EXISTS credito_mensal_ativo boolean NOT NULL DEFAULT false;
+          ALTER TABLE public.voucher_empresas_parceiras ADD COLUMN IF NOT EXISTS valor_credito_mensal numeric(10,2) NOT NULL DEFAULT 0.00;
+          ALTER TABLE public.voucher_empresas_parceiras ADD COLUMN IF NOT EXISTS dia_renovacao_mensal integer NOT NULL DEFAULT 1;
+          ALTER TABLE public.voucher_empresas_parceiras ADD COLUMN IF NOT EXISTS modo_renovacao_mensal text NOT NULL DEFAULT 'RENOVAR_TETO';
+          ALTER TABLE public.voucher_empresas_parceiras ADD COLUMN IF NOT EXISTS ultima_renovacao_competencia text;
+          ALTER TABLE public.voucher_empresas_parceiras ADD COLUMN IF NOT EXISTS permitir_compra_creditos boolean NOT NULL DEFAULT true;
+          ALTER TABLE public.voucher_empresas_parceiras ADD COLUMN IF NOT EXISTS desconto_compra_percent numeric(5,2) NOT NULL DEFAULT 0.00;
+          REVOKE ALL ON public.voucher_empresas_parceiras FROM anon;
 
           CREATE TABLE IF NOT EXISTS public.voucher_campanhas (
             id text PRIMARY KEY,
             tenant_id uuid NOT NULL,
             empresa_id text,
+            empresa_nome text,
             nome text NOT NULL,
             descricao text,
             valor_voucher numeric(10,2) DEFAULT 0.00,
+            tipo_desconto text NOT NULL DEFAULT 'VALOR_FIXO',
+            valor_desconto numeric(10,2) NOT NULL DEFAULT 0.00,
             quantidade_total integer DEFAULT 0,
             ativo boolean DEFAULT true,
             validade_fim timestamp with time zone,
-            created_at timestamp with time zone DEFAULT now()
+            horarios_permitidos jsonb NOT NULL DEFAULT '{"dias":[0,1,2,3,4,5,6],"inicio":"00:00","fim":"23:59"}'::jsonb,
+            restaurante_instance_id uuid,
+            created_at timestamp with time zone DEFAULT now(),
+            updated_at timestamp with time zone DEFAULT now()
           );
           ALTER TABLE public.voucher_campanhas ENABLE ROW LEVEL SECURITY;
-          DROP POLICY IF EXISTS "Permitir tudo em voucher_campanhas" ON public.voucher_campanhas;
-          CREATE POLICY "Permitir tudo em voucher_campanhas" ON public.voucher_campanhas FOR ALL USING (true) WITH CHECK (true);
-          GRANT ALL ON public.voucher_campanhas TO authenticated, anon, service_role;
+          ALTER TABLE public.voucher_campanhas ADD COLUMN IF NOT EXISTS empresa_nome text;
+          ALTER TABLE public.voucher_campanhas ADD COLUMN IF NOT EXISTS tipo_desconto text NOT NULL DEFAULT 'VALOR_FIXO';
+          ALTER TABLE public.voucher_campanhas ADD COLUMN IF NOT EXISTS valor_desconto numeric(10,2) NOT NULL DEFAULT 0.00;
+          ALTER TABLE public.voucher_campanhas ADD COLUMN IF NOT EXISTS horarios_permitidos jsonb NOT NULL DEFAULT '{"dias":[0,1,2,3,4,5,6],"inicio":"00:00","fim":"23:59"}'::jsonb;
+          ALTER TABLE public.voucher_campanhas ADD COLUMN IF NOT EXISTS restaurante_instance_id uuid;
+          ALTER TABLE public.voucher_campanhas ADD COLUMN IF NOT EXISTS updated_at timestamp with time zone DEFAULT now();
+          REVOKE ALL ON public.voucher_campanhas FROM anon;
 
           CREATE TABLE IF NOT EXISTS public.voucher_colaboradores (
             id text PRIMARY KEY,
@@ -816,21 +834,29 @@ async function runMigrations() {
             cpf text,
             whatsapp text,
             email text,
+            cargo text,
+            departamento text,
+            observacoes text,
             ativo boolean DEFAULT true,
-            created_at timestamp with time zone DEFAULT now()
+            created_at timestamp with time zone DEFAULT now(),
+            updated_at timestamp with time zone DEFAULT now()
           );
           ALTER TABLE public.voucher_colaboradores ENABLE ROW LEVEL SECURITY;
-          DROP POLICY IF EXISTS "Permitir tudo em voucher_colaboradores" ON public.voucher_colaboradores;
-          CREATE POLICY "Permitir tudo em voucher_colaboradores" ON public.voucher_colaboradores FOR ALL USING (true) WITH CHECK (true);
-          GRANT ALL ON public.voucher_colaboradores TO authenticated, anon, service_role;
+          ALTER TABLE public.voucher_colaboradores ADD COLUMN IF NOT EXISTS cargo text;
+          ALTER TABLE public.voucher_colaboradores ADD COLUMN IF NOT EXISTS departamento text;
+          ALTER TABLE public.voucher_colaboradores ADD COLUMN IF NOT EXISTS observacoes text;
+          ALTER TABLE public.voucher_colaboradores ADD COLUMN IF NOT EXISTS updated_at timestamp with time zone DEFAULT now();
+          REVOKE ALL ON public.voucher_colaboradores FROM anon;
 
           CREATE TABLE IF NOT EXISTS public.vouchers (
             id text PRIMARY KEY,
             tenant_id uuid NOT NULL,
             empresa_id text,
             campanha_id text,
+            campanha_nome text,
             colaborador_id text,
             public_token text UNIQUE NOT NULL,
+            qr_secret text,
             valor numeric(10,2) NOT NULL DEFAULT 0.00,
             status text NOT NULL DEFAULT 'CRIADO',
             beneficiario_nome text,
@@ -839,24 +865,31 @@ async function runMigrations() {
             empresa_razao_social text,
             observacoes text,
             validade_fim timestamp with time zone NOT NULL,
+            lock_until timestamp with time zone,
+            mensagem_envio_status text DEFAULT 'PENDENTE',
+            mensagem_envio_erro text,
+            mensagem_enviada_em timestamp with time zone,
+            data_cancelamento timestamp with time zone,
             data_resgate timestamp with time zone,
             atendente_id text,
             created_at timestamp with time zone DEFAULT now(),
             updated_at timestamp with time zone DEFAULT now()
           );
           ALTER TABLE public.vouchers ENABLE ROW LEVEL SECURITY;
-          DROP POLICY IF EXISTS "Permitir tudo em vouchers" ON public.vouchers;
-          CREATE POLICY "Permitir tudo em vouchers" ON public.vouchers FOR ALL USING (true) WITH CHECK (true);
-          GRANT ALL ON public.vouchers TO authenticated, anon, service_role;
+          ALTER TABLE public.vouchers ADD COLUMN IF NOT EXISTS campanha_nome text;
+          ALTER TABLE public.vouchers ADD COLUMN IF NOT EXISTS lock_until timestamp with time zone;
+          ALTER TABLE public.vouchers ADD COLUMN IF NOT EXISTS mensagem_envio_status text DEFAULT 'PENDENTE';
+          ALTER TABLE public.vouchers ADD COLUMN IF NOT EXISTS mensagem_envio_erro text;
+          ALTER TABLE public.vouchers ADD COLUMN IF NOT EXISTS mensagem_enviada_em timestamp with time zone;
+          ALTER TABLE public.vouchers ADD COLUMN IF NOT EXISTS data_cancelamento timestamp with time zone;
+          REVOKE ALL ON public.vouchers FROM anon;
 
-          -- =========================================================================
-          -- TABELA VOUCHER_EVENTS (Ledger de Auditoria Imutável de Vouchers)
-          -- =========================================================================
           CREATE TABLE IF NOT EXISTS public.voucher_events (
             id text PRIMARY KEY,
             tenant_id text,
             voucher_id text,
             voucher_token text,
+            empresa_id text,
             tipo_operacao text,
             valor numeric(10,2) DEFAULT 0.00,
             beneficiario_nome text,
@@ -867,12 +900,49 @@ async function runMigrations() {
             usuario_responsavel text,
             hash_transacao text,
             motivo text,
+            ip text,
+            dispositivo text,
+            payload jsonb DEFAULT '{}'::jsonb,
             created_at timestamp with time zone DEFAULT now()
           );
           ALTER TABLE public.voucher_events ENABLE ROW LEVEL SECURITY;
-          DROP POLICY IF EXISTS "Permitir tudo em voucher_events" ON public.voucher_events;
-          CREATE POLICY "Permitir tudo em voucher_events" ON public.voucher_events FOR ALL USING (true) WITH CHECK (true);
-          GRANT ALL ON public.voucher_events TO authenticated, anon, service_role;
+          ALTER TABLE public.voucher_events ADD COLUMN IF NOT EXISTS empresa_id text;
+          ALTER TABLE public.voucher_events ADD COLUMN IF NOT EXISTS ip text;
+          ALTER TABLE public.voucher_events ADD COLUMN IF NOT EXISTS dispositivo text;
+          ALTER TABLE public.voucher_events ADD COLUMN IF NOT EXISTS payload jsonb DEFAULT '{}'::jsonb;
+          REVOKE ALL ON public.voucher_events FROM anon;
+
+          CREATE TABLE IF NOT EXISTS public.voucher_portal_sessions (
+            token_hash text PRIMARY KEY,
+            empresa_id text NOT NULL REFERENCES public.voucher_empresas_parceiras(id) ON DELETE CASCADE,
+            tenant_id uuid NOT NULL,
+            expires_at timestamp with time zone NOT NULL,
+            last_seen_at timestamp with time zone DEFAULT now(),
+            created_at timestamp with time zone DEFAULT now()
+          );
+          ALTER TABLE public.voucher_portal_sessions ENABLE ROW LEVEL SECURITY;
+          REVOKE ALL ON public.voucher_portal_sessions FROM anon, authenticated;
+
+          CREATE TABLE IF NOT EXISTS public.voucher_credit_orders (
+            id text PRIMARY KEY,
+            tenant_id uuid NOT NULL,
+            empresa_id text NOT NULL REFERENCES public.voucher_empresas_parceiras(id) ON DELETE CASCADE,
+            valor_credito numeric(10,2) NOT NULL,
+            desconto_percent numeric(5,2) NOT NULL DEFAULT 0.00,
+            valor_desconto numeric(10,2) NOT NULL DEFAULT 0.00,
+            valor_pago numeric(10,2) NOT NULL,
+            forma_pagamento text NOT NULL DEFAULT 'PIX',
+            origem text NOT NULL DEFAULT 'PORTAL',
+            status text NOT NULL DEFAULT 'PENDENTE',
+            solicitado_por text,
+            aprovado_por text,
+            observacoes text,
+            aprovado_em timestamp with time zone,
+            created_at timestamp with time zone NOT NULL DEFAULT now(),
+            updated_at timestamp with time zone NOT NULL DEFAULT now()
+          );
+          ALTER TABLE public.voucher_credit_orders ENABLE ROW LEVEL SECURITY;
+          REVOKE ALL ON public.voucher_credit_orders FROM anon;
 
           -- =========================================================================
           -- AJUSTE DE RLS EM CRM_BOARDS E CRM_LEADS (Evita erro 403 no Supabase)
@@ -1090,6 +1160,15 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
         }
     } catch(err) {
         console.error("[Worker Boot] Erro ao iniciar Cardapio Background Sync:", err.message);
+    }
+
+    try {
+        if (APP_ENV !== 'alpha' && process.env.IS_LOCAL_DEV !== 'true' && process.env.DISABLE_AUTO_START_SESSIONS !== 'true') {
+            console.log("[Worker Boot] Inicializando Scheduler Recorrente de Vouchers Corporativos...");
+            voucherEngine.startMonthlyRenewalScheduler();
+        }
+    } catch(err) {
+        console.error("[Worker Boot] Erro ao iniciar Scheduler Recorrente de Vouchers:", err.message);
     }
 
     try {
