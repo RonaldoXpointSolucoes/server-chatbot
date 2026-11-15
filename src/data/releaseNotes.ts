@@ -712,6 +712,88 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.2.3',
+    date: '2026-11-15',
+    summary: 'Redesign UI/UX & Responsividade Total do Antigravity DevLogger e ServerLogsTerminal (Obsidian Cyber Glassmorphism, Bottom Sheets, Modo Panorâmico & Busca no Terminal)',
+    notes: [
+      {
+        id: 'feat-devlogger-cyber-cockpit-823',
+        category: 'features',
+        title: 'Novo Cockpit Antigravity DevLogger em Obsidian Cyber Glassmorphism, Modo Panorâmico e Submodais Dedicados',
+        description: 'Arquitetura modularizada com casca unificada de Bottom Sheets (DevLoggerModalShell), modais elevados para Versões Baileys/Changelog/Endpoints (DevLoggerMetaModals) e painel Gastrofood com KPIs operacionais e inspetor JSON (DevLoggerGastrofoodTab). O Cockpit ganhou modo panorâmico (Maximizar/Restaurar), cabeçalho em 2 camadas sem cortes horizontais e trigger flutuante redesenhado.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+        guide: {
+          moduleGroup: 'system',
+          moduleLabel: 'Antigravity Cockpit (>_) • Diagnóstico, Logs & Telemetria',
+          purpose: 'Entregar uma central de observabilidade responsiva e confortável em Mobile, Tablet e Desktop (inclusive tela panorâmica), com acesso rápido a diagnósticos SSE/Supabase/Baileys, inspeção cirúrgica de JSONs e leitura limpa de histórico de versões.',
+          whereToAccess: [
+            '1. Clique no botão flutuante ">_" (canto inferior direito da tela)',
+            '2. Use o cabeçalho de 2 camadas para disparar pings (Server SSE, Supabase, React App, Baileys Ping, ASTS Suite, API Docs) ou alternar o modo Panorâmico (Maximizar)',
+            '3. Navegue entre as abas Console, Gastrofood, ASTS e E2E / Telemetria, ou clique em Baileys / Novidades / Endpoints na barra de telemetria'
+          ],
+          howToTest: [
+            '1. Abra o botão ">_" no Desktop e clique no ícone de Maximizar para expandir o Cockpit em tela cheia; depois redimensione para viewport Mobile e valide o formato Bottom Sheet.',
+            '2. Na aba Console, filtre pelos chips rápidos (Todos, Erros, Migalhas, Node, Alertas) e clique em um card com payload para expandir/recolher o JSON.',
+            '3. Clique em "Server SSE" para abrir o ServerLogsTerminal e teste a nova barra de busca (searchQuery) e os filtros rápidos de nível.'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Tela: Antigravity Cockpit (>_) ➔ Cabeçalho 2 Camadas & Bottom Sheet Responsivo',
+            contextElements: ['Server SSE', 'Supabase', 'React App', 'Baileys Ping', 'ASTS Suite'],
+            targetButtonLabel: '👆 Clique Aqui: Botão >_ (Cockpit) ➔ Maximizar / Filtros Rápidos',
+            targetButtonPosition: 'Canto inferior direito (botão flutuante >_) abrindo Bottom Sheet no Mobile ou Cockpit flutuante/panorâmico no Desktop',
+            visualPreviewVariant: 'hub-account-limits'
+          },
+          quickAction: {
+            label: 'Abrir Painel & Testar Cockpit (>_) Agora',
+            route: '/chat'
+          }
+        }
+      },
+      {
+        id: 'imp-devlogger-mobile-bottomsheet-search-823',
+        category: 'improvements',
+        title: 'Responsividade Mobile-First, KPIs na Aba Gastrofood e Busca/Filtros Rápidos no ServerLogsTerminal',
+        description: 'Todos os modais do DevLogger e do ServerLogsTerminal (elevado para z-[9999]) agora operam em Mobile Bottom Sheet com alvos táteis >=44px e micro-interação active:scale-95, abas em grade 2x2/4 colunas sem clipping, barra de telemetria e ferramentas recolhíveis no celular, badges KPI (Total/OK/Pendente/Falha) na aba Gastrofood e busca instantânea + filtros (Todos/Erros/Alertas) no terminal do servidor.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-300/30',
+        guide: {
+          moduleGroup: 'system',
+          moduleLabel: 'ServerLogsTerminal (SSE) & Aba Gastrofood',
+          purpose: 'Permitir filtrar instantaneamente logs em tempo real do servidor Node.js por texto ou severidade e acompanhar o status de integrações Gastrofood mesmo em telas estreitas de celular.',
+          whereToAccess: [
+            '1. Abra o botão flutuante ">_" ➔ clique em "Server SSE" para abrir o Terminal de Servidor',
+            '2. Digite termos na barra de busca ou alterne entre os filtros Todos, Erros e Alertas',
+            '3. Acesse a aba "Gastrofood" no DevLogger para ver os KPIs operacionais e o visualizador Payload/Response JSON'
+          ],
+          howToTest: [
+            '1. No ServerLogsTerminal, pesquise por "QueueProcessor" ou clique no chip "Erros" e copie um bloco de logs para validar o toast não bloqueante.',
+            '2. No DevLogger em tela Mobile, toque no ícone de chave inglesa para expandir as ações secundárias e recolha/expanda a barra de telemetria.'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Tela: ServerLogsTerminal & Aba Gastrofood ➔ Busca, Chips & KPIs',
+            contextElements: ['🔍 Buscar logs...', 'Todos', '🔴 Erros', '🟡 Alertas'],
+            targetButtonLabel: '👆 Clique Aqui: Server SSE ➔ Filtro / Copiar Logs',
+            targetButtonPosition: 'Camada de diagnóstico rápido do cabeçalho do DevLogger (>_) abrindo o ServerLogsTerminal sobreposto',
+            visualPreviewVariant: 'hub-account-limits'
+          },
+          quickAction: {
+            label: 'Testar ServerLogsTerminal no Chat',
+            route: '/chat'
+          }
+        }
+      },
+      {
+        id: 'fix-devlogger-sticky-alerts-collapse-823',
+        category: 'fixes',
+        title: 'Fim da Sobreposição de Filtros, Cliques Acidentais no Cabeçalho, alert() Bloqueante e JSONs Forçados Abertos',
+        description: 'Removido o onClick global de alternância em toda a extensão do cabeçalho, fixada a barra de filtros fora do scroll de logs para eliminar sobreposição sticky com o banner de análise IA, corrigido o colapso real de payloads JSON via isExpanded e substituídos todos os alert() de cópia no ServerLogsTerminal por banners/toasts não bloqueantes.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      }
+    ]
+  },
+  {
     version: '8.2.2',
     date: '2026-11-15',
     summary: 'Correção de Scroll & Experiência Mobile-First no Módulo de Vouchers Corporativos e Portal B2B (Bottom Sheets, KPIs Compactos e Navegação Touch)',

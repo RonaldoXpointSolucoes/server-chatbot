@@ -1,18 +1,22 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDevStore } from '../store/devStore';
-import { Terminal, AlertTriangle, Bug, Info, CheckCircle2, ChevronDown, ChevronUp, Trash2, Copy, Activity, Layers, Calendar, Rocket, Database, Smartphone, AppWindow, ExternalLink, Network, Cpu, Play, Pause, RefreshCw, UserCheck, ShieldAlert, Sparkles, Wand2, BrainCircuit, Check, Loader2, Send, ArrowUpRight, FileCode, CheckCircle, X, Zap, Mic, MicOff, Image as ImageIcon, Paperclip, Volume2, UploadCloud, Square, Plus, Radio, Film, Gauge, Server, Clock, HardDrive, Search, SlidersHorizontal, ChevronRight } from 'lucide-react';
+import { Terminal, AlertTriangle, Bug, Info, CheckCircle2, ChevronDown, ChevronUp, Trash2, Copy, Activity, Layers, Calendar, Rocket, Database, Smartphone, AppWindow, ExternalLink, Network, Cpu, Play, Pause, RefreshCw, UserCheck, ShieldAlert, Sparkles, Wand2, BrainCircuit, Check, Loader2, Send, ArrowUpRight, FileCode, CheckCircle, X, Zap, Mic, MicOff, Image as ImageIcon, Paperclip, Volume2, UploadCloud, Square, Plus, Radio, Film, Gauge, Server, Clock, HardDrive, Search, SlidersHorizontal, ChevronRight, Maximize2, Minimize2, Wrench } from 'lucide-react';
 import { supabase, masterSupabase, getSupabaseHealthStatus } from '../services/supabase';
 import { ServerLogsTerminal } from './ServerLogsTerminal';
 import { useChatStore } from '../store/chatStore';
 import { geminiService } from '../services/geminiService';
 import { runPreventiveAudit, runControlledCaptureProbe, fetchRecentRealLogs, getContactBoxPhoneKey, PreventiveAuditReport, CaptureProbeKind } from '../utils/preventiveDiagnostics';
+import { DevLoggerModalShell } from './devlogger/DevLoggerModalShell';
+import { DevLoggerMetaModals } from './devlogger/DevLoggerMetaModals';
+import { DevLoggerGastrofoodTab } from './devlogger/DevLoggerGastrofoodTab';
 
 export default function DevLogger() {
   const navigate = useNavigate();
   const { logs, isVisible, isEnabled, toggleVisibility, addLog, clearLogs, showServerLogs, setShowServerLogs } = useDevStore();
   const bottomRef = useRef<HTMLDivElement>(null);
   const devLoggerModalRef = useRef<HTMLDivElement>(null);
+  const originalConsoleWarnRef = useRef(console.warn);
   
   const [engineStatus, setEngineStatus] = useState<'online' | 'offline' | 'checking'>('checking');
   const [lastPing, setLastPing] = useState<Date | null>(null);
@@ -22,6 +26,10 @@ export default function DevLogger() {
   const [showEndpoints, setShowEndpoints] = useState(false);
   const [telemetry, setTelemetry] = useState<{ cpu: number, memory: number, uptime: number } | null>(null);
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
+  const [isMaximized, setIsMaximized] = useState(false);
+  const [showMobileTools, setShowMobileTools] = useState(false);
+  const [showTelemetryBar, setShowTelemetryBar] = useState(false);
+  const [showConsoleFilters, setShowConsoleFilters] = useState(false);
   const [showSimulationModal, setShowSimulationModal] = useState(false);
   const [simModalTab, setSimModalTab] = useState<'preventive' | 'suites' | 'sandbox'>('preventive');
   const [auditTenantOverride, setAuditTenantOverride] = useState<string>('');
@@ -29,6 +37,11 @@ export default function DevLogger() {
   const [isRunningPreventive, setIsRunningPreventive] = useState(false);
   const [runningProbe, setRunningProbe] = useState<CaptureProbeKind | null>(null);
   const [probeResult, setProbeResult] = useState<{ kind: CaptureProbeKind; ok: boolean; summary: string } | null>(null);
+
+  const showToastFeedback = (msg: string, durationMs = 2800) => {
+    setCopyFeedback(msg);
+    setTimeout(() => setCopyFeedback(null), durationMs);
+  };
   
   // Draggable Floating Button logic
   const [position, setPosition] = useState<{ x: number; y: number }>(() => {
@@ -964,8 +977,8 @@ export default function DevLogger() {
       if (err.name !== 'AbortError') {
         telemetryErrorCountRef.current += 1;
         // Evita poluir o console com avisos repetidos durante oscilações de rede ou reinicializações do servidor
-        if (telemetryErrorCountRef.current <= 1 && typeof originalConsoleWarn === 'function') {
-          originalConsoleWarn.apply(console, ['[DevLogger] Telemetria em espera de sincronização com o servidor:', err.message || err]);
+        if (telemetryErrorCountRef.current <= 1 && typeof originalConsoleWarnRef.current === 'function') {
+          originalConsoleWarnRef.current.apply(console, ['[DevLogger] Telemetria em espera de sincronização com o servidor:', err.message || err]);
         }
       }
     } finally {
@@ -1215,6 +1228,7 @@ export default function DevLogger() {
   useEffect(() => {
     const originalConsoleError = console.error;
     const originalConsoleWarn = console.warn;
+    originalConsoleWarnRef.current = originalConsoleWarn;
     let lastSupabaseErrorTime = 0;
 
     console.error = (...args: any[]) => {
@@ -2849,246 +2863,333 @@ export default function DevLogger() {
              bottom: 'auto',
              right: 'auto'
            } : undefined}
-           className={`fixed z-[9999] text-white p-3 rounded-full shadow-xl transition-colors duration-200 ${
+           className={`fixed z-[9999] w-12 h-12 rounded-2xl flex items-center justify-center text-white shadow-[0_12px_32px_rgba(0,0,0,0.6)] border backdrop-blur-xl transition-all duration-200 active:scale-95 ${
              position.x === -1 ? 'bottom-24 right-4' : ''
-           } ${engineStatus === 'online' ? 'bg-emerald-600 hover:bg-emerald-500 hover:shadow-emerald-500/20' : 'bg-red-600 hover:bg-red-500 animate-pulse hover:shadow-red-500/20'} cursor-grab active:cursor-grabbing select-none`}
-           title="Abrir Dev"
+           } ${
+             engineStatus === 'online'
+               ? 'bg-gradient-to-tr from-emerald-600 via-emerald-500 to-teal-400 border-emerald-300/50 hover:shadow-emerald-500/35 text-slate-950'
+               : engineStatus === 'checking'
+                 ? 'bg-gradient-to-tr from-blue-600 to-indigo-500 border-blue-300/50 hover:shadow-blue-500/35'
+                 : 'bg-gradient-to-tr from-rose-600 to-red-500 border-rose-300/60 animate-pulse hover:shadow-rose-500/40'
+           } cursor-grab active:cursor-grabbing select-none`}
+           title="Abrir Antigravity DevLogger Cockpit"
         >
-          <Terminal size={20} />
+          <Terminal size={20} className={engineStatus === 'online' ? 'stroke-[2.5]' : ''} />
+          <span
+            className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-[#070c10] ${
+              engineStatus === 'online' ? 'bg-emerald-300' : engineStatus === 'checking' ? 'bg-blue-300 animate-pulse' : 'bg-rose-300 animate-ping'
+            }`}
+          />
           {logs.filter(l => l.type === 'error').length > 0 && (
-            <span className="absolute -top-1 -right-1 bg-red-800 w-5 h-5 rounded-full text-[10px] flex items-center justify-center font-bold shadow-sm border border-red-400 animate-bounce">
-              {logs.filter(l => l.type === 'error').length}
+            <span className="absolute -top-1.5 -right-1.5 bg-rose-600 min-w-[20px] h-5 px-1 rounded-full text-[10px] flex items-center justify-center font-black font-mono text-white shadow-md border border-rose-300 animate-bounce">
+              {logs.filter(l => l.type === 'error').length > 99 ? '99+' : logs.filter(l => l.type === 'error').length}
             </span>
           )}
         </button>
       )}
 
-      <div className={`fixed z-[9999] right-2 sm:right-6 transition-all duration-300 ease-out ${isVisible ? 'top-2 sm:top-3 bottom-2 sm:bottom-3 flex flex-col pointer-events-auto' : '-top-[1000px] pointer-events-none'}`}>
-        <div ref={devLoggerModalRef} className="bg-[#070c10]/95 backdrop-blur-3xl border border-white/10 rounded-[28px] shadow-[0_25px_70px_rgba(0,0,0,0.95)] w-[96vw] sm:w-[740px] md:w-[820px] max-w-[96vw] flex flex-col max-h-full overflow-hidden text-[#d1d7db] transition-all duration-300 relative group/card border-t border-white/20 my-auto">
-          
-          {/* Brilho Radial de Fundo Neon */}
-          <div className="absolute -top-24 -left-24 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
-          <div className="absolute -bottom-24 -right-24 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+      {/* Backdrop sutil apenas em Mobile para padrão Bottom Sheet */}
+      {isVisible && (
+        <div
+          onClick={toggleVisibility}
+          className="fixed inset-0 z-[9998] bg-black/70 backdrop-blur-sm sm:hidden animate-in fade-in duration-200"
+          aria-hidden="true"
+        />
+      )}
 
-          {/* Header Superior Neon Glassmorphism (Fixo & Sticky) */}
-          <div 
-            className="flex items-center justify-between px-3 sm:px-5 py-2.5 sm:py-3 border-b border-white/10 cursor-pointer bg-[#070c10] bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-indigo-500/10 hover:from-emerald-500/15 hover:to-indigo-500/15 transition-all select-none relative z-30 shrink-0 sticky top-0 gap-2 overflow-x-auto custom-scrollbar"
-            onClick={toggleVisibility}
-          >
-            {/* Lado Esquerdo: Logo, Título e Chip ONLINE */}
-            <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
-              <div className="relative flex items-center justify-center shrink-0">
-                <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-2xl bg-gradient-to-tr from-emerald-500 via-teal-400 to-emerald-300 flex items-center justify-center shadow-lg shadow-emerald-500/30">
-                  <Terminal size={17} className="text-black stroke-[2.5]" />
+      <div
+        className={`fixed z-[9999] transition-all duration-300 ease-out ${
+          isVisible
+            ? isMaximized
+              ? 'inset-x-0 bottom-0 top-[6dvh] sm:inset-3 lg:inset-5 flex flex-col pointer-events-auto opacity-100 translate-y-0'
+              : 'inset-x-0 bottom-0 top-[7dvh] sm:top-3 sm:bottom-3 sm:left-auto sm:right-4 lg:right-6 flex flex-col pointer-events-auto opacity-100 translate-y-0'
+            : 'inset-x-0 bottom-0 translate-y-[110%] sm:translate-y-0 sm:-top-[1400px] sm:bottom-auto sm:right-6 pointer-events-none opacity-0'
+        }`}
+      >
+        <div
+          ref={devLoggerModalRef}
+          className={`bg-[#070c10]/95 backdrop-blur-3xl border border-white/15 border-t-white/25 shadow-[0_25px_75px_rgba(0,0,0,0.95)] flex flex-col h-full max-h-full overflow-hidden text-[#e2e8f0] transition-all duration-300 relative group/card ${
+            isMaximized
+              ? 'w-full rounded-t-[28px] sm:rounded-[28px]'
+              : 'w-full sm:w-[700px] md:w-[840px] lg:w-[920px] xl:w-[980px] sm:max-w-[95vw] rounded-t-[28px] sm:rounded-[28px] my-auto'
+          }`}
+        >
+          {/* Brilhos Ambientais Obsidian Cyber */}
+          <div className="absolute -top-24 -left-24 w-72 h-72 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+          <div className="absolute -bottom-24 -right-24 w-72 h-72 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+
+          {/* Mobile Drag Handle */}
+          <div className="sm:hidden flex justify-center pt-2 pb-1 bg-[#070c10] shrink-0">
+            <span className="w-11 h-1.5 rounded-full bg-white/20" />
+          </div>
+
+          {/* Header Superior Responsivo em 2 Camadas */}
+          <div className="border-b border-white/10 bg-[#070c10]/95 bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-indigo-500/10 select-none relative z-30 shrink-0">
+            {/* Camada 1: Identidade + Status + Ações Principais */}
+            <div className="flex items-center justify-between px-3.5 sm:px-5 py-2.5 sm:py-3 gap-2">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="relative flex items-center justify-center shrink-0">
+                  <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-emerald-500 via-teal-400 to-emerald-300 flex items-center justify-center shadow-lg shadow-emerald-500/30">
+                    <Terminal size={18} className="text-slate-950 stroke-[2.5]" />
+                  </div>
+                  <div className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-[#070c10] ${
+                    engineStatus === 'online' ? 'bg-emerald-400 animate-pulse' : engineStatus === 'checking' ? 'bg-blue-400 animate-pulse' : 'bg-rose-400 animate-ping'
+                  }`} />
                 </div>
-                <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-400 border-2 border-[#070c10] animate-pulse" />
-              </div>
 
-              <div className="text-left shrink-0">
-                <div className="flex items-center gap-1.5">
-                  <h3 className="text-xs sm:text-sm font-black text-white tracking-tight leading-none font-mono">Antigravity</h3>
-                  <span className="text-[8px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.2 rounded font-extrabold uppercase tracking-widest font-mono">
-                    COCKPIT
+                <div className="text-left min-w-0">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <h3 className="text-sm font-black text-white tracking-tight leading-none font-mono truncate">Antigravity</h3>
+                    <span className="text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.5 rounded-md font-extrabold uppercase tracking-widest font-mono">
+                      COCKPIT
+                    </span>
+                    <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black border font-mono shadow-sm transition-all shrink-0 ${
+                      engineStatus === 'online'
+                        ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                        : engineStatus === 'checking'
+                          ? 'bg-blue-500/15 border-blue-500/40 text-blue-300'
+                          : 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+                    }`}>
+                      <Activity size={10} className={engineStatus === 'online' ? 'animate-pulse text-emerald-400' : ''} />
+                      <span>{engineStatus.toUpperCase()}</span>
+                    </div>
+                    {logs.filter(l => l.type === 'error').length > 0 && (
+                      <span className="flex items-center gap-1 bg-rose-500/20 border border-rose-500/40 text-rose-300 px-2 py-0.5 rounded-full text-[9px] font-black font-mono shadow-sm animate-pulse shrink-0">
+                        <Bug size={10} /> {logs.filter(l => l.type === 'error').length}
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[9px] text-emerald-400/80 font-bold tracking-widest block uppercase font-mono leading-none mt-1 truncate">
+                    DEV LOGGER • ENGINE {serverMeta?.engineVersion || '5.8.5'}
                   </span>
                 </div>
-                <span className="text-[8px] sm:text-[9px] text-emerald-400/80 font-bold tracking-widest block uppercase font-mono leading-none mt-1">DEV LOGGER SYSTEM</span>
-              </div>
-              
-              {/* Chip de Status do Motor */}
-              <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black border font-mono shadow-sm transition-all shrink-0 ${
-                engineStatus === 'online' 
-                  ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 shadow-emerald-500/10' 
-                  : engineStatus === 'checking' 
-                    ? 'bg-blue-500/15 border-blue-500/40 text-blue-300 shadow-blue-500/10' 
-                    : 'bg-rose-500/15 border-rose-500/40 text-rose-300 shadow-rose-500/10'
-              }`}>
-                <span className={`w-2 h-2 rounded-full ${
-                  engineStatus === 'online' ? 'bg-emerald-400 animate-ping' : engineStatus === 'checking' ? 'bg-blue-400 animate-pulse' : 'bg-rose-400 animate-ping'
-                }`} />
-                <Activity size={11} className={engineStatus === 'online' ? 'animate-pulse text-emerald-400' : ''} />
-                <span>{engineStatus.toUpperCase()}</span>
               </div>
 
-              {logs.filter(l => l.type === 'error').length > 0 && (
-                <span className="hidden md:flex items-center gap-1 bg-rose-500/20 border border-rose-500/40 text-rose-300 px-2 py-0.5 rounded-full text-[10px] font-bold font-mono shadow-sm animate-pulse shrink-0">
-                  <Bug size={11} /> {logs.filter(l => l.type === 'error').length}
-                </span>
-              )}
-            </div>
-
-            {/* Barra de Ferramentas Dev no Header */}
-            <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 py-0.5 ml-auto">
-              {/* Grupo de Testes e Diagnóstico */}
-              <div className="flex items-center gap-1 bg-black/30 p-1 rounded-2xl border border-white/5">
-                <button 
-                  onClick={(e) => { 
-                    e.stopPropagation(); 
-                    setShowServerLogs(true); 
-                    useDevStore.setState({ isVisible: false }); 
-                  }} 
-                  className="text-[#8696a0] hover:text-emerald-300 bg-white/5 hover:bg-emerald-500/15 border border-white/5 hover:border-emerald-500/30 p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer active:scale-95 shadow-sm shrink-0" 
-                  title="Abrir Terminal Server Node.js (SSE Stream)"
-                >
-                  <Terminal size={14} />
-                </button>
-
-                <button 
-                  onClick={(e) => { e.stopPropagation(); handleTestSupabase(); }} 
-                  className="text-[#8696a0] hover:text-purple-300 bg-white/5 hover:bg-purple-500/15 border border-white/5 hover:border-purple-500/30 p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer active:scale-95 shadow-sm shrink-0" 
-                  title="Testar Conexão Supabase DB"
-                >
-                  <Database size={14} />
-                </button>
-
-                <button 
-                  onClick={(e) => { e.stopPropagation(); handleTestApp(); }} 
-                  className="text-[#8696a0] hover:text-cyan-300 bg-white/5 hover:bg-cyan-500/15 border border-white/5 hover:border-cyan-500/30 p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer active:scale-95 shadow-sm shrink-0" 
-                  title="Testar Aplicação React (State & Hooks)"
-                >
-                  <AppWindow size={14} />
-                </button>
-
-                <button 
-                  onClick={(e) => { e.stopPropagation(); handleTestEngine(); }} 
-                  className="text-[#8696a0] hover:text-blue-300 bg-white/5 hover:bg-blue-500/15 border border-white/5 hover:border-blue-500/30 p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer active:scale-95 shadow-sm shrink-0" 
-                  title="Testar Status do Baileys WhatsApp Engine"
-                >
-                  <Smartphone size={14} />
-                </button>
-
-                <button 
-                  onClick={(e) => { e.stopPropagation(); setShowTestPanel(!showTestPanel); }} 
-                  className={`p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer relative active:scale-95 border shrink-0 ${
-                    showTestPanel 
-                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-lg shadow-amber-500/20' 
-                      : 'text-[#8696a0] hover:text-amber-300 bg-white/5 hover:bg-amber-500/15 border-white/5 hover:border-amber-500/30'
+              {/* Ações Principais (Touch Targets >= 40-44px, active:scale-95) */}
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setShowAiMediaPromptModal(true); }}
+                  disabled={isAnalyzingAiLogs}
+                  className={`min-h-[40px] px-2.5 sm:px-3 rounded-xl transition-all cursor-pointer active:scale-95 border flex items-center gap-1.5 font-mono text-[10px] sm:text-[11px] font-black ${
+                    isAnalyzingAiLogs
+                      ? 'bg-purple-500/20 text-purple-300 border-purple-500/50 animate-pulse'
+                      : 'bg-gradient-to-r from-purple-500/30 via-indigo-500/25 to-pink-500/30 hover:from-purple-500/45 hover:to-pink-500/45 text-purple-100 border-purple-400/50 shadow-lg shadow-purple-500/15'
                   }`}
-                  title="Antigravity Test Suite (ASTS Cockpit)"
+                  title="Analisar todos os logs com IA e criar Card de Correção no CRM Kanban"
                 >
-                  <Activity size={14} className={isTestingApp ? 'animate-pulse text-amber-400' : ''} />
-                  {isTestingApp && (
-                    <span className="absolute -top-1 -right-1 flex h-2 w-2">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
-                    </span>
+                  {isAnalyzingAiLogs ? (
+                    <Loader2 size={14} className="animate-spin text-purple-300" />
+                  ) : (
+                    <Sparkles size={14} className="text-purple-300" />
                   )}
+                  <span className="hidden xs:inline sm:inline">I.A CRM</span>
                 </button>
-              </div>
 
-              <div className="w-px h-4 bg-white/10 mx-0.5 shrink-0" />
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); copyLogs(); }}
+                  className="min-w-[40px] min-h-[40px] flex items-center justify-center text-[#94a3b8] hover:text-emerald-300 bg-white/5 hover:bg-emerald-500/15 border border-white/10 hover:border-emerald-500/30 rounded-xl transition-all cursor-pointer active:scale-95"
+                  title="Copiar Logs Estruturados"
+                >
+                  <Copy size={15} />
+                </button>
 
-              {/* Grupo de Ações de Logs */}
-              <div className="flex items-center gap-1">
-                <div className="relative flex items-center shrink-0">
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); copyLogs(); }} 
-                    className="text-[#8696a0] hover:text-emerald-300 bg-white/5 hover:bg-emerald-500/15 border border-white/10 hover:border-emerald-500/30 p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer active:scale-95 shadow-sm" 
-                    title="Copiar Logs Estruturados"
-                  >
-                    <Copy size={14} />
-                  </button>
-                  {copyFeedback && (
-                    <div className="absolute right-full mr-2 whitespace-nowrap bg-gradient-to-r from-emerald-500 to-teal-400 text-black font-black text-[10px] px-2.5 py-1 rounded-lg shadow-xl animate-in fade-in slide-in-from-right-2 z-30 font-mono">
-                      {copyFeedback}
-                    </div>
-                  )}
-                </div>
-
-                <button 
-                  onClick={(e) => { e.stopPropagation(); clearLogs(); }} 
-                  className="text-[#8696a0] hover:text-rose-300 bg-white/5 hover:bg-rose-500/15 border border-white/10 hover:border-rose-500/30 p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer active:scale-95 shadow-sm shrink-0" 
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); clearLogs(); }}
+                  className="min-w-[40px] min-h-[40px] flex items-center justify-center text-[#94a3b8] hover:text-rose-300 bg-white/5 hover:bg-rose-500/15 border border-white/10 hover:border-rose-500/30 rounded-xl transition-all cursor-pointer active:scale-95"
                   title="Limpar Histórico de Logs"
                 >
-                  <Trash2 size={14} />
+                  <Trash2 size={15} />
+                </button>
+
+                {/* Botão Mobile de Ferramentas Rápidas */}
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setShowMobileTools(prev => !prev); }}
+                  className={`sm:hidden min-w-[40px] min-h-[40px] flex items-center justify-center rounded-xl border transition-all cursor-pointer active:scale-95 ${
+                    showMobileTools
+                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                      : 'bg-white/5 text-[#94a3b8] border-white/10 hover:text-white'
+                  }`}
+                  title="Ferramentas Rápidas e Telemetria"
+                >
+                  <Wrench size={15} />
+                </button>
+
+                {/* Maximizar / Restaurar em Tablet & Desktop */}
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setIsMaximized(prev => !prev); }}
+                  className="hidden sm:flex min-w-[40px] min-h-[40px] items-center justify-center text-[#94a3b8] hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl transition-all cursor-pointer active:scale-95"
+                  title={isMaximized ? 'Restaurar Janela Flutuante' : 'Expandir Cockpit em Tela Cheia'}
+                >
+                  {isMaximized ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); toggleVisibility(); }}
+                  className="min-w-[40px] min-h-[40px] flex items-center justify-center text-[#94a3b8] hover:text-white bg-white/5 hover:bg-rose-500/20 border border-white/10 hover:border-rose-500/40 rounded-xl transition-all cursor-pointer active:scale-95"
+                  title="Minimizar / Fechar Cockpit"
+                >
+                  <X size={16} />
                 </button>
               </div>
+            </div>
 
-              <div className="w-px h-4 bg-white/10 mx-0.5 shrink-0" />
-
-              {/* Botão de Análise de Logs com IA e Criação de Card no CRM Kanban */}
-              <button 
-                onClick={(e) => { e.stopPropagation(); setShowAiMediaPromptModal(true); }} 
-                disabled={isAnalyzingAiLogs}
-                className={`p-1.5 sm:py-1.5 sm:px-2.5 rounded-xl transition-all cursor-pointer relative active:scale-95 border shrink-0 flex items-center gap-1.5 font-mono text-[10px] font-black ${
-                  isAnalyzingAiLogs 
-                    ? 'bg-purple-500/20 text-purple-300 border-purple-500/50 animate-pulse' 
-                    : 'bg-gradient-to-r from-purple-500/25 via-indigo-500/25 to-pink-500/25 hover:from-purple-500/40 hover:to-pink-500/40 text-purple-200 hover:text-white border-purple-500/40 hover:border-purple-400 hover:shadow-lg hover:shadow-purple-500/20'
-                }`}
-                title="Analisar todos os logs com IA e criar Card de Correção no CRM Kanban"
+            {/* Camada 2: Faixa de Diagnóstico & Atalhos (Sempre visível em sm+, expansível em mobile) */}
+            <div className={`${showMobileTools ? 'flex' : 'hidden sm:flex'} items-center gap-1.5 px-3.5 sm:px-5 pb-2.5 pt-0.5 flex-wrap`}>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowServerLogs(true);
+                  useDevStore.setState({ isVisible: false });
+                }}
+                className="min-h-[34px] px-2.5 py-1 flex items-center gap-1.5 text-[10px] font-bold font-mono text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/25 rounded-xl transition-all cursor-pointer active:scale-95"
+                title="Abrir Terminal Server Node.js (SSE Stream)"
               >
-                {isAnalyzingAiLogs ? (
-                  <Loader2 size={13} className="animate-spin text-purple-300" />
-                ) : (
-                  <Sparkles size={13} className="text-purple-300 animate-pulse" />
-                )}
-                <span className="inline whitespace-nowrap">I.A CRM</span>
+                <Terminal size={12} /> <span>Server SSE</span>
               </button>
 
-              <a 
-                href={`${engineUrl}/swagger/teste.html`} 
-                target="_blank" 
-                rel="noopener noreferrer" 
-                onClick={(e) => e.stopPropagation()} 
-                className="bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/40 px-2 sm:px-2.5 py-1.5 rounded-xl text-[10px] font-black transition-all flex items-center gap-1 shadow-sm active:scale-95 shrink-0 font-mono whitespace-nowrap" 
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); handleTestSupabase(); }}
+                className="min-h-[34px] px-2.5 py-1 flex items-center gap-1.5 text-[10px] font-bold font-mono text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/25 rounded-xl transition-all cursor-pointer active:scale-95"
+                title="Testar Conexão Supabase DB"
+              >
+                <Database size={12} /> <span>Supabase</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); handleTestApp(); }}
+                className="min-h-[34px] px-2.5 py-1 flex items-center gap-1.5 text-[10px] font-bold font-mono text-cyan-300 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/25 rounded-xl transition-all cursor-pointer active:scale-95"
+                title="Testar Aplicação React (State & Hooks)"
+              >
+                <AppWindow size={12} /> <span>React App</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); handleTestEngine(); }}
+                className="min-h-[34px] px-2.5 py-1 flex items-center gap-1.5 text-[10px] font-bold font-mono text-blue-300 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/25 rounded-xl transition-all cursor-pointer active:scale-95"
+                title="Testar Status do Baileys WhatsApp Engine"
+              >
+                <Smartphone size={12} /> <span>Baileys Ping</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setShowTestPanel(!showTestPanel); }}
+                className={`min-h-[34px] px-2.5 py-1 flex items-center gap-1.5 text-[10px] font-bold font-mono rounded-xl transition-all cursor-pointer relative active:scale-95 border ${
+                  showTestPanel
+                    ? 'bg-amber-500/25 text-amber-200 border-amber-400/50 shadow-sm'
+                    : 'text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/25'
+                }`}
+                title="Antigravity Test Suite (ASTS Cockpit)"
+              >
+                <Activity size={12} className={isTestingApp ? 'animate-pulse text-amber-300' : ''} />
+                <span>ASTS Suite</span>
+                {isTestingApp && (
+                  <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+                )}
+              </button>
+
+              <a
+                href={`${engineUrl}/swagger/teste.html`}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="min-h-[34px] px-2.5 py-1 flex items-center gap-1.5 text-[10px] font-bold font-mono text-teal-200 bg-teal-500/15 hover:bg-teal-500/25 border border-teal-400/30 rounded-xl transition-all active:scale-95 ml-auto"
                 title="Abrir Documentação Interativa da API (Swagger)"
               >
-                <span className="hidden sm:inline">API</span> Docs
+                <span>API Docs</span>
+                <ExternalLink size={11} />
               </a>
-
-              <button className="text-[#8696a0] hover:text-white transition-colors p-1 shrink-0 ml-0.5">
-                {isVisible ? <ChevronUp size={17} /> : <ChevronDown size={17} />}
-              </button>
             </div>
           </div>
 
           {/* Cockpit de Telemetria e Metadados do Servidor */}
           {isVisible && (
-            <div className="bg-[#0e161c]/90 border-b border-white/10 p-2.5 px-4 flex flex-col gap-2 text-xs font-mono transition-all relative z-10 shrink-0 max-h-[35vh] overflow-y-auto custom-scrollbar">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar max-w-full py-1 whitespace-nowrap scroll-smooth">
-                  <div className="flex items-center gap-1.5 text-indigo-300 bg-indigo-500/10 px-2.5 py-1 rounded-xl border border-indigo-500/25 text-[10px] font-bold shrink-0">
-                    <Layers size={12} className="text-indigo-400" />
-                    <span>Engine: {serverMeta?.engineVersion || '5.8.5'}</span>
+            <div className="bg-[#0b1319]/95 border-b border-white/10 px-3.5 sm:px-5 py-2 text-xs font-mono relative z-10 shrink-0">
+              {/* Toggle compacto de Telemetria em Mobile */}
+              <div className="sm:hidden flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-[10px] text-[#94a3b8] min-w-0 truncate">
+                  <span className="text-purple-300 font-bold truncate">
+                    Baileys {serverMeta?.baileysVersion || '7.0.0-rc.9'}
+                  </span>
+                  {telemetry && (
+                    <span className="text-cyan-300 shrink-0">• {telemetry.memory.toFixed(0)}MB</span>
+                  )}
+                  <span className="text-slate-500 shrink-0">• {windowSize.width}px</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setShowTelemetryBar(prev => !prev); }}
+                  className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-[10px] font-bold text-slate-300 flex items-center gap-1 shrink-0 active:scale-95"
+                >
+                  <span>Telemetria</span>
+                  <ChevronDown size={11} className={`transition-transform ${showTelemetryBar ? 'rotate-180' : ''}`} />
+                </button>
+              </div>
+
+              {/* Faixa completa de pills de Telemetria */}
+              <div className={`${showTelemetryBar ? 'flex mt-2 pt-2 border-t border-white/10' : 'hidden sm:flex'} flex-col lg:flex-row lg:items-center justify-between gap-2`}>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <div className="flex items-center gap-1.5 text-indigo-300 bg-indigo-500/10 px-2 py-1 rounded-lg border border-indigo-500/20 text-[10px] font-bold">
+                    <Layers size={11} className="text-indigo-400" />
+                    <span>Engine {serverMeta?.engineVersion || '5.8.5'}</span>
                   </div>
 
-                  <div className="flex items-center gap-1.5 text-amber-300 bg-amber-500/10 px-2.5 py-1 rounded-xl border border-amber-500/25 text-[10px] font-bold shrink-0">
-                    <Calendar size={12} className="text-amber-400" />
-                    <span>Compilação: {serverMeta?.compileDate ? new Date(serverMeta.compileDate).toLocaleString('pt-BR') : '05/08/2026, 13:20:00'}</span>
+                  <div className="flex items-center gap-1.5 text-amber-300 bg-amber-500/10 px-2 py-1 rounded-lg border border-amber-500/20 text-[10px] font-bold">
+                    <Calendar size={11} className="text-amber-400" />
+                    <span>{serverMeta?.compileDate ? new Date(serverMeta.compileDate).toLocaleString('pt-BR') : '05/08/2026 13:20'}</span>
                   </div>
 
                   <button
                     type="button"
-                    onClick={(e) => { e.stopPropagation(); setShowBaileysModal(!showBaileysModal); }}
-                    className="flex items-center gap-1.5 text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 px-2.5 py-1 rounded-xl border border-purple-500/25 text-[10px] font-bold transition-all cursor-pointer group active:scale-95 shrink-0"
+                    onClick={(e) => { e.stopPropagation(); setShowBaileysModal(true); }}
+                    className="flex items-center gap-1.5 text-purple-200 bg-purple-500/15 hover:bg-purple-500/25 px-2.5 py-1 rounded-lg border border-purple-500/30 text-[10px] font-bold transition-all cursor-pointer active:scale-95"
                     title="Clique para ver o Histórico de Versões e Releases do Baileys no GitHub"
                   >
-                    <Smartphone size={12} className="text-purple-400 group-hover:scale-110 transition-transform" />
-                    <span>Baileys: {serverMeta?.baileysVersion || '7.0.0-rc.9'} ({serverMeta?.baileysDate || '29/07/2026'})</span>
-                    <ChevronDown size={11} className={`transition-transform duration-200 ${showBaileysModal ? 'rotate-180' : ''}`} />
+                    <Smartphone size={11} className="text-purple-400" />
+                    <span>Baileys {serverMeta?.baileysVersion || '7.0.0-rc.9'} ({serverMeta?.baileysDate || '29/07/2026'})</span>
+                    <ChevronRight size={11} />
                   </button>
 
-                  <div className="flex items-center gap-1.5 text-blue-300 bg-blue-500/10 px-2.5 py-1 rounded-xl border border-blue-500/25 text-[10px] font-bold shrink-0" title="Resolução atual da tela">
-                    <AppWindow size={12} className="text-blue-400" />
-                    <span>{windowSize.width}x{windowSize.height}</span>
+                  {lastPing && (
+                    <div className="flex items-center gap-1 text-slate-300 bg-white/5 px-2 py-1 rounded-lg border border-white/10 text-[10px] font-bold" title="Último heartbeat recebido">
+                      <Clock size={11} className="text-emerald-400" />
+                      <span>{lastPing.toLocaleTimeString('pt-BR')}</span>
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-1 text-blue-300 bg-blue-500/10 px-2 py-1 rounded-lg border border-blue-500/20 text-[10px] font-bold" title="Resolução atual da janela">
+                    <AppWindow size={11} className="text-blue-400" />
+                    <span>{windowSize.width}×{windowSize.height}</span>
                   </div>
 
                   {telemetry && (
                     <>
-                      <div className="flex items-center gap-1.5 text-emerald-300 bg-emerald-500/10 px-2.5 py-1 rounded-xl border border-emerald-500/25 text-[10px] font-bold shrink-0" title="Uso de CPU">
-                        <Cpu size={12} className={telemetry.cpu > 50 ? 'animate-pulse text-rose-400' : 'text-emerald-400'} />
+                      <div className="flex items-center gap-1 text-emerald-300 bg-emerald-500/10 px-2 py-1 rounded-lg border border-emerald-500/20 text-[10px] font-bold" title="Uso de CPU">
+                        <Cpu size={11} className={telemetry.cpu > 50 ? 'animate-pulse text-rose-400' : 'text-emerald-400'} />
                         <span>{telemetry.cpu.toFixed(1)}%</span>
                       </div>
 
-                      <div className="flex items-center gap-1.5 text-cyan-300 bg-cyan-500/10 px-2.5 py-1 rounded-xl border border-cyan-500/25 text-[10px] font-bold shrink-0" title="Uso de Memória RAM">
-                        <Activity size={12} className="text-cyan-400" />
+                      <div className="flex items-center gap-1 text-cyan-300 bg-cyan-500/10 px-2 py-1 rounded-lg border border-cyan-500/20 text-[10px] font-bold" title="Uso de Memória RAM">
+                        <Activity size={11} className="text-cyan-400" />
                         <span>{telemetry.memory.toFixed(1)} MB</span>
                       </div>
                     </>
                   )}
                 </div>
 
-                <div className="flex items-center gap-1.5 shrink-0">
+                <div className="flex items-center gap-1.5 flex-wrap shrink-0">
                   <button
+                    type="button"
                     onClick={(e) => {
                       e.stopPropagation();
                       if ((window as any).__openReleaseNotesHub) {
@@ -3097,312 +3198,104 @@ export default function DevLogger() {
                         window.dispatchEvent(new CustomEvent('open-release-notes-hub', { detail: { tab: 'mindmap', expand: true } }));
                       }
                     }}
-                    className="flex items-center gap-1.5 text-slate-950 bg-gradient-to-r from-emerald-400 to-teal-400 hover:from-emerald-300 hover:to-teal-300 px-2.5 py-1 rounded-xl text-[10px] font-black shadow-md cursor-pointer active:scale-95 shrink-0"
+                    className="flex items-center gap-1 text-slate-950 bg-gradient-to-r from-emerald-400 to-teal-400 hover:from-emerald-300 hover:to-teal-300 px-2.5 py-1 rounded-lg text-[10px] font-black shadow-sm cursor-pointer active:scale-95"
                     title="Abrir Mapa Mental Interativo, Prints de Onde Clicar e Guia de Testes das 18 Novidades"
                   >
-                    <Rocket size={12} className="text-slate-950" /> 🗺️ Mapa Mental (18 Novidades)
+                    <Rocket size={11} /> <span>Mapa Mental (18)</span>
                   </button>
 
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); setShowChangelog(!showChangelog); }}
-                    className="flex items-center gap-1.5 text-emerald-300 hover:text-white transition-all bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 px-2.5 py-1 rounded-xl text-[10px] font-black shadow-md cursor-pointer active:scale-95 shrink-0"
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); setShowChangelog(true); }}
+                    className="flex items-center gap-1 text-emerald-300 hover:text-white bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 px-2.5 py-1 rounded-lg text-[10px] font-bold cursor-pointer active:scale-95"
                   >
-                    <Rocket size={12} className="text-emerald-400" /> Novidades <ChevronDown size={11} className={`transition-transform duration-200 ${showChangelog ? 'rotate-180' : ''}`}/>
+                    <Rocket size={11} className="text-emerald-400" /> <span>Novidades</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); setShowEndpoints(true); }}
+                    className="flex items-center gap-1 text-indigo-300 hover:text-white bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-500/30 px-2.5 py-1 rounded-lg text-[10px] font-bold cursor-pointer active:scale-95"
+                  >
+                    <Network size={11} className="text-indigo-400" /> <span>Endpoints</span>
                   </button>
                 </div>
               </div>
-
-              {/* Baileys Version History & GitHub Releases Dropdown */}
-              {showBaileysModal && (
-                <div className="mt-2 animate-in fade-in slide-in-from-top-2 relative overflow-hidden rounded-2xl bg-[#141d24] border border-purple-500/30 shadow-2xl p-4 transition-all">
-                  <div className="flex items-center justify-between gap-2 mb-3 pb-3 border-b border-white/10 flex-wrap">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-9 h-9 rounded-xl bg-purple-500/20 border border-purple-500/40 flex items-center justify-center">
-                        <Smartphone size={18} className="text-purple-400 animate-pulse" />
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-black text-white block text-xs">Baileys Core ({serverMeta?.baileysVersion || '7.0.0-rc.9'})</span>
-                          <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold uppercase">
-                            Em Uso no Servidor Node
-                          </span>
-                        </div>
-                        <span className="text-[10px] text-[#8696a0]">
-                          Motor Socket TypeScript/JavaScript para WhatsApp Web — <a href="https://github.com/WhiskeySockets/Baileys" target="_blank" rel="noopener noreferrer" className="text-purple-300 hover:underline font-bold" onClick={(e)=>e.stopPropagation()}>WhiskeySockets/Baileys</a>
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <a
-                        href="/features"
-                        onClick={(e) => { e.stopPropagation(); useDevStore.setState({ isVisible: false }); }}
-                        className="flex items-center gap-1.5 text-xs text-emerald-300 hover:text-white bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 px-3 py-1.5 rounded-xl font-bold transition-all shadow-sm shrink-0"
-                      >
-                        <span>🗺️ Mapa Geral</span>
-                      </a>
-                      <a
-                        href="https://github.com/WhiskeySockets/Baileys/releases"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        className="flex items-center gap-1.5 text-xs text-purple-300 hover:text-white bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/40 px-3 py-1.5 rounded-xl font-bold transition-all shadow-sm shrink-0"
-                      >
-                        <span>Releases GitHub</span> <ExternalLink size={12} />
-                      </a>
-                    </div>
-                  </div>
-
-                  {/* Lista de Releases e Histórico de Versões */}
-                  <div className="space-y-3 max-h-[350px] overflow-y-auto pr-1 custom-scrollbar">
-                    {(serverMeta?.baileysHistory || [
-                      {
-                        tag: 'v7.0.0-rc14',
-                        version: '7.0.0-rc14',
-                        name: 'v7.0.0-rc14 (Latest)',
-                        date: '2026-08-01',
-                        isLatest: true,
-                        isCurrent: true,
-                        commit: '7e7b075',
-                        highlights: [
-                          'fix: advertise WIN_HYBRID instead of retired WIN32 web sub-platform (substitui WIN32 aposentado pela Meta por WIN_HYBRID)',
-                          'ci: pin npm to 11.x, last line that still runs on node 20',
-                          'example: fix logging of contact upserts',
-                          'WAProto: perf: optimize history sync memory and CPU usage (#2333)',
-                          'Resiliência aprimorada no processamento de lotes de mensagens e Bad MAC retry'
-                        ]
-                      },
-                      {
-                        tag: 'v6.7.24',
-                        version: '6.7.24',
-                        name: 'v6.7.24 (2026-07-29)',
-                        date: '2026-07-29',
-                        isLatest: false,
-                        isCurrent: false,
-                        commit: 'e062994',
-                        highlights: [
-                          'Reverts: Revert "chore(release): v6.7.24 (c7a17f5)"',
-                          'Estabilização de sinalização de chamadas de voz e vídeo (WaCalls)',
-                          'Suporte a vCards interativos e múltiplos contatos (ContactMessage)',
-                          'Tratamento aprimorado de tokens de segurança E2E (tctoken)'
-                        ]
-                      },
-                      {
-                        tag: 'v7.0.0-rc.12',
-                        version: '7.0.0-rc.12',
-                        name: 'v7.0.0-rc.12',
-                        date: '2026-07-20',
-                        isLatest: false,
-                        isCurrent: false,
-                        commit: 'a12b34c',
-                        highlights: [
-                          'feat: Add support for pastParticipants in history sync (#2426)',
-                          'Novo compilador estático Protobuf (WAProto/GenerateStatics.sh)',
-                          'Otimização de memória RAM para instâncias multi-tenant'
-                        ]
-                      },
-                      {
-                        tag: 'v6.7.21',
-                        version: '6.7.21',
-                        name: 'v6.7.21',
-                        date: '2026-07-10',
-                        isLatest: false,
-                        isCurrent: false,
-                        commit: 'f98e721',
-                        highlights: [
-                          'Correções de heartbeat e presenciais (composing/recording)',
-                          'Mitigação de desconexões 408 (QR Code timeout)'
-                        ]
-                      }
-                    ]).map((rel: any, idx: number) => (
-                      <div key={idx} className="bg-[#0b141a] p-3 rounded-2xl border border-white/10 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-white text-xs font-mono">{rel.tag || rel.version}</span>
-                            {rel.isLatest && (
-                              <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[9px] font-black uppercase">
-                                Latest
-                              </span>
-                            )}
-                            {rel.isCurrent && (
-                              <span className="px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 text-[9px] font-black uppercase">
-                                Rodando no Nó
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2 text-[10px] text-[#8696a0]">
-                            {rel.commit && <span className="font-mono bg-white/5 px-1.5 py-0.5 rounded">commit {rel.commit}</span>}
-                            <span>{rel.date}</span>
-                          </div>
-                        </div>
-
-                        <ul className="space-y-1.5 pt-1">
-                          {rel.highlights && rel.highlights.map((item: string, iIdx: number) => (
-                            <li key={iIdx} className="flex items-start gap-2 text-[11px] text-[#d1d7db] leading-relaxed">
-                              <span className="w-1.5 h-1.5 rounded-full bg-purple-400 mt-1.5 shrink-0" />
-                              <span>{item}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Changelog Dropdown */}
-              {showChangelog && (
-                <div className="mt-2 animate-in fade-in slide-in-from-top-2 relative overflow-hidden rounded-2xl bg-[#141d24] border border-emerald-500/30 shadow-2xl p-4 transition-all">
-                  <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
-                    <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center">
-                        <Rocket size={16} className="text-emerald-400 animate-pulse" />
-                      </div>
-                      <div>
-                        <span className="font-black text-white block text-xs">Novidades no Motor & App (v{serverMeta?.engineVersion || '8.1.3'})</span>
-                        <span className="text-[10px] text-[#8696a0]">
-                          Deploy de {serverMeta?.history && serverMeta.history[0] ? new Date(serverMeta.history[0].compile_date).toLocaleString('pt-BR') : 'Hoje'}
-                        </span>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if ((window as any).__openReleaseNotesHub) {
-                          (window as any).__openReleaseNotesHub('mindmap', true);
-                        } else {
-                          window.dispatchEvent(new CustomEvent('open-release-notes-hub', { detail: { tab: 'mindmap', expand: true } }));
-                        }
-                      }}
-                      className="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-[11px] flex items-center gap-1.5 shadow cursor-pointer"
-                    >
-                      <span>📸 Ver Mapa Mental & Prints das 18 Funções</span>
-                    </button>
-                  </div>
-
-                  <ul className="space-y-2 mt-2">
-                    {serverMeta?.changelog && serverMeta.changelog.map((logItem: string, idx: number) => (
-                      <li key={idx} className="flex items-start gap-2 text-xs text-[#d1d7db] leading-relaxed">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mt-1.5 shrink-0" />
-                        <span>{logItem}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              
-              <div className="flex items-center justify-between font-mono mt-0.5 pt-1.5 border-t border-white/10">
-                <span className="text-[#8696a0] font-bold text-[10px] uppercase tracking-wider">Ferramentas Dev:</span>
-                <button 
-                  onClick={(e) => { e.stopPropagation(); setShowEndpoints(!showEndpoints); }}
-                  className="flex items-center gap-1.5 text-indigo-300 hover:text-white transition-all bg-indigo-500/15 border border-indigo-500/30 px-2 py-0.5 rounded-lg text-[10px] font-bold cursor-pointer"
-                >
-                  <Network size={11} className="text-indigo-400" /> Root Endpoints <ChevronDown size={11} className={`transition-transform ${showEndpoints ? 'rotate-180' : ''}`}/>
-                </button>
-              </div>
-               
-              {showEndpoints && (
-                <div className="bg-[#141d24] rounded-2xl p-3 border border-indigo-500/20 mt-2 space-y-2 animate-in fade-in">
-                  <span className="font-black text-indigo-300 text-xs block">Endpoints Globais do Motor Baileys:</span>
-                  <div className="grid grid-cols-1 gap-2">
-                    {(() => {
-                      const myTenant = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')) || 'be05dcc0-3da2-4290-b826-65058d5a0b5e';
-                      return [
-                        { name: 'Root / App Status (GET)', path: '/' },
-                        { name: 'Motor Health Check (GET)', path: '/debug/healthz' },
-                        { name: 'Listar Todas Instâncias (GET)', path: '/instance' },
-                        { name: 'Listar Conversas/Chats da Instância (GET)', path: `/instance/${myTenant}/chats` },
-                        { name: 'Listar Contatos/Agenda da Instância (GET)', path: `/instance/${myTenant}/contacts` },
-                      ];
-                    })().map((ep, idx) => (
-                      <div key={idx} className="flex justify-between items-center bg-[#0b141a] p-2.5 rounded-xl border border-white/10">
-                        <span className="text-white font-mono text-[11px] break-all max-w-[70%]">{ep.name} <br/><span className="text-[#8696a0] text-[10px]">{engineUrl}{ep.path}</span></span>
-                        <a 
-                          href={`${engineUrl}${ep.path}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-indigo-300 hover:text-white bg-indigo-500/20 border border-indigo-500/30 px-2.5 py-1 rounded-xl transition-all flex items-center gap-1 text-[10px] font-bold"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <span>Testar</span> <ExternalLink size={11} />
-                        </a>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
           )}
 
-          {/* Abas de Navegação Principal em Segmented Control Neon (CONSOLE / GASTROFOOD / ASTS / E2E) */}
+          {/* Abas de Navegação Principal — Grid Responsivo 2x2 (Mobile) / 4x1 (sm+) sem cortes */}
           {isVisible && (
-            <div className="p-2 sm:p-2.5 bg-[#080e13]/95 border-b border-white/10 flex items-center gap-2 shrink-0 select-none relative z-10 backdrop-blur-2xl overflow-x-auto no-scrollbar scroll-smooth">
-              <button 
+            <div className="p-2 sm:px-5 sm:py-2.5 bg-[#080e13]/95 border-b border-white/10 grid grid-cols-2 sm:grid-cols-4 gap-1.5 sm:gap-2 shrink-0 select-none relative z-10 backdrop-blur-2xl">
+              <button
+                type="button"
                 onClick={(e) => { e.stopPropagation(); setActiveTab('console'); }}
-                className={`shrink-0 whitespace-nowrap px-3.5 sm:px-4 py-2 sm:py-2.5 min-h-[44px] font-mono text-[11px] sm:text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 sm:gap-2 rounded-2xl transition-all duration-200 cursor-pointer border ${
-                  activeTab === 'console' 
-                    ? 'bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-400 text-black border-emerald-300/60 shadow-lg shadow-emerald-500/25 font-black scale-[1.01]' 
-                    : 'bg-[#101920]/70 text-[#8696a0] border-white/5 hover:text-white hover:bg-white/10'
+                className={`min-h-[44px] px-2.5 sm:px-3 py-2 font-mono text-[10px] sm:text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 rounded-xl transition-all duration-200 cursor-pointer border active:scale-95 ${
+                  activeTab === 'console'
+                    ? 'bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-400 text-slate-950 border-emerald-300/70 shadow-lg shadow-emerald-500/20'
+                    : 'bg-[#101920]/75 text-[#94a3b8] border-white/5 hover:text-white hover:bg-white/10'
                 }`}
               >
-                <Terminal size={14} className={activeTab === 'console' ? 'text-black stroke-[2.5]' : ''} /> 
-                <span>Console</span>
-                <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-black ${
-                  activeTab === 'console' ? 'bg-black/25 text-black' : 'bg-white/10 text-white/80'
+                <Terminal size={13} className={activeTab === 'console' ? 'text-slate-950 stroke-[2.5] shrink-0' : 'shrink-0'} />
+                <span className="truncate">Console</span>
+                <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-black shrink-0 ${
+                  activeTab === 'console' ? 'bg-black/20 text-slate-950' : 'bg-white/10 text-white/80'
                 }`}>
                   {logs.length}
                 </span>
               </button>
 
-              <button 
+              <button
+                type="button"
                 onClick={(e) => { e.stopPropagation(); setActiveTab('gastrofood'); }}
-                className={`shrink-0 whitespace-nowrap px-3.5 sm:px-4 py-2 sm:py-2.5 min-h-[44px] font-mono text-[11px] sm:text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 sm:gap-2 rounded-2xl transition-all duration-200 cursor-pointer border ${
-                  activeTab === 'gastrofood' 
-                    ? 'bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 text-white border-blue-400/60 shadow-lg shadow-blue-500/25 font-black scale-[1.01]' 
-                    : 'bg-[#101920]/70 text-[#8696a0] border-white/5 hover:text-white hover:bg-white/10'
+                className={`min-h-[44px] px-2.5 sm:px-3 py-2 font-mono text-[10px] sm:text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 rounded-xl transition-all duration-200 cursor-pointer border active:scale-95 ${
+                  activeTab === 'gastrofood'
+                    ? 'bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 text-white border-blue-400/70 shadow-lg shadow-blue-500/25'
+                    : 'bg-[#101920]/75 text-[#94a3b8] border-white/5 hover:text-white hover:bg-white/10'
                 }`}
               >
-                <Network size={14} /> 
-                <span>Gastrofood</span>
-                <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-black ${
-                  activeTab === 'gastrofood' ? 'bg-white/20 text-white' : 'bg-white/10 text-white/80'
+                <Network size={13} className="shrink-0" />
+                <span className="truncate">Gastrofood</span>
+                <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-black shrink-0 ${
+                  activeTab === 'gastrofood' ? 'bg-white/25 text-white' : 'bg-white/10 text-white/80'
                 }`}>
                   {groupedGastrofoodLogs.length}
                 </span>
               </button>
 
-              <button 
+              <button
+                type="button"
                 onClick={(e) => { e.stopPropagation(); setActiveTab('asts'); }}
-                className={`shrink-0 whitespace-nowrap px-3.5 sm:px-4 py-2 sm:py-2.5 min-h-[44px] font-mono text-[11px] sm:text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 sm:gap-2 rounded-2xl transition-all duration-200 cursor-pointer border ${
-                  activeTab === 'asts' 
-                    ? 'bg-gradient-to-r from-amber-400 via-orange-500 to-amber-500 text-black border-amber-300/60 shadow-lg shadow-amber-500/25 font-black scale-[1.01]' 
-                    : 'bg-[#101920]/70 text-[#8696a0] border-white/5 hover:text-white hover:bg-white/10'
+                className={`min-h-[44px] px-2.5 sm:px-3 py-2 font-mono text-[10px] sm:text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 rounded-xl transition-all duration-200 cursor-pointer border active:scale-95 ${
+                  activeTab === 'asts'
+                    ? 'bg-gradient-to-r from-amber-400 via-orange-500 to-amber-500 text-slate-950 border-amber-300/70 shadow-lg shadow-amber-500/20'
+                    : 'bg-[#101920]/75 text-[#94a3b8] border-white/5 hover:text-white hover:bg-white/10'
                 }`}
               >
-                <Activity size={14} className={isTestingApp ? 'animate-pulse text-amber-950 stroke-[2.5]' : ''} /> 
-                <span>ASTS</span>
+                <Activity size={13} className={`shrink-0 ${isTestingApp ? 'animate-pulse' : ''}`} />
+                <span className="truncate">ASTS</span>
                 {testSummary && (
-                  <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-black ${
-                    activeTab === 'asts' ? 'bg-black/25 text-black' : 'bg-amber-500/20 text-amber-300'
+                  <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-black shrink-0 ${
+                    activeTab === 'asts' ? 'bg-black/20 text-slate-950' : 'bg-amber-500/20 text-amber-300'
                   }`}>
                     {testSummary.healthScore}%
                   </span>
                 )}
               </button>
 
-              <button 
+              <button
+                type="button"
                 onClick={(e) => { e.stopPropagation(); setActiveTab('e2e'); }}
-                className={`shrink-0 whitespace-nowrap px-3.5 sm:px-4 py-2 sm:py-2.5 min-h-[44px] font-mono text-[11px] sm:text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 sm:gap-2 rounded-2xl transition-all duration-200 cursor-pointer border ${
-                  activeTab === 'e2e' 
-                    ? 'bg-gradient-to-r from-cyan-500 via-teal-400 to-indigo-500 text-black border-cyan-300/60 shadow-lg shadow-cyan-500/25 font-black scale-[1.01]' 
-                    : 'bg-[#101920]/70 text-[#8696a0] border-white/5 hover:text-white hover:bg-white/10'
+                className={`min-h-[44px] px-2.5 sm:px-3 py-2 font-mono text-[10px] sm:text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 rounded-xl transition-all duration-200 cursor-pointer border active:scale-95 ${
+                  activeTab === 'e2e'
+                    ? 'bg-gradient-to-r from-cyan-400 via-teal-400 to-indigo-400 text-slate-950 border-cyan-300/70 shadow-lg shadow-cyan-500/20'
+                    : 'bg-[#101920]/75 text-[#94a3b8] border-white/5 hover:text-white hover:bg-white/10'
                 }`}
               >
-                <Radio size={14} className={activeTab === 'e2e' ? 'text-black stroke-[2.5] animate-pulse' : 'text-cyan-400'} /> 
-                <span>E2E / Telemetria</span>
-                <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-black ${
-                  activeTab === 'e2e' ? 'bg-black/25 text-black' : 'bg-cyan-500/20 text-cyan-300'
+                <Radio size={13} className={`shrink-0 ${activeTab === 'e2e' ? 'text-slate-950 animate-pulse' : 'text-cyan-400'}`} />
+                <span className="truncate">E2E / Telemetria</span>
+                <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-black shrink-0 ${
+                  activeTab === 'e2e' ? 'bg-black/20 text-slate-950' : 'bg-cyan-500/20 text-cyan-300'
                 }`}>
                   {serverTelemetry?.eventLoop ? `${serverTelemetry.eventLoop.p50Ms}ms` : 'LIVE'}
                 </span>
@@ -3414,23 +3307,23 @@ export default function DevLogger() {
           {isVisible && (
             activeTab === 'asts' ? (
               /* Antigravity Application Simulator & Test Suite (ASTS) */
-              <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4 text-xs custom-scrollbar min-h-[180px] bg-[#070c10] transition-all duration-300 relative rounded-b-[28px]">
+              <div className="flex-1 overflow-y-auto p-3.5 sm:p-4 flex flex-col gap-3.5 text-xs custom-scrollbar min-h-0 bg-[#070c10] transition-all duration-300 relative">
                 {/* Cabeçalho do Painel ASTS */}
-                <div className="flex items-center justify-between pb-3 border-b border-white/10 relative z-10 shrink-0">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center shadow-lg shadow-amber-500/20">
-                      <Activity size={16} className="text-amber-400 animate-pulse" />
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/10 relative z-10 shrink-0">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center shadow-lg shadow-amber-500/15 shrink-0">
+                      <Activity size={17} className="text-amber-400 animate-pulse" />
                     </div>
-                    <div>
-                      <span className="font-black text-white block text-xs tracking-wider font-mono">ASTS COCKPIT v1.0.0</span>
-                      <span className="text-[10px] text-[#8696a0] block font-mono">SIMULADOR E AUTOMATIZADOR DE TESTES</span>
+                    <div className="min-w-0">
+                      <span className="font-black text-white block text-xs sm:text-sm tracking-wider font-mono truncate">ASTS COCKPIT v1.0.0</span>
+                      <span className="text-[10px] text-[#94a3b8] block font-mono truncate">SIMULADOR E AUTOMATIZADOR DE TESTES</span>
                     </div>
                   </div>
                   
                   {/* Controles de Teste */}
-                  <div className="flex items-center gap-3">
-                    <label className="flex items-center gap-2 cursor-pointer select-none">
-                      <span className="text-[10px] font-bold text-[#8696a0] uppercase tracking-wider font-mono">Loop Contínuo</span>
+                  <div className="flex items-center justify-between sm:justify-end gap-2.5 flex-wrap">
+                    <label className="flex items-center gap-2 cursor-pointer select-none min-h-[40px] px-2.5 rounded-xl bg-[#0e161d] border border-white/10">
+                      <span className="text-[10px] font-bold text-[#94a3b8] uppercase tracking-wider font-mono">Loop Contínuo</span>
                       <div className="relative">
                         <input 
                           type="checkbox" 
@@ -3442,21 +3335,21 @@ export default function DevLogger() {
                       </div>
                     </label>
                     
-                    <div className="w-px h-5 bg-white/10" />
-                    
                     {isTestingApp ? (
                       <button 
+                        type="button"
                         onClick={stopApplicationTests}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-300 font-bold rounded-xl font-mono transition-all active:scale-95 cursor-pointer text-xs"
+                        className="min-h-[42px] flex items-center gap-1.5 px-4 py-2 bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-200 font-black rounded-xl font-mono transition-all active:scale-95 cursor-pointer text-xs"
                       >
-                        <Pause size={12} className="fill-current" /> PARAR
+                        <Pause size={13} className="fill-current" /> PARAR
                       </button>
                     ) : (
                       <button 
+                        type="button"
                         onClick={runApplicationTests}
-                        className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-400 text-black font-black rounded-xl font-mono transition-all active:scale-95 shadow-lg shadow-amber-500/30 cursor-pointer text-xs tracking-wide"
+                        className="min-h-[42px] flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-300 hover:to-orange-400 text-slate-950 font-black rounded-xl font-mono transition-all active:scale-95 shadow-lg shadow-amber-500/25 cursor-pointer text-xs tracking-wide"
                       >
-                        <Play size={12} className="fill-current" /> DIAGNÓSTICO
+                        <Play size={13} className="fill-current" /> DIAGNÓSTICO
                       </button>
                     )}
                   </div>
@@ -3464,9 +3357,9 @@ export default function DevLogger() {
 
                 {/* Barra de Progresso Futurista */}
                 {isTestingApp && (
-                  <div className="flex flex-col gap-2.5 bg-[#0f171e] border border-white/10 rounded-2xl p-3.5 relative z-10 animate-in zoom-in-95 duration-200 shrink-0">
+                  <div className="flex flex-col gap-2.5 bg-[#0c141b] border border-amber-500/25 rounded-2xl p-3.5 relative z-10 animate-in zoom-in-95 duration-200 shrink-0 shadow-lg">
                     <div className="flex items-center justify-between font-mono text-xs text-white">
-                      <span className="font-bold text-amber-400 uppercase flex items-center gap-1.5 min-w-0">
+                      <span className="font-bold text-amber-300 uppercase flex items-center gap-2 min-w-0">
                         <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping shrink-0" />
                         <span className="truncate">Tarefa: {testCurrentTask}</span>
                       </span>
@@ -3475,12 +3368,12 @@ export default function DevLogger() {
                       </span>
                     </div>
                     
-                    <div className="flex items-center justify-between font-mono text-[10px] uppercase font-bold text-[#8696a0] gap-2 flex-wrap">
-                      <span className="bg-amber-500/15 border border-amber-500/30 text-amber-300 px-2.5 py-0.5 rounded-lg animate-pulse">
+                    <div className="flex items-center justify-between font-mono text-[10px] uppercase font-bold text-[#94a3b8] gap-2 flex-wrap">
+                      <span className="bg-amber-500/15 border border-amber-500/30 text-amber-300 px-2.5 py-1 rounded-lg animate-pulse">
                         ⚙️ Executando: Passo {testStepIndex} de 10
                       </span>
-                      <span className="bg-amber-500/15 border border-amber-500/30 text-amber-300 px-2.5 py-0.5 rounded-lg">
-                        ⏱️ Tempo Restante: ~{testTimeRemaining}s
+                      <span className="bg-amber-500/15 border border-amber-500/30 text-amber-300 px-2.5 py-1 rounded-lg">
+                        ⏱️ Restante: ~{testTimeRemaining}s
                       </span>
                     </div>
                     
@@ -3496,10 +3389,10 @@ export default function DevLogger() {
                 {/* Painel de Status Matrix */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 relative z-10 shrink-0">
                   {[
-                    { id: 'supabase', label: 'Supabase DB', icon: <Database size={13} />, status: testResults.supabase },
-                    { id: 'baileys', label: 'Baileys Engine', icon: <Smartphone size={13} />, status: testResults.baileys },
-                    { id: 'chatStore', label: 'Zustand Store', icon: <Layers size={13} />, status: testResults.chatStore },
-                    { id: 'auth', label: 'Nível RBAC', icon: <UserCheck size={13} />, status: testResults.auth },
+                    { id: 'supabase', label: 'Supabase DB', icon: <Database size={14} />, status: testResults.supabase },
+                    { id: 'baileys', label: 'Baileys Engine', icon: <Smartphone size={14} />, status: testResults.baileys },
+                    { id: 'chatStore', label: 'Zustand Store', icon: <Layers size={14} />, status: testResults.chatStore },
+                    { id: 'auth', label: 'Nível RBAC', icon: <UserCheck size={14} />, status: testResults.auth },
                   ].map((mod) => {
                     const isIdle = mod.status === 'idle';
                     const isTesting = mod.status === 'testing';
@@ -3509,18 +3402,18 @@ export default function DevLogger() {
                     return (
                       <div 
                         key={mod.id} 
-                        className={`p-3 rounded-2xl border flex flex-col gap-1 font-mono select-none transition-all duration-300 min-w-0 ${
-                          isIdle ? 'bg-[#0f171e] border-white/10 text-[#8696a0]' : ''
+                        className={`p-3 rounded-2xl border flex flex-col gap-1.5 font-mono select-none transition-all duration-300 min-w-0 ${
+                          isIdle ? 'bg-[#0c141b] border-white/10 text-[#94a3b8]' : ''
                         } ${
                           isTesting ? 'bg-blue-500/15 border-blue-500/40 text-blue-300 animate-pulse' : ''
                         } ${
-                          isPassed ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-400 shadow-md' : ''
+                          isPassed ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 shadow-md' : ''
                         } ${
                           isFailed ? 'bg-rose-500/15 border-rose-500/40 text-rose-300 animate-in shake' : ''
                         }`}
                       >
                         <div className="flex items-center justify-between text-[10px] uppercase font-bold gap-1 min-w-0">
-                          <span className="opacity-80 truncate block">{mod.label}</span>
+                          <span className="opacity-90 truncate block">{mod.label}</span>
                           <span className="shrink-0">{mod.icon}</span>
                         </div>
                         <div className="text-xs font-black tracking-wider truncate block">
@@ -3536,19 +3429,19 @@ export default function DevLogger() {
 
                 {/* Relatório Final */}
                 {testSummary && (
-                  <div className="flex flex-col gap-3 bg-[#0f171e] border border-white/10 rounded-2xl p-4 relative z-10 animate-in fade-in duration-300">
-                    <div className="flex justify-between items-center pb-2 border-b border-white/10 flex-wrap gap-2">
-                      <div className="flex items-center gap-3 text-xs text-[#8696a0]">
-                        <span className="uppercase font-bold font-mono">Métricas de Auditoria:</span>
+                  <div className="flex flex-col gap-3 bg-[#0c141b] border border-white/10 rounded-2xl p-3.5 sm:p-4 relative z-10 animate-in fade-in duration-300">
+                    <div className="flex justify-between items-center pb-2.5 border-b border-white/10 flex-wrap gap-2">
+                      <div className="flex items-center gap-3 text-xs text-[#94a3b8] flex-wrap">
+                        <span className="uppercase font-bold font-mono text-white">Métricas de Auditoria:</span>
                         <span>Duração: <strong className="text-white font-mono">{testSummary.duration.toFixed(2)}s</strong></span>
                         <span>Anomalias: <strong className={testSummary.totalErrors > 0 ? "text-rose-400 font-mono" : "text-emerald-400 font-mono"}>{testSummary.totalErrors}</strong></span>
                       </div>
                       
                       <div className="flex items-center gap-1.5 font-mono">
-                        <span className="text-xs font-bold text-[#8696a0] uppercase">Saúde:</span>
+                        <span className="text-xs font-bold text-[#94a3b8] uppercase">Saúde:</span>
                         <span className={`px-3 py-1 rounded-xl text-xs font-black border shadow-sm ${
                           testSummary.healthScore === 100 
-                            ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400' 
+                            ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300' 
                             : testSummary.healthScore >= 75 
                               ? 'bg-amber-500/20 border-amber-500/40 text-amber-300' 
                               : 'bg-rose-500/20 border-rose-500/40 text-rose-300'
@@ -3558,7 +3451,7 @@ export default function DevLogger() {
                       </div>
                     </div>
                     
-                    <p className="text-xs leading-relaxed text-[#d1d7db] font-mono bg-[#141d24] p-3 rounded-xl border border-white/10">
+                    <p className="text-xs leading-relaxed text-[#e2e8f0] font-mono bg-[#111c25] p-3 rounded-xl border border-white/10 break-words">
                       {testSummary.diagnosis}
                     </p>
                   </div>
@@ -3574,10 +3467,10 @@ export default function DevLogger() {
                     </div>
                     <div className="flex flex-col gap-2">
                       {testErrors.map((err, idx) => (
-                        <div key={idx} className="p-2.5 rounded-xl bg-[#0c1319] border border-rose-500/25 flex flex-col gap-1">
+                        <div key={idx} className="p-3 rounded-xl bg-[#0c1319] border border-rose-500/25 flex flex-col gap-1.5">
                           <span className="text-[10px] font-black font-mono uppercase text-rose-300">{err.step}</span>
-                          <p className="text-xs text-rose-100 leading-snug">{err.message}</p>
-                          <p className="text-[11px] text-amber-300/90 bg-amber-500/10 border border-amber-500/20 rounded-lg px-2 py-1 mt-1">
+                          <p className="text-xs text-rose-100 leading-snug break-words">{err.message}</p>
+                          <p className="text-[11px] text-amber-200 bg-amber-500/10 border border-amber-500/20 rounded-lg px-2.5 py-1.5">
                             💡 {err.suggestion}
                           </p>
                         </div>
@@ -3588,11 +3481,11 @@ export default function DevLogger() {
 
                 {/* Trilha de Logs em Tempo Real do ASTS */}
                 {testLogs.length > 0 && (
-                  <div className="bg-[#0a1015] border border-white/10 rounded-2xl p-3 font-mono text-[11px] relative z-10">
-                    <div className="text-[10px] font-bold uppercase text-[#8696a0] mb-2">
+                  <div className="bg-[#0a1015] border border-white/10 rounded-2xl p-3.5 font-mono text-[11px] relative z-10">
+                    <div className="text-[10px] font-bold uppercase text-[#94a3b8] mb-2">
                       Execução Passo a Passo ({testLogs.length} eventos)
                     </div>
-                    <div className="max-h-40 overflow-y-auto custom-scrollbar space-y-1 text-[#cbd5e1]">
+                    <div className="max-h-48 overflow-y-auto custom-scrollbar space-y-1 text-[#cbd5e1]">
                       {testLogs.map((line, i) => (
                         <div key={i} className="leading-relaxed break-words">{line}</div>
                       ))}
@@ -3601,96 +3494,48 @@ export default function DevLogger() {
                 )}
               </div>
             ) : activeTab === 'gastrofood' ? (
-              /* Gastrofood API Logs Monitor */
-              <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 font-mono text-xs custom-scrollbar min-h-[180px] bg-[#070c10] relative rounded-b-[28px] select-none">
-                {groupedGastrofoodLogs.length === 0 ? (
-                  <div className="m-auto py-12 px-6 flex flex-col items-center justify-center text-center space-y-4 select-none animate-in fade-in zoom-in-95 duration-300 relative">
-                    <div className="w-20 h-20 rounded-3xl bg-gradient-to-tr from-blue-500/20 via-indigo-500/10 to-purple-500/20 border border-blue-500/40 flex items-center justify-center text-blue-400 shadow-2xl shadow-blue-500/20 relative group">
-                      <Network size={32} className="animate-pulse text-blue-400" />
-                      <div className="absolute inset-0 rounded-3xl border border-blue-400/30 animate-ping pointer-events-none" />
-                    </div>
-                    <div className="space-y-1">
-                      <h4 className="text-base font-black text-white tracking-tight font-mono">Aguardando Transações Gastrofood</h4>
-                      <p className="text-xs text-[#8696a0] max-w-sm leading-relaxed">
-                        Interaja com o chat ou aguarde a sincronização automática do cardápio para acompanhar chamadas de API em tempo real.
-                      </p>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex flex-col gap-3">
-                    {groupedGastrofoodLogs.map((log) => {
-                      const isExpanded = !!expandedLogs[log.id];
-                      const isPending = log.isPending;
-                      const isError = log.direction === 'error';
-                      
-                      const duration = log.responseTimestamp 
-                        ? (new Date(log.responseTimestamp).getTime() - new Date(log.timestamp).getTime()) 
-                        : null;
-                      
-                      return (
-                        <div 
-                          key={log.id} 
-                          className="bg-[#121c23] border border-white/10 rounded-2xl p-3.5 flex flex-col gap-2 transition-all cursor-pointer hover:border-white/20 hover:bg-[#16232c]"
-                          onClick={() => toggleExpandLog(log.id)}
-                        >
-                          <div className="flex justify-between items-center gap-2 select-none">
-                            <div className="flex items-center gap-2 font-mono min-w-0">
-                              <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider border ${
-                                isError 
-                                  ? 'bg-rose-500/20 border-rose-500/40 text-rose-300' 
-                                  : !isPending 
-                                    ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300' 
-                                    : 'bg-amber-500/20 border-amber-500/40 text-amber-300 animate-pulse'
-                              }`}>
-                                {log.status || (isError ? 'ERROR' : isPending ? 'REQ' : 'SUCCESS')}
-                              </span>
-                              <span className="font-black text-white truncate text-xs">
-                                {log.action || 'API Gastrofood'}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-2 text-xs text-[#8696a0]">
-                              {duration !== null && (
-                                <span className="text-amber-400 font-bold bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-md text-[10px]">
-                                  ⚡ {duration}ms
-                                </span>
-                              )}
-                              <span>{new Date(log.timestamp).toLocaleTimeString('pt-BR')}</span>
-                              {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
+              /* Gastrofood API Logs Monitor com Resumo + Inspetor Payload/Response */
+              <DevLoggerGastrofoodTab
+                logs={groupedGastrofoodLogs}
+                companies={companies}
+                expandedLogs={expandedLogs}
+                onToggleExpand={toggleExpandLog}
+                onCopyAll={copyGastrofoodLogs}
+                onClearAll={() => {
+                  setGastrofoodLogs([]);
+                  showToastFeedback('Logs Gastrofood limpos!');
+                }}
+                onCopyJson={(text, label) => {
+                  navigator.clipboard.writeText(text);
+                  showToastFeedback(label);
+                }}
+              />
             ) : activeTab === 'e2e' ? (
               /* Cockpit de Telemetria e Validação E2E em Tempo Real */
-              <div className="flex-1 overflow-y-auto p-3 sm:p-4 flex flex-col gap-4 text-xs font-mono custom-scrollbar min-h-[180px] bg-[#070c10] relative rounded-b-[28px] select-none">
+              <div className="flex-1 overflow-y-auto p-3.5 sm:p-4 flex flex-col gap-3.5 text-xs font-mono custom-scrollbar min-h-0 bg-[#070c10] relative">
                 
                 {/* CABEÇALHO DO COCKPIT E2E */}
-                <div className="flex items-center justify-between pb-3 border-b border-white/10 relative z-10 shrink-0 flex-wrap gap-2">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-xl bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center shadow-lg shadow-cyan-500/20">
-                      <Radio size={16} className="text-cyan-400 animate-pulse" />
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/10 relative z-10 shrink-0">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-9 h-9 rounded-xl bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center shadow-lg shadow-cyan-500/15 shrink-0">
+                      <Radio size={17} className="text-cyan-400 animate-pulse" />
                     </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-black text-white block text-xs tracking-wider">E2E COCKPIT & TELEMETRIA</span>
-                        <span className="px-2 py-0.2 rounded-full text-[9px] font-black bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-black text-white block text-xs sm:text-sm tracking-wider">E2E COCKPIT & TELEMETRIA</span>
+                        <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
                           PROD ENGINE
                         </span>
                       </div>
-                      <span className="text-[10px] text-[#8696a0] block">
-                        EVENT LOOP, LISTENERS BAILEYS, TRACE ID E AUDITORIA DE 9 ESTÁGIOS
+                      <span className="text-[10px] text-[#94a3b8] block truncate">
+                        EVENT LOOP, LISTENERS BAILEYS, TRACE ID & 9 ESTÁGIOS
                       </span>
                     </div>
                   </div>
 
                   {/* Ações Rápidas no Cabeçalho */}
                   <div className="flex items-center gap-2 flex-wrap">
-                    {/* Toggle Auto-Refresh */}
-                    <label className="flex items-center gap-1.5 cursor-pointer bg-[#0e161c] px-2.5 py-1 rounded-xl border border-white/10 text-[10px] text-[#8696a0]">
+                    <label className="min-h-[38px] flex items-center gap-2 cursor-pointer bg-[#0e161d] px-3 py-1 rounded-xl border border-white/10 text-[10px] text-[#94a3b8]">
                       <span className="font-bold">Auto (4s)</span>
                       <input 
                         type="checkbox" 
@@ -3701,42 +3546,42 @@ export default function DevLogger() {
                       <div className="w-7 h-4 bg-[#182229] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-[#8696a0] after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-cyan-500 peer-checked:after:bg-black relative"></div>
                     </label>
 
-                    {/* Botão Atualizar Manual */}
                     <button
+                      type="button"
                       onClick={fetchServerTelemetry}
                       disabled={isFetchingTelemetry}
-                      className="p-1.5 px-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-[#8696a0] hover:text-white transition-all flex items-center gap-1 text-[10px] cursor-pointer active:scale-95"
+                      className="min-h-[38px] px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-[#cbd5e1] hover:text-white transition-all flex items-center gap-1.5 text-[10px] font-bold cursor-pointer active:scale-95"
                       title="Atualizar telemetria do servidor"
                     >
-                      <RefreshCw size={11} className={isFetchingTelemetry ? 'animate-spin text-cyan-400' : ''} />
-                      <span className="hidden sm:inline">Atualizar</span>
+                      <RefreshCw size={12} className={isFetchingTelemetry ? 'animate-spin text-cyan-400' : ''} />
+                      <span>Atualizar</span>
                     </button>
 
-                    {/* Botão Capturar Snapshot */}
                     <button
+                      type="button"
                       onClick={handleCaptureSnapshot}
                       disabled={isCapturingSnapshot}
-                      className="p-1.5 px-2.5 bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/30 text-purple-300 rounded-xl transition-all flex items-center gap-1 text-[10px] font-bold cursor-pointer active:scale-95"
+                      className="min-h-[38px] px-3 py-1.5 bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/35 text-purple-200 rounded-xl transition-all flex items-center gap-1.5 text-[10px] font-bold cursor-pointer active:scale-95"
                       title="Salva um snapshot completo do estado do processo no servidor"
                     >
-                      <Layers size={11} />
+                      <Layers size={12} />
                       <span>{isCapturingSnapshot ? 'Capturando...' : 'Snapshot'}</span>
                     </button>
 
-                    {/* Botão Executar Suite E2E */}
                     <button
+                      type="button"
                       onClick={runE2EValidationSuite}
                       disabled={isExecutingE2E}
-                      className="p-1.5 px-3 bg-gradient-to-r from-cyan-500 via-teal-400 to-indigo-500 text-black font-black rounded-xl transition-all flex items-center gap-1.5 text-xs shadow-lg shadow-cyan-500/20 cursor-pointer active:scale-95"
+                      className="min-h-[40px] px-3.5 py-2 bg-gradient-to-r from-cyan-400 via-teal-400 to-indigo-400 hover:from-cyan-300 hover:to-indigo-300 text-slate-950 font-black rounded-xl transition-all flex items-center gap-1.5 text-xs shadow-lg shadow-cyan-500/20 cursor-pointer active:scale-95"
                     >
                       {isExecutingE2E ? (
                         <>
-                          <Loader2 size={12} className="animate-spin" />
+                          <Loader2 size={13} className="animate-spin" />
                           <span>Auditando [{e2eTestCurrentStage}/9]</span>
                         </>
                       ) : (
                         <>
-                          <Play size={12} className="fill-current" />
+                          <Play size={13} className="fill-current" />
                           <span>TESTAR E2E (9 ESTÁGIOS)</span>
                         </>
                       )}
@@ -3751,7 +3596,6 @@ export default function DevLogger() {
                   {(() => {
                     const ev = serverTelemetry?.eventLoop;
                     const p50 = ev?.p50Ms ?? 0;
-                    const isHealthy = p50 < 25;
                     const isWarn = p50 >= 25 && p50 <= 50;
                     const isCritical = p50 > 50;
                     return (
@@ -3760,23 +3604,23 @@ export default function DevLogger() {
                           ? 'bg-rose-500/10 border-rose-500/40 text-rose-300' 
                           : isWarn 
                             ? 'bg-amber-500/10 border-amber-500/40 text-amber-300' 
-                            : 'bg-[#0f171e] border-white/10 text-[#8696a0]'
+                            : 'bg-[#0c141b] border-white/10 text-[#94a3b8]'
                       }`}>
-                        <div className="flex items-center justify-between text-[10px] uppercase font-bold">
-                          <span className="flex items-center gap-1">
-                            <Gauge size={12} className="text-cyan-400" /> Event Loop Lag
+                        <div className="flex items-center justify-between text-[10px] uppercase font-bold gap-1">
+                          <span className="flex items-center gap-1 truncate">
+                            <Gauge size={12} className="text-cyan-400 shrink-0" /> Event Loop Lag
                           </span>
-                          <span className={`px-1.5 py-0.2 rounded-md text-[9px] font-black ${
-                            isCritical ? 'bg-rose-500/25 text-rose-300' : isWarn ? 'bg-amber-500/25 text-amber-300' : 'bg-emerald-500/20 text-emerald-400'
+                          <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-black shrink-0 ${
+                            isCritical ? 'bg-rose-500/25 text-rose-300' : isWarn ? 'bg-amber-500/25 text-amber-300' : 'bg-emerald-500/20 text-emerald-300'
                           }`}>
                             {isCritical ? 'BLOQUEADO' : isWarn ? 'MODERADO' : 'IDEAL'}
                           </span>
                         </div>
                         <div className="flex items-baseline gap-1">
                           <span className="text-xl font-black text-white">{p50}</span>
-                          <span className="text-xs text-[#8696a0]">ms (P50)</span>
+                          <span className="text-xs text-[#94a3b8]">ms (P50)</span>
                         </div>
-                        <div className="text-[10px] text-[#8696a0] flex justify-between">
+                        <div className="text-[10px] text-[#94a3b8] flex justify-between">
                           <span>P95: <strong className="text-white font-mono">{ev?.p95Ms ?? 0}ms</strong></span>
                           <span>Max: <strong className="text-white font-mono">{ev?.maxMs ?? 0}ms</strong></span>
                         </div>
@@ -3800,20 +3644,20 @@ export default function DevLogger() {
                     const rss = mem?.rssMb ?? 0;
                     const pct = Math.min(100, Math.round((used / total) * 100));
                     return (
-                      <div className="p-3 rounded-2xl border bg-[#0f171e] border-white/10 flex flex-col gap-1.5">
-                        <div className="flex items-center justify-between text-[10px] uppercase font-bold text-[#8696a0]">
-                          <span className="flex items-center gap-1">
-                            <Cpu size={12} className="text-indigo-400" /> Memória & Heap
+                      <div className="p-3 rounded-2xl border bg-[#0c141b] border-white/10 flex flex-col gap-1.5">
+                        <div className="flex items-center justify-between text-[10px] uppercase font-bold text-[#94a3b8] gap-1">
+                          <span className="flex items-center gap-1 truncate">
+                            <Cpu size={12} className="text-indigo-400 shrink-0" /> Memória & Heap
                           </span>
-                          <span className="px-1.5 py-0.2 rounded-md text-[9px] font-black bg-indigo-500/20 text-indigo-300">
+                          <span className="px-1.5 py-0.5 rounded-md text-[9px] font-black bg-indigo-500/20 text-indigo-300 shrink-0">
                             {pct}% HEAP
                           </span>
                         </div>
                         <div className="flex items-baseline gap-1">
                           <span className="text-xl font-black text-white">{used}</span>
-                          <span className="text-xs text-[#8696a0]">MB usado</span>
+                          <span className="text-xs text-[#94a3b8]">MB usado</span>
                         </div>
-                        <div className="text-[10px] text-[#8696a0] flex justify-between">
+                        <div className="text-[10px] text-[#94a3b8] flex justify-between">
                           <span>RSS: <strong className="text-white font-mono">{rss}MB</strong></span>
                           <span>Total: <strong className="text-white font-mono">{total}MB</strong></span>
                         </div>
@@ -3837,23 +3681,23 @@ export default function DevLogger() {
                       <div className={`p-3 rounded-2xl border flex flex-col gap-1.5 transition-all ${
                         storm 
                           ? 'bg-rose-500/10 border-rose-500/40 text-rose-300' 
-                          : 'bg-[#0f171e] border-white/10'
+                          : 'bg-[#0c141b] border-white/10'
                       }`}>
-                        <div className="flex items-center justify-between text-[10px] uppercase font-bold text-[#8696a0]">
-                          <span className="flex items-center gap-1">
-                            <Smartphone size={12} className="text-teal-400" /> Baileys & Listeners
+                        <div className="flex items-center justify-between text-[10px] uppercase font-bold text-[#94a3b8] gap-1">
+                          <span className="flex items-center gap-1 truncate">
+                            <Smartphone size={12} className="text-teal-400 shrink-0" /> Baileys & Listeners
                           </span>
-                          <span className={`px-1.5 py-0.2 rounded-md text-[9px] font-black ${
+                          <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-black shrink-0 ${
                             storm ? 'bg-rose-500/25 text-rose-300 animate-pulse' : 'bg-teal-500/20 text-teal-300'
                           }`}>
-                            {storm ? 'STORM ATIVA' : 'SEM VAZAMENTOS'}
+                            {storm ? 'STORM' : 'ESTÁVEL'}
                           </span>
                         </div>
                         <div className="flex items-baseline gap-1">
                           <span className="text-xl font-black text-white">{sessions}</span>
-                          <span className="text-xs text-[#8696a0]">caixas ativas</span>
+                          <span className="text-xs text-[#94a3b8]">caixas ativas</span>
                         </div>
-                        <div className="text-[10px] text-[#8696a0] flex justify-between">
+                        <div className="text-[10px] text-[#94a3b8] flex justify-between">
                           <span>Listeners: <strong className="text-white font-mono">{listeners}</strong></span>
                           <span>Média: <strong className="text-white font-mono">{sessions > 0 ? (listeners / sessions).toFixed(1) : '0'} /cx</strong></span>
                         </div>
@@ -3877,20 +3721,20 @@ export default function DevLogger() {
                     const mins = Math.floor((uptimeSec % 3600) / 60);
                     const uptimeStr = hours > 0 ? `${hours}h ${mins}m` : `${mins}m ${uptimeSec % 60}s`;
                     return (
-                      <div className="p-3 rounded-2xl border bg-[#0f171e] border-white/10 flex flex-col gap-1.5">
-                        <div className="flex items-center justify-between text-[10px] uppercase font-bold text-[#8696a0]">
-                          <span className="flex items-center gap-1">
-                            <Server size={12} className="text-purple-400" /> Processo Node.js
+                      <div className="p-3 rounded-2xl border bg-[#0c141b] border-white/10 flex flex-col gap-1.5">
+                        <div className="flex items-center justify-between text-[10px] uppercase font-bold text-[#94a3b8] gap-1">
+                          <span className="flex items-center gap-1 truncate">
+                            <Server size={12} className="text-purple-400 shrink-0" /> Processo Node.js
                           </span>
-                          <span className="px-1.5 py-0.2 rounded-md text-[9px] font-black bg-purple-500/20 text-purple-300">
+                          <span className="px-1.5 py-0.5 rounded-md text-[9px] font-black bg-purple-500/20 text-purple-300 shrink-0">
                             PID {proc?.pid || 'OK'}
                           </span>
                         </div>
                         <div className="flex items-baseline gap-1">
                           <span className="text-xl font-black text-white">{uptimeStr}</span>
-                          <span className="text-xs text-[#8696a0]">uptime</span>
+                          <span className="text-xs text-[#94a3b8]">uptime</span>
                         </div>
-                        <div className="text-[10px] text-[#8696a0] flex justify-between">
+                        <div className="text-[10px] text-[#94a3b8] flex justify-between">
                           <span>Handles: <strong className="text-white font-mono">{proc?.activeHandles ?? 'N/A'}</strong></span>
                           <span>Node: <strong className="text-white font-mono">{proc?.nodeVersion || 'v20'}</strong></span>
                         </div>
@@ -3905,9 +3749,8 @@ export default function DevLogger() {
 
                 {/* PAINEL DE VALIDAÇÃO E2E (9 ESTÁGIOS) */}
                 {(isExecutingE2E || e2eOverallResult || e2eLogs.length > 0) && (
-                  <div className="bg-[#0f171e] border border-white/10 rounded-2xl p-4 flex flex-col gap-3 relative z-10 animate-in fade-in duration-300">
+                  <div className="bg-[#0c141b] border border-white/10 rounded-2xl p-3.5 sm:p-4 flex flex-col gap-3 relative z-10 animate-in fade-in duration-300">
                     
-                    {/* Barra de Progresso E2E */}
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <Activity size={14} className="text-cyan-400 animate-pulse" />
@@ -3928,17 +3771,17 @@ export default function DevLogger() {
                     </div>
 
                     {/* Grade dos 9 Estágios */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mt-1">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 mt-1">
                       {[
-                        { num: 1, name: 'Gateway HTTP & Latência RTT', icon: <Network size={12} /> },
-                        { num: 2, name: 'Event Loop & Performance', icon: <Gauge size={12} /> },
-                        { num: 3, name: 'Auditoria de Listeners Baileys', icon: <Layers size={12} /> },
-                        { num: 4, name: 'Supabase DB & Isolamento', icon: <Database size={12} /> },
-                        { num: 5, name: 'Sessões Baileys Conectadas', icon: <Smartphone size={12} /> },
-                        { num: 6, name: 'Geração de Trace ID E2E', icon: <Radio size={12} /> },
-                        { num: 7, name: 'WebSocket Realtime Supabase', icon: <Zap size={12} /> },
-                        { num: 8, name: 'Detecção de Reconnect Storms', icon: <ShieldAlert size={12} /> },
-                        { num: 9, name: 'Snapshot de Saúde Consolidado', icon: <CheckCircle2 size={12} /> },
+                        { num: 1, name: 'Gateway HTTP & Latência RTT' },
+                        { num: 2, name: 'Event Loop & Performance' },
+                        { num: 3, name: 'Auditoria de Listeners Baileys' },
+                        { num: 4, name: 'Supabase DB & Isolamento' },
+                        { num: 5, name: 'Sessões Baileys Conectadas' },
+                        { num: 6, name: 'Geração de Trace ID E2E' },
+                        { num: 7, name: 'WebSocket Realtime Supabase' },
+                        { num: 8, name: 'Detecção de Reconnect Storms' },
+                        { num: 9, name: 'Snapshot de Saúde Consolidado' },
                       ].map((st) => {
                         const state = e2eStagesStatus[st.num] || { status: 'idle' };
                         const isIdle = state.status === 'idle';
@@ -3949,28 +3792,28 @@ export default function DevLogger() {
                         return (
                           <div 
                             key={st.num}
-                            className={`p-2.5 rounded-xl border flex flex-col gap-1 transition-all ${
-                              isIdle ? 'bg-[#141d24]/60 border-white/5 text-[#8696a0]' : ''
+                            className={`p-2.5 rounded-xl border flex flex-col gap-1 transition-all min-w-0 ${
+                              isIdle ? 'bg-[#121c24]/70 border-white/5 text-[#94a3b8]' : ''
                             } ${
-                              isRunning ? 'bg-cyan-500/15 border-cyan-500/40 text-cyan-300 animate-pulse' : ''
+                              isRunning ? 'bg-cyan-500/15 border-cyan-500/40 text-cyan-200 animate-pulse' : ''
                             } ${
-                              isPassed ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300' : ''
+                              isPassed ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-200' : ''
                             } ${
-                              isFailed ? 'bg-rose-500/15 border-rose-500/40 text-rose-300' : ''
+                              isFailed ? 'bg-rose-500/15 border-rose-500/40 text-rose-200' : ''
                             }`}
                           >
-                            <div className="flex items-center justify-between text-[10px] uppercase font-bold">
+                            <div className="flex items-center justify-between text-[10px] uppercase font-bold gap-1">
                               <span className="flex items-center gap-1 truncate">
                                 <span className="opacity-70 font-mono">[{st.num}/9]</span> {st.name}
                               </span>
-                              <span className="shrink-0 ml-1">
+                              <span className="shrink-0">
                                 {isIdle && <Clock size={11} />}
                                 {isRunning && <Loader2 size={11} className="animate-spin text-cyan-400" />}
                                 {isPassed && <CheckCircle2 size={11} className="text-emerald-400" />}
                                 {isFailed && <AlertTriangle size={11} className="text-rose-400" />}
                               </span>
                             </div>
-                            <div className="text-[10px] text-[#8696a0] truncate">
+                            <div className="text-[10px] text-[#94a3b8] truncate">
                               {state.detail ? state.detail : isRunning ? 'Executando validação...' : 'Aguardando'}
                             </div>
                           </div>
@@ -3980,20 +3823,20 @@ export default function DevLogger() {
 
                     {/* Resultado Consolidado */}
                     {e2eOverallResult && (
-                      <div className="mt-2 p-3 rounded-xl bg-[#141d24] border border-white/10 flex items-center justify-between flex-wrap gap-2">
-                        <div className="flex items-center gap-3">
+                      <div className="mt-1 p-3 rounded-xl bg-[#121c24] border border-white/10 flex items-center justify-between flex-wrap gap-2">
+                        <div className="flex items-center gap-3 flex-wrap">
                           <span className={`px-3 py-1 rounded-xl text-xs font-black border ${
                             e2eOverallResult.healthScore === 100 
-                              ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400' 
+                              ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300' 
                               : 'bg-amber-500/20 border-amber-500/40 text-amber-300'
                           }`}>
                             HEALTH SCORE: {e2eOverallResult.healthScore}%
                           </span>
-                          <span className="text-[11px] text-[#d1d7db]">
+                          <span className="text-[11px] text-[#e2e8f0] break-words">
                             {e2eOverallResult.summary}
                           </span>
                         </div>
-                        <span className="text-[10px] text-[#8696a0]">
+                        <span className="text-[10px] text-[#94a3b8]">
                           Duração: <strong className="text-white">{(e2eOverallResult.durationTotalMs / 1000).toFixed(2)}s</strong>
                         </span>
                       </div>
@@ -4004,20 +3847,20 @@ export default function DevLogger() {
 
                 {/* SESSÃO DE INSTÂNCIAS BAILEYS EM TEMPO REAL */}
                 {serverTelemetry?.baileys?.instances && serverTelemetry.baileys.instances.length > 0 && (
-                  <div className="bg-[#0f171e] border border-white/10 rounded-2xl p-4 flex flex-col gap-3 relative z-10">
-                    <div className="flex items-center justify-between">
+                  <div className="bg-[#0c141b] border border-white/10 rounded-2xl p-3.5 sm:p-4 flex flex-col gap-3 relative z-10">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
                       <div className="flex items-center gap-2">
                         <Smartphone size={14} className="text-teal-400" />
                         <span className="font-black text-white text-xs tracking-wider uppercase">
                           Sessões Ativas no Motor Node ({serverTelemetry.baileys.instances.length})
                         </span>
                       </div>
-                      <span className="text-[10px] text-[#8696a0]">
+                      <span className="text-[10px] text-[#94a3b8]">
                         Auditando listeners & integridade de socket
                       </span>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5 max-h-56 overflow-y-auto custom-scrollbar pr-1">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 max-h-60 overflow-y-auto custom-scrollbar pr-1">
                       {serverTelemetry.baileys.instances.map((inst: any) => {
                         const isConnected = inst.wsOpen || inst.status === 'open' || inst.status === 'connected';
                         const isLeakRisk = (inst.totalListeners || 0) > 8;
@@ -4026,31 +3869,31 @@ export default function DevLogger() {
                         return (
                           <div 
                             key={inst.instanceId}
-                            className={`p-3 rounded-xl border flex flex-col gap-1.5 transition-all ${
+                            className={`p-3 rounded-xl border flex flex-col gap-1.5 transition-all min-w-0 ${
                               isStorm 
                                 ? 'bg-rose-500/15 border-rose-500/40' 
                                 : isLeakRisk 
                                   ? 'bg-amber-500/15 border-amber-500/40' 
-                                  : 'bg-[#141d24] border-white/10'
+                                  : 'bg-[#121c24] border-white/10'
                             }`}
                           >
-                            <div className="flex items-center justify-between">
-                              <span className="font-mono text-[11px] font-bold text-white truncate max-w-[180px]">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-mono text-[11px] font-bold text-white truncate">
                                 {inst.instanceId}
                               </span>
-                              <span className={`px-2 py-0.2 rounded-full text-[9px] font-black uppercase ${
-                                isConnected ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-white/10 text-[#8696a0]'
+                              <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase shrink-0 ${
+                                isConnected ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-white/10 text-[#94a3b8]'
                               }`}>
                                 {isConnected ? 'WS CONECTADO' : 'OFFLINE'}
                               </span>
                             </div>
 
-                            <div className="flex items-center justify-between text-[10px] text-[#8696a0]">
-                              <span>Listeners: <strong className={isLeakRisk ? "text-amber-400 font-black" : "text-white font-mono"}>{inst.totalListeners || 0}</strong></span>
-                              <span>Reconexões (1m): <strong className={isStorm ? "text-rose-400 font-black" : "text-white font-mono"}>{inst.reconnectsLastMin || 0}</strong></span>
+                            <div className="flex items-center justify-between text-[10px] text-[#94a3b8]">
+                              <span>Listeners: <strong className={isLeakRisk ? "text-amber-300 font-black" : "text-white font-mono"}>{inst.totalListeners || 0}</strong></span>
+                              <span>Reconexões (1m): <strong className={isStorm ? "text-rose-300 font-black" : "text-white font-mono"}>{inst.reconnectsLastMin || 0}</strong></span>
                             </div>
 
-                            <div className="text-[9px] text-[#8696a0] font-mono bg-[#0c1217] p-1.5 rounded-lg flex justify-between">
+                            <div className="text-[9px] text-[#94a3b8] font-mono bg-[#0a1015] p-1.5 rounded-lg flex justify-between">
                               <span>upsert: {inst.listeners?.['messages.upsert'] || 0}</span>
                               <span>update: {inst.listeners?.['messages.update'] || 0}</span>
                               <span>conn: {inst.listeners?.['connection.update'] || 0}</span>
@@ -4063,8 +3906,8 @@ export default function DevLogger() {
                 )}
 
                 {/* TERMINAL DE LOGS E2E & EVENTOS DE TELEMETRIA */}
-                <div className="bg-[#0f171e] border border-white/10 rounded-2xl p-3.5 flex flex-col gap-2 relative z-10">
-                  <div className="flex items-center justify-between pb-2 border-b border-white/10">
+                <div className="bg-[#0c141b] border border-white/10 rounded-2xl p-3.5 flex flex-col gap-2 relative z-10">
+                  <div className="flex items-center justify-between pb-2 border-b border-white/10 flex-wrap gap-2">
                     <div className="flex items-center gap-2">
                       <Terminal size={13} className="text-cyan-400" />
                       <span className="font-black text-white text-[11px] uppercase tracking-wider">
@@ -4072,34 +3915,34 @@ export default function DevLogger() {
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5">
                       <button
+                        type="button"
                         onClick={() => {
                           const text = e2eLogs.map(l => `[${l.timestamp}] [${l.stage}/9] ${l.message}`).join('\n');
                           navigator.clipboard.writeText(text);
-                          setCopyFeedback('Logs E2E copiados!');
-                          setTimeout(() => setCopyFeedback(null), 3000);
+                          showToastFeedback('Logs E2E copiados!');
                         }}
                         disabled={e2eLogs.length === 0}
-                        className="p-1 px-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[#8696a0] hover:text-white transition-all text-[10px] flex items-center gap-1 cursor-pointer disabled:opacity-40"
+                        className="min-h-[32px] px-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[#cbd5e1] hover:text-white transition-all text-[10px] font-bold flex items-center gap-1 cursor-pointer active:scale-95 disabled:opacity-40"
                       >
                         <Copy size={11} /> Copiar Logs
                       </button>
 
                       <button
+                        type="button"
                         onClick={() => setE2ELogs([])}
                         disabled={e2eLogs.length === 0}
-                        className="p-1 px-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[#8696a0] hover:text-rose-400 transition-all text-[10px] flex items-center gap-1 cursor-pointer disabled:opacity-40"
+                        className="min-h-[32px] px-2.5 bg-white/5 hover:bg-rose-500/15 border border-white/10 hover:border-rose-500/30 rounded-lg text-[#cbd5e1] hover:text-rose-300 transition-all text-[10px] font-bold flex items-center gap-1 cursor-pointer active:scale-95 disabled:opacity-40"
                       >
                         <Trash2 size={11} /> Limpar
                       </button>
                     </div>
                   </div>
 
-                  {/* Visualizador de Linhas */}
-                  <div className="max-h-48 overflow-y-auto custom-scrollbar flex flex-col gap-1.5 font-mono text-[11px] p-2 bg-[#090e13] rounded-xl border border-white/5">
+                  <div className="max-h-52 overflow-y-auto custom-scrollbar flex flex-col gap-1.5 font-mono text-[11px] p-2.5 bg-[#080d12] rounded-xl border border-white/5">
                     {e2eLogs.length === 0 && telemetryEvents.length === 0 ? (
-                      <div className="py-6 text-center text-[#8696a0] text-xs">
+                      <div className="py-6 text-center text-[#94a3b8] text-xs">
                         Nenhum evento registrado ainda. Clique em <strong className="text-cyan-300">"TESTAR E2E (9 ESTÁGIOS)"</strong> para iniciar uma auditoria completa.
                       </div>
                     ) : (
@@ -4107,29 +3950,29 @@ export default function DevLogger() {
                         {e2eLogs.map((log, idx) => (
                           <div 
                             key={`e2e_${idx}`}
-                            className={`flex items-start gap-2 py-0.5 px-1.5 rounded ${
+                            className={`flex items-start gap-2 py-1 px-2 rounded-lg ${
                               log.level === 'error' 
-                                ? 'bg-rose-500/10 text-rose-300' 
+                                ? 'bg-rose-500/10 text-rose-200' 
                                 : log.level === 'success' 
-                                  ? 'bg-emerald-500/10 text-emerald-300' 
+                                  ? 'bg-emerald-500/10 text-emerald-200' 
                                   : log.level === 'warn' 
-                                    ? 'bg-amber-500/10 text-amber-300' 
-                                    : 'text-[#d1d7db]'
+                                    ? 'bg-amber-500/10 text-amber-200' 
+                                    : 'text-[#e2e8f0]'
                             }`}
                           >
-                            <span className="text-[10px] text-[#8696a0] shrink-0">[{log.timestamp}]</span>
+                            <span className="text-[10px] text-[#94a3b8] shrink-0">[{log.timestamp}]</span>
                             <span className="font-bold shrink-0 text-cyan-400">[{log.stage}/9]</span>
-                            <span className="break-all">{log.message}</span>
+                            <span className="break-words min-w-0">{log.message}</span>
                           </div>
                         ))}
 
                         {telemetryEvents.map((ev, idx) => (
                           <div 
                             key={`ev_${idx}`}
-                            className="flex items-start gap-2 py-0.5 px-1.5 rounded text-[#8696a0] hover:text-white transition-colors"
+                            className="flex items-start gap-2 py-1 px-2 rounded-lg text-[#94a3b8] hover:text-white hover:bg-white/5 transition-colors flex-wrap"
                           >
-                            <span className="text-[10px] opacity-70 shrink-0">
-                              [{new Date(ev.timestamp).toLocaleTimeString()}]
+                            <span className="text-[10px] opacity-80 shrink-0">
+                              [{new Date(ev.timestamp).toLocaleTimeString('pt-BR')}]
                             </span>
                             <span className="text-purple-400 font-bold shrink-0">[SERVER]</span>
                             <span className="text-white font-bold shrink-0">{ev.event}</span>
@@ -4144,40 +3987,40 @@ export default function DevLogger() {
 
                 {/* SNAPSHOTS RECENTES */}
                 {telemetrySnapshots.length > 0 && (
-                  <div className="bg-[#0f171e] border border-white/10 rounded-2xl p-3.5 flex flex-col gap-2 relative z-10">
-                    <div className="flex items-center justify-between pb-2 border-b border-white/10">
+                  <div className="bg-[#0c141b] border border-white/10 rounded-2xl p-3.5 flex flex-col gap-2 relative z-10">
+                    <div className="flex items-center justify-between pb-2 border-b border-white/10 flex-wrap gap-2">
                       <div className="flex items-center gap-2">
                         <Layers size={13} className="text-purple-400" />
                         <span className="font-black text-white text-[11px] uppercase tracking-wider">
-                          Snapshots de Diagnóstico Recentes ({telemetrySnapshots.length})
+                          Snapshots Recentes ({telemetrySnapshots.length})
                         </span>
                       </div>
-                      <span className="text-[10px] text-[#8696a0]">
+                      <span className="text-[10px] text-[#94a3b8]">
                         Capturados automaticamente ou sob demanda
                       </span>
                     </div>
 
-                    <div className="flex flex-col gap-1.5 max-h-36 overflow-y-auto custom-scrollbar">
+                    <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto custom-scrollbar">
                       {telemetrySnapshots.map((snap, idx) => (
                         <div 
                           key={idx}
-                          className="p-2 rounded-xl bg-[#141d24] border border-white/5 flex items-center justify-between text-[11px]"
+                          className="p-2.5 rounded-xl bg-[#121c24] border border-white/5 flex items-center justify-between gap-2 text-[11px]"
                         >
-                          <div className="flex items-center gap-2 truncate">
+                          <div className="flex items-center gap-2 min-w-0">
                             <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shrink-0" />
                             <span className="font-bold text-white truncate">{snap.reason || 'MANUAL'}</span>
-                            <span className="text-[10px] text-[#8696a0]">
+                            <span className="text-[10px] text-[#94a3b8] shrink-0">
                               {new Date(snap.timestamp).toLocaleString('pt-BR')}
                             </span>
                           </div>
 
                           <button
+                            type="button"
                             onClick={() => {
                               navigator.clipboard.writeText(JSON.stringify(snap, null, 2));
-                              setCopyFeedback('JSON do Snapshot copiado!');
-                              setTimeout(() => setCopyFeedback(null), 3000);
+                              showToastFeedback('JSON do Snapshot copiado!');
                             }}
-                            className="p-1 px-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[#8696a0] hover:text-white transition-all text-[10px] flex items-center gap-1 cursor-pointer"
+                            className="min-h-[30px] px-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[#cbd5e1] hover:text-white transition-all text-[10px] font-bold flex items-center gap-1 cursor-pointer active:scale-95 shrink-0"
                           >
                             <Copy size={10} /> Copiar JSON
                           </button>
@@ -4189,143 +4032,111 @@ export default function DevLogger() {
 
               </div>
             ) : (
-              /* Console & Server Logs - COM SUPORTE A AGRUPAMENTO DE ERROS IDENTICOS E FILTRAGEM DE NOVO PADRÃO */
-              <div className="flex-1 overflow-y-auto flex flex-col font-mono text-xs custom-scrollbar min-h-[180px] bg-[#070c10] rounded-b-[28px]">
+              /* Console & Server Logs - Barra Fixa Fora do Scroll + Log Cards Retráteis Inteligentes */
+              <div className="flex-1 flex flex-col min-h-0 font-mono text-xs bg-[#070c10] overflow-hidden">
                 
-                {/* Sub-Barra de Controles: Responsiva, Multi-linha sem corte horizontal */}
-                <div className="p-2.5 px-3 sm:px-4 bg-[#080e13]/95 border-b border-white/10 text-xs font-mono select-none flex flex-wrap items-center justify-between gap-2 sticky top-0 z-20 backdrop-blur-2xl overflow-x-hidden">
+                {/* Sub-Barra Fixa de Controles do Console */}
+                <div className="px-3 sm:px-4 py-2.5 bg-[#091017]/95 border-b border-white/10 text-xs font-mono select-none flex flex-col gap-2 shrink-0 relative z-20 backdrop-blur-2xl">
                   
-                  {/* Bloco 1: Toggle de Modo + Dropdown Tipo de Log */}
-                  <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                    {/* Seletor de Modo: Agrupado vs Linha do Tempo */}
-                    <div className="flex items-center gap-0.5 bg-[#0e161c] p-0.5 rounded-xl border border-white/10 shrink-0">
-                      <button
-                        onClick={() => setViewMode('grouped')}
-                        className={`px-2.5 sm:px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer border-0 flex items-center gap-1.5 ${
-                          viewMode === 'grouped'
-                            ? 'bg-gradient-to-r from-emerald-500 to-teal-400 text-black shadow-md shadow-emerald-500/20 font-black'
-                            : 'text-[#8696a0] hover:text-white hover:bg-white/5'
-                        }`}
-                        title="Agrupar erros e logs idênticos"
-                      >
-                        <span>📦 Agrupado</span>
-                        <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-extrabold ${viewMode === 'grouped' ? 'bg-black/20 text-black' : 'bg-white/10 text-white/80'}`}>
-                          {groupedAndFilteredLogs.length}
-                        </span>
-                      </button>
-                      <button
-                        onClick={() => setViewMode('timeline')}
-                        className={`px-2.5 sm:px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer border-0 flex items-center gap-1.5 ${
-                          viewMode === 'timeline'
-                            ? 'bg-gradient-to-r from-emerald-500 to-teal-400 text-black shadow-md shadow-emerald-500/20 font-black'
-                            : 'text-[#8696a0] hover:text-white hover:bg-white/5'
-                        }`}
-                        title="Exibir histórico individual por ordem cronológica"
-                      >
-                        <span>🕒 Linha do Tempo</span>
-                      </button>
-                    </div>
-
-                    {/* Dropdown Unificado: Tipo de Log (Consolidação de Todos, Ação Requerida, Erros, Migalhas, Node, Alertas) */}
-                    <div className="relative shrink-0">
-                      <select
-                        value={logFilter}
-                        onChange={(e) => setLogFilter(e.target.value as any)}
-                        className={`appearance-none bg-[#0e161c] border border-white/10 rounded-xl pl-2.5 pr-7 py-1.5 text-[10px] font-mono font-black uppercase tracking-wider cursor-pointer transition-all focus:outline-none focus:border-indigo-500/60 ${
-                          logFilter === 'action' ? 'text-rose-300 border-rose-500/50 bg-rose-950/30' :
-                          logFilter === 'error' ? 'text-rose-300 border-rose-500/40 bg-rose-950/20' :
-                          logFilter === 'breadcrumbs' ? 'text-cyan-300 border-cyan-500/40 bg-cyan-950/20' :
-                          logFilter === 'warn' ? 'text-amber-300 border-amber-500/40 bg-amber-950/20' :
-                          logFilter === 'node' ? 'text-purple-300 border-purple-500/40 bg-purple-950/20' :
-                          'text-[#d1d7db] hover:text-white'
-                        }`}
-                        title="Filtrar por tipo de log"
-                      >
-                        <option value="all" className="bg-[#0e161c] text-white">📋 Todos ({logs.length})</option>
-                        <option value="action" className="bg-[#0e161c] text-rose-300 font-bold">🚨 Ação Requerida ({actionLogsCount})</option>
-                        <option value="error" className="bg-[#0e161c] text-rose-400">🔴 Erros ({errorLogsCount})</option>
-                        <option value="breadcrumbs" className="bg-[#0e161c] text-cyan-300">📍 Migalhas ({breadcrumbLogsCount})</option>
-                        <option value="node" className="bg-[#0e161c] text-purple-300">🖥️ Servidor Node ({nodeLogsCount})</option>
-                        <option value="warn" className="bg-[#0e161c] text-amber-300">🟡 Alertas ({warnLogsCount})</option>
-                      </select>
-                      <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-[#8696a0] pointer-events-none" />
-                    </div>
-                  </div>
-
-                  {/* Bloco 2: Busca + Tempo + Ações (wrap automático para nunca cortar "Ações de Teste") */}
-                  <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap flex-1 min-w-0 justify-between sm:justify-end">
+                  {/* Linha 1: Busca + Toggle Filtros (Mobile) + Ações Principais */}
+                  <div className="flex items-center gap-2 flex-wrap justify-between">
                     {/* Input de Busca Textual */}
-                    <div className="relative flex items-center flex-1 min-w-[130px] max-w-xs">
-                      <Search size={11} className="absolute left-2.5 text-[#8696a0] pointer-events-none" />
+                    <div className="relative flex items-center flex-1 min-w-[160px]">
+                      <Search size={13} className="absolute left-3 text-[#94a3b8] pointer-events-none" />
                       <input
                         type="text"
-                        placeholder="Buscar logs..."
+                        placeholder="Filtrar por texto, instância ou trace..."
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        className="w-full pl-7 pr-6 py-1.5 bg-[#0e161c] border border-white/10 rounded-xl text-[10px] text-white placeholder-[#8696a0] focus:outline-none focus:border-indigo-500/50 transition-all font-mono"
+                        className="w-full min-h-[38px] pl-8 pr-8 py-1.5 bg-[#0e161d] border border-white/10 rounded-xl text-[11px] text-white placeholder-[#64748b] focus:outline-none focus:border-emerald-500/50 transition-all font-mono"
                       />
                       {searchQuery && (
                         <button
+                          type="button"
                           onClick={() => setSearchQuery('')}
-                          className="absolute right-2 text-[#8696a0] hover:text-white transition-colors cursor-pointer border-0 bg-transparent p-0"
+                          className="absolute right-2.5 w-6 h-6 flex items-center justify-center rounded-md text-[#94a3b8] hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
                           title="Limpar busca"
                         >
-                          <X size={10} />
+                          <X size={12} />
                         </button>
                       )}
                     </div>
 
-                    {/* Filtro por Faixa Temporal */}
-                    <div className="flex items-center gap-0.5 bg-[#0e161c] p-0.5 rounded-xl border border-white/10 shrink-0">
-                      {[
-                        { id: 'all', label: 'Tudo' },
-                        { id: '15m', label: '15m' },
-                        { id: '1h', label: '1h' },
-                        { id: 'today', label: 'Hoje' },
-                      ].map((tf) => (
-                        <button
-                          key={tf.id}
-                          onClick={() => setTimeFilter(tf.id as any)}
-                          className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer border-0 ${
-                            timeFilter === tf.id
-                              ? 'bg-indigo-500 text-white shadow-sm font-black'
-                              : 'text-[#8696a0] hover:text-white hover:bg-white/5'
-                          }`}
-                          title={`Filtrar logs: ${tf.label}`}
-                        >
-                          {tf.label}
-                        </button>
-                      ))}
+                    {/* Seletor de Modo: Agrupado vs Timeline */}
+                    <div className="flex items-center gap-0.5 bg-[#0e161d] p-0.5 rounded-xl border border-white/10 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setViewMode('grouped')}
+                        className={`min-h-[34px] px-2.5 sm:px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 ${
+                          viewMode === 'grouped'
+                            ? 'bg-gradient-to-r from-emerald-500 to-teal-400 text-slate-950 shadow-sm'
+                            : 'text-[#94a3b8] hover:text-white hover:bg-white/5'
+                        }`}
+                        title="Agrupar erros e logs idênticos"
+                      >
+                        <span>📦 Agrupado</span>
+                        <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-black ${viewMode === 'grouped' ? 'bg-black/20 text-slate-950' : 'bg-white/10 text-white/80'}`}>
+                          {groupedAndFilteredLogs.length}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setViewMode('timeline')}
+                        className={`min-h-[34px] px-2.5 sm:px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 ${
+                          viewMode === 'timeline'
+                            ? 'bg-gradient-to-r from-emerald-500 to-teal-400 text-slate-950 shadow-sm'
+                            : 'text-[#94a3b8] hover:text-white hover:bg-white/5'
+                        }`}
+                        title="Exibir histórico individual por ordem cronológica"
+                      >
+                        <span>🕒 Timeline</span>
+                      </button>
                     </div>
 
-                    {/* Ações: Analisar c/ IA & Ações de Teste */}
+                    {/* Botão Mobile de Filtros Extras + Central Preventiva */}
                     <div className="flex items-center gap-1.5 shrink-0">
-                      {/* Botão de Análise de Logs com IA (Visível apenas se houver logs) */}
+                      <button
+                        type="button"
+                        onClick={() => setShowConsoleFilters(prev => !prev)}
+                        className={`sm:hidden min-h-[38px] px-2.5 rounded-xl border text-[10px] font-bold flex items-center gap-1.5 transition-all cursor-pointer active:scale-95 ${
+                          showConsoleFilters || logFilter !== 'all' || timeFilter !== 'all'
+                            ? 'bg-indigo-500/20 text-indigo-200 border-indigo-400/40'
+                            : 'bg-[#0e161d] text-[#94a3b8] border-white/10'
+                        }`}
+                      >
+                        <SlidersHorizontal size={12} />
+                        <span>Filtros</span>
+                        {(logFilter !== 'all' || timeFilter !== 'all') && (
+                          <span className="w-2 h-2 rounded-full bg-indigo-400" />
+                        )}
+                      </button>
+
                       {logs.length > 0 && (
                         <button
+                          type="button"
                           onClick={() => setShowAiMediaPromptModal(true)}
                           disabled={isAnalyzingAiLogs}
-                          className={`px-2.5 sm:px-3 py-1.5 rounded-xl text-[10px] font-black transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 shadow-sm border ${
+                          className={`min-h-[38px] px-3 rounded-xl text-[10px] font-black transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 border ${
                             isAnalyzingAiLogs
                               ? 'bg-purple-500/20 text-purple-300 border-purple-500/50 animate-pulse'
-                              : 'bg-gradient-to-r from-purple-500/25 via-indigo-500/25 to-pink-500/25 hover:from-purple-500/35 hover:to-pink-500/35 text-purple-200 hover:text-white border-purple-500/40 hover:border-purple-400 shadow-lg shadow-purple-500/10'
+                              : 'bg-gradient-to-r from-purple-500/25 via-indigo-500/25 to-pink-500/25 hover:from-purple-500/40 hover:to-pink-500/40 text-purple-100 border-purple-400/45 shadow-md shadow-purple-500/10'
                           }`}
                           title="Analisar logs atuais com Gemini IA e criar card no CRM Kanban"
                         >
                           {isAnalyzingAiLogs ? (
                             <Loader2 size={12} className="animate-spin text-purple-300" />
                           ) : (
-                            <Sparkles size={12} className="text-purple-300 animate-pulse" />
+                            <Sparkles size={12} className="text-purple-300" />
                           )}
-                          <span className="hidden sm:inline">{isAnalyzingAiLogs ? 'Analisando...' : '✨ Analisar c/ IA'}</span>
-                          <span className="sm:hidden">{isAnalyzingAiLogs ? '...' : '✨ IA'}</span>
+                          <span className="hidden md:inline">{isAnalyzingAiLogs ? 'Analisando...' : 'Analisar c/ IA'}</span>
+                          <span className="md:hidden">{isAnalyzingAiLogs ? '...' : 'IA'}</span>
                         </button>
                       )}
 
-                      {/* Botão Unificado: Diagnóstico Preventivo & Ações de Teste */}
                       <button
+                        type="button"
                         onClick={() => setShowSimulationModal(true)}
-                        className="bg-gradient-to-r from-amber-500/20 to-rose-500/20 hover:from-amber-500/30 hover:to-rose-500/30 text-amber-200 border border-amber-500/30 hover:border-amber-400 px-3 py-1.5 rounded-xl text-[10px] font-black transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 shadow-sm min-h-[34px] whitespace-nowrap shrink-0"
+                        className="min-h-[38px] bg-gradient-to-r from-amber-500/20 to-rose-500/20 hover:from-amber-500/30 hover:to-rose-500/30 text-amber-200 border border-amber-500/35 hover:border-amber-400 px-3 rounded-xl text-[10px] font-black transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 shadow-sm whitespace-nowrap shrink-0"
                         title="Abrir Central de Diagnóstico Preventivo Real e Simulação de Erros"
                       >
                         <Zap size={12} className="text-amber-400 shrink-0" />
@@ -4338,75 +4149,123 @@ export default function DevLogger() {
                       </button>
                     </div>
                   </div>
+
+                  {/* Linha 2: Quick Filter Chips + Janela Temporal (Sempre visível em sm+, expansível em Mobile) */}
+                  <div className={`${showConsoleFilters ? 'flex pt-1' : 'hidden sm:flex'} items-center justify-between gap-2 flex-wrap`}>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {[
+                        { id: 'all', label: 'Todos', count: logs.length, activeCls: 'bg-white/15 text-white border-white/30' },
+                        { id: 'action', label: '🚨 Ação', count: actionLogsCount, activeCls: 'bg-rose-500/25 text-rose-200 border-rose-400/60' },
+                        { id: 'error', label: '🔴 Erros', count: errorLogsCount, activeCls: 'bg-rose-500/20 text-rose-300 border-rose-500/50' },
+                        { id: 'breadcrumbs', label: '📍 Migalhas', count: breadcrumbLogsCount, activeCls: 'bg-cyan-500/20 text-cyan-200 border-cyan-500/50' },
+                        { id: 'node', label: '🖥️ Node', count: nodeLogsCount, activeCls: 'bg-purple-500/20 text-purple-200 border-purple-500/50' },
+                        { id: 'warn', label: '🟡 Alertas', count: warnLogsCount, activeCls: 'bg-amber-500/20 text-amber-200 border-amber-500/50' },
+                      ].map((chip) => {
+                        const isActive = logFilter === chip.id;
+                        return (
+                          <button
+                            key={chip.id}
+                            type="button"
+                            onClick={() => setLogFilter(chip.id as any)}
+                            className={`min-h-[30px] px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 ${
+                              isActive
+                                ? `${chip.activeCls} shadow-sm font-black`
+                                : 'bg-[#0e161d] text-[#94a3b8] border-white/10 hover:text-white hover:bg-white/5'
+                            }`}
+                          >
+                            <span>{chip.label}</span>
+                            <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-black ${isActive ? 'bg-black/25 text-white' : 'bg-white/5 text-[#94a3b8]'}`}>
+                              {chip.count}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Filtro por Faixa Temporal */}
+                    <div className="flex items-center gap-0.5 bg-[#0e161d] p-0.5 rounded-xl border border-white/10 shrink-0">
+                      {[
+                        { id: 'all', label: 'Tudo' },
+                        { id: '15m', label: '15m' },
+                        { id: '1h', label: '1h' },
+                        { id: 'today', label: 'Hoje' },
+                      ].map((tf) => (
+                        <button
+                          key={tf.id}
+                          type="button"
+                          onClick={() => setTimeFilter(tf.id as any)}
+                          className={`min-h-[28px] px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer active:scale-95 ${
+                            timeFilter === tf.id
+                              ? 'bg-indigo-500 text-white shadow-sm'
+                              : 'text-[#94a3b8] hover:text-white hover:bg-white/5'
+                          }`}
+                          title={`Filtrar logs: ${tf.label}`}
+                        >
+                          {tf.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
 
-                {/* Banner Animado de Progresso da Análise de IA */}
+                {/* Banner Animado de Progresso da Análise de IA (Fixo abaixo da barra de controles, sem sobreposição) */}
                 {isAnalyzingAiLogs && (
-                  <div className="bg-gradient-to-r from-purple-950/80 via-indigo-950/80 to-purple-950/80 border-b border-purple-500/30 p-3 px-4 flex items-center justify-between gap-3 text-xs font-mono text-purple-200 animate-in fade-in slide-in-from-top-2 duration-200 sticky top-[53px] z-20 backdrop-blur-md">
+                  <div className="bg-gradient-to-r from-purple-950/90 via-indigo-950/90 to-purple-950/90 border-b border-purple-500/35 px-4 py-2.5 flex items-center justify-between gap-3 text-xs font-mono text-purple-200 animate-in fade-in duration-200 shrink-0 relative z-10">
                     <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="relative flex items-center justify-center shrink-0">
-                        <div className="w-6 h-6 rounded-lg bg-purple-500/30 border border-purple-400/50 flex items-center justify-center shadow-lg shadow-purple-500/30 animate-spin">
-                          <BrainCircuit size={14} className="text-purple-300" />
-                        </div>
+                      <div className="w-7 h-7 rounded-xl bg-purple-500/30 border border-purple-400/50 flex items-center justify-center shadow-lg shadow-purple-500/25 shrink-0">
+                        <BrainCircuit size={14} className="text-purple-200 animate-pulse" />
                       </div>
-                      <div className="truncate">
-                        <span className="font-black text-white text-[11px] block">{aiAnalysisStep || 'Analisando logs com Inteligência Artificial...'}</span>
-                        <span className="text-[9px] text-purple-300/80">Filtrando ruídos e formulando plano técnico para o Kanban</span>
+                      <div className="min-w-0">
+                        <span className="font-black text-white text-[11px] block truncate">{aiAnalysisStep || 'Analisando logs com Inteligência Artificial...'}</span>
+                        <span className="text-[10px] text-purple-300/85 block truncate">Correlacionando eventos e formulando plano técnico para o Kanban</span>
                       </div>
                     </div>
-                    <div className="flex items-center gap-1.5 shrink-0 bg-purple-500/20 px-2.5 py-1 rounded-full border border-purple-500/40 text-[10px] font-bold text-purple-200 animate-pulse">
+                    <div className="flex items-center gap-1.5 shrink-0 bg-purple-500/20 px-2.5 py-1 rounded-full border border-purple-400/40 text-[10px] font-bold text-purple-100 animate-pulse">
                       <Loader2 size={11} className="animate-spin" />
                       <span>Processando</span>
                     </div>
                   </div>
                 )}
 
-                {/* Lista de Cards Agrupados / Cronológicos */}
-                <div className="p-4 flex flex-col gap-3.5 min-h-[240px]">
+                {/* Área Rolável Única de Logs */}
+                <div className="flex-1 overflow-y-auto p-3.5 sm:p-4 flex flex-col gap-3 custom-scrollbar min-h-0">
                   {groupedAndFilteredLogs.length === 0 ? (
                     <div className="m-auto py-10 px-6 flex flex-col items-center justify-center text-center space-y-4 select-none animate-in fade-in zoom-in-95 duration-300 relative">
-                      
-                      {/* Badge Superior de Status Operacional */}
                       <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-[10px] font-bold text-emerald-300 font-mono shadow-sm">
                         <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
                         <span>SISTEMA OPERACIONAL ESTÁVEL • 0 ANOMALIAS</span>
                       </div>
 
-                      {/* Radar Cibernético Neon */}
                       <div className="relative flex items-center justify-center my-2">
                         <div className="absolute -inset-6 rounded-full bg-gradient-to-tr from-emerald-500/20 via-teal-500/15 to-indigo-500/20 blur-2xl animate-pulse" />
                         <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-3xl bg-[#0c141a]/90 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shadow-2xl shadow-emerald-500/25 relative z-10 backdrop-blur-2xl">
                           <Terminal size={36} className="animate-pulse text-emerald-400 stroke-[2]" />
                         </div>
                         <div className="absolute inset-0 rounded-3xl border border-emerald-400/30 animate-ping pointer-events-none" />
-                        <div className="absolute -inset-3 rounded-full border border-teal-500/20 animate-pulse pointer-events-none" />
                       </div>
 
                       <div className="space-y-1.5 z-10 max-w-md">
-                        <h4 className="text-base sm:text-lg font-black text-white tracking-tight font-mono bg-gradient-to-r from-white via-emerald-100 to-teal-200 bg-clip-text text-transparent">
-                          {searchQuery || timeFilter !== 'all'
+                        <h4 className="text-base sm:text-lg font-black text-white tracking-tight font-mono">
+                          {searchQuery || timeFilter !== 'all' || logFilter !== 'all'
                             ? 'Nenhum log corresponde aos filtros'
-                            : logFilter === 'node' 
-                              ? 'Nenhum erro do Servidor Node capturado' 
-                              : 'Nenhum log detectado'}
+                            : 'Nenhum log detectado'}
                         </h4>
-                        <p className="text-xs text-[#8696a0] max-w-sm leading-relaxed font-mono">
-                          {searchQuery || timeFilter !== 'all'
-                            ? `Nenhum registro encontrado com os filtros atuais${searchQuery ? ` ("${searchQuery}")` : ''}. Tente ajustar a busca ou o intervalo temporal.`
-                            : logFilter === 'node' 
-                              ? 'O servidor Node.js está operando normalmente sem erros de lógica ou loops.' 
-                              : 'Erros do Servidor Node, requisições HTTP e exceções de lógica serão capturados e agrupados aqui.'}
+                        <p className="text-xs text-[#94a3b8] max-w-sm leading-relaxed font-mono">
+                          {searchQuery || timeFilter !== 'all' || logFilter !== 'all'
+                            ? `Nenhum registro encontrado com os filtros atuais${searchQuery ? ` ("${searchQuery}")` : ''}. Ajuste os chips ou limpe os filtros.`
+                            : 'Erros do Servidor Node, migalhas de fluxo, requisições HTTP e exceções aparecerão agrupados aqui.'}
                         </p>
                       </div>
 
                       {(searchQuery || timeFilter !== 'all' || logFilter !== 'all') && (
                         <button
+                          type="button"
                           onClick={() => {
                             setSearchQuery('');
                             setTimeFilter('all');
                             setLogFilter('all');
                           }}
-                          className="px-3 py-1 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer font-mono"
+                          className="min-h-[38px] px-4 py-1.5 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 border border-indigo-400/40 text-[11px] font-bold uppercase tracking-wider transition-all cursor-pointer font-mono active:scale-95"
                         >
                           Limpar Todos os Filtros
                         </button>
@@ -4414,7 +4273,8 @@ export default function DevLogger() {
 
                       <div className="flex items-center gap-2.5 pt-2 z-10 flex-wrap justify-center">
                         <button
-                          onClick={handleRunPreventiveAudit}
+                          type="button"
+                          onClick={() => handleRunPreventiveAudit()}
                           disabled={isRunningPreventive}
                           className="bg-gradient-to-r from-emerald-500/25 to-teal-500/25 hover:from-emerald-500/35 hover:to-teal-500/35 text-emerald-200 border border-emerald-500/40 text-xs font-bold px-4 py-2.5 min-h-[44px] rounded-2xl transition-all cursor-pointer shadow-lg shadow-emerald-500/15 active:scale-95 flex items-center gap-2 font-mono disabled:opacity-60"
                         >
@@ -4426,8 +4286,9 @@ export default function DevLogger() {
                           {isRunningPreventive ? 'Auditando Sistema Real...' : 'Varredura Preventiva Real'}
                         </button>
                         <button
+                          type="button"
                           onClick={() => setShowSimulationModal(true)}
-                          className="bg-gradient-to-r from-indigo-500/20 via-purple-500/20 to-emerald-500/20 hover:from-indigo-500/30 hover:to-emerald-500/30 text-indigo-200 border border-indigo-500/30 text-xs font-bold px-4 py-2.5 min-h-[44px] rounded-2xl transition-all cursor-pointer shadow-lg shadow-indigo-500/10 active:scale-95 flex items-center gap-2 font-mono"
+                          className="bg-gradient-to-r from-indigo-500/20 via-purple-500/20 to-emerald-500/20 hover:from-indigo-500/30 hover:to-emerald-500/30 text-indigo-200 border border-indigo-500/35 text-xs font-bold px-4 py-2.5 min-h-[44px] rounded-2xl transition-all cursor-pointer shadow-lg shadow-indigo-500/10 active:scale-95 flex items-center gap-2 font-mono"
                         >
                           <SlidersHorizontal size={14} className="text-indigo-400" /> Ações de Teste e Simulação
                         </button>
@@ -4442,44 +4303,42 @@ export default function DevLogger() {
                       const isNode = log.isServerNode || log.source?.toLowerCase().includes('server') || log.source?.toLowerCase().includes('node');
                       const isAction = log.requiresAction || log.severity === 'critical';
                       const isExpanded = !!expandedLogs[log.id];
+                      const hasExtra = !!(log.details || log.count > 1);
 
                       return (
                         <div 
                           key={log.id} 
-                          className={`p-4 rounded-2xl border transition-all duration-300 flex flex-col gap-2.5 shadow-xl backdrop-blur-xl ${
+                          className={`p-3.5 sm:p-4 rounded-2xl border transition-all duration-200 flex flex-col gap-2 shadow-lg backdrop-blur-xl ${
                             isAction
-                              ? 'bg-gradient-to-br from-rose-950/40 via-[#0e141a] to-[#121b22] border-l-4 border-l-rose-500 border-rose-500/40 text-rose-100 shadow-[0_8px_30px_rgba(244,63,94,0.18)] ring-1 ring-rose-500/20'
+                              ? 'bg-gradient-to-br from-rose-950/45 via-[#0e151c] to-[#121c24] border-l-4 border-l-rose-500 border-rose-500/45 text-rose-50 ring-1 ring-rose-500/20'
                               : isNode && isErr
-                                ? 'bg-gradient-to-br from-rose-950/30 via-[#0e141a] to-[#121b22] border-l-4 border-l-rose-500 border-rose-500/30 text-rose-100 shadow-[0_8px_30px_rgba(244,63,94,0.12)]'
+                                ? 'bg-gradient-to-br from-rose-950/30 via-[#0e151c] to-[#121c24] border-l-4 border-l-rose-500 border-rose-500/35 text-rose-50'
                                 : isErr 
-                                  ? 'bg-gradient-to-br from-rose-950/20 via-[#0e141a] to-[#121b22] border-l-4 border-l-rose-500 border-rose-500/30 text-rose-100 shadow-[0_8px_30px_rgba(244,63,94,0.1)]' 
+                                  ? 'bg-gradient-to-br from-rose-950/20 via-[#0e151c] to-[#121c24] border-l-4 border-l-rose-500 border-rose-500/30 text-rose-50' 
                                   : isWrn 
-                                    ? 'bg-gradient-to-br from-amber-950/20 via-[#0e141a] to-[#121b22] border-l-4 border-l-amber-400 border-amber-500/30 text-amber-100 shadow-[0_8px_30px_rgba(245,158,11,0.08)]' 
+                                    ? 'bg-gradient-to-br from-amber-950/20 via-[#0e151c] to-[#121c24] border-l-4 border-l-amber-400 border-amber-500/30 text-amber-50' 
                                     : isSucc 
-                                      ? 'bg-gradient-to-br from-emerald-950/20 via-[#0e141a] to-[#121b22] border-l-4 border-l-emerald-400 border-emerald-500/30 text-emerald-100 shadow-[0_8px_30px_rgba(16,185,129,0.08)]' 
+                                      ? 'bg-gradient-to-br from-emerald-950/20 via-[#0e151c] to-[#121c24] border-l-4 border-l-emerald-400 border-emerald-500/30 text-emerald-50' 
                                       : isInf 
-                                        ? 'bg-gradient-to-br from-blue-950/20 via-[#0e141a] to-[#121b22] border-l-4 border-l-blue-400 border-blue-500/30 text-blue-100 shadow-[0_8px_30px_rgba(59,130,246,0.08)]' 
-                                        : 'bg-[#10171d] border-white/10 text-[#d1d7db] hover:border-white/20'
+                                        ? 'bg-gradient-to-br from-blue-950/20 via-[#0e151c] to-[#121c24] border-l-4 border-l-blue-400 border-blue-500/30 text-blue-50' 
+                                        : 'bg-[#0f171e] border-white/10 text-[#e2e8f0] hover:border-white/20'
                           }`}
                         >
                           {/* Cabeçalho do Card */}
-                          <div className="flex justify-between items-center select-none gap-2 flex-wrap">
-                            <div className="flex items-center gap-1.5 font-mono text-[10px] font-black uppercase tracking-wider min-w-0 flex-wrap">
-                              
-                              {/* Tag de Origem Unificada */}
+                          <div className="flex justify-between items-start select-none gap-2 flex-wrap">
+                            <div className="flex items-center gap-1.5 font-mono text-[10px] font-black uppercase tracking-wider min-w-0 flex-wrap flex-1">
                               {isNode ? (
-                                <span className="flex items-center gap-1 bg-purple-500/20 border border-purple-500/40 text-purple-300 px-2.5 py-0.5 rounded-lg text-[9px] font-mono font-black shadow-sm">
+                                <span className="flex items-center gap-1 bg-purple-500/20 border border-purple-500/40 text-purple-200 px-2 py-0.5 rounded-lg text-[9px] font-mono font-black">
                                   🖥️ SERVIDOR NODE.JS
                                 </span>
                               ) : (
-                                <span className="flex items-center gap-1 bg-slate-500/20 border border-slate-500/30 text-slate-300 px-2 py-0.5 rounded-lg text-[9px] font-mono font-bold">
+                                <span className="flex items-center gap-1 bg-slate-500/20 border border-slate-500/35 text-slate-200 px-2 py-0.5 rounded-lg text-[9px] font-mono font-bold">
                                   {log.source || 'APP'}
                                 </span>
                               )}
 
-                              {/* Badge de Nível / Severidade */}
                               {isAction && (
-                                <span className="flex items-center gap-1 bg-rose-500/30 border border-rose-500/50 text-rose-200 px-2 py-0.5 rounded-lg text-[9px] font-black animate-pulse shadow-sm">
+                                <span className="flex items-center gap-1 bg-rose-500/30 border border-rose-400/60 text-rose-100 px-2 py-0.5 rounded-lg text-[9px] font-black animate-pulse">
                                   🚨 {log.severity === 'critical' ? 'CRÍTICO' : 'AÇÃO REQUERIDA'}
                                 </span>
                               )}
@@ -4487,10 +4346,10 @@ export default function DevLogger() {
                               {log.step && (
                                 <span className={`flex items-center gap-1 px-2 py-0.5 rounded-lg text-[9px] font-bold border ${
                                   log.step.status === 'timeout' || log.step.status === 'error'
-                                    ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                                    ? 'bg-rose-500/20 text-rose-200 border-rose-500/40'
                                     : log.step.status === 'success'
-                                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                                      : 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40'
+                                      ? 'bg-emerald-500/20 text-emerald-200 border-emerald-500/40'
+                                      : 'bg-cyan-500/20 text-cyan-200 border-cyan-500/40'
                                 }`}>
                                   📍 PASSO {log.step.current}/{log.step.total}
                                 </span>
@@ -4498,7 +4357,7 @@ export default function DevLogger() {
 
                               {isErr && !isAction && (
                                 <span className="flex items-center gap-1 bg-rose-500/20 border border-rose-500/40 text-rose-300 px-2 py-0.5 rounded-lg text-[9px] font-bold">
-                                  <AlertTriangle size={11} className="text-rose-400 animate-pulse shrink-0" /> ERRO
+                                  <AlertTriangle size={11} className="text-rose-400 shrink-0" /> ERRO
                                 </span>
                               )}
                               {isWrn && !isAction && (
@@ -4517,9 +4376,8 @@ export default function DevLogger() {
                                 </span>
                               )}
 
-                              {/* Chips de Correlação Tenant / Instância */}
                               {log.tenantId && (
-                                <span className="text-[9px] bg-white/5 border border-white/10 text-[#8696a0] px-1.5 py-0.5 rounded font-mono" title={`Tenant ID: ${log.tenantId}`}>
+                                <span className="text-[9px] bg-white/5 border border-white/10 text-[#94a3b8] px-1.5 py-0.5 rounded font-mono" title={`Tenant ID: ${log.tenantId}`}>
                                   🏢 {log.tenantId.substring(0, 8)}...
                                 </span>
                               )}
@@ -4529,42 +4387,78 @@ export default function DevLogger() {
                                 </span>
                               )}
 
-                              {/* PILULA DE CONTAGEM / AGRUPAMENTO */}
                               {log.count > 1 && (
-                                <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black bg-gradient-to-r from-amber-500/25 to-orange-500/25 text-amber-200 border border-amber-400/50 shrink-0 animate-pulse shadow-sm shadow-amber-500/20 font-mono">
-                                  {log.count}x Ocorrências
+                                <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-gradient-to-r from-amber-500/25 to-orange-500/25 text-amber-200 border border-amber-400/50 shrink-0 font-mono">
+                                  {log.count}x
                                 </span>
                               )}
                             </div>
 
-                            <div className="flex items-center gap-2">
-                              <span className="text-[10px] font-bold text-[#8696a0] shrink-0 font-mono bg-white/5 px-2 py-0.5 rounded-md border border-white/5">
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span className="text-[10px] font-bold text-[#94a3b8] font-mono bg-white/5 px-2 py-1 rounded-lg border border-white/10">
                                 {new Date(log.latestTimestamp).toLocaleTimeString('pt-BR', { hour12: false })}
                               </span>
-                              <button
-                                onClick={() => toggleExpandLog(log.id)}
-                                className="text-[#8696a0] hover:text-white p-1 rounded-lg hover:bg-white/10 transition-colors cursor-pointer active:scale-95"
-                                title={isExpanded ? "Recolher detalhes" : "Expandir detalhes"}
-                              >
-                                {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                              </button>
+                              {hasExtra && (
+                                <button
+                                  type="button"
+                                  onClick={() => toggleExpandLog(log.id)}
+                                  className="min-w-[34px] min-h-[34px] flex items-center justify-center text-[#94a3b8] hover:text-white rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 transition-all cursor-pointer active:scale-95"
+                                  title={isExpanded ? 'Recolher payload e ocorrências' : 'Expandir payload JSON e ocorrências'}
+                                >
+                                  {isExpanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+                                </button>
+                              )}
                             </div>
                           </div>
 
-                          {/* Mensagem do Log (Tipografia Nítida & Quebra de Palavras Sem Hifenização Quebrada) */}
-                          <p className="break-words whitespace-pre-wrap leading-relaxed font-semibold font-mono text-xs text-[#e6edf3]">
+                          {/* Mensagem Principal com Alto Contraste */}
+                          <p className="break-words whitespace-pre-wrap leading-relaxed font-semibold font-mono text-xs text-[#f8fafc] select-text">
                             {log.message}
                           </p>
 
-                          {/* Detalhes Expandidos (Histórico de ocorrências e JSON payload) */}
-                          {(isExpanded || log.details) && (
-                            <div className="flex flex-col gap-2 mt-1 animate-in fade-in duration-200">
+                          {/* Atalho Discreto Quando Recolhido com Payload */}
+                          {!isExpanded && hasExtra && (
+                            <div className="flex items-center justify-between gap-2 pt-1 border-t border-white/5 flex-wrap">
+                              <button
+                                type="button"
+                                onClick={() => toggleExpandLog(log.id)}
+                                className="min-h-[30px] px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-[10px] font-bold text-cyan-300 flex items-center gap-1.5 cursor-pointer active:scale-95"
+                              >
+                                <FileCode size={11} />
+                                <span>
+                                  {log.details && log.count > 1
+                                    ? `Inspecionar JSON & ${log.count} ocorrências`
+                                    : log.details
+                                      ? 'Inspecionar Payload JSON'
+                                      : `Ver ${log.count} ocorrências agrupadas`}
+                                </span>
+                              </button>
+                              {log.details && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const text = typeof log.details === 'object' ? JSON.stringify(log.details, null, 2) : String(log.details);
+                                    navigator.clipboard.writeText(text);
+                                    showToastFeedback('JSON Copiado!');
+                                  }}
+                                  className="min-h-[30px] px-2.5 py-1 rounded-lg bg-white/5 hover:bg-emerald-500/20 border border-white/10 hover:border-emerald-500/40 text-[10px] font-bold text-[#94a3b8] hover:text-emerald-200 flex items-center gap-1 cursor-pointer active:scale-95"
+                                >
+                                  <Copy size={11} /> <span>Copiar JSON</span>
+                                </button>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Detalhes Expandidos (somente quando isExpanded = true) */}
+                          {isExpanded && hasExtra && (
+                            <div className="flex flex-col gap-2 mt-1 animate-in fade-in duration-200 pt-2 border-t border-white/10">
                               {log.count > 1 && (
-                                <div className="p-2.5 bg-[#060b0f] border border-white/10 rounded-xl text-[10px] text-amber-300 font-mono flex items-center justify-between flex-wrap gap-2">
+                                <div className="p-2.5 bg-[#060b0f] border border-white/10 rounded-xl text-[10px] text-amber-200 font-mono flex items-center justify-between flex-wrap gap-2">
                                   <span>
-                                    ⏱️ <strong>Primeira ocorrência:</strong> {new Date(log.firstTimestamp).toLocaleTimeString('pt-BR')} &bull; <strong>Última:</strong> {new Date(log.latestTimestamp).toLocaleTimeString('pt-BR')}
+                                    ⏱️ <strong>Primeira:</strong> {new Date(log.firstTimestamp).toLocaleTimeString('pt-BR')} &bull; <strong>Última:</strong> {new Date(log.latestTimestamp).toLocaleTimeString('pt-BR')}
                                   </span>
-                                  <span className="text-[9px] text-[#8696a0] uppercase font-bold bg-white/5 px-2 py-0.5 rounded-md">
+                                  <span className="text-[9px] text-[#94a3b8] uppercase font-bold bg-white/5 px-2 py-0.5 rounded-md">
                                     Agrupado ({log.count} repetições)
                                   </span>
                                 </div>
@@ -4572,18 +4466,18 @@ export default function DevLogger() {
 
                               {log.details && (
                                 <div className="relative group/code">
-                                  <pre className="p-3.5 bg-[#03070b] border border-white/10 rounded-xl text-[10px] text-cyan-300 overflow-x-auto max-h-[180px] custom-scrollbar font-mono leading-relaxed select-all shadow-inner pr-16">
+                                  <pre className="p-3.5 bg-[#03070b] border border-white/10 rounded-xl text-[10px] text-cyan-300 overflow-x-auto max-h-[220px] custom-scrollbar font-mono leading-relaxed select-all shadow-inner pr-20">
                                     {typeof log.details === 'object' ? JSON.stringify(log.details, null, 2) : String(log.details)}
                                   </pre>
                                   <button
+                                    type="button"
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       const text = typeof log.details === 'object' ? JSON.stringify(log.details, null, 2) : String(log.details);
                                       navigator.clipboard.writeText(text);
-                                      setCopyFeedback('JSON Copiado!');
-                                      setTimeout(() => setCopyFeedback(null), 2500);
+                                      showToastFeedback('JSON Copiado!');
                                     }}
-                                    className="absolute top-2 right-2 opacity-80 group-hover/code:opacity-100 bg-[#0f171e] hover:bg-emerald-500 hover:text-black text-[#8696a0] border border-white/10 px-2.5 py-1 rounded-lg text-[9px] font-bold font-mono transition-all flex items-center gap-1 shadow-md active:scale-95 cursor-pointer"
+                                    className="absolute top-2.5 right-2.5 bg-[#0f171e]/95 hover:bg-emerald-500 hover:text-slate-950 text-[#cbd5e1] border border-white/15 px-2.5 py-1.5 rounded-lg text-[10px] font-bold font-mono transition-all flex items-center gap-1 shadow-md active:scale-95 cursor-pointer"
                                     title="Copiar JSON Payload para a área de transferência"
                                   >
                                     <Copy size={11} /> <span>Copiar</span>
@@ -4605,445 +4499,306 @@ export default function DevLogger() {
       </div>
 
       {/* Modal Interativo de Entrada Multimídia & Confirmação de IA */}
-      {showAiMediaPromptModal && (
-        <div className="fixed inset-0 z-[100000] flex items-center justify-center p-3 sm:p-6 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
-          <div className="bg-[#0a1015] border border-purple-500/30 rounded-3xl shadow-[0_25px_80px_rgba(0,0,0,0.95)] w-full max-w-2xl max-h-[92vh] flex flex-col overflow-hidden text-[#d1d7db] font-mono relative animate-in zoom-in-95 duration-200">
-            
-            {/* Brilhos de Fundo */}
-            <div className="absolute -top-20 -right-20 w-64 h-64 bg-purple-500/15 rounded-full blur-3xl pointer-events-none" />
-            <div className="absolute -bottom-20 -left-20 w-64 h-64 bg-indigo-500/15 rounded-full blur-3xl pointer-events-none" />
-
-            {/* Header do Modal */}
-            <div className="p-4 sm:p-5 border-b border-white/10 flex items-center justify-between gap-3 bg-gradient-to-r from-purple-500/15 via-indigo-500/10 to-transparent relative z-10">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-purple-600 via-indigo-500 to-pink-500 flex items-center justify-center text-white shadow-lg shadow-purple-500/30 shrink-0">
-                  <Sparkles size={20} className="animate-pulse text-amber-300" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-sm sm:text-base font-black text-white tracking-tight">Criar Card CRM com I.A</h3>
-                    <span className="text-[9px] bg-purple-500/20 text-purple-300 border border-purple-500/40 px-2 py-0.5 rounded-full font-bold uppercase">
-                      Gemini Vision
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-purple-300/80 font-medium">
-                    Diagnóstico multimodal &bull; Destino: <strong className="text-emerald-400">Em Análise</strong>
-                  </p>
-                </div>
-              </div>
-
-              <button
-                onClick={() => {
-                  stopAudioRecording();
-                  setShowAiMediaPromptModal(false);
-                }}
-                className="text-[#8696a0] hover:text-white bg-white/5 hover:bg-white/10 p-2 rounded-xl transition-all cursor-pointer"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            {/* Seletor de Modo (Abas) */}
-            <div className="px-4 sm:px-6 pt-4 pb-1 border-b border-white/5 bg-[#0e161c]/60 flex items-center gap-2 relative z-10">
-              <button
-                onClick={() => setAiPromptTab('enriched')}
-                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer border ${
-                  aiPromptTab === 'enriched'
-                    ? 'bg-purple-500/20 border-purple-500/50 text-purple-200 shadow-sm'
-                    : 'bg-transparent border-transparent text-[#8696a0] hover:text-white hover:bg-white/5'
-                }`}
-              >
-                <Paperclip size={13} />
-                <span>📎 Adicionar Observações & Mídia</span>
-                {(attachedImagesList.length > 0 || attachedAudioItem || userPromptNotes.trim().length > 0) && (
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                )}
-              </button>
-
-              <button
-                onClick={() => setAiPromptTab('quick')}
-                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer border ${
-                  aiPromptTab === 'quick'
-                    ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-200 shadow-sm'
-                    : 'bg-transparent border-transparent text-[#8696a0] hover:text-white hover:bg-white/5'
-                }`}
-              >
-                <Zap size={13} className="text-amber-300" />
-                <span>⚡ Análise Rápida de Logs</span>
-              </button>
-            </div>
-
-            {/* Corpo do Modal (Scrollável) */}
-            <div className="p-4 sm:p-6 overflow-y-auto custom-scrollbar flex-1 space-y-4 text-xs relative z-10">
-              
-              {aiPromptTab === 'quick' ? (
-                /* Modo Rápido */
-                <div className="bg-[#101820] border border-white/10 rounded-2xl p-5 space-y-4 text-center">
-                  <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-300 mx-auto">
-                    <Zap size={28} className="text-amber-300 animate-pulse" />
-                  </div>
-                  <div className="space-y-1.5 max-w-md mx-auto">
-                    <h4 className="text-sm font-bold text-white">Análise Automática e Imediata</h4>
-                    <p className="text-xs text-[#8696a0] leading-relaxed">
-                      A Inteligência Artificial irá capturar o print do DevLogger, correlacionar os logs do Console, Servidor Node.js, Gastrofood e formular um plano técnico completo pronto na coluna <strong className="text-emerald-400">Em Análise</strong>.
-                    </p>
-                  </div>
-
-                  <div className="bg-[#070c10] border border-white/5 rounded-xl p-3.5 text-left space-y-2 text-[11px] text-slate-300 font-mono">
-                    <div className="flex items-center gap-2 text-emerald-400 font-bold">
-                      <CheckCircle2 size={13} /> 📸 Captura de screenshot automática
-                    </div>
-                    <div className="flex items-center gap-2 text-emerald-400 font-bold">
-                      <CheckCircle2 size={13} /> 🖥️ Extração de {logs.length} logs e erros do servidor
-                    </div>
-                    <div className="flex items-center gap-2 text-emerald-400 font-bold">
-                      <CheckCircle2 size={13} /> 🎯 Direcionamento fixo para o quadro ChatBot CRM
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                /* Modo Enriquecido com Mídia e Observações */
-                <div className="space-y-4">
-                  
-                  {/* Textarea de Observações do Desenvolvedor */}
-                  <div className="bg-[#101820] border border-white/10 rounded-2xl p-3.5 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] text-[#8696a0] uppercase font-bold tracking-wider flex items-center gap-1.5">
-                        <FileCode size={12} className="text-purple-400" /> Observações e Contexto do Desenvolvedor
-                      </span>
-                      <span className="text-[9px] text-[#8696a0]">
-                        {userPromptNotes.length} caracteres
-                      </span>
-                    </div>
-                    <textarea
-                      value={userPromptNotes}
-                      onChange={(e) => setUserPromptNotes(e.target.value)}
-                      placeholder="Ex: 'Ao testar o fluxo de envio para a caixa FoodNext, o botão ficou em loop. O comportamento esperado era abrir o QR Code...'"
-                      rows={3}
-                      className="w-full bg-[#070c10] border border-white/10 rounded-xl p-3 text-xs text-slate-200 placeholder-[#8696a0]/60 focus:outline-none focus:border-purple-500/50 resize-none font-sans"
-                    />
-                  </div>
-
-                  {/* Seção de Anexo de Imagens */}
-                  <div className="bg-[#101820] border border-white/10 rounded-2xl p-3.5 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] text-[#8696a0] uppercase font-bold tracking-wider flex items-center gap-1.5">
-                        <ImageIcon size={12} className="text-cyan-400" /> Imagens & Prints Adicionais ({attachedImagesList.length})
-                      </span>
-                      
-                      <label className="bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-300 px-2.5 py-1 rounded-lg text-[10px] font-bold cursor-pointer transition-all flex items-center gap-1">
-                        <Plus size={12} /> Adicionar Print
-                        <input
-                          type="file"
-                          accept="image/*"
-                          multiple
-                          onChange={(e) => handleImageFilesSelected(e.target.files)}
-                          className="hidden"
-                        />
-                      </label>
-                    </div>
-
-                    {attachedImagesList.length === 0 ? (
-                      <label className="border border-dashed border-white/15 hover:border-cyan-500/40 rounded-xl p-4 flex flex-col items-center justify-center text-center cursor-pointer transition-all bg-[#070c10]/50 hover:bg-[#070c10]">
-                        <UploadCloud size={22} className="text-cyan-400/70 mb-1" />
-                        <span className="text-[11px] text-slate-300 font-medium">Clique para selecionar imagens ou arraste prints aqui</span>
-                        <span className="text-[9px] text-[#8696a0]">Formatos PNG, JPG, JPEG, WebP</span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          multiple
-                          onChange={(e) => handleImageFilesSelected(e.target.files)}
-                          className="hidden"
-                        />
-                      </label>
-                    ) : (
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-                        {attachedImagesList.map((img) => (
-                          <div key={img.id} className="relative group/img bg-[#070c10] border border-white/10 rounded-xl overflow-hidden p-1.5">
-                            <img src={img.dataUrl} alt={img.name} className="w-full h-20 object-cover rounded-lg" />
-                            <div className="mt-1 flex items-center justify-between text-[9px] text-[#8696a0] px-1 truncate">
-                              <span className="truncate max-w-[100px]">{img.name}</span>
-                              <button
-                                onClick={() => removeImageItem(img.id)}
-                                className="text-rose-400 hover:text-rose-300 p-0.5"
-                                title="Remover imagem"
-                              >
-                                <Trash2 size={11} />
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Seção de Áudio e Voz */}
-                  <div className="bg-[#101820] border border-white/10 rounded-2xl p-3.5 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] text-[#8696a0] uppercase font-bold tracking-wider flex items-center gap-1.5">
-                        <Volume2 size={12} className="text-emerald-400" /> Instrução por Áudio / Microfone
-                      </span>
-                    </div>
-
-                    {isRecordingAudio ? (
-                      /* Estado de Gravação Ativa */
-                      <div className="bg-rose-950/30 border border-rose-500/40 rounded-xl p-3 flex items-center justify-between gap-3 animate-pulse">
-                        <div className="flex items-center gap-2 text-rose-300 text-xs font-bold">
-                          <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping" />
-                          <span>Gravando áudio... 00:{recordingSeconds < 10 ? `0${recordingSeconds}` : recordingSeconds}</span>
-                        </div>
-                        <button
-                          onClick={stopAudioRecording}
-                          className="bg-rose-600 hover:bg-rose-500 text-white font-bold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 cursor-pointer shadow-lg active:scale-95"
-                        >
-                          <Square size={12} /> Parar Gravação
-                        </button>
-                      </div>
-                    ) : attachedAudioItem ? (
-                      /* Áudio Gravado ou Anexado */
-                      <div className="bg-[#070c10] border border-emerald-500/30 rounded-xl p-3 flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-300 flex items-center justify-center shrink-0">
-                            <Volume2 size={16} />
-                          </div>
-                          <div className="truncate">
-                            <span className="text-xs font-bold text-white block truncate">{attachedAudioItem.name}</span>
-                            <audio src={attachedAudioItem.url} controls className="h-7 w-48 mt-1" />
-                          </div>
-                        </div>
-                        <button
-                          onClick={removeAudioItem}
-                          className="text-rose-400 hover:text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 p-2 rounded-lg transition-all cursor-pointer"
-                          title="Remover áudio"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    ) : (
-                      /* Botões de Iniciar Gravação ou Upload de Arquivo */
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={startAudioRecording}
-                          className="flex-1 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95"
-                        >
-                          <Mic size={14} className="text-emerald-400" />
-                          <span>Gravar Áudio pelo Microfone</span>
-                        </button>
-
-                        <label className="bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer">
-                          <Paperclip size={13} />
-                          <span>Arquivo de Áudio</span>
-                          <input
-                            type="file"
-                            accept="audio/*"
-                            onChange={(e) => handleAudioFileSelected(e.target.files)}
-                            className="hidden"
-                          />
-                        </label>
-                      </div>
-                    )}
-                  </div>
-
-                </div>
+      <DevLoggerModalShell
+        isOpen={showAiMediaPromptModal}
+        onClose={() => {
+          stopAudioRecording();
+          setShowAiMediaPromptModal(false);
+        }}
+        title="Criar Card CRM com I.A"
+        badge="Gemini Vision"
+        subtitle={<>Diagnóstico multimodal &bull; Destino: <strong className="text-emerald-400">Em Análise</strong></>}
+        icon={<Sparkles size={20} className="animate-pulse text-amber-300" />}
+        accent="purple"
+        headerExtra={
+          <div className="grid grid-cols-2 sm:inline-flex items-center gap-1.5 bg-[#060a0e] p-1 rounded-2xl border border-white/10 w-full sm:w-auto">
+            <button
+              type="button"
+              onClick={() => setAiPromptTab('enriched')}
+              className={`min-h-[40px] px-3 py-1.5 rounded-xl text-[11px] font-bold font-mono transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 ${
+                aiPromptTab === 'enriched'
+                  ? 'bg-purple-500/25 border border-purple-400/50 text-purple-100 shadow-sm'
+                  : 'text-[#94a3b8] hover:text-white hover:bg-white/5 border border-transparent'
+              }`}
+            >
+              <Paperclip size={13} className="shrink-0" />
+              <span className="truncate">Observações & Mídia</span>
+              {(attachedImagesList.length > 0 || attachedAudioItem || userPromptNotes.trim().length > 0) && (
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
               )}
+            </button>
 
-            </div>
-
-            {/* Footer do Modal */}
-            <div className="p-4 sm:p-5 border-t border-white/10 bg-[#070c10] flex items-center justify-between gap-3 relative z-10 flex-wrap">
-              <button
-                onClick={() => {
-                  stopAudioRecording();
-                  setShowAiMediaPromptModal(false);
-                }}
-                className="bg-white/5 hover:bg-white/10 text-[#8696a0] hover:text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer"
-              >
-                Cancelar
-              </button>
-
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => handleAnalyzeLogsAndCreateKanbanCard()}
-                  disabled={isAnalyzingAiLogs}
-                  className="bg-white/5 hover:bg-white/10 border border-white/15 text-[#d1d7db] hover:text-white px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 active:scale-95 cursor-pointer"
-                  title="Executar análise padrão com logs e captura de tela sem observações adicionais"
-                >
-                  <Zap size={13} className="text-amber-300" /> Analisar Diretamente
-                </button>
-
-                <button
-                  onClick={() => handleAnalyzeLogsAndCreateKanbanCard({
-                    userNotes: userPromptNotes,
-                    images: attachedImagesList,
-                    audio: attachedAudioItem
-                  })}
-                  disabled={isAnalyzingAiLogs}
-                  className="bg-gradient-to-r from-purple-600 via-indigo-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-black px-5 py-2.5 rounded-xl text-xs transition-all flex items-center gap-2 shadow-lg shadow-purple-600/30 active:scale-95 cursor-pointer"
-                >
-                  {isAnalyzingAiLogs ? (
-                    <Loader2 size={14} className="animate-spin text-white" />
-                  ) : (
-                    <Sparkles size={14} className="text-amber-300 animate-pulse" />
-                  )}
-                  <span>{isAnalyzingAiLogs ? 'Processando...' : '🚀 Analisar c/ IA & Criar Card'}</span>
-                </button>
-              </div>
-            </div>
-
+            <button
+              type="button"
+              onClick={() => setAiPromptTab('quick')}
+              className={`min-h-[40px] px-3 py-1.5 rounded-xl text-[11px] font-bold font-mono transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 ${
+                aiPromptTab === 'quick'
+                  ? 'bg-indigo-500/25 border border-indigo-400/50 text-indigo-100 shadow-sm'
+                  : 'text-[#94a3b8] hover:text-white hover:bg-white/5 border border-transparent'
+              }`}
+            >
+              <Zap size={13} className="text-amber-300 shrink-0" />
+              <span className="truncate">Análise Rápida</span>
+            </button>
           </div>
-        </div>
-      )}
+        }
+        footer={
+          <div className="flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-2.5 w-full">
+            <button
+              type="button"
+              onClick={() => {
+                stopAudioRecording();
+                setShowAiMediaPromptModal(false);
+              }}
+              className="min-h-[44px] bg-white/5 hover:bg-white/10 border border-white/10 text-[#94a3b8] hover:text-white px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer active:scale-95"
+            >
+              Cancelar
+            </button>
 
-      {/* Modal de Card Gerado por I.A & Publicado no CRM Kanban */}
-      {showAiCardModal && generatedAiCard && (
-        <div className="fixed inset-0 z-[100000] flex items-center justify-center p-3 sm:p-6 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
-          <div className="bg-[#0a1015] border border-purple-500/30 rounded-3xl shadow-[0_25px_80px_rgba(0,0,0,0.95)] w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden text-[#d1d7db] font-mono relative animate-in zoom-in-95 duration-200">
-            
-            {/* Brilho de Fundo */}
-            <div className="absolute -top-20 -right-20 w-64 h-64 bg-purple-500/15 rounded-full blur-3xl pointer-events-none" />
-            <div className="absolute -bottom-20 -left-20 w-64 h-64 bg-indigo-500/15 rounded-full blur-3xl pointer-events-none" />
-
-            {/* Header do Modal */}
-            <div className="p-4 sm:p-5 border-b border-white/10 flex items-center justify-between gap-3 bg-gradient-to-r from-purple-500/15 via-indigo-500/10 to-transparent relative z-10">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-purple-600 via-indigo-500 to-pink-500 flex items-center justify-center text-white shadow-lg shadow-purple-500/30 shrink-0">
-                  <Sparkles size={20} className="animate-pulse" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-sm sm:text-base font-black text-white tracking-tight">Card de Correção Criado no CRM</h3>
-                    <span className="text-[9px] bg-purple-500/20 text-purple-300 border border-purple-500/40 px-2 py-0.5 rounded-full font-bold uppercase">
-                      Gemini 2.0 Flash
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-purple-300/80 font-medium">
-                    Quadro: <strong className="text-white">{createdCardBoardName}</strong> &bull; Coluna: <strong className="text-emerald-400">Em Análise</strong>
-                  </p>
-                </div>
-              </div>
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+              <button
+                type="button"
+                onClick={() => handleAnalyzeLogsAndCreateKanbanCard()}
+                disabled={isAnalyzingAiLogs}
+                className="min-h-[44px] bg-white/5 hover:bg-white/10 border border-white/15 text-[#e2e8f0] hover:text-white px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer disabled:opacity-50"
+                title="Executar análise padrão com logs e captura de tela sem observações adicionais"
+              >
+                <Zap size={14} className="text-amber-300" /> Analisar Diretamente
+              </button>
 
               <button
-                onClick={() => setShowAiCardModal(false)}
-                className="text-[#8696a0] hover:text-white p-1.5 rounded-xl hover:bg-white/10 transition-colors"
-                title="Fechar"
+                type="button"
+                onClick={() => handleAnalyzeLogsAndCreateKanbanCard({
+                  userNotes: userPromptNotes,
+                  images: attachedImagesList,
+                  audio: attachedAudioItem
+                })}
+                disabled={isAnalyzingAiLogs}
+                className="min-h-[44px] bg-gradient-to-r from-purple-600 via-indigo-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-black px-5 py-2 rounded-xl text-xs transition-all flex items-center justify-center gap-2 shadow-lg shadow-purple-600/30 active:scale-95 cursor-pointer disabled:opacity-50"
               >
-                <X size={18} />
+                {isAnalyzingAiLogs ? (
+                  <Loader2 size={14} className="animate-spin text-white" />
+                ) : (
+                  <Sparkles size={14} className="text-amber-300 animate-pulse" />
+                )}
+                <span>{isAnalyzingAiLogs ? 'Processando...' : 'Analisar c/ IA & Criar Card'}</span>
               </button>
             </div>
-
-            {/* Corpo do Modal (Scrollável) */}
-            <div className="p-4 sm:p-6 overflow-y-auto custom-scrollbar flex-1 space-y-4 text-xs relative z-10">
-              
-              {/* Título do Card */}
-              <div className="bg-[#101820] border border-white/10 rounded-2xl p-3.5 space-y-2">
-                <span className="text-[10px] text-[#8696a0] uppercase font-bold tracking-wider block">Título do Card</span>
-                <h4 className="text-sm sm:text-base font-bold text-white leading-snug">{generatedAiCard.title}</h4>
-                
-                {/* Metadados: Categoria, Prioridade, Tags */}
-                <div className="flex items-center gap-2 flex-wrap pt-1">
-                  <span className="bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 px-2.5 py-0.5 rounded-lg text-[10px] font-bold">
-                    {generatedAiCard.category || 'Correção'}
-                  </span>
-                  
-                  <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-bold border ${
-                    generatedAiCard.priority === 3 
-                      ? 'bg-rose-500/20 text-rose-300 border-rose-500/40' 
-                      : generatedAiCard.priority === 2 
-                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' 
-                      : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                  }`}>
-                    Prioridade: {generatedAiCard.priority === 3 ? 'Alta / Crítica' : generatedAiCard.priority === 2 ? 'Média' : 'Baixa'}
-                  </span>
-
-                  {(generatedAiCard.tags || []).map((tag: string, idx: number) => (
-                    <span key={idx} className="bg-white/5 text-[#d1d7db] border border-white/10 px-2 py-0.5 rounded-lg text-[9px] font-bold">
-                      #{tag}
-                    </span>
-                  ))}
-                </div>
+          </div>
+        }
+      >
+        <div className="space-y-4 font-mono text-xs">
+          {aiPromptTab === 'quick' ? (
+            <div className="bg-[#0e161d] border border-white/10 rounded-2xl p-5 space-y-4 text-center">
+              <div className="w-14 h-14 rounded-2xl bg-indigo-500/15 border border-indigo-400/35 flex items-center justify-center text-indigo-300 mx-auto">
+                <Zap size={28} className="text-amber-300 animate-pulse" />
               </div>
-
-              {/* Estatísticas dos Logs Analisados */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
-                <div className="bg-[#101820] border border-white/10 rounded-xl p-2.5">
-                  <span className="text-[9px] text-[#8696a0] uppercase block">Console / Logs</span>
-                  <span className="text-xs font-black text-white">{generatedAiCard.analyzed_count?.console || 0} analisados</span>
-                </div>
-                <div className="bg-[#101820] border border-white/10 rounded-xl p-2.5">
-                  <span className="text-[9px] text-[#8696a0] uppercase block">Servidor Node</span>
-                  <span className="text-xs font-black text-purple-300">{generatedAiCard.analyzed_count?.server || 0} erros</span>
-                </div>
-                <div className="bg-[#101820] border border-white/10 rounded-xl p-2.5">
-                  <span className="text-[9px] text-[#8696a0] uppercase block">Gastrofood API</span>
-                  <span className="text-xs font-black text-amber-300">{generatedAiCard.analyzed_count?.gastrofood || 0} logs</span>
-                </div>
-                <div className="bg-[#101820] border border-white/10 rounded-xl p-2.5">
-                  <span className="text-[9px] text-[#8696a0] uppercase block">Auditoria ASTS</span>
-                  <span className="text-xs font-black text-emerald-300">{generatedAiCard.analyzed_count?.asts || 0} itens</span>
-                </div>
-              </div>
-
-              {/* Resumo Executivo */}
-              <div className="bg-gradient-to-r from-purple-950/30 via-[#121c24] to-[#101820] border border-purple-500/30 rounded-2xl p-4 space-y-1.5">
-                <div className="flex items-center gap-1.5 text-purple-300 font-bold text-[11px]">
-                  <BrainCircuit size={14} /> Resumo Diagnóstico da I.A
-                </div>
-                <p className="text-xs text-purple-100/90 leading-relaxed">
-                  {generatedAiCard.summary}
+              <div className="space-y-1.5 max-w-md mx-auto">
+                <h4 className="text-sm font-black text-white">Análise Automática e Imediata</h4>
+                <p className="text-xs text-[#94a3b8] leading-relaxed font-sans">
+                  A Inteligência Artificial irá capturar o print do DevLogger, correlacionar os logs do Console, Servidor Node.js, Gastrofood e formular um plano técnico completo pronto na coluna <strong className="text-emerald-400">Em Análise</strong>.
                 </p>
               </div>
 
-              {/* Dica de Governança da Esteira Fila Dev */}
-              <div className="bg-blue-950/30 border border-blue-500/30 rounded-2xl p-3.5 flex items-start gap-2.5">
-                <span className="text-base leading-none">💡</span>
-                <div className="text-xs text-blue-200/90 leading-relaxed">
-                  <strong className="text-blue-300 block mb-0.5">Fluxo da Esteira Fila Dev:</strong>
-                  O comando <code className="bg-blue-900/60 px-1.5 py-0.5 rounded text-blue-200 font-mono font-bold">Fila dev</code> executa autonomamente os cards que estiverem na coluna <span className="text-emerald-400 font-bold">"Em Desenvolvimento"</span>. Você pode mover este card agora mesmo pelo botão abaixo para iniciar a execução imediata.
+              <div className="bg-[#070c10] border border-white/10 rounded-xl p-3.5 text-left space-y-2 text-[11px] text-slate-200">
+                <div className="flex items-center gap-2 text-emerald-300 font-bold">
+                  <CheckCircle2 size={14} className="shrink-0" /> Captura de screenshot automática
                 </div>
-              </div>
-
-              {/* Plano Técnico Estruturado em Markdown */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-[#8696a0] text-[10px] uppercase font-bold">
-                  <span className="flex items-center gap-1"><FileCode size={13} /> Plano Técnico & Arquivos a Modificar</span>
-                  <span>Markdown</span>
+                <div className="flex items-center gap-2 text-emerald-300 font-bold">
+                  <CheckCircle2 size={14} className="shrink-0" /> Extração de {logs.length} logs e erros do servidor
                 </div>
-                <pre className="p-4 bg-[#050a0e] border border-white/10 rounded-2xl text-[11px] text-cyan-200 overflow-x-auto max-h-[260px] custom-scrollbar font-mono leading-relaxed whitespace-pre-wrap select-all shadow-inner">
-                  {generatedAiCard.technical_plan}
-                </pre>
+                <div className="flex items-center gap-2 text-emerald-300 font-bold">
+                  <CheckCircle2 size={14} className="shrink-0" /> Direcionamento fixo para o quadro ChatBot CRM
+                </div>
               </div>
             </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Observações do Desenvolvedor */}
+              <div className="bg-[#0e161d] border border-white/10 rounded-2xl p-3.5 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-[#94a3b8] uppercase font-bold tracking-wider flex items-center gap-1.5">
+                    <FileCode size={12} className="text-purple-400" /> Observações e Contexto do Desenvolvedor
+                  </span>
+                  <span className="text-[10px] text-[#94a3b8]">
+                    {userPromptNotes.length} caracteres
+                  </span>
+                </div>
+                <textarea
+                  value={userPromptNotes}
+                  onChange={(e) => setUserPromptNotes(e.target.value)}
+                  placeholder="Ex: 'Ao testar o fluxo de envio para a caixa FoodNext, o botão ficou em loop. O comportamento esperado era abrir o QR Code...'"
+                  rows={3}
+                  className="w-full bg-[#070c10] border border-white/10 rounded-xl p-3 text-xs text-slate-100 placeholder-[#64748b] focus:outline-none focus:border-purple-500/60 resize-none font-sans"
+                />
+              </div>
 
-            {/* Footer com Ações */}
-            <div className="p-4 sm:p-5 border-t border-white/10 bg-[#070c10] flex items-center justify-between gap-3 relative z-10 flex-wrap">
-              <div className="flex items-center gap-2">
+              {/* Anexo de Imagens */}
+              <div className="bg-[#0e161d] border border-white/10 rounded-2xl p-3.5 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] text-[#94a3b8] uppercase font-bold tracking-wider flex items-center gap-1.5">
+                    <ImageIcon size={12} className="text-cyan-400" /> Imagens & Prints ({attachedImagesList.length})
+                  </span>
+
+                  <label className="min-h-[34px] bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/35 text-cyan-200 px-3 py-1 rounded-xl text-[10px] font-bold cursor-pointer transition-all flex items-center gap-1 active:scale-95">
+                    <Plus size={12} /> Adicionar Print
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      onChange={(e) => handleImageFilesSelected(e.target.files)}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+
+                {attachedImagesList.length === 0 ? (
+                  <label className="border border-dashed border-white/15 hover:border-cyan-400/50 rounded-xl p-5 flex flex-col items-center justify-center text-center cursor-pointer transition-all bg-[#070c10]/60 hover:bg-[#070c10]">
+                    <UploadCloud size={24} className="text-cyan-400/80 mb-1.5" />
+                    <span className="text-xs text-slate-200 font-bold font-sans">Toque para selecionar imagens ou arraste prints</span>
+                    <span className="text-[10px] text-[#94a3b8] mt-0.5">PNG, JPG, JPEG, WebP</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      onChange={(e) => handleImageFilesSelected(e.target.files)}
+                      className="hidden"
+                    />
+                  </label>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                    {attachedImagesList.map((img) => (
+                      <div key={img.id} className="relative bg-[#070c10] border border-white/10 rounded-xl overflow-hidden p-1.5">
+                        <img src={img.dataUrl} alt={img.name} className="w-full h-24 object-cover rounded-lg" />
+                        <div className="mt-1.5 flex items-center justify-between text-[10px] text-[#94a3b8] px-1 gap-1">
+                          <span className="truncate">{img.name}</span>
+                          <button
+                            type="button"
+                            onClick={() => removeImageItem(img.id)}
+                            className="min-w-[28px] min-h-[28px] flex items-center justify-center rounded-lg bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 cursor-pointer shrink-0"
+                            title="Remover imagem"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Áudio e Voz */}
+              <div className="bg-[#0e161d] border border-white/10 rounded-2xl p-3.5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-[#94a3b8] uppercase font-bold tracking-wider flex items-center gap-1.5">
+                    <Volume2 size={12} className="text-emerald-400" /> Instrução por Áudio / Microfone
+                  </span>
+                </div>
+
+                {isRecordingAudio ? (
+                  <div className="bg-rose-950/35 border border-rose-500/45 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-pulse">
+                    <div className="flex items-center gap-2 text-rose-200 text-xs font-bold">
+                      <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping shrink-0" />
+                      <span>Gravando áudio... 00:{recordingSeconds < 10 ? `0${recordingSeconds}` : recordingSeconds}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={stopAudioRecording}
+                      className="min-h-[40px] bg-rose-600 hover:bg-rose-500 text-white font-bold px-3.5 py-1.5 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-lg active:scale-95"
+                    >
+                      <Square size={12} /> Parar Gravação
+                    </button>
+                  </div>
+                ) : attachedAudioItem ? (
+                  <div className="bg-[#070c10] border border-emerald-500/35 rounded-xl p-3 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                      <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-300 flex items-center justify-center shrink-0">
+                        <Volume2 size={16} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <span className="text-xs font-bold text-white block truncate">{attachedAudioItem.name}</span>
+                        <audio src={attachedAudioItem.url} controls className="h-8 w-full max-w-[240px] mt-1" />
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={removeAudioItem}
+                      className="min-w-[38px] min-h-[38px] flex items-center justify-center text-rose-300 bg-rose-500/15 hover:bg-rose-500/25 rounded-xl transition-all cursor-pointer active:scale-95 shrink-0"
+                      title="Remover áudio"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={startAudioRecording}
+                      className="min-h-[44px] flex-1 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-200 py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+                    >
+                      <Mic size={15} className="text-emerald-400" />
+                      <span>Gravar Áudio pelo Microfone</span>
+                    </button>
+
+                    <label className="min-h-[44px] bg-white/5 hover:bg-white/10 border border-white/10 text-slate-200 py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95">
+                      <Paperclip size={14} />
+                      <span>Arquivo de Áudio</span>
+                      <input
+                        type="file"
+                        accept="audio/*"
+                        onChange={(e) => handleAudioFileSelected(e.target.files)}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </DevLoggerModalShell>
+
+      {/* Modal de Card Gerado por I.A & Publicado no CRM Kanban */}
+      <DevLoggerModalShell
+        isOpen={!!(showAiCardModal && generatedAiCard)}
+        onClose={() => setShowAiCardModal(false)}
+        title="Card de Correção Criado no CRM"
+        badge="Gemini 2.0 Flash"
+        subtitle={<>Quadro: <strong className="text-white">{createdCardBoardName}</strong> &bull; Coluna: <strong className="text-emerald-400">Em Análise</strong></>}
+        icon={<Sparkles size={20} className="animate-pulse" />}
+        accent="purple"
+        footer={
+          generatedAiCard && (
+            <div className="flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-2.5 w-full">
+              <div className="flex items-center gap-2 flex-wrap">
                 <button
+                  type="button"
                   onClick={() => {
                     const fullText = `# ${generatedAiCard.title}\n\n**Resumo:**\n${generatedAiCard.summary}\n\n${generatedAiCard.technical_plan}`;
                     navigator.clipboard.writeText(fullText);
-                    setCopyFeedback('Plano técnico copiado!');
-                    setTimeout(() => setCopyFeedback(null), 3000);
+                    showToastFeedback('Plano técnico copiado!');
                   }}
-                  className="bg-white/5 hover:bg-white/10 border border-white/15 text-[#d1d7db] hover:text-white px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 active:scale-95 cursor-pointer"
+                  className="min-h-[42px] bg-white/5 hover:bg-white/10 border border-white/15 text-[#e2e8f0] hover:text-white px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 active:scale-95 cursor-pointer"
                 >
                   <Copy size={14} /> Copiar Plano
                 </button>
 
                 <button
+                  type="button"
                   onClick={() => {
                     clearLogs();
-                    setCopyFeedback('🧹 Logs do DevLogger limpos!');
-                    setTimeout(() => setCopyFeedback(null), 3000);
+                    showToastFeedback('Logs do DevLogger limpos!');
                   }}
-                  className="bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 text-amber-300 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 active:scale-95 cursor-pointer"
+                  className="min-h-[42px] bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-200 px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 active:scale-95 cursor-pointer"
                   title="Limpa a lista de logs do DevLogger"
                 >
                   <Trash2 size={13} /> Limpar Logs
                 </button>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap justify-end">
                 <button
+                  type="button"
                   onClick={() => {
                     clearLogs();
                     setTestErrors([]);
@@ -5052,447 +4807,514 @@ export default function DevLogger() {
                     setShowAiCardModal(false);
                     useDevStore.setState({ isVisible: false });
                   }}
-                  className="bg-white/5 hover:bg-white/10 text-[#8696a0] hover:text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                  className="min-h-[42px] bg-white/5 hover:bg-white/10 border border-white/10 text-[#94a3b8] hover:text-white px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer active:scale-95"
                 >
                   Fechar
                 </button>
 
                 <button
+                  type="button"
                   onClick={() => {
-                    // 1. Limpa todo o histórico de logs e testes
                     clearLogs();
                     setTestErrors([]);
                     setTestLogs([]);
                     setTestSummary(null);
-                    
-                    // 2. Fecha o modal de IA e o cockpit do DevLogger
                     setShowAiCardModal(false);
                     useDevStore.setState({ isVisible: false });
-
-                    // 3. NÃO NAVEGA / PERMANECE NESTA TELA
-                    setCopyFeedback('✨ Card criado no CRM com sucesso e logs limpos!');
-                    setTimeout(() => setCopyFeedback(null), 3500);
+                    showToastFeedback('Card criado no CRM e logs limpos!', 3500);
                   }}
-                  className="bg-gradient-to-r from-purple-600 via-indigo-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-black px-5 py-2.5 rounded-xl text-xs transition-all flex items-center gap-2 shadow-lg shadow-purple-600/30 active:scale-95 cursor-pointer"
+                  className="min-h-[42px] bg-gradient-to-r from-purple-600 via-indigo-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-black px-5 py-2 rounded-xl text-xs transition-all flex items-center gap-2 shadow-lg shadow-purple-600/30 active:scale-95 cursor-pointer"
                   title="Confirma a criação do card no CRM, limpa os logs e permanece na tela atual"
                 >
                   <Sparkles size={15} className="text-amber-300 animate-pulse" /> Criar Card
                 </button>
               </div>
             </div>
+          )
+        }
+      >
+        {generatedAiCard && (
+          <div className="space-y-4 font-mono text-xs">
+            <div className="bg-[#0e161d] border border-white/10 rounded-2xl p-3.5 space-y-2">
+              <span className="text-[10px] text-[#94a3b8] uppercase font-bold tracking-wider block">Título do Card</span>
+              <h4 className="text-sm sm:text-base font-bold text-white leading-snug">{generatedAiCard.title}</h4>
 
-          </div>
-        </div>
-      )}
+              <div className="flex items-center gap-2 flex-wrap pt-1">
+                <span className="bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 px-2.5 py-0.5 rounded-lg text-[10px] font-bold">
+                  {generatedAiCard.category || 'Correção'}
+                </span>
 
-      {/* Central de Diagnóstico Preventivo, Suítes & Sandbox Real (Mobile-First Bottom Sheet / Glass Desktop) */}
-      {showSimulationModal && (
-        <div
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100000] flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200"
-          onClick={() => setShowSimulationModal(false)}
-        >
-          <div
-            className="bg-[#0a1016]/95 backdrop-blur-2xl border-t sm:border border-white/15 rounded-t-[28px] sm:rounded-3xl max-w-2xl w-full max-h-[90vh] flex flex-col shadow-[0_24px_80px_rgba(0,0,0,0.85)] overflow-hidden animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-200"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Alça Mobile Bottom-Sheet */}
-            <div className="flex justify-center pt-2.5 pb-1 sm:hidden shrink-0">
-              <div className="w-10 h-1 rounded-full bg-white/20" />
+                <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-bold border ${
+                  generatedAiCard.priority === 3
+                    ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                    : generatedAiCard.priority === 2
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                      : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                }`}>
+                  Prioridade: {generatedAiCard.priority === 3 ? 'Alta / Crítica' : generatedAiCard.priority === 2 ? 'Média' : 'Baixa'}
+                </span>
+
+                {(generatedAiCard.tags || []).map((tag: string, idx: number) => (
+                  <span key={idx} className="bg-white/5 text-[#e2e8f0] border border-white/10 px-2 py-0.5 rounded-lg text-[9px] font-bold">
+                    #{tag}
+                  </span>
+                ))}
+              </div>
             </div>
 
-            {/* Cabeçalho */}
-            <div className="px-4 sm:px-5 pt-2 sm:pt-4 pb-3 border-b border-white/10 flex flex-col gap-3 shrink-0 bg-gradient-to-b from-white/[0.03] to-transparent">
-              <div className="flex items-start sm:items-center justify-between gap-3">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-emerald-500/25 via-teal-500/20 to-indigo-500/25 border border-emerald-500/35 flex items-center justify-center shrink-0">
-                    <ShieldAlert size={18} className="text-emerald-400" />
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+              <div className="bg-[#0e161d] border border-white/10 rounded-xl p-2.5">
+                <span className="text-[9px] text-[#94a3b8] uppercase block">Console / Logs</span>
+                <span className="text-xs font-black text-white">{generatedAiCard.analyzed_count?.console || 0} analisados</span>
+              </div>
+              <div className="bg-[#0e161d] border border-white/10 rounded-xl p-2.5">
+                <span className="text-[9px] text-[#94a3b8] uppercase block">Servidor Node</span>
+                <span className="text-xs font-black text-purple-300">{generatedAiCard.analyzed_count?.server || 0} erros</span>
+              </div>
+              <div className="bg-[#0e161d] border border-white/10 rounded-xl p-2.5">
+                <span className="text-[9px] text-[#94a3b8] uppercase block">Gastrofood API</span>
+                <span className="text-xs font-black text-amber-300">{generatedAiCard.analyzed_count?.gastrofood || 0} logs</span>
+              </div>
+              <div className="bg-[#0e161d] border border-white/10 rounded-xl p-2.5">
+                <span className="text-[9px] text-[#94a3b8] uppercase block">Auditoria ASTS</span>
+                <span className="text-xs font-black text-emerald-300">{generatedAiCard.analyzed_count?.asts || 0} itens</span>
+              </div>
+            </div>
+
+            <div className="bg-gradient-to-r from-purple-950/35 via-[#121c24] to-[#0e161d] border border-purple-500/35 rounded-2xl p-4 space-y-1.5">
+              <div className="flex items-center gap-1.5 text-purple-300 font-bold text-[11px]">
+                <BrainCircuit size={14} /> Resumo Diagnóstico da I.A
+              </div>
+              <p className="text-xs text-purple-100/95 leading-relaxed font-sans">
+                {generatedAiCard.summary}
+              </p>
+            </div>
+
+            <div className="bg-blue-950/30 border border-blue-500/30 rounded-2xl p-3.5 flex items-start gap-2.5">
+              <span className="text-base leading-none">💡</span>
+              <div className="text-xs text-blue-200/95 leading-relaxed font-sans">
+                <strong className="text-blue-300 block mb-0.5">Fluxo da Esteira Fila Dev:</strong>
+                O comando <code className="bg-blue-900/60 px-1.5 py-0.5 rounded text-blue-200 font-mono font-bold">Fila dev</code> executa autonomamente os cards que estiverem na coluna <span className="text-emerald-400 font-bold">"Em Desenvolvimento"</span>.
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-[#94a3b8] text-[10px] uppercase font-bold">
+                <span className="flex items-center gap-1"><FileCode size={13} /> Plano Técnico & Arquivos a Modificar</span>
+                <span>Markdown</span>
+              </div>
+              <pre className="p-4 bg-[#050a0e] border border-white/10 rounded-2xl text-[11px] text-cyan-200 overflow-x-auto max-h-[260px] custom-scrollbar font-mono leading-relaxed whitespace-pre-wrap select-all shadow-inner">
+                {generatedAiCard.technical_plan}
+              </pre>
+            </div>
+          </div>
+        )}
+      </DevLoggerModalShell>
+
+      {/* Central de Diagnóstico Preventivo, Suítes & Sandbox Real */}
+      <DevLoggerModalShell
+        isOpen={showSimulationModal}
+        onClose={() => setShowSimulationModal(false)}
+        title="Diagnóstico Preventivo & Simulação Real"
+        subtitle="Rastreia falhas latentes em produção antes que afetem seus clientes"
+        icon={<ShieldAlert size={18} className="text-emerald-400" />}
+        accent="emerald"
+        headerExtra={
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="grid grid-cols-3 sm:flex items-center gap-1 bg-[#060a0e] p-1 rounded-2xl border border-white/10">
+              {[
+                { id: 'preventive', label: 'Varredura Real', badge: preventiveReport ? preventiveReport.counts.critical + preventiveReport.counts.warn : null },
+                { id: 'suites', label: 'Suítes ASTS/E2E', badge: null },
+                { id: 'sandbox', label: 'Sandbox', badge: null },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setSimModalTab(tab.id as any)}
+                  className={`px-2.5 sm:px-3 py-2 min-h-[38px] rounded-xl text-[10px] sm:text-[11px] font-bold font-mono transition-all cursor-pointer active:scale-95 flex items-center justify-center gap-1.5 whitespace-nowrap ${
+                    simModalTab === tab.id
+                      ? 'bg-gradient-to-r from-emerald-500 to-teal-400 text-slate-950 font-black shadow-md shadow-emerald-500/20'
+                      : 'text-slate-400 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  <span className="truncate">{tab.label}</span>
+                  {tab.badge !== null && tab.badge > 0 && (
+                    <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-black shrink-0 ${
+                      simModalTab === tab.id ? 'bg-black/25 text-black' : 'bg-rose-500 text-white'
+                    }`}>
+                      {tab.badge}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            <select
+              value={auditTenantOverride}
+              onChange={(e) => {
+                const val = e.target.value;
+                setAuditTenantOverride(val);
+                handleRunPreventiveAudit(val);
+              }}
+              className="bg-[#060a0e] border border-white/15 rounded-xl px-3 py-2 min-h-[40px] text-[11px] font-mono text-slate-200 focus:outline-none focus:border-emerald-500/60 cursor-pointer w-full sm:max-w-[215px]"
+              title="Escolher empresa para auditoria preventiva"
+            >
+              <option value="">🏢 Empresa Ativa (Auto)</option>
+              <option value="__all__">🌐 Visão Global (Sem Tenant)</option>
+              {companies.map((comp: any) => (
+                <option key={comp.id} value={comp.id}>
+                  🏢 {comp.name || comp.id.slice(0, 8)}
+                </option>
+              ))}
+            </select>
+          </div>
+        }
+        footer={
+          <div className="flex items-center justify-between gap-2 flex-wrap w-full">
+            <button
+              type="button"
+              onClick={() => {
+                clearLogs();
+                setTestErrors([]);
+                setTestLogs([]);
+                setTestSummary(null);
+                setPreventiveReport(null);
+                setProbeResult(null);
+                showToastFeedback('Console e cache limpos!');
+              }}
+              className="px-3.5 py-2 min-h-[42px] bg-white/5 hover:bg-rose-500/15 border border-white/10 hover:border-rose-500/30 text-slate-200 hover:text-rose-200 rounded-xl text-xs font-semibold transition-all cursor-pointer active:scale-95 flex items-center gap-2"
+            >
+              <Trash2 size={14} />
+              <span>Limpar Console & Cache</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowSimulationModal(false)}
+              className="px-5 py-2 min-h-[42px] bg-white/10 hover:bg-white/15 text-white rounded-xl text-xs font-bold transition-all cursor-pointer active:scale-95 ml-auto"
+            >
+              Fechar
+            </button>
+          </div>
+        }
+      >
+        <div className="flex flex-col gap-3.5">
+          {simModalTab === 'preventive' && (
+            <>
+              <div className="rounded-2xl bg-gradient-to-br from-slate-900/90 via-[#0d151d] to-[#0b1218] border border-white/10 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className={`w-12 h-12 rounded-2xl border flex items-center justify-center font-mono font-black text-sm shrink-0 ${
+                    !preventiveReport
+                      ? 'bg-slate-800/60 border-white/10 text-slate-400'
+                      : preventiveReport.status === 'healthy'
+                        ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                        : preventiveReport.status === 'degraded'
+                          ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                          : 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+                  }`}>
+                    {isRunningPreventive ? <Loader2 size={18} className="animate-spin" /> : preventiveReport ? `${preventiveReport.score}%` : '--'}
                   </div>
                   <div className="min-w-0">
-                    <h3 className="font-black text-white text-sm sm:text-base tracking-tight truncate">
-                      Diagnóstico Preventivo & Simulação Real
-                    </h3>
-                    <p className="text-[11px] text-slate-400 truncate">
-                      Rastreia falhas latentes em produção antes que afetem seus clientes
-                    </p>
+                    <div className="text-xs font-black text-white flex items-center gap-2 flex-wrap">
+                      <span>
+                        {isRunningPreventive
+                          ? 'Auditando camadas reais em paralelo...'
+                          : preventiveReport
+                            ? preventiveReport.status === 'healthy'
+                              ? 'Operação Íntegra • Sem Riscos Críticos'
+                              : preventiveReport.status === 'degraded'
+                                ? 'Atenção Preventiva Recomendada'
+                                : 'Anomalias Críticas Detectadas'
+                            : 'Pronto para Auditoria Real'}
+                      </span>
+                    </div>
+                    {preventiveReport && (
+                      <div className="text-[11px] font-mono text-slate-400 mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                        <span className="text-rose-300 font-bold">{preventiveReport.counts.critical} críticos</span>
+                        <span>•</span>
+                        <span className="text-amber-300 font-bold">{preventiveReport.counts.warn} alertas</span>
+                        <span>•</span>
+                        <span className="text-emerald-300 font-bold">{preventiveReport.counts.ok} OK</span>
+                        <span>•</span>
+                        <span>{preventiveReport.durationMs}ms</span>
+                      </div>
+                    )}
                   </div>
                 </div>
-                <button
-                  onClick={() => setShowSimulationModal(false)}
-                  className="text-slate-400 hover:text-white min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl hover:bg-white/10 transition-all cursor-pointer active:scale-95 shrink-0"
-                  aria-label="Fechar central de diagnóstico"
-                >
-                  <X size={18} />
-                </button>
-              </div>
 
-              {/* Seletor de Empresa Alvo + Navegação em 3 Abas */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <div className="flex items-center gap-1 bg-[#060a0e] p-1 rounded-2xl border border-white/10 overflow-x-auto">
-                  {[
-                    { id: 'preventive', label: 'Varredura Real', badge: preventiveReport ? preventiveReport.counts.critical + preventiveReport.counts.warn : null },
-                    { id: 'suites', label: 'Suítes (ASTS/E2E)', badge: null },
-                    { id: 'sandbox', label: 'Sandbox Captura', badge: null },
-                  ].map((tab) => (
-                    <button
-                      key={tab.id}
-                      onClick={() => setSimModalTab(tab.id as any)}
-                      className={`px-3 py-2 min-h-[38px] rounded-xl text-[11px] font-bold font-mono transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
-                        simModalTab === tab.id
-                          ? 'bg-gradient-to-r from-emerald-500 to-teal-400 text-black font-black shadow-md shadow-emerald-500/20'
-                          : 'text-slate-400 hover:text-white hover:bg-white/5'
-                      }`}
-                    >
-                      <span>{tab.label}</span>
-                      {tab.badge !== null && tab.badge > 0 && (
-                        <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-black ${
-                          simModalTab === tab.id ? 'bg-black/25 text-black' : 'bg-rose-500 text-white'
-                        }`}>
-                          {tab.badge}
-                        </span>
-                      )}
-                    </button>
-                  ))}
+                <div className="flex items-center gap-2 flex-wrap shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => handleSyncHistoricalLogs()}
+                    disabled={isRunningPreventive}
+                    className="px-3 py-2 min-h-[42px] rounded-xl bg-white/5 hover:bg-white/10 border border-white/15 text-slate-200 text-[11px] font-bold font-mono transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 disabled:opacity-50"
+                    title="Puxar erros e warnings reais de system_logs e do Buffer Node (últimas 2h)"
+                  >
+                    <Clock size={13} className="text-cyan-400" />
+                    <span>Sincronizar 2h</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleRunPreventiveAudit()}
+                    disabled={isRunningPreventive}
+                    className="px-3.5 py-2 min-h-[42px] rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 hover:brightness-110 text-slate-950 text-[11px] font-black font-mono transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 shadow-lg shadow-emerald-500/20 disabled:opacity-50"
+                  >
+                    <RefreshCw size={13} className={isRunningPreventive ? 'animate-spin' : ''} />
+                    <span>{isRunningPreventive ? 'Auditando...' : 'Reescanear Real'}</span>
+                  </button>
                 </div>
-
-                {/* Escopo de Empresa Auditada */}
-                <select
-                  value={auditTenantOverride}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setAuditTenantOverride(val);
-                    handleRunPreventiveAudit(val);
-                  }}
-                  className="bg-[#060a0e] border border-white/15 rounded-xl px-3 py-2 min-h-[40px] text-[11px] font-mono text-slate-200 focus:outline-none focus:border-emerald-500/60 cursor-pointer max-w-full sm:max-w-[210px]"
-                  title="Escolher empresa para auditoria preventiva"
-                >
-                  <option value="">🏢 Empresa Ativa (Auto)</option>
-                  <option value="__all__">🌐 Visão Global (Sem Tenant)</option>
-                  {companies.map((comp: any) => (
-                    <option key={comp.id} value={comp.id}>
-                      🏢 {comp.name || comp.id.slice(0, 8)}
-                    </option>
-                  ))}
-                </select>
               </div>
-            </div>
 
-            {/* Corpo Rolável */}
-            <div className="flex-1 overflow-y-auto p-4 sm:p-5 flex flex-col gap-3.5 custom-scrollbar">
-              {simModalTab === 'preventive' && (
-                <>
-                  {/* Card de Resumo & Ações da Varredura */}
-                  <div className="rounded-2xl bg-gradient-to-br from-slate-900/90 via-[#0d151d] to-[#0b1218] border border-white/10 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className={`w-12 h-12 rounded-2xl border flex items-center justify-center font-mono font-black text-sm shrink-0 ${
-                        !preventiveReport
-                          ? 'bg-slate-800/60 border-white/10 text-slate-400'
-                          : preventiveReport.status === 'healthy'
-                            ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
-                            : preventiveReport.status === 'degraded'
-                              ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
-                              : 'bg-rose-500/15 border-rose-500/40 text-rose-300'
-                      }`}>
-                        {isRunningPreventive ? <Loader2 size={18} className="animate-spin" /> : preventiveReport ? `${preventiveReport.score}%` : '--'}
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-xs font-black text-white flex items-center gap-2 flex-wrap">
-                          <span>
-                            {isRunningPreventive
-                              ? 'Auditando camadas reais em paralelo...'
-                              : preventiveReport
-                                ? preventiveReport.status === 'healthy'
-                                  ? 'Operação Íntegra • Sem Riscos Críticos'
-                                  : preventiveReport.status === 'degraded'
-                                    ? 'Atenção Preventiva Recomendada'
-                                    : 'Anomalias Críticas Detectadas'
-                                : 'Pronto para Auditoria Real'}
-                          </span>
-                        </div>
-                        {preventiveReport && (
-                          <div className="text-[11px] font-mono text-slate-400 mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                            <span className="text-rose-300 font-bold">{preventiveReport.counts.critical} críticos</span>
-                            <span>•</span>
-                            <span className="text-amber-300 font-bold">{preventiveReport.counts.warn} alertas</span>
-                            <span>•</span>
-                            <span className="text-emerald-300 font-bold">{preventiveReport.counts.ok} OK</span>
-                            <span>•</span>
-                            <span>{preventiveReport.durationMs}ms</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 flex-wrap shrink-0">
-                      <button
-                        onClick={() => handleSyncHistoricalLogs()}
-                        disabled={isRunningPreventive}
-                        className="px-3 py-2 min-h-[42px] rounded-xl bg-white/5 hover:bg-white/10 border border-white/15 text-slate-200 text-[11px] font-bold font-mono transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 disabled:opacity-50"
-                        title="Puxar erros e warnings reais de system_logs e do Buffer Node (últimas 2h)"
-                      >
-                        <Clock size={13} className="text-cyan-400" />
-                        <span>Sincronizar 2h</span>
-                      </button>
-                      <button
-                        onClick={() => handleRunPreventiveAudit()}
-                        disabled={isRunningPreventive}
-                        className="px-3.5 py-2 min-h-[42px] rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 hover:brightness-110 text-black text-[11px] font-black font-mono transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 shadow-lg shadow-emerald-500/20 disabled:opacity-50"
-                      >
-                        <RefreshCw size={13} className={isRunningPreventive ? 'animate-spin' : ''} />
-                        <span>{isRunningPreventive ? 'Auditando...' : 'Reescanear Real'}</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Checklist de Achados Reais (Críticos -> Alertas -> OK) */}
-                  {preventiveReport && (
-                    <div className="flex flex-col gap-2">
-                      {[...preventiveReport.findings]
-                        .sort((a, b) => {
-                          const order = { critical: 0, warn: 1, ok: 2 };
-                          return order[a.severity] - order[b.severity];
-                        })
-                        .map((item) => {
-                          const isCrit = item.severity === 'critical';
-                          const isWarn = item.severity === 'warn';
-                          return (
-                            <div
-                              key={item.id}
-                              className={`p-3.5 rounded-2xl border transition-all flex flex-col gap-1.5 ${
-                                isCrit
-                                  ? 'bg-rose-950/25 border-rose-500/40'
-                                  : isWarn
-                                    ? 'bg-amber-950/20 border-amber-500/35'
-                                    : 'bg-emerald-950/10 border-emerald-500/20'
-                              }`}
-                            >
-                              <div className="flex items-center justify-between gap-2 flex-wrap">
-                                <div className="flex items-center gap-2 min-w-0">
-                                  {isCrit ? (
-                                    <AlertTriangle size={15} className="text-rose-400 shrink-0" />
-                                  ) : isWarn ? (
-                                    <AlertTriangle size={15} className="text-amber-400 shrink-0" />
-                                  ) : (
-                                    <CheckCircle2 size={15} className="text-emerald-400 shrink-0" />
-                                  )}
-                                  <span className="font-bold text-white text-xs truncate">{item.title}</span>
-                                </div>
-                                <div className="flex items-center gap-1.5 shrink-0 font-mono text-[10px]">
-                                  {typeof item.latencyMs === 'number' && (
-                                    <span className="px-2 py-0.5 rounded-lg bg-white/5 border border-white/10 text-slate-300">
-                                      {item.latencyMs}ms
-                                    </span>
-                                  )}
-                                  <span
-                                    className={`px-2 py-0.5 rounded-lg font-black uppercase ${
-                                      isCrit
-                                        ? 'bg-rose-500/25 text-rose-200 border border-rose-500/40'
-                                        : isWarn
-                                          ? 'bg-amber-500/20 text-amber-200 border border-amber-500/40'
-                                          : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
-                                    }`}
-                                  >
-                                    {isCrit ? 'Crítico' : isWarn ? 'Alerta' : 'OK'}
-                                  </span>
-                                </div>
-                              </div>
-
-                              <p className="text-xs text-slate-200 leading-relaxed">{item.summary}</p>
-                              {item.detail && (
-                                <p className="text-[11px] font-mono text-slate-400 bg-black/30 px-2.5 py-1.5 rounded-xl border border-white/5 break-words">
-                                  {item.detail}
-                                </p>
+              {preventiveReport && (
+                <div className="flex flex-col gap-2">
+                  {[...preventiveReport.findings]
+                    .sort((a, b) => {
+                      const order = { critical: 0, warn: 1, ok: 2 };
+                      return order[a.severity] - order[b.severity];
+                    })
+                    .map((item) => {
+                      const isCrit = item.severity === 'critical';
+                      const isWarn = item.severity === 'warn';
+                      return (
+                        <div
+                          key={item.id}
+                          className={`p-3.5 rounded-2xl border transition-all flex flex-col gap-1.5 ${
+                            isCrit
+                              ? 'bg-rose-950/25 border-rose-500/40'
+                              : isWarn
+                                ? 'bg-amber-950/20 border-amber-500/35'
+                                : 'bg-emerald-950/10 border-emerald-500/20'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <div className="flex items-center gap-2 min-w-0">
+                              {isCrit ? (
+                                <AlertTriangle size={15} className="text-rose-400 shrink-0" />
+                              ) : isWarn ? (
+                                <AlertTriangle size={15} className="text-amber-400 shrink-0" />
+                              ) : (
+                                <CheckCircle2 size={15} className="text-emerald-400 shrink-0" />
                               )}
-                              {(isCrit || isWarn) && (
-                                <p className="text-[11px] text-amber-200/90 bg-amber-500/10 border border-amber-500/20 rounded-xl px-2.5 py-1.5">
-                                  💡 <strong>Antecipação:</strong> {item.recommendation}
-                                </p>
-                              )}
+                              <span className="font-bold text-white text-xs truncate">{item.title}</span>
                             </div>
-                          );
-                        })}
-                    </div>
-                  )}
+                            <div className="flex items-center gap-1.5 shrink-0 font-mono text-[10px]">
+                              {typeof item.latencyMs === 'number' && (
+                                <span className="px-2 py-0.5 rounded-lg bg-white/5 border border-white/10 text-slate-300">
+                                  {item.latencyMs}ms
+                                </span>
+                              )}
+                              <span
+                                className={`px-2 py-0.5 rounded-lg font-black uppercase ${
+                                  isCrit
+                                    ? 'bg-rose-500/25 text-rose-200 border border-rose-500/40'
+                                    : isWarn
+                                      ? 'bg-amber-500/20 text-amber-200 border border-amber-500/40'
+                                      : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+                                }`}
+                              >
+                                {isCrit ? 'Crítico' : isWarn ? 'Alerta' : 'OK'}
+                              </span>
+                            </div>
+                          </div>
 
-                  {/* Atalho de Correção IA se houver anomalias */}
-                  {preventiveReport && (preventiveReport.counts.critical > 0 || preventiveReport.counts.warn > 0) && (
-                    <button
-                      onClick={() => {
-                        setShowSimulationModal(false);
-                        setActiveTab('console');
-                        setLogFilter(preventiveReport.counts.critical > 0 ? 'action' : 'all');
-                        setShowAiMediaPromptModal(true);
-                      }}
-                      className="w-full min-h-[48px] px-4 py-3 rounded-2xl bg-gradient-to-r from-purple-600/30 via-indigo-600/30 to-pink-600/30 hover:from-purple-600/45 hover:to-pink-600/45 border border-purple-400/40 text-white text-xs font-black font-mono transition-all cursor-pointer active:scale-95 flex items-center justify-center gap-2 shadow-lg shadow-purple-500/15"
-                    >
-                      <Sparkles size={15} className="text-purple-300" />
-                      <span>Analisar Erros Capturados c/ I.A & Abrir Card no Kanban</span>
-                    </button>
-                  )}
-                </>
-              )}
-
-              {simModalTab === 'suites' && (
-                <div className="flex flex-col gap-3">
-                  <p className="text-xs text-slate-300 leading-relaxed">
-                    Execute suítes completas de ponta a ponta para validar banco (RLS + escrita + DDL), Motor Node/Baileys, Store React e WebSocket Realtime ao vivo.
-                  </p>
-
-                  <button
-                    onClick={() => {
-                      setShowSimulationModal(false);
-                      setActiveTab('asts');
-                      runApplicationTests();
-                    }}
-                    className="w-full min-h-[56px] flex items-center justify-between p-4 rounded-2xl bg-gradient-to-r from-amber-500/15 to-orange-500/10 hover:from-amber-500/25 hover:to-orange-500/20 border border-amber-500/35 text-left transition-all cursor-pointer active:scale-95 group"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <Activity size={20} className="text-amber-400 shrink-0 group-hover:scale-110 transition-transform" />
-                      <div className="min-w-0">
-                        <div className="font-bold text-white text-xs sm:text-sm">Executar ASTS Completo (10 Checkpoints)</div>
-                        <div className="text-[11px] text-amber-200/80">
-                          Valida RLS multitenant, escrita/DDL contacts, Store duplicada, Storage chat_media e Realtime
+                          <p className="text-xs text-slate-200 leading-relaxed">{item.summary}</p>
+                          {item.detail && (
+                            <p className="text-[11px] font-mono text-slate-400 bg-black/30 px-2.5 py-1.5 rounded-xl border border-white/5 break-words">
+                              {item.detail}
+                            </p>
+                          )}
+                          {(isCrit || isWarn) && (
+                            <p className="text-[11px] text-amber-200/90 bg-amber-500/10 border border-amber-500/20 rounded-xl px-2.5 py-1.5">
+                              💡 <strong>Antecipação:</strong> {item.recommendation}
+                            </p>
+                          )}
                         </div>
-                      </div>
-                    </div>
-                    <ChevronRight size={18} className="text-amber-400/70 shrink-0" />
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      setShowSimulationModal(false);
-                      setActiveTab('e2e');
-                      runE2EValidationSuite();
-                    }}
-                    className="w-full min-h-[56px] flex items-center justify-between p-4 rounded-2xl bg-gradient-to-r from-cyan-500/15 to-indigo-500/10 hover:from-cyan-500/25 hover:to-indigo-500/20 border border-cyan-500/35 text-left transition-all cursor-pointer active:scale-95 group"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <Radio size={20} className="text-cyan-400 shrink-0 group-hover:scale-110 transition-transform" />
-                      <div className="min-w-0">
-                        <div className="font-bold text-white text-xs sm:text-sm">Executar E2E Telemetry Suite (9 Estágios Live)</div>
-                        <div className="text-[11px] text-cyan-200/80">
-                          Audita Event Loop Node, listeners Baileys, sockets abertos, Trace ID no servidor e canal WSS
-                        </div>
-                      </div>
-                    </div>
-                    <ChevronRight size={18} className="text-cyan-400/70 shrink-0" />
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      handleTestApp();
-                      setActiveTab('console');
-                      setShowSimulationModal(false);
-                    }}
-                    className="w-full min-h-[56px] flex items-center justify-between p-4 rounded-2xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-left transition-all cursor-pointer active:scale-95 group"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <Layers size={20} className="text-emerald-400 shrink-0 group-hover:scale-110 transition-transform" />
-                      <div className="min-w-0">
-                        <div className="font-bold text-white text-xs sm:text-sm">Checagem Instantânea Local (Store + Disjuntor)</div>
-                        <div className="text-[11px] text-emerald-200/80">
-                          Verifica estado real do Circuit Breaker Supabase, duplicidade em memória e funções do ChatStore
-                        </div>
-                      </div>
-                    </div>
-                    <ChevronRight size={18} className="text-emerald-400/70 shrink-0" />
-                  </button>
+                      );
+                    })}
                 </div>
               )}
 
-              {simModalTab === 'sandbox' && (
-                <div className="flex flex-col gap-3">
-                  <div className="p-3 rounded-2xl bg-indigo-500/10 border border-indigo-500/25 text-[11px] text-indigo-200 leading-relaxed">
-                    <strong>Validação de Captura em Tempo Real:</strong> Dispara sondas controladas e rotuladas com <code className="px-1 py-0.5 rounded bg-black/40">[SANDBOX-VALIDAÇÃO]</code> para confirmar que os interceptadores de erro, HTTP, Promise e sincronização Node estão gravando no Console.
-                  </div>
-
-                  {probeResult && (
-                    <div className={`p-3 rounded-2xl border text-xs font-mono flex items-start gap-2 ${
-                      probeResult.ok
-                        ? 'bg-emerald-500/10 border-emerald-500/35 text-emerald-200'
-                        : 'bg-rose-500/15 border-rose-500/40 text-rose-200'
-                    }`}>
-                      {probeResult.ok ? <CheckCircle2 size={15} className="shrink-0 mt-0.5 text-emerald-400" /> : <AlertTriangle size={15} className="shrink-0 mt-0.5 text-rose-400" />}
-                      <span>{probeResult.summary}</span>
-                    </div>
-                  )}
-
-                  {[
-                    {
-                      kind: 'node_logs_sync' as CaptureProbeKind,
-                      title: 'Puxar Erros Reais do Buffer Node (/recent-errors)',
-                      desc: 'Consulta diretamente o servidor Node no Coolify sem injetar erros falsos.',
-                      icon: <Server size={18} className="text-purple-400" />,
-                      style: 'bg-purple-500/10 hover:bg-purple-500/20 border-purple-500/30'
-                    },
-                    {
-                      kind: 'http_404' as CaptureProbeKind,
-                      title: 'Testar Interceptador HTTP Real (window.fetch 404)',
-                      desc: 'Executa GET em rota inexistente para comprovar captura de status HTTP >= 400 e latência.',
-                      icon: <Network size={18} className="text-amber-400" />,
-                      style: 'bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/30'
-                    },
-                    {
-                      kind: 'report_error' as CaptureProbeKind,
-                      title: 'Testar Pipeline Completo reportError() -> system_logs',
-                      desc: 'Valida se falhas capturadas pelo React chegam ao DevLogger, Supabase e Node.',
-                      icon: <Bug size={18} className="text-rose-400" />,
-                      style: 'bg-rose-500/10 hover:bg-rose-500/20 border-rose-500/30'
-                    },
-                    {
-                      kind: 'promise_rejection' as CaptureProbeKind,
-                      title: 'Testar Trap Assíncrona (Unhandled Promise Rejection)',
-                      desc: 'Emite uma rejeição controlada para validar captura de falhas assíncronas não tratadas.',
-                      icon: <Zap size={18} className="text-cyan-400" />,
-                      style: 'bg-cyan-500/10 hover:bg-cyan-500/20 border-cyan-500/30'
-                    }
-                  ].map((probe) => (
-                    <button
-                      key={probe.kind}
-                      onClick={() => handleRunCaptureProbe(probe.kind)}
-                      disabled={runningProbe !== null}
-                      className={`w-full min-h-[54px] flex items-center justify-between p-3.5 rounded-2xl border text-left transition-all cursor-pointer active:scale-95 disabled:opacity-50 ${probe.style}`}
-                    >
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="shrink-0">
-                          {runningProbe === probe.kind ? <Loader2 size={18} className="animate-spin text-white" /> : probe.icon}
-                        </div>
-                        <div className="min-w-0">
-                          <div className="font-bold text-white text-xs">{probe.title}</div>
-                          <div className="text-[11px] text-slate-300/80">{probe.desc}</div>
-                        </div>
-                      </div>
-                      <ChevronRight size={16} className="text-white/50 shrink-0" />
-                    </button>
-                  ))}
-                </div>
+              {preventiveReport && (preventiveReport.counts.critical > 0 || preventiveReport.counts.warn > 0) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowSimulationModal(false);
+                    setActiveTab('console');
+                    setLogFilter(preventiveReport.counts.critical > 0 ? 'action' : 'all');
+                    setShowAiMediaPromptModal(true);
+                  }}
+                  className="w-full min-h-[48px] px-4 py-3 rounded-2xl bg-gradient-to-r from-purple-600/30 via-indigo-600/30 to-pink-600/30 hover:from-purple-600/45 hover:to-pink-600/45 border border-purple-400/40 text-white text-xs font-black font-mono transition-all cursor-pointer active:scale-95 flex items-center justify-center gap-2 shadow-lg shadow-purple-500/15"
+                >
+                  <Sparkles size={15} className="text-purple-300" />
+                  <span>Analisar Erros Capturados c/ I.A & Abrir Card no Kanban</span>
+                </button>
               )}
-            </div>
+            </>
+          )}
 
-            {/* Rodapé Fixo */}
-            <div className="px-4 sm:px-5 py-3 border-t border-white/10 bg-[#070b10] flex items-center justify-between gap-2 flex-wrap shrink-0">
+          {simModalTab === 'suites' && (
+            <div className="flex flex-col gap-3">
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Execute suítes completas de ponta a ponta para validar banco (RLS + escrita + DDL), Motor Node/Baileys, Store React e WebSocket Realtime ao vivo.
+              </p>
+
               <button
+                type="button"
                 onClick={() => {
-                  clearLogs();
-                  setTestErrors([]);
-                  setTestLogs([]);
-                  setTestSummary(null);
-                  setPreventiveReport(null);
-                  setProbeResult(null);
+                  setShowSimulationModal(false);
+                  setActiveTab('asts');
+                  runApplicationTests();
                 }}
-                className="px-3.5 py-2 min-h-[42px] bg-white/5 hover:bg-rose-500/15 border border-white/10 hover:border-rose-500/30 text-slate-300 hover:text-rose-200 rounded-xl text-xs font-semibold transition-all cursor-pointer active:scale-95 flex items-center gap-2"
+                className="w-full min-h-[56px] flex items-center justify-between p-4 rounded-2xl bg-gradient-to-r from-amber-500/15 to-orange-500/10 hover:from-amber-500/25 hover:to-orange-500/20 border border-amber-500/35 text-left transition-all cursor-pointer active:scale-95 group"
               >
-                <Trash2 size={14} />
-                <span>Limpar Console & Cache</span>
+                <div className="flex items-center gap-3 min-w-0">
+                  <Activity size={20} className="text-amber-400 shrink-0 group-hover:scale-110 transition-transform" />
+                  <div className="min-w-0">
+                    <div className="font-bold text-white text-xs sm:text-sm">Executar ASTS Completo (10 Checkpoints)</div>
+                    <div className="text-[11px] text-amber-200/80">
+                      Valida RLS multitenant, escrita/DDL contacts, Store duplicada, Storage chat_media e Realtime
+                    </div>
+                  </div>
+                </div>
+                <ChevronRight size={18} className="text-amber-400/70 shrink-0" />
               </button>
 
               <button
-                onClick={() => setShowSimulationModal(false)}
-                className="px-5 py-2 min-h-[42px] bg-white/10 hover:bg-white/15 text-white rounded-xl text-xs font-bold transition-all cursor-pointer active:scale-95 ml-auto"
+                type="button"
+                onClick={() => {
+                  setShowSimulationModal(false);
+                  setActiveTab('e2e');
+                  runE2EValidationSuite();
+                }}
+                className="w-full min-h-[56px] flex items-center justify-between p-4 rounded-2xl bg-gradient-to-r from-cyan-500/15 to-indigo-500/10 hover:from-cyan-500/25 hover:to-indigo-500/20 border border-cyan-500/35 text-left transition-all cursor-pointer active:scale-95 group"
               >
-                Fechar
+                <div className="flex items-center gap-3 min-w-0">
+                  <Radio size={20} className="text-cyan-400 shrink-0 group-hover:scale-110 transition-transform" />
+                  <div className="min-w-0">
+                    <div className="font-bold text-white text-xs sm:text-sm">Executar E2E Telemetry Suite (9 Estágios Live)</div>
+                    <div className="text-[11px] text-cyan-200/80">
+                      Audita Event Loop Node, listeners Baileys, sockets abertos, Trace ID no servidor e canal WSS
+                    </div>
+                  </div>
+                </div>
+                <ChevronRight size={18} className="text-cyan-400/70 shrink-0" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  handleTestApp();
+                  setActiveTab('console');
+                  setShowSimulationModal(false);
+                }}
+                className="w-full min-h-[56px] flex items-center justify-between p-4 rounded-2xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-left transition-all cursor-pointer active:scale-95 group"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <Layers size={20} className="text-emerald-400 shrink-0 group-hover:scale-110 transition-transform" />
+                  <div className="min-w-0">
+                    <div className="font-bold text-white text-xs sm:text-sm">Checagem Instantânea Local (Store + Disjuntor)</div>
+                    <div className="text-[11px] text-emerald-200/80">
+                      Verifica estado real do Circuit Breaker Supabase, duplicidade em memória e funções do ChatStore
+                    </div>
+                  </div>
+                </div>
+                <ChevronRight size={18} className="text-emerald-400/70 shrink-0" />
               </button>
             </div>
-          </div>
+          )}
+
+          {simModalTab === 'sandbox' && (
+            <div className="flex flex-col gap-3">
+              <div className="p-3 rounded-2xl bg-indigo-500/10 border border-indigo-500/25 text-[11px] text-indigo-200 leading-relaxed">
+                <strong>Validação de Captura em Tempo Real:</strong> Dispara sondas controladas e rotuladas com <code className="px-1 py-0.5 rounded bg-black/40">[SANDBOX-VALIDAÇÃO]</code> para confirmar que os interceptadores de erro, HTTP, Promise e sincronização Node estão gravando no Console.
+              </div>
+
+              {probeResult && (
+                <div className={`p-3 rounded-2xl border text-xs font-mono flex items-start gap-2 ${
+                  probeResult.ok
+                    ? 'bg-emerald-500/10 border-emerald-500/35 text-emerald-200'
+                    : 'bg-rose-500/15 border-rose-500/40 text-rose-200'
+                }`}>
+                  {probeResult.ok ? <CheckCircle2 size={15} className="shrink-0 mt-0.5 text-emerald-400" /> : <AlertTriangle size={15} className="shrink-0 mt-0.5 text-rose-400" />}
+                  <span>{probeResult.summary}</span>
+                </div>
+              )}
+
+              {[
+                {
+                  kind: 'node_logs_sync' as CaptureProbeKind,
+                  title: 'Puxar Erros Reais do Buffer Node (/recent-errors)',
+                  desc: 'Consulta diretamente o servidor Node no Coolify sem injetar erros falsos.',
+                  icon: <Server size={18} className="text-purple-400" />,
+                  style: 'bg-purple-500/10 hover:bg-purple-500/20 border-purple-500/30'
+                },
+                {
+                  kind: 'http_404' as CaptureProbeKind,
+                  title: 'Testar Interceptador HTTP Real (window.fetch 404)',
+                  desc: 'Executa GET em rota inexistente para comprovar captura de status HTTP >= 400 e latência.',
+                  icon: <Network size={18} className="text-amber-400" />,
+                  style: 'bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/30'
+                },
+                {
+                  kind: 'report_error' as CaptureProbeKind,
+                  title: 'Testar Pipeline Completo reportError() -> system_logs',
+                  desc: 'Valida se falhas capturadas pelo React chegam ao DevLogger, Supabase e Node.',
+                  icon: <Bug size={18} className="text-rose-400" />,
+                  style: 'bg-rose-500/10 hover:bg-rose-500/20 border-rose-500/30'
+                },
+                {
+                  kind: 'promise_rejection' as CaptureProbeKind,
+                  title: 'Testar Trap Assíncrona (Unhandled Promise Rejection)',
+                  desc: 'Emite uma rejeição controlada para validar captura de falhas assíncronas não tratadas.',
+                  icon: <Zap size={18} className="text-cyan-400" />,
+                  style: 'bg-cyan-500/10 hover:bg-cyan-500/20 border-cyan-500/30'
+                }
+              ].map((probe) => (
+                <button
+                  key={probe.kind}
+                  type="button"
+                  onClick={() => handleRunCaptureProbe(probe.kind)}
+                  disabled={runningProbe !== null}
+                  className={`w-full min-h-[54px] flex items-center justify-between p-3.5 rounded-2xl border text-left transition-all cursor-pointer active:scale-95 disabled:opacity-50 ${probe.style}`}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="shrink-0">
+                      {runningProbe === probe.kind ? <Loader2 size={18} className="animate-spin text-white" /> : probe.icon}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="font-bold text-white text-xs">{probe.title}</div>
+                      <div className="text-[11px] text-slate-300/80">{probe.desc}</div>
+                    </div>
+                  </div>
+                  <ChevronRight size={16} className="text-white/50 shrink-0" />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </DevLoggerModalShell>
+
+      {/* Modais de Metadados (Baileys Releases, Novidades Changelog & Root Endpoints) */}
+      <DevLoggerMetaModals
+        serverMeta={serverMeta}
+        engineUrl={engineUrl}
+        showBaileysModal={showBaileysModal}
+        onCloseBaileysModal={() => setShowBaileysModal(false)}
+        showChangelog={showChangelog}
+        onCloseChangelog={() => setShowChangelog(false)}
+        showEndpoints={showEndpoints}
+        onCloseEndpoints={() => setShowEndpoints(false)}
+        onCopyText={(text, label) => {
+          navigator.clipboard.writeText(text);
+          showToastFeedback(label);
+        }}
+      />
+
+      {/* Toast Global de Feedback Rápido */}
+      {copyFeedback && (
+        <div className="fixed bottom-5 sm:bottom-7 left-1/2 -translate-x-1/2 z-[100020] bg-gradient-to-r from-emerald-500 to-teal-400 text-slate-950 font-black text-xs px-4 py-2.5 rounded-2xl shadow-[0_12px_35px_rgba(16,185,129,0.45)] border border-emerald-200/70 animate-in fade-in slide-in-from-bottom-3 font-mono flex items-center gap-2 pointer-events-none">
+          <CheckCircle2 size={15} className="shrink-0 stroke-[2.5]" />
+          <span>{copyFeedback}</span>
         </div>
       )}
 
