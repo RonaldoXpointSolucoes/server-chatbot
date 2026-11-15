@@ -712,6 +712,55 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.2.2',
+    date: '2026-11-15',
+    summary: 'Correção de Scroll & Experiência Mobile-First no Módulo de Vouchers Corporativos e Portal B2B (Bottom Sheets, KPIs Compactos e Navegação Touch)',
+    notes: [
+      {
+        id: 'fix-vouchers-mobile-scroll-lock-822',
+        category: 'fixes',
+        title: 'Desbloqueio Total da Rolagem Vertical & Navegação Mobile no Painel de Vouchers, Portal B2B e Scanner',
+        description: 'Corrigido o travamento de rolagem causado pelo viewport fixo do shell principal (#root / MainLayout): todas as telas de Vouchers (/vouchers, /voucher-empresa/login, /voucher-empresa e /vouchers/scanner) agora contam com contêineres roláveis internos (h-full / h-[100dvh] overflow-y-auto overscroll-y-contain), fluxo fluido com teclado virtual no login e suporte à classe .no-scrollbar.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      },
+      {
+        id: 'imp-vouchers-mobile-ux-bottom-sheets-822',
+        category: 'improvements',
+        title: 'Layout Mobile-First: Botão de Menu Lateral, KPIs em 2 Colunas, Abas Deslizáveis & Bottom Sheets Roláveis',
+        description: 'No celular, o cabeçalho ganhou acesso direto ao menu lateral, os cards de KPI foram compactados em grade 2x2 para revelar logo as abas, os filtros de status e navegação viraram trilhos horizontais deslizáveis com alvos táteis ergonômicos (>=44px) e todos os modais de emissão, campanhas, empresas parceiras, colaboradores e recarga foram convertidos em Bottom Sheets roláveis (max-h-[92dvh]).',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-300/30',
+        guide: {
+          moduleGroup: 'system',
+          moduleLabel: 'Vouchers Corporativos • Experiência Mobile & Bottom Sheets',
+          purpose: 'Permitir gestão completa de vouchers, campanhas, empresas parceiras e portal B2B diretamente pelo celular, sem travamento de tela e com abertura confortável de todos os modais em formato Bottom Sheet.',
+          whereToAccess: [
+            '1. Menu Lateral (ícone ☰ no topo esquerdo no celular) ➔ Vouchers Corporativos ➔ Painel de Vouchers (/vouchers)',
+            '2. Role normalmente para baixo para visualizar KPIs, abas deslizáveis, lista de vouchers e extrato',
+            '3. Abra o Portal B2B (/voucher-empresa/login) ou o Terminal Caixa (/vouchers/scanner) no celular para testar a rolagem contínua e os modais'
+          ],
+          howToTest: [
+            '1. Acesse /vouchers pelo celular (ou modo responsivo Mobile no navegador) e role até o final da lista e extrato.',
+            '2. Deslize horizontalmente entre as abas (Vouchers, Empresas Parceiras, Pedidos de Crédito, Campanhas, Extrato / Ledger).',
+            '3. Toque em "+ EMITIR VOUCHER / LOTE" ou "Nova Empresa" para validar o modal em formato Bottom Sheet com rolagem interna suave.'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Tela Mobile: Voucher Gestão (/vouchers) ➔ Rolagem Fluida & Abas Deslizáveis',
+            contextElements: ['☰ Menu Mobile', 'Vouchers', 'Empresas Parceiras', 'Pedidos', 'Campanhas'],
+            targetButtonLabel: 'Abrir Painel de Vouchers',
+            targetButtonPosition: 'Tela principal de Vouchers Corporativos (/vouchers) com grade 2x2, trilho horizontal e Bottom Sheets',
+            visualPreviewVariant: 'chat-header-pin'
+          },
+          quickAction: {
+            label: 'Abrir Painel de Vouchers',
+            route: '/vouchers'
+          }
+        }
+      }
+    ]
+  },
+  {
     version: '8.2.1',
     date: '2026-11-14',
     summary: 'Vouchers Corporativos B2B Enterprise v2 (Multi-Tenant + Portal Empresas Parceiras + Créditos Mensais/Desconto + WhatsApp Baileys + Antifraude QR/PIN)',

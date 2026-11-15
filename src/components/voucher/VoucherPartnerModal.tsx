@@ -269,15 +269,15 @@ export const VoucherPartnerModal: React.FC<VoucherPartnerModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/75 backdrop-blur-sm p-0 sm:p-4">
-      <div className="w-full max-w-3xl max-h-[92vh] flex flex-col rounded-t-3xl sm:rounded-3xl bg-[#0b1526] border border-white/15 shadow-2xl overflow-hidden">
+      <div className="w-full max-w-3xl max-h-[92dvh] flex flex-col rounded-t-[28px] sm:rounded-3xl bg-[#0b1526] border border-white/15 shadow-2xl overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 bg-white/[0.03]">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-400/30 flex items-center justify-center text-emerald-300">
+        <div className="shrink-0 flex items-center justify-between gap-2 px-4 sm:px-5 py-3.5 sm:py-4 border-b border-white/10 bg-white/[0.03]">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-400/30 flex items-center justify-center text-emerald-300 shrink-0">
               <Building2 className="w-5 h-5" />
             </div>
-            <div>
-              <h2 className="text-base sm:text-lg font-bold text-white">
+            <div className="min-w-0">
+              <h2 className="text-base sm:text-lg font-bold text-white truncate">
                 {editingPartner ? 'Editar Empresa Parceira' : 'Nova Empresa Parceira B2B'}
               </h2>
               <p className="text-xs text-slate-400">
@@ -288,7 +288,7 @@ export const VoucherPartnerModal: React.FC<VoucherPartnerModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="w-10 h-10 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center text-slate-300 transition"
+            className="min-w-[44px] min-h-[44px] w-10 h-10 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center text-slate-300 transition shrink-0 active:scale-95"
             aria-label="Fechar modal"
           >
             <X className="w-5 h-5" />
@@ -296,7 +296,7 @@ export const VoucherPartnerModal: React.FC<VoucherPartnerModalProps> = ({
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 space-y-5">
+        <form onSubmit={handleSubmit} className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch] p-4 sm:p-5 pb-8 sm:pb-5 space-y-5">
           {/* 1. CNPJ & Identificação */}
           <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2">

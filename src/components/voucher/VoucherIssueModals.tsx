@@ -304,8 +304,8 @@ export const IssueVoucherModal: React.FC<IssueVoucherModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/75 backdrop-blur-sm p-0 sm:p-4">
-      <div className="w-full max-w-2xl max-h-[92vh] flex flex-col rounded-t-3xl sm:rounded-3xl bg-[#0b1526] border border-white/15 shadow-2xl overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 bg-white/[0.03]">
+      <div className="w-full max-w-2xl max-h-[92dvh] flex flex-col rounded-t-[28px] sm:rounded-3xl bg-[#0b1526] border border-white/15 shadow-2xl overflow-hidden">
+        <div className="shrink-0 flex items-center justify-between px-4 sm:px-5 py-4 border-b border-white/10 bg-white/[0.03]">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-400/30 flex items-center justify-center text-emerald-300">
               <Ticket className="w-5 h-5" />
@@ -326,7 +326,7 @@ export const IssueVoucherModal: React.FC<IssueVoucherModalProps> = ({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 space-y-4">
+        <form onSubmit={handleSubmit} className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-4 sm:p-5 pb-8 sm:pb-5 space-y-4">
           {/* Mode Switcher */}
           <div className="grid grid-cols-2 gap-2 p-1 rounded-2xl bg-slate-900 border border-white/10">
             <button
@@ -774,8 +774,8 @@ export const CampaignModal: React.FC<CampaignModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/75 backdrop-blur-sm p-0 sm:p-4">
-      <div className="w-full max-w-xl rounded-t-3xl sm:rounded-3xl bg-[#0b1526] border border-white/15 shadow-2xl overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 bg-white/[0.03]">
+      <div className="w-full max-w-xl max-h-[92dvh] flex flex-col rounded-t-[28px] sm:rounded-3xl bg-[#0b1526] border border-white/15 shadow-2xl overflow-hidden">
+        <div className="shrink-0 flex items-center justify-between px-4 sm:px-5 py-4 border-b border-white/10 bg-white/[0.03]">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-400/30 flex items-center justify-center text-amber-300">
               <Gift className="w-5 h-5" />
@@ -796,7 +796,7 @@ export const CampaignModal: React.FC<CampaignModalProps> = ({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-5 space-y-4 max-h-[82vh] overflow-y-auto">
+        <form onSubmit={handleSubmit} className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-4 sm:p-5 pb-8 sm:pb-5 space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
             <div className="sm:col-span-8">
               <label className="block text-xs font-medium text-slate-300 mb-1">Nome da Campanha *</label>
@@ -1066,8 +1066,8 @@ export const VoucherDetailModal: React.FC<VoucherDetailModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/75 backdrop-blur-sm p-0 sm:p-4">
-      <div className="w-full max-w-lg rounded-t-3xl sm:rounded-3xl bg-[#0b1526] border border-white/15 shadow-2xl overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 bg-white/[0.03]">
+      <div className="w-full max-w-lg max-h-[92dvh] flex flex-col rounded-t-[28px] sm:rounded-3xl bg-[#0b1526] border border-white/15 shadow-2xl overflow-hidden">
+        <div className="shrink-0 flex items-center justify-between px-4 sm:px-5 py-4 border-b border-white/10 bg-white/[0.03]">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-400/30 flex items-center justify-center text-emerald-300">
               <QrCode className="w-5 h-5" />
@@ -1088,7 +1088,7 @@ export const VoucherDetailModal: React.FC<VoucherDetailModalProps> = ({
           </button>
         </div>
 
-        <div className="p-5 space-y-4 max-h-[82vh] overflow-y-auto">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-4 sm:p-5 pb-8 sm:pb-5 space-y-4">
           <div className="flex flex-col items-center p-5 rounded-2xl bg-white text-slate-950">
             <QRCode value={publicUrl} size={160} />
             <div className="mt-3 text-xs font-mono font-bold tracking-widest text-slate-700">
@@ -1281,8 +1281,8 @@ export const VoucherSettingsModal: React.FC<VoucherSettingsModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/75 backdrop-blur-sm p-0 sm:p-4">
-      <div className="w-full max-w-lg rounded-t-3xl sm:rounded-3xl bg-[#0b1526] border border-white/15 shadow-2xl overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 bg-white/[0.03]">
+      <div className="w-full max-w-lg max-h-[92dvh] flex flex-col rounded-t-[28px] sm:rounded-3xl bg-[#0b1526] border border-white/15 shadow-2xl overflow-hidden">
+        <div className="shrink-0 flex items-center justify-between px-4 sm:px-5 py-4 border-b border-white/10 bg-white/[0.03]">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center text-white">
               <Settings className="w-5 h-5" />
@@ -1301,7 +1301,7 @@ export const VoucherSettingsModal: React.FC<VoucherSettingsModalProps> = ({
           </button>
         </div>
 
-        <form onSubmit={handleSave} className="p-5 space-y-4 max-h-[82vh] overflow-y-auto">
+        <form onSubmit={handleSave} className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-4 sm:p-5 pb-8 sm:pb-5 space-y-4">
           <div>
             <label className="block text-xs font-medium text-slate-300 mb-1.5 flex items-center gap-1.5">
               <MessageCircle className="w-4 h-4 text-emerald-400" />

@@ -483,7 +483,7 @@ export default function CompanyPortalDashboard() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#070b0e] text-slate-200 flex flex-col items-center justify-center gap-3 p-4">
+      <div className="h-[100dvh] w-full overflow-y-auto overflow-x-hidden bg-[#070b0e] text-slate-200 flex flex-col items-center justify-center gap-3 p-4">
         <Loader2 className="w-8 h-8 animate-spin text-emerald-400" />
         <span className="text-sm font-semibold text-slate-400">Carregando Portal Corporativo...</span>
       </div>
@@ -491,7 +491,7 @@ export default function CompanyPortalDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-[#070b0e] text-slate-100 pb-20">
+    <div className="h-[100dvh] w-full overflow-y-auto overflow-x-hidden overscroll-y-contain bg-[#070b0e] text-slate-100 pb-24 sm:pb-20 [-webkit-overflow-scrolling:touch]">
       {/* Toast Notification */}
       {toast && (
         <div
@@ -566,17 +566,17 @@ export default function CompanyPortalDashboard() {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 space-y-6">
+      <main className="max-w-7xl mx-auto px-3.5 sm:px-6 pt-4 sm:pt-6 space-y-5 sm:space-y-6">
         {/* KPI Overview Grid */}
-        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="rounded-3xl bg-gradient-to-br from-emerald-950/50 via-slate-900/80 to-slate-900/90 border border-emerald-500/30 p-5 flex flex-col justify-between gap-3">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-400">Saldo Disponível</span>
-              <Wallet className="w-5 h-5 text-emerald-400" />
+        <section className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
+          <div className="rounded-2xl sm:rounded-3xl bg-gradient-to-br from-emerald-950/50 via-slate-900/80 to-slate-900/90 border border-emerald-500/30 p-3.5 sm:p-5 flex flex-col justify-between gap-2 sm:gap-3 min-w-0">
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-emerald-400 truncate">Saldo Disponível</span>
+              <Wallet className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400 shrink-0" />
             </div>
-            <div>
-              <div className="text-3xl font-black text-white">{formatBRL(empresa?.saldo_credito)}</div>
-              <div className="flex items-center gap-2 flex-wrap mt-2">
+            <div className="min-w-0">
+              <div className="text-xl sm:text-3xl font-black text-white truncate">{formatBRL(empresa?.saldo_credito)}</div>
+              <div className="flex items-center gap-1.5 flex-wrap mt-1.5 sm:mt-2">
                 {empresa?.credito_mensal_ativo && Number(empresa.valor_credito_mensal) > 0 && (
                   <span className="px-2 py-0.5 rounded-lg bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 text-[10px] font-bold">
                     Mensal: {formatBRL(empresa.valor_credito_mensal)} (Dia {empresa.dia_renovacao_mensal})
@@ -591,46 +591,46 @@ export default function CompanyPortalDashboard() {
             </div>
           </div>
 
-          <div className="rounded-3xl bg-slate-900/75 border border-slate-800/80 p-5 flex flex-col justify-between gap-3">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Vouchers Ativos</span>
-              <Ticket className="w-5 h-5 text-cyan-400" />
+          <div className="rounded-2xl sm:rounded-3xl bg-slate-900/75 border border-slate-800/80 p-3.5 sm:p-5 flex flex-col justify-between gap-2 sm:gap-3 min-w-0">
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-slate-400 truncate">Vouchers Ativos</span>
+              <Ticket className="w-4 h-4 sm:w-5 sm:h-5 text-cyan-400 shrink-0" />
             </div>
-            <div>
-              <div className="text-2xl font-black text-white">{formatBRL(metrics.ativosValor)}</div>
-              <p className="text-xs text-slate-400 mt-1">{metrics.ativosCount} cupons disponíveis p/ uso</p>
-            </div>
-          </div>
-
-          <div className="rounded-3xl bg-slate-900/75 border border-slate-800/80 p-5 flex flex-col justify-between gap-3">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Resgatados na Loja</span>
-              <TrendingUp className="w-5 h-5 text-emerald-400" />
-            </div>
-            <div>
-              <div className="text-2xl font-black text-white">{formatBRL(metrics.resgatadosValor)}</div>
-              <p className="text-xs text-slate-400 mt-1">{metrics.resgatadosCount} baixas confirmadas</p>
+            <div className="min-w-0">
+              <div className="text-lg sm:text-2xl font-black text-white truncate">{formatBRL(metrics.ativosValor)}</div>
+              <p className="text-[11px] sm:text-xs text-slate-400 mt-1 truncate">{metrics.ativosCount} disponíveis p/ uso</p>
             </div>
           </div>
 
-          <div className="rounded-3xl bg-slate-900/75 border border-slate-800/80 p-5 flex flex-col justify-between gap-3">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Equipe Cadastrada</span>
-              <Users className="w-5 h-5 text-purple-400" />
+          <div className="rounded-2xl sm:rounded-3xl bg-slate-900/75 border border-slate-800/80 p-3.5 sm:p-5 flex flex-col justify-between gap-2 sm:gap-3 min-w-0">
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-slate-400 truncate">Resgatados na Loja</span>
+              <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400 shrink-0" />
             </div>
-            <div>
-              <div className="text-2xl font-black text-white">{colaboradores.length}</div>
-              <p className="text-xs text-slate-400 mt-1">
+            <div className="min-w-0">
+              <div className="text-lg sm:text-2xl font-black text-white truncate">{formatBRL(metrics.resgatadosValor)}</div>
+              <p className="text-[11px] sm:text-xs text-slate-400 mt-1 truncate">{metrics.resgatadosCount} baixas confirmadas</p>
+            </div>
+          </div>
+
+          <div className="rounded-2xl sm:rounded-3xl bg-slate-900/75 border border-slate-800/80 p-3.5 sm:p-5 flex flex-col justify-between gap-2 sm:gap-3 min-w-0">
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-slate-400 truncate">Equipe Cadastrada</span>
+              <Users className="w-4 h-4 sm:w-5 sm:h-5 text-purple-400 shrink-0" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-lg sm:text-2xl font-black text-white">{colaboradores.length}</div>
+              <p className="text-[11px] sm:text-xs text-slate-400 mt-1 truncate">
                 {empresa?.permitir_compra_creditos ? (
                   <button
                     type="button"
                     onClick={() => setActiveTab('creditos')}
                     className="text-emerald-400 hover:underline font-bold"
                   >
-                    + Comprar créditos com desconto
+                    + Comprar créditos ({empresa?.desconto_compra_percent || 0}% OFF)
                   </button>
                 ) : (
-                  'Colaboradores ativos no convênio'
+                  'Colaboradores ativos'
                 )}
               </p>
             </div>
@@ -1255,8 +1255,8 @@ export default function CompanyPortalDashboard() {
 
       {/* ==================== MODAL: EMITIR VOUCHER INDIVIDUAL ==================== */}
       {showIssueModal && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-lg rounded-3xl bg-slate-900 border border-slate-700 p-6 space-y-4 shadow-2xl">
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="w-full max-w-lg max-h-[92dvh] overflow-y-auto overscroll-y-contain rounded-t-[28px] sm:rounded-3xl bg-slate-900 border border-slate-700 p-5 sm:p-6 pb-8 sm:pb-6 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-extrabold text-white flex items-center gap-2">
                 <Sparkles className="w-5 h-5 text-emerald-400" /> Emitir Voucher Corporativo
@@ -1390,8 +1390,8 @@ export default function CompanyPortalDashboard() {
 
       {/* ==================== MODAL: EMISSAO EM LOTE (COLABORADORES) ==================== */}
       {showBatchModal && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-3xl bg-slate-900 border border-slate-700 p-6 space-y-4 shadow-2xl">
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="w-full max-w-md max-h-[92dvh] overflow-y-auto overscroll-y-contain rounded-t-[28px] sm:rounded-3xl bg-slate-900 border border-slate-700 p-5 sm:p-6 pb-8 sm:pb-6 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-extrabold text-white">Gerar Lote p/ {selectedColabs.length} Colaboradores</h3>
               <button type="button" onClick={() => setShowBatchModal(false)} className="text-slate-400 hover:text-white">
@@ -1459,8 +1459,8 @@ export default function CompanyPortalDashboard() {
 
       {/* ==================== MODAL: CADASTRAR/EDITAR COLABORADOR ==================== */}
       {showColabModal && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-3xl bg-slate-900 border border-slate-700 p-6 space-y-4 shadow-2xl">
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="w-full max-w-md max-h-[92dvh] overflow-y-auto overscroll-y-contain rounded-t-[28px] sm:rounded-3xl bg-slate-900 border border-slate-700 p-5 sm:p-6 pb-8 sm:pb-6 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-extrabold text-white">
                 {editingColab ? 'Editar Colaborador' : 'Novo Colaborador'}
@@ -1523,8 +1523,8 @@ export default function CompanyPortalDashboard() {
 
       {/* ==================== MODAL: IMPORTAR CSV ==================== */}
       {showCsvModal && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-lg rounded-3xl bg-slate-900 border border-slate-700 p-6 space-y-4 shadow-2xl">
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="w-full max-w-lg max-h-[92dvh] overflow-y-auto overscroll-y-contain rounded-t-[28px] sm:rounded-3xl bg-slate-900 border border-slate-700 p-5 sm:p-6 pb-8 sm:pb-6 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-extrabold text-white">Importar Equipe via CSV / Planilha</h3>
               <button type="button" onClick={() => setShowCsvModal(false)} className="text-slate-400 hover:text-white">

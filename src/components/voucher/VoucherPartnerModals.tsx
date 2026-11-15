@@ -186,14 +186,14 @@ export const PartnerCollaboratorsModal: React.FC<PartnerCollaboratorsModalProps>
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/75 backdrop-blur-sm p-0 sm:p-4">
-      <div className="w-full max-w-3xl max-h-[90vh] flex flex-col rounded-t-3xl sm:rounded-3xl bg-[#0b1526] border border-white/15 shadow-2xl overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 bg-white/[0.03]">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-cyan-500/15 border border-cyan-400/30 flex items-center justify-center text-cyan-300">
+      <div className="w-full max-w-3xl max-h-[92dvh] flex flex-col rounded-t-[28px] sm:rounded-3xl bg-[#0b1526] border border-white/15 shadow-2xl overflow-hidden">
+        <div className="shrink-0 flex items-center justify-between gap-2 px-4 sm:px-5 py-3.5 sm:py-4 border-b border-white/10 bg-white/[0.03]">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-cyan-500/15 border border-cyan-400/30 flex items-center justify-center text-cyan-300 shrink-0">
               <Users className="w-5 h-5" />
             </div>
-            <div>
-              <h2 className="text-base sm:text-lg font-bold text-white">
+            <div className="min-w-0">
+              <h2 className="text-base sm:text-lg font-bold text-white truncate">
                 Colaboradores • {partner.nome_fantasia || partner.razao_social}
               </h2>
               <p className="text-xs text-slate-400">
@@ -204,13 +204,14 @@ export const PartnerCollaboratorsModal: React.FC<PartnerCollaboratorsModalProps>
           <button
             type="button"
             onClick={onClose}
-            className="w-10 h-10 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center text-slate-300"
+            className="min-w-[44px] min-h-[44px] w-10 h-10 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center text-slate-300 shrink-0 active:scale-95"
+            aria-label="Fechar modal"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch] p-4 sm:p-5 pb-8 sm:pb-5 space-y-4">
           {/* Quick Actions */}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <button
@@ -430,14 +431,14 @@ export const PartnerRechargeModal: React.FC<PartnerRechargeModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/75 backdrop-blur-sm p-0 sm:p-4">
-      <div className="w-full max-w-lg rounded-t-3xl sm:rounded-3xl bg-[#0b1526] border border-white/15 shadow-2xl overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 bg-white/[0.03]">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-400/30 flex items-center justify-center text-emerald-300">
+      <div className="w-full max-w-lg max-h-[92dvh] flex flex-col rounded-t-[28px] sm:rounded-3xl bg-[#0b1526] border border-white/15 shadow-2xl overflow-hidden">
+        <div className="shrink-0 flex items-center justify-between gap-2 px-4 sm:px-5 py-3.5 sm:py-4 border-b border-white/10 bg-white/[0.03]">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-400/30 flex items-center justify-center text-emerald-300 shrink-0">
               <Wallet className="w-5 h-5" />
             </div>
-            <div>
-              <h2 className="text-base font-bold text-white">Recarregar / Vender Créditos</h2>
+            <div className="min-w-0">
+              <h2 className="text-base font-bold text-white truncate">Recarregar / Vender Créditos</h2>
               <p className="text-xs text-slate-400 truncate max-w-[260px]">
                 {partner.nome_fantasia || partner.razao_social} • Atual: {formatBRL(partner.saldo_credito)}
               </p>
@@ -446,13 +447,14 @@ export const PartnerRechargeModal: React.FC<PartnerRechargeModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="w-10 h-10 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center text-slate-300"
+            className="min-w-[44px] min-h-[44px] w-10 h-10 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center text-slate-300 shrink-0 active:scale-95"
+            aria-label="Fechar modal"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+        <form onSubmit={handleSubmit} className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch] p-4 sm:p-5 pb-8 sm:pb-5 space-y-4">
           <div className="flex flex-wrap gap-2">
             {[200, 300, 400, 500, 1000, 2000].map((v) => (
               <button
@@ -690,27 +692,28 @@ export const PartnerAccessModal: React.FC<PartnerAccessModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/75 backdrop-blur-sm p-0 sm:p-4">
-      <div className="w-full max-w-xl rounded-t-3xl sm:rounded-3xl bg-[#0b1526] border border-white/15 shadow-2xl overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 bg-white/[0.03]">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-cyan-500/15 border border-cyan-400/30 flex items-center justify-center text-cyan-300">
+      <div className="w-full max-w-xl max-h-[92dvh] flex flex-col rounded-t-[28px] sm:rounded-3xl bg-[#0b1526] border border-white/15 shadow-2xl overflow-hidden">
+        <div className="shrink-0 flex items-center justify-between gap-2 px-4 sm:px-5 py-3.5 sm:py-4 border-b border-white/10 bg-white/[0.03]">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-cyan-500/15 border border-cyan-400/30 flex items-center justify-center text-cyan-300 shrink-0">
               <Key className="w-5 h-5" />
             </div>
-            <div>
-              <h2 className="text-base font-bold text-white">Acesso Portal B2B</h2>
-              <p className="text-xs text-slate-400">{partner.nome_fantasia || partner.razao_social}</p>
+            <div className="min-w-0">
+              <h2 className="text-base font-bold text-white truncate">Acesso Portal B2B</h2>
+              <p className="text-xs text-slate-400 truncate">{partner.nome_fantasia || partner.razao_social}</p>
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="w-10 h-10 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center text-slate-300"
+            className="min-w-[44px] min-h-[44px] w-10 h-10 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center text-slate-300 shrink-0 active:scale-95"
+            aria-label="Fechar modal"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="p-5 space-y-4 max-h-[82vh] overflow-y-auto">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch] p-4 sm:p-5 pb-8 sm:pb-5 space-y-4">
           {/* Segurança Info */}
           <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-400/25 flex items-start gap-2.5 text-xs text-emerald-200">
             <ShieldCheck className="w-4 h-4 shrink-0 mt-0.5 text-emerald-300" />

@@ -98,14 +98,15 @@ export default function CompanyPortalLogin() {
   };
 
   return (
-    <div className="min-h-screen w-full bg-[#070b0e] text-slate-100 flex flex-col justify-center items-center p-4 sm:p-6 relative overflow-hidden">
+    <div className="h-[100dvh] w-full bg-[#070b0e] text-slate-100 overflow-y-auto overflow-x-hidden overscroll-y-contain relative [-webkit-overflow-scrolling:touch]">
       {/* Ambient Glassmorphism Glows */}
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
         <div className="absolute -top-40 -left-32 w-96 h-96 rounded-full bg-emerald-500/15 blur-[120px]" />
         <div className="absolute -bottom-40 -right-32 w-96 h-96 rounded-full bg-cyan-500/15 blur-[120px]" />
       </div>
 
-      <div className="w-full max-w-md relative z-10">
+      <div className="min-h-full w-full flex flex-col justify-center items-center p-4 sm:p-6 py-8 pb-16 relative z-10">
+        <div className="w-full max-w-md">
         {/* Header Branding */}
         <div className="text-center mb-6 sm:mb-8">
           <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-500/20 to-cyan-500/20 border border-emerald-500/30 shadow-lg shadow-emerald-950/50 mb-4">
@@ -247,6 +248,7 @@ export default function CompanyPortalLogin() {
           <Building2 className="w-3.5 h-3.5" />
           Não lembra sua senha? Solicite uma nova credencial ao estabelecimento conveniado.
         </p>
+        </div>
       </div>
     </div>
   );

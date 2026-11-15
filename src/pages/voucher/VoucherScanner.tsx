@@ -325,7 +325,7 @@ export default function VoucherScanner() {
   const isBlockedStatus = isAlreadyRedeemed || reservedVoucher?.status === 'CANCELADO' || reservedVoucher?.status === 'EXPIRADO';
 
   return (
-    <div className="min-h-screen w-full bg-[#070b0e] text-slate-100 p-4 sm:p-6 lg:p-8 flex flex-col items-center">
+    <div className="h-[100dvh] w-full overflow-y-auto overflow-x-hidden overscroll-y-contain bg-[#070b0e] text-slate-100 p-3.5 sm:p-6 lg:p-8 pb-24 sm:pb-10 flex flex-col items-center [-webkit-overflow-scrolling:touch]">
       <div className="w-full max-w-3xl space-y-5">
         {/* Header Bar */}
         <div className="rounded-3xl bg-slate-900/75 backdrop-blur-xl border border-slate-800/80 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">

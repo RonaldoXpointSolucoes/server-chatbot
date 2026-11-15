@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useOutletContext } from 'react-router-dom';
 import {
   AlertCircle,
   ArrowDownLeft,
@@ -19,6 +20,7 @@ import {
   History,
   Key,
   Loader2,
+  Menu,
   MessageCircle,
   Percent,
   Plus,
@@ -98,6 +100,11 @@ const WA_STATUS_BADGE: Record<string, { label: string; cls: string }> = {
 };
 
 export default function VoucherDashboard() {
+  const outletCtx =
+    (useOutletContext() as { showMainSidebar?: boolean; setShowMainSidebar?: (v: boolean) => void } | null) || {};
+  const showMainSidebar = outletCtx.showMainSidebar ?? false;
+  const setShowMainSidebar = outletCtx.setShowMainSidebar;
+
   const tenantInfo = useChatStore((state) => state.tenantInfo);
   const currentAccount = useChatStore((state) => state.currentAccount);
 
@@ -456,24 +463,34 @@ export default function VoucherDashboard() {
 
   if (!tenantId) {
     return (
-      <div className="min-h-screen bg-[#060d18] text-white flex items-center justify-center p-6">
-        <div className="max-w-md w-full p-6 rounded-3xl bg-white/[0.04] border border-white/10 text-center space-y-3">
+      <div className="flex-1 h-full w-full min-w-0 overflow-y-auto overflow-x-hidden overscroll-y-contain bg-[#060d18] text-white flex items-center justify-center p-4 sm:p-6 [-webkit-overflow-scrolling:touch]">
+        <div className="max-w-md w-full p-6 rounded-3xl bg-white/[0.04] backdrop-blur-xl border border-white/10 text-center space-y-4">
           <Store className="w-10 h-10 text-emerald-400 mx-auto" />
           <h2 className="text-lg font-bold">Nenhuma Empresa Selecionada</h2>
           <p className="text-sm text-slate-400">
             Selecione uma empresa/loja no seletor no topo superior esquerdo para gerenciar os vouchers corporativos dela.
           </p>
+          {setShowMainSidebar && (
+            <button
+              type="button"
+              onClick={() => setShowMainSidebar(true)}
+              className="lg:hidden w-full min-h-[48px] px-4 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-extrabold flex items-center justify-center gap-2 active:scale-95 transition-transform"
+            >
+              <Menu className="w-4 h-4" /> Abrir Menu para Escolher Loja
+            </button>
+          )}
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#060d18] text-slate-100 p-4 sm:p-6 space-y-5">
+    <div className="flex-1 h-full w-full min-w-0 overflow-y-auto overflow-x-hidden overscroll-y-contain bg-[#060d18] text-slate-100 [-webkit-overflow-scrolling:touch]">
+      <div className="max-w-[1600px] mx-auto p-3.5 sm:p-6 pb-24 sm:pb-10 space-y-4 sm:space-y-5">
       {/* Toast Notification */}
       {toast && (
         <div
-          className={`fixed bottom-5 right-5 z-[60] max-w-md px-4 py-3.5 rounded-2xl border shadow-2xl backdrop-blur-xl flex items-start gap-3 transition-all ${
+          className={`fixed bottom-4 left-3 right-3 sm:left-auto sm:bottom-5 sm:right-5 z-[60] sm:max-w-md px-4 py-3.5 rounded-2xl border shadow-2xl backdrop-blur-xl flex items-start gap-3 transition-all ${
             toast.type === 'success'
               ? 'bg-emerald-950/90 border-emerald-400/40 text-emerald-100'
               : toast.type === 'error'
@@ -491,55 +508,65 @@ export default function VoucherDashboard() {
       )}
 
       {/* Header */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-        <div className="flex items-start sm:items-center gap-3.5">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500/30 to-cyan-500/20 border border-emerald-400/30 flex items-center justify-center text-emerald-300 shrink-0">
-            <Ticket className="w-6 h-6" />
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4">
+        <div className="flex items-start sm:items-center gap-3 min-w-0">
+          {setShowMainSidebar && (
+            <button
+              type="button"
+              onClick={() => setShowMainSidebar(!showMainSidebar)}
+              aria-label="Abrir Menu Principal"
+              className="lg:hidden h-11 w-11 rounded-2xl bg-white/[0.06] hover:bg-white/[0.12] border border-white/15 flex items-center justify-center text-white shrink-0 active:scale-95 transition-transform duration-150"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+          )}
+          <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl bg-gradient-to-br from-emerald-500/30 to-cyan-500/20 border border-emerald-400/30 flex items-center justify-center text-emerald-300 shrink-0 shadow-lg shadow-emerald-950/30">
+            <Ticket className="w-5 h-5 sm:w-6 sm:h-6" />
           </div>
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight">Voucher Gestão</h1>
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/15 text-emerald-300 border border-emerald-400/30">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+              <h1 className="text-lg sm:text-2xl font-extrabold text-white tracking-tight">Voucher Gestão</h1>
+              <span className="px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-black uppercase tracking-wider bg-emerald-500/15 text-emerald-300 border border-emerald-400/30">
                 Multi-Tenant B2B
               </span>
-              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-white/10 text-white border border-white/15 flex items-center gap-1.5">
-                <Store className="w-3 h-3 text-cyan-300" />
-                {storeProfile?.name || currentTenantName}
+              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-white/10 text-white border border-white/15 inline-flex items-center gap-1.5 max-w-[200px] sm:max-w-xs truncate">
+                <Store className="w-3 h-3 text-cyan-300 shrink-0" />
+                <span className="truncate">{storeProfile?.name || currentTenantName}</span>
               </span>
             </div>
-            <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
+            <p className="text-xs sm:text-sm text-slate-400 mt-0.5 leading-snug line-clamp-2 sm:line-clamp-none">
               Emita vouchers avulsos, cadastre empresas parceiras com portal próprio, créditos mensais e compras com desconto.
             </p>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
           <a
             href={`/voucher-scanner?empresa=${encodeURIComponent(tenantId)}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="h-11 px-3.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] border border-white/15 text-xs font-bold text-white flex items-center gap-2 transition"
+            className="min-h-[46px] sm:h-11 px-3 sm:px-3.5 rounded-2xl sm:rounded-xl bg-white/[0.06] hover:bg-white/[0.12] border border-white/15 text-xs font-bold text-white flex items-center justify-center gap-2 active:scale-95 transition-all"
           >
-            <QrCode className="w-4 h-4 text-cyan-300" />
-            TERMINAL CAIXA
+            <QrCode className="w-4 h-4 text-cyan-300 shrink-0" />
+            <span className="truncate">TERMINAL CAIXA</span>
           </a>
           <a
             href={`/voucher-empresa/login?empresa=${encodeURIComponent(tenantId)}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="h-11 px-3.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] border border-white/15 text-xs font-bold text-white flex items-center gap-2 transition"
+            className="min-h-[46px] sm:h-11 px-3 sm:px-3.5 rounded-2xl sm:rounded-xl bg-white/[0.06] hover:bg-white/[0.12] border border-white/15 text-xs font-bold text-white flex items-center justify-center gap-2 active:scale-95 transition-all"
           >
-            <ExternalLink className="w-4 h-4 text-amber-300" />
-            PORTAL B2B
+            <ExternalLink className="w-4 h-4 text-amber-300 shrink-0" />
+            <span className="truncate">PORTAL B2B</span>
           </a>
           <button
             type="button"
             onClick={() => setShowSettingsModal(true)}
-            className="h-11 px-3.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] border border-white/15 text-xs font-bold text-slate-200 flex items-center gap-2 transition"
+            className="col-span-2 sm:col-span-1 min-h-[46px] sm:h-11 px-3.5 rounded-2xl sm:rounded-xl bg-white/[0.06] hover:bg-white/[0.12] border border-white/15 text-xs font-bold text-slate-200 flex items-center justify-center gap-2 active:scale-95 transition-all"
             title="Configurar WhatsApp Padrão e PIN do Terminal Caixa"
           >
-            <Settings className="w-4 h-4" />
-            <span className="hidden sm:inline">Configurar Loja</span>
+            <Settings className="w-4 h-4 shrink-0" />
+            <span>Configurar Loja &amp; PIN</span>
           </button>
           <button
             type="button"
@@ -548,9 +575,9 @@ export default function VoucherDashboard() {
               setIssueModalMode('single');
               setShowIssueModal(true);
             }}
-            className="h-11 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs sm:text-sm font-extrabold flex items-center gap-2 shadow-lg shadow-emerald-500/20 transition"
+            className="col-span-2 sm:col-span-1 min-h-[48px] sm:h-11 px-4 rounded-2xl sm:rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 text-xs sm:text-sm font-extrabold flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 active:scale-95 transition-all"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-4 h-4 shrink-0" />
             EMITIR VOUCHER / LOTE
           </button>
         </div>
@@ -567,13 +594,13 @@ export default function VoucherDashboard() {
             <button
               type="button"
               onClick={() => loadDashboard(false)}
-              className="h-10 px-4 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-bold text-white"
+              className="min-h-[42px] px-4 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-bold text-white active:scale-95 transition-transform"
             >
               Tentar Novamente
             </button>
             <a
               href="/login"
-              className="h-10 px-4 rounded-xl bg-rose-500 hover:bg-rose-400 text-white text-xs font-bold flex items-center"
+              className="min-h-[42px] px-4 rounded-xl bg-rose-500 hover:bg-rose-400 text-white text-xs font-bold flex items-center active:scale-95 transition-transform"
             >
               Revalidar Login CRM
             </a>
@@ -594,97 +621,97 @@ export default function VoucherDashboard() {
           <button
             type="button"
             onClick={() => setActiveTab('pedidos')}
-            className="h-9 px-4 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 text-xs font-extrabold shrink-0"
+            className="min-h-[42px] px-4 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 text-xs font-extrabold shrink-0 active:scale-95 transition-transform"
           >
             Revisar Pedidos Agora
           </button>
         </div>
       )}
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3.5">
-        <div className="p-4 rounded-2xl bg-white/[0.04] border border-white/10 backdrop-blur-xl">
-          <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-slate-400">
-            <span>Total Emitido</span>
-            <Ticket className="w-4 h-4 text-emerald-400" />
+      {/* KPI Cards (2x2 compacto no mobile, 4 colunas no desktop) */}
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-2.5 sm:gap-3.5">
+        <div className="p-3 sm:p-4 rounded-2xl bg-gradient-to-br from-emerald-500/10 via-white/[0.04] to-transparent border border-emerald-500/20 backdrop-blur-xl min-w-0">
+          <div className="flex items-center justify-between gap-1 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-slate-400">
+            <span className="truncate">Total Emitido</span>
+            <Ticket className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-400 shrink-0" />
           </div>
-          <div className="mt-2 text-2xl font-black text-white">{formatBRL(stats.totalIssuedVal)}</div>
-          <div className="mt-1 text-xs text-slate-400">
+          <div className="mt-1.5 sm:mt-2 text-lg sm:text-2xl font-black text-white truncate">{formatBRL(stats.totalIssuedVal)}</div>
+          <div className="mt-0.5 sm:mt-1 text-[11px] sm:text-xs text-slate-400 truncate">
             {vouchers.length} voucher(es) • {partners.length} parceira(s)
           </div>
         </div>
 
-        <div className="p-4 rounded-2xl bg-white/[0.04] border border-white/10 backdrop-blur-xl">
-          <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-slate-400">
-            <span>Total Resgatado</span>
-            <DollarSign className="w-4 h-4 text-cyan-400" />
+        <div className="p-3 sm:p-4 rounded-2xl bg-gradient-to-br from-cyan-500/10 via-white/[0.04] to-transparent border border-cyan-500/20 backdrop-blur-xl min-w-0">
+          <div className="flex items-center justify-between gap-1 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-slate-400">
+            <span className="truncate">Total Resgatado</span>
+            <DollarSign className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-cyan-400 shrink-0" />
           </div>
-          <div className="mt-2 text-2xl font-black text-emerald-400">{formatBRL(stats.totalRedeemedVal)}</div>
-          <div className="mt-1 text-xs text-slate-400">
-            {stats.totalRedeemedCount} baixa(s) • Taxa de resgate {stats.redemptionRate}%
+          <div className="mt-1.5 sm:mt-2 text-lg sm:text-2xl font-black text-emerald-400 truncate">{formatBRL(stats.totalRedeemedVal)}</div>
+          <div className="mt-0.5 sm:mt-1 text-[11px] sm:text-xs text-slate-400 truncate">
+            {stats.totalRedeemedCount} baixa(s) • Taxa {stats.redemptionRate}%
           </div>
         </div>
 
-        <div className="p-4 rounded-2xl bg-white/[0.04] border border-white/10 backdrop-blur-xl">
-          <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-slate-400">
-            <span>Em Circulação</span>
-            <Clock className="w-4 h-4 text-amber-400" />
+        <div className="p-3 sm:p-4 rounded-2xl bg-gradient-to-br from-amber-500/10 via-white/[0.04] to-transparent border border-amber-500/20 backdrop-blur-xl min-w-0">
+          <div className="flex items-center justify-between gap-1 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-slate-400">
+            <span className="truncate">Em Circulação</span>
+            <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400 shrink-0" />
           </div>
-          <div className="mt-2 text-2xl font-black text-amber-300">{formatBRL(stats.activeVal)}</div>
-          <div className="mt-1 text-xs text-slate-400">{stats.activeCount} disponíveis para resgate no caixa</div>
+          <div className="mt-1.5 sm:mt-2 text-lg sm:text-2xl font-black text-amber-300 truncate">{formatBRL(stats.activeVal)}</div>
+          <div className="mt-0.5 sm:mt-1 text-[11px] sm:text-xs text-slate-400 truncate">{stats.activeCount} disponíveis no caixa</div>
         </div>
 
-        <div className="p-4 rounded-2xl bg-white/[0.04] border border-white/10 backdrop-blur-xl">
-          <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-slate-400">
-            <span>Saldo Carteira B2B</span>
-            <Building2 className="w-4 h-4 text-indigo-400" />
+        <div className="p-3 sm:p-4 rounded-2xl bg-gradient-to-br from-indigo-500/10 via-white/[0.04] to-transparent border border-indigo-500/20 backdrop-blur-xl min-w-0">
+          <div className="flex items-center justify-between gap-1 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-slate-400">
+            <span className="truncate">Carteira B2B</span>
+            <Building2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-indigo-400 shrink-0" />
           </div>
-          <div className="mt-2 text-2xl font-black text-indigo-300">{formatBRL(stats.totalPartnerBalance)}</div>
-          <div className="mt-1 text-xs text-slate-400">
-            {stats.activeMonthlyCount} plano(s) mensais • {connectedInstances.length} WhatsApp ativo(s)
+          <div className="mt-1.5 sm:mt-2 text-lg sm:text-2xl font-black text-indigo-300 truncate">{formatBRL(stats.totalPartnerBalance)}</div>
+          <div className="mt-0.5 sm:mt-1 text-[11px] sm:text-xs text-slate-400 truncate">
+            {stats.activeMonthlyCount} plano(s) • {connectedInstances.length} WhatsApp
           </div>
         </div>
       </div>
 
-      {/* Navigation Tabs + Refresh */}
-      <div className="flex flex-wrap items-center justify-between gap-2 pb-1 border-b border-white/10">
-        <div className="flex flex-wrap items-center gap-2">
+      {/* Navigation Tabs + Refresh (faixa horizontal deslizável no mobile, flex-wrap no desktop) */}
+      <div className="flex items-center gap-2 pb-2 border-b border-white/10">
+        <div className="flex-1 min-w-0 flex items-center gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar sm:flex-wrap snap-x">
           <button
             type="button"
             onClick={() => setActiveTab('vouchers')}
-            className={`h-11 px-4 rounded-xl text-xs font-extrabold flex items-center gap-2 transition ${
+            className={`shrink-0 snap-start whitespace-nowrap h-11 px-3.5 sm:px-4 rounded-2xl sm:rounded-xl text-xs font-extrabold flex items-center gap-2 active:scale-95 transition-all ${
               activeTab === 'vouchers'
                 ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/20'
                 : 'bg-white/[0.04] hover:bg-white/[0.09] text-slate-300 border border-white/10'
             }`}
           >
-            <Ticket className="w-4 h-4" />
+            <Ticket className="w-4 h-4 shrink-0" />
             VOUCHERS ({vouchers.length})
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('empresas')}
-            className={`h-11 px-4 rounded-xl text-xs font-extrabold flex items-center gap-2 transition ${
+            className={`shrink-0 snap-start whitespace-nowrap h-11 px-3.5 sm:px-4 rounded-2xl sm:rounded-xl text-xs font-extrabold flex items-center gap-2 active:scale-95 transition-all ${
               activeTab === 'empresas'
                 ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/20'
                 : 'bg-white/[0.04] hover:bg-white/[0.09] text-slate-300 border border-white/10'
             }`}
           >
-            <Building2 className="w-4 h-4" />
+            <Building2 className="w-4 h-4 shrink-0" />
             EMPRESAS PARCEIRAS ({partners.length})
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('pedidos')}
-            className={`h-11 px-4 rounded-xl text-xs font-extrabold flex items-center gap-2 transition ${
+            className={`shrink-0 snap-start whitespace-nowrap h-11 px-3.5 sm:px-4 rounded-2xl sm:rounded-xl text-xs font-extrabold flex items-center gap-2 active:scale-95 transition-all ${
               activeTab === 'pedidos'
                 ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/20'
                 : 'bg-white/[0.04] hover:bg-white/[0.09] text-slate-300 border border-white/10'
             }`}
           >
-            <Coins className="w-4 h-4" />
+            <Coins className="w-4 h-4 shrink-0" />
             PEDIDOS DE CRÉDITO
             {stats.pendingOrdersCount > 0 && (
               <span className="px-1.5 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black">
@@ -696,26 +723,26 @@ export default function VoucherDashboard() {
           <button
             type="button"
             onClick={() => setActiveTab('campanhas')}
-            className={`h-11 px-4 rounded-xl text-xs font-extrabold flex items-center gap-2 transition ${
+            className={`shrink-0 snap-start whitespace-nowrap h-11 px-3.5 sm:px-4 rounded-2xl sm:rounded-xl text-xs font-extrabold flex items-center gap-2 active:scale-95 transition-all ${
               activeTab === 'campanhas'
                 ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/20'
                 : 'bg-white/[0.04] hover:bg-white/[0.09] text-slate-300 border border-white/10'
             }`}
           >
-            <Gift className="w-4 h-4" />
+            <Gift className="w-4 h-4 shrink-0" />
             CAMPANHAS ({campaigns.length})
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('auditoria')}
-            className={`h-11 px-4 rounded-xl text-xs font-extrabold flex items-center gap-2 transition ${
+            className={`shrink-0 snap-start whitespace-nowrap h-11 px-3.5 sm:px-4 rounded-2xl sm:rounded-xl text-xs font-extrabold flex items-center gap-2 active:scale-95 transition-all ${
               activeTab === 'auditoria'
                 ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/20'
                 : 'bg-white/[0.04] hover:bg-white/[0.09] text-slate-300 border border-white/10'
             }`}
           >
-            <History className="w-4 h-4" />
+            <History className="w-4 h-4 shrink-0" />
             EXTRATO / LEDGER ({events.length})
           </button>
         </div>
@@ -724,10 +751,10 @@ export default function VoucherDashboard() {
           type="button"
           disabled={refreshing}
           onClick={() => loadDashboard(true)}
-          className="h-10 w-10 rounded-xl bg-white/[0.05] hover:bg-white/[0.1] border border-white/10 flex items-center justify-center text-slate-300"
+          className="shrink-0 h-11 w-11 rounded-2xl sm:rounded-xl bg-white/[0.05] hover:bg-white/[0.1] border border-white/10 flex items-center justify-center text-slate-300 active:scale-95 transition-all"
           title="Atualizar dados"
         >
-          <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+          <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin text-emerald-400' : ''}`} />
         </button>
       </div>
 
@@ -770,15 +797,15 @@ export default function VoucherDashboard() {
                   ))}
                 </select>
 
-                <div className="flex flex-wrap gap-1.5">
+                <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar sm:flex-wrap pb-0.5">
                   {(['TODOS', 'ATIVOS', 'RESGATADOS', 'CANCELADOS'] as VoucherFilterStatus[]).map((st) => (
                     <button
                       key={st}
                       type="button"
                       onClick={() => setVoucherFilter(st)}
-                      className={`h-11 px-3.5 rounded-xl text-xs font-extrabold transition ${
+                      className={`shrink-0 h-11 px-3.5 rounded-2xl sm:rounded-xl text-xs font-extrabold active:scale-95 transition-all ${
                         voucherFilter === st
-                          ? 'bg-emerald-500 text-slate-950'
+                          ? 'bg-emerald-500 text-slate-950 shadow-sm shadow-emerald-500/20'
                           : 'bg-white/[0.04] hover:bg-white/[0.09] text-slate-300 border border-white/10'
                       }`}
                     >
@@ -940,7 +967,7 @@ export default function VoucherDashboard() {
                               <button
                                 type="button"
                                 onClick={() => setDetailVoucher(v)}
-                                className="h-10 px-3 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-bold text-white flex items-center gap-1.5"
+                                className="min-h-[44px] sm:h-10 px-3.5 rounded-2xl sm:rounded-xl bg-white/10 hover:bg-white/15 text-xs font-bold text-white flex items-center gap-1.5 active:scale-95 transition-all"
                               >
                                 <QrCode className="w-4 h-4 text-cyan-300" />
                                 QR / Ações
@@ -1540,6 +1567,7 @@ export default function VoucherDashboard() {
         onSaved={() => loadDashboard(true)}
         onToast={showToast}
       />
+      </div>
     </div>
   );
 }
