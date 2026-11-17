@@ -161,3 +161,80 @@ body {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* Cabeçalho Inteligente do Chat com Container Queries (responde à largura real do painel, evitando encavalamento em split screen) */
+.chat-header-cq {
+  container-type: inline-size;
+  container-name: chatheader;
+}
+
+.chat-header-cq .chat-cq-label-2xl,
+.chat-header-cq .chat-cq-label-xl {
+  display: inline;
+}
+
+.chat-header-cq .chat-cq-label-xl-short {
+  display: none;
+}
+
+.chat-header-cq .chat-cq-btn-2xl-auto,
+.chat-header-cq .chat-cq-btn-xl-auto {
+  width: auto;
+  padding-left: 0.625rem;
+  padding-right: 0.625rem;
+}
+
+@container chatheader (max-width: 840px) {
+  .chat-header-cq .chat-cq-label-2xl {
+    display: none;
+  }
+  .chat-header-cq .mobile-actions-drawer .chat-cq-label-2xl {
+    display: inline;
+  }
+  .chat-header-cq .chat-cq-btn-2xl-auto {
+    width: 2rem;
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .chat-header-cq .chat-cq-omni-auto {
+    width: auto;
+    min-width: 2rem;
+    padding-left: 0.375rem;
+    padding-right: 0.375rem;
+  }
+  .chat-header-cq .mobile-actions-drawer .chat-cq-omni-auto {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
+}
+
+@container chatheader (max-width: 720px) {
+  .chat-header-cq .chat-cq-label-xl {
+    display: none;
+  }
+  .chat-header-cq .chat-cq-label-xl-short {
+    display: inline;
+  }
+  .chat-header-cq .chat-cq-btn-xl-auto {
+    width: 2rem;
+    padding-left: 0;
+    padding-right: 0;
+  }
+}
+
+@container chatheader (max-width: 540px) {
+  .chat-header-cq {
+    flex-wrap: wrap;
+    row-gap: 0.5rem;
+  }
+  .chat-header-cq .chat-header-identity {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+  .chat-header-cq .chat-header-actions {
+    width: 100%;
+    justify-content: flex-end;
+    padding-top: 0.375rem;
+    border-top: 1px solid rgba(148, 163, 184, 0.16);
+  }
+}

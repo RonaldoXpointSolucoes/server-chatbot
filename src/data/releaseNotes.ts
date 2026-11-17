@@ -712,6 +712,96 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.2.6',
+    date: '2026-11-17',
+    summary: 'Busca Inteligente por Escopo (Tudo, Contato, Empresa, Mensagens + Salto Contextual), Resolução Otimista Instantânea (<150ms) e Cabeçalho Responsivo (Container Queries)',
+    notes: [
+      {
+        id: 'feat-scoped-deep-search-826',
+        category: 'features',
+        title: 'Novo Filtro Inteligente por Escopo (Tudo, Contato, Empresa e Mensagens) + Salto "Ver na conversa"',
+        description: 'Implementado seletor de escopo direto na barra de busca do Chat (/chat) com motor normalizado (chatSearch.ts) tolerante a acentos, pontuação de telefone/CNPJ e sanitização PostgREST: "Contato" filtra rápido sem varrer histórico de mensagens, "Empresa" encontra contatos vinculados via company_ids/razão social/fantasia/CNPJ, e "Mensagens" busca dentro de conversas e anotações CRM com janela otimizada (180 dias + fallback Full-Text Search) exibindo trecho destacado no card e banner com botão "Ver na conversa" para pular direto à mensagem histórica.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+        guide: {
+          moduleGroup: 'chat-header',
+          moduleLabel: 'Chat ao Vivo (/chat) • Busca & Filtros de Conversas',
+          purpose: 'Permitir localizar rapidamente qualquer atendimento por nome do contato, telefone, empresa vinculada, CNPJ ou palavra citada meses atrás dentro das mensagens, mantendo performance alta mesmo em "Todas as Caixas".',
+          whereToAccess: [
+            '1. Menu Lateral Esquerdo ➔ Conversas (/chat)',
+            '2. Selecione "Todas as Caixas" ou as caixas desejadas no topo da lista',
+            '3. Clique na barra "Pesquisar contato, empresa, CNPJ ou msg..." e escolha o filtro logo abaixo: "Tudo", "Contato", "Empresa" ou "Mensagens"',
+            '4. Ao abrir um chat encontrado por mensagem antiga, clique em "Ver na conversa" no banner superior para saltar e destacar a mensagem exata'
+          ],
+          howToTest: [
+            '1. Com "Todas as Caixas" selecionado, pesquise uma palavra citada dentro de uma conversa (ex.: "Aytek") nos modos "Tudo" ou "Mensagens".',
+            '2. Confira os cards retornados com o trecho destacado ("Msg • dd/MM"), clique em um atendimento antigo e clique em "Ver na conversa" no topo do chat.',
+            '3. Alterne para "Empresa" e busque parte do nome de uma empresa cliente (ex.: "Zanini") para listar imediatamente todos os contatos vinculados a ela.'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Tela: Chat ao Vivo (/chat) ➔ Barra de Busca & Chips de Escopo',
+            contextElements: ['Todas as Caixas', '🔍 Pesquisar contato, empresa, CNPJ ou msg...', 'Tudo', 'Contato', 'Empresa', 'Mensagens'],
+            targetButtonLabel: '👆 Tudo | Contato | Empresa | Mensagens',
+            targetButtonPosition: 'Logo abaixo do campo de busca na barra lateral de conversas (/chat)',
+            visualPreviewVariant: 'chat-history-sync'
+          },
+          quickAction: {
+            label: 'Abrir Chat & Testar Nova Busca Agora',
+            route: '/chat'
+          }
+        }
+      },
+      {
+        id: 'fix-all-boxes-search-and-timeout-826',
+        category: 'fixes',
+        title: 'Correção da Busca em "Todas as Caixas" & Eliminação de Timeouts/Erros 400/500 no Supabase',
+        description: 'Corrigida a lógica de searchGlobalContacts que associava instance_id="all" às conversas retornadas quando "Todas as Caixas" estava ativo (perdendo histórico e etiquetas). Removida referência à coluna inexistente push_name no banco (400), aplicadas consultas em 2 fases progressivas com cancelamento sequencial e cache LRU de 45s, e calibrada a busca de mensagens para janela de 180d + FTS nativo sem estourar statement_timeout (57014).',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      },
+      {
+        id: 'imp-optimistic-resolve-and-realtime-storm-826',
+        category: 'improvements',
+        title: 'Resolução Otimista Instantânea (<150ms) & Fim da Tempestade de PATCH Realtime',
+        description: 'Refatorados executeResolve, handleResolveConversation, resolveConversation e reopenConversation para atualizar o estado e trocar para o próximo ticket em 1 único frame (<150ms vs >20s antes), rodando gravação de mensagem, atualização de conversa/contato, chat_tickets e análise IA em paralelo/background com rollback seguro. Eliminado loop infinito de PATCH unread_count no listener Realtime, reduzido getTicketResolutionDate para 1 query LIMIT 1 e removido AnimatePresence popLayout dos cards da sidebar.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-300/30',
+        guide: {
+          moduleGroup: 'chat-header',
+          moduleLabel: 'Chat ao Vivo (/chat) • Botão Resolver & Fila de Tickets',
+          purpose: 'Permitir que operadores finalizem e troquem de atendimento instantaneamente ao clicar em Resolver ou Reabrir, sem travamentos de UI ou congestionamento de rede.',
+          whereToAccess: [
+            '1. Menu Lateral Esquerdo ➔ Conversas (/chat)',
+            '2. Abra qualquer conversa ativa e clique em "✅ Resolver" no cabeçalho superior direito'
+          ],
+          howToTest: [
+            '1. Abra um atendimento e clique em "Resolver". Observe a saída imediata da conversa da fila e a abertura automática do próximo ticket em menos de 1 segundo.',
+            '2. Em conversas já resolvidas, clique em "Reabrir" e confirme a restauração instantânea na fila aberta.'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Tela: Chat ao Vivo (/chat) ➔ Botão Resolver Instantâneo',
+            contextElements: ['📞 Telefone', '🏢 Empresa', '✅ Resolver', '⋮ Opções'],
+            targetButtonLabel: '👆 ✅ Resolver',
+            targetButtonPosition: 'Cabeçalho superior direito da conversa ativa no Chat ao Vivo',
+            visualPreviewVariant: 'chat-header-modify'
+          },
+          quickAction: {
+            label: 'Testar Fluxo no Chat (/chat)',
+            route: '/chat'
+          }
+        }
+      },
+      {
+        id: 'imp-responsive-chat-header-cq-826',
+        category: 'improvements',
+        title: 'Cabeçalho do Chat Responsivo com CSS Container Queries (ChatOmniMenu & index.css)',
+        description: 'Adicionadas CSS Container Queries (.chat-header-cq) para adaptar os botões e rótulos do cabeçalho conforme a largura real do painel de conversa, evitando sobreposição de botões em telas menores ou split screen.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-300/30'
+      }
+    ]
+  },
+  {
     version: '8.2.5',
     date: '2026-11-17',
     summary: 'Blindagem Completa do Envio de Mídia (Preflight Offline/Leitura, Política Inteligente do Storage Supabase & Zero Unhandled Rejections)',

@@ -1,5 +1,5 @@
 {
-  "version": "8.2.5",
-  "buildDate": "2026-11-17T16:07:45.921Z",
-  "summary": "Blindagem Completa do Envio de Mídia (Preflight Offline/Leitura, Política Inteligente do Storage Supabase & Zero Unhandled Rejections)"
+  "version": "8.2.6",
+  "buildDate": "2026-11-17T17:24:49.062Z",
+  "summary": "Busca Inteligente por Escopo (Tudo, Contato, Empresa, Mensagens + Salto Contextual), Resolução Otimista Instantânea (<150ms) e Cabeçalho Responsivo (Container Queries)"
 }

@@ -204,7 +204,8 @@ export const MessageBubble = memo(({
     return (
       <div 
         key={msg.id} 
-        id={`message-note-${msg.id}`} 
+        id={`message-note-${msg.id}`}
+        data-db-msg-id={msg.id}
         className="flex flex-col w-full message-item-container animate-in fade-in duration-300 scroll-mt-20"
       >
         {separatorNode}
@@ -454,7 +455,7 @@ export const MessageBubble = memo(({
   const isLastMessages = index >= totalMessages - 2;
 
   return (
-    <div id={`msg-${(msg as any).whatsapp_id || msg.id}`} className="flex flex-col w-full message-item-container">
+    <div id={`msg-${(msg as any).whatsapp_id || msg.id}`} data-db-msg-id={msg.id} className="flex flex-col w-full message-item-container">
       {separatorNode}
       <div 
         className={`relative flex items-center mb-1 group w-full ${isMe ? 'justify-end' : 'justify-start'} ${

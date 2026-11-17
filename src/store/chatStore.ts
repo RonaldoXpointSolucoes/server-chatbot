@@ -10,6 +10,14 @@ import {
   probeFileReadable,
   sendMultipartWithRetry
 } from '../utils/mediaUploadResilience.mjs';
+import {
+  SearchScopeType,
+  SearchMatchMeta,
+  normalizeSearchText,
+  extractSearchDigits,
+  sanitizePostgrestTerm,
+  extractMatchSnippet
+} from '../utils/chatSearch';
 
 export const getBrPhoneVariations = (phoneStr: string | null | undefined): string[] => {
   if (!phoneStr) return [];
@@ -190,6 +198,7 @@ export type ContactType = ContactRow & {
   ai_paused_manually?: boolean;
   isManuallyUnread?: boolean;
   isSearchResult?: boolean;
+  searchMatchMeta?: SearchMatchMeta | null;
 };
 
 export interface ChatTicket {
@@ -396,6 +405,10 @@ const spuriousZeroRestoredForMsgTs = new Map<string, number>();
 const recentlyResolvedConvAt = new Map<string, number>();
 // Lock em voo para impedir cliques duplicados simultâneos em Resolver
 const resolvingContactLocks = new Set<string>();
+// Controle de sequência (cancelamento lógico) e cache LRU da busca global
+let latestGlobalSearchSeq = 0;
+const globalSearchCache = new Map<string, { timestamp: number; contacts: ContactType[] }>();
+const GLOBAL_SEARCH_CACHE_TTL_MS = 45000;
 
 export const getOrFetchApiKey = async (instanceId: string | null | undefined): Promise<string> => {
   if (!instanceId) return '';
@@ -698,6 +711,7 @@ interface ChatState {
   tenantLabels: any[];
   appVersion: { version: string, deploy_date: string } | null;
   isSearchingGlobally: boolean;
+  isSearchingMessages: boolean;
   realtimeStatus: 'connected' | 'connecting' | 'disconnected';
   hasRealtimeConnectedOnce: boolean;
   isOffline: boolean;
@@ -718,7 +732,8 @@ interface ChatState {
   toggleGlobalAi: (forceState?: boolean) => Promise<void>;
   syncMissedMessages: () => Promise<void>;
 
-  searchGlobalContacts: (term: string) => Promise<void>;
+  searchGlobalContacts: (term: string, scope?: SearchScopeType, options?: { companyIdsHint?: string[] }) => Promise<void>;
+  clearGlobalSearchLoading: () => void;
   openQRModal: (instanceId?: string | null) => void;
   closeQRModal: () => void;
 
@@ -754,6 +769,7 @@ interface ChatState {
   // Historical Sync
   syncEvolutionContacts: (instanceName: string) => Promise<void>;
   loadHistoricalMessages: (contactId: string, instanceName: string, forceSync?: boolean) => Promise<void>;
+  loadMessagesAroundTimestamp: (contactId: string, conversationId: string, timestampIso: string) => Promise<boolean>;
 
   // Local state updaters
   addMessageLocally: (contactId: string, msg: MessageType, options?: any) => void;
@@ -1230,6 +1246,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   automations: [],
   tenantLabels: [],
   isSearchingGlobally: false,
+  isSearchingMessages: false,
   quickReplies: [],
   appointments: [],
   filterType: (typeof window !== 'undefined' ? localStorage.getItem('chat_filter_preference') : null) || 'all',
@@ -1405,6 +1422,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       automations: [],
       tenantLabels: [],
       isSearchingGlobally: false,
+      isSearchingMessages: false,
       quickReplies: [],
       appVersion: null,
       userSettings: {},
@@ -5618,135 +5636,608 @@ export const useChatStore = create<ChatState>((set, get) => ({
     await state.fetchInitialData();
   },
 
-  searchGlobalContacts: async (term: string) => {
+  clearGlobalSearchLoading: () => {
+    latestGlobalSearchSeq += 1;
+    set({ isSearchingGlobally: false, isSearchingMessages: false });
+  },
+
+  searchGlobalContacts: async (term: string, scope: SearchScopeType = 'all', options?: { companyIdsHint?: string[] }) => {
     const state = get();
-    const tenant = state.tenantInfo;
-    if (!tenant || !term || term.trim().length < 3) return;
+    const tenantId = state.tenantInfo?.id || (typeof window !== 'undefined' ? (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')) : null);
+    const trimmed = String(term || '').trim();
+    const normTerm = normalizeSearchText(trimmed);
 
-    set({ isSearchingGlobally: true });
+    if (!tenantId || !trimmed || normTerm.length < 2) {
+      latestGlobalSearchSeq += 1;
+      set({ isSearchingGlobally: false, isSearchingMessages: false });
+      return;
+    }
 
-    try {
-      const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
-      let allowedInstances: string[] = [];
-      const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
-      if (allowedStr) {
-        try { allowedInstances = JSON.parse(allowedStr); } catch (e) { }
-      }
+    const requestSeq = ++latestGlobalSearchSeq;
+    const activeFilter = state.activeChannelFilter;
+    const selectedFilters = Array.isArray(state.selectedChannelFilters) ? state.selectedChannelFilters : [];
+    const hasSpecificSingleFilter = Boolean(activeFilter && activeFilter !== 'all');
+    const channelScopeKey = hasSpecificSingleFilter
+      ? activeFilter!
+      : (selectedFilters.length > 0 ? [...selectedFilters].sort().join(',') : 'ALL');
 
-      const { data: dbContacts, error: contactError } = await supabase
-        .from('contacts')
-        .select('*')
-        .eq('tenant_id', tenant.id)
-        .or(`name.ilike.%${term}%,custom_name.ilike.%${term}%,phone.ilike.%${term}%,whatsapp_jid.ilike.%${term}%`)
-        .limit(50);
-
-      if (contactError || !dbContacts || dbContacts.length === 0) {
-        set({ isSearchingGlobally: false });
-        return;
-      }
-
-      const contactIds = dbContacts.map(c => c.id);
-      const { data: dbConvs } = await supabase
-        .from('conversations')
-        .select('*, conversation_labels(label_id)')
-        .in('contact_id', contactIds)
-        .order('updated_at', { ascending: false });
-
-      const conversationIds = dbConvs?.map(cv => cv.id) || [];
-
-      const { data: dbMessages } = await supabase
-        .from('messages')
-        .select('conversation_id, text_content, message_type, timestamp, sender_type, status')
-        .in('conversation_id', conversationIds)
-        .order('timestamp', { ascending: false })
-        .limit(100);
-
-      const validContacts = dbContacts.filter(c => {
-        const conv = dbConvs?.find(cv => cv.contact_id === c.id);
-        const effectiveInstanceId = conv?.instance_id || c.instance_id;
-        const loggedEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
-        const isRonaldo = loggedEmail?.toLowerCase() === 'ronaldo.xpointsolucoes@gmail.com';
-        const isGlobalAdmin = isRonaldo || roleStr === 'owner' || roleStr === 'admin';
-
-        if (effectiveInstanceId && !isGlobalAdmin) {
-          if (Array.isArray(allowedInstances) && allowedInstances.length > 0) {
-            const matchInst = allowedInstances.some(inst =>
-              inst === effectiveInstanceId ||
-              instanceCache.getId(inst) === effectiveInstanceId ||
-              instanceCache.getName(inst) === effectiveInstanceId
-            );
-            if (!matchInst) return false;
-          } else if (roleStr === 'agent' || roleStr === 'Agente') {
-            return false;
-          }
-        }
-        const jid = c.whatsapp_jid || '';
-        const phone = c.phone || '';
-        if (jid.includes('@lid') || jid.includes('undefined') || jid.includes('null')) return false;
-        if (phone === 'undefined' || phone === 'null' || !phone) return false;
-        const isGroup = jid.endsWith('@g.us');
-        if (phone.length > 15 && !phone.includes('+') && !isGroup) return false;
-        return true;
-      });
-
-      const newContacts: ContactType[] = validContacts.map(dbC => {
-        const targetInstanceId = state.activeChannelFilter || dbC.instance_id || state.connectedInstanceName;
-        const compositeId = targetInstanceId ? `${dbC.id}_${targetInstanceId}` : dbC.id;
-
-        const conv = dbConvs?.find(cv => cv.contact_id === dbC.id && cv.instance_id === targetInstanceId);
-        const msgs = conv ? (dbMessages?.filter(m => m.conversation_id === conv.id) || []) : [];
-
-        const mappedMessages: MessageType[] = msgs.map((m: any) => ({
-          id: m.id || Math.random().toString(),
-          text: m.text_content,
-          sender: m.sender_type,
-          timestamp: new Date(m.timestamp),
-          mediaType: m.message_type,
-          status: m.status
-        })).sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-
-        return {
-          ...dbC,
-          id: compositeId,
-          avatar: dbC.profile_picture_url || '',
-          messages: mappedMessages,
-          unread: conv?.unread_count || 0,
-          lastMsgTimestamp: (conv?.last_message_at || conv?.updated_at) ? new Date(conv.last_message_at || conv.updated_at).getTime() : new Date(dbC.created_at).getTime(),
-          is_pinned: conv?.is_pinned || false,
-          is_favorite: conv?.is_favorite || false,
-          conv_status: conv?.status || (mappedMessages.length > 0 ? 'pending' : 'no_conversation'),
-          snoozed_until: conv?.snoozed_until,
-          snoozed_at: conv?.snoozed_at,
-          snoozed_by: conv?.snoozed_by,
-          priority: conv?.priority,
-          assigned_to: conv?.assigned_to,
-          conv_labels: conv?.conversation_labels || [],
-          instance_id: targetInstanceId,
-          isSearchResult: true
-        } as ContactType;
-      });
-
-      set(state => {
-        const existingContacts = [...state.contacts];
+    const cacheKey = `${tenantId}|${scope}|${normTerm}|${channelScopeKey}`;
+    const cachedHit = globalSearchCache.get(cacheKey);
+    if (cachedHit && (Date.now() - cachedHit.timestamp) < GLOBAL_SEARCH_CACHE_TTL_MS) {
+      set((s) => {
+        const existingContacts = [...s.contacts];
+        const byIdIndex = new Map<string, number>();
+        existingContacts.forEach((c, idx) => byIdIndex.set(c.id, idx));
 
         let changed = false;
-        newContacts.forEach(nc => {
-          const idx = existingContacts.findIndex(c => c.id === nc.id);
-          if (idx === -1) {
+        cachedHit.contacts.forEach(nc => {
+          const existingIdx = byIdIndex.get(nc.id);
+          if (existingIdx === undefined) {
             existingContacts.push(nc);
+            byIdIndex.set(nc.id, existingContacts.length - 1);
             changed = true;
+          } else {
+            const cur = existingContacts[existingIdx];
+            if (nc.searchMatchMeta) {
+              existingContacts[existingIdx] = {
+                ...cur,
+                searchMatchMeta: nc.searchMatchMeta,
+                conv_id: cur.conv_id || nc.conv_id
+              };
+              changed = true;
+            }
           }
         });
-        // Ordenar contatos para que os recém pesquisados possam aparecer no topo caso tenham lastMsgTimestamp maior
+        return changed
+          ? { contacts: existingContacts, isSearchingGlobally: false, isSearchingMessages: false }
+          : { isSearchingGlobally: false, isSearchingMessages: false };
+      });
+      return;
+    }
+
+    const shouldSearchContactsOrCompanies = scope !== 'messages';
+    const shouldSearchDeepMessages = scope === 'messages' || (scope === 'all' && normTerm.length >= 3);
+
+    set({
+      isSearchingGlobally: true,
+      isSearchingMessages: shouldSearchDeepMessages
+    });
+
+    const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
+    let allowedInstances: string[] = [];
+    const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
+    if (allowedStr) {
+      try { allowedInstances = JSON.parse(allowedStr); } catch (_) {}
+    }
+    const loggedEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
+    const isRonaldo = loggedEmail?.toLowerCase() === 'ronaldo.xpointsolucoes@gmail.com';
+    const isGlobalAdmin = isRonaldo || roleStr === 'owner' || roleStr === 'admin';
+
+    const isAllowedInstance = (instId: string | null | undefined): boolean => {
+      if (!instId) return true;
+      if (!isRonaldo && instId === '5c78d358-d449-41c4-b396-a04ab20a39e4') return false;
+      if (isGlobalAdmin) return true;
+      if (Array.isArray(allowedInstances) && allowedInstances.length > 0) {
+        return allowedInstances.some(inst =>
+          inst === instId ||
+          instanceCache.getId(inst) === instId ||
+          instanceCache.getName(inst) === instId
+        );
+      }
+      return !(roleStr === 'agent' || roleStr === 'Agente');
+    };
+
+    const resolveSelectedFilterUuidSet = (): Set<string> | null => {
+      if (hasSpecificSingleFilter && activeFilter) {
+        const uuid = instanceCache.getId(activeFilter) || activeFilter;
+        return new Set([activeFilter, uuid]);
+      }
+      if (selectedFilters.length > 0) {
+        const tokens = new Set<string>();
+        selectedFilters.forEach(fid => {
+          tokens.add(fid);
+          const uuid = instanceCache.getId(fid);
+          if (uuid) tokens.add(uuid);
+        });
+        return tokens;
+      }
+      return null;
+    };
+    const channelFilterSet = resolveSelectedFilterUuidSet();
+
+    const matchesSelectedChannel = (instId: string | null | undefined): boolean => {
+      if (!channelFilterSet) return true;
+      if (!instId) return false;
+      const uuid = instanceCache.getId(instId) || instId;
+      return channelFilterSet.has(instId) || channelFilterSet.has(uuid);
+    };
+
+    const isValidSearchContact = (dbC: any, hasRealConv: boolean): boolean => {
+      const jid = dbC.whatsapp_jid || '';
+      const phone = dbC.phone || '';
+      if (jid.includes('undefined') || jid.includes('null')) return false;
+      if (jid.includes('@lid') && !hasRealConv && !dbC.name && !dbC.custom_name) return false;
+      if (!hasRealConv && (phone === 'undefined' || phone === 'null' || !phone)) return false;
+      const isGroup = jid.endsWith('@g.us');
+      if (!hasRealConv && phone.length > 15 && !phone.includes('+') && !isGroup) return false;
+      return true;
+    };
+
+    const mergeBatchIntoStore = (
+      batchContacts: ContactType[],
+      flags: { isSearchingGlobally?: boolean; isSearchingMessages?: boolean }
+    ) => {
+      if (requestSeq !== latestGlobalSearchSeq) return;
+      set((s) => {
+        const existingContacts = [...s.contacts];
+        const byIdIndex = new Map<string, number>();
+        const byConvIdIndex = new Map<string, number>();
+        existingContacts.forEach((c, idx) => {
+          byIdIndex.set(c.id, idx);
+          if (c.conv_id) byConvIdIndex.set(c.conv_id, idx);
+        });
+
+        let changed = false;
+        batchContacts.forEach(nc => {
+          const existingIdx = byIdIndex.get(nc.id) ?? (nc.conv_id ? byConvIdIndex.get(nc.conv_id) : undefined);
+          if (existingIdx === undefined) {
+            existingContacts.push(nc);
+            byIdIndex.set(nc.id, existingContacts.length - 1);
+            if (nc.conv_id) byConvIdIndex.set(nc.conv_id, existingContacts.length - 1);
+            changed = true;
+          } else {
+            const cur = existingContacts[existingIdx];
+            const hasFullExistingHistory = Array.isArray(cur.messages) && cur.messages.length > (nc.messages?.length || 0);
+            const nextMsgs = hasFullExistingHistory ? cur.messages : (nc.messages?.length ? nc.messages : cur.messages);
+            const shouldAttachMeta = Boolean(
+              nc.searchMatchMeta &&
+              (cur.searchMatchMeta?.normalizedTerm !== nc.searchMatchMeta.normalizedTerm ||
+                cur.searchMatchMeta?.source !== nc.searchMatchMeta.source ||
+                cur.searchMatchMeta?.matchedMessageId !== nc.searchMatchMeta.matchedMessageId)
+            );
+            if (shouldAttachMeta || (!hasFullExistingHistory && nc.messages?.length > 0)) {
+              existingContacts[existingIdx] = {
+                ...cur,
+                fantasy_name: cur.fantasy_name || nc.fantasy_name,
+                document_number: cur.document_number || nc.document_number,
+                company_ids: (cur.company_ids && cur.company_ids.length > 0) ? cur.company_ids : nc.company_ids,
+                conv_id: cur.conv_id || nc.conv_id,
+                conv_labels: (cur.conv_labels && cur.conv_labels.length > 0) ? cur.conv_labels : nc.conv_labels,
+                messages: nextMsgs,
+                searchMatchMeta: nc.searchMatchMeta || cur.searchMatchMeta
+              };
+              changed = true;
+            }
+          }
+        });
+
         if (changed) {
-          existingContacts.sort((a, b) => b.lastMsgTimestamp - a.lastMsgTimestamp);
+          existingContacts.sort((a, b) => getEffectiveContactTime(b) - getEffectiveContactTime(a));
         }
-        return changed ? { contacts: existingContacts, isSearchingGlobally: false } : { isSearchingGlobally: false };
+
+        return {
+          ...(changed ? { contacts: existingContacts } : {}),
+          ...flags
+        };
+      });
+    };
+
+    const buildContactEntries = (
+      dbContactsList: any[],
+      dbConvsList: any[],
+      dbMsgsList: any[],
+      metaResolver: (dbC: any, conv: any) => SearchMatchMeta
+    ): ContactType[] => {
+      const convsByContact = new Map<string, any[]>();
+      (dbConvsList || []).forEach((cv: any) => {
+        if (!cv?.contact_id) return;
+        const arr = convsByContact.get(cv.contact_id) || [];
+        arr.push(cv);
+        convsByContact.set(cv.contact_id, arr);
       });
 
+      const msgsByConv = new Map<string, any[]>();
+      (dbMsgsList || []).forEach((m: any) => {
+        if (!m?.conversation_id) return;
+        const arr = msgsByConv.get(m.conversation_id) || [];
+        arr.push(m);
+        msgsByConv.set(m.conversation_id, arr);
+      });
+
+      const results: ContactType[] = [];
+      const emittedIds = new Set<string>();
+
+      for (const dbC of dbContactsList) {
+        const rawConvs = convsByContact.get(dbC.id) || [];
+        const allowedConvs = rawConvs.filter((cv: any) =>
+          isAllowedInstance(cv.instance_id) && matchesSelectedChannel(cv.instance_id)
+        );
+
+        // NUNCA usar 'all' como ID de instância; quando 'Todas as Caixas', preservar instância real da conversa
+        const targetConvs: Array<any | null> = [];
+        if (hasSpecificSingleFilter && activeFilter) {
+          const singleUuid = instanceCache.getId(activeFilter) || activeFilter;
+          const exactSingleConv = allowedConvs.find((cv: any) => cv.instance_id === singleUuid || cv.instance_id === activeFilter);
+          if (exactSingleConv) {
+            targetConvs.push(exactSingleConv);
+          } else if (scope !== 'messages') {
+            targetConvs.push(null);
+          }
+        } else if (allowedConvs.length > 0) {
+          // Em "Todas as Caixas" ou multi-seleção, mantém a conversa mais relevante por instância permitida
+          const seenInsts = new Set<string>();
+          for (const cv of allowedConvs) {
+            const instKey = cv.instance_id || 'default';
+            if (!seenInsts.has(instKey)) {
+              seenInsts.add(instKey);
+              targetConvs.push(cv);
+            }
+          }
+        } else if (rawConvs.length === 0 && !hasSpecificSingleFilter && selectedFilters.length === 0) {
+          if (isAllowedInstance(dbC.instance_id)) {
+            targetConvs.push(null);
+          }
+        }
+
+        for (const conv of targetConvs) {
+          const realConvInst = conv?.instance_id || null;
+          const fallbackSingleInst = (hasSpecificSingleFilter && activeFilter)
+            ? (instanceCache.getId(activeFilter) || activeFilter)
+            : (dbC.instance_id && dbC.instance_id !== 'all' ? dbC.instance_id : null);
+          const resolvedInstId = realConvInst || fallbackSingleInst;
+
+          if (!isValidSearchContact(dbC, Boolean(conv))) continue;
+          if (!isAllowedInstance(resolvedInstId)) continue;
+
+          const compositeId = resolvedInstId ? `${dbC.id}_${resolvedInstId}` : dbC.id;
+          if (emittedIds.has(compositeId)) continue;
+          emittedIds.add(compositeId);
+
+          const rawMsgs = conv ? (msgsByConv.get(conv.id) || []) : [];
+          const mappedMessages: MessageType[] = rawMsgs.map((m: any) => ({
+            id: m.id || Math.random().toString(),
+            whatsapp_id: m.whatsapp_message_id,
+            text: m.text_content,
+            sender: m.sender_type,
+            timestamp: new Date(m.timestamp),
+            mediaType: m.message_type,
+            status: m.status,
+            transcription: m.transcription
+          })).sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+
+          const mappedLabels = Array.isArray(conv?.conversation_labels)
+            ? conv.conversation_labels.map((cl: any) => cl?.tenant_labels || cl).filter((l: any) => l && l.name)
+            : [];
+
+          const lastActivityIso = conv?.last_message_at || conv?.updated_at || dbC.created_at;
+          const matchMeta = metaResolver(dbC, conv);
+
+          results.push({
+            ...dbC,
+            id: compositeId,
+            conv_id: conv?.id || undefined,
+            avatar: dbC.profile_picture_url || '',
+            messages: mappedMessages,
+            unread: conv?.unread_count || 0,
+            last_message_at: lastActivityIso,
+            lastMsgTimestamp: lastActivityIso ? new Date(lastActivityIso).getTime() : new Date(dbC.created_at).getTime(),
+            is_pinned: conv?.is_pinned || false,
+            is_favorite: conv?.is_favorite || false,
+            conv_status: conv?.status || (mappedMessages.length > 0 ? 'pending' : 'no_conversation'),
+            bot_status: dbC.bot_status || (conv?.ai_paused ? 'paused' : 'active'),
+            ai_paused: dbC.bot_status === 'paused' || Boolean(conv?.ai_paused),
+            ai_paused_manually: dbC.bot_status === 'paused' || Boolean(conv?.ai_paused_manually),
+            snoozed_until: conv?.snoozed_until,
+            snoozed_at: conv?.snoozed_at,
+            snoozed_by: conv?.snoozed_by,
+            priority: conv?.priority,
+            assigned_to: conv?.assigned_to,
+            conv_labels: mappedLabels,
+            instance_id: resolvedInstId,
+            isSearchResult: true,
+            searchMatchMeta: matchMeta
+          } as ContactType);
+        }
+      }
+
+      return results;
+    };
+
+    const accumulatedForCache: ContactType[] = [];
+
+    try {
+      const safeTerm = sanitizePostgrestTerm(trimmed);
+      const digitsTerm = extractSearchDigits(trimmed);
+
+      // FASE 1 (Rápida ~120ms): Contatos e Empresas vinculadas
+      if (shouldSearchContactsOrCompanies && safeTerm.length >= 2) {
+        const contactClauses: string[] = [];
+        if (scope === 'contact' || scope === 'all') {
+          contactClauses.push(
+            `name.ilike.%${safeTerm}%`,
+            `custom_name.ilike.%${safeTerm}%`,
+            `fantasy_name.ilike.%${safeTerm}%`,
+            `phone.ilike.%${safeTerm}%`,
+            `whatsapp_jid.ilike.%${safeTerm}%`,
+            `document_number.ilike.%${safeTerm}%`
+          );
+        } else {
+          // scope === 'company'
+          contactClauses.push(
+            `fantasy_name.ilike.%${safeTerm}%`,
+            `document_number.ilike.%${safeTerm}%`,
+            `name.ilike.%${safeTerm}%`,
+            `custom_name.ilike.%${safeTerm}%`
+          );
+        }
+        if (digitsTerm.length >= 4 && digitsTerm !== safeTerm) {
+          contactClauses.push(`phone.ilike.%${digitsTerm}%`, `document_number.ilike.%${digitsTerm}%`);
+        }
+
+        const directQuery = supabase
+          .from('contacts')
+          .select('*')
+          .eq('tenant_id', tenantId)
+          .or(contactClauses.join(','))
+          .limit(50);
+
+        const hintCompanyIds = (scope === 'company' || scope === 'all') && Array.isArray(options?.companyIdsHint)
+          ? options!.companyIdsHint.filter(id => isValidUuid(id)).slice(0, 30)
+          : [];
+
+        const linkedByHintPromise = hintCompanyIds.length > 0
+          ? supabase.from('contacts').select('*').eq('tenant_id', tenantId).overlaps('company_ids', hintCompanyIds).limit(50)
+          : Promise.resolve({ data: [] as any[], error: null });
+
+        const [{ data: directRows }, { data: hintLinkedRows }] = await Promise.all([directQuery, linkedByHintPromise]);
+        if (requestSeq !== latestGlobalSearchSeq) return;
+
+        // Se achou registros de empresa direta ainda não presentes em hintCompanyIds, busca contatos vinculados via company_ids
+        const directCompanyIds = (scope === 'company' || scope === 'all')
+          ? (directRows || [])
+              .filter((r: any) => r.document_type === 'cnpj' || Boolean(r.fantasy_name))
+              .map((r: any) => r.id)
+              .filter((id: string) => isValidUuid(id) && !hintCompanyIds.includes(id))
+              .slice(0, 25)
+          : [];
+
+        let extraLinkedRows: any[] = [];
+        if (directCompanyIds.length > 0) {
+          const { data: exLinked } = await supabase
+            .from('contacts')
+            .select('*')
+            .eq('tenant_id', tenantId)
+            .overlaps('company_ids', directCompanyIds)
+            .limit(40);
+          extraLinkedRows = exLinked || [];
+          if (requestSeq !== latestGlobalSearchSeq) return;
+        }
+
+        const mergedContactMap = new Map<string, any>();
+        [...(directRows || []), ...(hintLinkedRows || []), ...extraLinkedRows].forEach((r: any) => {
+          if (r?.id && !mergedContactMap.has(r.id)) {
+            if (scope === 'company') {
+              const allMatchedCompIds = new Set([...hintCompanyIds, ...directCompanyIds]);
+              const isDirectCompany = r.document_type === 'cnpj' || Boolean(r.fantasy_name);
+              const isLinkedToMatchedCompany = Array.isArray(r.company_ids) && r.company_ids.some((cid: string) => allMatchedCompIds.has(cid));
+              if (!isDirectCompany && !isLinkedToMatchedCompany) return;
+            }
+            mergedContactMap.set(r.id, r);
+          }
+        });
+
+        const phase1Contacts = Array.from(mergedContactMap.values());
+        if (phase1Contacts.length > 0) {
+          const cIds = phase1Contacts.map(c => c.id);
+          const { data: dbConvs } = await supabase
+            .from('conversations')
+            .select('*, conversation_labels(label_id, tenant_labels(*))')
+            .eq('tenant_id', tenantId)
+            .in('contact_id', cIds)
+            .order('last_message_at', { ascending: false })
+            .limit(120);
+
+          if (requestSeq !== latestGlobalSearchSeq) return;
+
+          const convIds = (dbConvs || []).map(cv => cv.id).slice(0, 80);
+          const { data: dbMsgs } = convIds.length > 0
+            ? await supabase
+                .from('messages')
+                .select('id, whatsapp_message_id, conversation_id, text_content, transcription, message_type, timestamp, sender_type, status')
+                .in('conversation_id', convIds)
+                .order('timestamp', { ascending: false })
+                .limit(150)
+            : { data: [] };
+
+          if (requestSeq !== latestGlobalSearchSeq) return;
+
+          const builtPhase1 = buildContactEntries(phase1Contacts, dbConvs || [], dbMsgs || [], (dbC) => ({
+            normalizedTerm: normTerm,
+            rawTerm: trimmed,
+            source: scope === 'company' || Boolean(dbC.fantasy_name && normalizeSearchText(dbC.fantasy_name).includes(normTerm))
+              ? 'company'
+              : 'contact'
+          }));
+
+          accumulatedForCache.push(...builtPhase1);
+          mergeBatchIntoStore(builtPhase1, {
+            isSearchingGlobally: false,
+            isSearchingMessages: shouldSearchDeepMessages
+          });
+        } else if (!shouldSearchDeepMessages) {
+          set((s) => (requestSeq === latestGlobalSearchSeq ? { isSearchingGlobally: false, isSearchingMessages: false } : s));
+        } else {
+          set((s) => (requestSeq === latestGlobalSearchSeq ? { isSearchingGlobally: false } : s));
+        }
+      }
+
+      // FASE 2 (Profunda e Resiliente): Janela recente (180d, ~370ms) com ILIKE + Fallback FTS para histórico antigo
+      if (shouldSearchDeepMessages && safeTerm.length >= 3) {
+        if (requestSeq !== latestGlobalSearchSeq) return;
+
+        const since180DaysIso = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString();
+
+        const recentMsgQuery = supabase
+          .from('messages')
+          .select('id, whatsapp_message_id, conversation_id, text_content, transcription, message_type, timestamp, sender_type, status, instance_id')
+          .eq('tenant_id', tenantId)
+          .gte('timestamp', since180DaysIso)
+          .ilike('text_content', `%${safeTerm}%`)
+          .order('timestamp', { ascending: false })
+          .limit(35);
+
+        const notesQuery = supabase
+          .from('contact_notes')
+          .select('id, contact_id, content, created_at')
+          .eq('tenant_id', tenantId)
+          .ilike('content', `%${safeTerm}%`)
+          .order('created_at', { ascending: false })
+          .limit(15);
+
+        const [{ data: recentMsgs, error: msgErr }, { data: matchedNotes }] = await Promise.all([recentMsgQuery, notesQuery]);
+        if (requestSeq !== latestGlobalSearchSeq) return;
+        if (msgErr) {
+          console.warn('[searchGlobalContacts] Erro na busca recente de mensagens:', msgErr.message || msgErr);
+        }
+
+        let matchedMsgs: any[] = recentMsgs ? [...recentMsgs] : [];
+
+        // Se poucos ou nenhum match nos últimos 180 dias, busca em todo o histórico via Full-Text Search nativo (sem statement_timeout)
+        if (matchedMsgs.length < 5 && /[a-zA-ZÀ-ÿ0-9]{3,}/.test(safeTerm)) {
+          const { data: ftsMsgs, error: ftsErr } = await supabase
+            .from('messages')
+            .select('id, whatsapp_message_id, conversation_id, text_content, transcription, message_type, timestamp, sender_type, status, instance_id')
+            .eq('tenant_id', tenantId)
+            .textSearch('text_content', safeTerm, { config: 'portuguese', type: 'plain' })
+            .order('timestamp', { ascending: false })
+            .limit(25);
+
+          if (requestSeq !== latestGlobalSearchSeq) return;
+          if (!ftsErr && Array.isArray(ftsMsgs) && ftsMsgs.length > 0) {
+            const seenMsgIds = new Set(matchedMsgs.map(m => m.id));
+            ftsMsgs.forEach(fm => {
+              if (fm?.id && !seenMsgIds.has(fm.id)) {
+                seenMsgIds.add(fm.id);
+                matchedMsgs.push(fm);
+              }
+            });
+          }
+        }
+
+        const bestMsgByConv = new Map<string, any>();
+        (matchedMsgs || []).forEach((m: any) => {
+          if (m?.conversation_id && !bestMsgByConv.has(m.conversation_id)) {
+            bestMsgByConv.set(m.conversation_id, m);
+          }
+        });
+
+        const bestNoteByContact = new Map<string, any>();
+        (matchedNotes || []).forEach((n: any) => {
+          if (n?.contact_id && !bestNoteByContact.has(n.contact_id)) {
+            bestNoteByContact.set(n.contact_id, n);
+          }
+        });
+
+        const msgConvIds = Array.from(bestMsgByConv.keys());
+        const noteContactIds = Array.from(bestNoteByContact.keys());
+
+        if (msgConvIds.length > 0 || noteContactIds.length > 0) {
+          const [convsByMsgRes, convsByNoteRes] = await Promise.all([
+            msgConvIds.length > 0
+              ? supabase
+                  .from('conversations')
+                  .select('*, conversation_labels(label_id, tenant_labels(*))')
+                  .eq('tenant_id', tenantId)
+                  .in('id', msgConvIds)
+              : Promise.resolve({ data: [] as any[] }),
+            noteContactIds.length > 0
+              ? supabase
+                  .from('conversations')
+                  .select('*, conversation_labels(label_id, tenant_labels(*))')
+                  .eq('tenant_id', tenantId)
+                  .in('contact_id', noteContactIds)
+                  .order('last_message_at', { ascending: false })
+              : Promise.resolve({ data: [] as any[] })
+          ]);
+
+          if (requestSeq !== latestGlobalSearchSeq) return;
+
+          const allPhase2ConvsMap = new Map<string, any>();
+          [...(convsByMsgRes.data || []), ...(convsByNoteRes.data || [])].forEach((cv: any) => {
+            if (cv?.id && !allPhase2ConvsMap.has(cv.id)) {
+              allPhase2ConvsMap.set(cv.id, cv);
+            }
+          });
+          const phase2Convs = Array.from(allPhase2ConvsMap.values()).filter((cv: any) =>
+            isAllowedInstance(cv.instance_id) && matchesSelectedChannel(cv.instance_id)
+          );
+
+          const phase2ContactIds = Array.from(new Set([
+            ...phase2Convs.map((cv: any) => cv.contact_id).filter(Boolean),
+            ...noteContactIds
+          ]));
+
+          if (phase2ContactIds.length > 0) {
+            const { data: phase2Contacts } = await supabase
+              .from('contacts')
+              .select('*')
+              .eq('tenant_id', tenantId)
+              .in('id', phase2ContactIds);
+
+            if (requestSeq !== latestGlobalSearchSeq) return;
+
+            const builtPhase2 = buildContactEntries(
+              phase2Contacts || [],
+              phase2Convs,
+              matchedMsgs || [],
+              (dbC, conv) => {
+                const msgHit = conv ? bestMsgByConv.get(conv.id) : null;
+                if (msgHit) {
+                  const textSource = normalizeSearchText(msgHit.text_content).includes(normTerm)
+                    ? msgHit.text_content
+                    : (msgHit.transcription || msgHit.text_content);
+                  return {
+                    normalizedTerm: normTerm,
+                    rawTerm: trimmed,
+                    source: 'message',
+                    matchedText: extractMatchSnippet(textSource, trimmed, 78),
+                    matchedTimestamp: msgHit.timestamp || null,
+                    matchedMessageId: msgHit.id || null,
+                    matchedConversationId: conv?.id || null
+                  };
+                }
+                const noteHit = bestNoteByContact.get(dbC.id);
+                return {
+                  normalizedTerm: normTerm,
+                  rawTerm: trimmed,
+                  source: 'note',
+                  matchedText: extractMatchSnippet(noteHit?.content || '', trimmed, 78),
+                  matchedTimestamp: noteHit?.created_at || null,
+                  matchedMessageId: noteHit?.id || null,
+                  matchedConversationId: conv?.id || null
+                };
+              }
+            );
+
+            accumulatedForCache.push(...builtPhase2);
+            mergeBatchIntoStore(builtPhase2, { isSearchingGlobally: false, isSearchingMessages: false });
+          }
+        }
+      }
+
+      if (requestSeq === latestGlobalSearchSeq) {
+        if (globalSearchCache.size >= 40) {
+          const oldestKey = globalSearchCache.keys().next().value;
+          if (oldestKey) globalSearchCache.delete(oldestKey);
+        }
+        globalSearchCache.set(cacheKey, { timestamp: Date.now(), contacts: accumulatedForCache });
+        set({ isSearchingGlobally: false, isSearchingMessages: false });
+      }
     } catch (e) {
-      console.error("Global search failed", e);
-      set({ isSearchingGlobally: false });
+      console.error('Global search failed', e);
+      if (requestSeq === latestGlobalSearchSeq) {
+        set({ isSearchingGlobally: false, isSearchingMessages: false });
+      }
     }
   },
 
@@ -6897,6 +7388,84 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     inFlightMessagesLoad.set(loadKey, loadPromise);
     return loadPromise;
+  },
+
+  loadMessagesAroundTimestamp: async (contactId: string, conversationId: string, timestampIso: string): Promise<boolean> => {
+    try {
+      const tenant = get().tenantInfo;
+      if (!tenant || !isValidUuid(conversationId) || !timestampIso) return false;
+
+      const [beforeRes, afterRes] = await Promise.all([
+        supabase.from('messages')
+          .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
+          .eq('conversation_id', conversationId)
+          .lte('timestamp', timestampIso)
+          .order('timestamp', { ascending: false })
+          .limit(30),
+        supabase.from('messages')
+          .select('id, whatsapp_message_id, text_content, sender_type, media_url, message_type, status, timestamp, transcription, raw_payload')
+          .eq('conversation_id', conversationId)
+          .gt('timestamp', timestampIso)
+          .order('timestamp', { ascending: true })
+          .limit(25)
+      ]);
+
+      const fetched = [...(beforeRes.data || []), ...(afterRes.data || [])];
+      if (fetched.length === 0) return false;
+
+      const mappedContext: MessageType[] = fetched.map((m: any) => {
+        const advanced = parseAdvancedMsgMetadata(m);
+        return {
+          id: m.id,
+          whatsapp_id: m.whatsapp_message_id,
+          text: advanced.text || m.text_content,
+          sender: m.sender_type,
+          mediaUrl: m.media_url,
+          mediaType: advanced.mediaType,
+          status: m.status,
+          timestamp: new Date(m.timestamp),
+          quoted: advanced.quoted,
+          buttons: advanced.buttons,
+          transcription: m.transcription,
+          vcardWaid: advanced.vcardWaid,
+          payload: m.raw_payload || m.payload
+        };
+      });
+
+      set((s) => {
+        const updated = [...s.contacts];
+        const realContactId = getRealContactId(contactId);
+        const idx = updated.findIndex(c =>
+          c.id === contactId ||
+          c.conv_id === conversationId ||
+          getRealContactId(c.id) === realContactId
+        );
+        if (idx === -1) return s;
+
+        const existing = updated[idx].messages || [];
+        const byKey = new Map<string, MessageType>();
+        existing.forEach((m: MessageType) => {
+          const k = m.whatsapp_id || m.id;
+          if (k) byKey.set(k, m);
+        });
+        mappedContext.forEach((m: MessageType) => {
+          const k = m.whatsapp_id || m.id;
+          if (k) byKey.set(k, m);
+        });
+
+        const merged = sortMessagesChronologically(Array.from(byKey.values()));
+        updated[idx] = {
+          ...updated[idx],
+          conv_id: updated[idx].conv_id || conversationId,
+          messages: merged
+        };
+        return { contacts: updated };
+      });
+      return true;
+    } catch (e) {
+      console.warn('[loadMessagesAroundTimestamp] Falha ao carregar janela de contexto:', e);
+      return false;
+    }
   },
 
   syncMissedMessages: async () => {

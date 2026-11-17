@@ -36,13 +36,13 @@ export const ChatOmniMenu: React.FC<ChatOmniMenuProps> = ({ contactId }) => {
           type="button"
           onClick={() => setMenuOpen(menuOpen === 'agent' ? null : 'agent')}
           title={assignedAgents.length > 0 ? `Atribuído a: ${assignedAgents.map(a => a.full_name).join(', ')}` : 'Atribuir atendente ou Salvar no RAG'}
-          className="flex items-center justify-center gap-1.5 h-8 w-8 2xl:w-auto 2xl:px-2.5 rounded-full text-xs font-semibold text-slate-600 dark:text-slate-300 bg-slate-500/10 dark:bg-white/[0.06] hover:bg-slate-500/20 dark:hover:bg-white/[0.12] transition-all border border-black/5 dark:border-white/10 active:scale-95 whitespace-nowrap cursor-pointer"
+          className="chat-cq-omni-auto flex items-center justify-center gap-1.5 h-8 px-2.5 rounded-full text-xs font-semibold text-slate-600 dark:text-slate-300 bg-slate-500/10 dark:bg-white/[0.06] hover:bg-slate-500/20 dark:hover:bg-white/[0.12] transition-all border border-black/5 dark:border-white/10 active:scale-95 whitespace-nowrap cursor-pointer"
         >
           {assignedAgents.length > 0 ? (
             <>
               <div className="flex -space-x-1.5 overflow-hidden">
                 {assignedAgents.slice(0, 3).map(agent => (
-                  <div key={agent.id} className="w-5 h-5 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 text-white flex items-center justify-center text-[9px] uppercase font-bold overflow-hidden shadow-sm shrink-0 border border-white dark:border-[#233138]" title={agent.full_name}>
+                  <div key={agent.id} className="w-5 h-5 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 text-white flex items-center justify-center text-[9px] uppercase font-bold overflow-hidden shadow-sm shrink-0 border border-white dark:border-[#233138]" title={agent.full_name || undefined}>
                      {agent.full_name?.substring(0, 2) || <User size={10}/>}
                   </div>
                 ))}
@@ -50,17 +50,17 @@ export const ChatOmniMenu: React.FC<ChatOmniMenuProps> = ({ contactId }) => {
               {assignedAgents.length > 3 && (
                 <span className="text-[10px] font-bold text-indigo-500 bg-indigo-500/10 px-1 py-0.5 rounded ml-0.5">+{assignedAgents.length - 3}</span>
               )}
-              <span className="hidden 2xl:inline max-w-[76px] truncate ml-0.5">
+              <span className="chat-cq-label-2xl max-w-[76px] truncate ml-0.5">
                 {assignedAgents.map(a => a.full_name?.split(' ')[0]).join(', ')}
               </span>
             </>
           ) : (
             <>
               <UserPlus size={14} className="shrink-0" />
-              <span className="hidden 2xl:inline">Atribuir</span>
+              <span className="chat-cq-label-2xl">Atribuir</span>
             </>
           )}
-          <ChevronDown size={13} className="opacity-60 hidden 2xl:inline" />
+          <ChevronDown size={13} className="opacity-60 chat-cq-label-2xl" />
         </button>
 
         {menuOpen === 'agent' && (

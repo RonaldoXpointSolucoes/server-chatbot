@@ -33,6 +33,31 @@ import { useScheduleMonitor } from '../hooks/useScheduleMonitor';
 import { useXPointRemoteBridge, resolveContactRemoteContext } from '../hooks/useXPointRemoteBridge';
 import { convertClipboardToWhatsAppFormat, formatStructuredPlainText, hasWhatsAppRichFormatting } from '../utils/whatsappRichText';
 import { classifyUploadFailure, runFileUploadQueue, sendMultipartWithRetry } from '../utils/mediaUploadResilience.mjs';
+import {
+  SearchScopeType,
+  buildLocalSearchCriteria,
+  evaluateContactSearchMatch,
+  normalizeSearchText,
+  extractSearchDigits,
+  extractMatchSnippet
+} from '../utils/chatSearch';
+
+const renderHighlightedMatchText = (text: string, query: string): React.ReactNode => {
+  if (!text || !query || query.trim().length < 2) return text;
+  const escaped = query.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (!escaped) return text;
+  const parts = String(text).split(new RegExp(`(${escaped})`, 'ig'));
+  if (parts.length <= 1) return text;
+  return parts.map((part, idx) =>
+    idx % 2 === 1 ? (
+      <mark key={idx} className="bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-bold px-0.5 rounded">
+        {part}
+      </mark>
+    ) : (
+      part
+    )
+  );
+};
 
 export function cn(...inputs: (string | undefined | null | false)[]) {
   return twMerge(clsx(inputs));
@@ -554,6 +579,9 @@ export default function ChatDashboard() {
 
   // Estados para Filtros (Movido para o topo para evitar erro de inicialização)
   const [searchTerm, setSearchTerm] = useState('');
+  const [searchScope, setSearchScope] = useState<SearchScopeType>('all');
+  const [dismissedSearchJumpKey, setDismissedSearchJumpKey] = useState<string | null>(null);
+  const [isLoadingJumpMsg, setIsLoadingJumpMsg] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [selectedLabelId, setSelectedLabelId] = useState<string | null>(null);
   const [filterContextMenu, setFilterContextMenu] = useState<{ type: string, x: number, y: number } | null>(null);
@@ -597,6 +625,7 @@ export default function ChatDashboard() {
     fetchTenantConfig,
     subscribeToNewMessages,
     loadHistoricalMessages,
+    loadMessagesAroundTimestamp,
     fetchTenantAgents,
     modalReason,
     setModalReason,
@@ -622,7 +651,9 @@ export default function ChatDashboard() {
     isChannelLoading,
     fetchAutomations,
     searchGlobalContacts,
+    clearGlobalSearchLoading,
     isSearchingGlobally,
+    isSearchingMessages,
     filterType,
     setFilterType,
     resolveConversation,
@@ -695,7 +726,10 @@ export default function ChatDashboard() {
     isChannelLoading: state.isChannelLoading,
     fetchAutomations: state.fetchAutomations,
     searchGlobalContacts: state.searchGlobalContacts,
+    clearGlobalSearchLoading: state.clearGlobalSearchLoading,
     isSearchingGlobally: state.isSearchingGlobally,
+    isSearchingMessages: state.isSearchingMessages,
+    loadMessagesAroundTimestamp: state.loadMessagesAroundTimestamp,
     filterType: state.filterType,
     setFilterType: state.setFilterType,
     resolveConversation: state.resolveConversation,
@@ -966,20 +1000,52 @@ export default function ChatDashboard() {
     };
   }, []);
 
-  // Dispara a busca global no Supabase quando o usuário digita no campo de busca do chat
+  // Dispara a busca global no Supabase respeitando o escopo selecionado (Tudo, Contato, Empresa ou Mensagens)
   useEffect(() => {
-    if (searchTerm && searchTerm.trim().length >= 2) {
-      const timer = setTimeout(() => {
-        searchGlobalContacts(searchTerm.trim());
-      }, 300);
-      return () => clearTimeout(timer);
+    const trimmed = searchTerm.trim();
+    if (!trimmed || normalizeSearchText(trimmed).length < 2) {
+      clearGlobalSearchLoading();
+      return;
     }
-  }, [searchTerm, searchGlobalContacts]);
+
+    const delayMs = searchScope === 'messages' ? 420 : 250;
+    const timer = setTimeout(() => {
+      let companyIdsHint: string[] | undefined;
+      if ((searchScope === 'company' || searchScope === 'all') && Array.isArray(allCompanies) && allCompanies.length > 0) {
+        const norm = normalizeSearchText(trimmed);
+        const digits = extractSearchDigits(trimmed);
+        const matchedIds: string[] = [];
+        for (const comp of allCompanies) {
+          if (!comp?.id) continue;
+          const matchComp =
+            normalizeSearchText(comp.fantasy_name).includes(norm) ||
+            normalizeSearchText(comp.custom_name).includes(norm) ||
+            normalizeSearchText(comp.name).includes(norm) ||
+            normalizeSearchText(comp.document_number).includes(norm) ||
+            (digits.length >= 3 && extractSearchDigits(comp.document_number).includes(digits));
+          if (matchComp) {
+            matchedIds.push(comp.id);
+            if (matchedIds.length >= 30) break;
+          }
+        }
+        if (matchedIds.length > 0) companyIdsHint = matchedIds;
+      }
+
+      searchGlobalContacts(trimmed, searchScope, companyIdsHint ? { companyIdsHint } : undefined);
+    }, delayMs);
+
+    return () => clearTimeout(timer);
+  }, [searchTerm, searchScope, allCompanies, activeChannelFilter, selectedChannelFilters, searchGlobalContacts, clearGlobalSearchLoading]);
+
+  useEffect(() => {
+    setDismissedSearchJumpKey(null);
+  }, [activeChatId, searchTerm]);
 
   // Limpa o termo de pesquisa (input e filtro) sempre que a caixa comercial/instância (activeChannelFilter) ou o tipo de filtro (filterType) for alterado
   useEffect(() => {
     setSearchTerm('');
-  }, [activeChannelFilter, filterType]);
+    clearGlobalSearchLoading();
+  }, [activeChannelFilter, filterType, clearGlobalSearchLoading]);
 
   // Higienização Reativa de Filtros de Canais entre Empresas/Tenants
   useEffect(() => {
@@ -2274,7 +2340,8 @@ export default function ChatDashboard() {
   const filteredContacts = React.useMemo(() => {
     const { currentTenantId, loggedEmail, isRonaldo, allowedSet, allowedInvalidOrEmpty } = getRbacRuntimeContext();
     const nowMs = Date.now();
-    const searchLower = searchTerm ? searchTerm.toLowerCase() : '';
+    const searchCriteria = buildLocalSearchCriteria(searchTerm, searchScope);
+    const contactGroups = tenantInfo?.settings?.contactGroups || [];
     const currentAgentForFilter = filterType === 'mine'
       ? agents.find(a => a.email === loggedEmail)
       : null;
@@ -2320,24 +2387,24 @@ export default function ChatDashboard() {
         );
         const isResolvedOrClosed = c.conv_status === 'resolved' || c.conv_status === 'closed' || c.status === 'resolved' || c.status === 'closed' || c.is_resolved === true || Boolean(c.resolved_at);
 
+        const matchesSearch = searchCriteria
+          ? evaluateContactSearchMatch({
+              contact: c,
+              criteria: searchCriteria,
+              linkedCompanies: resolveLinkedCompaniesFast(c),
+              contactGroups
+            }).matched
+          : true;
+
         if (isExactActiveChat) {
             // No Modo Ticket (ou filtros de tickets abertos), se o chat ativo não for um ticket aberto válido da caixa, não força visibilidade
             if ((ticketMode || filterType === 'tickets' || filterType === 'open') && !isContactOpenTicket(c)) {
                 return false;
             }
-            if (!searchLower) {
+            if (!searchCriteria) {
                 return true;
             }
-            const match = c.name?.toLowerCase().includes(searchLower) ||
-                          c.custom_name?.toLowerCase().includes(searchLower) ||
-                          c.push_name?.toLowerCase().includes(searchLower) ||
-                          c.pushname?.toLowerCase().includes(searchLower) ||
-                          c.whatsapp_jid?.toLowerCase().includes(searchLower) ||
-                          c.phone?.toLowerCase().includes(searchLower) ||
-                          c.fantasy_name?.toLowerCase().includes(searchLower) ||
-                          c.document_number?.includes(searchTerm) ||
-                          c.conv_labels?.some((l: any) => l.name?.toLowerCase().includes(searchLower));
-            if (match) return true;
+            if (matchesSearch) return true;
         }
 
         // 4) LÓGICA DE STATUS: CONTATOS BLOQUEADOS, ADIADOS (SNOOZED) E RESOLVIDOS
@@ -2381,18 +2448,9 @@ export default function ChatDashboard() {
            }
         }
 
-        // 4) BUSCA EM TEXTO E METADADOS
-        if (searchLower) {
-            const match = c.name?.toLowerCase().includes(searchLower) ||
-                          c.custom_name?.toLowerCase().includes(searchLower) ||
-                          c.push_name?.toLowerCase().includes(searchLower) ||
-                          c.pushname?.toLowerCase().includes(searchLower) ||
-                          c.whatsapp_jid?.toLowerCase().includes(searchLower) ||
-                          c.phone?.toLowerCase().includes(searchLower) ||
-                          c.fantasy_name?.toLowerCase().includes(searchLower) ||
-                          c.document_number?.includes(searchTerm) ||
-                          c.conv_labels?.some((l: any) => l.name?.toLowerCase().includes(searchLower));
-            if (!match) return false;
+        // 4) BUSCA EM TEXTO E METADADOS (Por escopo: Tudo | Contato | Empresa | Mensagens)
+        if (searchCriteria && !matchesSearch) {
+            return false;
         }
 
         // Filtro de Tarefas CRM do operador ativo (independente de searchTerm)
@@ -2402,7 +2460,7 @@ export default function ChatDashboard() {
         }
 
         // Filtros de Pills - IGNORADOS DURANTE PESQUISA (exceto Modo Ticket que sempre filtra)
-        if (!searchTerm || ticketMode) {
+        if (!searchCriteria || ticketMode) {
             if (filterType === 'unread') {
                // Já tratado rigorosamente acima
             }
@@ -2420,7 +2478,7 @@ export default function ChatDashboard() {
         }
 
        // Esconde contatos que são apenas resultados de busca global quando a pesquisa é limpa (a menos que seja o chat ativo)
-       if (!searchTerm && c.isSearchResult && !isExactActiveChat) {
+       if (!searchCriteria && c.isSearchResult && !isExactActiveChat) {
           return false;
        }
 
@@ -2457,12 +2515,25 @@ export default function ChatDashboard() {
 
        // Quando pesquisando ou aplicando filtro de caixa (única ou múltipla), a chave de unicidade é o personKey (Pessoa Única)
        const isFilteringBoxes = Boolean((selectedChannelFilters && selectedChannelFilters.length > 0) || (activeChannelFilter && activeChannelFilter !== 'all'));
-       const key = (searchTerm || isFilteringBoxes) ? personKey : `${personKey}_${targetInst}`;
+       const key = (searchCriteria || isFilteringBoxes) ? personKey : `${personKey}_${targetInst}`;
 
        if (!seenKeys.has(key)) {
          seenKeys.set(key, c);
        } else {
          const existing = seenKeys.get(key);
+
+         // Preferir match direto de mensagem quando o usuário buscou em mensagens e ambas as entradas são válidas
+         if (searchCriteria && searchCriteria.scope !== 'contact') {
+           const curHasMsgHit = c.searchMatchMeta?.normalizedTerm === searchCriteria.normTerm && c.searchMatchMeta?.source === 'message';
+           const extHasMsgHit = existing.searchMatchMeta?.normalizedTerm === searchCriteria.normTerm && existing.searchMatchMeta?.source === 'message';
+           if (curHasMsgHit && !extHasMsgHit) {
+             seenKeys.set(key, c);
+             continue;
+           }
+           if (!curHasMsgHit && extHasMsgHit) {
+             continue;
+           }
+         }
 
          // Se a nova entrada for da caixa ativa atual (activeChannelFilter / activeChannelName / selectedChannelFilters), PREFERIR a nova entrada!
          const isCurrentInActiveBox = isMatchingChannel(c);
@@ -2483,7 +2554,7 @@ export default function ChatDashboard() {
        }
      }
      return Array.from(seenKeys.values());
-  }, [contacts, activeChannelFilter, selectedChannelFilters, searchTerm, filterType, selectedLabelId, activeChatId, ticketMode, agents, connectedInstanceName, activeChannelName, isMatchingChannel, getRbacRuntimeContext, isContactOpenTicket, myTaskContactIdsSet]);
+  }, [contacts, activeChannelFilter, selectedChannelFilters, searchTerm, searchScope, filterType, selectedLabelId, activeChatId, ticketMode, agents, connectedInstanceName, activeChannelName, isMatchingChannel, getRbacRuntimeContext, isContactOpenTicket, myTaskContactIdsSet, resolveLinkedCompaniesFast, tenantInfo?.settings?.contactGroups]);
 
   const handleBatchResolveConfirm = async () => {
     setIsProcessingBatchResolve(true);
@@ -4005,25 +4076,33 @@ export default function ChatDashboard() {
     }
   }, [activeChatId, ticketMode]);
 
+  // Previne que o auto-scroll puxe para baixo enquanto o usuário salta até uma mensagem encontrada na busca
+  const suppressAutoScrollUntilRef = useRef<number>(0);
+
   // Smart Auto-Scroll para novas mensagens
   useEffect(() => {
     const currentMessagesLength = activeChat?.messages?.length || 0;
     const diff = currentMessagesLength - prevMessagesLength.current;
-    
+
+    if (Date.now() < suppressAutoScrollUntilRef.current) {
+      prevMessagesLength.current = currentMessagesLength;
+      return;
+    }
+
     if (diff > 0) {
       const lastMsg = activeChat?.messages?.[currentMessagesLength - 1];
       const isMe = lastMsg && (lastMsg.sender === 'human' || lastMsg.sender === 'bot');
       
       if (!showScrollButton || isMe) {
-        // Usa rolagem instantÇ｢nea ('auto') se vierem múltiplas mensagens de uma vez (ex: carregamento do histórico)
+        // Usa rolagem instantânea ('auto') se vierem múltiplas mensagens de uma vez (ex: carregamento do histórico)
         // Usa 'smooth' apenas para novas mensagens recebidas 1 a 1
         const behavior = diff > 1 ? 'auto' : 'smooth';
         scrollToBottom(behavior);
         
         // Fallbacks para garantir que caia na última linha mesmo que as imagens demorem a renderizar
         if (diff > 1) {
-           setTimeout(() => scrollToBottom('auto'), 150);
-           setTimeout(() => scrollToBottom('auto'), 500);
+           setTimeout(() => { if (Date.now() >= suppressAutoScrollUntilRef.current) scrollToBottom('auto'); }, 150);
+           setTimeout(() => { if (Date.now() >= suppressAutoScrollUntilRef.current) scrollToBottom('auto'); }, 500);
         }
       }
     }
@@ -4037,9 +4116,11 @@ export default function ChatDashboard() {
     if (prevMessageFilter.current !== messageFilter) {
       prevMessageFilter.current = messageFilter;
 
+      if (Date.now() < suppressAutoScrollUntilRef.current) return;
+
       if (messagesContainerRef.current) {
         const scrollToRecent = () => {
-          if (messagesContainerRef.current) {
+          if (messagesContainerRef.current && Date.now() >= suppressAutoScrollUntilRef.current) {
             messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
           }
         };
@@ -4051,6 +4132,43 @@ export default function ChatDashboard() {
       }
     }
   }, [messageFilter]);
+
+  const handleJumpToSearchedMessage = useCallback(async () => {
+    const meta = activeChat?.searchMatchMeta;
+    if (!activeChat || !meta?.matchedMessageId) return;
+    suppressAutoScrollUntilRef.current = Date.now() + 3000;
+
+    if (ticketMode && messageFilter === 'today') {
+      handleToggleMessageFilter('all');
+    }
+
+    const findMsgEl = () =>
+      document.querySelector(`[data-db-msg-id="${meta.matchedMessageId}"]`) as HTMLElement | null;
+
+    let el = findMsgEl();
+    if (!el && meta.matchedTimestamp && (meta.matchedConversationId || activeChat.conv_id)) {
+      setIsLoadingJumpMsg(true);
+      await loadMessagesAroundTimestamp(
+        activeChat.id,
+        (meta.matchedConversationId || activeChat.conv_id)!,
+        meta.matchedTimestamp
+      );
+      setIsLoadingJumpMsg(false);
+      await new Promise((r) => setTimeout(r, 120));
+      el = findMsgEl();
+    } else if (ticketMode && messageFilter === 'today') {
+      await new Promise((r) => setTimeout(r, 100));
+      el = findMsgEl();
+    }
+
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('ring-2', 'ring-emerald-500/80', 'bg-emerald-500/10', 'rounded-2xl', 'transition-all', 'duration-300');
+      setTimeout(() => {
+        el?.classList.remove('ring-2', 'ring-emerald-500/80', 'bg-emerald-500/10', 'rounded-2xl');
+      }, 3200);
+    }
+  }, [activeChat, ticketMode, messageFilter, handleToggleMessageFilter, loadMessagesAroundTimestamp]);
 
 
   useEffect(() => {
@@ -8127,17 +8245,25 @@ export default function ChatDashboard() {
         )}
 
         {/* Search e Filtros */}
-        <div className="flex flex-col border-b border-[#f2f2f2] dark:border-[#222d34] px-3 py-2 gap-3 bg-white dark:bg-[#111b21]">
+        <div className="flex flex-col border-b border-[#f2f2f2] dark:border-[#222d34] px-3 py-2 gap-2 bg-white dark:bg-[#111b21]">
           <div className="flex items-center gap-2 w-full">
             <div className="flex w-full bg-[#f0f2f5] dark:bg-[#202c33] px-3 py-2 rounded-xl items-center gap-2 group transition-all ring-1 ring-transparent focus-within:ring-[#00a884]/50 shadow-inner">
-              {isSearchingGlobally ? (
+              {(isSearchingGlobally || (isSearchingMessages && filteredContacts.length === 0)) ? (
                   <Loader2 size={18} className="text-[#00a884] animate-spin flex-shrink-0" />
               ) : (
                   <Search size={18} className="text-[#54656f] dark:text-[#aebac1] group-focus-within:text-[#00a884] transition-colors flex-shrink-0" />
               )}
               <input 
                 type="text" 
-                placeholder="Pesquisar chat ou contato" 
+                placeholder={
+                  searchScope === 'contact'
+                    ? 'Filtrar por nome do contato ou telefone...'
+                    : searchScope === 'company'
+                      ? 'Filtrar por empresa, fantasia ou CNPJ...'
+                      : searchScope === 'messages'
+                        ? 'Buscar palavra dentro das mensagens...'
+                        : 'Pesquisar contato, empresa, CNPJ ou msg...'
+                }
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="bg-transparent border-none outline-none text-sm w-full dark:text-[#d1d7db] placeholder:text-[#54656f] dark:placeholder:text-[#aebac1]"
@@ -8145,7 +8271,7 @@ export default function ChatDashboard() {
               {searchTerm && (
                 <button 
                   type="button"
-                  onClick={() => setSearchTerm('')}
+                  onClick={() => { setSearchTerm(''); clearGlobalSearchLoading(); }}
                   className="p-1 text-[#54656f] dark:text-[#aebac1] hover:text-red-500 dark:hover:text-red-400 hover:bg-black/5 dark:hover:bg-white/5 rounded-full transition-all flex-shrink-0 animate-in fade-in zoom-in-95 duration-200 active:scale-90"
                   title="Limpar pesquisa"
                 >
@@ -8160,46 +8286,83 @@ export default function ChatDashboard() {
               <Filter size={18} />
             </button>
           </div>
+
+          {/* Seletor rápido de Escopo de Busca (Performance e precisão: Tudo | Contato | Empresa | Mensagens) */}
+          <div className="flex items-center justify-between gap-1.5 w-full">
+            <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide pb-0.5 select-none">
+              {([
+                { id: 'all', label: 'Tudo', Icon: Layers, title: 'Buscar em contatos, empresas, CNPJ e mensagens' },
+                { id: 'contact', label: 'Contato', Icon: User, title: 'Filtro rápido apenas por nome, apelido ou telefone' },
+                { id: 'company', label: 'Empresa', Icon: Building2, title: 'Filtrar por empresa vinculada, razão social ou CNPJ' },
+                { id: 'messages', label: 'Mensagens', Icon: MessageSquareText, title: 'Buscar palavras dentro das conversas e anotações' }
+              ] as const).map(({ id, label, Icon, title }) => {
+                const isActive = searchScope === id;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setSearchScope(id)}
+                    title={title}
+                    className={cn(
+                      "px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap flex items-center gap-1 shrink-0 border cursor-pointer active:scale-95",
+                      isActive
+                        ? "bg-[#00a884]/12 dark:bg-emerald-500/15 text-[#00a884] dark:text-emerald-400 border-[#00a884]/30 shadow-xs"
+                        : "bg-[#f0f2f5]/70 dark:bg-[#202c33]/70 text-[#54656f] dark:text-[#8696a0] border-transparent hover:bg-gray-200/70 dark:hover:bg-white/5"
+                    )}
+                  >
+                    <Icon size={11} className="shrink-0" />
+                    <span>{label}</span>
+                  </button>
+                );
+              })}
+            </div>
+            {isSearchingMessages && searchTerm.trim().length >= 3 && (
+              <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1 shrink-0 animate-pulse">
+                <Loader2 size={10} className="animate-spin" />
+                <span className="hidden sm:inline">Mensagens...</span>
+              </span>
+            )}
+          </div>
           
-          {/* Pills Filters (Glassmorphism inspired) */}
+          {/* Pills Filters (Glassmorphism inspired - Sem corte lateral nos filtros) */}
           {showFilters && (
             <div className="flex flex-col gap-2 relative">
-              <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide relative select-none animate-in fade-in slide-in-from-top-2 duration-200">
+              <div className="flex flex-wrap gap-1.5 pb-1 relative select-none animate-in fade-in slide-in-from-top-2 duration-200">
                  <button 
                     onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'all', x: e.clientX, y: e.clientY }); }}
                     onClick={() => { setFilterType('all'); setSelectedLabelId(null); }} 
-                    className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap", filterType === 'all' ? "bg-[#00a884]/10 text-[#00a884] ring-1 ring-[#00a884]/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
+                    className={cn("px-3 py-1 rounded-full text-xs font-semibold transition-all whitespace-nowrap active:scale-95", filterType === 'all' ? "bg-[#00a884]/15 text-[#00a884] ring-1 ring-[#00a884]/35" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
                    Tudo
                  </button>
                  <button 
                     onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'unread', x: e.clientX, y: e.clientY }); }}
                     onClick={() => { setFilterType('unread'); setSelectedLabelId(null); }} 
-                    className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap", filterType === 'unread' ? "bg-[#00a884]/10 text-[#00a884] ring-1 ring-[#00a884]/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
+                    className={cn("px-3 py-1 rounded-full text-xs font-semibold transition-all whitespace-nowrap active:scale-95", filterType === 'unread' ? "bg-[#00a884]/15 text-[#00a884] ring-1 ring-[#00a884]/35" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
                    Não Lidas
                  </button>
                  <button 
                     onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'mine', x: e.clientX, y: e.clientY }); }}
                     onClick={() => { setFilterType('mine'); setSelectedLabelId(null); }} 
-                    className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap flex items-center gap-1", filterType === 'mine' ? "bg-indigo-500/10 text-indigo-600 ring-1 ring-indigo-500/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
-                   <User size={14} className={filterType === 'mine' ? "text-indigo-600" : ""} /> Minhas
+                    className={cn("px-3 py-1 rounded-full text-xs font-semibold transition-all whitespace-nowrap flex items-center gap-1 active:scale-95", filterType === 'mine' ? "bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 ring-1 ring-indigo-500/35" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
+                   <User size={13} className={filterType === 'mine' ? "text-indigo-600 dark:text-indigo-400" : ""} /> Minhas
                  </button>
                  <button 
                     onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'favorite', x: e.clientX, y: e.clientY }); }}
                     onClick={() => { setFilterType('favorite'); setSelectedLabelId(null); }} 
-                    className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap flex items-center gap-1", filterType === 'favorite' ? "bg-yellow-500/10 text-yellow-600 ring-1 ring-yellow-500/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
-                   <Star size={14} className={filterType === 'favorite' ? "fill-yellow-600" : ""} /> Favoritas
+                    className={cn("px-3 py-1 rounded-full text-xs font-semibold transition-all whitespace-nowrap flex items-center gap-1 active:scale-95", filterType === 'favorite' ? "bg-yellow-500/15 text-yellow-600 dark:text-yellow-400 ring-1 ring-yellow-500/35" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
+                   <Star size={13} className={filterType === 'favorite' ? "fill-yellow-600 dark:fill-yellow-400" : ""} /> Favoritas
                  </button>
                  <button 
                     onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'labels', x: e.clientX, y: e.clientY }); }}
                     onClick={() => setFilterType('labels')} 
-                    className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap flex items-center gap-1", filterType === 'labels' ? "bg-blue-500/10 text-blue-600 ring-1 ring-blue-500/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
-                   <Tag size={14} /> Etiquetas
+                    className={cn("px-3 py-1 rounded-full text-xs font-semibold transition-all whitespace-nowrap flex items-center gap-1 active:scale-95", filterType === 'labels' ? "bg-blue-500/15 text-blue-600 dark:text-blue-400 ring-1 ring-blue-500/35" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
+                   <Tag size={13} /> Etiquetas
                  </button>
                  <button 
                     onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'blocked', x: e.clientX, y: e.clientY }); }}
                     onClick={() => { setFilterType('blocked'); setSelectedLabelId(null); }} 
-                    className={cn("px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap flex items-center gap-1", filterType === 'blocked' ? "bg-red-500/10 text-red-600 ring-1 ring-red-500/30" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
-                   <Ban size={14} className={filterType === 'blocked' ? "text-red-600" : ""} /> Bloqueados
+                    className={cn("px-3 py-1 rounded-full text-xs font-semibold transition-all whitespace-nowrap flex items-center gap-1 active:scale-95", filterType === 'blocked' ? "bg-red-500/15 text-red-600 dark:text-red-400 ring-1 ring-red-500/35" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
+                   <Ban size={13} className={filterType === 'blocked' ? "text-red-600 dark:text-red-400" : ""} /> Bloqueados
                  </button>
               </div>
 
@@ -8209,7 +8372,7 @@ export default function ChatDashboard() {
                     <Tag size={10} className="text-[#00a884] dark:text-emerald-400" />
                     Filtrar por etiqueta:
                   </span>
-                  <div className="flex gap-1.5 overflow-x-auto pb-1 px-0.5 scrollbar-hide select-none">
+                  <div className="flex flex-wrap gap-1.5 pb-0.5 px-0.5 select-none">
                     <button
                       onClick={() => setSelectedLabelId(null)}
                       className={cn(
@@ -8321,7 +8484,7 @@ export default function ChatDashboard() {
           className="flex-1 overflow-y-auto custom-scrollbar"
         >
            <AnimatePresence initial={false}>
-            {/* Expressão 1: Nenhum contato encontrado durante a busca */}
+            {/* Expressão 1: Estado de busca em andamento ou nenhum contato encontrado */}
             {!isChannelLoading && filteredContacts.length === 0 && searchTerm && (
               <motion.div 
                 initial={{ opacity: 0, scale: 0.95 }}
@@ -8331,17 +8494,84 @@ export default function ChatDashboard() {
                 className="flex flex-col items-center justify-center p-6 text-center w-full"
               >
                 <div className="w-full max-w-sm bg-white/5 dark:bg-[#182229]/30 backdrop-blur-md border border-gray-100 dark:border-white/5 rounded-3xl p-6 shadow-xl flex flex-col items-center gap-4">
-                  <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 dark:bg-emerald-500/20 flex items-center justify-center text-emerald-500 animate-pulse">
-                    <MessageSquarePlus size={24} />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <p className="text-sm font-semibold text-gray-700 dark:text-[#d1d7db]">
-                      Nenhum contato encontrado
-                    </p>
-                    <p className="text-xs text-gray-400 dark:text-[#8696a0] max-w-[200px] mx-auto">
-                      Não encontramos nenhum chat ou contato para "{searchTerm}".
-                    </p>
-                  </div>
+                  {(isSearchingGlobally || isSearchingMessages) && searchTerm.trim().length >= 2 ? (
+                    <>
+                      <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 dark:bg-emerald-500/20 flex items-center justify-center text-emerald-500">
+                        <Loader2 size={24} className="animate-spin" />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <p className="text-sm font-semibold text-gray-700 dark:text-[#d1d7db]">
+                          Buscando conversas...
+                        </p>
+                        <p className="text-xs text-gray-400 dark:text-[#8696a0] max-w-[230px] mx-auto">
+                          Consultando histórico para "{searchTerm}" no filtro{' '}
+                          <strong>
+                            {searchScope === 'contact' ? 'Contato' : searchScope === 'company' ? 'Empresa' : searchScope === 'messages' ? 'Mensagens' : 'Tudo'}
+                          </strong>.
+                        </p>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 dark:bg-emerald-500/20 flex items-center justify-center text-emerald-500">
+                        <Search size={22} />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <p className="text-sm font-semibold text-gray-700 dark:text-[#d1d7db]">
+                          Nenhum resultado encontrado
+                        </p>
+                        <p className="text-xs text-gray-400 dark:text-[#8696a0] max-w-[230px] mx-auto">
+                          Não encontramos correspondências para "{searchTerm}"
+                          {searchScope !== 'all' && ` no filtro ${searchScope === 'contact' ? 'Contato' : searchScope === 'company' ? 'Empresa' : 'Mensagens'}`}.
+                        </p>
+                      </div>
+
+                      {/* Ações rápidas inteligentes para ampliar busca em 1 clique sem redigitar */}
+                      <div className="flex flex-wrap items-center justify-center gap-1.5 w-full">
+                        {searchScope !== 'all' && (
+                          <button
+                            type="button"
+                            onClick={() => setSearchScope('all')}
+                            className="px-3 py-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
+                          >
+                            <Layers size={12} />
+                            Buscar em Tudo
+                          </button>
+                        )}
+                        {searchScope !== 'messages' && searchTerm.trim().length >= 3 && (
+                          <button
+                            type="button"
+                            onClick={() => setSearchScope('messages')}
+                            className="px-3 py-1.5 rounded-xl bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 border border-indigo-500/25 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
+                          >
+                            <MessageSquareText size={12} />
+                            Buscar nas Mensagens
+                          </button>
+                        )}
+                        {searchScope !== 'company' && (
+                          <button
+                            type="button"
+                            onClick={() => setSearchScope('company')}
+                            className="px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/25 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
+                          >
+                            <Building2 size={12} />
+                            Buscar por Empresa
+                          </button>
+                        )}
+                        {ticketMode && (
+                          <button
+                            type="button"
+                            onClick={() => setTicketMode(false)}
+                            className="px-3 py-1.5 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 text-purple-600 dark:text-purple-400 border border-purple-500/25 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
+                            title="O Modo Ticket oculta conversas já resolvidas"
+                          >
+                            <Ticket size={12} />
+                            Ver também resolvidas
+                          </button>
+                        )}
+                      </div>
+                    </>
+                  )}
                   
                   {searchTerm.replace(/\D/g, '').length >= 8 && (
                     <button
@@ -8396,6 +8626,39 @@ export default function ChatDashboard() {
               const instanceIdFromId = contact.id.includes('_') ? contact.id.split('_')[1] : contact.instance_id;
               const resolvedContactInstanceUuid = instanceIdFromId ? (instanceCache.getId(instanceIdFromId) || instanceIdFromId) : null;
               const contactInstanceName = resolvedContactInstanceUuid ? (instanceCache.getName(resolvedContactInstanceUuid) || resolvedContactInstanceUuid) : null;
+
+              const activeNormSearch = searchTerm ? normalizeSearchText(searchTerm) : '';
+              const activeMeta = (activeNormSearch && contact.searchMatchMeta?.normalizedTerm === activeNormSearch)
+                ? contact.searchMatchMeta
+                : null;
+              const matchedLocalMsg = (activeNormSearch && (searchScope === 'messages' || searchScope === 'all') && Array.isArray(contact.messages))
+                ? [...contact.messages].reverse().find((m: any) =>
+                    normalizeSearchText(m?.text).includes(activeNormSearch) ||
+                    normalizeSearchText(m?.transcription).includes(activeNormSearch)
+                  )
+                : null;
+
+              const searchSnippetInfo = (() => {
+                if (!activeNormSearch || searchScope === 'contact' || searchScope === 'company') return null;
+                if (activeMeta && (activeMeta.source === 'message' || activeMeta.source === 'note') && activeMeta.matchedText) {
+                  return {
+                    tag: activeMeta.source === 'note' ? 'Nota' : 'Msg',
+                    dateStr: activeMeta.matchedTimestamp ? format(new Date(activeMeta.matchedTimestamp), 'dd/MM') : '',
+                    snippet: activeMeta.matchedText
+                  };
+                }
+                if (matchedLocalMsg) {
+                  const rawTxt = normalizeSearchText(matchedLocalMsg.text).includes(activeNormSearch)
+                    ? matchedLocalMsg.text
+                    : matchedLocalMsg.transcription;
+                  return {
+                    tag: 'Msg',
+                    dateStr: matchedLocalMsg.timestamp ? format(new Date(matchedLocalMsg.timestamp), 'dd/MM') : '',
+                    snippet: extractMatchSnippet(rawTxt, searchTerm, 68)
+                  };
+                }
+                return null;
+              })();
 
               const lastMsgText = (() => {
                 if (!lastMsg) return contact.last_message_preview || '';
@@ -8818,22 +9081,31 @@ export default function ChatDashboard() {
                         </div>
                       </div>
                     </div>
-                    {/* Segunda linha: Preview da última mensagem e Badge de não lidas */}
+                    {/* Segunda linha: Preview da mensagem encontrada na busca ou última mensagem + Badge de não lidas */}
                     <div className="flex justify-between items-center mt-1">
-                      <p className="text-[13px] text-gray-500 dark:text-[#8696a0] truncate flex-1 pr-2 flex items-center">
-                        {isMe && (
-                          <span className="inline-flex mr-1 align-middle text-[#00a884] dark:text-[#53bdeb] shrink-0">
-                            {lastMsg.status === 'read' || lastMsg.status === 'READ' || lastMsg.status === 'PLAYED' || lastMsg.status === 'played' ? (
-                              <CheckCheck size={15} className="text-[#00a884] dark:text-[#53bdeb]" />
-                            ) : lastMsg.status === 'delivered' || lastMsg.status === 'DELIVERY_ACK' ? (
-                              <CheckCheck size={15} className="text-[#8696a0]" />
-                            ) : (
-                              <Check size={15} className="text-[#8696a0]" />
-                            )}
+                      {searchSnippetInfo ? (
+                        <p className="text-[12px] text-gray-600 dark:text-[#aebac1] truncate flex-1 pr-2 flex items-center gap-1.5">
+                          <span className="px-1.5 py-[1px] rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/25 text-[9px] font-bold shrink-0">
+                            {searchSnippetInfo.tag}{searchSnippetInfo.dateStr ? ` • ${searchSnippetInfo.dateStr}` : ''}
                           </span>
-                        )}
-                        <span className="truncate">{lastMsgText}</span>
-                      </p>
+                          <span className="truncate">{renderHighlightedMatchText(searchSnippetInfo.snippet, searchTerm)}</span>
+                        </p>
+                      ) : (
+                        <p className="text-[13px] text-gray-500 dark:text-[#8696a0] truncate flex-1 pr-2 flex items-center">
+                          {isMe && (
+                            <span className="inline-flex mr-1 align-middle text-[#00a884] dark:text-[#53bdeb] shrink-0">
+                              {lastMsg.status === 'read' || lastMsg.status === 'READ' || lastMsg.status === 'PLAYED' || lastMsg.status === 'played' ? (
+                                <CheckCheck size={15} className="text-[#00a884] dark:text-[#53bdeb]" />
+                              ) : lastMsg.status === 'delivered' || lastMsg.status === 'DELIVERY_ACK' ? (
+                                <CheckCheck size={15} className="text-[#8696a0]" />
+                              ) : (
+                                <Check size={15} className="text-[#8696a0]" />
+                              )}
+                            </span>
+                          )}
+                          <span className="truncate">{lastMsgText}</span>
+                        </p>
+                      )}
                       
                       {contact.unread > 0 && (
                         <span className="min-w-[20px] h-[20px] px-1.5 rounded-full bg-[#00a884] text-white text-[11px] font-bold flex items-center justify-center animate-in zoom-in-50 duration-200 shadow-sm shrink-0">
@@ -8926,10 +9198,10 @@ export default function ChatDashboard() {
         title="Arraste para redimensionar"
       >
         {/* Hitbox expandida para facilitar o clique */}
-        <div className="absolute -left-2 -right-2 top-0 bottom-0 cursor-col-resize" />
-        {/* Ícone sutil no meio */}
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-gray-400 group-hover:text-[#00a884] transition-colors pointer-events-none">
-          <MoreVertical size={12} className="opacity-50" />
+        <div className="absolute -left-1.5 -right-1.5 top-0 bottom-0 cursor-col-resize" />
+        {/* Indicador vertical confinado dentro da divisória (sem invadir o avatar do chat) */}
+        <div className="w-full h-full flex items-center justify-center overflow-hidden pointer-events-none">
+          <div className="w-[2px] h-8 rounded-full bg-slate-400/45 dark:bg-white/20 group-hover:bg-[#00a884] group-hover:h-12 transition-all duration-200" />
         </div>
       </div>
 
@@ -9013,8 +9285,8 @@ export default function ChatDashboard() {
               </div>
             </div>
           ) : (
-            <div className="relative min-h-[64px] py-1.5 shrink-0 bg-[#f0f2f5]/95 dark:bg-[#202c33]/95 backdrop-blur-md flex items-center justify-between gap-2 sm:gap-3 px-3 sm:px-4 z-20 shadow-sm border-b border-black/5 dark:border-white/5 border-l">
-            <div className="flex items-center gap-2.5 relative min-w-0 flex-1">
+            <div className="chat-header-cq relative min-h-[64px] py-2 shrink-0 bg-[#f0f2f5]/90 dark:bg-[#1a242b]/90 backdrop-blur-xl flex items-center justify-between gap-2.5 sm:gap-3 px-3.5 sm:px-4 z-30 shadow-[0_4px_20px_rgba(0,0,0,0.06)] border-b border-black/5 dark:border-white/10 border-l">
+            <div className="chat-header-identity flex items-center gap-2.5 relative min-w-0 flex-1">
               <button 
                 type="button"
                 aria-label="Voltar para a lista de conversas"
@@ -9074,8 +9346,8 @@ export default function ChatDashboard() {
                     )}
                   </h2>
                   
-                  {/* Linha Única Compacta de Metadados (Sem Encavalamento Vertical + Submenu de Vínculos/CNPJ) */}
-                  <div className="flex items-center gap-1.5 mt-0.5 flex-nowrap min-w-0">
+                  {/* Linha Inteligente de Metadados (Wrap fluído sem invadir os controles da direita) */}
+                  <div className="flex items-center gap-x-1.5 gap-y-1 mt-1 flex-wrap min-w-0">
                     {isGroupContact(activeChat) ? (
                       <div className="inline-flex items-center gap-1.5 bg-gradient-to-r from-indigo-500/10 to-purple-500/10 dark:from-indigo-500/15 dark:to-purple-500/15 h-5 px-2 rounded-full border border-indigo-500/25 text-indigo-600 dark:text-indigo-400 text-[10.5px] font-medium shrink-0 max-w-full">
                         <Users size={10} className="shrink-0 text-indigo-500" />
@@ -9146,11 +9418,11 @@ export default function ChatDashboard() {
                         const hasDetailsPopover = Boolean(docNumber || extraCompaniesCount > 0 || extraGroupsCount > 0 || (primaryCompanyLabel && matchingGroups.length > 0));
 
                         return (
-                          <div className="flex items-center gap-1.5 flex-nowrap min-w-0">
+                          <div className="flex items-center gap-x-1.5 gap-y-1 flex-wrap min-w-0">
                             {/* 1. Celular com cópia rápida */}
                             {activeChat.phone && (
-                              <div className="inline-flex items-center gap-1 bg-blue-500/10 dark:bg-blue-500/10 h-5 px-2 rounded-full border border-blue-500/20 text-blue-600 dark:text-blue-400 text-[10.5px] font-medium shrink-0">
-                                <span className="font-mono leading-none">{formatPhoneNumber(activeChat.phone)}</span>
+                              <div className="inline-flex items-center gap-1 bg-blue-500/10 dark:bg-blue-500/15 h-5 px-2 rounded-full border border-blue-500/20 text-blue-600 dark:text-blue-400 text-[10.5px] font-medium max-w-full min-w-0">
+                                <span className="font-mono leading-none truncate">{formatPhoneNumber(activeChat.phone)}</span>
                                 <button
                                   type="button"
                                   onClick={(e) => {
@@ -9159,7 +9431,7 @@ export default function ChatDashboard() {
                                     setCopiedPhone(true);
                                     setTimeout(() => setCopiedPhone(false), 2000);
                                   }}
-                                  className="p-0.5 rounded hover:bg-blue-500/20 transition-colors flex items-center justify-center cursor-pointer"
+                                  className="p-0.5 rounded hover:bg-blue-500/20 transition-colors flex items-center justify-center shrink-0 cursor-pointer"
                                   title="Copiar Celular"
                                 >
                                   {copiedPhone ? (
@@ -9171,7 +9443,7 @@ export default function ChatDashboard() {
                               </div>
                             )}
 
-                            {/* 2. Empresa Principal ou Grupo Principal (Inline Compacto) */}
+                            {/* 2. Empresa Principal ou Grupo Principal (Truncamento fluido sem transbordamento) */}
                             {primaryCompanyTarget && primaryCompanyLabel ? (
                               <button
                                 type="button"
@@ -9179,7 +9451,7 @@ export default function ChatDashboard() {
                                   e.stopPropagation();
                                   setCompanyDetailsOpen(primaryCompanyTarget);
                                 }}
-                                className="hidden sm:inline-flex items-center gap-1 bg-emerald-500/10 hover:bg-emerald-500/20 h-5 px-2 rounded-full border border-emerald-500/25 text-emerald-600 dark:text-emerald-400 text-[10.5px] font-semibold transition-all duration-200 shadow-sm active:scale-95 max-w-[130px] xl:max-w-[175px] shrink-0 cursor-pointer"
+                                className="inline-flex items-center gap-1 bg-emerald-500/10 hover:bg-emerald-500/20 h-5 px-2 rounded-full border border-emerald-500/25 text-emerald-600 dark:text-emerald-400 text-[10.5px] font-semibold transition-all duration-200 shadow-sm active:scale-95 min-w-0 max-w-[140px] sm:max-w-[175px] cursor-pointer"
                                 title={`Ver Dados da Empresa e Faturamento: ${primaryCompanyLabel}`}
                               >
                                 <Building2 size={10} className="shrink-0" />
@@ -9192,7 +9464,7 @@ export default function ChatDashboard() {
                                   e.stopPropagation();
                                   setCompanyDetailsOpen(linkedCompanies[0] || activeChat);
                                 }}
-                                className="hidden sm:inline-flex items-center gap-1 h-5 px-2 rounded-full border text-[10.5px] font-bold shadow-sm transition-all duration-200 active:scale-95 max-w-[130px] shrink-0 cursor-pointer"
+                                className="inline-flex items-center gap-1 h-5 px-2 rounded-full border text-[10.5px] font-bold shadow-sm transition-all duration-200 active:scale-95 min-w-0 max-w-[140px] sm:max-w-[165px] cursor-pointer"
                                 style={{
                                   backgroundColor: `${matchingGroups[0].color}15`,
                                   borderColor: `${matchingGroups[0].color}30`,
@@ -9216,7 +9488,7 @@ export default function ChatDashboard() {
                                       e.stopPropagation();
                                       setCompanyDetailsOpen(activeChat);
                                     }}
-                                    className="hidden sm:inline-flex items-center gap-1 bg-gray-500/10 hover:bg-[#00a884]/15 h-5 px-2 rounded-full border border-dashed border-gray-400/40 hover:border-[#00a884]/40 text-gray-500 dark:text-gray-400 hover:text-[#00a884] text-[10px] font-medium transition-all duration-200 active:scale-95 shrink-0 cursor-pointer"
+                                    className="inline-flex items-center gap-1 bg-gray-500/10 hover:bg-[#00a884]/15 h-5 px-2 rounded-full border border-dashed border-gray-400/40 hover:border-[#00a884]/40 text-gray-500 dark:text-gray-400 hover:text-[#00a884] text-[10px] font-medium transition-all duration-200 active:scale-95 shrink-0 cursor-pointer"
                                     title="Associar Empresa a este Contato"
                                   >
                                     <Building2 size={10} className="shrink-0" />
@@ -9248,10 +9520,10 @@ export default function ChatDashboard() {
                                   ) : (
                                     <FileText size={10} className="shrink-0 opacity-80" />
                                   )}
-                                  <span className="hidden xl:inline font-mono leading-none">
+                                  <span className="chat-cq-label-xl font-mono leading-none">
                                     {docNumber ? formatDocumentNumber(docNumber) : `+${extraCompaniesCount + extraGroupsCount} vínculo(s)`}
                                   </span>
-                                  <span className="xl:hidden leading-none">
+                                  <span className="chat-cq-label-xl-short leading-none">
                                     {docNumber ? 'CNPJ' : `+${extraCompaniesCount + extraGroupsCount}`}
                                   </span>
                                   <ChevronDown size={10} className={cn("transition-transform duration-200 opacity-70", showContactMetaMenu && "rotate-180")} />
@@ -9265,7 +9537,7 @@ export default function ChatDashboard() {
                                       exit={{ opacity: 0, y: 8, scale: 0.96 }}
                                       transition={{ duration: 0.15 }}
                                       onClick={(e) => e.stopPropagation()}
-                                      className="absolute left-0 top-full mt-2 w-72 bg-white/95 dark:bg-[#1b262c]/95 backdrop-blur-xl rounded-2xl shadow-[0_12px_40px_rgb(0,0,0,0.25)] border border-slate-200/80 dark:border-white/10 p-3 z-[85] space-y-2.5"
+                                      className="absolute left-0 top-full mt-2 w-72 max-w-[calc(100vw-2rem)] bg-white/95 dark:bg-[#1b262c]/95 backdrop-blur-xl rounded-2xl shadow-[0_12px_40px_rgb(0,0,0,0.25)] border border-slate-200/80 dark:border-white/10 p-3 z-[85] space-y-2.5"
                                     >
                                       <div className="text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 flex items-center justify-between">
                                         <span>Dados & Vínculos do Contato</span>
@@ -9390,7 +9662,7 @@ export default function ChatDashboard() {
 
                             {/* 4. Alerta FALTA CNPJ (quando aplicável) */}
                             {needsCnpjAlert && (
-                              <span className="hidden sm:inline-flex items-center gap-1 bg-rose-500/10 text-rose-500 h-5 px-2 rounded-full border border-rose-500/20 text-[10px] font-bold shrink-0">
+                              <span className="inline-flex items-center gap-1 bg-rose-500/10 text-rose-500 h-5 px-2 rounded-full border border-rose-500/20 text-[10px] font-bold shrink-0">
                                 <AlertTriangle size={10} className="shrink-0 animate-pulse" />
                                 <span className="leading-none">FALTA CNPJ</span>
                               </span>
@@ -9404,8 +9676,8 @@ export default function ChatDashboard() {
               </div>
             </div>
 
-            {/* Right Header Area — Compacta, Sem Overflow e com Submenu Glassmorphism */}
-            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {/* Right Header Area — Cápsula Glassmorphism Adaptativa por Container */}
+            <div className="chat-header-actions flex items-center gap-1 sm:gap-1.5 shrink-0 px-1.5 py-1 rounded-full bg-white/60 dark:bg-white/[0.04] border border-black/5 dark:border-white/[0.08] shadow-inner">
               
               {/* Botão Compacto de Acesso Remoto (XPoint Remote) */}
               {activeChat && (
@@ -9451,11 +9723,11 @@ export default function ChatDashboard() {
                   </div>
 
                   {xpointRemoteActiveSession ? (
-                    <span className="hidden xl:inline font-bold">
+                    <span className="chat-cq-label-xl font-bold">
                       Ativo
                     </span>
                   ) : (
-                    <span className="hidden 2xl:inline">Remoto</span>
+                    <span className="chat-cq-label-2xl">Remoto</span>
                   )}
 
                   {xpointRemoteResolvedInfo && (
@@ -9488,7 +9760,7 @@ export default function ChatDashboard() {
                     type="button"
                     onClick={() => setShowPauseMenu(!showPauseMenu)}
                     className={cn(
-                      "flex items-center justify-center gap-1.5 h-8 w-8 2xl:w-auto 2xl:px-2.5 rounded-full transition-all duration-200 text-xs font-semibold border shadow-sm active:scale-95 whitespace-nowrap cursor-pointer",
+                      "chat-cq-btn-2xl-auto flex items-center justify-center gap-1.5 h-8 rounded-full transition-all duration-200 text-xs font-semibold border shadow-sm active:scale-95 whitespace-nowrap cursor-pointer",
                       !activeChat.ai_paused 
                         ? "bg-indigo-500/10 hover:bg-indigo-500/20 border-indigo-500/30 text-indigo-600 dark:text-indigo-400 shadow-[0_0_12px_rgba(99,102,241,0.12)]"
                         : activeChat.bot_paused_until
@@ -9518,14 +9790,14 @@ export default function ChatDashboard() {
                         <StopCircle size={14} className="text-rose-500" />
                       )}
                     </div>
-                    <span className="hidden 2xl:inline">
+                    <span className="chat-cq-label-2xl">
                       {!activeChat.ai_paused 
                         ? "I.A." 
                         : activeChat.bot_paused_until 
                         ? "Pausada" 
                         : "I.A. Off"}
                     </span>
-                    <ChevronDown size={12} className={cn("transition-transform duration-200 hidden 2xl:inline", showPauseMenu && "rotate-180")} />
+                    <ChevronDown size={12} className={cn("transition-transform duration-200 chat-cq-label-2xl", showPauseMenu && "rotate-180")} />
                   </button>
 
                   <AnimatePresence>
@@ -9666,7 +9938,7 @@ export default function ChatDashboard() {
                     title="Abrir Submenu de Recursos e Ferramentas Rápidas"
                   >
                     <Layers size={13} className="text-purple-500 dark:text-purple-400 shrink-0" />
-                    <span className="hidden xl:inline">Recursos</span>
+                    <span className="chat-cq-label-xl">Recursos</span>
                     <ChevronDown size={12} className={cn("transition-transform duration-200 opacity-70", showHeaderToolsMenu && "rotate-180")} />
                   </button>
 
@@ -9820,11 +10092,11 @@ export default function ChatDashboard() {
                     onClick={() => {
                       reopenConversation(activeChat.id);
                     }}
-                    className="flex items-center justify-center gap-1.5 h-8 w-8 xl:w-auto xl:px-2.5 bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-full transition-all duration-200 text-xs font-semibold border border-blue-200 dark:border-blue-500/20 shadow-sm active:scale-95 whitespace-nowrap cursor-pointer"
+                    className="chat-cq-btn-xl-auto flex items-center justify-center gap-1.5 h-8 bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-full transition-all duration-200 text-xs font-semibold border border-blue-200 dark:border-blue-500/20 shadow-sm active:scale-95 whitespace-nowrap cursor-pointer"
                     title="Reabrir Conversa"
                   >
                     <RotateCcw size={14} className="animate-spin-once" />
-                    <span className="hidden xl:inline">Reabrir</span>
+                    <span className="chat-cq-label-xl">Reabrir</span>
                   </button>
                 ) : (
                   <button 
@@ -9832,11 +10104,11 @@ export default function ChatDashboard() {
                     onClick={() => {
                       handleResolveConversation(activeChat.id);
                     }}
-                    className="flex items-center justify-center gap-1.5 h-8 w-8 xl:w-auto xl:px-2.5 bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 rounded-full transition-all duration-200 text-xs font-semibold border border-emerald-200 dark:border-emerald-500/20 shadow-sm active:scale-95 whitespace-nowrap cursor-pointer"
+                    className="chat-cq-btn-xl-auto flex items-center justify-center gap-1.5 h-8 bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 rounded-full transition-all duration-200 text-xs font-semibold border border-emerald-200 dark:border-emerald-500/20 shadow-sm active:scale-95 whitespace-nowrap cursor-pointer"
                     title="Resolver Conversa"
                   >
                     <CheckCircle2 size={14} />
-                    <span className="hidden xl:inline">Resolver</span>
+                    <span className="chat-cq-label-xl">Resolver</span>
                   </button>
                 )}
 
@@ -9885,7 +10157,7 @@ export default function ChatDashboard() {
                   <Menu size={20} />
                 </button>
                 {mobileHeaderMenuOpen && (
-                   <div className="absolute right-0 top-12 w-[272px] bg-white/95 dark:bg-[#233138]/95 backdrop-blur-xl rounded-2xl shadow-[0_12px_40px_rgb(0,0,0,0.22)] border border-gray-100 dark:border-white/10 p-3 z-[100] animate-in fade-in zoom-in-95 duration-200 flex flex-col gap-2.5">
+                   <div className="mobile-actions-drawer absolute right-0 top-12 w-[272px] max-w-[calc(100vw-1.5rem)] bg-white/95 dark:bg-[#233138]/95 backdrop-blur-xl rounded-2xl shadow-[0_12px_40px_rgb(0,0,0,0.22)] border border-gray-100 dark:border-white/10 p-3 z-[100] animate-in fade-in zoom-in-95 duration-200 flex flex-col gap-2.5">
                       <button
                         type="button"
                         onClick={() => {
@@ -10472,6 +10744,46 @@ export default function ChatDashboard() {
               
               return (
                 <>
+                  {/* Banner contextual de mensagem encontrada via busca profunda */}
+                  {activeChat?.searchMatchMeta?.source === 'message' &&
+                   activeChat.searchMatchMeta.matchedMessageId &&
+                   dismissedSearchJumpKey !== `${activeChat.id}_${activeChat.searchMatchMeta.matchedMessageId}` && (
+                    <div className="sticky top-2 z-30 mx-2 sm:mx-4 my-2 p-2.5 bg-white/95 dark:bg-[#1f2c34]/95 backdrop-blur-md rounded-2xl shadow-lg border border-emerald-500/30 flex items-center justify-between gap-2.5 animate-in fade-in slide-in-from-top-2 duration-200">
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <div className="w-7 h-7 rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                          <Search size={14} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                            Mensagem encontrada {activeChat.searchMatchMeta.matchedTimestamp ? `em ${format(new Date(activeChat.searchMatchMeta.matchedTimestamp), 'dd/MM/yyyy HH:mm')}` : ''}
+                          </p>
+                          <p className="text-xs text-gray-700 dark:text-[#d1d7db] truncate">
+                            {renderHighlightedMatchText(activeChat.searchMatchMeta.matchedText || '', activeChat.searchMatchMeta.rawTerm || searchTerm)}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          disabled={isLoadingJumpMsg}
+                          onClick={handleJumpToSearchedMessage}
+                          className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white text-[11px] font-bold flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
+                        >
+                          {isLoadingJumpMsg ? <Loader2 size={12} className="animate-spin" /> : <History size={12} />}
+                          <span>Ver na conversa</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDismissedSearchJumpKey(`${activeChat.id}_${activeChat.searchMatchMeta?.matchedMessageId}`)}
+                          className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer"
+                          title="Dispensar"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Banner do Modo de Seleção RAG (Floating Top Banner) */}
                   {isRagSelectionMode && (
                     <div className="sticky top-2 z-40 mx-2 sm:mx-4 my-2 p-3.5 bg-gradient-to-r from-purple-900/95 via-indigo-900/95 to-purple-900/95 text-white rounded-2xl shadow-xl border border-purple-400/40 backdrop-blur-xl flex flex-col sm:flex-row items-center justify-between gap-3 animate-in slide-in-from-top-4 duration-300">
