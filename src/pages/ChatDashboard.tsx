@@ -32,6 +32,7 @@ import { geminiService } from '../services/geminiService';
 import { useScheduleMonitor } from '../hooks/useScheduleMonitor';
 import { useXPointRemoteBridge, resolveContactRemoteContext } from '../hooks/useXPointRemoteBridge';
 import { convertClipboardToWhatsAppFormat, formatStructuredPlainText, hasWhatsAppRichFormatting } from '../utils/whatsappRichText';
+import { classifyUploadFailure, runFileUploadQueue, sendMultipartWithRetry } from '../utils/mediaUploadResilience.mjs';
 
 export function cn(...inputs: (string | undefined | null | false)[]) {
   return twMerge(clsx(inputs));
@@ -5028,27 +5029,36 @@ export default function ChatDashboard() {
         setNoteAttachedPreview('attached');
       }
     } else {
-      // Loop sequencial for para manter a ordem cronológica correta das mídias na conversa
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        let mediaType: 'image' | 'video' | 'audio' | 'document' = 'document';
-        if (file.type.startsWith('image/')) mediaType = 'image';
-        else if (file.type.startsWith('video/')) mediaType = 'video';
-        else if (file.type.startsWith('audio/')) mediaType = 'audio';
+      // Loop sequencial com snapshot e captura segura para evitar unhandledrejection em uploads de mídia
+      await runFileUploadQueue(
+        files,
+        async (file) => {
+          let mediaType: 'image' | 'video' | 'audio' | 'document' = 'document';
+          if (file.type.startsWith('image/')) mediaType = 'image';
+          else if (file.type.startsWith('video/')) mediaType = 'video';
+          else if (file.type.startsWith('audio/')) mediaType = 'audio';
 
-        await useChatStore.getState().uploadAndSendMedia(activeChatId, file, mediaType, properTargetInstance as string);
-        scrollToBottom('smooth');
-      }
-      setReplyMessage(null);
+          await useChatStore.getState().uploadAndSendMedia(activeChatId, file, mediaType, properTargetInstance as string);
+          scrollToBottom('smooth');
+        },
+        {
+          onError: (err: any) => {
+            if (err?.message !== 'whatsapp_offline') {
+              console.warn('[processFiles] Falha controlada no envio de mídia:', err?.message || err);
+            }
+          },
+          onFinally: () => setReplyMessage(null)
+        }
+      );
     }
   };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files;
-    if (files) {
-      await processFiles(files);
-    }
+    const pickedFiles = event.target.files ? Array.from(event.target.files) : [];
     if (fileInputRef.current) fileInputRef.current.value = '';
+    if (pickedFiles.length > 0) {
+      await processFiles(pickedFiles);
+    }
   };
 
   const handleDragEnter = (e: React.DragEvent) => {
@@ -5285,9 +5295,12 @@ export default function ChatDashboard() {
       }
 
       await useChatStore.getState().uploadAndSendMedia(activeChatId, fileToSend, 'audio', properTargetInstance as string, true);
-    } catch (err) {
-      console.error('Erro ao enviar áudio gravado:', err);
-      alert('Erro ao enviar áudio.');
+    } catch (err: any) {
+      if (err?.message !== 'whatsapp_offline') {
+        const info = classifyUploadFailure(err);
+        console.warn('[handleSendRecordedAudio] Falha controlada ao enviar áudio gravado:', err?.message || err);
+        window.dispatchEvent(new CustomEvent('toast', { detail: { message: info.userMessage, type: 'error', duration: 6000 } }));
+      }
     }
   };
 
@@ -6249,7 +6262,11 @@ export default function ChatDashboard() {
                 properTargetInstance as string,
                 false,
                 caption
-              ).catch(console.error);
+              ).catch((err: any) => {
+                if (err?.message !== 'whatsapp_offline') {
+                  console.warn('[ImageEditorModal] Falha controlada ao enviar imagem:', err?.message || err);
+                }
+              });
             }
           }}
         />
@@ -12187,29 +12204,43 @@ export default function ChatDashboard() {
                             const resolvedId = await resolveInstanceUuid(tenantInfo?.id || '', properTargetInstance);
                             if (!resolvedId || !tenantInfo?.id) return;
                             const apiUrl = getInstanceApiUrl(resolvedId);
-                            const formData = new FormData();
-                            formData.append('media', file);
-                            formData.append('jid', activeChat.whatsapp_jid || activeChat.phone);
                             const isVid = file.type.startsWith('video') || specialMediaType === 'ptv';
                             const isAud = file.type.startsWith('audio');
-                            formData.append('messageType', isVid ? 'video' : isAud ? 'audio' : 'image');
-                            if (specialMediaType === 'ptv') {
-                              formData.append('ptv', 'true');
-                            }
-                            if (specialMediaType === 'viewOnce') {
-                              formData.append('viewOnce', 'true');
-                            }
+                            const isPtv = specialMediaType === 'ptv';
+                            const isViewOnce = specialMediaType === 'viewOnce';
+                            const targetJid = activeChat.whatsapp_jid || activeChat.phone;
+                            const buildSpecialFormData = () => {
+                              const formData = new FormData();
+                              formData.append('media', file);
+                              formData.append('jid', targetJid);
+                              formData.append('messageType', isVid ? 'video' : isAud ? 'audio' : 'image');
+                              if (isPtv) {
+                                formData.append('ptv', 'true');
+                              }
+                              if (isViewOnce) {
+                                formData.append('viewOnce', 'true');
+                              }
+                              return formData;
+                            };
                             try {
-                              await fetch(`${apiUrl}/api/v1/instances/${resolvedId}/send-media`, {
-                                method: 'POST',
+                              const res = await sendMultipartWithRetry({
+                                url: `${apiUrl}/api/v1/instances/${resolvedId}/send-media`,
                                 headers: {
                                   'x-tenant-id': tenantInfo.id,
                                   'apikey': import.meta.env.VITE_EVOLUTION_GLOBAL_API_KEY || '356c087d9-4073-4ceb-986a-09083992518c'
                                 },
-                                body: formData
+                                buildFormData: buildSpecialFormData,
+                                timeoutMs: 45000,
+                                maxRetries: 1,
+                                retryDelayMs: 600
                               });
-                            } catch (err) {
-                              console.error('Erro ao enviar mídia especial:', err);
+                              if (!res.ok) {
+                                throw new Error(`HTTP ${res.status}`);
+                              }
+                            } catch (err: any) {
+                              const info = classifyUploadFailure(err);
+                              console.warn('[specialMedia] Falha controlada ao enviar mídia especial:', err?.message || err);
+                              window.dispatchEvent(new CustomEvent('toast', { detail: { message: info.userMessage, type: 'error', duration: 6000 } }));
                             } finally {
                               setSpecialMediaType(null);
                             }

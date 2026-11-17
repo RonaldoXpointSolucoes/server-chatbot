@@ -712,6 +712,53 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.2.5',
+    date: '2026-11-17',
+    summary: 'Blindagem Completa do Envio de Mídia (Preflight Offline/Leitura, Política Inteligente do Storage Supabase & Zero Unhandled Rejections)',
+    notes: [
+      {
+        id: 'fix-media-upload-unhandled-rejection-cascade-825',
+        category: 'fixes',
+        title: 'Eliminação da Cascata de Falhas no Envio de Arquivos (Failed to fetch / Unhandled Rejection)',
+        description: 'Corrigida a cadeia de erros em uploadAndSendMedia e processFiles: agora há verificação antecipada de conexão offline e legibilidade do arquivo (probeFileReadable), reconstrução limpa de FormData em retentativa única com timeout de 45s no /send-media, fila segura com snapshot do FileList (runFileUploadQueue) e tratamento unificado em anexos, drag-and-drop, áudio gravado, editor de imagem e mídia especial — impedindo unhandledrejection e repasse espúrio de [FRONTEND] Failed to fetch para o servidor Node.js.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
+        guide: {
+          moduleGroup: 'chat-composer',
+          moduleLabel: 'Chat ao Vivo (/chat) • Envio Resiliente de Anexos, Imagens e Áudios',
+          purpose: 'Garantir envios de imagens, áudios, vídeos e documentos sem travamentos, sem retentativas infinitas offline e sem disparar erros não tratados no DevLogger ou no servidor Node.js.',
+          whereToAccess: [
+            '1. Menu Lateral ➔ Conversas (/chat)',
+            '2. Abra qualquer atendimento ativo e utilize o botão de clipe (Anexar), arraste um arquivo (Drag & Drop), cole um print ou grave um áudio na barra inferior'
+          ],
+          howToTest: [
+            '1. Envie uma imagem ou documento normalmente e confirme o envio e a entrega em tempo real.',
+            '2. Caso teste uma queda de rede momentânea (offline), o app avisa via toast claro e amigável sem gerar erros de Promise Rejection ou [FRONTEND] Failed to fetch no DevLogger (>_) .'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Tela: Chat ao Vivo (/chat) ➔ Barra Inferior de Envio de Mídias',
+            contextElements: ['📎 Anexar Arquivo', '🖼️ Colar/Editar Imagem', '🎤 Áudio PTT', '⚡ Envio Resiliente'],
+            targetButtonLabel: '👆 Clique Aqui: Clipe de Anexo / Arrastar Arquivo',
+            targetButtonPosition: 'Barra inferior de composição de mensagens no ChatDashboard (/chat)',
+            visualPreviewVariant: 'chat-album'
+          },
+          quickAction: {
+            label: 'Abrir Chat & Testar Envio Agora',
+            route: '/chat'
+          }
+        }
+      },
+      {
+        id: 'imp-supabase-storage-retry-policy-and-errorlogger-825',
+        category: 'improvements',
+        title: 'Política Inteligente de Retentativas no Supabase Storage & Filtro Offline no ErrorLogger',
+        description: 'O customFetch do Supabase agora usa resolveSupabaseRetryPolicy: interrompe retentativas imediatamente quando o navegador está offline ou abortado, limita escritas no Storage (POST/PUT /storage/v1/object/) a no máximo 1 retentativa rápida (eliminando loops de 13,5s / 5262ms e falsos alertas de oscilação no banco) e protege o supabaseCircuitBreaker contra bloqueios provocados por uploads; errorLogger.ts também ignora persistência remota offline.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-300/30'
+      }
+    ]
+  },
+  {
     version: '8.2.4',
     date: '2026-11-16',
     summary: 'Blindagem DevLogger (Correção Definitiva de Corte no Cabeçalho) + Motor Server v8.1.8 (Coalescing Signal lid-mapping, Resiliência getInstanceConfig/Carrinhos & Otimizações ChatDashboard O(1))',

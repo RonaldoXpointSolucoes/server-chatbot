@@ -1,5 +1,5 @@
 {
-  "version": "8.2.4",
-  "buildDate": "2026-11-17T01:59:27.401Z",
-  "summary": "Blindagem DevLogger (Correção Definitiva de Corte no Cabeçalho) + Motor Server v8.1.8 (Coalescing Signal lid-mapping, Resiliência getInstanceConfig/Carrinhos & Otimizações ChatDashboard O(1))"
+  "version": "8.2.5",
+  "buildDate": "2026-11-17T16:07:45.921Z",
+  "summary": "Blindagem Completa do Envio de Mídia (Preflight Offline/Leitura, Política Inteligente do Storage Supabase & Zero Unhandled Rejections)"
 }

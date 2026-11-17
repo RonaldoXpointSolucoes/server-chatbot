@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { isNetworkFetchError, isOfflineBrowser, resolveSupabaseRetryPolicy } from '../utils/mediaUploadResilience.mjs';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim();
@@ -69,12 +70,26 @@ if (typeof window !== 'undefined') {
   });
 }
 
-const customFetch = async (input: RequestInfo | URL, init?: RequestInit, retries = 5, delay = 1000): Promise<Response> => {
+const customFetch = async (
+  input: RequestInfo | URL,
+  init?: RequestInit,
+  retries = 5,
+  delay = 1000,
+  policyOverride?: ReturnType<typeof resolveSupabaseRetryPolicy>
+): Promise<Response> => {
   const urlStr = typeof input === 'string' ? input : input.toString();
   const isAuthRequest = urlStr.includes('/auth/v1/token') || urlStr.includes('grant_type=refresh_token');
+  const policy = policyOverride ?? resolveSupabaseRetryPolicy({
+    url: urlStr,
+    method: init?.method || 'GET',
+    requestedRetries: retries,
+    isOffline: isOfflineBrowser(),
+    signalAborted: Boolean(init?.signal?.aborted)
+  });
+  const remainingRetries = policyOverride ? retries : policy.maxRetries;
 
   // Proteção de Circuit Breaker para chamadas de banco de dados
-  if (!isAuthRequest && supabaseCircuitBreaker.isCircuitOpen() && retries < 5) {
+  if (!isAuthRequest && !policy.shouldBypassBreaker && supabaseCircuitBreaker.isCircuitOpen() && remainingRetries < policy.maxRetries) {
     throw new TypeError('Failed to fetch (Supabase CircuitBreaker: requisição abortada para alívio do gateway)');
   }
 
@@ -83,19 +98,21 @@ const customFetch = async (input: RequestInfo | URL, init?: RequestInit, retries
 
     // Identificar erros HTTP 5xx de servidor/infraestrutura Supabase
     if (response.status >= 500) {
-      if (retries > 0) {
+      if (remainingRetries > 0 && !isOfflineBrowser() && !init?.signal?.aborted) {
         const jitter = Math.floor(Math.random() * 300);
         const waitTime = delay + jitter;
-        if (retries <= 3) {
-          console.warn(`[Supabase Cloud] Instabilidade HTTP ${response.status} no servidor Supabase. Retentando em ${waitTime}ms... (Tentativas restantes: ${retries})`);
+        if (policy.shouldEmitCloudWarning && remainingRetries <= 3) {
+          console.warn(`[Supabase Cloud] Instabilidade HTTP ${response.status} no servidor Supabase. Retentando em ${waitTime}ms... (Tentativas restantes: ${remainingRetries})`);
         }
         await new Promise(resolve => setTimeout(resolve, waitTime));
-        return customFetch(input, init, retries - 1, Math.min(Math.round(delay * 1.5), 5000));
+        return customFetch(input, init, remainingRetries - 1, Math.min(Math.round(delay * 1.5), 5000), policy);
       }
 
-      supabaseCircuitBreaker.recordFailure();
+      if (!policy.shouldBypassBreaker) {
+        supabaseCircuitBreaker.recordFailure();
+      }
 
-      if (typeof window !== 'undefined') {
+      if (typeof window !== 'undefined' && !policy.shouldBypassBreaker && !isOfflineBrowser()) {
         hasReportedServiceError = true;
         window.dispatchEvent(new CustomEvent('supabase-service-error', {
           detail: { 
@@ -138,32 +155,33 @@ const customFetch = async (input: RequestInfo | URL, init?: RequestInit, retries
 
     return response;
   } catch (error: any) {
-    const isNetworkError = 
-      error.name === 'TypeError' && (error.message === 'Failed to fetch' || error.message.includes('fetch'));
-      
-    if (retries > 0 && isNetworkError) {
+    const isNetworkError = isNetworkFetchError(error);
+    const isOfflineNow = isOfflineBrowser();
+    const signalAborted = Boolean(init?.signal?.aborted);
+
+    if (remainingRetries > 0 && isNetworkError && !isOfflineNow && !signalAborted) {
       const jitter = Math.floor(Math.random() * 350);
       const waitTime = delay + jitter;
       
-      // Só alerta nos logs quando a aba estiver ativa e persistir até as tentativas finais (evita warnings espúrios quando o dispositivo dorme em segundo plano)
+      // Só alerta nos logs quando a aba estiver ativa, houver retentativas longas de banco/auth e persistir até as tentativas finais
       const now = Date.now();
       const isTabHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
-      if (!isTabHidden && retries === 1 && now - lastSupabaseOscillationLog > 60000) {
+      if (policy.shouldEmitCloudWarning && !isTabHidden && remainingRetries === 1 && now - lastSupabaseOscillationLog > 60000) {
         lastSupabaseOscillationLog = now;
         console.warn(`[Supabase Cloud] Oscilação de rede detectada no servidor Supabase${isAuthRequest ? ' (Auth Refresh)' : ''}. Auto-recuperando em ${waitTime}ms...`);
       }
-      if (retries <= 1) {
+      if (!policy.shouldBypassBreaker && remainingRetries <= 1) {
         hasReportedServiceError = true;
       }
       await new Promise(resolve => setTimeout(resolve, waitTime));
-      return customFetch(input, init, retries - 1, Math.min(Math.round(delay * 1.5), 5000));
+      return customFetch(input, init, remainingRetries - 1, Math.min(Math.round(delay * 1.5), 5000), policy);
     }
     
-    if (isNetworkError) {
+    if (isNetworkError && !isOfflineNow && !signalAborted && !policy.shouldBypassBreaker) {
       supabaseCircuitBreaker.recordFailure();
       const isTabHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
       const now = Date.now();
-      if (!isTabHidden && now - lastSupabaseOscillationLog > 60000) {
+      if (policy.shouldEmitCloudWarning && !isTabHidden && now - lastSupabaseOscillationLog > 60000) {
         lastSupabaseOscillationLog = now;
         console.warn('[Supabase Cloud Network] Falha transitória de conexão com a API do Supabase após retentativas com backoff.');
       }
@@ -175,7 +193,7 @@ const customFetch = async (input: RequestInfo | URL, init?: RequestInit, retries
             title: '☁️ Instabilidade na Nuvem (Supabase)',
             message: "Instabilidade temporária no servidor do banco de dados (Supabase Cloud). O aplicativo continuará funcionando com os dados salvos.",
             originalError: error.message,
-            url: typeof input === 'string' ? input : input.toString()
+            url: urlStr
           }
         }));
       }

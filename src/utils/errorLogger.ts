@@ -1,5 +1,6 @@
 import { supabase } from '../services/supabase';
 import { useDevStore } from '../store/devStore';
+import { isOfflineBrowser } from './mediaUploadResilience.mjs';
 
 interface ErrorContext {
   componentStack?: string;
@@ -46,8 +47,9 @@ export const reportError = async (
       }
     });
 
-    // 2. Evita loops com o próprio Supabase e ruídos de browser internos
+    // 2. Evita loops com o próprio Supabase, navegador offline e ruídos internos
     if (
+      isOfflineBrowser() ||
       message.toLowerCase().includes('supabase') || 
       message.toLowerCase().includes('system_logs') || 
       message.toLowerCase().includes('supabase.co') ||

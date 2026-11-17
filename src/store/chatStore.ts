@@ -4,6 +4,12 @@ import { playNotificationSound } from '../utils/AudioEngine';
 import { useDevStore } from './devStore';
 import { shouldNotifyForEvent, NotificationEventType } from '../services/notificationPreferences';
 import { runAiHealthCheck, AiDiagnosticsReport } from '../services/aiHealthCheckService';
+import {
+  classifyUploadFailure,
+  isOfflineBrowser,
+  probeFileReadable,
+  sendMultipartWithRetry
+} from '../utils/mediaUploadResilience.mjs';
 
 export const getBrPhoneVariations = (phoneStr: string | null | undefined): string[] => {
   if (!phoneStr) return [];
@@ -3321,6 +3327,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
       throw new Error('whatsapp_offline');
     }
 
+    if (isOfflineBrowser()) {
+      const offlineInfo = classifyUploadFailure(null, { isOffline: true });
+      console.warn('[uploadAndSendMedia] Envio bloqueado: navegador sem conexão com a internet.');
+      window.dispatchEvent(new CustomEvent('toast', { detail: { message: offlineInfo.userMessage, type: 'error', duration: 6000 } }));
+      return;
+    }
+
+    try {
+      await probeFileReadable(file);
+    } catch (readErr: any) {
+      const readInfo = classifyUploadFailure(readErr, { isOffline: false });
+      console.warn('[uploadAndSendMedia] Arquivo selecionado não pôde ser lido:', readErr?.message || readErr);
+      window.dispatchEvent(new CustomEvent('toast', { detail: { message: readInfo.userMessage, type: 'error', duration: 6000 } }));
+      return;
+    }
+
     // Injeção Mágica de Assinatura Síncrona na mídia para evitar atrasos na UI
     let finalCaption = caption?.trim() ? caption.trim() : (mediaType === 'image' || mediaType === 'video' ? '' : (file.name || ''));
 
@@ -3406,33 +3428,42 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
 
     try {
-      const formData = new FormData();
-      formData.append('media', file);
-      // Pega o jid. Padrão: DDI + NUMERO + @s.whatsapp.net
       const jid = getContactJid(contact);
-      formData.append('jid', jid);
-      formData.append('messageType', mediaType);
+      const buildMediaFormData = () => {
+        const formData = new FormData();
+        formData.append('media', file);
+        // Pega o jid. Padrão: DDI + NUMERO + @s.whatsapp.net
+        formData.append('jid', jid);
+        formData.append('messageType', mediaType);
+        if (finalCaption) formData.append('caption', finalCaption);
+        if (isPtt) formData.append('ptt', 'true');
+        return formData;
+      };
 
-      if (finalCaption) formData.append('caption', finalCaption);
-
-      if (isPtt) formData.append('ptt', 'true');
-
-      // Chamada HTTP pro Node (único dono do upload Supabase e Baileys)
+      // Chamada HTTP pro Node (único dono do upload Supabase e Baileys) com retentativa única de rede e FormData novo
       const { getInstanceApiUrl } = await import('../services/whatsappEngine');
       const API_URL = getInstanceApiUrl(resolvedInstanceId);
       const apiKey = await getOrFetchApiKey(resolvedInstanceId);
 
-      const res = await fetch(`${API_URL}/api/v1/instances/${resolvedInstanceId}/send-media`, {
-        method: 'POST',
+      const res = await sendMultipartWithRetry({
+        url: `${API_URL}/api/v1/instances/${resolvedInstanceId}/send-media`,
         headers: {
           'x-tenant-id': state.tenantInfo.id,
           'apikey': apiKey
         },
-        body: formData
+        buildFormData: buildMediaFormData,
+        timeoutMs: 45000,
+        maxRetries: 1,
+        retryDelayMs: 600
       });
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Erro ao processar mídia no servidor');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (res.status === 413) {
+          throw new Error('Arquivo excedeu o limite máximo suportado pelo servidor (HTTP 413).');
+        }
+        throw new Error(data.error || `Erro ao processar mídia no servidor (HTTP ${res.status})`);
+      }
 
       console.log('[uploadAndSendMedia] Resposta do server:', data);
 
@@ -3455,16 +3486,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
 
     } catch (err: any) {
-      // Fallback Resiliente de Mídia: Se o gateway Node estiver reiniciando ou inacessível,
+      let fallbackFailure: any = null;
+      const errClassification = classifyUploadFailure(err, { isOffline: isOfflineBrowser() });
+
+      // Fallback Resiliente de Mídia: Se o gateway Node estiver reiniciando ou inacessível (mas o navegador estiver online),
       // fazemos upload direto para o Supabase Storage pelo navegador e enfileiramos em wa_outgoing_messages!
       try {
-        if (state.tenantInfo?.id && resolvedInstanceId && err?.message !== 'whatsapp_offline') {
+        if (
+          state.tenantInfo?.id &&
+          resolvedInstanceId &&
+          err?.message !== 'whatsapp_offline' &&
+          errClassification.kind !== 'offline' &&
+          errClassification.kind !== 'file_unreadable'
+        ) {
           const jid = getContactJid(contact);
           const safeName = (file.name || 'media.bin').replace(/[^a-zA-Z0-9.\-]/g, '_');
           const storagePath = `tenant_${state.tenantInfo.id}/instance_${resolvedInstanceId}/${jid}/${Date.now()}_${safeName}`;
           const { error: directUpErr } = await supabase.storage
             .from('chat_media')
             .upload(storagePath, file, { contentType: file.type || 'application/octet-stream', upsert: false });
+
+          if (directUpErr) {
+            fallbackFailure = directUpErr;
+          }
 
           if (!directUpErr) {
             const { data: pubData } = supabase.storage.from('chat_media').getPublicUrl(storagePath);
@@ -3516,13 +3560,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
         }
       } catch (fallbackMediaErr) {
+        fallbackFailure = fallbackMediaErr;
         console.warn('[uploadAndSendMedia] Fallback direto via Supabase Storage também falhou:', fallbackMediaErr);
       }
 
-      console.error('[uploadAndSendMedia] Falha crítica:', err);
+      const finalClassification = classifyUploadFailure(err, { isOffline: isOfflineBrowser() });
+      if (finalClassification.logLevel === 'warn') {
+        console.warn(
+          '[uploadAndSendMedia] Falha de transporte/rede ao enviar mídia:',
+          err?.message || err,
+          fallbackFailure ? `(Fallback Storage: ${fallbackFailure?.message || fallbackFailure})` : ''
+        );
+      } else {
+        console.error('[uploadAndSendMedia] Falha crítica:', err);
+      }
       state.removeMessageLocally(contactId, pseudoId);
-      window.dispatchEvent(new CustomEvent('toast', { detail: { message: 'Falha ao enviar arquivo para o WhatsApp: ' + (err.message || err), type: 'error' } }));
-      throw err;
+      window.dispatchEvent(new CustomEvent('toast', { detail: { message: finalClassification.userMessage, type: 'error', duration: 6000 } }));
     }
   },
 
