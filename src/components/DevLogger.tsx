@@ -15,6 +15,7 @@ export default function DevLogger() {
   const navigate = useNavigate();
   const { logs, isVisible, isEnabled, toggleVisibility, addLog, clearLogs, showServerLogs, setShowServerLogs } = useDevStore();
   const bottomRef = useRef<HTMLDivElement>(null);
+  const logsScrollRef = useRef<HTMLDivElement>(null);
   const devLoggerModalRef = useRef<HTMLDivElement>(null);
   const originalConsoleWarnRef = useRef(console.warn);
   
@@ -1592,10 +1593,26 @@ export default function DevLogger() {
   }, [isVisible, engineUrl]);
 
   useEffect(() => {
-    if (isVisible && isEnabled && bottomRef.current && !isAnalyzingAiLogs) {
-      bottomRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (isVisible && isEnabled && activeTab === 'console' && logsScrollRef.current && !isAnalyzingAiLogs) {
+      logsScrollRef.current.scrollTo({
+        top: logsScrollRef.current.scrollHeight,
+        behavior: 'smooth',
+      });
     }
-  }, [logs, isVisible, isEnabled, isAnalyzingAiLogs]);
+  }, [logs, isVisible, isEnabled, activeTab, isAnalyzingAiLogs]);
+
+  // Garante que o container raiz overflow-hidden do Cockpit jamais acumule scrollTop/scrollLeft residual
+  useEffect(() => {
+    const resetModalScroll = () => {
+      if (devLoggerModalRef.current) {
+        devLoggerModalRef.current.scrollTop = 0;
+        devLoggerModalRef.current.scrollLeft = 0;
+      }
+    };
+    resetModalScroll();
+    const rafId = requestAnimationFrame(resetModalScroll);
+    return () => cancelAnimationFrame(rafId);
+  }, [isVisible, isMaximized, activeTab, windowSize.width, windowSize.height]);
 
   useEffect(() => {
     if (!isVisible || !isEnabled) return;
@@ -2901,22 +2918,28 @@ export default function DevLogger() {
         className={`fixed z-[9999] transition-all duration-300 ease-out ${
           isVisible
             ? isMaximized
-              ? 'inset-x-0 bottom-0 top-[6dvh] sm:inset-3 lg:inset-5 flex flex-col pointer-events-auto opacity-100 translate-y-0'
-              : 'inset-x-0 bottom-0 top-[7dvh] sm:top-3 sm:bottom-3 sm:left-auto sm:right-4 lg:right-6 flex flex-col pointer-events-auto opacity-100 translate-y-0'
-            : 'inset-x-0 bottom-0 translate-y-[110%] sm:translate-y-0 sm:-top-[1400px] sm:bottom-auto sm:right-6 pointer-events-none opacity-0'
+              ? 'inset-x-0 bottom-0 top-[6dvh] sm:inset-3 lg:inset-5 flex flex-col pointer-events-auto opacity-100 translate-y-0 visible'
+              : 'inset-x-0 bottom-0 top-[7dvh] sm:top-3 sm:bottom-3 sm:left-auto sm:right-4 lg:right-6 flex flex-col pointer-events-auto opacity-100 translate-y-0 visible'
+            : 'inset-x-0 bottom-0 sm:top-3 sm:bottom-3 sm:left-auto sm:right-4 lg:right-6 translate-y-[110%] sm:translate-y-4 pointer-events-none opacity-0 invisible'
         }`}
       >
         <div
           ref={devLoggerModalRef}
+          onScroll={(e) => {
+            if (e.currentTarget.scrollTop !== 0) e.currentTarget.scrollTop = 0;
+            if (e.currentTarget.scrollLeft !== 0) e.currentTarget.scrollLeft = 0;
+          }}
           className={`bg-[#070c10]/95 backdrop-blur-3xl border border-white/15 border-t-white/25 shadow-[0_25px_75px_rgba(0,0,0,0.95)] flex flex-col h-full max-h-full overflow-hidden text-[#e2e8f0] transition-all duration-300 relative group/card ${
             isMaximized
               ? 'w-full rounded-t-[28px] sm:rounded-[28px]'
-              : 'w-full sm:w-[700px] md:w-[840px] lg:w-[920px] xl:w-[980px] sm:max-w-[95vw] rounded-t-[28px] sm:rounded-[28px] my-auto'
+              : 'w-full sm:w-[700px] md:w-[840px] lg:w-[920px] xl:w-[980px] sm:max-w-[95vw] rounded-t-[28px] sm:rounded-[28px]'
           }`}
         >
-          {/* Brilhos Ambientais Obsidian Cyber */}
-          <div className="absolute -top-24 -left-24 w-72 h-72 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
-          <div className="absolute -bottom-24 -right-24 w-72 h-72 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+          {/* Brilhos Ambientais Obsidian Cyber encapsulados para não expandir scrollWidth/scrollHeight */}
+          <div className="absolute inset-0 overflow-hidden pointer-events-none rounded-t-[28px] sm:rounded-[28px]" aria-hidden="true">
+            <div className="absolute -top-24 -left-24 w-72 h-72 bg-emerald-500/10 rounded-full blur-3xl" />
+            <div className="absolute -bottom-24 -right-24 w-72 h-72 bg-indigo-500/10 rounded-full blur-3xl" />
+          </div>
 
           {/* Mobile Drag Handle */}
           <div className="sm:hidden flex justify-center pt-2 pb-1 bg-[#070c10] shrink-0">
@@ -4228,7 +4251,7 @@ export default function DevLogger() {
                 )}
 
                 {/* Área Rolável Única de Logs */}
-                <div className="flex-1 overflow-y-auto p-3.5 sm:p-4 flex flex-col gap-3 custom-scrollbar min-h-0">
+                <div ref={logsScrollRef} className="flex-1 overflow-y-auto p-3.5 sm:p-4 flex flex-col gap-3 custom-scrollbar min-h-0">
                   {groupedAndFilteredLogs.length === 0 ? (
                     <div className="m-auto py-10 px-6 flex flex-col items-center justify-center text-center space-y-4 select-none animate-in fade-in zoom-in-95 duration-300 relative">
                       <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-[10px] font-bold text-emerald-300 font-mono shadow-sm">

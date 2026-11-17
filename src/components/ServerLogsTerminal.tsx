@@ -108,6 +108,7 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
   };
   
   const bottomRef = useRef<HTMLDivElement>(null);
+  const logsScrollRef = useRef<HTMLDivElement>(null);
 
   const toggleDebugMode = async () => {
     const newMode = !isDebugMode;
@@ -597,8 +598,11 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
   }, [isOpen, checkHealth, fetchLogsRest, loadLogsFromSupabase]);
 
   useEffect(() => {
-    if (!isPaused && bottomRef.current) {
-      bottomRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (!isPaused && logsScrollRef.current) {
+      logsScrollRef.current.scrollTo({
+        top: logsScrollRef.current.scrollHeight,
+        behavior: 'smooth',
+      });
     }
   }, [logs, isPaused, isExpanded]);
 
@@ -624,6 +628,10 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
       />
 
       <div
+        onScroll={(e) => {
+          if (e.currentTarget.scrollTop !== 0) e.currentTarget.scrollTop = 0;
+          if (e.currentTarget.scrollLeft !== 0) e.currentTarget.scrollLeft = 0;
+        }}
         className={clsx(
           "fixed z-[9999] flex flex-col overflow-hidden transition-all duration-300 ease-out shadow-[0_25px_75px_rgba(0,0,0,0.9)] border border-white/15 border-t-white/25 backdrop-blur-2xl bg-[#070c10]/95 text-[#e2e8f0]",
           isExpanded
@@ -874,7 +882,7 @@ export const ServerLogsTerminal: React.FC<ServerLogsTerminalProps> = ({ onClose,
         )}
 
         {/* Área de Logs */}
-        <div className="flex-1 overflow-y-auto p-3 sm:p-4 flex flex-col gap-2 font-mono text-[11px] leading-relaxed custom-scrollbar bg-[#060b0f]/80 min-h-0">
+        <div ref={logsScrollRef} className="flex-1 overflow-y-auto p-3 sm:p-4 flex flex-col gap-2 font-mono text-[11px] leading-relaxed custom-scrollbar bg-[#060b0f]/80 min-h-0">
           {filteredLogs.length === 0 ? (
             <div className="m-auto flex flex-col items-center justify-center text-slate-400 space-y-3 select-none animate-in fade-in duration-300 text-center px-4 py-8">
               <div className={clsx(

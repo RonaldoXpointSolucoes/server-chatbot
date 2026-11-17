@@ -1,5 +1,5 @@
 {
-  "version": "8.2.3",
-  "buildDate": "2026-11-15T21:51:21.275Z",
-  "summary": "Redesign UI/UX & Responsividade Total do Antigravity DevLogger e ServerLogsTerminal (Obsidian Cyber Glassmorphism, Bottom Sheets, Modo Panorâmico & Busca no Terminal)"
+  "version": "8.2.4",
+  "buildDate": "2026-11-17T01:59:27.401Z",
+  "summary": "Blindagem DevLogger (Correção Definitiva de Corte no Cabeçalho) + Motor Server v8.1.8 (Coalescing Signal lid-mapping, Resiliência getInstanceConfig/Carrinhos & Otimizações ChatDashboard O(1))"
 }

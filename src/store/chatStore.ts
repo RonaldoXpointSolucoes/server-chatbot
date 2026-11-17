@@ -260,19 +260,7 @@ export const getTicketResolutionDate = async (
     startOfDay.setHours(0, 0, 0, 0);
 
     if (conversationId) {
-      // 1. Verifica se houve alguma mensagem de interação (não-system) enviada ou recebida hoje
-      const { count: todayCount } = await supabaseClient
-        .from('messages')
-        .select('id', { count: 'exact', head: true })
-        .eq('conversation_id', conversationId)
-        .neq('sender_type', 'system')
-        .gte('timestamp', startOfDay.toISOString());
-
-      if (todayCount && todayCount > 0) {
-        return new Date().toISOString();
-      }
-
-      // 2. Se não houve mensagens hoje, busca o timestamp da última mensagem de interação (não-system)
+      // Query única leve (LIMIT 1 em índice composto conversation_id + timestamp DESC) evita COUNT(*) pesado em tabelas grandes
       const { data: lastMsgs } = await supabaseClient
         .from('messages')
         .select('timestamp')
@@ -285,6 +273,9 @@ export const getTicketResolutionDate = async (
       if (lastMsgTs) {
         const lastMsgDate = new Date(lastMsgTs);
         if (!isNaN(lastMsgDate.getTime())) {
+          if (lastMsgDate.getTime() >= startOfDay.getTime()) {
+            return new Date().toISOString();
+          }
           lastMsgDate.setUTCHours(0, 0, 0, 0);
           return lastMsgDate.toISOString();
         }
@@ -292,9 +283,7 @@ export const getTicketResolutionDate = async (
     } else if (fallbackLastMessageAt) {
       const lastMsgDate = new Date(fallbackLastMessageAt);
       if (!isNaN(lastMsgDate.getTime())) {
-        const startOfToday = new Date();
-        startOfToday.setHours(0, 0, 0, 0);
-        if (lastMsgDate.getTime() >= startOfToday.getTime()) {
+        if (lastMsgDate.getTime() >= startOfDay.getTime()) {
           return new Date().toISOString();
         }
         lastMsgDate.setUTCHours(0, 0, 0, 0);
@@ -315,8 +304,16 @@ export const instanceCache = {
   apiKeys: {} as Record<string, string>,  // id -> api_key
   phoneNumbers: {} as Record<string, string>, // id -> phone_number
   settings: {} as Record<string, any>,   // id -> settings
+  ticketConfig: {} as Record<string, { ticket_mode: boolean; hide_ticket_modal: boolean }>,
 
-  set(id: string, name: string, apiKey: string, phoneNumber?: string, settings?: any) {
+  set(
+    id: string,
+    name: string,
+    apiKey: string,
+    phoneNumber?: string,
+    settings?: any,
+    ticketCfg?: { ticket_mode?: boolean; hide_ticket_modal?: boolean }
+  ) {
     if (name) {
       this.byName[name.toLowerCase()] = id;
       this.byId[id] = name;
@@ -324,6 +321,13 @@ export const instanceCache = {
     if (apiKey) this.apiKeys[id] = apiKey;
     if (phoneNumber) this.phoneNumbers[id] = phoneNumber;
     if (settings !== undefined) this.settings[id] = settings;
+    if (ticketCfg && (ticketCfg.ticket_mode !== undefined || ticketCfg.hide_ticket_modal !== undefined)) {
+      const prev = this.ticketConfig[id] || { ticket_mode: false, hide_ticket_modal: false };
+      this.ticketConfig[id] = {
+        ticket_mode: ticketCfg.ticket_mode !== undefined ? Boolean(ticketCfg.ticket_mode) : prev.ticket_mode,
+        hide_ticket_modal: ticketCfg.hide_ticket_modal !== undefined ? Boolean(ticketCfg.hide_ticket_modal) : prev.hide_ticket_modal
+      };
+    }
   },
 
   getId(name: string | any): string | null {
@@ -351,6 +355,12 @@ export const instanceCache = {
     return this.settings[resolvedId] || null;
   },
 
+  getTicketConfig(idOrName?: string | null): { ticket_mode: boolean; hide_ticket_modal: boolean } | null {
+    if (!idOrName) return null;
+    const resolvedId = this.getId(idOrName) || idOrName;
+    return this.ticketConfig[resolvedId] || null;
+  },
+
   isAssociateCompanyEnabled(idOrName?: string | null): boolean {
     if (!idOrName) return true;
     const resolvedId = this.getId(idOrName) || idOrName;
@@ -374,6 +384,12 @@ export const inFlightMessagesLoad = new Map<string, Promise<void>>();
 export const contactUuidCache = new Map<string, string>();
 // Cache de mapeamento de conversation_id -> { contact_id, instance_id } para Realtime instantâneo (0ms)
 export const conversationMetadataCache = new Map<string, { contact_id: string; instance_id: string }>();
+// Controle anti-tempestade de restore de unread_count (máx 1 tentativa por mensagem real recebida)
+const spuriousZeroRestoredForMsgTs = new Map<string, number>();
+// Blindagem contra eco tardio de Realtime após resolução otimista (evita card voltar para 'open')
+const recentlyResolvedConvAt = new Map<string, number>();
+// Lock em voo para impedir cliques duplicados simultâneos em Resolver
+const resolvingContactLocks = new Set<string>();
 
 export const getOrFetchApiKey = async (instanceId: string | null | undefined): Promise<string> => {
   if (!instanceId) return '';
@@ -810,7 +826,11 @@ interface ChatState {
   ticketMode: boolean;
   setTicketMode: (active: boolean) => void;
   reopenConversation: (contactId: string) => Promise<void>;
-  resolveConversation: (contactId: string, reactivateAi?: boolean) => Promise<void>;
+  resolveConversation: (
+    contactId: string,
+    reactivateAi?: boolean,
+    options?: { nextActiveChatId?: string | null }
+  ) => Promise<{ closedTicket?: any } | void>;
 
   // Detalhes de Tickets e Histórico
   activeTicket: ChatTicket | null;
@@ -1453,7 +1473,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const resolvedActiveChannel = await resolveInstanceUuid(tenantInfo.id, activeChannel);
 
       let query = supabase.from('conversations')
-        .select('id, contact_id, status, assigned_to, instance_id')
+        .select('id, contact_id, status, assigned_to, instance_id, last_message_at')
         .eq('tenant_id', tenantInfo.id)
         .neq('status', 'resolved');
 
@@ -1515,24 +1535,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
             .in('contact_id', chunk);
 
           if (openChunkTickets && openChunkTickets.length > 0) {
-            for (const t of openChunkTickets) {
-              const matchedConv = convsToResolve.find(c => c.contact_id === t.contact_id);
-              const closedAt = await getTicketResolutionDate(supabase, matchedConv?.id, matchedConv?.last_message_at);
-              let effOpenedAt = t.opened_at;
-              if (effOpenedAt && new Date(effOpenedAt).getTime() > new Date(closedAt).getTime()) {
-                effOpenedAt = closedAt;
-              }
+            await Promise.all(
+              openChunkTickets.map(async (t) => {
+                const matchedConv = convsToResolve.find(c => c.contact_id === t.contact_id);
+                const closedAt = await getTicketResolutionDate(supabase, matchedConv?.id, matchedConv?.last_message_at);
+                let effOpenedAt = t.opened_at;
+                if (effOpenedAt && new Date(effOpenedAt).getTime() > new Date(closedAt).getTime()) {
+                  effOpenedAt = closedAt;
+                }
 
-              await supabase.from('chat_tickets')
-                .update({
-                  status: 'resolved',
-                  opened_at: effOpenedAt,
-                  closed_at: closedAt,
-                  resolution_summary: 'Encerrado em lote (análise I.A ignorada)',
-                  metadata: { skip_ai_analysis: true, closed_in_batch: true }
-                })
-                .eq('id', t.id);
-            }
+                await supabase.from('chat_tickets')
+                  .update({
+                    status: 'resolved',
+                    opened_at: effOpenedAt,
+                    closed_at: closedAt,
+                    resolution_summary: 'Encerrado em lote (análise I.A ignorada)',
+                    metadata: { skip_ai_analysis: true, closed_in_batch: true }
+                  })
+                  .eq('id', t.id);
+              })
+            );
           }
         }
       }
@@ -1715,8 +1737,42 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       const realContactId = getRealContactId(contactId);
       const instId = getInstanceIdFromContact(contactId) || (get().activeChannelFilter !== 'all' ? get().activeChannelFilter : null);
-      const resolvedInstId = await resolveInstanceUuid(tenantInfo.id, instId);
+      const cachedInstUuid = instId ? (instanceCache.getId(instId) || (/^[0-9a-f-]{36}$/i.test(instId) ? instId : null)) : null;
+      const targetContact = findContactByIdAndInstance(get().contacts, contactId, cachedInstUuid || instId);
+      const isDefinitivelyPaused = targetContact?.bot_status === 'paused' || (targetContact?.ai_paused_manually && !targetContact?.bot_paused_until);
+      const knownConvId = targetContact?.conv_id && isValidUuid(targetContact.conv_id) ? targetContact.conv_id : null;
 
+      // Limpa proteção anti-eco de resolução recente
+      if (knownConvId) recentlyResolvedConvAt.delete(knownConvId);
+      recentlyResolvedConvAt.delete(`${realContactId}_${cachedInstUuid || instId || 'default'}`);
+
+      const msgText = `🔓 Reaberta por ${agentName} dia ${new Date().toLocaleString('pt-BR')}`;
+      const optimisticId = `optimistic-reopen-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+      // Atualização otimista imediata (< 1ms) na UI
+      set((state) => ({
+        contacts: state.contacts.map((c) => {
+          if (!isContactMatchingTarget(c, contactId, cachedInstUuid || instId)) return c;
+          const optMsg: MessageType = {
+            id: optimisticId,
+            pseudoId: optimisticId,
+            conversation_id: c.conv_id,
+            text: msgText,
+            sender: 'system',
+            timestamp: new Date()
+          };
+          return {
+            ...c,
+            conv_status: 'open',
+            ai_paused: isDefinitivelyPaused ? true : c.ai_paused,
+            ai_paused_manually: isDefinitivelyPaused ? true : c.ai_paused_manually,
+            bot_status: isDefinitivelyPaused ? 'paused' : c.bot_status,
+            messages: sortMessagesChronologically([...(c.messages || []), optMsg])
+          };
+        })
+      }));
+
+      const resolvedInstId = cachedInstUuid || (await resolveInstanceUuid(tenantInfo.id, instId));
       const { data: convs } = await supabase
         .from('conversations')
         .select('id, instance_id')
@@ -1727,59 +1783,43 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const matchingConvs = resolvedInstId && convs?.some(c => c.instance_id === resolvedInstId)
         ? convs.filter(c => c.instance_id === resolvedInstId)
         : (convs || []);
-      const conv = matchingConvs.length > 0 ? matchingConvs[0] : null;
-      const allConvIds = matchingConvs.map(c => c.id);
+      const conv = matchingConvs.length > 0 ? matchingConvs[0] : (knownConvId ? { id: knownConvId, instance_id: resolvedInstId } : null);
+      const allConvIds = matchingConvs.length > 0 ? matchingConvs.map(c => c.id) : (knownConvId ? [knownConvId] : []);
 
-      if (conv) {
-        // 1. Inserir a mensagem interna System de reabertura
-        const msgText = `🔓 Reaberta por ${agentName} dia ${new Date().toLocaleString('pt-BR')}`;
+      allConvIds.forEach(cid => recentlyResolvedConvAt.delete(cid));
 
-        const dbMsg = {
-          conversation_id: conv.id,
-          tenant_id: tenantInfo.id,
-          text_content: msgText,
-          sender_type: 'system',
-          direction: 'outgoing',
-          instance_id: conv.instance_id || resolvedInstId
-        };
-
-        const { data: insertedMsg, error } = await supabase.from('messages').insert(dbMsg).select().single();
-
-        if (!error && insertedMsg) {
-          const msgTypeObj: MessageType = {
-            id: insertedMsg.id,
-            text: insertedMsg.text_content,
-            sender: 'system',
-            timestamp: new Date(insertedMsg.timestamp || insertedMsg.created_at || Date.now())
-          };
-          get().addMessageLocally(contactId, msgTypeObj);
-        }
+      const updatePayload: any = { status: 'open' };
+      if (isDefinitivelyPaused) {
+        updatePayload.ai_paused = true;
+        updatePayload.ai_paused_manually = true;
       }
 
-      const targetContact = findContactByIdAndInstance(get().contacts, contactId, resolvedInstId);
-      const isDefinitivelyPaused = targetContact?.bot_status === 'paused' || (targetContact?.ai_paused_manually && !targetContact?.bot_paused_until);
+      const [msgRes] = await Promise.all([
+        conv
+          ? supabase.from('messages').insert({
+              conversation_id: conv.id,
+              tenant_id: tenantInfo.id,
+              text_content: msgText,
+              sender_type: 'system',
+              direction: 'outgoing',
+              instance_id: conv.instance_id || resolvedInstId
+            }).select().single()
+          : Promise.resolve({ data: null, error: null }),
+        allConvIds.length > 0
+          ? supabase.from('conversations').update(updatePayload).in('id', allConvIds)
+          : Promise.resolve({ error: null })
+      ]);
 
-      // 2. Atualiza no Supabase status para 'open' nas conversas correspondentes à caixa, preservando ai_paused caso esteja pausado definitivamente
-      if (allConvIds.length > 0) {
-        const updatePayload: any = { status: 'open' };
-        if (isDefinitivelyPaused) {
-          updatePayload.ai_paused = true;
-          updatePayload.ai_paused_manually = true;
-        }
-        await supabase.from('conversations').update(updatePayload).in('id', allConvIds);
+      if (!msgRes?.error && msgRes?.data) {
+        get().addMessageLocally(contactId, {
+          id: msgRes.data.id,
+          pseudoId: optimisticId,
+          conversation_id: conv?.id,
+          text: msgRes.data.text_content,
+          sender: 'system',
+          timestamp: new Date(msgRes.data.timestamp || msgRes.data.created_at || Date.now())
+        });
       }
-
-      // 3. Atualização local dos registros de contato correspondentes para 'open'
-      set((state) => ({
-        contacts: state.contacts.map((c) => isContactMatchingTarget(c, contactId, resolvedInstId) ? {
-          ...c,
-          conv_status: 'open',
-          ai_paused: isDefinitivelyPaused ? true : c.ai_paused,
-          ai_paused_manually: isDefinitivelyPaused ? true : c.ai_paused_manually,
-          bot_status: isDefinitivelyPaused ? 'paused' : c.bot_status
-        } : c)
-      }));
-
     } catch (e) {
       console.error('Erro ao reabrir conversa:', e);
     }
@@ -2232,7 +2272,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     get().fetchInitialData();
   },
   setActiveChat: (id) => {
-    set({ activeChatId: id });
+    if (get().activeChatId !== id) {
+      set({ activeChatId: id });
+    }
     if (id) {
       // Hidratação instantânea da memória local (0ms) se houver cache de mensagens prévio daquela caixa específica
       const hasCompositeInst = id.includes('_') && !id.endsWith('_default');
@@ -4438,7 +4480,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           // Se 'msg' for uma nova mensagem OTIMISTA (msg.id inicia com 'optimistic-'), ela é uma nova
           // mensagem criada pelo usuário e NUNCA deve reconciliar nem sobrescrever mensagens anteriores existentes!
           const isOptimisticMsg = String(msg.id || '').startsWith('optimistic-') || String(msg.pseudoId || '').startsWith('optimistic-');
-          const isOutboundMsg = ['human', 'agent', 'bot', 'automation'].includes(msg.sender);
+          const isOutboundMsg = ['human', 'agent', 'bot', 'automation', 'system'].includes(msg.sender);
 
           if (!isOptimisticMsg && isOutboundMsg) {
             const normMsg = normalizeMessageTextForComparison(msg.text);
@@ -4587,7 +4629,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             conv_status: updatedStatus,
             snoozed_until: updatedSnooze,
             unread: newUnread,
-            ...(msg.sender === 'client' && !isChatCurrentlyFocused && !isHistoricalMsg && !msg.isIgnored ? { lastClientMsgAt: Date.now() } : {}),
+            ...(msg.sender === 'client' && !isChatCurrentlyFocused && !isHistoricalMsg && !msg.isIgnored ? { lastClientMsgAt: Date.now(), lastRealClientMsgAt: Date.now() } : {}),
             lastMsgTimestamp: effectiveLastMsgTs,
             last_message_preview: previewText
           };
@@ -4840,160 +4882,292 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  resolveConversation: async (contactId, reactivateAi) => {
-    try {
-      const tenantInfo = get().tenantInfo;
-      if (!tenantInfo) return;
+  resolveConversation: async (contactId, reactivateAi, options) => {
+    const tenantInfo = get().tenantInfo;
+    if (!tenantInfo) return;
 
-      const currentUserEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
-      let agentName = 'Agente';
-      if (currentUserEmail) {
-        const agent = get().agents.find(a => a.email === currentUserEmail);
-        if (agent && agent.full_name) agentName = agent.full_name;
-      }
+    const realContactId = getRealContactId(contactId);
+    const instId = getInstanceIdFromContact(contactId) || get().activeChannelFilter;
+    const cachedInstUuid = instId
+      ? (instanceCache.getId(instId) || (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(instId) ? instId : null))
+      : null;
 
-      // Descobre as conversas vinculadas ao contato naquela caixa específica para update de Status/Assigned_to e Insert de Message
-      const realContactId = getRealContactId(contactId);
-      const instId = getInstanceIdFromContact(contactId) || get().activeChannelFilter;
-      const resolvedInstId = await resolveInstanceUuid(tenantInfo.id, instId);
+    const lockKey = `${realContactId}_${cachedInstUuid || instId || 'default'}`;
+    if (resolvingContactLocks.has(lockKey)) {
+      return;
+    }
+    resolvingContactLocks.add(lockKey);
 
-      let convsQuery = supabase
-        .from('conversations')
-        .select('id, instance_id, last_message_at')
-        .eq('contact_id', realContactId)
-        .eq('tenant_id', tenantInfo.id);
-      if (resolvedInstId) {
-        convsQuery = convsQuery.eq('instance_id', resolvedInstId);
-      }
-      const { data: convs } = await convsQuery.order('last_message_at', { ascending: false });
+    const currentUserEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
+    let agentName = 'Agente';
+    if (currentUserEmail) {
+      const agent = get().agents.find(a => a.email === currentUserEmail);
+      if (agent && agent.full_name) agentName = agent.full_name;
+    }
 
-      const conv = convs && convs.length > 0 ? convs[0] : null;
-      const allConvIds = convs ? convs.map(c => c.id) : [];
+    const targetContact = findContactByIdAndInstance(get().contacts, contactId, cachedInstUuid || instId);
+    const isDefinitivelyPaused = targetContact?.bot_status === 'paused' || (targetContact?.ai_paused_manually && !targetContact?.bot_paused_until);
 
-      if (conv) {
-        // 1. Inserir a mensagem interna System
-        const msgText = `✅ Resolvido por ${agentName} dia ${new Date().toLocaleString('pt-BR')}`;
+    let nextAiPaused = false;
+    if (isDefinitivelyPaused) {
+      nextAiPaused = true;
+    } else if (reactivateAi !== undefined) {
+      nextAiPaused = !reactivateAi;
+    } else {
+      const isPausedManually = targetContact?.ai_paused_manually || false;
+      nextAiPaused = isPausedManually ? true : false;
+    }
 
-        const dbMsg = {
-          conversation_id: conv.id,
-          tenant_id: tenantInfo.id,
-          text_content: msgText,
-          sender_type: 'system',
-          direction: 'outgoing',
-          instance_id: conv.instance_id || resolvedInstId
-        };
+    const knownConvId = targetContact?.conv_id && isValidUuid(targetContact.conv_id) ? targetContact.conv_id : null;
+    const preResolveLastMsgAt = targetContact?.last_message_at || null;
+    const msgText = `✅ Resolvido por ${agentName} dia ${new Date().toLocaleString('pt-BR')}`;
+    const optimisticId = `optimistic-resolve-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
-        const { data: insertedMsg, error } = await supabase.from('messages').insert(dbMsg).select().single();
+    // Marca proteção anti-eco tardio ANTES do optimistic update
+    const resolveTimestamp = Date.now();
+    recentlyResolvedConvAt.set(lockKey, resolveTimestamp);
+    if (knownConvId) recentlyResolvedConvAt.set(knownConvId, resolveTimestamp);
 
-        if (!error && insertedMsg) {
-          const msgTypeObj: MessageType = {
-            id: insertedMsg.id,
-            text: insertedMsg.text_content,
+    // Captura snapshot para rollback em caso de falha crítica na persistência
+    const prevContactSnapshot = targetContact ? {
+      id: targetContact.id,
+      assigned_to: targetContact.assigned_to,
+      conv_status: targetContact.conv_status,
+      ai_paused: targetContact.ai_paused,
+      ai_paused_manually: targetContact.ai_paused_manually,
+      bot_status: targetContact.bot_status,
+      bot_paused_until: targetContact.bot_paused_until,
+      snoozed_until: targetContact.snoozed_until,
+      snoozed_at: targetContact.snoozed_at,
+      snoozed_by: targetContact.snoozed_by,
+      unread: targetContact.unread,
+      last_message_preview: targetContact.last_message_preview
+    } : null;
+    const prevActiveChatId = get().activeChatId;
+
+    // 1. Atualização OTIMISTA e ATÔMICA na UI (< 1ms): tira da fila e avança pro próximo chat em 1 único render
+    set((state) => {
+      const targetActiveId = (options && 'nextActiveChatId' in options)
+        ? (options.nextActiveChatId ?? null)
+        : ((state.activeChatId === contactId || (!cachedInstUuid && state.activeChatId && getRealContactId(state.activeChatId) === realContactId)) ? null : state.activeChatId);
+
+      const didChangeActive = targetActiveId !== state.activeChatId;
+
+      return {
+        contacts: state.contacts.map((c) => {
+          if (!isContactMatchingTarget(c, contactId, cachedInstUuid || instId)) return c;
+          const hasSysMsg = Boolean(knownConvId);
+          const optMsg: MessageType | null = hasSysMsg ? {
+            id: optimisticId,
+            pseudoId: optimisticId,
+            conversation_id: c.conv_id,
+            text: msgText,
             sender: 'system',
-            timestamp: new Date(insertedMsg.timestamp || insertedMsg.created_at || Date.now())
+            timestamp: new Date()
+          } : null;
+
+          return {
+            ...c,
+            assigned_to: null,
+            conv_status: 'resolved',
+            ai_paused: nextAiPaused,
+            ai_paused_manually: nextAiPaused,
+            bot_status: nextAiPaused ? 'paused' : 'active',
+            bot_paused_until: isDefinitivelyPaused ? null : (nextAiPaused ? c.bot_paused_until : null),
+            snoozed_until: null,
+            snoozed_at: null,
+            snoozed_by: null,
+            unread: 0,
+            lastClientMsgAt: 0,
+            ...(optMsg ? {
+              last_message_preview: msgText,
+              messages: sortMessagesChronologically([...(c.messages || []), optMsg])
+            } : {})
           };
-          get().addMessageLocally(contactId, msgTypeObj);
+        }),
+        activeChatId: targetActiveId,
+        ...(didChangeActive ? { activeTicket: null, contactTickets: [] } : {})
+      };
+    });
+
+    try {
+      const resolvedInstId = cachedInstUuid || (await resolveInstanceUuid(tenantInfo.id, instId));
+      if (resolvedInstId) {
+        recentlyResolvedConvAt.set(`${realContactId}_${resolvedInstId}`, resolveTimestamp);
+      }
+
+      // Usa conv_id já em memória quando disponível para evitar SELECT bloqueante extra
+      let conv: { id: string; instance_id: string | null; last_message_at: string | null } | null = knownConvId
+        ? { id: knownConvId, instance_id: resolvedInstId || targetContact?.instance_id || null, last_message_at: preResolveLastMsgAt }
+        : null;
+      let allConvIds: string[] = knownConvId ? [knownConvId] : [];
+
+      if (!conv) {
+        let convsQuery = supabase
+          .from('conversations')
+          .select('id, instance_id, last_message_at')
+          .eq('contact_id', realContactId)
+          .eq('tenant_id', tenantInfo.id);
+        if (resolvedInstId) {
+          convsQuery = convsQuery.eq('instance_id', resolvedInstId);
         }
+        const { data: convs } = await convsQuery.order('last_message_at', { ascending: false });
+        conv = convs && convs.length > 0 ? convs[0] : null;
+        allConvIds = convs ? convs.map(c => c.id) : [];
+        if (conv?.id) recentlyResolvedConvAt.set(conv.id, resolveTimestamp);
       }
 
-      const targetContact = findContactByIdAndInstance(get().contacts, contactId, resolvedInstId || instId);
-
-      // Verifica se o contato estava pausado definitivamente por tempo indeterminado
-      const isDefinitivelyPaused = targetContact?.bot_status === 'paused' || (targetContact?.ai_paused_manually && !targetContact?.bot_paused_until);
-
-      let nextAiPaused = false;
-      if (isDefinitivelyPaused) {
-        // Se o contato foi pausado definitivamente, NUNCA reativa a IA automaticamente ao resolver a conversa
-        nextAiPaused = true;
-      } else if (reactivateAi !== undefined) {
-        nextAiPaused = !reactivateAi;
-      } else {
-        const isPausedManually = targetContact?.ai_paused_manually || false;
-        nextAiPaused = isPausedManually ? true : false;
-      }
-
-      // 2. Sincroniza o status da IA no contato
-      await supabase
-        .from('contacts')
-        .update({
-          bot_status: nextAiPaused ? 'paused' : 'active',
-          bot_paused_until: isDefinitivelyPaused ? null : (nextAiPaused ? targetContact?.bot_paused_until || null : null)
-        })
-        .eq('id', realContactId);
-
-      // 3. Remove o assignment e altera status para 'resolved' nas conversas da caixa correspondente
-      if (allConvIds.length > 0) {
-        await supabase.from('conversations').update({
+      // 2. Dispara INSERT da mensagem + UPDATE contact + UPDATE conversation(s) em PARALELO (1 único RTT)
+      let convUpdatePromise: PromiseLike<any>;
+      if (allConvIds.length > 0 && (!resolvedInstId || allConvIds.length > 1)) {
+        convUpdatePromise = supabase.from('conversations').update({
           assigned_to: null,
           status: 'resolved',
           ai_paused: nextAiPaused,
           ai_paused_manually: nextAiPaused,
+          unread_count: 0,
           snoozed_until: null,
           snoozed_at: null,
           snoozed_by: null
         }).in('id', allConvIds);
+      } else {
+        let updQuery = supabase.from('conversations').update({
+          assigned_to: null,
+          status: 'resolved',
+          ai_paused: nextAiPaused,
+          ai_paused_manually: nextAiPaused,
+          unread_count: 0,
+          snoozed_until: null,
+          snoozed_at: null,
+          snoozed_by: null
+        })
+          .eq('tenant_id', tenantInfo.id)
+          .eq('contact_id', realContactId);
+        if (resolvedInstId) {
+          updQuery = updQuery.eq('instance_id', resolvedInstId);
+        } else if (conv?.id) {
+          updQuery = updQuery.eq('id', conv.id);
+        }
+        convUpdatePromise = updQuery;
       }
 
-      // Encerra ou registra ticket em chat_tickets
-      try {
-        const { data: openTickets } = await supabase.from('chat_tickets')
-          .select('id, opened_at')
-          .eq('tenant_id', tenantInfo.id)
-          .eq('status', 'open')
-          .eq('contact_id', realContactId);
+      const [msgRes, contactUpdRes, convUpdRes] = await Promise.all([
+        conv
+          ? supabase.from('messages').insert({
+              conversation_id: conv.id,
+              tenant_id: tenantInfo.id,
+              text_content: msgText,
+              sender_type: 'system',
+              direction: 'outgoing',
+              instance_id: conv.instance_id || resolvedInstId
+            }).select().single()
+          : Promise.resolve({ data: null, error: null }),
+        supabase
+          .from('contacts')
+          .update({
+            bot_status: nextAiPaused ? 'paused' : 'active',
+            bot_paused_until: isDefinitivelyPaused ? null : (nextAiPaused ? targetContact?.bot_paused_until || null : null)
+          })
+          .eq('id', realContactId),
+        convUpdatePromise
+      ]);
 
-        const closedAt = await getTicketResolutionDate(supabase, conv?.id, conv?.last_message_at);
+      if (convUpdRes?.error) {
+        throw convUpdRes.error;
+      }
+      if (contactUpdRes?.error) {
+        console.warn('[resolveConversation] Aviso ao atualizar contato:', contactUpdRes.error);
+      }
+
+      if (!msgRes?.error && msgRes?.data) {
+        get().addMessageLocally(contactId, {
+          id: msgRes.data.id,
+          pseudoId: optimisticId,
+          conversation_id: conv?.id,
+          text: msgRes.data.text_content,
+          sender: 'system',
+          timestamp: new Date(msgRes.data.timestamp || msgRes.data.created_at || Date.now())
+        });
+      }
+
+      // 3. Sincronização de chat_tickets em paralelo (select + resolutionDate em 1 RTT)
+      let closedTicket: any = null;
+      try {
+        const [{ data: openTickets }, closedAt] = await Promise.all([
+          supabase.from('chat_tickets')
+            .select('id, opened_at')
+            .eq('tenant_id', tenantInfo.id)
+            .eq('status', 'open')
+            .eq('contact_id', realContactId),
+          getTicketResolutionDate(supabase, conv?.id, conv?.last_message_at || preResolveLastMsgAt)
+        ]);
 
         if (openTickets && openTickets.length > 0) {
-          for (const t of openTickets) {
-            let effOpenedAt = t.opened_at;
-            if (effOpenedAt && new Date(effOpenedAt).getTime() > new Date(closedAt).getTime()) {
-              effOpenedAt = closedAt;
-            }
-            await supabase.from('chat_tickets')
-              .update({
-                status: 'resolved',
-                opened_at: effOpenedAt,
-                closed_at: closedAt,
-                resolution_summary: `Resolvido por ${agentName}`
-              })
-              .eq('id', t.id);
-          }
+          const updatedTickets = await Promise.all(
+            openTickets.map(async (t) => {
+              let effOpenedAt = t.opened_at;
+              if (effOpenedAt && new Date(effOpenedAt).getTime() > new Date(closedAt).getTime()) {
+                effOpenedAt = closedAt;
+              }
+              const { data: updT } = await supabase.from('chat_tickets')
+                .update({
+                  status: 'resolved',
+                  opened_at: effOpenedAt,
+                  closed_at: closedAt,
+                  resolution_summary: `Resolvido por ${agentName}`
+                })
+                .eq('id', t.id)
+                .select()
+                .maybeSingle();
+              return updT || { ...t, status: 'resolved', opened_at: effOpenedAt, closed_at: closedAt };
+            })
+          );
+          closedTicket = updatedTickets[0] || null;
         } else {
-          await supabase.from('chat_tickets').insert({
+          const { data: insT } = await supabase.from('chat_tickets').insert({
             tenant_id: tenantInfo.id,
             contact_id: realContactId,
             status: 'resolved',
-            opened_at: conv?.last_message_at || closedAt,
+            opened_at: conv?.last_message_at || preResolveLastMsgAt || closedAt,
             closed_at: closedAt,
             problem_description: 'Atendimento finalizado pelo atendente',
             resolution_summary: `Resolvido por ${agentName}`,
             metadata: { closed_by: agentName, instance_id: conv?.instance_id || resolvedInstId }
-          });
+          }).select().maybeSingle();
+          closedTicket = insT || null;
         }
       } catch (err) {
         console.error('Erro ao sincronizar chat_tickets:', err);
       }
 
-      // 4. Atualização local do estado apenas para o card da caixa alvo e fechar o chat ativo
-      set((state) => ({
-        contacts: state.contacts.map((c) => isContactMatchingTarget(c, contactId, resolvedInstId || instId) ? {
-          ...c,
-          assigned_to: null,
-          conv_status: 'resolved',
-          ai_paused: nextAiPaused,
-          ai_paused_manually: nextAiPaused,
-          bot_status: nextAiPaused ? 'paused' : 'active',
-          bot_paused_until: isDefinitivelyPaused ? null : (nextAiPaused ? c.bot_paused_until : null),
-          snoozed_until: null,
-          snoozed_at: null,
-          snoozed_by: null
-        } : c),
-        activeChatId: (state.activeChatId === contactId || ( !resolvedInstId && state.activeChatId && getRealContactId(state.activeChatId) === realContactId)) ? null : state.activeChatId
-      }));
-
+      return { closedTicket };
     } catch (e) {
-      console.error('Erro ao resolver conversa:', e);
+      console.error('Erro ao resolver conversa (executando rollback):', e);
+      recentlyResolvedConvAt.delete(lockKey);
+      if (knownConvId) recentlyResolvedConvAt.delete(knownConvId);
+      if (prevContactSnapshot) {
+        set((state) => ({
+          contacts: state.contacts.map((c) => c.id === prevContactSnapshot.id ? {
+            ...c,
+            assigned_to: prevContactSnapshot.assigned_to,
+            conv_status: prevContactSnapshot.conv_status,
+            ai_paused: prevContactSnapshot.ai_paused,
+            ai_paused_manually: prevContactSnapshot.ai_paused_manually,
+            bot_status: prevContactSnapshot.bot_status,
+            bot_paused_until: prevContactSnapshot.bot_paused_until,
+            snoozed_until: prevContactSnapshot.snoozed_until,
+            snoozed_at: prevContactSnapshot.snoozed_at,
+            snoozed_by: prevContactSnapshot.snoozed_by,
+            unread: prevContactSnapshot.unread,
+            last_message_preview: prevContactSnapshot.last_message_preview,
+            messages: (c.messages || []).filter(m => m.id !== optimisticId && m.pseudoId !== optimisticId)
+          } : c),
+          activeChatId: prevActiveChatId
+        }));
+      }
+      throw e;
+    } finally {
+      resolvingContactLocks.delete(lockKey);
     }
   },
 
@@ -6034,7 +6208,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         try {
           let instQuery = supabase
             .from('whatsapp_instances')
-            .select('id, display_name, api_key, status, phone_number, settings, tenant_id');
+            .select('id, display_name, api_key, status, phone_number, settings, tenant_id, ticket_mode, hide_ticket_modal');
 
           if (tenantData.evolution_api_instance) {
             instQuery = instQuery.or(`tenant_id.eq.${currentTenantId},id.eq.${tenantData.evolution_api_instance}`);
@@ -6047,7 +6221,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
           if (instances) {
             const statusUpdates: Record<string, string> = {};
             instances.forEach(inst => {
-              instanceCache.set(inst.id, inst.display_name || '', inst.api_key || '', inst.phone_number || '', inst.settings || {});
+              instanceCache.set(
+                inst.id,
+                inst.display_name || '',
+                inst.api_key || '',
+                inst.phone_number || '',
+                inst.settings || {},
+                { ticket_mode: Boolean(inst.ticket_mode), hide_ticket_modal: Boolean(inst.hide_ticket_modal) }
+              );
               if (inst.status === 'connected') {
                 statusUpdates[inst.id] = 'connected';
               } else if (inst.status) {
@@ -6273,7 +6454,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
         // 2. Montar queries paralelizadas
         let convsQuery = supabase.from('conversations')
-          .select('id, status, last_message_at, updated_at, instance_id')
+          .select('id, status, last_message_at, updated_at, instance_id, unread_count')
           .eq('tenant_id', tenant.id);
 
         if (knownConvId && isUuid(knownConvId)) {
@@ -6431,7 +6612,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // 4. Se a query direta antecipada já trouxe mensagens, usa imediatamente
         let rawFetchedMsgs: any[] = (directMsgRes?.data && Array.isArray(directMsgRes.data)) ? directMsgRes.data : [];
 
-        if (conv?.id) {
+        if (
+          conv?.id &&
+          (Number((conv as any).unread_count || 0) > 0 || Number(activeContactObj?.unread || 0) > 0 || Boolean(activeContactObj?.isManuallyUnread))
+        ) {
           supabase.from('conversations').update({ unread_count: 0 }).eq('id', conv.id).then(({ error }) => {
             if (error) console.error("[loadHistoricalMessages] Erro ao limpar unread_count:", error);
           });
@@ -7128,23 +7312,59 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
 
     try {
-      const resolvedUuid = await resolveInstanceUuid(tenantInfo.id, instId);
-      const targetInstId = resolvedUuid || instId;
       const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const resolvedUuid = uuidRegex.test(instId)
+        ? instId
+        : (instanceCache.getId(instId) || (await resolveInstanceUuid(tenantInfo.id, instId)));
+      const targetInstId = resolvedUuid || instId;
 
-      let instQuery = supabase
-        .from('whatsapp_instances')
-        .select('ticket_mode');
-
-      if (uuidRegex.test(targetInstId)) {
-        instQuery = instQuery.eq('id', targetInstId);
+      let ticketModeEnabled: boolean | null = null;
+      const cachedCfg = instanceCache.getTicketConfig(targetInstId);
+      if (cachedCfg) {
+        ticketModeEnabled = cachedCfg.ticket_mode;
       } else {
-        instQuery = instQuery.eq('tenant_id', tenantInfo.id).or(`display_name.eq.${targetInstId},whatsapp_name.eq.${targetInstId}`);
+        const rawInst = (get().rawInstances || []).find(
+          (i: any) => i.id === targetInstId || i.display_name === targetInstId || i.whatsapp_name === targetInstId
+        );
+        if (rawInst && rawInst.ticket_mode !== undefined) {
+          ticketModeEnabled = Boolean(rawInst.ticket_mode);
+          instanceCache.set(
+            rawInst.id,
+            rawInst.display_name || '',
+            rawInst.api_key || '',
+            rawInst.phone_number || '',
+            rawInst.settings,
+            { ticket_mode: Boolean(rawInst.ticket_mode), hide_ticket_modal: Boolean(rawInst.hide_ticket_modal) }
+          );
+        }
       }
 
-      const { data: instData } = await instQuery.maybeSingle();
+      if (ticketModeEnabled === null) {
+        let instQuery = supabase
+          .from('whatsapp_instances')
+          .select('id, display_name, api_key, ticket_mode, hide_ticket_modal');
 
-      if (!instData?.ticket_mode) {
+        if (uuidRegex.test(targetInstId)) {
+          instQuery = instQuery.eq('id', targetInstId);
+        } else {
+          instQuery = instQuery.eq('tenant_id', tenantInfo.id).or(`display_name.eq.${targetInstId},whatsapp_name.eq.${targetInstId}`);
+        }
+
+        const { data: instData } = await instQuery.maybeSingle();
+        ticketModeEnabled = Boolean(instData?.ticket_mode);
+        if (instData?.id) {
+          instanceCache.set(
+            instData.id,
+            instData.display_name || '',
+            instData.api_key || '',
+            undefined,
+            undefined,
+            { ticket_mode: Boolean(instData.ticket_mode), hide_ticket_modal: Boolean(instData.hide_ticket_modal) }
+          );
+        }
+      }
+
+      if (!ticketModeEnabled) {
         set({ contactTickets: [], activeTicket: null });
         return;
       }
@@ -7347,7 +7567,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // Buscar todos os problemas mestre existentes desse tenant
         const { data: masterProblems } = await supabase
           .from('ticket_problems_master')
-          .select('*');
+          .select('*')
+          .eq('tenant_id', tenantId);
 
         const normalizedMasterProblems = masterProblems || [];
 
@@ -7907,7 +8128,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 const isFocused = typeof document !== 'undefined' && document.hasFocus();
                 if (s.activeChatId !== cid || !isFocused) {
                   updatedContact.unread = Math.max(updatedContact.unread || 0, prevUnreadBeforeAdd + 1);
-                  (updatedContact as any).lastClientMsgAt = Date.now();
+                  const clientMsgNow = Date.now();
+                  (updatedContact as any).lastClientMsgAt = clientMsgNow;
+                  (updatedContact as any).lastRealClientMsgAt = clientMsgNow;
                 } else {
                   updatedContact.isManuallyUnread = false;
                 }
@@ -8176,12 +8399,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'conversations', filter: `tenant_id=eq.${tenantId}` }, async (payload) => {
         const conv = payload.new as any;
-        console.log('[Realtime] Conversation UPDATE:', conv);
 
         // RBAC RIGOROSO: Verifica se o usuário tem acesso a esta caixa antes de exibir/atualizar
         if (conv.instance_id && !hasUserAccessToInstance(conv.instance_id)) {
           return;
         }
+
+        const convInstKey = instanceCache.getId(conv.instance_id || 'default') || conv.instance_id || 'default';
+        const recentResolvedTs = Math.max(
+          conv.id ? (recentlyResolvedConvAt.get(conv.id) || 0) : 0,
+          conv.contact_id ? (recentlyResolvedConvAt.get(`${conv.contact_id}_${convInstKey}`) || 0) : 0
+        );
+        const convLastMsgTs = conv.last_message_at ? new Date(conv.last_message_at).getTime() : 0;
+        const isRecentResolveStaleEcho = Boolean(
+          recentResolvedTs &&
+          (Date.now() - recentResolvedTs) < 6000 &&
+          conv.status !== 'resolved' &&
+          conv.status !== 'closed' &&
+          (!convLastMsgTs || convLastMsgTs <= recentResolvedTs + 500)
+        );
 
         // 1. Coleta e avalia o status antes do update, fora do set, para decidir se deve disparar o toast
         const currentContacts = get().contacts;
@@ -8202,7 +8438,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           if (realId === conv.contact_id && isSameInstance) {
             foundMatchingContact = true;
             contactName = c.custom_name || c.name || c.phone;
-            if ((c.conv_status === 'resolved' || c.conv_status === 'closed') && (conv.status === 'open' || conv.status === 'bot')) {
+            if (!isRecentResolveStaleEcho && (c.conv_status === 'resolved' || c.conv_status === 'closed') && (conv.status === 'open' || conv.status === 'bot')) {
               shouldToast = true;
               toastType = 'reopen';
               break; // Achou o contato correspondente
@@ -8226,8 +8462,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 ...dbContact,
                 id: compositeId,
                 conv_id: conv.id,
-                conv_status: conv.status || 'open',
-                assigned_to: conv.assigned_to,
+                conv_status: isRecentResolveStaleEcho ? 'resolved' : (conv.status || 'open'),
+                assigned_to: isRecentResolveStaleEcho ? null : conv.assigned_to,
                 unread: conv.unread_count || 0,
                 is_pinned: conv.is_pinned,
                 is_favorite: conv.is_favorite,
@@ -8241,7 +8477,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 last_message_at: conv.last_message_at ?? dbContact.last_message_at,
                 lastConvUnreadSyncAt: (conv.unread_count || 0) > 0 ? Date.now() : 0,
                 lastConvUnreadCount: conv.unread_count || 0,
-                lastClientMsgAt: (conv.unread_count || 0) > 0 ? Date.now() : 0,
                 messages: [],
                 lastMsgTimestamp: conv.last_message_at ? new Date(conv.last_message_at).getTime() : Date.now()
               };
@@ -8269,12 +8504,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
               get().setReopenedTicketToast(null);
             }, 4000);
           }, 100);
-
-          // PERSISTÊNCIA DO LOG DE AUDITORIA DE REABERTURA AUTOMÁTICA - REMOVIDO A PEDIDO DO USUÁRIO PARA EVITAR POLUIÇÃO NO CHAT
-          console.log('[Realtime] Conversa reaberta automaticamente, omitindo geração de mensagem de sistema a pedido do usuário.');
         }
 
-        // 3. Agora atualiza o estado síncrono dos contatos sem disparar efeitos colaterais
+        // 3. Atualiza o estado síncrono dos contatos e coleta eventual restauração única de unread FORA do set
+        let pendingUnreadRestore: { convId: string; unread: number; realMsgTs: number } | null = null;
         set((s: any) => {
           const updatedContacts = s.contacts.map((c: any) => {
             const realId = getRealContactId(c.id);
@@ -8288,12 +8521,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
             if (realId === conv.contact_id && isSameInstance) {
               const stillManuallyUnread = c.isManuallyUnread && conv.unread_count === 1;
               const isChatCurrentlyOpen = s.activeChatId === c.id;
-              const recentClientMsgAge = Date.now() - (c.lastClientMsgAt || 0);
-              const isSpuriousZeroUnread = conv.unread_count === 0 && !isChatCurrentlyOpen && (c.unread || 0) > 0 && recentClientMsgAge < 30000 && conv.status !== 'resolved' && conv.status !== 'closed';
+              const realMsgTs = Number(c.lastRealClientMsgAt || 0);
+              const recentRealClientMsgAge = realMsgTs > 0 ? (Date.now() - realMsgTs) : Infinity;
+              const notYetRestoredForMsg = Boolean(conv.id && realMsgTs > 0 && spuriousZeroRestoredForMsgTs.get(conv.id) !== realMsgTs);
+              const isSpuriousZeroUnread =
+                !isRecentResolveStaleEcho &&
+                conv.unread_count === 0 &&
+                !isChatCurrentlyOpen &&
+                (c.unread || 0) > 0 &&
+                recentRealClientMsgAge < 12000 &&
+                notYetRestoredForMsg &&
+                conv.status !== 'resolved' &&
+                conv.status !== 'closed';
 
               if (isSpuriousZeroUnread && conv.id) {
-                // Restaura unread_count no banco caso um evento secundário do Baileys (chats.update do celular aberto) tenha zerado indevidamente a mensagem recém-chegada no CRM
-                supabase.from('conversations').update({ unread_count: c.unread }).eq('id', conv.id).then(() => {});
+                pendingUnreadRestore = { convId: conv.id, unread: c.unread, realMsgTs };
               }
 
               const nextUnread = isSpuriousZeroUnread
@@ -8305,18 +8547,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
               return {
                 ...c,
                 conv_id: conv.id || c.conv_id,
-                conv_status: conv.status || c.conv_status,
-                assigned_to: conv.assigned_to,
-                unread: nextUnread,
+                conv_status: isRecentResolveStaleEcho ? 'resolved' : (conv.status || c.conv_status),
+                assigned_to: isRecentResolveStaleEcho ? null : conv.assigned_to,
+                unread: isRecentResolveStaleEcho ? 0 : nextUnread,
                 lastConvUnreadSyncAt: (conv.unread_count || 0) > 0 ? Date.now() : c.lastConvUnreadSyncAt,
                 lastConvUnreadCount: typeof conv.unread_count === 'number' ? conv.unread_count : c.lastConvUnreadCount,
-                lastClientMsgAt: (conv.unread_count || 0) > (c.unread || 0) ? Date.now() : c.lastClientMsgAt,
                 isManuallyUnread: stillManuallyUnread,
                 is_pinned: conv.is_pinned,
                 is_favorite: conv.is_favorite,
-                snoozed_until: conv.snoozed_until,
-                snoozed_at: conv.snoozed_at,
-                snoozed_by: conv.snoozed_by,
+                snoozed_until: isRecentResolveStaleEcho ? null : conv.snoozed_until,
+                snoozed_at: isRecentResolveStaleEcho ? null : conv.snoozed_at,
+                snoozed_by: isRecentResolveStaleEcho ? null : conv.snoozed_by,
                 instance_id: conv.instance_id || c.instance_id,
                 ai_paused: conv.ai_paused,
                 ai_paused_manually: conv.ai_paused_manually,
@@ -8329,6 +8570,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
           });
           return { contacts: updatedContacts };
         });
+
+        // Dispara no máximo 1 restauração por mensagem real recebida fora do set(), evitando tempestade HTTP
+        if (pendingUnreadRestore) {
+          const { convId, unread, realMsgTs } = pendingUnreadRestore as { convId: string; unread: number; realMsgTs: number };
+          spuriousZeroRestoredForMsgTs.set(convId, realMsgTs);
+          supabase.from('conversations').update({ unread_count: unread }).eq('id', convId).then(() => {});
+        }
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'whatsapp_instances', filter: `tenant_id=eq.${tenantId}` }, async (payload) => {
         const t = get().tenantInfo;
@@ -8349,7 +8597,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
         const inst = payload.new as any;
         if (inst.id) {
-          instanceCache.set(inst.id, inst.display_name || '', inst.api_key || '');
+          instanceCache.set(
+            inst.id,
+            inst.display_name || '',
+            inst.api_key || '',
+            inst.phone_number,
+            inst.settings,
+            ('ticket_mode' in inst || 'hide_ticket_modal' in inst)
+              ? { ticket_mode: Boolean(inst.ticket_mode), hide_ticket_modal: Boolean(inst.hide_ticket_modal) }
+              : undefined
+          );
+          set((s) => ({
+            rawInstances: (s.rawInstances || []).some((r: any) => r.id === inst.id)
+              ? (s.rawInstances || []).map((r: any) => r.id === inst.id ? { ...r, ...inst } : r)
+              : [...(s.rawInstances || []), inst]
+          }));
         }
         get().setInstanceStatus(inst.id, inst.status);
 

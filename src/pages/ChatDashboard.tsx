@@ -1300,6 +1300,69 @@ export default function ChatDashboard() {
     );
   }, [globalActiveTasks, currentAgent]);
 
+  // Índices em memória O(1) para evitar varreduras O(N*M) na lista lateral e ao clicar em Resolver
+  const tasksByContactIdMap = React.useMemo(() => {
+    const map = new Map<string, any[]>();
+    for (const t of globalActiveTasks) {
+      const cleanId = t.contactId && typeof t.contactId === 'string' && t.contactId.includes('_')
+        ? t.contactId.split('_')[0]
+        : t.contactId;
+      if (!cleanId) continue;
+      const arr = map.get(cleanId);
+      if (arr) arr.push(t);
+      else map.set(cleanId, [t]);
+    }
+    return map;
+  }, [globalActiveTasks]);
+
+  const myTaskContactIdsSet = React.useMemo(() => {
+    const setIds = new Set<string>();
+    for (const t of myActiveTasks) {
+      if (t.contactId) setIds.add(t.contactId);
+    }
+    return setIds;
+  }, [myActiveTasks]);
+
+  const agentsByIdMap = React.useMemo(() => {
+    const map = new Map<string, any>();
+    for (const a of agents) {
+      if (a?.id) map.set(a.id, a);
+    }
+    return map;
+  }, [agents]);
+
+  const companiesLookup = React.useMemo(() => {
+    const byId = new Map<string, any>();
+    const byDoc = new Map<string, any>();
+    const byPhoneLast8 = new Map<string, any>();
+    for (const comp of allCompanies) {
+      if (!comp?.id) continue;
+      byId.set(comp.id, comp);
+      const cleanDoc = comp.document_number ? String(comp.document_number).replace(/\D/g, '') : '';
+      if (cleanDoc && !byDoc.has(cleanDoc)) byDoc.set(cleanDoc, comp);
+      const cleanPhone = comp.phone ? String(comp.phone).replace(/\D/g, '').slice(-8) : '';
+      if (cleanPhone && !byPhoneLast8.has(cleanPhone)) byPhoneLast8.set(cleanPhone, comp);
+    }
+    return { byId, byDoc, byPhoneLast8 };
+  }, [allCompanies]);
+
+  const resolveLinkedCompaniesFast = React.useCallback((contact: any) => {
+    if (!contact) return [];
+    let linked = (Array.isArray(contact.company_ids) ? contact.company_ids : [])
+      .map((id: string) => companiesLookup.byId.get(id))
+      .filter(Boolean);
+    if (linked.length === 0 && (contact.document_number || contact.phone)) {
+      const cleanDoc = contact.document_number ? String(contact.document_number).replace(/\D/g, '') : '';
+      const cleanPhone = contact.phone ? String(contact.phone).replace(/\D/g, '').slice(-8) : '';
+      const byDocMatch = cleanDoc ? companiesLookup.byDoc.get(cleanDoc) : null;
+      const matched = (byDocMatch && byDocMatch.id !== contact.id)
+        ? byDocMatch
+        : (cleanPhone ? companiesLookup.byPhoneLast8.get(cleanPhone) : null);
+      if (matched && matched.id !== contact.id) linked = [matched];
+    }
+    return linked;
+  }, [companiesLookup]);
+
   // Função para buscar do Supabase todas as tarefas ativas do operador logado
   const fetchGlobalActiveTasks = React.useCallback(async () => {
     if (!currentAgent) return;
@@ -2070,39 +2133,48 @@ export default function ChatDashboard() {
     return channelId;
   }, [activeChannelFilter, activeChannelName, tenantInstances, availableInstancesList, instanceNamesMap]);
 
-  // Helper de validação de Ticket Aberto para a caixa atual
-  const isContactOpenTicket = React.useCallback((c: any) => {
-    // 0) ISOLAMENTO ESTRITO POR EMPRESA / TENANT ATIVO
+  // Helper de leitura única de contexto RBAC (evita JSON.parse repetido N vezes em loops de filtros)
+  const getRbacRuntimeContext = React.useCallback(() => {
     const currentTenantId = tenantInfo?.id || (typeof window !== 'undefined' ? (sessionStorage.getItem('current_tenant_id') || localStorage.getItem('current_tenant_id')) : null);
-    if (currentTenantId && c.tenant_id && c.tenant_id !== currentTenantId) {
-      return false;
-    }
-
-    // 1) RBAC Enforcement & Proteção Ronaldo-Web
     const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
     const loggedEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
     const isRonaldo = loggedEmail?.toLowerCase() === 'ronaldo.xpointsolucoes@gmail.com';
     const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
+    let allowedSet: Set<string> | null = null;
+    let allowedInvalidOrEmpty = false;
+    if (!isRonaldo) {
+      if (allowedStr) {
+        try {
+          const parsed = JSON.parse(allowedStr);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            allowedSet = new Set(parsed);
+          } else if (roleStr === 'agent' || roleStr === 'Agente') {
+            allowedInvalidOrEmpty = true;
+          }
+        } catch {
+          if (roleStr === 'agent' || roleStr === 'Agente') allowedInvalidOrEmpty = true;
+        }
+      } else if (roleStr === 'agent' || roleStr === 'Agente') {
+        allowedInvalidOrEmpty = true;
+      }
+    }
+    return { currentTenantId, loggedEmail, isRonaldo, allowedSet, allowedInvalidOrEmpty };
+  }, [tenantInfo?.id]);
+
+  // Helper de validação de Ticket Aberto para a caixa atual
+  const isContactOpenTicket = React.useCallback((c: any) => {
+    const { currentTenantId, isRonaldo, allowedSet, allowedInvalidOrEmpty } = getRbacRuntimeContext();
+    if (currentTenantId && c.tenant_id && c.tenant_id !== currentTenantId) {
+      return false;
+    }
 
     const instanceIdFromId = c.id && typeof c.id === 'string' && c.id.includes('_') ? c.id.split('_')[1] : null;
     const effectiveInstId = instanceIdFromId || c.instance_id || connectedInstanceName || 'default';
 
     if (!isRonaldo) {
       if (effectiveInstId === '5c78d358-d449-41c4-b396-a04ab20a39e4') return false;
-      if (allowedStr) {
-        try {
-          const allowedInstances = JSON.parse(allowedStr);
-          if (Array.isArray(allowedInstances) && allowedInstances.length > 0) {
-            if (effectiveInstId && !allowedInstances.includes(effectiveInstId)) return false;
-          } else if (roleStr === 'agent' || roleStr === 'Agente') {
-            return false;
-          }
-        } catch(e) {
-          if (roleStr === 'agent' || roleStr === 'Agente') return false;
-        }
-      } else if (roleStr === 'agent' || roleStr === 'Agente') {
-        return false;
-      }
+      if (allowedInvalidOrEmpty) return false;
+      if (allowedSet && effectiveInstId && !allowedSet.has(effectiveInstId)) return false;
     }
 
     // 2) Filtro de Caixa Ativa Estrito
@@ -2128,7 +2200,7 @@ export default function ChatDashboard() {
     }
 
     return true;
-  }, [tenantInfo, connectedInstanceName, isMatchingChannel]);
+  }, [getRbacRuntimeContext, connectedInstanceName, isMatchingChannel]);
 
   // Sincroniza o filtro de mensagens estritamente quando o Modo Ticket for alternado pelo usuário
   const prevTicketModeRef = useRef(ticketMode);
@@ -2199,31 +2271,33 @@ export default function ChatDashboard() {
   };
 
   const filteredContacts = React.useMemo(() => {
+    const { currentTenantId, loggedEmail, isRonaldo, allowedSet, allowedInvalidOrEmpty } = getRbacRuntimeContext();
+    const nowMs = Date.now();
+    const searchLower = searchTerm ? searchTerm.toLowerCase() : '';
+    const currentAgentForFilter = filterType === 'mine'
+      ? agents.find(a => a.email === loggedEmail)
+      : null;
+    const validRawInstTokens = new Set<string>();
+    if (rawInstances && rawInstances.length > 0) {
+      for (const inst of rawInstances as any[]) {
+        if (inst?.id) validRawInstTokens.add(inst.id);
+        if (inst?.display_name) validRawInstTokens.add(inst.display_name);
+      }
+    }
+
     const sorted = contacts.filter(c => {
         // 0) ISOLAMENTO ESTRITO POR EMPRESA / TENANT ATIVO:
-        const currentTenantId = tenantInfo?.id || (typeof window !== 'undefined' ? (sessionStorage.getItem('current_tenant_id') || localStorage.getItem('current_tenant_id')) : null);
         if (currentTenantId && c.tenant_id && c.tenant_id !== currentTenantId) {
             return false;
         }
 
-        // 1) RBAC ENFORCEMENT - A REGRA DE OURO (Nunca mostrar conversas que não tenho acesso)
-        const roleStr = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_role') || localStorage.getItem('current_user_role')) : null;
-        const loggedEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
-        const isRonaldo = loggedEmail?.toLowerCase() === 'ronaldo.xpointsolucoes@gmail.com';
-        const allowedStr = typeof window !== 'undefined' ? (sessionStorage.getItem('allowed_instances') || localStorage.getItem('allowed_instances')) : null;
-        
         const instanceIdFromId = c.id.includes('_') ? c.id.split('_')[1] : null;
         const effectiveInstId = instanceIdFromId || c.instance_id || connectedInstanceName;
 
         // Se houver caixas válidas carregadas para a empresa ativa (rawInstances), garantir que a conversa pertence a uma dessas caixas
-        if (rawInstances && rawInstances.length > 0 && effectiveInstId && effectiveInstId !== 'default') {
+        if (validRawInstTokens.size > 0 && effectiveInstId && effectiveInstId !== 'default') {
             const resolvedEffUuid = instanceCache.getId(effectiveInstId) || effectiveInstId;
-            const belongsToTenant = rawInstances.some((inst: any) => 
-                inst.id === effectiveInstId || 
-                inst.id === resolvedEffUuid ||
-                inst.display_name === effectiveInstId
-            );
-            if (!belongsToTenant && !isRonaldo) {
+            if (!validRawInstTokens.has(effectiveInstId) && !validRawInstTokens.has(resolvedEffUuid) && !isRonaldo) {
                 return false;
             }
         }
@@ -2231,23 +2305,8 @@ export default function ChatDashboard() {
         // --- PROTEÇÃO RIGOROSA RONALDO-WEB ---
         if (!isRonaldo) {
             if (effectiveInstId === '5c78d358-d449-41c4-b396-a04ab20a39e4') return false;
-        }
-
-        if (!isRonaldo) {
-            if (allowedStr) {
-                try {
-                    const allowedInstances = JSON.parse(allowedStr);
-                    if (Array.isArray(allowedInstances) && allowedInstances.length > 0) {
-                        if (effectiveInstId && !allowedInstances.includes(effectiveInstId)) return false;
-                    } else if (roleStr === 'agent' || roleStr === 'Agente') {
-                        return false;
-                    }
-                } catch(e) {
-                    if (roleStr === 'agent' || roleStr === 'Agente') return false;
-                }
-            } else if (roleStr === 'agent' || roleStr === 'Agente') {
-                return false;
-            }
+            if (allowedInvalidOrEmpty) return false;
+            if (allowedSet && effectiveInstId && !allowedSet.has(effectiveInstId)) return false;
         }
 
         // 2) FILTRO POR CAIXA ESPECÍFICA (Menu esquerdo)
@@ -2259,26 +2318,24 @@ export default function ChatDashboard() {
           activeChatId && (c.id === activeChatId || c.conv_id === activeChatId)
         );
         const isResolvedOrClosed = c.conv_status === 'resolved' || c.conv_status === 'closed' || c.status === 'resolved' || c.status === 'closed' || c.is_resolved === true || Boolean(c.resolved_at);
-        const isSnoozedActive = c.conv_status === 'snoozed' && c.snoozed_until && (new Date(c.snoozed_until).getTime() > Date.now());
 
         if (isExactActiveChat) {
             // No Modo Ticket (ou filtros de tickets abertos), se o chat ativo não for um ticket aberto válido da caixa, não força visibilidade
             if ((ticketMode || filterType === 'tickets' || filterType === 'open') && !isContactOpenTicket(c)) {
                 return false;
             }
-            if (!searchTerm) {
+            if (!searchLower) {
                 return true;
             }
-            const s = searchTerm.toLowerCase();
-            const match = c.name?.toLowerCase().includes(s) ||
-                          c.custom_name?.toLowerCase().includes(s) ||
-                          c.push_name?.toLowerCase().includes(s) ||
-                          c.pushname?.toLowerCase().includes(s) ||
-                          c.whatsapp_jid?.toLowerCase().includes(s) ||
-                          c.phone?.toLowerCase().includes(s) ||
-                          c.fantasy_name?.toLowerCase().includes(s) ||
+            const match = c.name?.toLowerCase().includes(searchLower) ||
+                          c.custom_name?.toLowerCase().includes(searchLower) ||
+                          c.push_name?.toLowerCase().includes(searchLower) ||
+                          c.pushname?.toLowerCase().includes(searchLower) ||
+                          c.whatsapp_jid?.toLowerCase().includes(searchLower) ||
+                          c.phone?.toLowerCase().includes(searchLower) ||
+                          c.fantasy_name?.toLowerCase().includes(searchLower) ||
                           c.document_number?.includes(searchTerm) ||
-                          c.conv_labels?.some((l: any) => l.name?.toLowerCase().includes(s));
+                          c.conv_labels?.some((l: any) => l.name?.toLowerCase().includes(searchLower));
             if (match) return true;
         }
 
@@ -2297,7 +2354,7 @@ export default function ChatDashboard() {
             // Conversas adiadas ativas no futuro NUNCA são consideradas não atendidas no momento
             if (c.conv_status === 'snoozed' && c.snoozed_until) {
                 const untilTimestamp = new Date(c.snoozed_until).getTime();
-                if (untilTimestamp > Date.now()) return false;
+                if (untilTimestamp > nowMs) return false;
             }
 
             const hasUnread = (Number(c.unread) > 0) || Boolean(c.isManuallyUnread);
@@ -2317,10 +2374,6 @@ export default function ChatDashboard() {
         }
 
         // REGRA DE OURO DO MODO TICKET:
-        // - Modo Ticket ATIVO (ticketMode === true OU filterType === 'tickets' OU filterType === 'open'):
-        //   Mostra EXCLUSIVAMENTE tickets abertos na lista lateral (validados rigorosamente por isContactOpenTicket).
-        // - Modo Ticket DESATIVADO (ticketMode === false E filterType === 'all'):
-        //   Mostra TODAS as conversas da caixa (abertas, resolvidas, encerradas, etc.).
         if (ticketMode || filterType === 'tickets' || filterType === 'open') {
            if (!isContactOpenTicket(c)) {
               return false;
@@ -2328,25 +2381,23 @@ export default function ChatDashboard() {
         }
 
         // 4) BUSCA EM TEXTO E METADADOS
-        if (searchTerm) {
-            const s = searchTerm.toLowerCase();
-            const match = c.name?.toLowerCase().includes(s) ||
-                          c.custom_name?.toLowerCase().includes(s) ||
-                          c.push_name?.toLowerCase().includes(s) ||
-                          c.pushname?.toLowerCase().includes(s) ||
-                          c.whatsapp_jid?.toLowerCase().includes(s) ||
-                          c.phone?.toLowerCase().includes(s) ||
-                          c.fantasy_name?.toLowerCase().includes(s) ||
+        if (searchLower) {
+            const match = c.name?.toLowerCase().includes(searchLower) ||
+                          c.custom_name?.toLowerCase().includes(searchLower) ||
+                          c.push_name?.toLowerCase().includes(searchLower) ||
+                          c.pushname?.toLowerCase().includes(searchLower) ||
+                          c.whatsapp_jid?.toLowerCase().includes(searchLower) ||
+                          c.phone?.toLowerCase().includes(searchLower) ||
+                          c.fantasy_name?.toLowerCase().includes(searchLower) ||
                           c.document_number?.includes(searchTerm) ||
-                          c.conv_labels?.some((l: any) => l.name?.toLowerCase().includes(s));
+                          c.conv_labels?.some((l: any) => l.name?.toLowerCase().includes(searchLower));
             if (!match) return false;
         }
 
         // Filtro de Tarefas CRM do operador ativo (independente de searchTerm)
         if (filterType === 'tasks') {
             const realContactId = c.id.includes('_') ? c.id.split('_')[0] : c.id;
-            const hasActiveTask = myActiveTasks.some(t => t.contactId === realContactId);
-            if (!hasActiveTask) return false;
+            if (!myTaskContactIdsSet.has(realContactId)) return false;
         }
 
         // Filtros de Pills - IGNORADOS DURANTE PESQUISA (exceto Modo Ticket que sempre filtra)
@@ -2363,9 +2414,7 @@ export default function ChatDashboard() {
                }
             }
             if (filterType === 'mine') {
-                const currentUserEmail = sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email');
-                const currentAgent = agents.find(a => a.email === currentUserEmail);
-                if (!currentAgent || !c.assigned_to?.split(',').includes(currentAgent.id)) return false;
+                if (!currentAgentForFilter || !c.assigned_to?.split(',').includes(currentAgentForFilter.id)) return false;
             }
         }
 
@@ -2433,7 +2482,7 @@ export default function ChatDashboard() {
        }
      }
      return Array.from(seenKeys.values());
-  }, [contacts, activeChannelFilter, selectedChannelFilters, searchTerm, filterType, selectedLabelId, activeChatId, ticketMode, agents, connectedInstanceName, activeChannelName, isMatchingChannel]);
+  }, [contacts, activeChannelFilter, selectedChannelFilters, searchTerm, filterType, selectedLabelId, activeChatId, ticketMode, agents, connectedInstanceName, activeChannelName, isMatchingChannel, getRbacRuntimeContext, isContactOpenTicket, myTaskContactIdsSet]);
 
   const handleBatchResolveConfirm = async () => {
     setIsProcessingBatchResolve(true);
@@ -2989,8 +3038,7 @@ export default function ChatDashboard() {
 
     // 1. Salva a posição de scroll atual da lista lateral de chats
     const currentScrollTop = contactListRef.current ? contactListRef.current.scrollTop : 0;
-    
-    // 1.2 Acha o próximo contato a ser selecionado ANTES de resolver a conversa
+
     // 1.2 Acha o próximo contato a ser selecionado ANTES de resolver a conversa
     const realTargetId = getRealContactId(contactId);
     const currentIndex = filteredContacts.findIndex(c => c.id === contactId || getRealContactId(c.id) === realTargetId);
@@ -3002,29 +3050,25 @@ export default function ChatDashboard() {
         nextContactId = nextContact.id;
       }
     }
-    
+
     try {
-      // 2. Dispara a ação de resolução
-      await resolveConversation(contactId, reactivateAi);
-      
-      // 2.2 Seleciona o próximo contato da mesma caixa se houver, ou limpa caso a lista fique vazia
+      // 2. Atualização otimista atômica (resolve e abre o próximo chat em < 1ms) + persistência em background
+      const resolvePromise = resolveConversation(contactId, reactivateAi, { nextActiveChatId: nextContactId });
+
       if (nextContactId) {
         setActiveChat(nextContactId);
-      } else {
-        setActiveChat(null);
-        useChatStore.setState({ activeChatId: null, activeTicket: null });
       }
-      
-      // 3. Estabilização absoluta em cascata de tempo para anular saltos enquanto o Framer-motion anima a saída
+
+      // 3. Restaura scroll sem layout thrashing
       const restoreScroll = () => {
         if (contactListRef.current) {
           contactListRef.current.scrollTop = currentScrollTop;
         }
       };
-      
       restoreScroll();
       requestAnimationFrame(restoreScroll);
-      [10, 30, 50, 100, 180, 300, 500].forEach(ms => setTimeout(restoreScroll, ms));
+
+      return await resolvePromise;
     } catch (err: any) {
       alert('Erro ao resolver conversa: ' + (err.message || String(err)));
     }
@@ -3033,24 +3077,8 @@ export default function ChatDashboard() {
   const handleResolveConversation = async (contactId: string) => {
     const contact = contacts.find(c => c.id === contactId);
     if (contact) {
-      const realContactId = contact.id.includes('_') ? contact.id.split('_')[0] : contact.id;
-
-      // 1. Resolve empresas vinculadas via company_ids ou auto-match
-      let linkedCompanies = (Array.isArray(contact.company_ids) ? contact.company_ids : [])
-        .map((id: string) => allCompanies.find((c: any) => c.id === id))
-        .filter(Boolean) || [];
-
-      if (linkedCompanies.length === 0 && (contact.document_number || contact.phone)) {
-        const cleanDoc = contact.document_number ? contact.document_number.replace(/\D/g, '') : null;
-        const cleanPhone = contact.phone ? contact.phone.replace(/\D/g, '').slice(-8) : null;
-        const matched = allCompanies.find((c: any) => {
-          if (c.id === contact.id) return false;
-          const compDoc = c.document_number ? c.document_number.replace(/\D/g, '') : null;
-          const compPhone = c.phone ? c.phone.replace(/\D/g, '').slice(-8) : null;
-          return (cleanDoc && compDoc && cleanDoc === compDoc) || (cleanPhone && compPhone && cleanPhone === compPhone);
-        });
-        if (matched) linkedCompanies = [matched];
-      }
+      // 1. Resolve empresas vinculadas via índices em memória O(1)
+      const linkedCompanies = resolveLinkedCompaniesFast(contact);
 
       const isDirectCompany = !!(contact.fantasy_name || (contact.document_type === 'cnpj' && (contact.custom_name || contact.name)));
       const hasCnpj = !!(contact.document_number || linkedCompanies.some((c: any) => !!c.document_number));
@@ -3062,151 +3090,171 @@ export default function ChatDashboard() {
         setCompanyDetailsOpen(targetComp);
         return;
       }
-      // Check if instance has ticket_mode enabled
+
+      // Verifica ticket_mode/hide_ticket_modal instantaneamente via cache em memória (0ms), sem bloquear clique
       const instId = contact.instance_id || useChatStore.getState().tenantInfo?.evolution_api_instance;
       if (instId) {
         try {
           const tenantId = useChatStore.getState().tenantInfo?.id;
-          const resolvedUuid = tenantId ? await resolveInstanceUuid(tenantId, instId) : null;
-          const targetInstId = resolvedUuid || instId;
           const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+          let instData: { ticket_mode?: boolean; hide_ticket_modal?: boolean } | null =
+            instanceCache.getTicketConfig(instId) || null;
 
-          let instQuery = supabase
-            .from('whatsapp_instances')
-            .select('ticket_mode, hide_ticket_modal');
-
-          if (uuidRegex.test(targetInstId)) {
-            instQuery = instQuery.eq('id', targetInstId);
-          } else if (tenantId) {
-            instQuery = instQuery.eq('tenant_id', tenantId).or(`display_name.eq.${targetInstId},whatsapp_name.eq.${targetInstId}`);
+          if (!instData) {
+            const rawMatch = (rawInstances || []).find(
+              (i: any) => i.id === instId || i.display_name === instId || i.whatsapp_name === instId
+            ) as any;
+            if (rawMatch && (rawMatch.ticket_mode !== undefined || rawMatch.hide_ticket_modal !== undefined)) {
+              instData = {
+                ticket_mode: Boolean(rawMatch.ticket_mode),
+                hide_ticket_modal: Boolean(rawMatch.hide_ticket_modal)
+              };
+            }
           }
 
-          const { data: instData } = await instQuery.maybeSingle();
+          if (!instData) {
+            const resolvedUuid = uuidRegex.test(instId)
+              ? instId
+              : (instanceCache.getId(instId) || (tenantId ? await resolveInstanceUuid(tenantId, instId) : null));
+            const targetInstId = resolvedUuid || instId;
+
+            let instQuery = supabase
+              .from('whatsapp_instances')
+              .select('id, display_name, api_key, ticket_mode, hide_ticket_modal');
+
+            if (uuidRegex.test(targetInstId)) {
+              instQuery = instQuery.eq('id', targetInstId);
+            } else if (tenantId) {
+              instQuery = instQuery.eq('tenant_id', tenantId).or(`display_name.eq.${targetInstId},whatsapp_name.eq.${targetInstId}`);
+            }
+
+            const { data: fetchedInst } = await instQuery.maybeSingle();
+            if (fetchedInst) {
+              instData = {
+                ticket_mode: Boolean(fetchedInst.ticket_mode),
+                hide_ticket_modal: Boolean(fetchedInst.hide_ticket_modal)
+              };
+              if (fetchedInst.id) {
+                instanceCache.set(fetchedInst.id, fetchedInst.display_name || '', fetchedInst.api_key || '', undefined, undefined, instData);
+              }
+            }
+          }
 
           if (instData?.ticket_mode) {
             if (instData?.hide_ticket_modal) {
-              // Buscar o ticket ativo correspondente ao contactId no Supabase antes da troca de chat ativo
               const realContactId = contactId.includes('_') ? contactId.split('_')[0] : contactId;
-              const { data: dbTicket } = await supabase
-                .from('chat_tickets')
-                .select('*')
-                .eq('contact_id', realContactId)
-                .eq('status', 'open')
-                .order('opened_at', { ascending: false })
-                .limit(1)
-                .maybeSingle();
-              
-              // Executa a resolução na interface preservando pausa definitiva se houver
+              const memTicket = activeTicket?.contact_id === realContactId && activeTicket?.status === 'open'
+                ? activeTicket
+                : null;
+
+              // Fecha e muda de tela instantaneamente (< 50ms) preservando pausa definitiva
               const isDefinitivelyPaused = contact?.bot_status === 'paused' || (contact?.ai_paused_manually && !contact?.bot_paused_until);
-              await executeResolve(contactId, !isDefinitivelyPaused);
+              const resolveResultPromise = executeResolve(contactId, !isDefinitivelyPaused);
 
-              if (dbTicket) {
-                // Roda a análise de IA e gravação do ticket em background
-                (async () => {
-                  try {
-                    const stats = await calculateFinalStats(contactId, dbTicket);
-                    
-                    const start = new Date(dbTicket.opened_at);
-                    const { data: ticketMsgs } = await supabase
-                      .from('messages')
-                      .select('id, text_content, sender_type, timestamp, raw_payload, transcription, message_type, media_url')
-                      .eq('conversation_id', (contact.conv_id && /^[0-9a-f-]{36}$/i.test(contact.conv_id)) ? contact.conv_id : '00000000-0000-0000-0000-000000000000')
-                      .gte('timestamp', dbTicket.opened_at)
-                      .order('timestamp', { ascending: true });
+              // Análise de IA e enriquecimento do ticket correm 100% em background
+              (async () => {
+                try {
+                  const resObj = await resolveResultPromise;
+                  const dbTicket = memTicket || resObj?.closedTicket;
+                  if (!dbTicket?.id) return;
 
-                    const processedMsgs = [];
-                    for (const m of (ticketMsgs || [])) {
-                      let text = (m.text_content || '').trim();
-                      const isAudio = m.message_type === 'audio' || text === '🎵 Áudio';
+                  const stats = await calculateFinalStats(contactId, dbTicket);
+                  const { data: ticketMsgs } = await supabase
+                    .from('messages')
+                    .select('id, text_content, sender_type, timestamp, raw_payload, transcription, message_type, media_url')
+                    .eq('conversation_id', (contact.conv_id && /^[0-9a-f-]{36}$/i.test(contact.conv_id)) ? contact.conv_id : '00000000-0000-0000-0000-000000000000')
+                    .gte('timestamp', dbTicket.opened_at)
+                    .order('timestamp', { ascending: true });
 
-                      if (isAudio) {
-                        if (m.transcription) {
-                          text = `🎵 Áudio (Transcrito): "${m.transcription}"`;
-                        } else if (m.media_url) {
-                          if (geminiService.isConfigured()) {
-                            try {
-                              const transcribedText = await geminiService.transcribeAudio(m.media_url);
-                              // Salvar no Supabase
-                              await supabase
-                                .from('messages')
-                                .update({ transcription: transcribedText })
-                                .eq('id', m.id);
+                  const processedMsgs = [];
+                  for (const m of (ticketMsgs || [])) {
+                    let text = (m.text_content || '').trim();
+                    const isAudio = m.message_type === 'audio' || text === '🎵 Áudio';
 
-                              text = `🎵 Áudio (Transcrito): "${transcribedText}"`;
-                              m.transcription = transcribedText;
-                            } catch (audioErr: any) {
-                              console.warn("Falha transitória ao transcrever áudio na análise silenciosa:", audioErr?.message || audioErr);
-                              text = `🎵 Áudio (Transcrição indisponível)`;
-                            }
-                          } else {
-                            text = `🎵 Áudio (Transcrição pausada - IA não configurada)`;
+                    if (isAudio) {
+                      if (m.transcription) {
+                        text = `🎵 Áudio (Transcrito): "${m.transcription}"`;
+                      } else if (m.media_url) {
+                        if (geminiService.isConfigured()) {
+                          try {
+                            const transcribedText = await geminiService.transcribeAudio(m.media_url);
+                            await supabase
+                              .from('messages')
+                              .update({ transcription: transcribedText })
+                              .eq('id', m.id);
+
+                            text = `🎵 Áudio (Transcrito): "${transcribedText}"`;
+                            m.transcription = transcribedText;
+                          } catch (audioErr: any) {
+                            console.warn("Falha transitória ao transcrever áudio na análise silenciosa:", audioErr?.message || audioErr);
+                            text = `🎵 Áudio (Transcrição indisponível)`;
                           }
                         } else {
-                          text = `🎵 Áudio (Mídia indisponível)`;
+                          text = `🎵 Áudio (Transcrição pausada - IA não configurada)`;
                         }
+                      } else {
+                        text = `🎵 Áudio (Mídia indisponível)`;
                       }
-
-                      let isHuman = m.sender_type === 'human';
-                      if (!isHuman && text) {
-                        const matchAsterisk = text.match(/^\*([^*:\n]+):\*/);
-                        if (matchAsterisk) {
-                          isHuman = true;
-                        }
-                      }
-                      processedMsgs.push({
-                        sender: isHuman ? 'human' : 'client',
-                        text: text,
-                        timestamp: new Date(m.timestamp).toLocaleString('pt-BR')
-                      });
                     }
 
-                    const formattedMsgs = processedMsgs;
-
-                    const currentUserEmail = typeof window !== 'undefined' ? (localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email')) : null;
-                    const currentUserName = typeof window !== 'undefined' ? (localStorage.getItem('current_user_name') || sessionStorage.getItem('current_user_name')) : null;
-                    const operatorName = currentUserName || currentUserEmail || 'Atendente';
-
-                    let problemDesc = dbTicket.problem_description || '';
-                    let resolution = 'Resolvido pelo atendente.';
-                    let summaryText = '';
-                    let problemsChecklist: any[] = [];
-                    let errorLog: string | null = null;
-
-                    if (geminiService.isConfigured()) {
-                      try {
-                        const result = await geminiService.generateTicketAnalysis({
-                          opened_at: new Date(dbTicket.opened_at).toLocaleString('pt-BR'),
-                          closed_at: new Date().toLocaleString('pt-BR'),
-                          operators: stats.operators || [],
-                          closed_by: operatorName,
-                          messages: formattedMsgs
-                        });
-                        if (result.problem_description) problemDesc = result.problem_description;
-                        if (result.summary) summaryText = result.summary;
-                        if (result.problems_checklist) problemsChecklist = result.problems_checklist;
-                        if (result.resolution_summary) resolution = result.resolution_summary;
-                        if (result.error_log) errorLog = result.error_log;
-                      } catch (geminiErr: any) {
-                        console.warn('Falha transitória na análise silenciosa do Gemini:', geminiErr?.message || geminiErr);
-                        errorLog = geminiErr?.message || String(geminiErr);
+                    let isHuman = m.sender_type === 'human';
+                    if (!isHuman && text) {
+                      const matchAsterisk = text.match(/^\*([^*:\n]+):\*/);
+                      if (matchAsterisk) {
+                        isHuman = true;
                       }
-                    } else {
-                      errorLog = "Chave de API do Gemini não configurada nas Configurações.";
                     }
-
-                    const finalStats = { 
-                      ...stats, 
-                      summary: summaryText, 
-                      checklist: problemsChecklist,
-                      closed_by: operatorName,
-                      error_log: errorLog
-                    };
-                    await useChatStore.getState().resolveActiveTicket(dbTicket.id, problemDesc, resolution, finalStats);
-                  } catch (bgErr) {
-                    console.error('Erro no processamento silencioso do ticket:', bgErr);
+                    processedMsgs.push({
+                      sender: isHuman ? 'human' : 'client',
+                      text: text,
+                      timestamp: new Date(m.timestamp).toLocaleString('pt-BR')
+                    });
                   }
-                })();
-              }
+
+                  const currentUserEmail = typeof window !== 'undefined' ? (localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email')) : null;
+                  const currentUserName = typeof window !== 'undefined' ? (localStorage.getItem('current_user_name') || sessionStorage.getItem('current_user_name')) : null;
+                  const operatorName = currentUserName || currentUserEmail || 'Atendente';
+
+                  let problemDesc = dbTicket.problem_description || '';
+                  let resolution = 'Resolvido pelo atendente.';
+                  let summaryText = '';
+                  let problemsChecklist: any[] = [];
+                  let errorLog: string | null = null;
+
+                  if (geminiService.isConfigured()) {
+                    try {
+                      const result = await geminiService.generateTicketAnalysis({
+                        opened_at: new Date(dbTicket.opened_at).toLocaleString('pt-BR'),
+                        closed_at: new Date().toLocaleString('pt-BR'),
+                        operators: stats.operators || [],
+                        closed_by: operatorName,
+                        messages: processedMsgs
+                      });
+                      if (result.problem_description) problemDesc = result.problem_description;
+                      if (result.summary) summaryText = result.summary;
+                      if (result.problems_checklist) problemsChecklist = result.problems_checklist;
+                      if (result.resolution_summary) resolution = result.resolution_summary;
+                      if (result.error_log) errorLog = result.error_log;
+                    } catch (geminiErr: any) {
+                      console.warn('Falha transitória na análise silenciosa do Gemini:', geminiErr?.message || geminiErr);
+                      errorLog = geminiErr?.message || String(geminiErr);
+                    }
+                  } else {
+                    errorLog = "Chave de API do Gemini não configurada nas Configurações.";
+                  }
+
+                  const finalStats = {
+                    ...stats,
+                    summary: summaryText,
+                    checklist: problemsChecklist,
+                    closed_by: operatorName,
+                    error_log: errorLog
+                  };
+                  await useChatStore.getState().resolveActiveTicket(dbTicket.id, problemDesc, resolution, finalStats);
+                } catch (bgErr) {
+                  console.error('Erro no processamento silencioso do ticket:', bgErr);
+                }
+              })();
               return;
             } else {
               setResolvingTicketContactId(contactId);
@@ -3218,7 +3266,7 @@ export default function ChatDashboard() {
         }
       }
     }
-    
+
     const isDefinitivelyPaused = contact?.bot_status === 'paused' || (contact?.ai_paused_manually && !contact?.bot_paused_until);
     await executeResolve(contactId, !isDefinitivelyPaused);
   };
@@ -4048,7 +4096,7 @@ export default function ChatDashboard() {
         // 2. Buscar instâncias pertencentes ao grupo econômico
         const { data, error: instError } = await supabase
           .from('whatsapp_instances')
-          .select('id, display_name, color, status, tenant_id')
+          .select('id, display_name, color, status, tenant_id, ticket_mode, hide_ticket_modal, api_key, phone_number, settings')
           .in('tenant_id', allowedTenants);
 
         if (!instError && data) {
@@ -4073,10 +4121,18 @@ export default function ChatDashboard() {
           }
 
           const newStatuses: Record<string, string> = {};
-          data.forEach(d => { 
+          data.forEach((d: any) => { 
              nameMap[d.id] = d.display_name; 
              if(d.color) colorMap[d.id] = d.color;
              newStatuses[d.id] = d.status;
+             instanceCache.set(
+               d.id,
+               d.display_name || '',
+               d.api_key || '',
+               d.phone_number || '',
+               d.settings,
+               { ticket_mode: Boolean(d.ticket_mode), hide_ticket_modal: Boolean(d.hide_ticket_modal) }
+             );
           });
           
           useChatStore.setState(state => ({
@@ -5848,40 +5904,46 @@ export default function ChatDashboard() {
         activeTicket={activeTicket}
         contact={activeChat}
         onConfirm={async (problemDesc, resolution, reactivateAi, summaryText, problemsChecklist, errorLog, aiSummaryData) => {
-          if (resolvingTicketContactId) {
-            // Buscar o ticket ativo correspondente ao resolvingTicketContactId no Supabase
-            const realContactId = resolvingTicketContactId.includes('_') ? resolvingTicketContactId.split('_')[0] : resolvingTicketContactId;
-            const { data: dbTicket } = await supabase
-              .from('chat_tickets')
-              .select('*')
-              .eq('contact_id', realContactId)
-              .eq('status', 'open')
-              .order('opened_at', { ascending: false })
-              .limit(1)
-              .maybeSingle();
-
-            const baseStats = await calculateFinalStats(resolvingTicketContactId, dbTicket);
-            const currentUserEmail = typeof window !== 'undefined' ? (localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email')) : null;
-            const currentUserName = typeof window !== 'undefined' ? (localStorage.getItem('current_user_name') || sessionStorage.getItem('current_user_name')) : null;
-            const operatorName = currentUserName || currentUserEmail || 'Atendente';
-            
-            const stats = { 
-              ...baseStats, 
-              summary: summaryText, 
-              checklist: problemsChecklist,
-              closed_by: operatorName,
-              error_log: errorLog,
-              sentiment: aiSummaryData?.sentiment || 'Neutro',
-              root_cause: aiSummaryData?.root_cause || undefined,
-              improvement_suggestions: aiSummaryData?.improvement_suggestions || [],
-              key_learnings: aiSummaryData?.key_learnings || []
-            };
-            if (dbTicket) {
-              await useChatStore.getState().resolveActiveTicket(dbTicket.id, problemDesc, resolution, stats);
-            }
-            await executeResolve(resolvingTicketContactId, reactivateAi);
-          }
+          const targetContactId = resolvingTicketContactId;
           setResolvingTicketContactId(null);
+          if (targetContactId) {
+            const realContactId = targetContactId.includes('_') ? targetContactId.split('_')[0] : targetContactId;
+            const memTicket = activeTicket?.contact_id === realContactId && activeTicket?.status === 'open'
+              ? activeTicket
+              : null;
+
+            // Fecha modal e muda a tela imediatamente (< 50ms)
+            const resolveResultPromise = executeResolve(targetContactId, reactivateAi);
+
+            // Atualiza estatísticas, checklist mestre e resumo no ticket em background
+            (async () => {
+              try {
+                const resObj = await resolveResultPromise;
+                const dbTicket = memTicket || resObj?.closedTicket;
+                if (!dbTicket?.id) return;
+
+                const baseStats = await calculateFinalStats(targetContactId, dbTicket);
+                const currentUserEmail = typeof window !== 'undefined' ? (localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email')) : null;
+                const currentUserName = typeof window !== 'undefined' ? (localStorage.getItem('current_user_name') || sessionStorage.getItem('current_user_name')) : null;
+                const operatorName = currentUserName || currentUserEmail || 'Atendente';
+
+                const stats = {
+                  ...baseStats,
+                  summary: summaryText,
+                  checklist: problemsChecklist,
+                  closed_by: operatorName,
+                  error_log: errorLog,
+                  sentiment: aiSummaryData?.sentiment || 'Neutro',
+                  root_cause: aiSummaryData?.root_cause || undefined,
+                  improvement_suggestions: aiSummaryData?.improvement_suggestions || [],
+                  key_learnings: aiSummaryData?.key_learnings || []
+                };
+                await useChatStore.getState().resolveActiveTicket(dbTicket.id, problemDesc, resolution, stats);
+              } catch (bgErr) {
+                console.error('Erro ao salvar detalhes do ticket resolvido:', bgErr);
+              }
+            })();
+          }
         }}
       />
 
@@ -8241,7 +8303,7 @@ export default function ChatDashboard() {
           onScroll={handleContactScroll} 
           className="flex-1 overflow-y-auto custom-scrollbar"
         >
-           <AnimatePresence mode="popLayout">
+           <AnimatePresence initial={false}>
             {/* Expressão 1: Nenhum contato encontrado durante a busca */}
             {!isChannelLoading && filteredContacts.length === 0 && searchTerm && (
               <motion.div 
@@ -8286,8 +8348,9 @@ export default function ChatDashboard() {
                 </div>
               </motion.div>
             )}
+           </AnimatePresence>
 
-            {/* Expressão 2: Renderização estável dos contatos correspondentes com garantia do chat ativo */}
+            {/* Expressão 2: Renderização estável dos contatos correspondentes sem Framer layout thrashing */}
             {(() => {
               const sliced = filteredContacts.slice(0, contactPageLimit);
               if (activeChatId && !searchTerm) {
@@ -8413,10 +8476,8 @@ export default function ChatDashboard() {
                              </span>
                              <div className="flex items-center gap-1 shrink-0">
                                {(() => {
-                                 const getCleanId = (id: string) => id.includes('_') ? id.split('_')[0] : id;
-                                 const contactTasks = globalActiveTasks.filter(t => 
-                                   getCleanId(t.contactId) === getCleanId(contact.id)
-                                 );
+                                 const cleanCid = contact.id.includes('_') ? contact.id.split('_')[0] : contact.id;
+                                 const contactTasks = tasksByContactIdMap.get(cleanCid) || [];
                                  if (contactTasks.length > 0) {
                                    return (
                                      <button
@@ -8466,7 +8527,7 @@ export default function ChatDashboard() {
                                   <span className="shrink-0 px-1.5 py-[2px] bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-500/20 text-[8px] font-extrabold uppercase rounded-md flex items-center gap-1 shadow-sm">
                                     <User size={8} />
                                     <span className="max-w-[120px] truncate">
-                                      {agents.filter(a => contact.assigned_to?.split(',').includes(a.id)).map(a => a.full_name?.split(' ')[0]).join(', ') || 'Agente'}
+                                      {contact.assigned_to.split(',').map((aid: string) => agentsByIdMap.get(aid.trim())?.full_name?.split(' ')[0]).filter(Boolean).join(', ') || 'Agente'}
                                     </span>
                                   </span>
                                 )}
@@ -8503,22 +8564,8 @@ export default function ChatDashboard() {
                           {(() => {
                             const contactGroups = tenantInfo?.settings?.contactGroups || [];
 
-                            // 1. Resolve empresas vinculadas via company_ids ou auto-match
-                            let linkedCompanies = (Array.isArray(contact.company_ids) ? contact.company_ids : [])
-                              .map((id: string) => allCompanies.find((c: any) => c.id === id))
-                              .filter(Boolean);
-
-                            if (linkedCompanies.length === 0 && (contact.document_number || contact.phone)) {
-                              const cleanDoc = contact.document_number ? contact.document_number.replace(/\D/g, '') : null;
-                              const cleanPhone = contact.phone ? contact.phone.replace(/\D/g, '').slice(-8) : null;
-                              const matched = allCompanies.find((c: any) => {
-                                if (c.id === contact.id) return false;
-                                const compDoc = c.document_number ? c.document_number.replace(/\D/g, '') : null;
-                                const compPhone = c.phone ? c.phone.replace(/\D/g, '').slice(-8) : null;
-                                return (cleanDoc && compDoc && cleanDoc === compDoc) || (cleanPhone && compPhone && cleanPhone === compPhone);
-                              });
-                              if (matched) linkedCompanies = [matched];
-                            }
+                            // 1. Resolve empresas vinculadas em O(1)
+                            const linkedCompanies = resolveLinkedCompaniesFast(contact);
 
                             // 2. Resolve grupos empresariais vinculados ao contato ou às empresas vinculadas
                             const matchingGroups = contactGroups.filter((g: any) => 
@@ -8783,6 +8830,7 @@ export default function ChatDashboard() {
             });
             })()}
 
+           <AnimatePresence initial={false}>
             {!isChannelLoading && filteredContacts.length === 0 && !searchTerm && (
               <motion.div
                 key="empty-contacts-state"

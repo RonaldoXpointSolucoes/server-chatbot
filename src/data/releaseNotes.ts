@@ -712,6 +712,87 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.2.4',
+    date: '2026-11-16',
+    summary: 'Blindagem DevLogger (Correção Definitiva de Corte no Cabeçalho) + Motor Server v8.1.8 (Coalescing Signal lid-mapping, Resiliência getInstanceConfig/Carrinhos & Otimizações ChatDashboard O(1))',
+    notes: [
+      {
+        id: 'fix-devlogger-header-scroll-clipping-824',
+        category: 'fixes',
+        title: 'Correção Definitiva de Corte e Deslocamento no Cabeçalho do Antigravity DevLogger e ServerLogsTerminal',
+        description: 'Eliminado o bug onde bottomRef.current.scrollIntoView() combinado com círculos de glow com margem negativa deslocava scrollTop/scrollLeft dentro do contêiner overflow-hidden, ocultando a Camada 1 do cabeçalho e cortando os botões Server SSE / Supabase / React App / Baileys Ping. Agora apenas o painel interno de logs rola via logsScrollRef e os glows ficam isolados em uma camada própria com trava de scroll (0, 0).',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
+        guide: {
+          moduleGroup: 'system',
+          moduleLabel: 'Antigravity DevLogger (>_) & ServerLogsTerminal (SSE)',
+          purpose: 'Garantir visibilidade integral de todos os botões de diagnóstico (Server SSE, Supabase, React App, Baileys Ping, ASTS Suite, Maximizar e Fechar) em Desktop, Tela Cheia e Mobile Bottom Sheet sem deslocamentos ou cortes internos.',
+          whereToAccess: [
+            '1. Toque ou clique no botão flutuante ">_" (canto inferior direito da tela)',
+            '2. Confira no topo do Cockpit toda a Camada 1 (Antigravity COCKPIT, I.A CRM, Copiar, Limpar, Maximizar, Fechar) e a Camada 2 (Server SSE, Supabase, React App, Baileys Ping, ASTS Suite, API Docs)',
+            '3. Clique em "Server SSE" para abrir o ServerLogsTerminal e testar o painel mesmo quando novos logs chegam em streaming'
+          ],
+          howToTest: [
+            '1. Abra o DevLogger pelo botão ">_" em Desktop (1440px+) e alterne entre janela flutuante e Maximizar.',
+            '2. Verifique se o título "Antigravity" e todos os 6 atalhos da barra superior permanecem 100% visíveis e clicáveis.',
+            '3. Redimensione para Mobile e confirme a exibição em Bottom Sheet sem cortes laterais.'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Tela: Antigravity DevLogger (>_) ➔ Cabeçalho Completo & Zero Clipping',
+            contextElements: ['Antigravity COCKPIT', 'I.A CRM', 'Server SSE', 'Supabase', 'Baileys Ping'],
+            targetButtonLabel: '👆 Botão ">_" ➔ Server SSE / ASTS Suite / Maximizar',
+            targetButtonPosition: 'Canto inferior direito (botão flutuante >_) abrindo o Cockpit com cabeçalho de 2 camadas fixo no topo',
+            visualPreviewVariant: 'hub-account-limits'
+          },
+          quickAction: {
+            label: 'Abrir Chat & Conferir Cockpit (>_) Agora',
+            route: '/chat'
+          }
+        }
+      },
+      {
+        id: 'imp-chatdashboard-lookup-and-ticket-cache-824',
+        category: 'improvements',
+        title: 'Otimizações de Performance O(1) na Lista de Conversas & Cache de Ticket Config (ChatDashboard + chatStore)',
+        description: 'Substituídas varreduras O(N×M) por mapas indexados em memória (tasksByContactIdMap, myTaskContactIdsSet, agentsByIdMap e companiesLookup) no ChatDashboard, além de consulta única leve LIMIT 1 em getTicketResolutionDate e cache ticketConfig por instância no instanceCache.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-300/30',
+        guide: {
+          moduleGroup: 'chat-header',
+          moduleLabel: 'Chat ao Vivo (/chat) • Performance de Lista & Tickets',
+          purpose: 'Acelerar a abertura de conversas, exibição de empresas vinculadas, resolução de tickets e alternância entre caixas de entrada sem travamentos mesmo com milhares de contatos e tarefas.',
+          whereToAccess: [
+            '1. Menu Lateral ➔ Conversas (/chat)',
+            '2. Navegue entre caixas, pesquise contatos e clique em "Resolver" para testar a resposta imediata da UI'
+          ],
+          howToTest: [
+            '1. Abra /chat e alterne rapidamente entre contatos e empresas parceiras.',
+            '2. Clique em "Resolver" em um atendimento e observe a fluidez na atualização de status e histórico.'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Tela: Chat ao Vivo (/chat) ➔ Indexação O(1) de Contatos, Tarefas e Empresas',
+            contextElements: ['Lista de Conversas', 'Empresas Vinculadas', 'Minhas Tarefas', '✅ Resolver'],
+            targetButtonLabel: 'Ir para o Chat ao Vivo (/chat)',
+            targetButtonPosition: 'Lista lateral de conversas e cabeçalho de ações do ChatDashboard',
+            visualPreviewVariant: 'chat-header-pin'
+          },
+          quickAction: {
+            label: 'Abrir Chat ao Vivo (/chat)',
+            route: '/chat'
+          }
+        }
+      },
+      {
+        id: 'feat-server-v818-signal-and-eventprocessor-resilience-824',
+        category: 'features',
+        title: 'Backend Engine v8.1.8: Blindagem Signal (lid-mapping Coalescing), Precision Fix de 17 Dígitos & EventProcessor Resiliente',
+        description: 'Implementada deduplicação in-flight + cooldown de 8s e cache LRU para 5.000 chaves Signal em auth.js (eliminando tempestades de 1.000+ timeouts em lid-mapping e preservando strings de LIDs com 17+ dígitos sem arredondamento IEEE-754), detecção case-insensitive de TIMEOUT em supabase.js, deduplicação anti-flood (15s) em system_logs e novo módulo resilience.js com Stale-While-Revalidate (60s/300s) em getInstanceConfig e tratamento silencioso de feature-not-implemented em carrinhos (getOrderDetails).',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      }
+    ]
+  },
+  {
     version: '8.2.3',
     date: '2026-11-15',
     summary: 'Redesign UI/UX & Responsividade Total do Antigravity DevLogger e ServerLogsTerminal (Obsidian Cyber Glassmorphism, Bottom Sheets, Modo Panorâmico & Busca no Terminal)',

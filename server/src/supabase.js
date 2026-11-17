@@ -111,14 +111,14 @@ export const nodeSupabaseCircuitBreaker = new NodeSupabaseCircuitBreaker();
 export function isTransientSupabaseError(err) {
   if (!err) return false;
   const msg = String(err?.message || err?.details || err || '');
+  const lowerMsg = msg.toLowerCase();
   const code = String(err?.code || '');
   const name = String(err?.name || '');
   return (
     msg.includes('CircuitBreaker') ||
-    msg.includes('fetch failed') ||
-    msg.includes('Timeout') ||
-    msg.includes('timeout') ||
-    msg.includes('aborted due to timeout') ||
+    lowerMsg.includes('fetch failed') ||
+    lowerMsg.includes('timeout') ||
+    lowerMsg.includes('aborted due to timeout') ||
     msg.includes('ECONNRESET') ||
     msg.includes('ETIMEDOUT') ||
     msg.includes('EPIPE') ||

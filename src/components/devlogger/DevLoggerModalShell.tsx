@@ -92,10 +92,16 @@ export const DevLoggerModalShell: React.FC<DevLoggerModalShellProps> = ({
       <div
         className={`bg-[#090f15]/95 backdrop-blur-2xl border-t sm:border ${theme.border} rounded-t-[28px] sm:rounded-3xl shadow-[0_25px_85px_rgba(0,0,0,0.92)] w-full ${maxWidthClass} max-h-[92dvh] sm:max-h-[90vh] flex flex-col overflow-hidden text-slate-200 relative animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-200 safe-bottom-padding`}
         onClick={(e) => e.stopPropagation()}
+        onScroll={(e) => {
+          if (e.currentTarget.scrollTop !== 0) e.currentTarget.scrollTop = 0;
+          if (e.currentTarget.scrollLeft !== 0) e.currentTarget.scrollLeft = 0;
+        }}
       >
-        {/* Brilhos radiais sutis */}
-        <div className={`absolute -top-20 -right-20 w-60 h-60 ${theme.topGlow} rounded-full blur-3xl pointer-events-none`} />
-        <div className={`absolute -bottom-20 -left-20 w-60 h-60 ${theme.bottomGlow} rounded-full blur-3xl pointer-events-none`} />
+        {/* Brilhos radiais sutis encapsulados para não expandir scrollWidth/scrollHeight do card */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none rounded-t-[28px] sm:rounded-3xl" aria-hidden="true">
+          <div className={`absolute -top-20 -right-20 w-60 h-60 ${theme.topGlow} rounded-full blur-3xl`} />
+          <div className={`absolute -bottom-20 -left-20 w-60 h-60 ${theme.bottomGlow} rounded-full blur-3xl`} />
+        </div>
 
         {/* Alça tátil de Bottom Sheet no celular */}
         <div

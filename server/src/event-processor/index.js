@@ -23,6 +23,7 @@ import {
     getCanonicalBrPhone,
     getBrPhoneVariations
 } from './helpers.js';
+import { createInstanceConfigLoader, createOrderDetailsFetcher } from './resilience.js';
 
 class EventProcessor {
     constructor() {
@@ -38,6 +39,21 @@ class EventProcessor {
         this.instanceConfigs = new Map();
         this.instanceConfigInFlight = new Map();
         this.validInstancesCache = new Map();
+        this.instanceConfigLoader = createInstanceConfigLoader({
+            cacheMap: this.instanceConfigs,
+            inFlightMap: this.instanceConfigInFlight,
+            isCircuitOpen: () => nodeSupabaseCircuitBreaker.isCircuitOpen(),
+            isTransientError: isTransientSupabaseError,
+            onResolvedTenantId: (instanceId) => this.validInstancesCache?.set(instanceId, Date.now()),
+            fetchFn: (instanceId) =>
+                retryWithBackoff(
+                    () => supabase.from('whatsapp_instances').select('settings, tenant_id').eq('id', instanceId).single(),
+                    0,
+                    400,
+                    4000
+                )
+        });
+        this.orderDetailsFetcher = createOrderDetailsFetcher();
         this.lastGlobalMessageTimestamp = 0;
         
         this.pendingStatuses = new Map();
@@ -314,68 +330,7 @@ class EventProcessor {
     }
 
     async getInstanceConfig(instanceId) {
-        if (!instanceId) return {};
-        const cached = this.instanceConfigs.get(instanceId);
-        if (cached && (Date.now() - cached.timestamp < 60000)) {
-            return cached.config;
-        }
-        if (nodeSupabaseCircuitBreaker.isCircuitOpen()) {
-            return cached?.config || {};
-        }
-        if (this.instanceConfigInFlight?.has(instanceId)) {
-            const existingEntry = this.instanceConfigInFlight.get(instanceId);
-            const entryPromise = existingEntry?.promise || existingEntry;
-            const entryStartedAt = existingEntry?.startedAt || 0;
-            if (entryPromise && entryStartedAt > 0 && (Date.now() - entryStartedAt < 6000)) {
-                return entryPromise;
-            }
-            console.warn(`[EventProcessor/SelfHealing] Removendo consulta getInstanceConfig estagnada (>6s) da instância ${instanceId} para impedir bloqueio de recebimento.`);
-            this.instanceConfigInFlight.delete(instanceId);
-        }
-
-        const fetchPromise = (async () => {
-            let cfgTimer = null;
-            try {
-                const { data, error } = await Promise.race([
-                    retryWithBackoff(() =>
-                        supabase.from('whatsapp_instances').select('settings, tenant_id').eq('id', instanceId).single(),
-                        1, 400, 5000
-                    ),
-                    new Promise((_, reject) => {
-                        cfgTimer = setTimeout(() => reject(new Error('INSTANCE_CONFIG_TIMEOUT')), 5000);
-                    })
-                ]);
-                if (error) {
-                    if (!isTransientSupabaseError(error)) {
-                        console.warn('[EventProcessor] Aviso ao buscar config da instância:', error.message || error);
-                    }
-                    if (cached?.config) {
-                        return cached.config;
-                    }
-                    return {};
-                }
-                const config = { ...(data?.settings || {}), _resolvedTenantId: data?.tenant_id || cached?.config?._resolvedTenantId || null };
-                this.instanceConfigs.set(instanceId, { config, timestamp: Date.now() });
-                if (data?.tenant_id) {
-                    this.validInstancesCache?.set(instanceId, Date.now());
-                }
-                return config;
-            } catch (e) {
-                if (!isTransientSupabaseError(e)) {
-                    console.warn(`[EventProcessor] Exceção/Timeout ao buscar config da instância ${instanceId}:`, e?.message || e);
-                }
-                return cached?.config || {};
-            } finally {
-                if (cfgTimer) clearTimeout(cfgTimer);
-                const currentEntry = this.instanceConfigInFlight?.get(instanceId);
-                if (!currentEntry || currentEntry === fetchPromise || currentEntry.promise === fetchPromise) {
-                    this.instanceConfigInFlight?.delete(instanceId);
-                }
-            }
-        })();
-
-        this.instanceConfigInFlight?.set(instanceId, { promise: fetchPromise, startedAt: Date.now() });
-        return fetchPromise;
+        return this.instanceConfigLoader.getConfig(instanceId);
     }
 
     async resolveInstanceTenantId(instanceId, fallbackTenantId) {
@@ -826,38 +781,7 @@ class EventProcessor {
                         currency: om.totalCurrencyCode || 'BRL',
                         products: []
                     };
-                    if (sock && typeof sock.getOrderDetails === 'function' && om.orderId && om.token) {
-                        let orderTimer = null;
-                        try {
-                            const fetchedOrder = await Promise.race([
-                                sock.getOrderDetails(om.orderId, om.token),
-                                new Promise((_, reject) => {
-                                    orderTimer = setTimeout(() => reject(new Error('TIMEOUT_ORDER_DETAILS')), 5000);
-                                })
-                            ]);
-                            if (fetchedOrder) {
-                                const products = (fetchedOrder.products || []).map(p => ({
-                                    id: p.id,
-                                    name: p.name,
-                                    quantity: Number(p.quantity || 1),
-                                    price: p.price ? Number(p.price) / 1000 : 0,
-                                    currency: p.currency || 'BRL',
-                                    imageUrl: p.imageUrl || null
-                                }));
-                                const calcTotal = fetchedOrder.price?.total ? Number(fetchedOrder.price.total) / 1000 : orderDetails.totalAmount;
-                                orderDetails = {
-                                    ...orderDetails,
-                                    totalAmount: calcTotal,
-                                    currency: fetchedOrder.price?.currency || orderDetails.currency,
-                                    products
-                                };
-                            }
-                        } catch (ordErr) {
-                            console.warn(`[EventProcessor] Aviso ao buscar detalhes do carrinho (${om.orderId}):`, ordErr.message);
-                        } finally {
-                            if (orderTimer) clearTimeout(orderTimer);
-                        }
-                    }
+                    orderDetails = await this.orderDetailsFetcher.enrich(instanceId, sock, om, orderDetails);
                     msg.orderDetails = orderDetails;
                     if (orderDetails.products && orderDetails.products.length > 0) {
                         const itemsLines = orderDetails.products.map(p => `• ${p.quantity}x *${p.name}* — R$ ${(p.price * p.quantity).toFixed(2)}`).join('\n');

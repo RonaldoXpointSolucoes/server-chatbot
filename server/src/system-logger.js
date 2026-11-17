@@ -7,6 +7,8 @@ const logBuffer = [];
 export const errorBuffer = [];
 const gastrofoodBuffer = [];
 const MAX_GASTROFOOD_LOGS = 100;
+const RECENT_LOG_DEDUP_MS = 15000;
+const recentPersistedLogCache = new Map();
 let clients = [];
 
 const router = express.Router();
@@ -22,7 +24,7 @@ const APP_ENV = (process.env.APP_ENV || 'production').toUpperCase();
 const APP_NODE = process.env.APP_NODE || (APP_ENV === 'ALPHA' ? 'ALFA-A' : 'PROD-C');
 
 /**
- * Persiste erros de forma não-bloqueante no Supabase (system_logs)
+ * Persiste erros de forma não-bloqueante no Supabase (system_logs) com proteção anti-flood.
  */
 export async function persistSystemLog({ type = 'Backend Error', message, level = 'error', payload = null, company_id = null, tenant_id = null }) {
   try {
@@ -36,6 +38,22 @@ export async function persistSystemLog({ type = 'Backend Error', message, level 
       msgStr.toLowerCase().includes('db.yzbxsxabzncdzuxvlppt')
     ) {
       return;
+    }
+
+    // Deduplicação em janela curta para impedir tempestades de INSERTs idênticos em system_logs
+    const normalizedKey = `${level}:${type}:${msgStr.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '<UUID>').slice(0, 140)}`;
+    const now = Date.now();
+    const lastInsertedAt = recentPersistedLogCache.get(normalizedKey);
+    if (lastInsertedAt && (now - lastInsertedAt < RECENT_LOG_DEDUP_MS)) {
+      return;
+    }
+    recentPersistedLogCache.set(normalizedKey, now);
+    if (recentPersistedLogCache.size > 500) {
+      for (const [k, ts] of recentPersistedLogCache.entries()) {
+        if (now - ts > RECENT_LOG_DEDUP_MS * 2) {
+          recentPersistedLogCache.delete(k);
+        }
+      }
     }
 
     const logPayload = payload || {};
@@ -140,7 +158,7 @@ function interceptConsole() {
         text.includes('SessionManager - Antiban') ||
         text.includes('Caixa FoodNext não está conectada') ||
         text.includes('Falha 404: Instância') ||
-        text.includes('Chave de API Gemini personalizada ignorada') || text.includes('[SessionManager/AuthQueue]') || text.includes('Aviso no DB Fallback') || text.includes('Aviso transitório no DB Fallback') || text.includes('failed to sync regular_') || text.includes('invalid wire type') || text.includes('[Supabase Node CircuitBreaker]') || text.includes('Aviso ao gravar wa_incoming_messages') || text.includes('Contato não validado no banco') || text.includes('Inserção de novos contatos em lote') ||
+        text.includes('Chave de API Gemini personalizada ignorada') || text.includes('[SessionManager/AuthQueue]') || text.includes('Aviso no DB Fallback') || text.includes('Aviso transitório no DB Fallback') || text.includes('Oscilação no DB Fallback') || text.includes('failed to sync regular_') || text.includes('invalid wire type') || text.includes('[Supabase Node CircuitBreaker]') || text.includes('Aviso ao gravar wa_incoming_messages') || text.includes('Contato não validado no banco') || text.includes('Inserção de novos contatos em lote') ||
         (text.includes('[WaCalls Listener]') && (text.includes('Contato não encontrado') || text.includes('mapeamento LID')))
     )) {
         originalFn.apply(console, args);

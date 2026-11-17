@@ -1,4 +1,4 @@
-import { supabase, retryWithBackoff } from '../supabase.js';
+import { supabase, retryWithBackoff, nodeSupabaseCircuitBreaker, isTransientSupabaseError } from '../supabase.js';
 import { initAuthCreds, BufferJSON } from '@whiskeysockets/baileys';
 
 export const sessionCaches = new Map();
@@ -137,11 +137,15 @@ export function clearInstanceMemoryCache(instanceId) {
 export function reviveAuthData(val) {
     if (val === null || val === undefined) return val;
     if (typeof val === 'string') {
-        try {
-            return JSON.parse(val, BufferJSON.reviver);
-        } catch {
-            return val;
+        const trimmed = val.trim();
+        if (trimmed.startsWith('{') || trimmed.startsWith('[') || trimmed.startsWith('"')) {
+            try {
+                return JSON.parse(val, BufferJSON.reviver);
+            } catch {
+                return val;
+            }
         }
+        return val;
     }
     return reviveBufferNode(val);
 }
@@ -265,12 +269,237 @@ export function clearRecipientSession(instanceId, jid) {
     return true;
 }
 
+const AUTH_FALLBACK_COOLDOWN_MS = 8000;
+const AUTH_FALLBACK_LOG_THROTTLE_MS = 30000;
+
+/**
+ * Cria handlers Signal (get/set) com coalescing de leituras concorrentes, cache negativo e cooldown em falhas transitórias.
+ */
+export function createSignalKeyHandlers({
+    instanceId,
+    tenantId,
+    memCache,
+    supabaseClient = supabase,
+    runWithBackoff = retryWithBackoff,
+    isCircuitOpen = () => nodeSupabaseCircuitBreaker.isCircuitOpen(),
+    isTransientError = isTransientSupabaseError,
+    logger = console,
+    cooldownMs = AUTH_FALLBACK_COOLDOWN_MS
+}) {
+    const inFlightReads = new Map();
+    let fallbackCooldownUntil = 0;
+    let lastFallbackLogAt = 0;
+
+    const formatKeyValue = (type, cv) => {
+        if (cv === null || cv === undefined) return undefined;
+        if (type === 'app-state-sync-key' && cv && cv.target) {
+            return { ...cv, target: Buffer.from(cv.target, 'base64') };
+        }
+        return cv;
+    };
+
+    const logThrottledTransient = (type, msg) => {
+        const now = Date.now();
+        if (now - lastFallbackLogAt >= AUTH_FALLBACK_LOG_THROTTLE_MS) {
+            lastFallbackLogAt = now;
+            logger.info(`[SessionManager/AuthFallback] Instabilidade transitória no DB para chaves ${type} (${instanceId}). Cooldown de ${Math.round(cooldownMs / 1000)}s ativado: ${msg}`);
+        }
+    };
+
+    return {
+        get: async (type, ids) => {
+            const data = {};
+            const missingKeys = [];
+            const missingIdMap = new Map();
+
+            for (const id of ids) {
+                const name = `${type}-${id}`;
+                if (memCache.has(name)) {
+                    const formatted = formatKeyValue(type, memCache.get(name));
+                    if (formatted !== undefined) {
+                        data[id] = formatted;
+                    }
+                } else {
+                    missingKeys.push(name);
+                    missingIdMap.set(name, id);
+                }
+            }
+
+            if (missingKeys.length > 0) {
+                const promisesToAwait = [];
+                const seenInFlight = new Set();
+                const keysToFetch = [];
+
+                for (const name of missingKeys) {
+                    const existingPromise = inFlightReads.get(name);
+                    if (existingPromise) {
+                        if (!seenInFlight.has(existingPromise)) {
+                            seenInFlight.add(existingPromise);
+                            promisesToAwait.push(existingPromise);
+                        }
+                    } else {
+                        keysToFetch.push(name);
+                    }
+                }
+
+                if (keysToFetch.length > 0 && !isCircuitOpen() && Date.now() >= fallbackCooldownUntil) {
+                    const CHUNK_SIZE = 100;
+                    for (let i = 0; i < keysToFetch.length; i += CHUNK_SIZE) {
+                        const chunk = keysToFetch.slice(i, i + CHUNK_SIZE);
+                        const chunkPromise = (async () => {
+                            try {
+                                const { data: dbKeys, error } = await runWithBackoff(
+                                    () => supabaseClient
+                                        .from('wa_auth_keys')
+                                        .select('key_name, key_data')
+                                        .eq('instance_id', instanceId)
+                                        .in('key_name', chunk),
+                                    0,
+                                    400,
+                                    8000
+                                );
+
+                                if (error) {
+                                    if (isTransientError(error)) {
+                                        fallbackCooldownUntil = Date.now() + cooldownMs;
+                                        logThrottledTransient(type, String(error.message || error));
+                                    } else {
+                                        logger.warn(`[SessionManager] Aviso não transitório no DB Fallback de chaves Signal (${type}):`, error.message || error);
+                                    }
+                                    return;
+                                }
+
+                                const foundNames = new Set();
+                                if (dbKeys && dbKeys.length > 0) {
+                                    for (let kIdx = 0; kIdx < dbKeys.length; kIdx++) {
+                                        const row = dbKeys[kIdx];
+                                        foundNames.add(row.key_name);
+                                        try {
+                                            const parsed = reviveAuthData(row.key_data);
+                                            memCache.set(row.key_name, parsed);
+                                        } catch (pErr) {
+                                            logger.warn(`[SessionManager] Erro ao deserializar chave ${row.key_name}:`, pErr.message);
+                                        }
+                                        if ((kIdx + 1) % 30 === 0) {
+                                            await new Promise(r => setImmediate(r));
+                                        }
+                                    }
+                                }
+
+                                // Negative Caching: evita tempestades de SELECTs repetidos para chaves inexistentes
+                                if (type !== 'app-state-sync-key') {
+                                    for (const kName of chunk) {
+                                        if (!foundNames.has(kName)) {
+                                            memCache.set(kName, null);
+                                        }
+                                    }
+                                }
+                            } catch (err) {
+                                if (isTransientError(err)) {
+                                    fallbackCooldownUntil = Date.now() + cooldownMs;
+                                    logThrottledTransient(type, String(err?.message || err));
+                                } else {
+                                    logger.warn(`[SessionManager] Oscilação no DB Fallback de chaves Signal (${type}):`, err?.message || err);
+                                }
+                            } finally {
+                                for (const kName of chunk) {
+                                    if (inFlightReads.get(kName) === chunkPromise) {
+                                        inFlightReads.delete(kName);
+                                    }
+                                }
+                            }
+                        })();
+
+                        for (const kName of chunk) {
+                            inFlightReads.set(kName, chunkPromise);
+                        }
+                        promisesToAwait.push(chunkPromise);
+                    }
+                }
+
+                if (promisesToAwait.length > 0) {
+                    await Promise.allSettled(promisesToAwait);
+                    for (const [name, id] of missingIdMap.entries()) {
+                        if (memCache.has(name)) {
+                            const formatted = formatKeyValue(type, memCache.get(name));
+                            if (formatted !== undefined) {
+                                data[id] = formatted;
+                            }
+                        }
+                    }
+                }
+            }
+
+            return data;
+        },
+        set: async (data) => {
+            const keysToUpsert = [];
+            const keysToDelete = [];
+            let processedCount = 0;
+
+            for (const category in data) {
+                for (const id in data[category]) {
+                    const val = data[category][id];
+                    const name = `${category}-${id}`;
+                    const isNull = !val;
+
+                    if (isNull) {
+                        memCache.set(name, null);
+                        keysToDelete.push(name);
+                    } else {
+                        memCache.set(name, val);
+                        keysToUpsert.push({
+                            instance_id: instanceId,
+                            tenant_id: tenantId,
+                            key_name: name,
+                            key_data: serializeAuthData(val)
+                        });
+                    }
+                    if (++processedCount % 30 === 0) {
+                        await new Promise(r => setImmediate(r));
+                    }
+                }
+            }
+
+            enqueueWrite(instanceId, async () => {
+                await runWithBackoff(async () => {
+                    const promises = [];
+                    if (keysToDelete.length > 0) {
+                        promises.push(
+                            supabaseClient.from('wa_auth_keys')
+                                .delete()
+                                .eq('instance_id', instanceId)
+                                .in('key_name', keysToDelete)
+                        );
+                    }
+                    if (keysToUpsert.length > 0) {
+                        const CHUNK = 500;
+                        for (let i = 0; i < keysToUpsert.length; i += CHUNK) {
+                            promises.push(
+                                supabaseClient.from('wa_auth_keys')
+                                    .upsert(keysToUpsert.slice(i, i + CHUNK), { onConflict: 'instance_id, key_name' })
+                            );
+                        }
+                    }
+
+                    if (promises.length > 0) {
+                        const results = await Promise.all(promises);
+                        for (const res of results) {
+                            if (res.error) throw res.error;
+                        }
+                    }
+                });
+            }).catch(() => {});
+        }
+    };
+}
+
 export async function useSupabaseAuthState(tenantId, instanceId, forceCleanState = false) {
     if (forceCleanState && sessionCaches.has(instanceId)) {
         sessionCaches.get(instanceId).clear();
     }
     if (!sessionCaches.has(instanceId)) {
-        sessionCaches.set(instanceId, new BoundedKeyCache(3000));
+        sessionCaches.set(instanceId, new BoundedKeyCache(5000));
     }
     const memCache = sessionCaches.get(instanceId);
 
@@ -343,7 +572,7 @@ export async function useSupabaseAuthState(tenantId, instanceId, forceCleanState
                     }
                 }
             }
-            console.log(`[SessionManager] Warm-up leve concluído: ${memCache.size} chaves ativas em RAM para a instância ${instanceId} (LRU Bounded: max 3000 chaves)`);
+            console.log(`[SessionManager] Warm-up leve concluído: ${memCache.size} chaves ativas em RAM para a instância ${instanceId} (LRU Bounded: max 5000 chaves)`);
         } catch (warmErr) {
             console.warn(`[SessionManager] Aviso no warm-up de chaves para ${instanceId}:`, warmErr.message);
         }
@@ -352,157 +581,7 @@ export async function useSupabaseAuthState(tenantId, instanceId, forceCleanState
     const authState = {
         state: {
             creds,
-            keys: {
-                get: async (type, ids) => {
-                    const data = {};
-                    const missingKeys = [];
-                    const missingIdMap = new Map();
-                    
-                    for (const id of ids) {
-                        const name = `${type}-${id}`;
-                        if (memCache.has(name)) {
-                            // Restaura cópia serializada
-                            let cv = memCache.get(name);
-                            if (cv !== null && cv !== undefined) {
-                                if (type === 'app-state-sync-key' && cv && cv.target) {
-                                    cv = { ...cv, target: Buffer.from(cv.target, 'base64') };
-                                }
-                                data[id] = cv;
-                            }
-                            // Se cv for null, significa que já sabemos que a chave não existe no DB (cache negativo)
-                        } else {
-                            missingKeys.push(name);
-                            missingIdMap.set(name, id);
-                        }
-                    }
-
-                    // Fallback em LOTE para o Banco de Dados para todas as chaves ausentes da RAM
-                    if (missingKeys.length > 0) {
-                        try {
-                            const CHUNK_SIZE = 100;
-                            for (let i = 0; i < missingKeys.length; i += CHUNK_SIZE) {
-                                const chunk = missingKeys.slice(i, i + CHUNK_SIZE);
-                                const { data: dbKeys, error } = await retryWithBackoff(() =>
-                                    supabase
-                                        .from('wa_auth_keys')
-                                        .select('key_name, key_data')
-                                        .eq('instance_id', instanceId)
-                                        .in('key_name', chunk)
-                                );
-                                
-                                if (error) {
-                                    const errMsg = String(error.message || '');
-                                    if (!errMsg.includes('CircuitBreaker') && !errMsg.includes('TimeoutError') && !errMsg.includes('aborted due to timeout')) {
-                                        console.info(`[SessionManager] Aviso transitório no DB Fallback para ${chunk.length} chaves Signal:`, errMsg);
-                                    }
-                                } else {
-                                    const foundNames = new Set();
-                                    if (dbKeys && dbKeys.length > 0) {
-                                        for (let kIdx = 0; kIdx < dbKeys.length; kIdx++) {
-                                            const row = dbKeys[kIdx];
-                                            foundNames.add(row.key_name);
-                                            try {
-                                                const parsed = reviveAuthData(row.key_data);
-                                                memCache.set(row.key_name, parsed);
-                                                const origId = missingIdMap.get(row.key_name);
-                                                if (origId) {
-                                                    let cv = parsed;
-                                                    if (type === 'app-state-sync-key' && cv && cv.target) {
-                                                        cv = { ...cv, target: Buffer.from(cv.target, 'base64') };
-                                                    }
-                                                    data[origId] = cv;
-                                                }
-                                            } catch (pErr) {
-                                                console.warn(`[SessionManager] Erro ao deserializar chave ${row.key_name}:`, pErr.message);
-                                            }
-                                            if ((kIdx + 1) % 30 === 0) {
-                                                await new Promise(r => setImmediate(r));
-                                            }
-                                        }
-                                    }
-                                    // Negative Caching: Chaves Signal que foram buscadas e NÃO existem no DB são salvas como null na RAM
-                                    // Isso impede tempestades de SELECTs repetidos para chaves inexistentes no Baileys.
-                                    // Exceção: 'app-state-sync-key' nunca recebe cache negativo permanente, pois chega de forma assíncrona via APP_STATE_SYNC_KEY_SHARE.
-                                    if (type !== 'app-state-sync-key') {
-                                        for (const kName of chunk) {
-                                            if (!foundNames.has(kName)) {
-                                                memCache.set(kName, null);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        } catch (err) {
-                            if (!String(err?.message || '').includes('CircuitBreaker')) {
-                                console.warn(`[SessionManager] Oscilação no DB Fallback de chaves Signal (${type}):`, err.message);
-                            }
-                        }
-                    }
-
-                    return data;
-                },
-                set: async (data) => {
-                    const keysToUpsert = [];
-                    const keysToDelete = [];
-                    let processedCount = 0;
-                    
-                    for (const category in data) {
-                        for (const id in data[category]) {
-                            const val = data[category][id];
-                            const name = `${category}-${id}`;
-                            const isNull = !val;
-                            
-                            if (isNull) {
-                                // Mantém null no cache negativo para impedir que keys.get ressuscite a chave deletada do DB antes do DELETE concluir
-                                memCache.set(name, null);
-                                keysToDelete.push(name);
-                            } else {
-                                memCache.set(name, val);
-                                keysToUpsert.push({
-                                    instance_id: instanceId,
-                                    tenant_id: tenantId,
-                                    key_name: name,
-                                    key_data: serializeAuthData(val)
-                                });
-                            }
-                            if (++processedCount % 30 === 0) {
-                                await new Promise(r => setImmediate(r));
-                            }
-                        }
-                    }
-
-                    // Dispara persistência assíncrona na fila ordenada sem segurar o txMutex do Signal em chamadas de rede
-                    enqueueWrite(instanceId, async () => {
-                        await retryWithBackoff(async () => {
-                            const promises = [];
-                            if (keysToDelete.length > 0) {
-                                promises.push(
-                                    supabase.from('wa_auth_keys')
-                                        .delete()
-                                        .eq('instance_id', instanceId)
-                                        .in('key_name', keysToDelete)
-                                );
-                            }
-                            if (keysToUpsert.length > 0) {
-                                const CHUNK = 500;
-                                for (let i = 0; i < keysToUpsert.length; i += CHUNK) {
-                                    promises.push(
-                                        supabase.from('wa_auth_keys')
-                                            .upsert(keysToUpsert.slice(i, i + CHUNK), { onConflict: 'instance_id, key_name' })
-                                    );
-                                }
-                            }
-
-                            if (promises.length > 0) {
-                                const results = await Promise.all(promises);
-                                for (const res of results) {
-                                    if (res.error) throw res.error;
-                                }
-                            }
-                        });
-                    }).catch(() => {});
-                }
-            }
+            keys: createSignalKeyHandlers({ instanceId, tenantId, memCache })
         },
         saveCreds: async () => {
             if (pendingCredsSaves.has(instanceId)) {
