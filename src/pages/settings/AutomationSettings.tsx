@@ -303,7 +303,7 @@ export default function AutomationSettings() {
                   <AlertCircle size={18} className="text-indigo-400 shrink-0 mt-0.5" />
                   <p className="text-xs text-indigo-200/80 leading-relaxed">
                     {formData.action_type === 'extract_contact_name' 
-                      ? 'O sistema irá procurar por "Nome: (X)" nas mensagens recebidas/enviadas. O texto encontrado em (X) será salvo como o nome do contato caso ele ainda não tenha nome (ou seja apenas um número de telefone).'
+                      ? 'O sistema irá procurar por "Nome: (X)" apenas nas mensagens recebidas do cliente (nunca em mensagens enviadas ou dados de Pix). O texto encontrado em (X) será salvo como o nome do contato somente se ele ainda não possuir um nome cadastrado (estiver apenas com o número de telefone).'
                       : 'Esta regra será aplicada tanto no App quanto no Banco de Dados. Conversas que receberem mensagens contendo o texto informado serão marcadas como lidas automaticamente.'}
                   </p>
                 </div>

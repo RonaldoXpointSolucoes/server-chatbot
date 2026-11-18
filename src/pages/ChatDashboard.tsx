@@ -33,6 +33,7 @@ import { useScheduleMonitor } from '../hooks/useScheduleMonitor';
 import { useXPointRemoteBridge, resolveContactRemoteContext } from '../hooks/useXPointRemoteBridge';
 import { convertClipboardToWhatsAppFormat, formatStructuredPlainText, hasWhatsAppRichFormatting } from '../utils/whatsappRichText';
 import { classifyUploadFailure, runFileUploadQueue, sendMultipartWithRetry } from '../utils/mediaUploadResilience.mjs';
+import { isPlaceholderContactName, sanitizeContactNameValue } from '../utils/contactName.mjs';
 import {
   SearchScopeType,
   buildLocalSearchCriteria,
@@ -138,9 +139,11 @@ export function isGroupContact(c: any): boolean {
 }
 
 export function getContactDisplayName(name: string | undefined | null, pushName: string | undefined | null, phone: string | undefined | null): string {
-  let cleanName = (name && name !== 'undefined' && name !== 'null') ? name.trim() : null;
-  let cleanPush = (pushName && pushName !== 'undefined' && pushName !== 'null') ? pushName.trim() : null;
-  let finalName = cleanName || cleanPush;
+  const rawName = (name && name !== 'undefined' && name !== 'null') ? name.trim() : null;
+  const rawPush = (pushName && pushName !== 'undefined' && pushName !== 'null') ? pushName.trim() : null;
+  const cleanName = (rawName && !isPlaceholderContactName(rawName)) ? rawName : null;
+  const cleanPush = (rawPush && !isPlaceholderContactName(rawPush)) ? rawPush : null;
+  const finalName = cleanName || cleanPush;
   if (!finalName) {
     if (phone && phone !== 'undefined' && phone !== 'null') {
       if (phone.startsWith('NO_PHONE_')) {
@@ -1464,10 +1467,14 @@ export default function ChatDashboard() {
       if (notes) {
         const formatted = notes.map((n: any) => {
           const contactObj = n.contacts || {};
+          const fallbackContactName = contactObj.custom_name
+            || sanitizeContactNameValue(contactObj.name, contactObj.phone)
+            || contactObj.phone
+            || 'Contato';
           return {
             noteId: n.id,
             contactId: n.contact_id,
-            contactName: contactObj.custom_name || contactObj.name || contactObj.phone || 'Contato',
+            contactName: fallbackContactName,
             instanceId: contactObj.instance_id,
             text: n.content || '',
             timestamp: new Date(n.created_at),
@@ -8248,7 +8255,7 @@ export default function ChatDashboard() {
         <div className="flex flex-col border-b border-[#f2f2f2] dark:border-[#222d34] px-3 py-2 gap-2 bg-white dark:bg-[#111b21]">
           <div className="flex items-center gap-2 w-full">
             <div className="flex w-full bg-[#f0f2f5] dark:bg-[#202c33] px-3 py-2 rounded-xl items-center gap-2 group transition-all ring-1 ring-transparent focus-within:ring-[#00a884]/50 shadow-inner">
-              {(isSearchingGlobally || (isSearchingMessages && filteredContacts.length === 0)) ? (
+              {(isSearchingGlobally || isSearchingMessages) ? (
                   <Loader2 size={18} className="text-[#00a884] animate-spin flex-shrink-0" />
               ) : (
                   <Search size={18} className="text-[#54656f] dark:text-[#aebac1] group-focus-within:text-[#00a884] transition-colors flex-shrink-0" />
@@ -8280,100 +8287,140 @@ export default function ChatDashboard() {
               )}
             </div>
             <button 
+              type="button"
               onClick={() => setShowFilters(!showFilters)}
-              className={cn("p-2 rounded-full transition-colors flex-shrink-0", showFilters || filterType !== 'all' ? "text-[#00a884] bg-[#00a884]/10" : "text-[#54656f] dark:text-[#aebac1] hover:bg-gray-100 dark:hover:bg-[#202c33]")}
-              title="Filtros">
+              className={cn(
+                "relative p-2 rounded-full transition-colors flex-shrink-0 active:scale-95",
+                (showFilters || filterType !== 'all' || searchScope !== 'all')
+                  ? "text-[#00a884] bg-[#00a884]/10"
+                  : "text-[#54656f] dark:text-[#aebac1] hover:bg-gray-100 dark:hover:bg-[#202c33]"
+              )}
+              title="Filtros e escopo da busca"
+              aria-expanded={showFilters}
+            >
               <Filter size={18} />
+              {!showFilters && (filterType !== 'all' || searchScope !== 'all') && (
+                <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-[#00a884] ring-2 ring-white dark:ring-[#111b21]" />
+              )}
             </button>
           </div>
 
-          {/* Seletor rápido de Escopo de Busca (Performance e precisão: Tudo | Contato | Empresa | Mensagens) */}
-          <div className="flex items-center justify-between gap-1.5 w-full">
-            <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide pb-0.5 select-none">
-              {([
-                { id: 'all', label: 'Tudo', Icon: Layers, title: 'Buscar em contatos, empresas, CNPJ e mensagens' },
-                { id: 'contact', label: 'Contato', Icon: User, title: 'Filtro rápido apenas por nome, apelido ou telefone' },
-                { id: 'company', label: 'Empresa', Icon: Building2, title: 'Filtrar por empresa vinculada, razão social ou CNPJ' },
-                { id: 'messages', label: 'Mensagens', Icon: MessageSquareText, title: 'Buscar palavras dentro das conversas e anotações' }
-              ] as const).map(({ id, label, Icon, title }) => {
-                const isActive = searchScope === id;
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => setSearchScope(id)}
-                    title={title}
-                    className={cn(
-                      "px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap flex items-center gap-1 shrink-0 border cursor-pointer active:scale-95",
-                      isActive
-                        ? "bg-[#00a884]/12 dark:bg-emerald-500/15 text-[#00a884] dark:text-emerald-400 border-[#00a884]/30 shadow-xs"
-                        : "bg-[#f0f2f5]/70 dark:bg-[#202c33]/70 text-[#54656f] dark:text-[#8696a0] border-transparent hover:bg-gray-200/70 dark:hover:bg-white/5"
-                    )}
-                  >
-                    <Icon size={11} className="shrink-0" />
-                    <span>{label}</span>
-                  </button>
-                );
-              })}
-            </div>
-            {isSearchingMessages && searchTerm.trim().length >= 3 && (
-              <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1 shrink-0 animate-pulse">
-                <Loader2 size={10} className="animate-spin" />
-                <span className="hidden sm:inline">Mensagens...</span>
-              </span>
-            )}
-          </div>
-          
-          {/* Pills Filters (Glassmorphism inspired - Sem corte lateral nos filtros) */}
+          {/* Menu unificado de Escopo de Busca e Filtros (visível apenas ao clicar no funil) */}
           {showFilters && (
-            <div className="flex flex-col gap-2 relative">
-              <div className="flex flex-wrap gap-1.5 pb-1 relative select-none animate-in fade-in slide-in-from-top-2 duration-200">
+            <div className="flex flex-col gap-2.5 p-2.5 rounded-2xl bg-[#f0f2f5]/75 dark:bg-[#202c33]/70 backdrop-blur-md border border-black/5 dark:border-white/10 shadow-sm relative select-none animate-in fade-in slide-in-from-top-2 duration-200">
+              {/* Seção 1: Escopo da Busca (Onde pesquisar) */}
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between gap-2 px-0.5">
+                  <span className="text-[10px] font-bold text-[#54656f] dark:text-[#8696a0] uppercase tracking-wider flex items-center gap-1">
+                    <Search size={10} className="text-[#00a884] dark:text-emerald-400" />
+                    Buscar em:
+                  </span>
+                  {(filterType !== 'all' || searchScope !== 'all' || selectedLabelId !== null) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSearchScope('all');
+                        setFilterType('all');
+                        setSelectedLabelId(null);
+                      }}
+                      className="text-[10px] font-semibold text-rose-500 dark:text-rose-400 hover:underline transition-colors cursor-pointer"
+                    >
+                      Limpar filtros
+                    </button>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {([
+                    { id: 'all', label: 'Tudo', Icon: Layers, title: 'Buscar em contatos, empresas, CNPJ e mensagens' },
+                    { id: 'contact', label: 'Contato', Icon: User, title: 'Filtro rápido apenas por nome, apelido ou telefone' },
+                    { id: 'company', label: 'Empresa', Icon: Building2, title: 'Filtrar por empresa vinculada, razão social ou CNPJ' },
+                    { id: 'messages', label: 'Mensagens', Icon: MessageSquareText, title: 'Buscar palavras dentro das conversas e anotações' }
+                  ] as const).map(({ id, label, Icon, title }) => {
+                    const isActive = searchScope === id;
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => setSearchScope(id)}
+                        title={title}
+                        className={cn(
+                          "px-2.5 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap flex items-center gap-1 border cursor-pointer active:scale-95",
+                          isActive
+                            ? "bg-[#00a884]/15 dark:bg-emerald-500/20 text-[#00a884] dark:text-emerald-400 border-[#00a884]/35 shadow-xs"
+                            : "bg-white/80 dark:bg-[#111b21]/75 text-[#54656f] dark:text-[#aebac1] border-black/5 dark:border-white/5 hover:bg-white dark:hover:bg-[#2a3942]"
+                        )}
+                      >
+                        <Icon size={12} className="shrink-0" />
+                        <span>{label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="h-px bg-black/5 dark:bg-white/10" />
+
+              {/* Seção 2: Filtros de Conversas */}
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[10px] font-bold text-[#54656f] dark:text-[#8696a0] uppercase tracking-wider px-0.5 flex items-center gap-1">
+                  <Filter size={10} className="text-[#00a884] dark:text-emerald-400" />
+                  Filtrar conversas:
+                </span>
+                <div className="flex flex-wrap gap-1.5">
                  <button 
+                    type="button"
                     onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'all', x: e.clientX, y: e.clientY }); }}
                     onClick={() => { setFilterType('all'); setSelectedLabelId(null); }} 
-                    className={cn("px-3 py-1 rounded-full text-xs font-semibold transition-all whitespace-nowrap active:scale-95", filterType === 'all' ? "bg-[#00a884]/15 text-[#00a884] ring-1 ring-[#00a884]/35" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
+                    className={cn("px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap border active:scale-95", filterType === 'all' ? "bg-[#00a884]/15 text-[#00a884] border-[#00a884]/35" : "bg-white/80 dark:bg-[#111b21]/75 text-[#54656f] dark:text-[#aebac1] border-black/5 dark:border-white/5 hover:bg-white dark:hover:bg-[#2a3942]")}>
                    Tudo
                  </button>
                  <button 
+                    type="button"
                     onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'unread', x: e.clientX, y: e.clientY }); }}
                     onClick={() => { setFilterType('unread'); setSelectedLabelId(null); }} 
-                    className={cn("px-3 py-1 rounded-full text-xs font-semibold transition-all whitespace-nowrap active:scale-95", filterType === 'unread' ? "bg-[#00a884]/15 text-[#00a884] ring-1 ring-[#00a884]/35" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
+                    className={cn("px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap border active:scale-95", filterType === 'unread' ? "bg-[#00a884]/15 text-[#00a884] border-[#00a884]/35" : "bg-white/80 dark:bg-[#111b21]/75 text-[#54656f] dark:text-[#aebac1] border-black/5 dark:border-white/5 hover:bg-white dark:hover:bg-[#2a3942]")}>
                    Não Lidas
                  </button>
                  <button 
+                    type="button"
                     onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'mine', x: e.clientX, y: e.clientY }); }}
                     onClick={() => { setFilterType('mine'); setSelectedLabelId(null); }} 
-                    className={cn("px-3 py-1 rounded-full text-xs font-semibold transition-all whitespace-nowrap flex items-center gap-1 active:scale-95", filterType === 'mine' ? "bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 ring-1 ring-indigo-500/35" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
+                    className={cn("px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap flex items-center gap-1 border active:scale-95", filterType === 'mine' ? "bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border-indigo-500/35" : "bg-white/80 dark:bg-[#111b21]/75 text-[#54656f] dark:text-[#aebac1] border-black/5 dark:border-white/5 hover:bg-white dark:hover:bg-[#2a3942]")}>
                    <User size={13} className={filterType === 'mine' ? "text-indigo-600 dark:text-indigo-400" : ""} /> Minhas
                  </button>
                  <button 
+                    type="button"
                     onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'favorite', x: e.clientX, y: e.clientY }); }}
                     onClick={() => { setFilterType('favorite'); setSelectedLabelId(null); }} 
-                    className={cn("px-3 py-1 rounded-full text-xs font-semibold transition-all whitespace-nowrap flex items-center gap-1 active:scale-95", filterType === 'favorite' ? "bg-yellow-500/15 text-yellow-600 dark:text-yellow-400 ring-1 ring-yellow-500/35" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
+                    className={cn("px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap flex items-center gap-1 border active:scale-95", filterType === 'favorite' ? "bg-yellow-500/15 text-yellow-600 dark:text-yellow-400 border-yellow-500/35" : "bg-white/80 dark:bg-[#111b21]/75 text-[#54656f] dark:text-[#aebac1] border-black/5 dark:border-white/5 hover:bg-white dark:hover:bg-[#2a3942]")}>
                    <Star size={13} className={filterType === 'favorite' ? "fill-yellow-600 dark:fill-yellow-400" : ""} /> Favoritas
                  </button>
                  <button 
+                    type="button"
                     onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'labels', x: e.clientX, y: e.clientY }); }}
                     onClick={() => setFilterType('labels')} 
-                    className={cn("px-3 py-1 rounded-full text-xs font-semibold transition-all whitespace-nowrap flex items-center gap-1 active:scale-95", filterType === 'labels' ? "bg-blue-500/15 text-blue-600 dark:text-blue-400 ring-1 ring-blue-500/35" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
+                    className={cn("px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap flex items-center gap-1 border active:scale-95", filterType === 'labels' ? "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/35" : "bg-white/80 dark:bg-[#111b21]/75 text-[#54656f] dark:text-[#aebac1] border-black/5 dark:border-white/5 hover:bg-white dark:hover:bg-[#2a3942]")}>
                    <Tag size={13} /> Etiquetas
                  </button>
                  <button 
+                    type="button"
                     onContextMenu={(e) => { e.preventDefault(); setFilterContextMenu({ type: 'blocked', x: e.clientX, y: e.clientY }); }}
                     onClick={() => { setFilterType('blocked'); setSelectedLabelId(null); }} 
-                    className={cn("px-3 py-1 rounded-full text-xs font-semibold transition-all whitespace-nowrap flex items-center gap-1 active:scale-95", filterType === 'blocked' ? "bg-red-500/15 text-red-600 dark:text-red-400 ring-1 ring-red-500/35" : "bg-[#f0f2f5] dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] hover:bg-gray-200 dark:hover:bg-gray-700")}>
+                    className={cn("px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap flex items-center gap-1 border active:scale-95", filterType === 'blocked' ? "bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/35" : "bg-white/80 dark:bg-[#111b21]/75 text-[#54656f] dark:text-[#aebac1] border-black/5 dark:border-white/5 hover:bg-white dark:hover:bg-[#2a3942]")}>
                    <Ban size={13} className={filterType === 'blocked' ? "text-red-600 dark:text-red-400" : ""} /> Bloqueados
                  </button>
+                </div>
               </div>
 
               {filterType === 'labels' && tenantLabels && tenantLabels.length > 0 && (
-                <div className="flex flex-col gap-1.5 p-2.5 bg-gray-50/60 dark:bg-black/30 backdrop-blur-md rounded-2xl border border-black/5 dark:border-white/5 animate-in fade-in slide-in-from-top-2 duration-300 shadow-inner">
+                <div className="flex flex-col gap-1.5 p-2.5 bg-white/70 dark:bg-black/30 backdrop-blur-md rounded-xl border border-black/5 dark:border-white/5 animate-in fade-in slide-in-from-top-2 duration-300 shadow-inner">
                   <span className="text-[10px] font-bold text-gray-500 dark:text-[#8696a0] uppercase tracking-wider px-1 flex items-center gap-1.5">
                     <Tag size={10} className="text-[#00a884] dark:text-emerald-400" />
                     Filtrar por etiqueta:
                   </span>
                   <div className="flex flex-wrap gap-1.5 pb-0.5 px-0.5 select-none">
                     <button
+                      type="button"
                       onClick={() => setSelectedLabelId(null)}
                       className={cn(
                         "px-3 py-1 rounded-full text-xs font-semibold transition-all whitespace-nowrap flex items-center gap-1.5",
@@ -8390,6 +8437,7 @@ export default function ChatDashboard() {
                       return (
                         <button
                           key={label.id}
+                          type="button"
                           onClick={() => setSelectedLabelId(label.id)}
                           className={cn(
                             "px-3 py-1 rounded-full text-xs font-semibold transition-all whitespace-nowrap flex items-center gap-1.5 border shadow-sm",

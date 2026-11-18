@@ -231,3 +231,93 @@ export function getBrPhoneVariations(phoneStr) {
     return Array.from(new Set(res));
 }
 
+const SERVER_PLACEHOLDER_NAMES = new Set([
+    'null',
+    'undefined',
+    'novo contato',
+    'contato desconhecido',
+    'contato sem telefone',
+    'contato sem nome',
+    'contato',
+    'sem nome',
+    'empresa',
+    'cliente',
+    'desconhecido'
+]);
+
+function normalizeServerName(value) {
+    if (typeof value !== 'string') return '';
+    return value
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, ' ');
+}
+
+export function isPlaceholderContactName(name, blockedNames = []) {
+    if (typeof name !== 'string') return true;
+    const trimmed = name.trim();
+    if (!trimmed) return true;
+    const norm = normalizeServerName(trimmed);
+    if (!norm || SERVER_PLACEHOLDER_NAMES.has(norm)) return true;
+
+    const compact = norm.replace(/\s+/g, '');
+    for (const blocked of blockedNames) {
+        if (!blocked || typeof blocked !== 'string') continue;
+        const normBlocked = normalizeServerName(blocked);
+        if (normBlocked && (norm === normBlocked || compact === normBlocked.replace(/\s+/g, ''))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+export function isPhoneOnlyContactName(name, phone) {
+    if (typeof name !== 'string') return false;
+    const trimmed = name.trim();
+    if (!trimmed || !/^[\d\s()+.-]+$/.test(trimmed)) return false;
+    const nameDigits = trimmed.replace(/\D/g, '');
+    if (nameDigits.length < 4) return false;
+    const phoneDigits = typeof phone === 'string' ? phone.replace(/\D/g, '') : '';
+    if (!phoneDigits) return true;
+    if (nameDigits === phoneDigits) return true;
+    if (nameDigits.length >= 8 && phoneDigits.length >= 8) {
+        return nameDigits.slice(-8) === phoneDigits.slice(-8);
+    }
+    return false;
+}
+
+export function sanitizeIncomingContactName(rawName, phone, blockedNames = []) {
+    const cleanPhone = typeof phone === 'string' ? phone.trim() : '';
+    if (typeof rawName !== 'string') return cleanPhone;
+    const trimmed = rawName.trim();
+    if (!trimmed || isPlaceholderContactName(trimmed, blockedNames)) {
+        return cleanPhone;
+    }
+    return trimmed;
+}
+
+export function resolveBatchContactName(existingContact, incomingName, targetPhone, blockedNames = []) {
+    if (existingContact?.custom_name && !isPlaceholderContactName(existingContact.custom_name, blockedNames)) {
+        return existingContact.custom_name.trim();
+    }
+
+    const oldName = typeof existingContact?.name === 'string' ? existingContact.name.trim() : '';
+    const hasValidOldName = Boolean(
+        existingContact &&
+        oldName &&
+        !isPlaceholderContactName(oldName, blockedNames) &&
+        oldName !== existingContact.phone &&
+        oldName !== targetPhone &&
+        !isPhoneOnlyContactName(oldName, existingContact.phone || targetPhone)
+    );
+
+    if (hasValidOldName) {
+        return oldName;
+    }
+
+    return sanitizeIncomingContactName(incomingName, targetPhone, blockedNames) || targetPhone;
+}
+
+

@@ -712,6 +712,55 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.2.7',
+    date: '2026-11-17',
+    summary: 'Menu Unificado no Funil (Escopo de Busca & Filtros Ocultos), Proteção Estrita de Nomes de Contatos (Fim do Bug LOCASERV) e Fallback para Telefone',
+    notes: [
+      {
+        id: 'imp-unified-funnel-menu-827',
+        category: 'improvements',
+        title: 'Menu de Busca & Filtros Unificado e Oculto no Ícone do Funil (Sem Barra Horizontal)',
+        description: 'Todos os menus de escopo de pesquisa ("Tudo | Contato | Empresa | Mensagens") e filtros de conversas ("Tudo | Não Lidas | Minhas | Favoritas | Etiquetas | Bloqueados") agora ficam ocultos por padrão para manter a lista limpa e aparecem organizados em um painel único ao clicar no ícone do funil (▽), sem corte lateral e com botão rápido "Limpar filtros" e indicador visual quando ativo.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-300/30',
+        guide: {
+          moduleGroup: 'chat-header',
+          moduleLabel: 'Chat ao Vivo (/chat) • Busca & Painel de Filtros no Funil',
+          purpose: 'Deixar o topo da lista de conversas mais limpo no dia a dia sem perder o acesso rápido aos escopos de busca (Contato, Empresa, Mensagens) e filtros (Não Lidas, Minhas, Favoritas, Etiquetas, Bloqueados).',
+          whereToAccess: [
+            '1. Menu Lateral Esquerdo ➔ Conversas (/chat)',
+            '2. Ao lado da barra "Pesquisar contato, empresa, CNPJ ou msg...", clique no ícone de funil (▽)',
+            '3. Escolha o escopo em "Buscar em:" (Tudo, Contato, Empresa, Mensagens) ou filtre em "Filtrar conversas:" e clique novamente no funil para recolher'
+          ],
+          howToTest: [
+            '1. Acesse Conversas (/chat) e confirme que a lista inicia limpa, sem menus nem barra de rolagem horizontal abaixo da pesquisa.',
+            '2. Clique no ícone do funil (▽), selecione "Contato" ou "Não Lidas", clique no funil novamente e note o ponto verde indicando filtro ativo.',
+            '3. Reabra o funil e clique em "Limpar filtros" para voltar tudo para "Tudo" em 1 clique.'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Tela: Chat ao Vivo (/chat) ➔ Barra de Busca + Botão Funil (▽)',
+            contextElements: ['🔍 Pesquisar contato, empresa, CNPJ ou msg...', '▽ Funil', 'Buscar em: Tudo | Contato | Empresa | Mensagens', 'Filtrar conversas: Tudo | Não Lidas | Minhas | Favoritas | Etiquetas | Bloqueados'],
+            targetButtonLabel: '👆 Ícone do Funil (▽)',
+            targetButtonPosition: 'Ao lado direito da caixa de pesquisa no topo da lista de conversas (/chat)',
+            visualPreviewVariant: 'chat-history-sync'
+          },
+          quickAction: {
+            label: 'Abrir Chat ao Vivo (/chat)',
+            route: '/chat'
+          }
+        }
+      },
+      {
+        id: 'fix-contact-name-protection-locaserv-827',
+        category: 'fixes',
+        title: 'Correção Definitiva de Renomeação Indevida de Contatos ("LOCASERV") & Fallback para Telefone',
+        description: 'Corrigida a automação "extract_contact_name" no PostgreSQL (apply_message_automations), no Listener Realtime (chatStore.ts) e no Backend Baileys v8.1.9 para nunca processar mensagens enviadas pela equipe/bot ou blocos de Pix ("Nome: LOCASERV...") nem sobrescrever contatos já nomeados. Contatos cujo nome não puder ser obtido mantêm estritamente o número de telefone aguardando cadastro.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      }
+    ]
+  },
+  {
     version: '8.2.6',
     date: '2026-11-17',
     summary: 'Busca Inteligente por Escopo (Tudo, Contato, Empresa, Mensagens + Salto Contextual), Resolução Otimista Instantânea (<150ms) e Cabeçalho Responsivo (Container Queries)',

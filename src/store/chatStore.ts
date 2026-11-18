@@ -18,6 +18,12 @@ import {
   sanitizePostgrestTerm,
   extractMatchSnippet
 } from '../utils/chatSearch';
+import {
+  extractContactNameFromAutomation,
+  needsContactName,
+  resolvePhoneFallback,
+  sanitizeContactNameValue
+} from '../utils/contactName.mjs';
 
 export const getBrPhoneVariations = (phoneStr: string | null | undefined): string[] => {
   if (!phoneStr) return [];
@@ -1109,18 +1115,7 @@ function parseAdvancedMsgMetadata(m: any) {
 }
 
 function sanitizeContactName(targetName: string | null | undefined, fallbackPhone: string | null | undefined, tenantName: string | null | undefined): string | null {
-  if (!targetName) return fallbackPhone || null;
-  const trimmed = targetName.trim();
-  const lname = trimmed.toLowerCase();
-  const tname = tenantName ? tenantName.toLowerCase().trim() : '';
-  // Apenas limpa se for EXATAMENTE o nome da empresa isolado (evita que nomes de clientes/contatos que contêm o nome da empresa sejam apagados)
-  if (tname && (lname === tname || lname === tname.replace(/\s+/g, ''))) {
-    return fallbackPhone || targetName;
-  }
-  if (lname === 'empresa' || lname === 'sem nome' || lname === 'null' || lname === 'undefined') {
-    return fallbackPhone || targetName;
-  }
-  return targetName;
+  return sanitizeContactNameValue(targetName, fallbackPhone, tenantName ? [tenantName] : []);
 }
 const instanceStatusTimeouts: Record<string, ReturnType<typeof setTimeout>> = {};
 let inFlightInitialDataPromise: Promise<void> | null = null;
@@ -2464,11 +2459,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       // 6. Injeta ou atualiza o contato imediatamente no estado para que activeChat resolva no mesmo frame (0ms)
       const tname = get().tenantInfo?.name || '';
-      const phoneMatch = resolvedContact?.phone || (resolvedContact?.whatsapp_jid ? resolvedContact.whatsapp_jid.split('@')[0] : contactPhone || '');
-      const displayContactName = resolvedContact?.custom_name || resolvedContact?.name || resolvedContact?.push_name || contactName || phoneMatch || 'Contato';
+      const phoneMatch = resolvePhoneFallback(resolvedContact?.phone, resolvedContact?.whatsapp_jid) || contactPhone || '';
+      const rawCandidateName = resolvedContact?.custom_name || resolvedContact?.name || resolvedContact?.push_name || contactName || '';
       const sanitizedName = resolvedContact?.custom_name
         ? resolvedContact.custom_name
-        : (sanitizeContactName(displayContactName, phoneMatch, tname) || displayContactName);
+        : (sanitizeContactName(rawCandidateName, phoneMatch, tname) || phoneMatch || 'Contato');
       const fallbackAvatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(sanitizedName)}&background=random&color=fff`;
       const ts = resolvedConv?.last_message_at
         ? new Date(resolvedConv.last_message_at).getTime()
@@ -8649,32 +8644,68 @@ export const useChatStore = create<ChatState>((set, get) => ({
           const patternText = auto.condition_text || auto.keyword || '';
           if (!patternText) continue;
 
-          // Escapa caracteres especiais de regex
+          if (auto.action_type === 'extract_contact_name') {
+            const stateSnapshot = get();
+            const blockedNames = [
+              stateSnapshot.tenantInfo?.name,
+              ...((stateSnapshot.rawInstances || []).map((inst: { display_name?: string | null }) => inst?.display_name))
+            ].filter(Boolean);
+
+            const extractedName = extractContactNameFromAutomation({
+              textContent: m.text_content,
+              conditionText: patternText,
+              senderType: m.sender_type,
+              direction: m.direction,
+              fromMe: Boolean(m.raw_payload?.key?.fromMe),
+              existingContact: targetContactLocally || cData,
+              blockedNames
+            });
+
+            if (extractedName && cid) {
+              const realId = getRealContactId(cid);
+              setTimeout(async () => {
+                try {
+                  const { data: latestDbContact } = await supabase
+                    .from('contacts')
+                    .select('id, name, custom_name, phone')
+                    .eq('id', realId)
+                    .maybeSingle();
+
+                  // Evita corrida multi-aba e nunca sobrescreve contato que já possui nome real ou custom_name
+                  if (!latestDbContact || !needsContactName(latestDbContact)) {
+                    if (latestDbContact?.name && latestDbContact.name !== targetContactLocally?.name) {
+                      get().upsertContactLocally({ ...cData, ...latestDbContact, id: cid } as ContactRow);
+                    }
+                    return;
+                  }
+
+                  console.log(`[Automation] Extraindo e salvando nome do contato: ${extractedName}`);
+                  const { error: updErr } = await supabase
+                    .from('contacts')
+                    .update({ name: extractedName })
+                    .eq('id', realId)
+                    .is('custom_name', null);
+
+                  if (!updErr) {
+                    get().upsertContactLocally({ ...cData, ...latestDbContact, name: extractedName, id: cid } as ContactRow);
+                  }
+                } catch (err) {
+                  console.warn('[Automation] Falha ao aplicar extração segura de nome:', err);
+                }
+              }, 250);
+            }
+            continue;
+          }
+
+          // Escapa caracteres especiais de regex para regras de ignorar/silenciar
           const escapedPattern = patternText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-          // Substitui o (X) escapado por um grupo de captura (.*) que pega até o final da linha
           const finalPattern = escapedPattern.replace(/\\\(X\\\)/ig, '(.*)');
-          // Flag 'i' para case-insensitive, 'm' para tratar múltiplas linhas (^ e $ funcionam por linha)
           const regex = new RegExp(finalPattern, 'im');
           const match = m.text_content.match(regex);
 
-          if (match) {
-            if (['ignore', 'ignore_message', 'ignore_message_silent'].includes(auto.action_type)) {
-              isIgnored = true;
-              if (auto.action_type === 'ignore_message_silent') isIgnoredSilent = true;
-            } else if (auto.action_type === 'extract_contact_name') {
-              // O grupo 1 (se houver) conterá o valor extraído de (X)
-              const extractedVal = match.length > 1 ? match[1] : match[0];
-              const extractedName = extractedVal?.trim();
-
-              // Atualiza o nome apenas se for válido e diferente do vazio
-              if (extractedName && extractedName.length > 1 && cid) {
-                console.log(`[Automation] Extraindo e salvando nome do contato: ${extractedName}`);
-                // Executa assincronamente sem bloquear o canal do Realtime
-                setTimeout(() => {
-                  get().updateContactCRM(cid, { name: extractedName });
-                }, 200);
-              }
-            }
+          if (match && ['ignore', 'ignore_message', 'ignore_message_silent'].includes(auto.action_type)) {
+            isIgnored = true;
+            if (auto.action_type === 'ignore_message_silent') isIgnoredSilent = true;
           }
         }
 
@@ -8789,7 +8820,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         || (s.rawInstances || []).find((inst: any) => inst.id === effectiveInstanceId)?.display_name
                         || s.activeChannelName
                         || '';
-                      const contactDisplayName = updatedContact.custom_name || updatedContact.name || updatedContact.push_name || updatedContact.phone || 'Novo Contato';
+                      const fallbackPhoneLabel = resolvePhoneFallback(updatedContact.phone, updatedContact.whatsapp_jid);
+                      const contactDisplayName = updatedContact.custom_name
+                        || sanitizeContactNameValue(updatedContact.name || updatedContact.push_name, fallbackPhoneLabel)
+                        || fallbackPhoneLabel
+                        || 'Novo Contato';
                       const notifTitle = instName ? `${contactDisplayName} • 📥 ${instName}` : contactDisplayName;
 
                       const rawText = (advanced.text || m.text_content || '').trim();

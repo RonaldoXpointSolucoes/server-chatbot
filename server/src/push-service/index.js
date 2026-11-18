@@ -1,5 +1,6 @@
 import webpush from 'web-push';
 import { supabase } from '../supabase.js';
+import { sanitizeIncomingContactName } from '../event-processor/helpers.js';
 
 const publicVapidKey = process.env.VAPID_PUBLIC_KEY || "BHUicMvZIyz2f9F33OIj9S6EMlh-UdP39ZEl02XMqPJfXXpJM_HkIHKcS4n2k3pJ0NaXNeQkGoSHOL495TuAUMw";
 const privateVapidKey = process.env.VAPID_PRIVATE_KEY || "hB_BNDtovRl4AVceGvmsQq1txhaZPlCaeiDmZbZPY2s";
@@ -161,7 +162,10 @@ class PushService {
             const contact = contactRes?.data;
             if (contact) {
                 contactId = contact.id || contactId;
-                contactName = contact.custom_name || contact.name || contact.push_name || (contactPhone ? `+${contactPhone}` : 'Novo Contato');
+                const phoneFallback = contactPhone ? `+${contactPhone}` : (contact.phone || '');
+                contactName = contact.custom_name
+                    || sanitizeIncomingContactName(contact.name || contact.push_name, phoneFallback)
+                    || 'Novo Contato';
                 if (contact.profile_picture_url) {
                     contactAvatar = contact.profile_picture_url;
                 }

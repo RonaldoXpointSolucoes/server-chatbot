@@ -1,5 +1,5 @@
 {
-  "version": "8.2.6",
-  "buildDate": "2026-11-17T17:24:49.062Z",
-  "summary": "Busca Inteligente por Escopo (Tudo, Contato, Empresa, Mensagens + Salto Contextual), Resolução Otimista Instantânea (<150ms) e Cabeçalho Responsivo (Container Queries)"
+  "version": "8.2.7",
+  "buildDate": "2026-11-18T02:25:02.396Z",
+  "summary": "Menu Unificado no Funil (Escopo de Busca & Filtros Ocultos), Proteção Estrita de Nomes de Contatos (Fim do Bug LOCASERV) e Fallback para Telefone"
 }

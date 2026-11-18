@@ -21,7 +21,9 @@ import {
     extractMediaMeta,
     extractTypeFromMessage,
     getCanonicalBrPhone,
-    getBrPhoneVariations
+    getBrPhoneVariations,
+    sanitizeIncomingContactName,
+    resolveBatchContactName
 } from './helpers.js';
 import { createInstanceConfigLoader, createOrderDetailsFetcher } from './resilience.js';
 
@@ -628,8 +630,10 @@ class EventProcessor {
                 const direction = msg.key.fromMe ? 'outbound' : 'inbound';
                 
                 // Se for outbound (fromMe), o msg.pushName é o nome do PRÓPRIO aparelho (ex: Burguer Plus).
-                // Não devemos atribuir ao nome do cliente (jid).
-                const pushName = msg.key.fromMe && !isSelfChat ? phone : (msg.pushName || phone);
+                // Não devemos atribuir ao nome do cliente (jid); e se o pushName vier vazio/genérico, mantemos o telefone.
+                const pushName = (msg.key.fromMe && !isSelfChat)
+                    ? phone
+                    : sanitizeIncomingContactName(msg.pushName, phone);
                 
                 // Trata data da mensagem
                 const timestampSecs = msg.messageTimestamp;
@@ -1159,8 +1163,7 @@ class EventProcessor {
                       if (isGroupContact) {
                           finalName = ex?.custom_name || ex?.name || (c.name && !c.name.includes('@g.us') && c.name !== targetPhone ? c.name : 'Grupo de WhatsApp');
                       } else {
-                          const hasValidOldName = ex && ex.name && ex.name !== ex.phone && ex.name !== targetPhone;
-                          finalName = ex?.custom_name ? ex.custom_name : (hasValidOldName ? ex.name : (c.name || targetPhone));
+                          finalName = resolveBatchContactName(ex, c.name, targetPhone);
                       }
                       let finalJid = c.whatsapp_jid;
                       if (!finalJid || finalJid.endsWith('@lid')) {
@@ -2374,7 +2377,7 @@ class EventProcessor {
                     
                     if (ownerPhone && phone === ownerPhone) continue;
 
-                    const pushName = c.notify || c.name || phone;
+                    const pushName = sanitizeIncomingContactName(c.notify || c.name, phone);
                     mappedContactsToHistory[`${tenantId}_${phone}`] = { tenant_id: tenantId, phone: phone, name: pushName, whatsapp_jid: jid, instance_id: instanceId };
                 }
                 const histContacts = Object.values(mappedContactsToHistory);
