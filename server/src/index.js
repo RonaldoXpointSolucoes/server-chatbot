@@ -33,6 +33,7 @@ import queueProcessor from './session-manager/queue-processor.js';
 import autoRagTrainer from './automation-worker/auto-rag-trainer.js';
 import AutomationWorker from './automation-worker/agent.js';
 import { startWaCallsListener } from './wacalls-listener.js';
+import { buildInboxKnowledgeMigrationSql } from './db/inboxKnowledgeMigrationsSql.js';
 import { startWaCallsProcess } from './wacalls-process.js';
 import { dispatchWebhookTriggers } from './event-processor/index.js';
 import voucherEngine from './voucher-engine/index.js';
@@ -986,6 +987,25 @@ async function runMigrations() {
 
           CREATE INDEX IF NOT EXISTS idx_system_logs_level_created_at
             ON public.system_logs (level, created_at DESC);
+
+          -- =========================================================================
+          -- RAG 2.0: ÍNDICES, DEDUPLICAÇÃO E BUSCA HÍBRIDA SEM AMBIGUIDADE (PGRST203 FIX)
+          -- =========================================================================
+          ALTER TABLE IF EXISTS public.knowledge_documents ADD COLUMN IF NOT EXISTS content_hash text;
+
+          CREATE INDEX IF NOT EXISTS knowledge_documents_tenant_created_idx
+            ON public.knowledge_documents (tenant_id, created_at DESC);
+
+          CREATE INDEX IF NOT EXISTS knowledge_documents_tenant_hash_idx
+            ON public.knowledge_documents (tenant_id, content_hash);
+
+          CREATE INDEX IF NOT EXISTS knowledge_chunks_document_id_idx
+            ON public.knowledge_chunks (document_id);
+
+          CREATE INDEX IF NOT EXISTS knowledge_chunks_fts_pt_idx
+            ON public.knowledge_chunks USING gin (to_tsvector('portuguese', coalesce(content, '')));
+
+          ${buildInboxKnowledgeMigrationSql()}
 
           NOTIFY pgrst, 'reload schema';
         `;
