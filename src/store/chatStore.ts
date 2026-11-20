@@ -29,6 +29,49 @@ import {
   pickHigherMessageStatus,
   shouldReconcileMessageStatus
 } from '../utils/messageStatus.mjs';
+import { resolveOperatorSendAiPauseAction } from '../utils/aiPause.mjs';
+
+const triggerBackendCancelAiImmediately = (
+  tenantId: string | undefined,
+  opts: { conversationId?: string; contactId?: string; remoteJid?: string; reason?: string }
+) => {
+  if (!tenantId) return;
+  try {
+    const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+    fetch(`${API_URL}/api/v1/messages/cancel-ai`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-tenant-id': tenantId
+      },
+      body: JSON.stringify(opts)
+    }).catch(err => console.warn('[ChatStore] Falha ao notificar cancel-ai no backend:', err));
+  } catch (err) {
+    console.warn('[ChatStore] Erro ao disparar cancel-ai:', err);
+  }
+};
+
+const autoPauseAiOnOperatorSend = (state: any, contact: any, contactId: string) => {
+  if (!contact) return;
+  const action = resolveOperatorSendAiPauseAction({
+    globalAiEnabled: Boolean(state.globalAiEnabled),
+    contact
+  });
+  if (action.shouldUpdateConversation && action.payload) {
+    state.updateConversationField(contactId, action.payload);
+    return;
+  }
+  if (action.shouldCancelBackend) {
+    const realContactId = getRealContactId(contactId);
+    const validConvId = contact?.conv_id && isValidUuid(contact.conv_id) ? contact.conv_id : undefined;
+    triggerBackendCancelAiImmediately(state.tenantInfo?.id, {
+      conversationId: validConvId,
+      contactId: realContactId,
+      remoteJid: contact?.phone ? `${String(contact.phone).replace(/\D/g, '')}@s.whatsapp.net` : undefined,
+      reason: 'envio_operador_ui'
+    });
+  }
+};
 
 export const getBrPhoneVariations = (phoneStr: string | null | undefined): string[] => {
   if (!phoneStr) return [];
@@ -2782,11 +2825,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       payload: resolvedOperatorName ? { operator_name: resolvedOperatorName, operator_id: resolvedOperatorId || undefined } : undefined
     });
 
-    // Auto-pause da IA por 30 minutos se o atendente mandou mensagem manual e ela não está pausada definitivamente
-    if (state.globalAiEnabled && contact.bot_status !== 'paused') {
-      const pauseUntil = new Date(Date.now() + 30 * 60000).toISOString();
-      state.updateConversationField(contactId, { ai_paused: true, ai_paused_manually: true, ai_paused_until: pauseUntil });
-    }
+    // Pausa a IA imediatamente sempre que o operador envia mensagem manual (preservando pausa definitiva se já ativa)
+    autoPauseAiOnOperatorSend(state, contact, contactId);
 
     // Auto-atribuição do agente quando envia mensagem
     try {
@@ -3039,6 +3079,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       status: 'pending',
       timestamp: new Date()
     });
+
+    autoPauseAiOnOperatorSend(state, contact, contactId);
 
     try {
       const { finalTargetInstance } = resolveStrictOutboundInstance(
@@ -3450,11 +3492,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       timestamp: new Date()
     });
 
-    // Auto-pause da IA por 30 minutos se o atendente mandou mensagem manual e ela não está pausada definitivamente
-    if (contact.bot_status !== 'paused') {
-      const pauseUntil = new Date(Date.now() + 30 * 60000).toISOString();
-      state.updateConversationField(contactId, { ai_paused: true, ai_paused_manually: true, ai_paused_until: pauseUntil });
-    }
+    // Pausa a IA imediatamente sempre que o operador envia áudio/imagem/documento manual
+    autoPauseAiOnOperatorSend(state, contact, contactId);
 
     // Auto-atribuição do agente quando envia mensagem
     try {
@@ -3728,6 +3767,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const hasMedia = Boolean(mediaUrl) || ['image', 'video', 'audio', 'document'].includes(String(message.mediaType || ''));
 
       try {
+        if (existingContactOnSendingBox) {
+          autoPauseAiOnOperatorSend(state, existingContactOnSendingBox, existingContactOnSendingBox.id);
+        }
         if (!hasMedia) {
           const finalText = withSignature(rawText || 'Mensagem encaminhada');
           const res = await sendTextMessage(state.tenantInfo.id, resolvedInstanceId, targetJid, finalText, apiKey);
@@ -3996,11 +4038,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       timestamp: new Date()
     });
 
-    // Auto-pause da IA por 30 minutos se o atendente mandou mensagem manual e ela não está pausada definitivamente
-    if (state.globalAiEnabled && contact.bot_status !== 'paused') {
-      const pauseUntil = new Date(Date.now() + 30 * 60000).toISOString();
-      state.updateConversationField(contactId, { ai_paused: true, ai_paused_manually: true, ai_paused_until: pauseUntil });
-    }
+    // Pausa a IA imediatamente sempre que o operador envia mensagem manual (preservando pausa definitiva se já ativa)
+    autoPauseAiOnOperatorSend(state, contact, contactId);
 
     // Auto-atribuição do agente quando envia mensagem
     try {
@@ -7690,6 +7729,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const tenant = get().tenantInfo;
     if (!tenant) return;
 
+    const prevContactSnapshot = get().contacts.find(c => c.id === contactId);
+    const prevAiPaused = Boolean(prevContactSnapshot?.ai_paused);
+    const realContactId = getRealContactId(contactId);
+    const knownConvId = prevContactSnapshot?.conv_id && isValidUuid(prevContactSnapshot.conv_id)
+      ? prevContactSnapshot.conv_id
+      : null;
+
+    // Cancela IA imediatamente na memória do servidor (0ms, sem aguardar roundtrip no Supabase)
+    if (payload.ai_paused) {
+      triggerBackendCancelAiImmediately(tenant.id, {
+        conversationId: knownConvId || undefined,
+        contactId: realContactId,
+        remoteJid: prevContactSnapshot?.phone ? `${String(prevContactSnapshot.phone).replace(/\D/g, '')}@s.whatsapp.net` : undefined,
+        reason: payload.ai_paused_until ? 'pausa_temporaria_ui' : 'pausa_definitiva_ui'
+      });
+    }
+
     // UI Otimista (Separa flags internas que não pertencem ao schema de conversations)
     const { snoozed_by_system, ai_paused_until, ...dbPayload } = payload as any;
     if ('ai_paused' in payload) {
@@ -7733,27 +7789,32 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
 
     try {
-      const realContactId = getRealContactId(contactId);
       const instId = getInstanceIdFromContact(contactId);
-      const resolvedInstId = await resolveInstanceUuid(tenant.id, instId);
-      let query = supabase.from('conversations').select('id').eq('contact_id', realContactId).eq('tenant_id', tenant.id);
-      if (resolvedInstId) query = query.eq('instance_id', resolvedInstId);
-      const { data: conv, error: convErr } = await query.order('last_message_at', { ascending: false }).limit(1).maybeSingle();
+      let convId = knownConvId;
 
-      if (convErr) {
-        console.error('Erro ao buscar conversa no Supabase:', convErr.message);
-        throw convErr;
+      if (!convId) {
+        const resolvedInstId = await resolveInstanceUuid(tenant.id, instId);
+        let query = supabase.from('conversations').select('id').eq('contact_id', realContactId).eq('tenant_id', tenant.id);
+        if (resolvedInstId) query = query.eq('instance_id', resolvedInstId);
+        const { data: conv, error: convErr } = await query.order('last_message_at', { ascending: false }).limit(1).maybeSingle();
+
+        if (convErr) {
+          console.error('Erro ao buscar conversa no Supabase:', convErr.message);
+          throw convErr;
+        }
+        convId = conv?.id || null;
       }
-      if (!conv) {
+
+      if (!convId) {
         console.warn('Nenhuma conversa encontrada para o contato:', realContactId);
         return;
       }
 
-      const { error } = await supabase.from('conversations').update(dbPayload).eq('id', conv.id);
+      const { error } = await supabase.from('conversations').update(dbPayload).eq('id', convId);
       if (error) throw error;
 
       const currentContacts = get().contacts;
-      const contact = currentContacts.find(c => c.id === contactId);
+      const contact = currentContacts.find(c => c.id === contactId) || prevContactSnapshot;
 
       if ('ai_paused' in payload) {
         const botStatusPayload: any = {
@@ -7762,26 +7823,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
         };
         await supabase.from('contacts').update(botStatusPayload).eq('id', realContactId);
 
-        // Notifica o backend imediatamente para abortar qualquer geração ou envio pendente da IA na memória
-        if (payload.ai_paused) {
-          try {
-            const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
-            fetch(`${API_URL}/api/v1/messages/cancel-ai`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'x-tenant-id': tenant.id
-              },
-              body: JSON.stringify({
-                conversationId: conv.id,
-                contactId: realContactId,
-                remoteJid: contact?.phone ? `${contact.phone.replace(/\D/g, '')}@s.whatsapp.net` : undefined,
-                reason: payload.ai_paused_until ? 'pausa_temporaria_ui' : 'pausa_definitiva_ui'
-              })
-            }).catch(err => console.warn('[ChatStore] Falha ao notificar cancel-ai no backend:', err));
-          } catch (notifyErr) {
-            console.warn('[ChatStore] Erro ao disparar cancel-ai:', notifyErr);
-          }
+        if (payload.ai_paused && !knownConvId) {
+          triggerBackendCancelAiImmediately(tenant.id, {
+            conversationId: convId,
+            contactId: realContactId,
+            remoteJid: contact?.phone ? `${String(contact.phone).replace(/\D/g, '')}@s.whatsapp.net` : undefined,
+            reason: payload.ai_paused_until ? 'pausa_temporaria_ui' : 'pausa_definitiva_ui'
+          });
         } else if (payload.ai_paused === false) {
           try {
             const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
@@ -7792,7 +7840,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 'x-tenant-id': tenant.id
               },
               body: JSON.stringify({
-                conversationId: conv.id
+                conversationId: convId
               })
             }).catch(err => console.warn('[ChatStore] Falha ao notificar resume-ai no backend:', err));
           } catch (resumeErr) {
@@ -7800,8 +7848,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
         }
 
-        // Only insert system logs and messages if the pause state is actually changing
-        const isStateChanging = !contact || !!contact.ai_paused !== !!payload.ai_paused;
+        // Insere log/mensagem de sistema apenas quando há mudança real de estado
+        const isStateChanging = !prevContactSnapshot || prevAiPaused !== Boolean(payload.ai_paused);
 
         if (isStateChanging) {
           const currentUserEmail = typeof window !== 'undefined' ? (localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email')) : null;
@@ -7821,7 +7869,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           const msgText = `${statusText} por ${operatorName}`;
 
           const dbMsg = {
-            conversation_id: conv.id,
+            conversation_id: convId,
             tenant_id: tenant.id,
             text_content: msgText,
             sender_type: 'system',
@@ -8813,7 +8861,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 updatedContact.conv_id = m.conversation_id;
               }
 
-              const isOutbound = m.from_me === true || m.sender_type === 'agent' || m.sender_type === 'bot' || m.sender_type === 'system' || m.sender_type === 'automation';
+              const isOutbound = m.from_me === true || m.sender_type === 'agent' || m.sender_type === 'bot' || m.sender_type === 'system' || m.sender_type === 'automation' || m.sender_type === 'human';
+              const isHumanOperatorOutbound = !isHistorical && (m.sender_type === 'human' || m.sender_type === 'agent') && (m.direction === 'outbound' || m.from_me === true);
+              if (isHumanOperatorOutbound) {
+                updatedContact.conv_status = 'open';
+                updatedContact.ai_paused = true;
+                updatedContact.ai_paused_manually = true;
+              }
               const isClient = !isOutbound && (m.sender_type === 'client' || !m.sender_type);
 
               // Impede notificação/Unread em mensagens antigas de sincronismo de histórico

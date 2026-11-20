@@ -1684,10 +1684,10 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
           onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setInstanceContextMenu(null); }}
         >
           <div 
-            className="absolute bg-[#202c33] border border-[#2a3942] rounded-xl shadow-2xl py-1.5 min-w-[230px] z-[100000] animate-in fade-in zoom-in-95 duration-100"
+            className="absolute bg-[#202c33] border border-[#2a3942] rounded-xl shadow-2xl py-1.5 min-w-[265px] z-[100000] animate-in fade-in zoom-in-95 duration-100"
             style={{ 
-              top: Math.min(instanceContextMenu.y, window.innerHeight - 260), 
-              left: Math.min(instanceContextMenu.x, window.innerWidth - 250)
+              top: Math.min(instanceContextMenu.y, window.innerHeight - 295), 
+              left: Math.min(instanceContextMenu.x, window.innerWidth - 280)
             }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -1695,15 +1695,18 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
               <span className="text-xs font-semibold text-[#8696a0] truncate block">{instanceContextMenu.name}</span>
             </div>
             <button 
-              className="w-full text-left px-4 py-2 text-sm font-semibold text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 transition-colors flex items-center gap-2 border-b border-[#2a3942] mb-1"
+              className="w-full text-left px-4 py-2.5 text-sm font-semibold text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 transition-colors flex items-start gap-2.5 border-b border-[#2a3942] mb-1 cursor-pointer"
               onClick={(e) => {
                  e.stopPropagation();
                  setDeepAnalysisTarget({ id: instanceContextMenu.id, name: instanceContextMenu.name });
                  setInstanceContextMenu(null);
               }}
             >
-              <BrainCircuit size={14} className="text-emerald-400 shrink-0" />
-              Análise Profunda (Base IA)
+              <BrainCircuit size={15} className="text-emerald-400 shrink-0 mt-0.5" />
+              <div className="flex flex-col min-w-0">
+                <span className="leading-tight">Sincronizar Conversas no RAG</span>
+                <span className="text-[10px] font-normal text-emerald-300/75 leading-tight mt-0.5">Análise Profunda • Base IA</span>
+              </div>
             </button>
             <button 
               className="w-full text-left px-4 py-2 text-sm text-[#d1d7db] hover:bg-[#2a3942] transition-colors flex items-center gap-2"

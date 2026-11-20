@@ -445,3 +445,50 @@ test('startInboxDeepAnalysis recovers stale orphaned active runs older than 20 m
     assert.equal(supabase._state.runs[0].status, 'failed');
     await res.completionPromise;
 });
+
+test('startInboxDeepAnalysis with targetScope=global stores knowledge_documents and chunks with instance_id=null and flushes full tenant cache', async () => {
+    const supabase = createJobSupabaseMock({
+        messages: [
+            { id: 'm1', tenant_id: TENANT_ID, instance_id: INSTANCE_ID, conversation_id: 'c1', sender_type: 'client', message_type: 'text', text_content: 'Vocês aceitam cartão VR ou apenas PIX e crédito na entrega?', timestamp: '2026-11-19T10:00:00.000Z' },
+            { id: 'm2', tenant_id: TENANT_ID, instance_id: INSTANCE_ID, conversation_id: 'c1', sender_type: 'human', message_type: 'text', text_content: 'Aceitamos PIX na chave CNPJ oficial 59075836000106, débito e crédito; não aceitamos VR.', timestamp: '2026-11-19T10:02:00.000Z' }
+        ]
+    });
+
+    const fakeTransformer = async () => ({ data: new Float32Array(384).fill(0.08) });
+    const invalidated = [];
+
+    const res = await analyzer.startInboxDeepAnalysis({
+        supabase,
+        tenantId: TENANT_ID,
+        instanceId: INSTANCE_ID,
+        mode: 'full',
+        targetScope: 'global',
+        nowIso: '2026-11-20T12:00:00.000Z',
+        deps: {
+            resolveApiKey: async () => 'fake-key',
+            getTransformer: async () => fakeTransformer,
+            invalidateCache: (tId, iId) => invalidated.push({ tId, iId }),
+            callLlmJson: async () => ({
+                behavior_signals: ['Responder com simpatia e objetividade sobre pagamentos.'],
+                business_rules: ['Aceita PIX CNPJ 59075836000106, débito e crédito; não aceita vale-refeição (VR).'],
+                faq_solutions: [],
+                sales_objections: [],
+                rejected_items: []
+            }),
+            callLlmText: async () => `# 1. Identidade, Comportamento & Tom de Voz da Caixa
+- Responder com simpatia, agilidade e clareza em toda a empresa.
+
+# 2. Regras Operacionais, Políticas & Pagamentos
+- Pagamentos aceitos são PIX no CNPJ oficial 59075836000106, cartão de crédito e débito; não aceitamos VR.`
+        }
+    });
+
+    await res.completionPromise;
+    assert.equal(supabase._state.runs[0].status, 'completed');
+    assert.equal(supabase._state.knowledgeDocs.length, 1);
+    assert.equal(supabase._state.knowledgeDocs[0].instance_id, null, 'Global targetScope must commit document with instance_id=null');
+    assert.equal(supabase._state.knowledgeDocs[0].metadata.scope, 'global');
+    assert.equal(supabase._state.knowledgeDocs[0].metadata.source_instance_id, INSTANCE_ID);
+    assert.ok(supabase._state.knowledgeChunks.every(c => c.instance_id === null), 'All committed chunks must have instance_id=null');
+    assert.deepEqual(invalidated[0], { tId: TENANT_ID, iId: undefined }, 'Global scope must flush cache for ALL inboxes in tenant');
+});

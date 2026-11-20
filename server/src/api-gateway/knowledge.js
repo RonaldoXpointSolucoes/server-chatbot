@@ -691,11 +691,13 @@ router.post('/inbox-analyze/:instanceId/start', async (req, res) => {
         if (!tenant_id) return res.status(400).json({ error: 'x-tenant-id required' });
 
         const mode = req.body?.mode === 'full' ? 'full' : 'incremental';
+        const targetScope = req.body?.targetScope === 'global' ? 'global' : 'inbox';
         const result = await startInboxDeepAnalysis({
             supabase,
             tenantId: tenant_id,
             instanceId: req.params.instanceId,
             mode,
+            targetScope,
             deps: {
                 invalidateCache: invalidateBehaviorCache,
                 getTransformer: () => EmbeddingsPipeline.getInstance()

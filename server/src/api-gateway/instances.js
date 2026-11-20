@@ -7,6 +7,8 @@ import { beginConnectionAttempt, getConnectionDiagnostics, connectDecision, shou
 import { recordStructuredEvent } from '../diagnostics/telemetry.js';
 import { sessionConnectionDiagnostics } from '../session-manager/socket-state.js';
 import { forwardInternalInstanceRequest, forwardInternalMultipartRequest } from './external-message-routing.js';
+import AutomationWorker from '../automation-worker/agent.js';
+import { pauseAiImmediatelyForHumanOperator } from '../automation-worker/human-pause.js';
 import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
@@ -598,6 +600,23 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                 let targetJid = jid;
                 if (targetJid && typeof targetJid === 'string' && !targetJid.endsWith('@g.us')) {
                     targetJid = await resolveTargetJid(activeSock, jid, req.tenantId);
+                }
+
+                const isAutomationSend = Boolean(
+                    req.body?.senderType === 'automation' ||
+                    req.body?.isAutomation === true ||
+                    invokeMeta?.isAutomation === true ||
+                    content?.isAutomation === true
+                );
+                if (!isAutomationSend && targetJid) {
+                    pauseAiImmediatelyForHumanOperator({
+                        supabase,
+                        AutomationWorker,
+                        tenantId: req.tenantId,
+                        instanceId,
+                        jid: targetJid,
+                        reason: 'envio_operador_invoke'
+                    }).catch(() => {});
                 }
 
                 // Extração do traceId do cabeçalho ou corpo para telemetria E2E
@@ -1730,6 +1749,17 @@ router.post('/instances/:instanceId/send-media-url', requireTenant, express.json
         const finalResponseType = responseType === 'TUTORIAL' ? 'TUTORIAL' : 'STANDARD';
         console.log(`[send-media-url] Queueing ${messageType} (${finalResponseType}) from URL: ${mediaUrl} to ${jid}`);
 
+        if (!req.body?.isAutomation && req.body?.senderType !== 'automation') {
+            pauseAiImmediatelyForHumanOperator({
+                supabase,
+                AutomationWorker,
+                tenantId: req.tenantId,
+                instanceId,
+                jid: String(jid).trim(),
+                reason: 'envio_operador_midia_url'
+            }).catch(() => {});
+        }
+
         // FAST-PATH DIRETO EM MEMÓRIA PARA MÍDIA VIA URL (Encaminhamentos e Respostas Rápidas < 300ms)
         const activeUrlSock = isAllowedOnThisNode ? (sessionManager.getSocket(instanceId) || sessionManager.sessions.get(instanceId)?.sock) : null;
         if (activeUrlSock && isSocketOpen(activeUrlSock) && /^https?:\/\//i.test(String(mediaUrl)) && finalResponseType === 'STANDARD') {
@@ -1936,6 +1966,17 @@ router.post('/instances/:instanceId/send-media', requireTenant, upload.single('m
             return res.status(400).json({ error: 'Missing file, jid or messageType' });
         }
 
+        if (!req.body?.isAutomation && req.body?.senderType !== 'automation') {
+            pauseAiImmediatelyForHumanOperator({
+                supabase,
+                AutomationWorker,
+                tenantId,
+                instanceId,
+                jid: String(jid).trim(),
+                reason: 'envio_operador_midia'
+            }).catch(() => {});
+        }
+
         // Convert WebM to OGG Opus if it's an audio note
         const timestamp = Date.now();
         console.log(`[send-media] Received request! messageType: ${messageType}, file: ${file.originalname}, mime: ${file.mimetype}, size: ${file.buffer.length}`);
@@ -2052,7 +2093,13 @@ router.post('/instances/:instanceId/send-media', requireTenant, upload.single('m
 
                 Promise.resolve().then(async () => {
                     try {
-                        const { default: eventProcessor } = await import('../event-processor/index.js');
+                        const { EventProcessor, default: eventProcessor } = await import('../event-processor/index.js');
+                        const epClass = EventProcessor || eventProcessor?.constructor;
+                        if (epClass && realWaId) {
+                            if (!epClass.humanMessagesCache) epClass.humanMessagesCache = new Map();
+                            epClass.humanMessagesCache.set(`${instanceId}_${realWaId}`, true);
+                            setTimeout(() => epClass.humanMessagesCache && epClass.humanMessagesCache.delete(`${instanceId}_${realWaId}`), 60000);
+                        }
                         const msgPayload = directRes?.message || (
                             messageType === 'image' ? { imageMessage: { url: mediaUrl, mimetype: file.mimetype, caption: caption || '' } } :
                             messageType === 'video' ? { videoMessage: { url: mediaUrl, mimetype: file.mimetype, caption: caption || '' } } :

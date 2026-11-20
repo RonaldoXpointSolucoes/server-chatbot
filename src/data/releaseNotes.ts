@@ -712,6 +712,83 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.3.2',
+    date: '2026-11-20',
+    summary: 'Pausa Imediata da I.A em Qualquer Envio de Operador (Motor v8.2.3), Botão DevLogger Compacto com Alerta Sonar de Erros e Sincronização RAG Exclusiva vs Global no Submenu da Caixa',
+    notes: [
+      {
+        id: 'feat-inbox-rag-sync-scope-prompt-832',
+        category: 'features',
+        title: 'Sincronizar Conversas no RAG no Submenu da Caixa (Exclusiva vs Global)',
+        description: 'O submenu dos três pontinhos (⋮) de cada caixa agora apresenta diretamente a ação "Sincronizar Conversas no RAG" e pergunta antes da execução se o conhecimento filtrado das conversas reais deve ser aplicado exclusivamente para a caixa escolhida ou de forma Global para toda a empresa (invalidando o cache comportamental de todas as caixas).',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+        guide: {
+          moduleGroup: 'system',
+          moduleLabel: 'Caixas de Entrada • Sincronização Histórica RAG 2.0',
+          purpose: 'Permitir que você extraia aprendizados e comportamento real de atendimento do histórico inteiro de uma caixa específica e escolha conscientemente se o conhecimento alimentará apenas aquela caixa ou toda a empresa globalmente.',
+          whereToAccess: [
+            '1. Menu Lateral Esquerdo ➔ Todas as conversas ➔ Lista de Caixas (ex: Android, iPhone)',
+            '2. Clique nos três pontinhos (⋮) ao lado da caixa desejada',
+            '3. Clique em "Sincronizar Conversas no RAG" e selecione "Exclusivamente nesta Caixa" ou "Global — Empresa Inteira"'
+          ],
+          howToTest: [
+            '1. Na barra lateral, passe o cursor sobre uma caixa (ex: Android) e clique no menu ⋮.',
+            '2. Selecione "Sincronizar Conversas no RAG".',
+            '3. Confirme que o modal exibe os dois cartões de alcance (Caixa Isolada vs Empresa Inteira Global) antes de iniciar a vetorização.'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Tela: Barra Lateral ➔ Submenu da Caixa (⋮)',
+            contextElements: ['📱 Caixa Android / iPhone', '⋮ Submenu da Caixa', '🌐 Global vs 🔒 Exclusiva'],
+            targetButtonLabel: '🧠 Sincronizar Conversas no RAG',
+            targetButtonPosition: 'Primeira opção destacada ao abrir o menu ⋮ de qualquer caixa',
+            visualPreviewVariant: 'chat-history-sync'
+          },
+          quickAction: {
+            label: 'Abrir Painel & Testar (/chat)',
+            route: '/chat'
+          }
+        }
+      },
+      {
+        id: 'feat-devlogger-compact-sonar-832',
+        category: 'features',
+        title: 'Botão Flutuante DevLogger Compacto com Alerta Sonar de Erros',
+        description: 'O indicador flutuante do Antigravity DevLogger foi reduzido para formato compacto (36x36px) para não interferir na área de atendimento e ganhou efeito visual de alerta (sonar pulsante carmesim/âmbar, halo luminoso e ícone de alerta com contador) sempre que houver erros registrados.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30',
+        guide: {
+          moduleGroup: 'system',
+          moduleLabel: 'Monitoramento • Antigravity DevLogger Cockpit',
+          purpose: 'Manter a tela limpa no dia a dia com um ícone discreto, mas chamar atenção imediatamente sempre que ocorrer qualquer erro de execução ou comunicação para diagnóstico rápido.',
+          whereToAccess: [
+            '1. Canto inferior direito (ou posição personalizada arrastada na tela)',
+            '2. Quando houver qualquer erro em logs (type === error), o botão alterna automaticamente para vermelho/âmbar pulsante com ondas sonar'
+          ],
+          howToTest: [
+            '1. Observe o tamanho compacto (36x36px) do botão flutuante do DevLogger.',
+            '2. Caso exista ao menos 1 erro no histórico do DevLogger, confirme os anéis sonar e a badge âmbar com a contagem; ao clicar, o Cockpit abre para inspeção.'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Tela: Botão Flutuante do Antigravity DevLogger',
+            contextElements: ['>_ Indicador Compacto 36px', '🚨 Alerta Sonar Carmesim', '🔢 Badge Âmbar de Erros'],
+            targetButtonLabel: '⚠️ Cockpit DevLogger',
+            targetButtonPosition: 'Botão flutuante arrastável sobre a interface (padrão inferior direito)',
+            visualPreviewVariant: 'hub-account-limits'
+          }
+        }
+      },
+      {
+        id: 'fix-immediate-ai-pause-on-operator-send-832',
+        category: 'fixes',
+        title: 'Pausa Imediata do Robô I.A em Qualquer Envio de Operador (CRM Web & WhatsApp Celular)',
+        description: 'Eliminadas condições de corrida no servidor (motor v8.2.3) e no frontend: o envio humano via texto, áudio, imagem, PDF, resposta pronta, cartão vCard, encaminhamento ou direto pelo celular/WhatsApp Web (inclusive eventos companion append recentes) agora cancela respostas em geração em 0ms, bloqueia novas execuções do AutomationWorker/FlowEngine e atualiza a conversa para open com ai_paused=true.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      }
+    ]
+  },
+  {
     version: '8.3.1',
     date: '2026-11-20',
     summary: 'Blindagem de Entrega & Recibos WhatsApp (Não-Regressão delivered ➔ SERVER_ACK, Motor v8.2.2) e Isolamento Estrito do Seletor de Empresas',

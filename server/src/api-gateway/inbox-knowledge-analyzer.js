@@ -845,6 +845,7 @@ export async function reduceSynthesizedKnowledgeWithGemini({
     mapResults = [],
     existingDocMarkdown = '',
     mode = 'incremental',
+    targetScope = 'inbox',
     inboxName,
     companyName,
     companySettings = {}
@@ -874,14 +875,18 @@ export async function reduceSynthesizedKnowledgeWithGemini({
     if (companySettings?.endereco) officialConfigLines.push(`- Endereço Comercial Oficial: ${companySettings.endereco}`);
     if (companySettings?.horario_funcionamento) officialConfigLines.push(`- Horário Oficial: ${companySettings.horario_funcionamento}`);
 
-    const prompt = `Você é um Engenheiro de Conhecimento Sênior criando o Playbook & Base RAG definitiva da caixa de entrada "${inboxName}" da empresa "${companyName}".
+    const scopeInstruction = targetScope === 'global'
+        ? `Base RAG GLOBAL de toda a empresa "${companyName}" (consolidando aprendizados reais coletados da caixa "${inboxName}" para todas as caixas da empresa)`
+        : `Playbook & Base RAG definitiva da caixa de entrada "${inboxName}" da empresa "${companyName}"`;
+
+    const prompt = `Você é um Engenheiro de Conhecimento Sênior criando a ${scopeInstruction}.
 ${officialConfigLines.length > 0 ? `\nCONFIGURAÇÕES OFICIAIS DA EMPRESA (SOBERANAS CONTRA CONTRADIÇÕES):\n${officialConfigLines.join('\n')}\n` : ''}
 ${existingBlock}
 NOVOS DADOS DESTILADOS DO HISTÓRICO REAL:
 ${JSON.stringify(consolidated, null, 2).slice(0, 28000)}
 
 TAREFA OBRIGATÓRIA DE TRANSFORMAÇÃO & REESCRITA:
-1. Reescreva tudo com Português impecável, estratégico e direto para orientar a IA a atender e vender melhor nesta caixa específica ("${inboxName}").
+1. Reescreva tudo com Português impecável, estratégico e direto para orientar a IA a atender e vender melhor ${targetScope === 'global' ? `globalmente em toda a empresa "${companyName}"` : `nesta caixa específica ("${inboxName}")`}.
 2. Elimine contradições internas, remova qualquer dado pessoal de cliente (CPF/nome/endereço de entrega) e não invente itens ou preços de cardápio.
 3. Organize EXATAMENTE nas 4 seções Markdown abaixo (use frases completas e auto-suficientes por bullet):
 
@@ -919,16 +924,31 @@ async function updateRunRecord(supabase, runId, patch) {
     }
 }
 
-async function loadExistingInboxLivingDoc(supabase, tenantId, instanceId) {
-    const { data: doc } = await supabase
-        .from('knowledge_documents')
-        .select('id, name, metadata, instance_id')
-        .eq('tenant_id', tenantId)
-        .eq('instance_id', instanceId)
-        .eq('metadata->>source', 'inbox_deep_analyzer')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+async function loadExistingInboxLivingDoc(supabase, tenantId, instanceId, preferredDocId = null) {
+    let doc = null;
+
+    if (preferredDocId) {
+        const { data: byIdDoc } = await supabase
+            .from('knowledge_documents')
+            .select('id, name, metadata, instance_id')
+            .eq('id', preferredDocId)
+            .eq('tenant_id', tenantId)
+            .maybeSingle();
+        if (byIdDoc) doc = byIdDoc;
+    }
+
+    if (!doc) {
+        const { data: scopedDoc } = await supabase
+            .from('knowledge_documents')
+            .select('id, name, metadata, instance_id')
+            .eq('tenant_id', tenantId)
+            .eq('metadata->>source', 'inbox_deep_analyzer')
+            .or(`instance_id.eq.${instanceId},metadata->>source_instance_id.eq.${instanceId}`)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+        doc = scopedDoc || null;
+    }
 
     if (!doc) return { doc: null, markdown: '' };
 
@@ -963,11 +983,14 @@ export async function runInboxDeepAnalysisJob({
     const windowStart = run.window_start || null;
     const windowEnd = run.window_end;
     const effectiveMode = run.mode || 'incremental';
+    const targetScope = run?.stats?.targetScope === 'global' ? 'global' : 'inbox';
+    const commitInstanceId = targetScope === 'global' ? null : instanceId;
     const inboxName = instance.display_name || 'Caixa';
     const companyName = company?.name || 'Empresa';
     const companySettings = company?.settings || {};
 
     const stats = {
+        targetScope,
         rawMessagesRead: 0,
         keptAuthoredMessages: 0,
         droppedProtocolNoise: 0,
@@ -1154,13 +1177,19 @@ export async function runInboxDeepAnalysisJob({
             stats
         });
 
-        const { doc: existingLivingDoc, markdown: existingDocMarkdown } = await loadExistingInboxLivingDoc(supabase, tenantId, instanceId);
+        const { doc: existingLivingDoc, markdown: existingDocMarkdown } = await loadExistingInboxLivingDoc(
+            supabase,
+            tenantId,
+            instanceId,
+            instance?.last_knowledge_document_id || null
+        );
 
         const synthesized = await reduceSynthesizedKnowledgeWithGemini({
             callLlmText,
             mapResults,
             existingDocMarkdown,
             mode: effectiveMode,
+            targetScope,
             inboxName,
             companyName,
             companySettings
@@ -1173,12 +1202,12 @@ export async function runInboxDeepAnalysisJob({
             current_step_label: 'Camadas 8–9: Auditoria anti-lixo, proteção de cardápio ERP e desduplicação semântica...'
         });
 
-        const existingTenantChunks = await fetchAllTenantChunks(supabase, tenantId, false, instanceId);
+        const existingTenantChunks = await fetchAllTenantChunks(supabase, tenantId, false, commitInstanceId);
         const audited = auditAndCleanSynthesizedMarkdown({
             markdown: synthesized.markdown,
             companySettings,
             existingChunks: existingTenantChunks,
-            instanceId
+            instanceId: commitInstanceId
         });
 
         stats.deduplicatedAgainstExistingRag = audited.stats.deduplicatedAgainstExistingRag;
@@ -1209,36 +1238,45 @@ export async function runInboxDeepAnalysisJob({
             return;
         }
 
-        // Estágio 10: Vetorização & Commit na Base RAG da Caixa
+        // Estágio 10: Vetorização & Commit na Base RAG (Exclusivo da Caixa ou Global da Empresa)
         await updateRunRecord(supabase, runId, {
             status: 'vectorizing',
             progress_pct: 90,
             current_stage: 10,
-            current_step_label: 'Camada 10: Gerando vetores semânticos (384-d) e implantando na Base da Caixa...',
+            current_step_label: targetScope === 'global'
+                ? 'Camada 10: Gerando vetores semânticos (384-d) e implantando no RAG Global da Empresa...'
+                : 'Camada 10: Gerando vetores semânticos (384-d) e implantando na Base da Caixa...',
             stats
         });
 
         const transformer = deps.getTransformer ? await deps.getTransformer() : await getDefaultTransformer();
         const behaviorProfile = audited.behaviorProfile || synthesized.behaviorSummary;
-        const docTitle = `Playbook & Conhecimento — Caixa ${inboxName}`;
+        const docTitle = targetScope === 'global'
+            ? `Playbook & Conhecimento Global — via ${inboxName}`
+            : `Playbook & Conhecimento — Caixa ${inboxName}`;
+        const docCategory = targetScope === 'global'
+            ? `Global (${companyName})`
+            : `Caixa: ${inboxName}`;
 
         const commitRes = await commitCuratedDocument({
             supabase,
             transformer,
             tenantId,
             agentId: null,
-            instanceId,
+            instanceId: commitInstanceId,
             mode: existingLivingDoc ? 'replace' : 'create',
             targetDocumentId: existingLivingDoc?.id || null,
             title: docTitle,
             type: 'text/markdown',
-            category: `Caixa: ${inboxName}`,
+            category: docCategory,
             content: audited.cleanedMarkdown,
             qualityScore: 95,
             source: 'inbox_deep_analyzer',
             behaviorProfile,
             extraMetadata: {
                 inbox_name: inboxName,
+                source_instance_id: instanceId,
+                scope: targetScope,
                 last_run_id: runId,
                 last_window_end: windowEnd,
                 behavior_profile: behaviorProfile
@@ -1261,14 +1299,16 @@ export async function runInboxDeepAnalysisJob({
             .eq('tenant_id', tenantId);
 
         if (typeof deps.invalidateCache === 'function') {
-            deps.invalidateCache(tenantId, instanceId);
+            deps.invalidateCache(tenantId, commitInstanceId === null ? undefined : instanceId);
         }
 
         await updateRunRecord(supabase, runId, {
             status: 'completed',
             progress_pct: 100,
             current_stage: 10,
-            current_step_label: 'Análise profunda concluída e implantada automaticamente na Base da Caixa!',
+            current_step_label: targetScope === 'global'
+                ? 'Sincronização RAG concluída e aplicada globalmente para toda a empresa!'
+                : 'Sincronização RAG concluída e aplicada exclusivamente nesta caixa!',
             stats,
             discarded_samples: discardedSamples.slice(0, MAX_DISCARDED_SAMPLES),
             extracted_behavior_summary: behaviorProfile,
@@ -1297,6 +1337,7 @@ export async function startInboxDeepAnalysis({
     tenantId,
     instanceId,
     mode = 'incremental',
+    targetScope = 'inbox',
     nowIso = new Date().toISOString(),
     deps = {}
 }) {
@@ -1360,6 +1401,8 @@ export async function startInboxDeepAnalysis({
         .eq('id', tenantId)
         .maybeSingle();
 
+    const safeTargetScope = targetScope === 'global' ? 'global' : 'inbox';
+
     const { data: run, error: insErr } = await supabase
         .from('inbox_knowledge_runs')
         .insert([{
@@ -1371,7 +1414,10 @@ export async function startInboxDeepAnalysis({
             window_end: windowEnd,
             progress_pct: 5,
             current_stage: 1,
-            current_step_label: 'Preparando varredura incremental do histórico da caixa...'
+            current_step_label: safeTargetScope === 'global'
+                ? 'Preparando varredura do histórico para aplicação Global no RAG da empresa...'
+                : 'Preparando varredura incremental do histórico da caixa...',
+            stats: { targetScope: safeTargetScope }
         }])
         .select('*')
         .single();
@@ -1451,8 +1497,8 @@ export async function getInboxAnalysisStatus({ supabase, tenantId, instanceId })
             .from('knowledge_documents')
             .select('id, name, instance_id, status, metadata, created_at')
             .eq('tenant_id', tenantId)
-            .eq('instance_id', instanceId)
             .eq('metadata->>source', 'inbox_deep_analyzer')
+            .or(`instance_id.eq.${instanceId},metadata->>source_instance_id.eq.${instanceId}`)
             .order('created_at', { ascending: false })
             .limit(1)
             .maybeSingle();

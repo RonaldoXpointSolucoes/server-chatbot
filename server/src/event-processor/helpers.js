@@ -382,4 +382,90 @@ export function isHistoricalUpsert(upsertType, tsDate, nowMs = Date.now()) {
     );
 }
 
+/**
+ * Detects a live human operator intervention even when Baileys delivers a companion
+ * WhatsApp Phone/Web outbound (`fromMe: true`) as `type: 'append'` within a recent window.
+ */
+export function isRecentHumanOperatorMessage({
+    senderType,
+    isHistory,
+    tsDate,
+    nowMs = Date.now(),
+    windowMs = 120000
+} = {}) {
+    if (senderType !== 'human') return false;
+    if (!isHistory) return true;
+    const msgMs = tsDate instanceof Date ? tsDate.getTime() : Number(new Date(tsDate || 0).getTime());
+    if (!Number.isFinite(msgMs) || msgMs <= 0) return false;
+    const ageMs = nowMs - msgMs;
+    return ageMs >= -60000 && ageMs <= windowMs;
+}
+
+/**
+ * Resolves database state updates for a conversation aggregated in BatchProcessor.
+ * Any live operator outbound intervention immediately forces status='open' and ai_paused=true.
+ */
+export function resolveBatchConversationTransition(exist, data, isContactPaused = false, nowMs = Date.now()) {
+    const isOldHistory = Boolean(
+        data?.last_message_at && (nowMs - new Date(data.last_message_at).getTime() > 24 * 60 * 60 * 1000)
+    );
+
+    if (exist) {
+        let nextStatus = exist.status || 'resolved';
+        let nextAiPaused = Boolean(exist.ai_paused || isContactPaused);
+        let nextAiPausedManually = Boolean(exist.ai_paused_manually);
+
+        if (!data?.has_inbound && !data?.has_human_outbound) {
+            nextStatus = exist.status || 'resolved';
+        } else if ((exist.status === 'resolved' || exist.status === 'closed' || exist.status === 'snoozed') && !isOldHistory) {
+            if (data.has_human_outbound) {
+                nextStatus = 'open';
+            } else if (data.has_inbound) {
+                nextStatus = (nextAiPaused || isContactPaused) ? 'open' : 'bot';
+            }
+        }
+
+        if (exist.status === 'open' && data?.has_inbound && !data?.has_human_outbound) {
+            nextStatus = (nextAiPaused || isContactPaused) ? 'open' : 'bot';
+        }
+
+        if (data?.has_human_outbound) {
+            nextAiPaused = true;
+            nextAiPausedManually = true;
+            nextStatus = 'open';
+        }
+
+        return {
+            status: nextStatus,
+            ai_paused: nextAiPaused,
+            ai_paused_manually: nextAiPausedManually,
+            hasHumanOverride: Boolean(data?.has_human_outbound)
+        };
+    }
+
+    let initialStatus = 'resolved';
+    let initialAiPaused = Boolean(isContactPaused);
+    let initialAiPausedManually = false;
+
+    if (!isOldHistory) {
+        if (data?.has_human_outbound) {
+            initialStatus = 'open';
+            initialAiPaused = true;
+            initialAiPausedManually = true;
+        } else if (data?.has_inbound) {
+            initialStatus = isContactPaused ? 'open' : 'bot';
+            initialAiPaused = Boolean(isContactPaused);
+        } else {
+            initialStatus = 'resolved';
+        }
+    }
+
+    return {
+        status: initialStatus,
+        ai_paused: initialAiPaused,
+        ai_paused_manually: initialAiPausedManually,
+        hasHumanOverride: Boolean(data?.has_human_outbound && !isOldHistory)
+    };
+}
+
 

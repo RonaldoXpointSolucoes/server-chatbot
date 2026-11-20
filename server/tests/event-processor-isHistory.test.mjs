@@ -37,6 +37,9 @@ function mockSupabaseForUnitTests(t, overrides = {}) {
       },
       in: () => chain,
       eq: () => chain,
+      neq: () => chain,
+      order: () => chain,
+      limit: () => chain,
       maybeSingle: async () => ({ data: null, error: null }),
       single: async () => ({ data: null, error: null }),
       then: (resolve) => resolve({ data: [], error: null })

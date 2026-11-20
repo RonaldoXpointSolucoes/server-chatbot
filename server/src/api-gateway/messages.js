@@ -3,6 +3,7 @@ import sessionManager, { isInstanceAllowedForNode } from '../session-manager/ind
 import { supabase, resolveTargetJid } from '../supabase.js';
 import realtime from '../realtime-publisher/index.js';
 import AutomationWorker from '../automation-worker/agent.js';
+import { pauseAiImmediatelyForHumanOperator } from '../automation-worker/human-pause.js';
 import { forwardInternalInstanceRequest } from './external-message-routing.js';
 
 const router = express.Router();
@@ -165,18 +166,22 @@ router.post(['/', '/send', '/messages/send', '/sendText', '/send-text'], require
         }
 
         if (!isAuto) {
-            try {
-                AutomationWorker.cancelPendingMessage(conversationId, 'envio_humano_api');
-                AutomationWorker.cancelPendingMessage(remoteJid, 'envio_humano_api');
-            } catch (cancelErr) {
-                console.error('[Messages API] Erro ao cancelar mensagem pendente:', cancelErr);
-            }
+            await pauseAiImmediatelyForHumanOperator({
+                supabase,
+                AutomationWorker,
+                tenantId,
+                instanceId,
+                conversationId,
+                jid: remoteJid,
+                reason: 'envio_humano_api'
+            });
 
             await supabase.from('conversations').update({
                 updated_at: new Date().toISOString(),
                 unread_count: 0,
                 status: 'open',
-                ai_paused: true
+                ai_paused: true,
+                ai_paused_manually: true
             }).eq('id', conversationId);
         } else {
             // Automação: apenas atualiza timestamp sem alterar o status da conversa (NÃO reabre ticket)
@@ -455,12 +460,18 @@ router.post('/conversations/:conversationId/sync-history', requireTenant, async 
 router.post(['/cancel-ai', '/messages/cancel-ai'], requireTenant, async (req, res) => {
     try {
         const { conversationId, remoteJid, contactId, reason } = req.body;
+
+        await pauseAiImmediatelyForHumanOperator({
+            supabase,
+            AutomationWorker,
+            tenantId: req.tenantId,
+            conversationId,
+            contactId,
+            jid: remoteJid,
+            reason: reason || 'pausa_manual'
+        });
         
-        if (conversationId) AutomationWorker.cancelPendingMessage(conversationId, reason || 'pausa_manual');
-        if (remoteJid) AutomationWorker.cancelPendingMessage(remoteJid, reason || 'pausa_manual');
-        if (contactId) AutomationWorker.cancelPendingMessage(contactId, reason || 'pausa_manual');
-        
-        res.json({ ok: true, message: 'IA abortada com sucesso' });
+        res.json({ ok: true, message: 'IA abortada e pausada com sucesso' });
     } catch (e) {
         console.error('[Messages API] Erro ao cancelar IA:', e);
         res.status(500).json({ error: e.message });
@@ -560,6 +571,8 @@ router.post(['/resume-ai', '/messages/resume-ai'], requireTenant, async (req, re
             return res.json({ ok: true, triggered: false, reason: 'missing_contact_jid' });
         }
         const jid = sock ? await resolveTargetJid(sock, rawTarget, tenantId) : (String(rawTarget).includes('@') ? rawTarget : `${String(rawTarget).replace(/\D/g, '')}@s.whatsapp.net`);
+
+        AutomationWorker.clearHumanPauseOverride?.(conversationId, jid, conv.contact_id);
 
         await AutomationWorker.processMessage({
             tenantId,

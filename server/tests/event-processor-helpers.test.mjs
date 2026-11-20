@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
   parseWhatsAppTimestamp,
   isHistoricalUpsert,
+  isRecentHumanOperatorMessage,
+  resolveBatchConversationTransition,
   resolveStatusPriority,
   shouldAcceptStatusTransition
 } from '../src/event-processor/helpers.js';
@@ -41,4 +43,32 @@ test('shouldAcceptStatusTransition enforces strict monotonic advancement', () =>
   assert.equal(shouldAcceptStatusTransition('read', 'delivered'), false);
   assert.equal(shouldAcceptStatusTransition('played', 'read'), false);
   assert.equal(shouldAcceptStatusTransition('delivered', 'delivered'), false);
+});
+
+test('isRecentHumanOperatorMessage detects live notify and recent (<2m) companion append human messages', () => {
+  const nowMs = Date.UTC(2026, 10, 20, 18, 0, 0);
+  const recentTs = new Date(nowMs - 15000);
+  const oldSyncTs = new Date(nowMs - 5 * 60000);
+
+  assert.equal(isRecentHumanOperatorMessage({ senderType: 'human', isHistory: false, tsDate: recentTs, nowMs }), true);
+  assert.equal(isRecentHumanOperatorMessage({ senderType: 'human', isHistory: true, tsDate: recentTs, nowMs }), true);
+  assert.equal(isRecentHumanOperatorMessage({ senderType: 'human', isHistory: true, tsDate: oldSyncTs, nowMs }), false);
+  assert.equal(isRecentHumanOperatorMessage({ senderType: 'automation', isHistory: false, tsDate: recentTs, nowMs }), false);
+  assert.equal(isRecentHumanOperatorMessage({ senderType: 'bot', isHistory: false, tsDate: recentTs, nowMs }), false);
+});
+
+test('resolveBatchConversationTransition forces open + ai_paused=true immediately on human outbound', () => {
+  const nowMs = Date.UTC(2026, 10, 20, 18, 0, 0);
+  const existBot = { id: 'conv-1', status: 'bot', ai_paused: false, ai_paused_manually: false };
+  const transition = resolveBatchConversationTransition(
+    existBot,
+    { has_inbound: true, has_human_outbound: true, last_message_at: new Date(nowMs - 1000) },
+    false,
+    nowMs
+  );
+
+  assert.equal(transition.status, 'open');
+  assert.equal(transition.ai_paused, true);
+  assert.equal(transition.ai_paused_manually, true);
+  assert.equal(transition.hasHumanOverride, true);
 });

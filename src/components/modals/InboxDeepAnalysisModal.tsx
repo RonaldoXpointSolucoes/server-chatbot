@@ -96,6 +96,8 @@ export const InboxDeepAnalysisModal: React.FC<InboxDeepAnalysisModalProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [resultTab, setResultTab] = useState<'document' | 'discarded'>('document');
   const [togglingScope, setTogglingScope] = useState(false);
+  const [targetScope, setTargetScope] = useState<'inbox' | 'global'>('inbox');
+  const [modalStep, setModalStep] = useState<'choose_scope' | 'studio'>('choose_scope');
 
   const loadStatus = useCallback(async () => {
     if (!tenantId || !instanceId) return;
@@ -110,12 +112,22 @@ export const InboxDeepAnalysisModal: React.FC<InboxDeepAnalysisModalProps> = ({
       setStatusData(json);
       if (json.activeRun) {
         setActiveRun(json.activeRun);
+        const runScope = (json.activeRun.stats as { targetScope?: string } | null)?.targetScope;
+        if (runScope === 'global' || runScope === 'inbox') {
+          setTargetScope(runScope);
+        }
+        if (isActiveRunStatus(json.activeRun.status)) {
+          setModalStep('studio');
+        }
       } else if (json.lastCompletedRun) {
         setActiveRun(json.lastCompletedRun);
       } else if (Array.isArray(json.recentRuns) && json.recentRuns[0]) {
         setActiveRun(json.recentRuns[0]);
       } else {
         setActiveRun(null);
+      }
+      if (!json.activeRun && json.linkedDocument) {
+        setTargetScope(json.linkedDocument.instance_id === null ? 'global' : 'inbox');
       }
     } catch (err: unknown) {
       setErrorMsg(getErrMessage(err, 'Erro ao carregar status da análise profunda.'));
@@ -130,12 +142,15 @@ export const InboxDeepAnalysisModal: React.FC<InboxDeepAnalysisModalProps> = ({
       setStatusData(null);
       setActiveRun(null);
       setErrorMsg(null);
+      setTargetScope('inbox');
+      setModalStep('choose_scope');
       return;
     }
     setConfirmFullReset(false);
     setStatusData(null);
     setActiveRun(null);
     setErrorMsg(null);
+    setModalStep('choose_scope');
     loadStatus();
   }, [isOpen, instanceId, loadStatus]);
 
@@ -181,10 +196,12 @@ export const InboxDeepAnalysisModal: React.FC<InboxDeepAnalysisModalProps> = ({
     };
   }, [isPolling, activeRunId, tenantId, loadStatus]);
 
-  const handleStartAnalysis = async (mode: 'incremental' | 'full') => {
+  const handleStartAnalysis = async (mode: 'incremental' | 'full', scopeOverride?: 'inbox' | 'global') => {
     if (!tenantId || !instanceId || starting) return;
+    const effectiveTargetScope = scopeOverride || targetScope;
     setStarting(true);
     setConfirmFullReset(false);
+    setModalStep('studio');
     setErrorMsg(null);
     try {
       const res = await fetch(`${ENGINE_URL}/api/v1/knowledge/inbox-analyze/${instanceId}/start`, {
@@ -193,7 +210,7 @@ export const InboxDeepAnalysisModal: React.FC<InboxDeepAnalysisModalProps> = ({
           'x-tenant-id': tenantId,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ mode })
+        body: JSON.stringify({ mode, targetScope: effectiveTargetScope })
       });
       const json = (await res.json()) as { run?: InboxRunRecord; activeRun?: InboxRunRecord; error?: string };
       if (res.status === 409 && json?.activeRun) {
@@ -209,6 +226,11 @@ export const InboxDeepAnalysisModal: React.FC<InboxDeepAnalysisModalProps> = ({
     } finally {
       setStarting(false);
     }
+  };
+
+  const handleChooseScope = (chosen: 'inbox' | 'global') => {
+    setTargetScope(chosen);
+    setModalStep('studio');
   };
 
   const linkedDoc = statusData?.linkedDocument || null;
@@ -277,16 +299,25 @@ export const InboxDeepAnalysisModal: React.FC<InboxDeepAnalysisModalProps> = ({
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-base sm:text-lg font-black text-white truncate">
-                  Análise Profunda da Caixa: {instanceName}
+                  Sincronizar Conversas no RAG: {instanceName}
                 </h2>
                 <span className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full border ${
-                  isDocGlobal
+                  (modalStep === 'studio' ? targetScope === 'global' : isDocGlobal)
                     ? 'bg-sky-500/15 text-sky-300 border-sky-500/30'
                     : 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30'
                 }`}>
-                  {isDocGlobal ? <Globe size={10} /> : <Lock size={10} />}
-                  {isDocGlobal ? 'Global da Empresa' : 'Exclusivo desta Caixa'}
+                  {(modalStep === 'studio' ? targetScope === 'global' : isDocGlobal) ? <Globe size={10} /> : <Lock size={10} />}
+                  {(modalStep === 'studio' ? targetScope === 'global' : isDocGlobal) ? 'Global da Empresa' : 'Exclusivo desta Caixa'}
                 </span>
+                {modalStep === 'studio' && !isRunning && (
+                  <button
+                    type="button"
+                    onClick={() => setModalStep('choose_scope')}
+                    className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white/5 hover:bg-white/15 text-slate-300 border border-white/10 transition-colors cursor-pointer"
+                  >
+                    Alterar escopo
+                  </button>
+                )}
               </div>
               <p className="text-xs text-slate-400 truncate mt-0.5">
                 Empresa: <strong className="text-slate-200">{resolvedCompanyName}</strong> • Funil Anti-Ruído 10x + Playbook Comportamental RAG 2.0
@@ -311,6 +342,109 @@ export const InboxDeepAnalysisModal: React.FC<InboxDeepAnalysisModalProps> = ({
             </div>
           )}
 
+          {/* Passo 1: Pergunta explícita de Escopo (Exclusivo desta Caixa vs Global da Empresa) */}
+          {modalStep === 'choose_scope' ? (
+            <div className="space-y-5">
+              <div className="rounded-2xl bg-[#182229]/90 border border-white/10 p-4 flex items-start gap-3">
+                <div className="p-2.5 rounded-xl bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 shrink-0">
+                  <Clock size={18} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    {loadingStatus ? 'Consultando histórico de conversas no banco...' : checkpoint.headline}
+                    {loadingStatus && <Loader2 size={14} className="animate-spin text-emerald-400" />}
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">{checkpoint.detail}</p>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <h3 className="text-base font-extrabold text-white">
+                    Onde deseja aplicar o conhecimento extraído do histórico desta caixa?
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Todas as conversas reais existentes da caixa <strong className="text-slate-200">{instanceName}</strong> serão lidas, filtradas em 10 camadas anti-lixo e inseridas no RAG. Escolha o alcance de aplicação:
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                  <button
+                    type="button"
+                    onClick={() => handleChooseScope('inbox')}
+                    className={`text-left p-5 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between gap-3 group ${
+                      targetScope === 'inbox'
+                        ? 'bg-indigo-500/15 border-indigo-400/60 shadow-[0_0_24px_rgba(99,102,241,0.18)]'
+                        : 'bg-[#182229]/80 border-white/10 hover:border-indigo-400/50 hover:bg-indigo-500/10'
+                    }`}
+                  >
+                    <div className="space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center text-indigo-300">
+                          <Lock size={19} />
+                        </div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-400/30">
+                          Isolado na Caixa
+                        </span>
+                      </div>
+                      <h4 className="text-sm font-black text-white">
+                        Exclusivamente nesta Caixa ({instanceName})
+                      </h4>
+                      <p className="text-xs text-slate-300 leading-relaxed">
+                        Aplica o playbook e o conhecimento RAG extraídos apenas para os atendimentos e robôs vinculados à caixa <strong className="text-white">{instanceName}</strong>.
+                      </p>
+                    </div>
+                    <span className="text-xs font-bold text-indigo-300 group-hover:translate-x-1 transition-transform inline-flex items-center gap-1">
+                      Aplicar exclusivamente nesta Caixa →
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleChooseScope('global')}
+                    className={`text-left p-5 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between gap-3 group ${
+                      targetScope === 'global'
+                        ? 'bg-sky-500/15 border-sky-400/60 shadow-[0_0_24px_rgba(56,189,248,0.18)]'
+                        : 'bg-[#182229]/80 border-white/10 hover:border-sky-400/50 hover:bg-sky-500/10'
+                    }`}
+                  >
+                    <div className="space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <div className="w-10 h-10 rounded-xl bg-sky-500/20 border border-sky-400/30 flex items-center justify-center text-sky-300">
+                          <Globe size={19} />
+                        </div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-400/30">
+                          Todas as Caixas
+                        </span>
+                      </div>
+                      <h4 className="text-sm font-black text-white">
+                        Global — Empresa Inteira ({resolvedCompanyName})
+                      </h4>
+                      <p className="text-xs text-slate-300 leading-relaxed">
+                        Insere o conhecimento RAG gerado a partir desta caixa na base <strong className="text-white">Global</strong>, ficando disponível para todas as caixas de {resolvedCompanyName}.
+                      </p>
+                    </div>
+                    <span className="text-xs font-bold text-sky-300 group-hover:translate-x-1 transition-transform inline-flex items-center gap-1">
+                      Aplicar Globalmente na Empresa →
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              {activeRun && (
+                <div className="pt-1 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setModalStep('studio')}
+                    className="text-xs font-semibold text-slate-300 hover:text-emerald-300 underline cursor-pointer"
+                  >
+                    Ir para o painel / resultado da última execução
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+          <>
           {/* Checkpoint & Incremental Controls */}
           <div className="rounded-2xl bg-[#182229]/90 border border-white/10 p-4 sm:p-5 flex flex-col gap-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -345,7 +479,11 @@ export const InboxDeepAnalysisModal: React.FC<InboxDeepAnalysisModalProps> = ({
                 className="flex-1 min-w-[230px] px-4 py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 transition-all disabled:opacity-50 cursor-pointer"
               >
                 {isRunning ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />}
-                <span>{isRunning ? 'Análise Profunda em Execução...' : checkpoint.primaryButtonLabel}</span>
+                <span>
+                  {isRunning
+                    ? 'Sincronização RAG em Execução...'
+                    : `${checkpoint.primaryButtonLabel} (${targetScope === 'global' ? 'Global da Empresa' : 'Somente esta Caixa'})`}
+                </span>
               </button>
 
               {checkpoint.hasPreviousRun && !confirmFullReset && (
@@ -528,6 +666,8 @@ export const InboxDeepAnalysisModal: React.FC<InboxDeepAnalysisModalProps> = ({
               </div>
             </div>
           )}
+          </>
+          )}
         </div>
 
         {/* Footer */}
@@ -549,7 +689,8 @@ export const InboxDeepAnalysisModal: React.FC<InboxDeepAnalysisModalProps> = ({
             <button
               onClick={() => {
                 onClose();
-                navigate(`/knowledge?instanceId=${encodeURIComponent(instanceId)}`);
+                const navScope = (modalStep === 'studio' ? targetScope === 'global' : isDocGlobal) ? 'global' : instanceId;
+                navigate(`/knowledge?instanceId=${encodeURIComponent(navScope)}`);
               }}
               className="px-4 py-2 rounded-xl bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-500/30 text-indigo-300 text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer"
             >

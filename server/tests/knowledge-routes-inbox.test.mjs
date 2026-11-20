@@ -130,11 +130,11 @@ test('Knowledge routes handle inbox-analyze status, start (400/409/202), and run
                 statusCalledFor = instanceId;
                 return { instance: { id: instanceId, display_name: 'Comercial' }, pendingEligibleCount: 12, activeRun: null, lastCompletedRun: null, recentRuns: [] };
             },
-            startInboxDeepAnalysis: async ({ instanceId, mode }) => {
+            startInboxDeepAnalysis: async ({ instanceId, mode, targetScope }) => {
                 if (conflictMode) {
                     return { conflict: true, activeRun: { id: RUN_ID, status: 'synthesizing' } };
                 }
-                return { ok: true, run: { id: RUN_ID, instance_id: instanceId, mode, status: 'queued' } };
+                return { ok: true, run: { id: RUN_ID, instance_id: instanceId, mode, targetScope, status: 'queued' } };
             },
             getInboxAnalysisRun: async ({ runId }) => {
                 runCalledFor = runId;
@@ -175,12 +175,13 @@ test('Knowledge routes handle inbox-analyze status, start (400/409/202), and run
         const okRes = await fetch(`${baseUrl}/inbox-analyze/${INSTANCE_ID}/start`, {
             method: 'POST',
             headers: { 'x-tenant-id': TENANT_ID, 'content-type': 'application/json' },
-            body: JSON.stringify({ mode: 'full' })
+            body: JSON.stringify({ mode: 'full', targetScope: 'global' })
         });
         assert.equal(okRes.status, 202);
         const okJson = await okRes.json();
         assert.equal(okJson.run.id, RUN_ID);
         assert.equal(okJson.run.mode, 'full');
+        assert.equal(okJson.run.targetScope, 'global');
     });
 });
 

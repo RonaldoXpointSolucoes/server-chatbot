@@ -1,5 +1,5 @@
 {
-  "version": "8.3.1",
-  "buildDate": "2026-11-20T17:39:10.496Z",
-  "summary": "Blindagem de Entrega & Recibos WhatsApp (Não-Regressão delivered ➔ SERVER_ACK, Motor v8.2.2) e Isolamento Estrito do Seletor de Empresas"
+  "version": "8.3.2",
+  "buildDate": "2026-11-20T19:41:02.224Z",
+  "summary": "Pausa Imediata da I.A em Qualquer Envio de Operador (Motor v8.2.3), Botão DevLogger Compacto com Alerta Sonar de Erros e Sincronização RAG Exclusiva vs Global no Submenu da Caixa"
 }

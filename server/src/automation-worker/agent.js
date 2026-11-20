@@ -1454,6 +1454,50 @@ class AutomationWorker {
     constructor() {
         this.genAI = null;
         this.genAICache = new Map();
+        this.recentHumanPauseMap = new Map();
+    }
+
+    _buildHumanPauseKeys({ conversationId = null, contactId = null, jid = null, phone = null } = {}) {
+        const keys = [];
+        if (conversationId) keys.push(`conv:${String(conversationId).trim()}`);
+        if (contactId) keys.push(`contact:${String(contactId).trim()}`);
+        const rawDigits = String(phone || jid || '').split('@')[0].split(':')[0].replace(/\D/g, '');
+        if (jid) keys.push(`jid:${String(jid).trim()}`);
+        if (rawDigits) {
+            for (const v of getBrPhoneVariations(rawDigits)) {
+                keys.push(`phone:${v}`);
+            }
+        }
+        return keys;
+    }
+
+    markHumanPause({ conversationId = null, contactId = null, jid = null, phone = null, reason = 'envio_operador', ttlMs = 30000 } = {}) {
+        if (!this.recentHumanPauseMap) this.recentHumanPauseMap = new Map();
+        const expiresAt = Date.now() + ttlMs;
+        for (const k of this._buildHumanPauseKeys({ conversationId, contactId, jid, phone })) {
+            this.recentHumanPauseMap.set(k, { expiresAt, reason });
+        }
+    }
+
+    clearHumanPauseOverride(conversationId = null, jidOrPhone = null, contactId = null) {
+        if (!this.recentHumanPauseMap) return;
+        for (const k of this._buildHumanPauseKeys({ conversationId, contactId, jid: jidOrPhone, phone: jidOrPhone })) {
+            this.recentHumanPauseMap.delete(k);
+        }
+    }
+
+    isRecentlyHumanPaused({ conversationId = null, contactId = null, jid = null, phone = null } = {}) {
+        if (!this.recentHumanPauseMap || this.recentHumanPauseMap.size === 0) return null;
+        const now = Date.now();
+        for (const k of this._buildHumanPauseKeys({ conversationId, contactId, jid, phone })) {
+            const entry = this.recentHumanPauseMap.get(k);
+            if (!entry) continue;
+            if (entry.expiresAt > now) {
+                return entry.reason || 'intervencao_humana_recente';
+            }
+            this.recentHumanPauseMap.delete(k);
+        }
+        return null;
     }
 
     getGenAI(customKey = null) {
@@ -2162,6 +2206,12 @@ Responda APENAS com o ID exato do agente escolhido, sem markdown e sem aspas. Ex
         const { tenantId, instanceId, conversationId, contactId, jid, textMessage, botId, botSettings, sock, botDelay, botInstructions } = params;
         const key = conversationId || jid;
 
+        const recentPauseReason = this.isRecentlyHumanPaused({ conversationId, contactId, jid });
+        if (recentPauseReason) {
+            console.log(`[AutomationWorker] Ignorando processMessage para ${key}: pausa humana imediata ativa (${recentPauseReason}).`);
+            return;
+        }
+
         if (!this.pendingJobs) {
             this.pendingJobs = new Map();
         }
@@ -2260,6 +2310,15 @@ Responda APENAS com o ID exato do agente escolhido, sem markdown e sem aspas. Ex
         const job = this.pendingJobs?.get(key);
         if (!job || job.cancelled) return;
 
+        // Pre-generation check: abort immediately if a human operator replied during the debounce window
+        const preCheck = await this.checkCanSendAiResponse(job.params.conversationId, job.params.contactId, job.params.jid);
+        if (!preCheck.allowed) {
+            console.log(`[AutomationWorker] Geração abortada antes de chamar IA para ${key}: ${preCheck.reason}`);
+            job.cancelled = true;
+            this.pendingJobs.delete(key);
+            return;
+        }
+
         job.generating = true;
         job.obsolete = false;
         job.generationTimeout = null;
@@ -2287,6 +2346,14 @@ Responda APENAS com o ID exato do agente escolhido, sem markdown e sem aspas. Ex
             // Se o job foi cancelado durante a chamada assíncrona ao Gemini, aborta imediatamente
             if (job.cancelled || !this.pendingJobs?.has(key)) {
                 console.log(`[AutomationWorker] Geração concluída para ${key}, mas o job foi cancelado durante o processamento. Descartando.`);
+                return;
+            }
+
+            const postGenCheck = await this.checkCanSendAiResponse(job.params.conversationId, job.params.contactId, job.params.jid);
+            if (!postGenCheck.allowed) {
+                console.log(`[AutomationWorker] Resposta descartada após geração para ${key}: ${postGenCheck.reason}`);
+                job.cancelled = true;
+                this.pendingJobs.delete(key);
                 return;
             }
 
@@ -4511,8 +4578,15 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
         });
     }
 
-    async checkCanSendAiResponse(conversationId, contactId) {
+    async checkCanSendAiResponse(conversationId, contactId, jid = null) {
         try {
+            const recentPauseReason = this.isRecentlyHumanPaused({ conversationId, contactId, jid });
+            if (recentPauseReason) {
+                return {
+                    allowed: false,
+                    reason: `Intervenção recente de operador humano (${recentPauseReason})`
+                };
+            }
             if (conversationId) {
                 const { data: currentConv } = await supabase
                     .from('conversations')
@@ -4584,7 +4658,7 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
         
         try {
             // DOUBLE CHECK 1: Validação no banco de dados ANTES de simular digitação
-            const check1 = await this.checkCanSendAiResponse(conversationId, contactId);
+            const check1 = await this.checkCanSendAiResponse(conversationId, contactId, jid);
             if (!check1.allowed) {
                 console.log(`[AutomationWorker] Envio de IA abortado no Double-Check 1 para conversa ${conversationId}: ${check1.reason}`);
                 return;
@@ -4616,7 +4690,7 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
                 }
 
                 // DOUBLE CHECK 2: Validação no banco de dados APÓS a digitação e IMEDIATAMENTE ANTES do envio
-                const check2 = await this.checkCanSendAiResponse(conversationId, contactId);
+                const check2 = await this.checkCanSendAiResponse(conversationId, contactId, jid);
                 if (!check2.allowed) {
                     console.log(`[AutomationWorker] Envio de IA abortado no Double-Check 2 (pós-digitação) para conversa ${conversationId}: ${check2.reason}`);
                     try {

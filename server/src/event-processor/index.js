@@ -8,6 +8,7 @@ import path from 'path';
 import * as tus from 'tus-js-client';
 import FlowEngine from '../flow-runtime/index.js';
 import AutomationWorker from '../automation-worker/agent.js';
+import { pauseAiImmediatelyForHumanOperator } from '../automation-worker/human-pause.js';
 import PushService from '../push-service/index.js';
 import crypto from 'crypto';
 import { logAndNotifyConnectionEvent } from './connection-notifier.js';
@@ -27,7 +28,9 @@ import {
     resolveStatusPriority,
     shouldAcceptStatusTransition,
     parseWhatsAppTimestamp,
-    isHistoricalUpsert
+    isHistoricalUpsert,
+    isRecentHumanOperatorMessage,
+    resolveBatchConversationTransition
 } from './helpers.js';
 import { createInstanceConfigLoader, createOrderDetailsFetcher } from './resilience.js';
 
@@ -646,6 +649,14 @@ class EventProcessor {
                      console.info(`[Message Tracker] ℹ️ Ignorando evento fromMe:false em self-chat (evita duplicidade). JID: ${jid}`);
                      continue;
                 }
+                const senderType = msg.key.fromMe 
+                    ? (isBot ? 'bot' : (isAutomation ? 'automation' : 'human')) 
+                    : 'client';
+                const direction = msg.key.fromMe ? 'outbound' : 'inbound';
+                const isLiveHumanOutbound = Boolean(
+                    msg.key.fromMe && isRecentHumanOperatorMessage({ senderType, isHistory, tsDate })
+                );
+
                 if (msg.key.fromMe) {
                     if (botCacheEntry && typeof botCacheEntry === 'object') {
                         if (botCacheEntry.bot_name && !msg.bot_name) msg.bot_name = botCacheEntry.bot_name;
@@ -653,14 +664,23 @@ class EventProcessor {
                     } else if (humanCacheEntry && typeof humanCacheEntry === 'object') {
                         if (humanCacheEntry.operator_name && !msg.operator_name) msg.operator_name = humanCacheEntry.operator_name;
                         if (humanCacheEntry.operator_id && !msg.operator_id) msg.operator_id = humanCacheEntry.operator_id;
-                    } else if (!isBot && !isAutomation && !isHuman && !isHistory && !msg.operator_name) {
+                    } else if (!isBot && !isAutomation && !isHuman && isLiveHumanOutbound && !msg.operator_name) {
                         msg.operator_source = 'whatsapp_device';
                     }
+
+                    // Intervenção humana imediata (Web CRM ou aparelho WhatsApp/Desktop, incluindo companion append recente)
+                    if (isLiveHumanOutbound) {
+                        pauseAiImmediatelyForHumanOperator({
+                            supabase,
+                            AutomationWorker,
+                            tenantId,
+                            instanceId,
+                            jid,
+                            phone,
+                            reason: msg.operator_source === 'whatsapp_device' ? 'envio_operador_whatsapp' : 'envio_operador_crm'
+                        }).catch(() => {});
+                    }
                 }
-                const senderType = msg.key.fromMe 
-                    ? (isBot ? 'bot' : (isAutomation ? 'automation' : 'human')) 
-                    : 'client';
-                const direction = msg.key.fromMe ? 'outbound' : 'inbound';
                 
                 // Se for outbound (fromMe), o msg.pushName é o nome do PRÓPRIO aparelho (ex: Burguer Plus).
                 // Não devemos atribuir ao nome do cliente (jid); e se o pushName vier vazio/genérico, mantemos o telefone.
@@ -909,12 +929,13 @@ class EventProcessor {
                     msgType,
                     textMessage,
                     isSelfChat,
-                    isHistory
+                    isHistory,
+                    isLiveHumanOutbound
                 });
 
                 // Otimização de Baixa Latência (<1s): Força flush imediato da fila para mensagens em tempo real
-                // (tanto mensagens do cliente no WhatsApp quanto do atendente no CRM)
-                const isLiveRealtime = !isHistory;
+                // (tanto mensagens do cliente no WhatsApp quanto do atendente no CRM ou aparelho)
+                const isLiveRealtime = !isHistory || isLiveHumanOutbound;
                 console.log(`[EventProcessor] [MSG_TRACE:INBOUND_ENQUEUED] Instância: ${instanceId} | MsgId: ${msg.key?.id} | De: ${phone} | Direção: ${direction} | Live: ${isLiveRealtime}`);
 
                 if (senderType === 'human' || isLiveRealtime) {
@@ -1368,7 +1389,7 @@ class EventProcessor {
                       conv.last_message_preview = b.textMessage;
                       conv.last_message_at = b.timestamp;
                   }
-                  if (!b.isHistory) {
+                  if (!b.isHistory || b.isLiveHumanOutbound) {
                       if (b.direction === 'inbound') {
                           conv.unread_count += 1;
                           conv.has_inbound = true;
@@ -1380,8 +1401,9 @@ class EventProcessor {
                           } else if (b.senderType === 'human') {
                               conv.has_human_outbound = true;
                               conv.only_automation_outbound = false;
-                              AutomationWorker.cancelPendingMessage(b.conversationId);
-                              AutomationWorker.cancelPendingMessage(b.jid);
+                              AutomationWorker.markHumanPause?.({ jid: b.jid, phone: b.phone, reason: 'envio_operador_lote' });
+                              AutomationWorker.cancelPendingMessage?.(b.jid, 'envio_operador_lote');
+                              AutomationWorker.cancelPendingMessage?.(b.phone, 'envio_operador_lote');
                           } else {
                               conv.only_automation_outbound = false;
                           }
@@ -1392,7 +1414,7 @@ class EventProcessor {
              // Verifica quais conversas já existem no banco
              const contactIds = Array.from(new Set(Array.from(convMap.values()).map(c => c.contact_id)));
              const { data: existingConvs, error: existError } = await supabase.from('conversations')
-                  .select('id, tenant_id, instance_id, contact_id, unread_count, status, ai_paused')
+                  .select('id, tenant_id, instance_id, contact_id, unread_count, status, ai_paused, ai_paused_manually')
                   .in('contact_id', contactIds);
                   
              if(existError) throw new Error("Conversation Select Error: " + existError.message);
@@ -1413,38 +1435,12 @@ class EventProcessor {
                  const exist = existingConvMap.get(key);
                  const contactBotStatus = contactBotStatusMap.get(data.contact_id) || 'active';
                  const isContactPaused = contactBotStatus === 'paused';
+                 const transition = resolveBatchConversationTransition(exist, data, isContactPaused);
 
-                 let finalStatus = 'resolved';
-                 let finalAiPaused = false;
-                 
+                 const finalStatus = transition.status;
+                 const finalAiPaused = transition.ai_paused;
+
                  if(exist) {
-                     let nextStatus = exist.status || 'resolved';
-                     let nextAiPaused = exist.ai_paused || isContactPaused || false;
-                     const isOldHistory = data.last_message_at && (Date.now() - new Date(data.last_message_at).getTime() > 24 * 60 * 60 * 1000);
-                      
-                     // Regra Estrita: Se o lote não possuir mensagem recebida do cliente (inbound) nem envio humano expresso,
-                     // MANTÉM intacto o status existente (se estava 'resolved', continua 'resolved', NUNCA reabre ticket!)
-                     if (!data.has_inbound && !data.has_human_outbound) {
-                         nextStatus = exist.status || 'resolved';
-                     } else if ((exist.status === 'resolved' || exist.status === 'closed' || exist.status === 'snoozed') && !isOldHistory) {
-                          if (data.has_inbound) {
-                              nextStatus = (nextAiPaused || isContactPaused) ? 'open' : 'bot';
-                          } else if (data.has_human_outbound) {
-                              nextStatus = 'open';
-                          }
-                      }
-
-                      // Transição automática de open para bot se receber inbound e a IA estiver ativa
-                      if (exist.status === 'open' && data.has_inbound) {
-                          nextStatus = (nextAiPaused || isContactPaused) ? 'open' : 'bot';
-                      }
-                      
-                      if (data.has_human_outbound) {
-                          nextAiPaused = true;
-                      }
-                      
-                      finalStatus = nextStatus;
-                      
                       const updatePayload = {
                           id: exist.id,
                           tenant_id: exist.tenant_id || data.tenant_id,
@@ -1454,11 +1450,12 @@ class EventProcessor {
                           last_message_preview: Array.from(String(data.last_message_preview || '')).slice(0, 500).join(''),
                           last_message_at: new Date(data.last_message_at).toISOString(),
                           updated_at: new Date().toISOString(),
-                          status: nextStatus,
-                          ai_paused: nextAiPaused
+                          status: finalStatus,
+                          ai_paused: finalAiPaused,
+                          ...(transition.hasHumanOverride ? { ai_paused_manually: true } : {})
                       };
 
-                      if (exist.status === 'snoozed' && nextStatus !== 'snoozed') {
+                      if (exist.status === 'snoozed' && finalStatus !== 'snoozed') {
                           updatePayload.snoozed_until = null;
                           updatePayload.snoozed_at = null;
                           updatePayload.snoozed_by = null;
@@ -1466,35 +1463,17 @@ class EventProcessor {
 
                       toUpdateConvs.push(updatePayload);
                  } else {
-                     let initialStatus = 'resolved';
-                     let initialAiPaused = isContactPaused || false;
-                     const isOldHistory = data.last_message_at && (Date.now() - new Date(data.last_message_at).getTime() > 24 * 60 * 60 * 1000);
-                     if (!isOldHistory) {
-                         if (data.has_inbound) {
-                             initialStatus = isContactPaused ? 'open' : 'bot';
-                             initialAiPaused = isContactPaused;
-                         } else if (data.has_human_outbound) {
-                             initialStatus = 'open';
-                             initialAiPaused = true;
-                         } else {
-                             // Qualquer mensagem outbound (automação, status de pedido, notificação) inicia como 'resolved' (SEM abrir ticket!)
-                             initialStatus = 'resolved';
-                         }
-                     }
-                     
-                     finalStatus = initialStatus;
-                     finalAiPaused = initialAiPaused;
-                     
                      toInsertConvs.push({
                          id: crypto.randomUUID(),
                          tenant_id: data.tenant_id,
                          instance_id: data.instance_id,
                          contact_id: data.contact_id,
-                         status: initialStatus,
+                         status: finalStatus,
                          unread_count: data.unread_count,
                          last_message_preview: Array.from(String(data.last_message_preview || '')).slice(0, 500).join(''),
                          last_message_at: data.last_message_at.toISOString(),
-                         ai_paused: initialAiPaused
+                         ai_paused: finalAiPaused,
+                         ...(transition.hasHumanOverride ? { ai_paused_manually: true } : {})
                      });
                  }
                  
@@ -1573,6 +1552,7 @@ class EventProcessor {
              }
 
              // 3. Processa Mídias em Paralelo Segura (evitando Memory leaks)
+             const humanOutboundConvIds = new Set();
              await Promise.all(activeBatch.map(async b => {
                  let cid = contactIdMap.get(`${b.tenantId}_${b.phone}`) || (b.jid ? contactIdMap.get(`${b.tenantId}_${b.jid}`) : null);
                  if (!cid) {
@@ -1633,6 +1613,21 @@ class EventProcessor {
                  b.aiPaused = isConvPaused || isContactPaused;
                  
                  if (!b.conversationId) return; // ignora falha bruta
+
+                 if (b.senderType === 'human' && (!b.isHistory || b.isLiveHumanOutbound)) {
+                     humanOutboundConvIds.add(b.conversationId);
+                     pauseAiImmediatelyForHumanOperator({
+                         supabase,
+                         AutomationWorker,
+                         tenantId: b.tenantId,
+                         instanceId: b.instanceId,
+                         conversationId: b.conversationId,
+                         contactId: cid,
+                         jid: b.jid,
+                         phone: b.phone,
+                         reason: 'envio_operador_lote'
+                     }).catch(() => {});
+                 }
                  
                  // Tenta recuperar a URL do cache de mídias pendentes (outbound)
                  if (!b.mediaUrl && b.rawMsg?.key?.id && EventProcessor.pendingMediaCache) {
@@ -1986,7 +1981,7 @@ class EventProcessor {
                  const b = activeBatch.find(x => x.rawMsg.key.id === msg.whatsapp_message_id && x.instanceId === msg.instance_id);
                  if (!b) continue;
 
-                 if (!b.isHistory) {
+                 if (!b.isHistory || b.isLiveHumanOutbound) {
                      await realtime.publishInboxEvent(b.tenantId, 'message.new', {
                          message: msg,
                          contact_phone: b.phone,
@@ -2011,8 +2006,8 @@ class EventProcessor {
                          }).catch(err => console.error('[WebhookTrigger] Falha ao despachar gatilho message_received:', err));
 
                          // Responde apenas se a conversa estiver sob os cuidados do bot ('bot' ou 'teste_robo')
-                         // E não seja um self-chat (evita auto-loop em envios pro próprio numero)
-                         if (!b.isSelfChat && !b.aiPaused && (b.convStatus === 'bot' || b.convStatus === 'teste_robo' || b.convStatus === 'open')) {
+                         // E não seja um self-chat nem conversa onde humano acabou de enviar mensagem no lote
+                         if (!b.isSelfChat && !b.aiPaused && !humanOutboundConvIds.has(b.conversationId) && (b.convStatus === 'bot' || b.convStatus === 'teste_robo' || b.convStatus === 'open')) {
                              const existingTrigger = aiTriggerMap.get(b.conversationId);
                              if (!existingTrigger || new Date(msg.timestamp) > new Date(existingTrigger.msg.timestamp)) {
                                  aiTriggerMap.set(b.conversationId, { msg, b });

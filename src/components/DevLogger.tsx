@@ -85,8 +85,8 @@ export default function DevLogger() {
         let newX = elementStartPosRef.current.x + dx;
         let newY = elementStartPosRef.current.y + dy;
         
-        const btnWidth = rect ? rect.width : 50;
-        const btnHeight = rect ? rect.height : 50;
+        const btnWidth = rect ? rect.width : 36;
+        const btnHeight = rect ? rect.height : 36;
         newX = Math.max(8, Math.min(newX, window.innerWidth - btnWidth - 8));
         newY = Math.max(8, Math.min(newY, window.innerHeight - btnHeight - 8));
         
@@ -139,8 +139,8 @@ export default function DevLogger() {
         let newX = elementStartPosRef.current.x + dx;
         let newY = elementStartPosRef.current.y + dy;
         
-        const btnWidth = rect ? rect.width : 50;
-        const btnHeight = rect ? rect.height : 50;
+        const btnWidth = rect ? rect.width : 36;
+        const btnHeight = rect ? rect.height : 36;
         newX = Math.max(8, Math.min(newX, window.innerWidth - btnWidth - 8));
         newY = Math.max(8, Math.min(newY, window.innerHeight - btnHeight - 8));
         
@@ -2863,47 +2863,119 @@ export default function DevLogger() {
 
   return (
     <>
-      {/* Floating Indicator when closed */}
-      {!isVisible && (
-        <button 
-           ref={buttonRef}
-           onMouseDown={handleMouseDown}
-           onTouchStart={handleTouchStart}
-           onClick={(e) => {
-             e.stopPropagation();
-             if (isDraggingRef.current) return;
-             toggleVisibility();
-           }}
-           style={position.x !== -1 && position.y !== -1 ? {
-             left: `${position.x}px`,
-             top: `${position.y}px`,
-             bottom: 'auto',
-             right: 'auto'
-           } : undefined}
-           className={`fixed z-[9999] w-12 h-12 rounded-2xl flex items-center justify-center text-white shadow-[0_12px_32px_rgba(0,0,0,0.6)] border backdrop-blur-xl transition-all duration-200 active:scale-95 ${
-             position.x === -1 ? 'bottom-24 right-4' : ''
-           } ${
-             engineStatus === 'online'
-               ? 'bg-gradient-to-tr from-emerald-600 via-emerald-500 to-teal-400 border-emerald-300/50 hover:shadow-emerald-500/35 text-slate-950'
-               : engineStatus === 'checking'
-                 ? 'bg-gradient-to-tr from-blue-600 to-indigo-500 border-blue-300/50 hover:shadow-blue-500/35'
-                 : 'bg-gradient-to-tr from-rose-600 to-red-500 border-rose-300/60 animate-pulse hover:shadow-rose-500/40'
-           } cursor-grab active:cursor-grabbing select-none`}
-           title="Abrir Antigravity DevLogger Cockpit"
-        >
-          <Terminal size={20} className={engineStatus === 'online' ? 'stroke-[2.5]' : ''} />
-          <span
-            className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-[#070c10] ${
-              engineStatus === 'online' ? 'bg-emerald-300' : engineStatus === 'checking' ? 'bg-blue-300 animate-pulse' : 'bg-rose-300 animate-ping'
-            }`}
-          />
-          {logs.filter(l => l.type === 'error').length > 0 && (
-            <span className="absolute -top-1.5 -right-1.5 bg-rose-600 min-w-[20px] h-5 px-1 rounded-full text-[10px] flex items-center justify-center font-black font-mono text-white shadow-md border border-rose-300 animate-bounce">
-              {logs.filter(l => l.type === 'error').length > 99 ? '99+' : logs.filter(l => l.type === 'error').length}
-            </span>
-          )}
-        </button>
-      )}
+      {/* Floating Indicator when closed (Compact 36px + Cyber Error Beacon when errorLogsCount > 0) */}
+      {!isVisible && (() => {
+        const hasErrors = errorLogsCount > 0;
+        const isCriticalAlert = hasErrors || engineStatus === 'offline';
+        return (
+          <>
+            <style>{`
+              @keyframes devloggerErrorBeacon {
+                0%, 100% {
+                  transform: scale(1) rotate(0deg);
+                  box-shadow: 0 0 14px rgba(244, 63, 94, 0.8), 0 0 28px rgba(251, 146, 60, 0.45);
+                }
+                18% {
+                  transform: scale(1.1) rotate(-6deg);
+                  box-shadow: 0 0 24px rgba(244, 63, 94, 1), 0 0 42px rgba(251, 191, 36, 0.75);
+                }
+                32% {
+                  transform: scale(1.06) rotate(6deg);
+                }
+                46% {
+                  transform: scale(1.12) rotate(-3deg);
+                }
+                62% {
+                  transform: scale(1) rotate(0deg);
+                }
+              }
+              .devlogger-error-beacon {
+                animation: devloggerErrorBeacon 2.1s cubic-bezier(0.34, 1.56, 0.64, 1) infinite;
+              }
+              @media (prefers-reduced-motion: reduce) {
+                .devlogger-error-beacon {
+                  animation: none;
+                }
+              }
+            `}</style>
+            <button
+              ref={buttonRef}
+              onMouseDown={handleMouseDown}
+              onTouchStart={handleTouchStart}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (isDraggingRef.current) return;
+                toggleVisibility();
+              }}
+              style={position.x !== -1 && position.y !== -1 ? {
+                left: `${position.x}px`,
+                top: `${position.y}px`,
+                bottom: 'auto',
+                right: 'auto'
+              } : undefined}
+              className={`group/devbtn fixed z-[9999] w-9 h-9 rounded-xl flex items-center justify-center shadow-[0_8px_20px_rgba(0,0,0,0.55)] border backdrop-blur-xl transition-all duration-200 active:scale-95 ${
+                position.x === -1 ? 'bottom-24 right-4' : ''
+              } ${
+                hasErrors
+                  ? 'devlogger-error-beacon bg-gradient-to-tr from-rose-700 via-red-600 to-amber-500 border-amber-300/90 text-white'
+                  : engineStatus === 'offline'
+                    ? 'bg-gradient-to-tr from-rose-600 to-red-500 border-rose-300/70 text-white animate-pulse hover:shadow-rose-500/45'
+                    : engineStatus === 'checking'
+                      ? 'bg-gradient-to-tr from-blue-600 to-indigo-500 border-blue-300/50 text-white hover:shadow-blue-500/35'
+                      : 'bg-gradient-to-tr from-emerald-600/90 via-emerald-500/90 to-teal-400/90 border-emerald-300/50 text-slate-950 hover:shadow-emerald-500/35 opacity-85 hover:opacity-100'
+              } cursor-grab active:cursor-grabbing select-none`}
+              title={
+                hasErrors
+                  ? `🚨 ${errorLogsCount} erro(s) capturado(s)! Clique para abrir o Antigravity DevLogger Cockpit`
+                  : 'Abrir Antigravity DevLogger Cockpit'
+              }
+              aria-label={
+                hasErrors
+                  ? `Abrir Antigravity DevLogger Cockpit (${errorLogsCount} erros)`
+                  : 'Abrir Antigravity DevLogger Cockpit'
+              }
+            >
+              {/* Anéis Sonar Radar de Alta Visibilidade em Caso de Erro */}
+              {isCriticalAlert && (
+                <>
+                  <span
+                    className="pointer-events-none absolute -inset-1.5 rounded-2xl bg-rose-500/45 blur-md animate-pulse"
+                    aria-hidden="true"
+                  />
+                  <span
+                    className="pointer-events-none absolute -inset-1 rounded-xl border-2 border-rose-400/80 animate-ping"
+                    aria-hidden="true"
+                  />
+                </>
+              )}
+
+              {hasErrors ? (
+                <AlertTriangle size={15} className="relative z-10 stroke-[2.5] drop-shadow-[0_1px_4px_rgba(0,0,0,0.65)]" />
+              ) : (
+                <Terminal size={15} className={`relative z-10 ${engineStatus === 'online' ? 'stroke-[2.5]' : ''}`} />
+              )}
+
+              <span
+                className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-[1.5px] border-[#070c10] ${
+                  hasErrors
+                    ? 'bg-amber-300 animate-ping'
+                    : engineStatus === 'online'
+                      ? 'bg-emerald-300'
+                      : engineStatus === 'checking'
+                        ? 'bg-blue-300 animate-pulse'
+                        : 'bg-rose-300 animate-ping'
+                }`}
+              />
+
+              {hasErrors && (
+                <span className="absolute -top-1.5 -right-1.5 z-20 bg-amber-400 min-w-[17px] h-[17px] px-1 rounded-full text-[9px] leading-none flex items-center justify-center font-black font-mono text-slate-950 shadow-[0_0_10px_rgba(251,191,36,0.95)] border border-[#070c10] animate-bounce">
+                  {errorLogsCount > 99 ? '99+' : errorLogsCount}
+                </span>
+              )}
+            </button>
+          </>
+        );
+      })()}
 
       {/* Backdrop sutil apenas em Mobile para padrão Bottom Sheet */}
       {isVisible && (

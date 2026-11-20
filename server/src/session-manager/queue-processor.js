@@ -1,6 +1,8 @@
 import { supabase, NODE_ID, retryWithBackoff, resolveTargetJid, isTransientSupabaseError } from '../supabase.js';
 import { buildWhatsAppMessage } from './message-builder.js';
 import { runOutgoingReconciliation } from './reconciler.js';
+import AutomationWorker from '../automation-worker/agent.js';
+import { pauseAiImmediatelyForHumanOperator } from '../automation-worker/human-pause.js';
 
 const OUTBOX_TTL_MS = 10 * 60 * 1000; // TTL estrito de 10 minutos: mensagens mais antigas são descartadas da fila
 
@@ -473,6 +475,16 @@ class QueueProcessor {
                 const responseType = msg.response_type || msg.options?.responseType || 'STANDARD';
 
                 const sendOptions = { priority: msg.priority, isAutomation: (msg.priority || 1) >= 5, skipDelay: true };
+                if (!sendOptions.isAutomation) {
+                    pauseAiImmediatelyForHumanOperator({
+                        supabase,
+                        AutomationWorker,
+                        tenantId,
+                        instanceId,
+                        jid: targetJid,
+                        reason: 'envio_operador_outbox'
+                    }).catch(() => {});
+                }
                 const sendTimeoutMs = msg.message_type === 'text' ? 15000 : 45000;
                 const sendWithTimeout = (jid, payload, opts) => {
                     let timer;
