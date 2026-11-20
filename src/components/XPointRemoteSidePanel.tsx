@@ -39,6 +39,7 @@ import { cn } from '../lib/utils';
 
 export const XPointRemoteSidePanel: React.FC = () => {
   const {
+    isRemoteAccessEnabled,
     isOpen,
     hasMountedOnce,
     widthMode,
@@ -71,6 +72,7 @@ export const XPointRemoteSidePanel: React.FC = () => {
 
   const activeChatId = useChatStore((s) => s.activeChatId);
   const draftNewChat = useChatStore((s) => s.draftNewChat);
+  const tenantInfo = useChatStore((s) => s.tenantInfo);
   const hasActiveConversation = Boolean(activeChatId || draftNewChat);
 
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -176,8 +178,8 @@ export const XPointRemoteSidePanel: React.FC = () => {
     }
   };
 
-  // Mantém o componente sempre montado após a primeira inicialização; controla visibilidade via CSS para ZERO reload
-  if (!hasMountedOnce) return null;
+  // Só monta e exibe o painel quando a empresa tem Acesso Remoto ativo e já houve abertura autorizada
+  if (!isRemoteAccessEnabled || !hasMountedOnce) return null;
 
   const isFullscreenMode = widthMode === 'fullscreen' && !customWidthPx;
   const isCompactMode = widthMode === 'compact' && !customWidthPx;
@@ -787,7 +789,9 @@ export const XPointRemoteSidePanel: React.FC = () => {
               <div className="px-6 py-4 flex-1 overflow-y-auto">
                 <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2 flex items-center justify-between">
                   <span>E-mails Autorizados ({allowedGoogleEmails.length})</span>
-                  <span className="text-[10px] font-normal">Sincronizado com a Empresa</span>
+                  <span className="text-[10px] font-normal">
+                    Sincronizado com {tenantInfo?.name || 'a Empresa'}
+                  </span>
                 </div>
                 <div className="space-y-1.5 max-h-[240px] overflow-y-auto pr-1">
                   {allowedGoogleEmails.map((emailItem) => {

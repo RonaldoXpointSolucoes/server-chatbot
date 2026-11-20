@@ -3,6 +3,20 @@ import { create } from 'zustand';
 import { supabase } from '../services/supabase';
 import { useChatStore, getRealContactId, isSameBrPhone, getBrPhoneVariations } from '../store/chatStore';
 import { formatDocumentNumber } from '../utils/format';
+import {
+  DEFAULT_REMOTE_ADMIN_EMAIL,
+  normalizeRemoteEmail,
+  normalizeRemoteTenantId,
+  isRemoteAccessEnabledForCompany,
+  readScopedAllowedGoogleEmails,
+  writeScopedAllowedGoogleEmails,
+  readScopedVerifiedGoogleEmail,
+  writeScopedVerifiedGoogleEmail,
+  clearLegacyGlobalRemoteStorage,
+  clearScopedRemoteStorageForTenant,
+  isContactOwnedByTenant,
+  filterRecordsByTenant,
+} from '../utils/remoteAccess.mjs';
 
 export const DEFAULT_XPOINT_REMOTE_URL = 'https://remoto.xpointsolucoes.com.br';
 
@@ -66,6 +80,7 @@ export interface ActiveContactRemoteContext {
   rawCnpj: string | null;
   formattedCnpj: string | null;
   companyName: string | null;
+  tenantId?: string | null;
 }
 
 export type XPointDrawerWidthMode = 'fullscreen' | 'expanded' | 'compact';
@@ -73,52 +88,48 @@ export type XPointDrawerWidthMode = 'fullscreen' | 'expanded' | 'compact';
 export const ALLOWED_GOOGLE_EMAILS_STORAGE_KEY = 'xpoint_allowed_google_emails_v1';
 export const VERIFIED_GOOGLE_EMAIL_STORAGE_KEY = 'xpoint_google_oauth_verified_email';
 export const REOPEN_REMOTE_AFTER_OAUTH_KEY = 'xpoint_remote_reopen_after_oauth';
-export const DEFAULT_ALLOWED_GOOGLE_EMAILS = ['ronaldo.xpointsolucoes@gmail.com'];
+export const DEFAULT_ALLOWED_GOOGLE_EMAILS = [DEFAULT_REMOTE_ADMIN_EMAIL];
+
+export function getActiveRemoteTenantId(): string | null {
+  const storeTenantId = normalizeRemoteTenantId(useChatStore.getState().tenantInfo?.id);
+  if (storeTenantId) return storeTenantId;
+  if (typeof window === 'undefined') return null;
+  return normalizeRemoteTenantId(
+    localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')
+  );
+}
+
+export function isCurrentTenantRemoteAccessEnabled(): boolean {
+  return isRemoteAccessEnabledForCompany(useChatStore.getState().tenantInfo);
+}
 
 export function normalizeEmail(email?: string | null): string {
-  return String(email || '').trim().toLowerCase();
+  return normalizeRemoteEmail(email);
 }
 
-export function getStoredAllowedGoogleEmails(): string[] {
-  const base = new Set<string>(DEFAULT_ALLOWED_GOOGLE_EMAILS.map(normalizeEmail));
-  if (typeof window !== 'undefined') {
-    try {
-      const raw = localStorage.getItem(ALLOWED_GOOGLE_EMAILS_STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          parsed.forEach((item) => {
-            const clean = normalizeEmail(item);
-            if (clean && clean.includes('@')) base.add(clean);
-          });
-        }
-      }
-    } catch (_) {
-      // ignore parse errors
-    }
-  }
-  return Array.from(base);
+export function getStoredAllowedGoogleEmails(tenantIdOverride?: string | null): string[] {
+  const storage = typeof window !== 'undefined' ? localStorage : null;
+  clearLegacyGlobalRemoteStorage(storage);
+  const activeTenantId = normalizeRemoteTenantId(tenantIdOverride) || getActiveRemoteTenantId();
+  return readScopedAllowedGoogleEmails(storage, activeTenantId);
 }
 
-export function saveStoredAllowedGoogleEmails(emails: string[]): string[] {
-  const unique = Array.from(
-    new Set([...DEFAULT_ALLOWED_GOOGLE_EMAILS, ...emails].map(normalizeEmail).filter((e) => e && e.includes('@')))
-  );
-  if (typeof window !== 'undefined') {
-    try {
-      localStorage.setItem(ALLOWED_GOOGLE_EMAILS_STORAGE_KEY, JSON.stringify(unique));
-    } catch (_) {
-      // ignore storage errors
-    }
-  }
-  return unique;
+export function saveStoredAllowedGoogleEmails(emails: string[], tenantIdOverride?: string | null): string[] {
+  const storage = typeof window !== 'undefined' ? localStorage : null;
+  clearLegacyGlobalRemoteStorage(storage);
+  const activeTenantId = normalizeRemoteTenantId(tenantIdOverride) || getActiveRemoteTenantId();
+  return writeScopedAllowedGoogleEmails(storage, activeTenantId, emails);
 }
 
-export function isEmailInAllowedList(email?: string | null, allowedList?: string[]): boolean {
-  const clean = normalizeEmail(email);
+export function isEmailInAllowedList(
+  email?: string | null,
+  allowedList?: string[],
+  tenantIdOverride?: string | null
+): boolean {
+  const clean = normalizeRemoteEmail(email);
   if (!clean || !clean.includes('@')) return false;
-  const list = allowedList && allowedList.length > 0 ? allowedList : getStoredAllowedGoogleEmails();
-  return list.some((item) => normalizeEmail(item) === clean);
+  const list = allowedList && allowedList.length > 0 ? allowedList : getStoredAllowedGoogleEmails(tenantIdOverride);
+  return list.some((item) => normalizeRemoteEmail(item) === clean);
 }
 
 export interface XPointRemoteToast {
@@ -130,6 +141,7 @@ export interface XPointRemoteToast {
 interface XPointRemoteStoreState {
   isOpen: boolean;
   hasMountedOnce: boolean;
+  activeTenantId: string | null;
   widthMode: XPointDrawerWidthMode;
   customWidthPx: number | null;
   bridgeReady: boolean;
@@ -156,6 +168,7 @@ interface XPointRemoteStoreState {
   openDrawer: (options?: { mode?: XPointDrawerWidthMode; openCnpjModal?: boolean }) => void;
   closeDrawer: () => void;
   toggleDrawer: () => void;
+  resetForTenantChange: (nextTenantId?: string | null) => void;
   setWidthMode: (mode: XPointDrawerWidthMode) => void;
   setCustomWidthPx: (width: number | null) => void;
   setBridgeReady: (payload: { version?: string; authenticated?: boolean; activeCnpj?: string | null }) => void;
@@ -200,28 +213,38 @@ export function normalizeCnpjDigits(value?: string | null): string {
   return String(value).replace(/\D/g, '');
 }
 
+function createEmptyRemoteContext(tenantId?: string | null): ActiveContactRemoteContext {
+  return {
+    contactId: null,
+    realContactId: null,
+    conversationId: null,
+    contactName: null,
+    contactPhone: null,
+    cnpj: null,
+    rawCnpj: null,
+    formattedCnpj: null,
+    companyName: null,
+    tenantId: normalizeRemoteTenantId(tenantId),
+  };
+}
+
 /**
  * Resolve o CNPJ e os metadados da empresa/contato a partir do objeto de contato do Chatbot
- * e da lista de empresas vinculadas (`company_ids` / `allCompanies`).
+ * e da lista de empresas vinculadas (`company_ids` / `allCompanies`), isolados por empresa (tenant).
  */
 export function resolveContactRemoteContext(
   contact: any | null | undefined,
   allCompanies: any[] = [],
-  allContacts: any[] = []
+  allContacts: any[] = [],
+  tenantIdOverride?: string | null
 ): ActiveContactRemoteContext {
-  if (!contact) {
-    return {
-      contactId: null,
-      realContactId: null,
-      conversationId: null,
-      contactName: null,
-      contactPhone: null,
-      cnpj: null,
-      rawCnpj: null,
-      formattedCnpj: null,
-      companyName: null,
-    };
+  const activeTenantId = normalizeRemoteTenantId(tenantIdOverride) || getActiveRemoteTenantId();
+  if (!contact || (activeTenantId && !isContactOwnedByTenant(contact, activeTenantId))) {
+    return createEmptyRemoteContext(activeTenantId);
   }
+
+  const scopedCompanies = activeTenantId ? filterRecordsByTenant(allCompanies, activeTenantId) : allCompanies;
+  const scopedContacts = activeTenantId ? filterRecordsByTenant(allContacts, activeTenantId) : allContacts;
 
   const realContactId = getRealContactId(contact.id);
   const conversationId = contact.conv_id || null;
@@ -234,8 +257,8 @@ export function resolveContactRemoteContext(
     'Contato';
   const contactPhone = contact.phone ? String(contact.phone).split('@')[0] : '';
 
-  // 1. Verifica empresas vinculadas em company_ids
-  const pool = [...allCompanies, ...allContacts];
+  // 1. Verifica empresas vinculadas em company_ids dentro do mesmo tenant
+  const pool = [...scopedCompanies, ...scopedContacts];
   let linkedCompanies: any[] = [];
   if (Array.isArray(contact.company_ids) && contact.company_ids.length > 0) {
     linkedCompanies = contact.company_ids
@@ -243,11 +266,11 @@ export function resolveContactRemoteContext(
       .filter(Boolean);
   }
 
-  // 2. Fallback por auto-match de documento ou telefone (mesma regra do ChatDashboard)
+  // 2. Fallback por auto-match de documento ou telefone (mesma regra do ChatDashboard, restrita ao tenant)
   if (linkedCompanies.length === 0 && (contact.document_number || contact.phone)) {
     const cleanDoc = contact.document_number ? normalizeCnpjDigits(contact.document_number) : null;
     const cleanPhone = contact.phone ? normalizeCnpjDigits(contact.phone).slice(-8) : null;
-    const matched = allCompanies.find((c: any) => {
+    const matched = scopedCompanies.find((c: any) => {
       if (!c || c.id === contact.id || getRealContactId(c.id) === realContactId) return false;
       const compDoc = c.document_number ? normalizeCnpjDigits(c.document_number) : null;
       const compPhone = c.phone ? normalizeCnpjDigits(c.phone).slice(-8) : null;
@@ -293,6 +316,7 @@ export function resolveContactRemoteContext(
     rawCnpj: hasValidCnpj ? chosenRawDoc : null,
     formattedCnpj,
     companyName,
+    tenantId: activeTenantId,
   };
 }
 
@@ -300,6 +324,10 @@ export function buildInitialXPointRemoteEmbedUrl(ctx?: Partial<ActiveContactRemo
   const baseUrl = getXPointRemoteBaseUrl();
   const params = new URLSearchParams();
   params.set('embed', '1');
+  const activeTenantId = normalizeRemoteTenantId(ctx?.tenantId) || getActiveRemoteTenantId();
+  if (activeTenantId) {
+    params.set('tenantId', activeTenantId);
+  }
   if (ctx?.rawCnpj || ctx?.cnpj) {
     params.set('cnpj', String(ctx.rawCnpj || ctx.cnpj));
   }
@@ -319,6 +347,7 @@ export function buildInitialXPointRemoteEmbedUrl(ctx?: Partial<ActiveContactRemo
 }
 
 export function postMessageToXPointRemote(payload: Record<string, any>): boolean {
+  if (!isCurrentTenantRemoteAccessEnabled()) return false;
   const iframe = getXPointRemoteIframeElement();
   if (!iframe || !iframe.contentWindow) return false;
   const baseUrl = getXPointRemoteBaseUrl();
@@ -355,6 +384,7 @@ export function sendXPointRemoteSetCnpj(
     contactPhone: ctx.contactPhone || undefined,
     contactId: ctx.realContactId || ctx.contactId || undefined,
     conversationId: ctx.conversationId || undefined,
+    tenantId: ctx.tenantId || getActiveRemoteTenantId() || undefined,
     ...(options?.role ? { role: options.role } : {}),
     ...(options?.openCnpjModal !== undefined ? { openCnpjModal: options.openCnpjModal } : {}),
   });
@@ -380,9 +410,20 @@ export function sendXPointRemotePing(): boolean {
   });
 }
 
+const initialTenantId = getActiveRemoteTenantId();
+if (typeof window !== 'undefined') {
+  clearLegacyGlobalRemoteStorage(localStorage);
+}
+const initialAllowedEmails = initialTenantId ? getStoredAllowedGoogleEmails(initialTenantId) : [];
+const initialVerifiedEmail =
+  typeof window !== 'undefined' && initialTenantId
+    ? readScopedVerifiedGoogleEmail(localStorage, initialTenantId)
+    : null;
+
 export const useXPointRemoteStore = create<XPointRemoteStoreState>((set, get) => ({
   isOpen: false,
-  hasMountedOnce: true, // Mantém o iframe montado em background para conexão instantânea
+  hasMountedOnce: false, // Só monta o iframe quando a empresa tem Acesso Remoto ativo e o painel é aberto
+  activeTenantId: initialTenantId,
   widthMode: 'fullscreen',
   customWidthPx: null,
   bridgeReady: false,
@@ -390,42 +431,29 @@ export const useXPointRemoteStore = create<XPointRemoteStoreState>((set, get) =>
   bridgeAuthenticated: false,
   iframeActiveCnpj: null,
   initialIframeSrc: null,
-  activeContext: {
-    contactId: null,
-    realContactId: null,
-    conversationId: null,
-    contactName: null,
-    contactPhone: null,
-    cnpj: null,
-    rawCnpj: null,
-    formattedCnpj: null,
-    companyName: null,
-  },
+  activeContext: createEmptyRemoteContext(initialTenantId),
   resolvedByCnpj: {},
   activeSessionsByContact: {},
   currentActiveSession: null,
   toast: null,
 
-  allowedGoogleEmails: getStoredAllowedGoogleEmails(),
-  googleAuthEmail:
-    typeof window !== 'undefined'
-      ? normalizeEmail(localStorage.getItem(VERIFIED_GOOGLE_EMAIL_STORAGE_KEY)) || null
-      : null,
+  allowedGoogleEmails: initialAllowedEmails,
+  googleAuthEmail: initialVerifiedEmail,
   googleAuthName: null,
   googleAuthAvatar: null,
-  isGoogleAuthenticated:
-    typeof window !== 'undefined' &&
-    Boolean(normalizeEmail(localStorage.getItem(VERIFIED_GOOGLE_EMAIL_STORAGE_KEY))),
-  isGoogleEmailAllowed:
-    typeof window !== 'undefined' &&
-    isEmailInAllowedList(
-      localStorage.getItem(VERIFIED_GOOGLE_EMAIL_STORAGE_KEY),
-      getStoredAllowedGoogleEmails()
-    ),
-  isCheckingGoogleAuth: true,
+  isGoogleAuthenticated: Boolean(initialVerifiedEmail),
+  isGoogleEmailAllowed: Boolean(
+    initialVerifiedEmail && isEmailInAllowedList(initialVerifiedEmail, initialAllowedEmails, initialTenantId)
+  ),
+  isCheckingGoogleAuth: false,
   googleAuthError: null,
 
   openDrawer: (options) => {
+    if (!isCurrentTenantRemoteAccessEnabled()) {
+      set({ isOpen: false, hasMountedOnce: false });
+      return;
+    }
+
     const state = get();
     const initialSrc = state.initialIframeSrc || buildInitialXPointRemoteEmbedUrl(state.activeContext);
     set({
@@ -435,11 +463,12 @@ export const useXPointRemoteStore = create<XPointRemoteStoreState>((set, get) =>
       ...(options?.mode ? { widthMode: options.mode, customWidthPx: null } : {}),
     });
 
-    // Verifica a sessão Google e a lista de e-mails liberados ao abrir o painel
+    // Verifica a sessão Google e a lista de e-mails liberados da empresa ativa ao abrir o painel
     state.verifyGoogleSession();
 
     // Dispara sincronização imediata com o iframe para o contato atual
     setTimeout(() => {
+      if (!isCurrentTenantRemoteAccessEnabled()) return;
       const latestCtx = get().activeContext;
       if (latestCtx.rawCnpj) {
         sendXPointRemoteSetCnpj(latestCtx, { openCnpjModal: options?.openCnpjModal });
@@ -454,12 +483,51 @@ export const useXPointRemoteStore = create<XPointRemoteStoreState>((set, get) =>
   },
 
   toggleDrawer: () => {
+    if (!isCurrentTenantRemoteAccessEnabled()) {
+      set({ isOpen: false, hasMountedOnce: false });
+      return;
+    }
     const state = get();
     if (state.isOpen) {
       state.closeDrawer();
     } else {
       state.openDrawer();
     }
+  },
+
+  resetForTenantChange: (nextTenantId) => {
+    const cleanNextId = normalizeRemoteTenantId(nextTenantId);
+    const storage = typeof window !== 'undefined' ? localStorage : null;
+    clearLegacyGlobalRemoteStorage(storage);
+
+    const nextAllowed = cleanNextId ? readScopedAllowedGoogleEmails(storage, cleanNextId) : [];
+    const nextVerifiedEmail = cleanNextId ? readScopedVerifiedGoogleEmail(storage, cleanNextId) : null;
+    const isAllowed = Boolean(
+      nextVerifiedEmail && isEmailInAllowedList(nextVerifiedEmail, nextAllowed, cleanNextId)
+    );
+
+    set({
+      isOpen: false,
+      hasMountedOnce: false,
+      activeTenantId: cleanNextId,
+      bridgeReady: false,
+      bridgeAuthenticated: false,
+      iframeActiveCnpj: null,
+      initialIframeSrc: null,
+      activeContext: createEmptyRemoteContext(cleanNextId),
+      resolvedByCnpj: {},
+      activeSessionsByContact: {},
+      currentActiveSession: null,
+      toast: null,
+      allowedGoogleEmails: nextAllowed,
+      googleAuthEmail: nextVerifiedEmail,
+      googleAuthName: null,
+      googleAuthAvatar: null,
+      isGoogleAuthenticated: Boolean(nextVerifiedEmail),
+      isGoogleEmailAllowed: isAllowed,
+      isCheckingGoogleAuth: false,
+      googleAuthError: null,
+    });
   },
 
   setWidthMode: (mode) => {
@@ -471,6 +539,7 @@ export const useXPointRemoteStore = create<XPointRemoteStoreState>((set, get) =>
   },
 
   setBridgeReady: (payload) => {
+    if (!isCurrentTenantRemoteAccessEnabled()) return;
     set((s) => ({
       bridgeReady: true,
       bridgeVersion: payload.version || s.bridgeVersion || 'v1.4.8',
@@ -480,6 +549,15 @@ export const useXPointRemoteStore = create<XPointRemoteStoreState>((set, get) =>
   },
 
   setActiveContext: (ctx) => {
+    if (!isCurrentTenantRemoteAccessEnabled()) {
+      const empty = createEmptyRemoteContext(getActiveRemoteTenantId());
+      set({
+        activeContext: empty,
+        initialIframeSrc: null,
+      });
+      return;
+    }
+
     const prev = get().activeContext;
     const initialSrc = get().initialIframeSrc || buildInitialXPointRemoteEmbedUrl(ctx);
     set({
@@ -575,18 +653,16 @@ export const useXPointRemoteStore = create<XPointRemoteStoreState>((set, get) =>
   clearToast: () => set({ toast: null }),
 
   syncAllowedEmailsFromSupabase: async () => {
-    const currentList = getStoredAllowedGoogleEmails();
-    const chatStore = useChatStore.getState();
-    const tenantId =
-      chatStore.tenantInfo?.id ||
-      (typeof window !== 'undefined'
-        ? localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')
-        : null);
+    const tenantId = getActiveRemoteTenantId();
+    const storage = typeof window !== 'undefined' ? localStorage : null;
+    clearLegacyGlobalRemoteStorage(storage);
 
-    if (!tenantId || tenantId === 'undefined') {
-      set({ allowedGoogleEmails: currentList });
-      return currentList;
+    if (!tenantId) {
+      set({ allowedGoogleEmails: [], isGoogleEmailAllowed: false });
+      return [];
     }
+
+    const currentList = readScopedAllowedGoogleEmails(storage, tenantId);
 
     try {
       const { data: comp } = await supabase
@@ -597,16 +673,33 @@ export const useXPointRemoteStore = create<XPointRemoteStoreState>((set, get) =>
 
       if (comp) {
         const settings = comp.settings || {};
+        if (!isRemoteAccessEnabledForCompany(comp)) {
+          clearScopedRemoteStorageForTenant(storage, tenantId);
+          set({
+            isOpen: false,
+            hasMountedOnce: false,
+            allowedGoogleEmails: [],
+            googleAuthEmail: null,
+            isGoogleAuthenticated: false,
+            isGoogleEmailAllowed: false,
+            isCheckingGoogleAuth: false,
+            googleAuthError: null,
+          });
+          return [];
+        }
+
         if (Array.isArray(settings.allowed_google_emails) && settings.allowed_google_emails.length > 0) {
-          const merged = saveStoredAllowedGoogleEmails(settings.allowed_google_emails);
+          const merged = saveStoredAllowedGoogleEmails(settings.allowed_google_emails, tenantId);
           set((s) => ({
             allowedGoogleEmails: merged,
-            isGoogleEmailAllowed: s.googleAuthEmail ? isEmailInAllowedList(s.googleAuthEmail, merged) : false,
+            isGoogleEmailAllowed: s.googleAuthEmail
+              ? isEmailInAllowedList(s.googleAuthEmail, merged, tenantId)
+              : false,
           }));
           return merged;
         }
 
-        // Inicializa a lista com os e-mails autorizados da empresa e agentes caso ainda não exista no banco
+        // Inicializa a lista estritamente com os e-mails autorizados da empresa ativa e seus agentes
         const seed = new Set<string>(currentList);
         if (comp.email && String(comp.email).includes('@')) seed.add(normalizeEmail(comp.email));
         if (settings.google_email && String(settings.google_email).includes('@')) {
@@ -627,10 +720,12 @@ export const useXPointRemoteStore = create<XPointRemoteStoreState>((set, get) =>
           });
         }
 
-        const finalEmails = saveStoredAllowedGoogleEmails(Array.from(seed));
+        const finalEmails = saveStoredAllowedGoogleEmails(Array.from(seed), tenantId);
         set((s) => ({
           allowedGoogleEmails: finalEmails,
-          isGoogleEmailAllowed: s.googleAuthEmail ? isEmailInAllowedList(s.googleAuthEmail, finalEmails) : false,
+          isGoogleEmailAllowed: s.googleAuthEmail
+            ? isEmailInAllowedList(s.googleAuthEmail, finalEmails, tenantId)
+            : false,
         }));
         return finalEmails;
       }
@@ -638,18 +733,40 @@ export const useXPointRemoteStore = create<XPointRemoteStoreState>((set, get) =>
       console.warn('[XPointRemoteBridge] Aviso ao sincronizar lista de e-mails liberados:', err);
     }
 
+    if (!isCurrentTenantRemoteAccessEnabled()) {
+      set({ allowedGoogleEmails: [], isGoogleEmailAllowed: false, isOpen: false, hasMountedOnce: false });
+      return [];
+    }
+
     set({ allowedGoogleEmails: currentList });
     return currentList;
   },
 
   verifyGoogleSession: async () => {
+    const tenantId = getActiveRemoteTenantId();
+    if (!tenantId || !isCurrentTenantRemoteAccessEnabled()) {
+      set({
+        isOpen: false,
+        hasMountedOnce: false,
+        isCheckingGoogleAuth: false,
+        googleAuthError: null,
+      });
+      return;
+    }
+
     set({ isCheckingGoogleAuth: true });
     try {
       const allowedList = await get().syncAllowedEmailsFromSupabase();
+      if (!isCurrentTenantRemoteAccessEnabled() || allowedList.length === 0) {
+        set({ isCheckingGoogleAuth: false, isOpen: false, hasMountedOnce: false });
+        return;
+      }
+
       const {
         data: { session },
       } = await supabase.auth.getSession();
 
+      const storage = typeof window !== 'undefined' ? localStorage : null;
       const user = session?.user;
       const sessionEmail = normalizeEmail(user?.email);
       const provider = user?.app_metadata?.provider;
@@ -659,10 +776,7 @@ export const useXPointRemoteStore = create<XPointRemoteStoreState>((set, get) =>
       const hasGoogleIdentity =
         Array.isArray(user?.identities) &&
         user!.identities.some((id: any) => id?.provider === 'google');
-      const storedVerifiedEmail =
-        typeof window !== 'undefined'
-          ? normalizeEmail(localStorage.getItem(VERIFIED_GOOGLE_EMAIL_STORAGE_KEY))
-          : '';
+      const storedVerifiedEmail = readScopedVerifiedGoogleEmail(storage, tenantId) || '';
       const hasOAuthReturnParam =
         typeof window !== 'undefined' &&
         (window.location.search.includes('remote_google_auth=1') ||
@@ -677,10 +791,8 @@ export const useXPointRemoteStore = create<XPointRemoteStoreState>((set, get) =>
           hasOAuthReturnParam);
 
       if (isGoogleOAuth && sessionEmail) {
-        if (typeof window !== 'undefined') {
-          localStorage.setItem(VERIFIED_GOOGLE_EMAIL_STORAGE_KEY, sessionEmail);
-        }
-        const allowed = isEmailInAllowedList(sessionEmail, allowedList);
+        writeScopedVerifiedGoogleEmail(storage, tenantId, sessionEmail);
+        const allowed = isEmailInAllowedList(sessionEmail, allowedList, tenantId);
         const fullName =
           user?.user_metadata?.full_name ||
           user?.user_metadata?.name ||
@@ -700,7 +812,7 @@ export const useXPointRemoteStore = create<XPointRemoteStoreState>((set, get) =>
             : `O e-mail Google "${sessionEmail}" não consta na Lista de E-mails Liberados.`,
         });
       } else if (storedVerifiedEmail) {
-        const allowed = isEmailInAllowedList(storedVerifiedEmail, allowedList);
+        const allowed = isEmailInAllowedList(storedVerifiedEmail, allowedList, tenantId);
         set({
           googleAuthEmail: storedVerifiedEmail,
           googleAuthName: storedVerifiedEmail.split('@')[0],
@@ -737,9 +849,14 @@ export const useXPointRemoteStore = create<XPointRemoteStoreState>((set, get) =>
       return { ok: false, error: 'Informe um endereço de e-mail válido (ex: usuario@gmail.com).' };
     }
 
-    const nextList = saveStoredAllowedGoogleEmails([...get().allowedGoogleEmails, clean]);
+    const tenantId = getActiveRemoteTenantId();
+    if (!tenantId || !isCurrentTenantRemoteAccessEnabled()) {
+      return { ok: false, error: 'Acesso Remoto não está ativo para a empresa selecionada.' };
+    }
+
+    const nextList = saveStoredAllowedGoogleEmails([...get().allowedGoogleEmails, clean], tenantId);
     const currentGoogleEmail = get().googleAuthEmail;
-    const isNowAllowed = currentGoogleEmail ? isEmailInAllowedList(currentGoogleEmail, nextList) : false;
+    const isNowAllowed = currentGoogleEmail ? isEmailInAllowedList(currentGoogleEmail, nextList, tenantId) : false;
 
     set({
       allowedGoogleEmails: nextList,
@@ -747,28 +864,20 @@ export const useXPointRemoteStore = create<XPointRemoteStoreState>((set, get) =>
       googleAuthError: isNowAllowed ? null : get().googleAuthError,
     });
 
-    // Persiste no Supabase em companies.settings.allowed_google_emails
+    // Persiste no Supabase em companies.settings.allowed_google_emails do tenant ativo
     try {
-      const tenantId =
-        useChatStore.getState().tenantInfo?.id ||
-        (typeof window !== 'undefined'
-          ? localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')
-          : null);
+      const { data: comp } = await supabase
+        .from('companies')
+        .select('settings')
+        .eq('id', tenantId)
+        .maybeSingle();
 
-      if (tenantId && tenantId !== 'undefined') {
-        const { data: comp } = await supabase
-          .from('companies')
-          .select('settings')
-          .eq('id', tenantId)
-          .maybeSingle();
+      const nextSettings = {
+        ...(comp?.settings || {}),
+        allowed_google_emails: nextList,
+      };
 
-        const nextSettings = {
-          ...(comp?.settings || {}),
-          allowed_google_emails: nextList,
-        };
-
-        await supabase.from('companies').update({ settings: nextSettings }).eq('id', tenantId);
-      }
+      await supabase.from('companies').update({ settings: nextSettings }).eq('id', tenantId);
     } catch (err) {
       console.warn('[XPointRemoteBridge] Erro ao salvar allowed_google_emails no Supabase:', err);
     }
@@ -786,12 +895,17 @@ export const useXPointRemoteStore = create<XPointRemoteStoreState>((set, get) =>
       };
     }
 
+    const tenantId = getActiveRemoteTenantId();
+    if (!tenantId || !isCurrentTenantRemoteAccessEnabled()) {
+      return { ok: false, error: 'Acesso Remoto não está ativo para a empresa selecionada.' };
+    }
+
     const filtered = get()
       .allowedGoogleEmails.map(normalizeEmail)
       .filter((e) => e !== clean);
-    const nextList = saveStoredAllowedGoogleEmails(filtered);
+    const nextList = saveStoredAllowedGoogleEmails(filtered, tenantId);
     const currentGoogleEmail = get().googleAuthEmail;
-    const isNowAllowed = currentGoogleEmail ? isEmailInAllowedList(currentGoogleEmail, nextList) : false;
+    const isNowAllowed = currentGoogleEmail ? isEmailInAllowedList(currentGoogleEmail, nextList, tenantId) : false;
 
     set({
       allowedGoogleEmails: nextList,
@@ -803,26 +917,18 @@ export const useXPointRemoteStore = create<XPointRemoteStoreState>((set, get) =>
     });
 
     try {
-      const tenantId =
-        useChatStore.getState().tenantInfo?.id ||
-        (typeof window !== 'undefined'
-          ? localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')
-          : null);
+      const { data: comp } = await supabase
+        .from('companies')
+        .select('settings')
+        .eq('id', tenantId)
+        .maybeSingle();
 
-      if (tenantId && tenantId !== 'undefined') {
-        const { data: comp } = await supabase
-          .from('companies')
-          .select('settings')
-          .eq('id', tenantId)
-          .maybeSingle();
+      const nextSettings = {
+        ...(comp?.settings || {}),
+        allowed_google_emails: nextList,
+      };
 
-        const nextSettings = {
-          ...(comp?.settings || {}),
-          allowed_google_emails: nextList,
-        };
-
-        await supabase.from('companies').update({ settings: nextSettings }).eq('id', tenantId);
-      }
+      await supabase.from('companies').update({ settings: nextSettings }).eq('id', tenantId);
     } catch (err) {
       console.warn('[XPointRemoteBridge] Erro ao remover e-mail no Supabase:', err);
     }
@@ -832,6 +938,7 @@ export const useXPointRemoteStore = create<XPointRemoteStoreState>((set, get) =>
   },
 
   loginWithGoogleForRemote: async () => {
+    if (!isCurrentTenantRemoteAccessEnabled()) return;
     try {
       set({ isCheckingGoogleAuth: true, googleAuthError: null });
       if (typeof window !== 'undefined') {
@@ -863,8 +970,10 @@ export const useXPointRemoteStore = create<XPointRemoteStoreState>((set, get) =>
   },
 
   logoutGoogleForRemote: async () => {
+    const tenantId = getActiveRemoteTenantId();
     if (typeof window !== 'undefined') {
-      localStorage.removeItem(VERIFIED_GOOGLE_EMAIL_STORAGE_KEY);
+      clearLegacyGlobalRemoteStorage(localStorage);
+      writeScopedVerifiedGoogleEmail(localStorage, tenantId, null);
       localStorage.removeItem(REOPEN_REMOTE_AFTER_OAUTH_KEY);
     }
     set({
@@ -884,6 +993,7 @@ export const useXPointRemoteStore = create<XPointRemoteStoreState>((set, get) =>
  * e atualiza o estado em memória do Chatbot instantaneamente.
  */
 async function handleContactAssociatedFromIframe(data: any) {
+  if (!isCurrentTenantRemoteAccessEnabled()) return;
   const store = useXPointRemoteStore.getState();
   const chatStore = useChatStore.getState();
   const cleanCnpj = normalizeCnpjDigits(data.cnpj || data.formattedCnpj);
@@ -902,11 +1012,13 @@ async function handleContactAssociatedFromIframe(data: any) {
     return;
   }
 
-  const tenantId =
-    chatStore.tenantInfo?.id ||
-    (typeof window !== 'undefined'
-      ? localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')
-      : null);
+  const tenantId = getActiveRemoteTenantId();
+  const scopedContactCandidate = chatStore.contacts.find(
+    (c) => getRealContactId(c.id) === targetRealContactId
+  );
+  if (scopedContactCandidate && !isContactOwnedByTenant(scopedContactCandidate, tenantId)) {
+    return;
+  }
 
   try {
     // 1. Verifica se já existe um cadastro de empresa no tenant com esse mesmo CNPJ
@@ -1028,8 +1140,10 @@ async function handleContactAssociatedFromIframe(data: any) {
  * Registra nota interna no histórico da conversa quando uma sessão remota é encerrada.
  */
 async function handleRemoteSessionEndedNote(data: any) {
+  if (!isCurrentTenantRemoteAccessEnabled()) return;
   const store = useXPointRemoteStore.getState();
   const chatStore = useChatStore.getState();
+  const tenantId = getActiveRemoteTenantId();
 
   const protocolNumber = data.protocolNumber || 'S/N';
   const displayName = data.displayName || data.hostname || 'Máquina Remota';
@@ -1040,19 +1154,20 @@ async function handleRemoteSessionEndedNote(data: any) {
 
   store.setSessionEnded(data.protocolNumber, data.contactId, data.cnpj);
 
-  // Localiza o contato da conversa para registrar a nota interna
+  // Localiza o contato da conversa no tenant ativo para registrar a nota interna
   const targetRealId = data.contactId
     ? getRealContactId(String(data.contactId))
     : store.activeContext.realContactId;
 
-  let targetContact = chatStore.contacts.find((c) => {
+  const scopedContacts = filterRecordsByTenant(chatStore.contacts, tenantId);
+  let targetContact = scopedContacts.find((c) => {
     if (data.conversationId && c.conv_id === data.conversationId) return true;
     if (targetRealId && getRealContactId(c.id) === targetRealId) return true;
     return false;
   });
 
   if (!targetContact && cleanCnpj) {
-    targetContact = chatStore.contacts.find(
+    targetContact = scopedContacts.find(
       (c) => normalizeCnpjDigits(c.document_number) === cleanCnpj
     );
   }
@@ -1092,11 +1207,12 @@ let isGlobalAuthListenerAttached = false;
 
 export function ensureGlobalXPointRemoteListener() {
   if (typeof window === 'undefined') return;
+  if (!isCurrentTenantRemoteAccessEnabled()) return;
 
   if (!isGlobalAuthListenerAttached) {
     isGlobalAuthListenerAttached = true;
 
-    // Verifica retorno do OAuth do Google para reabrir o painel automaticamente se solicitado
+    // Verifica retorno do OAuth do Google para reabrir o painel automaticamente somente se a empresa tiver Acesso Remoto ativo
     const hasOAuthReturn =
       window.location.search.includes('remote_google_auth=1') ||
       localStorage.getItem(REOPEN_REMOTE_AFTER_OAUTH_KEY) === '1';
@@ -1109,15 +1225,21 @@ export function ensureGlobalXPointRemoteListener() {
           url.searchParams.delete('remote_google_auth');
           window.history.replaceState({}, '', url.pathname + url.search + url.hash);
         }
-        useXPointRemoteStore.getState().openDrawer();
+        if (isCurrentTenantRemoteAccessEnabled()) {
+          useXPointRemoteStore.getState().openDrawer();
+        }
       }
     });
 
     supabase.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
-        useXPointRemoteStore.getState().verifyGoogleSession();
+        if (isCurrentTenantRemoteAccessEnabled()) {
+          useXPointRemoteStore.getState().verifyGoogleSession();
+        }
       } else if (event === 'SIGNED_OUT') {
-        localStorage.removeItem(VERIFIED_GOOGLE_EMAIL_STORAGE_KEY);
+        const activeTenantId = getActiveRemoteTenantId();
+        clearLegacyGlobalRemoteStorage(localStorage);
+        writeScopedVerifiedGoogleEmail(localStorage, activeTenantId, null);
         useXPointRemoteStore.setState({
           googleAuthEmail: null,
           googleAuthName: null,
@@ -1134,6 +1256,7 @@ export function ensureGlobalXPointRemoteListener() {
   isGlobalBridgeListenerAttached = true;
 
   window.addEventListener('message', (event: MessageEvent) => {
+    if (!isCurrentTenantRemoteAccessEnabled()) return;
     const data = event.data;
     if (!data || typeof data !== 'object' || typeof data.type !== 'string') return;
     if (!data.type.startsWith('XPOINT_REMOTE_')) return;
@@ -1217,9 +1340,23 @@ export function ensureGlobalXPointRemoteListener() {
  * Hook principal para consumo nos componentes do Chatbot (MainLayout, ChatDashboard, MainSidebar, XPointRemoteSidePanel).
  */
 export function useXPointRemoteBridge() {
+  const tenantInfo = useChatStore((s) => s.tenantInfo);
+  const activeTenantIdFromChat = normalizeRemoteTenantId(tenantInfo?.id) || getActiveRemoteTenantId();
+  const isRemoteAccessEnabled = isRemoteAccessEnabledForCompany(tenantInfo);
+
   useEffect(() => {
-    ensureGlobalXPointRemoteListener();
-  }, []);
+    const storeState = useXPointRemoteStore.getState();
+    if (storeState.activeTenantId !== activeTenantIdFromChat) {
+      storeState.resetForTenantChange(activeTenantIdFromChat);
+    }
+
+    if (isRemoteAccessEnabled) {
+      ensureGlobalXPointRemoteListener();
+      useXPointRemoteStore.getState().verifyGoogleSession();
+    } else if (storeState.isOpen || storeState.hasMountedOnce) {
+      useXPointRemoteStore.setState({ isOpen: false, hasMountedOnce: false });
+    }
+  }, [activeTenantIdFromChat, isRemoteAccessEnabled]);
 
   const isOpen = useXPointRemoteStore((s) => s.isOpen);
   const hasMountedOnce = useXPointRemoteStore((s) => s.hasMountedOnce);
@@ -1247,6 +1384,7 @@ export function useXPointRemoteBridge() {
   const openDrawer = useXPointRemoteStore((s) => s.openDrawer);
   const closeDrawer = useXPointRemoteStore((s) => s.closeDrawer);
   const toggleDrawer = useXPointRemoteStore((s) => s.toggleDrawer);
+  const resetForTenantChange = useXPointRemoteStore((s) => s.resetForTenantChange);
   const setWidthMode = useXPointRemoteStore((s) => s.setWidthMode);
   const setCustomWidthPx = useXPointRemoteStore((s) => s.setCustomWidthPx);
   const setActiveContext = useXPointRemoteStore((s) => s.setActiveContext);
@@ -1258,18 +1396,21 @@ export function useXPointRemoteBridge() {
   const logoutGoogleForRemote = useXPointRemoteStore((s) => s.logoutGoogleForRemote);
   const verifyGoogleSession = useXPointRemoteStore((s) => s.verifyGoogleSession);
 
-  const activeResolvedInfo = activeContext.rawCnpj
-    ? resolvedByCnpj[activeContext.rawCnpj] || null
+  const activeResolvedInfo =
+    isRemoteAccessEnabled && activeContext.rawCnpj
+      ? resolvedByCnpj[activeContext.rawCnpj] || null
+      : null;
+
+  const activeContactSession = isRemoteAccessEnabled
+    ? (activeContext.realContactId
+        ? activeSessionsByContact[activeContext.realContactId]
+        : null) ||
+      (activeContext.rawCnpj ? activeSessionsByContact[activeContext.rawCnpj] : null) ||
+      currentActiveSession
     : null;
 
-  const activeContactSession =
-    (activeContext.realContactId
-      ? activeSessionsByContact[activeContext.realContactId]
-      : null) ||
-    (activeContext.rawCnpj ? activeSessionsByContact[activeContext.rawCnpj] : null) ||
-    currentActiveSession;
-
   const reloadSync = useCallback(() => {
+    if (!isCurrentTenantRemoteAccessEnabled()) return;
     const ctx = useXPointRemoteStore.getState().activeContext;
     if (ctx.rawCnpj) {
       sendXPointRemoteSetCnpj(ctx);
@@ -1280,6 +1421,7 @@ export function useXPointRemoteBridge() {
   }, []);
 
   const openCnpjModalInIframe = useCallback(() => {
+    if (!isCurrentTenantRemoteAccessEnabled()) return;
     const ctx = useXPointRemoteStore.getState().activeContext;
     if (!useXPointRemoteStore.getState().isOpen) {
       useXPointRemoteStore.getState().openDrawer({ openCnpjModal: true });
@@ -1288,19 +1430,24 @@ export function useXPointRemoteBridge() {
     sendXPointRemoteOpenCnpjModal(ctx.rawCnpj || ctx.cnpj || '');
   }, []);
 
-  const togglePanel = useCallback(
-    (ctx?: Partial<XPointRemoteContactContext>) => {
-      if (ctx) {
-        useXPointRemoteStore.getState().setActiveContext(ctx);
-      }
-      useXPointRemoteStore.getState().toggleDrawer();
-    },
-    []
-  );
+  const togglePanel = useCallback((ctx?: Partial<ActiveContactRemoteContext>) => {
+    if (!isCurrentTenantRemoteAccessEnabled()) {
+      useXPointRemoteStore.setState({ isOpen: false, hasMountedOnce: false });
+      return;
+    }
+    if (ctx) {
+      useXPointRemoteStore.getState().setActiveContext({
+        ...createEmptyRemoteContext(getActiveRemoteTenantId()),
+        ...ctx,
+      });
+    }
+    useXPointRemoteStore.getState().toggleDrawer();
+  }, []);
 
   return {
-    isOpen,
-    hasMountedOnce,
+    isRemoteAccessEnabled,
+    isOpen: isRemoteAccessEnabled ? isOpen : false,
+    hasMountedOnce: isRemoteAccessEnabled ? hasMountedOnce : false,
     widthMode,
     customWidthPx,
     bridgeReady,
@@ -1308,12 +1455,14 @@ export function useXPointRemoteBridge() {
     bridgeAuthenticated,
     activeContext,
     activeResolvedInfo,
-    resolvedByCnpj,
+    resolvedByCnpj: isRemoteAccessEnabled ? resolvedByCnpj : {},
     activeContactSession,
-    currentActiveSession,
-    toast,
-    initialIframeSrc: initialIframeSrc || buildInitialXPointRemoteEmbedUrl(activeContext),
-    allowedGoogleEmails,
+    currentActiveSession: isRemoteAccessEnabled ? currentActiveSession : null,
+    toast: isRemoteAccessEnabled ? toast : null,
+    initialIframeSrc: isRemoteAccessEnabled
+      ? initialIframeSrc || buildInitialXPointRemoteEmbedUrl(activeContext)
+      : '',
+    allowedGoogleEmails: isRemoteAccessEnabled ? allowedGoogleEmails : [],
     googleAuthEmail,
     googleAuthName,
     googleAuthAvatar,
@@ -1325,6 +1474,7 @@ export function useXPointRemoteBridge() {
     closeDrawer,
     toggleDrawer,
     togglePanel,
+    resetForTenantChange,
     setWidthMode,
     setCustomWidthPx,
     setActiveContext,

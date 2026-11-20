@@ -740,15 +740,35 @@ export const MessageBubble = memo(({
          )}
 
          {(msg.sender === 'bot' || msg.sender === 'automation') && (
-          <div className="flex items-center gap-1 mb-1 text-[10px] text-[#005c4b] dark:text-[#1d9782] opacity-80 font-bold uppercase tracking-wider">
-            <Bot size={10} /> {msg.payload?.bot_name || (msg.sender === 'automation' ? 'Automação / Pedido' : 'IA ChatBoot')}
+          <div
+            className={cn(
+              "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider mb-1 select-none border",
+              msg.sender === 'automation'
+                ? "border-sky-500/25 bg-sky-500/10 text-sky-700 dark:text-sky-300"
+                : "border-indigo-500/30 bg-indigo-500/15 text-indigo-700 dark:text-indigo-300"
+            )}
+          >
+            <Bot size={10} strokeWidth={2.5} /> {msg.payload?.bot_name || (msg.sender === 'automation' ? 'Automação / Pedido' : 'Luna IA')}
           </div>
         )}
-        {msg.sender === 'human' && (
-          <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider mb-1 border border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 select-none">
-             <UserCheck size={10} strokeWidth={2.5} /> Você (Atendente)
-          </div>
-        )}
+        {msg.sender === 'human' && (() => {
+          const payloadOpName = typeof msg.payload?.operator_name === 'string' ? msg.payload.operator_name.trim() : '';
+          const isDeviceMsg = msg.payload?.operator_source === 'whatsapp_device';
+          const loggedName = (typeof window !== 'undefined' ? (localStorage.getItem('current_user_full_name') || '') : '').trim();
+          const sigMatch = !payloadOpName && typeof msg.text === 'string' ? msg.text.match(/^\*([^*\n:]{2,40}):?\*\n\n/) : null;
+          const inferredName = payloadOpName || (sigMatch ? sigMatch[1].trim() : '');
+          const isSelfOp = Boolean(inferredName && loggedName && inferredName.toLowerCase() === loggedName.toLowerCase());
+          const badgeLabel = isDeviceMsg
+            ? 'Aparelho WhatsApp'
+            : inferredName
+              ? (isSelfOp ? `${inferredName} (Você)` : `${inferredName} (Atendente)`)
+              : 'Você (Atendente)';
+          return (
+            <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider mb-1 border border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 select-none">
+              <UserCheck size={10} strokeWidth={2.5} /> {badgeLabel}
+            </div>
+          );
+        })()}
 
         {!isMe && (activeChat?.whatsapp_jid?.endsWith('@g.us') || activeChat?.phone?.endsWith('@g.us') || activeChat?.id?.includes('@g.us')) && (() => {
            const participantJid = msg.payload?.key?.participant || msg.payload?.participant || msg.participant;

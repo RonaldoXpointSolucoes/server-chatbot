@@ -16,12 +16,14 @@ export function MainLayout() {
   const activeChatId = useChatStore(s => s.activeChatId);
   const draftNewChat = useChatStore(s => s.draftNewChat);
   const {
+    isRemoteAccessEnabled,
     isOpen: isRemoteOpen,
     widthMode: remoteWidthMode,
     customWidthPx: remoteCustomWidth,
   } = useXPointRemoteBridge();
 
   const isSplitWithoutActiveChat =
+    isRemoteAccessEnabled &&
     isRemoteOpen &&
     remoteWidthMode === 'expanded' &&
     !remoteCustomWidth &&
@@ -29,10 +31,10 @@ export function MainLayout() {
     !draftNewChat;
 
   React.useEffect(() => {
-    if (isRemoteOpen && remoteWidthMode !== 'fullscreen' && window.innerWidth < 1600) {
+    if (isRemoteAccessEnabled && isRemoteOpen && remoteWidthMode !== 'fullscreen' && window.innerWidth < 1600) {
       setShowMainSidebar(false);
     }
-  }, [isRemoteOpen, remoteWidthMode]);
+  }, [isRemoteAccessEnabled, isRemoteOpen, remoteWidthMode]);
 
   React.useEffect(() => {
     // Garante que o tenantInfo esteja sempre carregado globalmente no Layout,
@@ -92,8 +94,8 @@ export function MainLayout() {
         <Outlet context={{ showMainSidebar, setShowMainSidebar }} />
       </div>
 
-      {/* Gaveta Lateral Persistente do XPoint Remote (Split-View Desktop / Drawer Mobile) */}
-      <XPointRemoteSidePanel />
+      {/* Gaveta Lateral Persistente do XPoint Remote (somente quando habilitado para a empresa) */}
+      {isRemoteAccessEnabled && <XPointRemoteSidePanel />}
 
       {/* Widget Flutuante do WaCalls */}
       <WaCallsWidget />

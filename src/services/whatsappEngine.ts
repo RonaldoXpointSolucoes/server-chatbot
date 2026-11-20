@@ -91,7 +91,8 @@ export const sendNativeMessage = async (
   number: string, 
   text: string, 
   apiKey: string,
-  timeoutMs = 10000
+  timeoutMs = 10000,
+  meta?: { operatorName?: string; operatorId?: string }
 ) => {
   const apiUrl = getInstanceApiUrl(instanceId);
   const startTime = Date.now();
@@ -110,7 +111,7 @@ export const sendNativeMessage = async (
         'x-tenant-id': tenantId,
         'apikey': apiKey
       },
-      body: JSON.stringify({ method: 'sendMessage', args: [number, { text }] }),
+      body: JSON.stringify({ method: 'sendMessage', args: [number, { text }], ...(meta ? { meta } : {}) }),
       signal: controller.signal
     });
   } catch (fetchErr: any) {
@@ -121,7 +122,7 @@ export const sendNativeMessage = async (
         const fbRes = await fetch(`${fallbackUrl}/api/v1/instances/${instanceId}/invoke`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-tenant-id': tenantId, 'apikey': apiKey },
-          body: JSON.stringify({ method: 'sendMessage', args: [number, { text }] })
+          body: JSON.stringify({ method: 'sendMessage', args: [number, { text }], ...(meta ? { meta } : {}) })
         });
         if (fbRes.ok) {
           return await fbRes.json();

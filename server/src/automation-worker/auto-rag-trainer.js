@@ -2,6 +2,12 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { supabase } from '../supabase.js';
 import { pipeline } from '../embeddings/pipeline.js';
 import { decryptGeminiKey } from '../utils/geminiVault.js';
+import {
+    sanitizeRagText,
+    computeNormalizedHash,
+    detectSensitiveOrNoisyPatterns,
+    fetchAllTenantChunks
+} from '../api-gateway/knowledge-curator.js';
 
 class LocalEmbeddingsPipeline {
   static task = 'feature-extraction';
@@ -85,14 +91,17 @@ Sua missão é ler a transcrição de um atendimento entre um cliente e um atend
 
 Você deve extrair fatos que sirvam para enriquecer o cérebro RAG (Geração Aumentada de Recuperação) do nosso robô agente para que ele aprenda com os atendentes humanos.
 
-REGRAS DE EXTRAÇÃO:
-1. Extraia apenas fatos declarativos concretos e autônomos. (Ex: "A taxa de entrega para o bairro Centro é R$ 7,00.", "O suporte comercial atende pelo telefone (11) 99999-9999 das 8h às 18h.", "Aceitamos pagamentos via PIX ou Cartão de Crédito.").
-2. Escreva as regras de forma clara, em português brasileiro nativo, direta e sem menção a nomes de clientes específicos ou dados pessoais confidenciais (remova CPFs, telefones pessoais, nomes de clientes e links temporários).
-3. Ignore conversas informais, cumprimentos, reclamações sem solução ou bate-papo irrelevante.
-4. Se o diálogo não contiver nenhuma regra de negócios útil, fato duradouro ou informação comercial nova, você DEVE retornar absolutamente vazio.
-5. NUNCA extraia fatos sobre a existência, nomes ou preços de produtos, lanches, pratos, bebidas ou acompanhamentos do cardápio. A lista oficial de produtos é integrada e atualizada de forma externa e NÃO deve ser aprendida a partir de diálogos de chat. Ignore totalmente menções a pratos ou lanches específicos na transcrição.
+REGRAS DE EXTRAÇÃO E BLINDAGEM DE QUALIDADE (ESTRITAS):
+1. Extraia APENAS regras de negócio duradouras, globais e reutilizáveis em português brasileiro claro.
+2. PROIBIÇÕES ABSOLUTAS (LGPD e LIXO):
+   - NUNCA mencione endereços residenciais, condomínios, blocos ou apartamentos de clientes.
+   - NUNCA mencione telefones pessoais, CPFs, chaves PIX pessoais de terceiros/motoboys ou nomes de clientes.
+   - NUNCA extraia conversas internas de equipe (ex: desligar totem, sistemas internos administrativos como DataDivas/alarmes) ou falhas momentâneas/passageiras (ex: falta temporária de ingrediente ou restrição de um único dia).
+   - NUNCA extraia taxas de entrega avulsas por endereço/bairro (taxas são calculadas dinamicamente por CEP) nem opções numéricas obsoletas de URA ("digite 1", "digite 2").
+   - NUNCA extraia nomes, descrições ou preços de produtos do cardápio (o cardápio oficial é sincronizado diretamente pelo ERP).
+3. Ignore cumprimentos, conversas informais ou casos específicos sem regra geral. Se não houver nenhuma regra nova duradoura, retorne ABSOLUTAMENTE VAZIO.
 
-Retorne os fatos extraídos um por linha, iniciando diretamente pelo fato sem numeração, sem marcadores de tópicos (- ou *) e sem nenhuma introdução ou explicação adicional.`;
+Retorne os fatos extraídos um por linha, iniciando diretamente pelo fato sem numeração, sem marcadores (- ou *) e sem explicações.`;
 
             const modelName = 'gemini-2.5-flash';
             const model = this.genAI.getGenerativeModel({ model: modelName });
@@ -117,23 +126,33 @@ Retorne os fatos extraídos um por linha, iniciando diretamente pelo fato sem nu
 
             console.log(`[AutoRagTrainer] ${rawFacts.length} fatos novos extraídos via Gemini:`, rawFacts);
 
-            // 5. Busca ou cria o documento virtual do RAG do Auto-Aprendizado
-            let { data: doc, error: docSeekErr } = await supabase.from('knowledge_documents')
-                .select('id')
+            // 5. Busca ou cria o documento único do Auto-Aprendizado (protegido contra múltiplos rows)
+            const autoDocName = 'Auto-Aprendizado Dinâmico (Conversas)';
+            let { data: doc, error: docSeekErr } = await supabase
+                .from('knowledge_documents')
+                .select('id, metadata')
                 .eq('tenant_id', tenantId)
-                .eq('name', 'Auto-Aprendizado Dinâmico (Conversas)')
+                .eq('name', autoDocName)
+                .is('agent_id', null)
+                .order('created_at', { ascending: true })
+                .limit(1)
                 .maybeSingle();
 
-            if (docSeekErr || !doc) {
+            if (docSeekErr) {
+                console.error("[AutoRagTrainer] Falha ao consultar documento virtual de aprendizado:", docSeekErr);
+                return;
+            }
+
+            if (!doc) {
                 const { data: newDoc, error: createErr } = await supabase.from('knowledge_documents')
                     .insert({
                         tenant_id: tenantId,
-                        name: 'Auto-Aprendizado Dinâmico (Conversas)',
-                        type: 'text',
-                        status: 'processed',
-                        metadata: { source: 'auto-rag-trainer', auto_learned: true }
+                        name: autoDocName,
+                        type: 'text/markdown',
+                        status: 'ready',
+                        metadata: { source: 'auto-rag-trainer', category: 'Conhecimento Geral', auto_learned: true, chunks_total: 0, chunks_processed: 0, rag_version: '2.0' }
                     })
-                    .select('id')
+                    .select('id, metadata')
                     .single();
 
                 if (createErr || !newDoc) {
@@ -145,38 +164,98 @@ Retorne os fatos extraídos um por linha, iniciando diretamente pelo fato sem nu
 
             const docId = doc.id;
 
-            // 6. Vetoriza e indexa cada fato na tabela knowledge_chunks
-            const transformer = await LocalEmbeddingsPipeline.getInstance();
+            // 6. Pré-carrega hashes existentes para bloquear duplicatas exatas e testa similaridade vetorial (< 0.84)
+            const existingChunks = await fetchAllTenantChunks(supabase, tenantId, false);
+            const existingHashes = new Set(
+                existingChunks.map(c => c.metadata?.chunk_hash || computeNormalizedHash(String(c.content || '').replace(/^\[[^\]]+\]\s*/, '')))
+            );
+            let currentDocChunksCount = existingChunks.filter(c => c.document_id === docId).length;
 
-            for (const fact of rawFacts) {
+            const transformer = await LocalEmbeddingsPipeline.getInstance();
+            let insertedCount = 0;
+
+            for (const rawFact of rawFacts) {
                 try {
-                    // Gera o embedding do fato (Vetor 384 dimensões do MiniLM)
-                    const output = await transformer(fact, { pooling: 'mean', normalize: true });
+                    const cleanFact = sanitizeRagText(rawFact);
+                    if (!cleanFact || cleanFact.length < 15) continue;
+
+                    const sensitiveAlerts = detectSensitiveOrNoisyPatterns(cleanFact);
+                    if (sensitiveAlerts.some(a => a.severity === 'critical')) {
+                        console.log(`[AutoRagTrainer] Fato descartado pelo Gatekeeper LGPD/Qualidade: "${cleanFact}"`);
+                        continue;
+                    }
+
+                    const factHash = computeNormalizedHash(cleanFact);
+                    if (existingHashes.has(factHash)) {
+                        console.log(`[AutoRagTrainer] Fato duplicado ignorado: "${cleanFact}"`);
+                        continue;
+                    }
+
+                    const enrichedContent = `[${autoDocName} > Aprendizado Validado]\n${cleanFact}`;
+                    const output = await transformer(enrichedContent, { pooling: 'mean', normalize: true });
                     const embeddingVector = Array.from(output.data);
+
+                    // Bloqueia paráfrases semânticas redundantes (>= 0.84 de similaridade)
+                    const { data: simHits } = await supabase.rpc('match_knowledge_chunks', {
+                        query_embedding: embeddingVector,
+                        match_threshold: 0.84,
+                        match_count: 1,
+                        p_tenant_id: tenantId,
+                        p_agent_id: null
+                    });
+                    if (simHits && simHits.length > 0) {
+                        console.log(`[AutoRagTrainer] Fato semanticamente redundante ignorado (sim=${simHits[0].similarity.toFixed(2)}): "${cleanFact}"`);
+                        continue;
+                    }
 
                     const { error: chunkErr } = await supabase.from('knowledge_chunks').insert({
                         document_id: docId,
                         tenant_id: tenantId,
-                        content: fact,
+                        content: enrichedContent,
                         embedding: embeddingVector,
+                        chunk_index: currentDocChunksCount,
                         metadata: {
+                            document_name: autoDocName,
+                            section_title: 'Aprendizado Validado',
+                            category: 'Conhecimento Geral',
+                            chunk_hash: factHash,
                             source: 'auto-rag-trainer',
                             conversation_id: conversationId,
-                            trained_at: new Date().toISOString()
+                            trained_at: new Date().toISOString(),
+                            rag_version: '2.0'
                         }
                     });
 
                     if (chunkErr) {
                         console.error(`[AutoRagTrainer] Erro ao inserir chunk do fato no Supabase:`, chunkErr);
                     } else {
-                        console.log(`[AutoRagTrainer] Fato indexado com sucesso na base vetorial RAG: "${fact}"`);
+                        existingHashes.add(factHash);
+                        currentDocChunksCount++;
+                        insertedCount++;
+                        console.log(`[AutoRagTrainer] Fato inédito indexado na base vetorial RAG 2.0: "${cleanFact}"`);
                     }
                 } catch (embErr) {
                     console.error(`[AutoRagTrainer] Falha ao vetorizar/indexar fato individual:`, embErr);
                 }
             }
 
-            console.log(`[AutoRagTrainer] Treinamento concluído com sucesso para chat: ${conversationId}`);
+            if (insertedCount > 0) {
+                await supabase.from('knowledge_documents').update({
+                    status: 'ready',
+                    metadata: {
+                        ...(doc.metadata || {}),
+                        source: 'auto-rag-trainer',
+                        category: 'Conhecimento Geral',
+                        auto_learned: true,
+                        chunks_total: currentDocChunksCount,
+                        chunks_processed: currentDocChunksCount,
+                        rag_version: '2.0',
+                        last_update: new Date().toISOString()
+                    }
+                }).eq('id', docId);
+            }
+
+            console.log(`[AutoRagTrainer] Treinamento concluído para chat ${conversationId}. Novos fatos adicionados: ${insertedCount}/${rawFacts.length}.`);
 
         } catch (err) {
             const errMsg = String(err?.message || err || '');

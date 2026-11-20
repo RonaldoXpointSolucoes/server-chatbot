@@ -131,58 +131,79 @@ export const AddRagModal: React.FC<AddRagModalProps> = ({
 
       const timestamp = new Date().toISOString();
       const cleanCategory = category.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "_");
-      const fileName = `rag_${entryType}_${cleanCategory}_${Date.now()}.txt`;
+      const fileName = `rag_${cleanCategory}.md`;
 
       let formattedContent = '';
       if (entryType === 'qa') {
-        formattedContent = `=====================================================
-BASE DE CONHECIMENTO RAG - PERGUNTA & RESPOSTA (Q&A)
-Categoria: ${category}
-Data de Criação: ${new Date().toLocaleString('pt-BR')}
-Criado Por: ${currentUserName} (${currentUserEmail})
-Mensagens de Origem: ${sourceMessageIds.join(', ') || 'Chat'}
-=====================================================
-
-[PERGUNTA DO CLIENTE]:
-${question.trim()}
-
-[RESPOSTA OFICIAL / RECOMENDADA]:
-${answer.trim()}
-`;
+        formattedContent = `# ${category} — Pergunta e Resposta Oficial\n\n## Pergunta Frequente\n${question.trim()}\n\n## Resposta Recomendada\n${answer.trim()}\n`;
       } else {
-        formattedContent = `=====================================================
-BASE DE CONHECIMENTO RAG - REGRA / CONHECIMENTO AVULSO
-Categoria: ${category}
-Data de Criação: ${new Date().toLocaleString('pt-BR')}
-Criado Por: ${currentUserName} (${currentUserEmail})
-Mensagens de Origem: ${sourceMessageIds.join(', ') || 'Chat'}
-=====================================================
-
-[CONTEÚDO / REGRA DE NEGÓCIO]:
-${knowledgeText.trim()}
-`;
+        formattedContent = `# ${category} — Regra de Negócio\n\n## Diretriz Oficial\n${knowledgeText.trim()}\n`;
       }
 
-      // 1. Enviar para o Motor de Vetorização do Backend RAG
-      const virtualFile = new File([formattedContent], fileName, { type: 'text/plain' });
-      const formData = new FormData();
-      formData.append('file', virtualFile);
-
+      // 1. Curadoria Pré-Ingestão (Evita duplicidade exata/semântica, lixo ou conflitos antes de gravar no banco)
       let uploadSuccess = false;
       try {
-        const response = await fetch(`${ENGINE_URL}/api/v1/knowledge/upload`, {
+        const analyzeRes = await fetch(`${ENGINE_URL}/api/v1/knowledge/analyze`, {
           method: 'POST',
           headers: {
+            'Content-Type': 'application/json',
             'x-tenant-id': tenantId
           },
-          body: formData
+          body: JSON.stringify({ title: fileName, content: formattedContent })
         });
 
-        if (response.ok) {
-          uploadSuccess = true;
+        if (analyzeRes.ok) {
+          const analyzeData = await analyzeRes.json().catch(() => null);
+          const analysis = analyzeData?.analysis;
+          if (analysis?.verdict === 'reject') {
+            throw new Error(analysis.recommendationSummary || 'Conteúdo duplicado ou sem valor informacional novo para a base.');
+          }
+
+          const commitRes = await fetch(`${ENGINE_URL}/api/v1/knowledge/commit`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-tenant-id': tenantId
+            },
+            body: JSON.stringify({
+              mode: analysis?.recommendedAction === 'merge_into_existing' && analysis?.targetDocumentId ? 'merge' : 'create',
+              targetDocumentId: analysis?.recommendedAction === 'merge_into_existing' ? analysis.targetDocumentId : null,
+              title: analysis?.suggestedTitle || fileName,
+              category: analysis?.suggestedCategory || category,
+              content: analysis?.refactoredMarkdown || formattedContent,
+              qualityScore: analysis?.qualityScore ?? 92,
+              source: 'chat_add_rag_modal'
+            })
+          });
+
+          if (commitRes.ok) {
+            uploadSuccess = true;
+          } else {
+            const cErr = await commitRes.json().catch(() => ({}));
+            throw new Error(cErr.error || 'Falha ao gravar conhecimento curado.');
+          }
+        } else {
+          // Fallback direto ao endpoint /upload com sanitização 2.0
+          const virtualFile = new File([formattedContent], fileName, { type: 'text/markdown' });
+          const formData = new FormData();
+          formData.append('file', virtualFile);
+          const response = await fetch(`${ENGINE_URL}/api/v1/knowledge/upload`, {
+            method: 'POST',
+            headers: { 'x-tenant-id': tenantId },
+            body: formData
+          });
+          if (response.ok) {
+            uploadSuccess = true;
+          } else {
+            const upErr = await response.json().catch(() => ({}));
+            throw new Error(upErr.error || 'Conteúdo rejeitado pela validação RAG.');
+          }
         }
-      } catch (engineErr) {
-        console.warn('[AddRagModal] Falha ao enviar para o endpoint do motor RAG, salvando registro no Supabase:', engineErr);
+      } catch (engineErr: any) {
+        if (engineErr?.message && (engineErr.message.includes('duplicad') || engineErr.message.includes('rejeitad') || engineErr.message.includes('Conteúdo'))) {
+          throw engineErr;
+        }
+        console.warn('[AddRagModal] Falha ao enviar para o endpoint do motor RAG:', engineErr);
       }
 
       // 2. Registro no Log de Auditoria do Sistema

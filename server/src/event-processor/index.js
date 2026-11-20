@@ -617,15 +617,29 @@ class EventProcessor {
                 // para que a interface (CRM) possa mostrar conversas de 'self-chat' (testes do próprio usuário).
                 const isSelfChat = (ownerPhone && phone === ownerPhone);
 
-                const isHuman = EventProcessor.humanMessagesCache && EventProcessor.humanMessagesCache.has(`${instanceId}_${msg.key.id}`);
+                const humanCacheEntry = EventProcessor.humanMessagesCache && EventProcessor.humanMessagesCache.get(`${instanceId}_${msg.key.id}`);
+                const isHuman = Boolean(humanCacheEntry);
+                const botCacheEntry = EventProcessor.botMessagesCache && EventProcessor.botMessagesCache.get(`${instanceId}_${msg.key.id}`);
+                const isBot = Boolean(botCacheEntry || msg.bot_name);
                 const isAutomation = EventProcessor.automationMessagesCache && EventProcessor.automationMessagesCache.has(`${instanceId}_${msg.key.id}`);
                 // Se for isSelfChat (enviado para si mesmo), apenas processe o evento "fromMe: true" para evitar duplicar a mensagem recebida e enviada
                 if (isSelfChat && !msg.key.fromMe) {
                      console.info(`[Message Tracker] ℹ️ Ignorando evento fromMe:false em self-chat (evita duplicidade). JID: ${jid}`);
                      continue;
                 }
+                if (msg.key.fromMe) {
+                    if (botCacheEntry && typeof botCacheEntry === 'object') {
+                        if (botCacheEntry.bot_name && !msg.bot_name) msg.bot_name = botCacheEntry.bot_name;
+                        if (botCacheEntry.bot_id && !msg.bot_id) msg.bot_id = botCacheEntry.bot_id;
+                    } else if (humanCacheEntry && typeof humanCacheEntry === 'object') {
+                        if (humanCacheEntry.operator_name && !msg.operator_name) msg.operator_name = humanCacheEntry.operator_name;
+                        if (humanCacheEntry.operator_id && !msg.operator_id) msg.operator_id = humanCacheEntry.operator_id;
+                    } else if (!isBot && !isAutomation && !isHuman && !isHistory && !msg.operator_name) {
+                        msg.operator_source = 'whatsapp_device';
+                    }
+                }
                 const senderType = msg.key.fromMe 
-                    ? (isAutomation ? 'automation' : (isHuman ? 'human' : 'bot')) 
+                    ? (isBot ? 'bot' : (isAutomation ? 'automation' : 'human')) 
                     : 'client';
                 const direction = msg.key.fromMe ? 'outbound' : 'inbound';
                 
@@ -2997,6 +3011,7 @@ EventProcessor.handleConnectionUpdate = (...args) => defaultEventProcessor.handl
 
 EventProcessor.pendingMediaCache = new Map();
 EventProcessor.humanMessagesCache = new Map();
+EventProcessor.botMessagesCache = new Map();
 EventProcessor.automationMessagesCache = new Map();
 
 export { EventProcessor };

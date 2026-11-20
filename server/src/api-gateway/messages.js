@@ -467,4 +467,120 @@ router.post(['/cancel-ai', '/messages/cancel-ai'], requireTenant, async (req, re
     }
 });
 
+router.post(['/resume-ai', '/messages/resume-ai'], requireTenant, async (req, res) => {
+    try {
+        const tenantId = req.tenantId;
+        const { conversationId } = req.body;
+        if (!conversationId) {
+            return res.status(400).json({ ok: false, error: 'conversationId é obrigatório.' });
+        }
+
+        const { data: conv } = await supabase
+            .from('conversations')
+            .select('id, instance_id, contact_id, ai_paused, contacts(id, phone, whatsapp_jid)')
+            .eq('id', conversationId)
+            .eq('tenant_id', tenantId)
+            .maybeSingle();
+
+        if (!conv || !conv.instance_id) {
+            return res.json({ ok: true, triggered: false, reason: 'conversation_or_instance_not_found' });
+        }
+
+        if (await forwardInternalInstanceRequest(req, res, conv.instance_id)) {
+            return;
+        }
+
+        const [{ data: companyData }, { data: botsData }, { data: instData }, { data: recentMsgs }] = await Promise.all([
+            supabase.from('companies').select('global_ai_enabled').eq('id', tenantId).maybeSingle(),
+            supabase.from('bots').select('*').eq('tenant_id', tenantId),
+            supabase.from('whatsapp_instances').select('settings').eq('id', conv.instance_id).maybeSingle(),
+            supabase.from('messages')
+                .select('id, text_content, sender_type, direction, timestamp')
+                .eq('tenant_id', tenantId)
+                .eq('conversation_id', conversationId)
+                .neq('sender_type', 'system')
+                .order('timestamp', { ascending: false })
+                .limit(3)
+        ]);
+
+        if (companyData && companyData.global_ai_enabled === false) {
+            return res.json({ ok: true, triggered: false, reason: 'global_ai_disabled' });
+        }
+
+        const lastMsg = recentMsgs && recentMsgs.length > 0 ? recentMsgs[0] : null;
+        if (!lastMsg || (lastMsg.direction !== 'inbound' && lastMsg.sender_type !== 'client') || !String(lastMsg.text_content || '').trim()) {
+            return res.json({ ok: true, triggered: false, reason: 'no_pending_inbound_message' });
+        }
+
+        const msgAgeMs = Date.now() - new Date(lastMsg.timestamp).getTime();
+        if (Number.isNaN(msgAgeMs) || msgAgeMs > 30 * 60 * 1000) {
+            return res.json({ ok: true, triggered: false, reason: 'inbound_message_too_old' });
+        }
+
+        const isOrchestratorBot = (bot) => {
+            if (!bot) return false;
+            const name = String(bot.name || '').toLowerCase();
+            const role = String(bot.role || '').toLowerCase();
+            const cat = String(bot.category || '').toLowerCase();
+            return name.includes('(orquestrador)') || name.includes('orquestrador') || role === 'orquestrador' || cat === 'orquestrador';
+        };
+
+        const allBots = botsData || [];
+        const orchestratorBot = allBots.find(b => isOrchestratorBot(b) && b.status === 'active');
+        const eligibleSpecialists = allBots.filter(b =>
+            !isOrchestratorBot(b) &&
+            b.status === 'active' &&
+            b.autoReply !== false &&
+            Array.isArray(b.channels) &&
+            b.channels.includes(conv.instance_id)
+        );
+
+        let selectedBot = null;
+        if (eligibleSpecialists.length > 1) {
+            selectedBot = await AutomationWorker.routeMessageToBot(
+                eligibleSpecialists,
+                lastMsg.text_content,
+                tenantId,
+                conversationId,
+                orchestratorBot?.systemPrompt
+            );
+        } else if (eligibleSpecialists.length === 1) {
+            selectedBot = eligibleSpecialists[0];
+        } else if (orchestratorBot && Array.isArray(orchestratorBot.channels) && orchestratorBot.channels.includes(conv.instance_id)) {
+            selectedBot = orchestratorBot;
+        }
+
+        if (!selectedBot) {
+            return res.json({ ok: true, triggered: false, reason: 'no_active_bot_for_instance' });
+        }
+
+        const sock = await sessionManager.getSocketOrWake(tenantId, conv.instance_id, false).catch(() => null);
+        const rawTarget = conv.contacts?.whatsapp_jid || conv.contacts?.phone;
+        if (!rawTarget) {
+            return res.json({ ok: true, triggered: false, reason: 'missing_contact_jid' });
+        }
+        const jid = sock ? await resolveTargetJid(sock, rawTarget, tenantId) : (String(rawTarget).includes('@') ? rawTarget : `${String(rawTarget).replace(/\D/g, '')}@s.whatsapp.net`);
+
+        await AutomationWorker.processMessage({
+            tenantId,
+            instanceId: conv.instance_id,
+            conversationId,
+            contactId: conv.contact_id,
+            jid,
+            phone: conv.contacts?.phone || String(jid).split('@')[0],
+            textMessage: lastMsg.text_content,
+            botId: selectedBot.id,
+            botSettings: selectedBot,
+            sock,
+            botDelay: instData?.settings?.bot_delay ?? 5,
+            botInstructions: instData?.settings?.bot_instructions || ''
+        });
+
+        return res.json({ ok: true, triggered: true, botName: selectedBot.name });
+    } catch (e) {
+        console.error('[Messages API] Erro ao retomar IA ativamente:', e);
+        return res.status(500).json({ error: e.message });
+    }
+});
+
 export default router;

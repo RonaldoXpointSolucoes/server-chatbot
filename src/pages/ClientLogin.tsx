@@ -9,12 +9,33 @@ import LoginErrorAlert from '../components/LoginErrorAlert';
 import InfraHealthModal from '../components/InfraHealthModal';
 import { parseLoginError, LoginErrorInfo } from '../utils/authErrorDiagnostics';
 import {
-  getStoredAllowedGoogleEmails,
   isEmailInAllowedList,
   saveStoredAllowedGoogleEmails,
-  VERIFIED_GOOGLE_EMAIL_STORAGE_KEY,
+  useXPointRemoteStore,
   normalizeEmail,
 } from '../hooks/useXPointRemoteBridge';
+import {
+  isRemoteAccessEnabledForCompany,
+  clearLegacyGlobalRemoteStorage,
+  clearScopedRemoteStorageForTenant,
+  writeScopedVerifiedGoogleEmail,
+} from '../utils/remoteAccess.mjs';
+
+function syncRemoteAccessStorageForCompany(company: any, userEmail: string) {
+  if (typeof window === 'undefined' || !company?.id) return;
+  clearLegacyGlobalRemoteStorage(localStorage);
+
+  if (isRemoteAccessEnabledForCompany(company)) {
+    const remoteAllowed = Array.isArray(company?.settings?.allowed_google_emails)
+      ? company.settings.allowed_google_emails
+      : [];
+    saveStoredAllowedGoogleEmails([...remoteAllowed, userEmail], company.id);
+    writeScopedVerifiedGoogleEmail(localStorage, company.id, userEmail);
+  } else {
+    clearScopedRemoteStorageForTenant(localStorage, company.id);
+  }
+  useXPointRemoteStore.getState().resetForTenantChange(company.id);
+}
 
 export default function ClientLogin() {
   const [email, setEmail] = useState('');
@@ -763,11 +784,7 @@ export default function ClientLogin() {
 
           if (compList && compList.length > 0) {
             const comp = compList[0];
-            const remoteAllowed = Array.isArray(comp.settings?.allowed_google_emails)
-              ? comp.settings.allowed_google_emails
-              : [];
-            saveStoredAllowedGoogleEmails([...getStoredAllowedGoogleEmails(), ...remoteAllowed, gEmail]);
-            localStorage.setItem(VERIFIED_GOOGLE_EMAIL_STORAGE_KEY, gEmail);
+            syncRemoteAccessStorageForCompany(comp, gEmail);
             saveUserSessionAndRedirect(comp, gName, 'admin', gEmail, authId, [comp.evolution_api_instance], [comp.id]);
             return;
           }
@@ -783,11 +800,7 @@ export default function ClientLogin() {
             const agent = agentList[0];
             const parentComp = agent.companies;
             if (parentComp) {
-              const remoteAllowed = Array.isArray(parentComp.settings?.allowed_google_emails)
-                ? parentComp.settings.allowed_google_emails
-                : [];
-              saveStoredAllowedGoogleEmails([...getStoredAllowedGoogleEmails(), ...remoteAllowed, gEmail]);
-              localStorage.setItem(VERIFIED_GOOGLE_EMAIL_STORAGE_KEY, gEmail);
+              syncRemoteAccessStorageForCompany(parentComp, gEmail);
               saveUserSessionAndRedirect(
                 parentComp,
                 agent.full_name || gName,
@@ -814,14 +827,11 @@ export default function ClientLogin() {
             return list.includes(gEmail);
           });
 
-          if (matchedAllowlistComp || isEmailInAllowedList(gEmail)) {
-            const targetComp = matchedAllowlistComp || (allComps && allComps[0]);
+          const fallbackTargetComp = matchedAllowlistComp || (allComps && allComps[0]);
+          if (matchedAllowlistComp || isEmailInAllowedList(gEmail, undefined, fallbackTargetComp?.id)) {
+            const targetComp = fallbackTargetComp;
             if (targetComp) {
-              const remoteAllowed = Array.isArray(targetComp.settings?.allowed_google_emails)
-                ? targetComp.settings.allowed_google_emails
-                : [];
-              saveStoredAllowedGoogleEmails([...getStoredAllowedGoogleEmails(), ...remoteAllowed, gEmail]);
-              localStorage.setItem(VERIFIED_GOOGLE_EMAIL_STORAGE_KEY, gEmail);
+              syncRemoteAccessStorageForCompany(targetComp, gEmail);
               saveUserSessionAndRedirect(
                 targetComp,
                 gName,
@@ -837,7 +847,8 @@ export default function ClientLogin() {
 
           // 4. Caso não conste na Lista de E-mails Liberados, bloqueia o acesso imediatamente
           await supabase.auth.signOut();
-          localStorage.removeItem(VERIFIED_GOOGLE_EMAIL_STORAGE_KEY);
+          clearLegacyGlobalRemoteStorage(localStorage);
+          useXPointRemoteStore.getState().resetForTenantChange(null);
           setIsLoading(false);
           const blockedMessage = `Acesso Restrito: O e-mail Google "${gEmail}" não consta na Lista de E-mails Liberados. Solicite a liberação ao administrador.`;
           setErrorMsg(blockedMessage);
@@ -1037,12 +1048,8 @@ export default function ClientLogin() {
          storage.setItem('current_user_id', signInData.user.id);
       }
 
-      // Sincroniza e-mail autenticado na Lista de E-mails Liberados
-      const remoteAllowed = Array.isArray(tenantData?.settings?.allowed_google_emails)
-        ? tenantData.settings.allowed_google_emails
-        : [];
-      saveStoredAllowedGoogleEmails([...getStoredAllowedGoogleEmails(), ...remoteAllowed, cleanLoginEmail]);
-      localStorage.setItem(VERIFIED_GOOGLE_EMAIL_STORAGE_KEY, cleanLoginEmail);
+      // Sincroniza e-mail autenticado estritamente no escopo da empresa ativa (quando habilitada para Acesso Remoto)
+      syncRemoteAccessStorageForCompany(tenantData, cleanLoginEmail);
       
       // RBAC Global: Salva as instâncias e empresas permitidas independentemente do papel
       storage.setItem('allowed_instances', JSON.stringify(allowedInstances || []));

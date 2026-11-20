@@ -4,6 +4,7 @@ import { playNotificationSound } from '../utils/AudioEngine';
 import { useDevStore } from './devStore';
 import { shouldNotifyForEvent, NotificationEventType } from '../services/notificationPreferences';
 import { runAiHealthCheck, AiDiagnosticsReport } from '../services/aiHealthCheckService';
+import { clearLegacyGlobalRemoteStorage } from '../utils/remoteAccess.mjs';
 import {
   classifyUploadFailure,
   isOfflineBrowser,
@@ -1393,6 +1394,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (get().isSubscribed) {
       supabase.removeAllChannels();
     }
+    if (typeof window !== 'undefined') {
+      clearLegacyGlobalRemoteStorage(localStorage);
+    }
     set({
       contacts: [],
       activeChatId: null,
@@ -2708,8 +2712,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return;
     }
 
-    // Injeção Mágica de Assinatura Síncrona (Signature) para evitar atrasos na UI
+    // Injeção Mágica de Assinatura Síncrona (Signature) + Identificação Nominal do Atendente
     let finalMessageText = text;
+    let resolvedOperatorName = '';
+    let resolvedOperatorId = '';
     try {
       const currentUserEmail = localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email');
       if (currentUserEmail) {
@@ -2720,14 +2726,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (agent) {
           useSignature = !!agent.use_signature;
           signature = agent.signature || '';
+          resolvedOperatorName = (agent.full_name || '').trim();
+          resolvedOperatorId = agent.id || '';
         } else {
           // Fallback síncrono do cache no localStorage
           useSignature = localStorage.getItem('current_user_use_signature') === 'true';
           signature = localStorage.getItem('current_user_signature') || '';
+          resolvedOperatorName = (localStorage.getItem('current_user_full_name') || '').trim();
+          resolvedOperatorId = localStorage.getItem('current_user_agent_id') || '';
         }
 
-        if (useSignature && signature.trim().length > 0) {
-          finalMessageText = `*${signature}*\n\n${text}`;
+        const effectiveSignature = signature.trim() || (useSignature && resolvedOperatorName ? `${resolvedOperatorName}:` : '');
+        if (useSignature && effectiveSignature.length > 0 && !text.startsWith(`*${effectiveSignature}*`)) {
+          finalMessageText = `*${effectiveSignature}*\n\n${text}`;
         }
 
         // Se o agente não está mapeado no cache local de forma alguma,
@@ -2735,7 +2746,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // mas SEM usar await para não bloquear o render do chat atual.
         if (!agent && !signature && state.tenantInfo) {
           supabase.from('tenant_users')
-            .select('use_signature, signature')
+            .select('id, full_name, use_signature, signature')
             .eq('email', currentUserEmail)
             .eq('tenant_id', state.tenantInfo.id)
             .limit(1)
@@ -2744,6 +2755,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
               if (agentData) {
                 localStorage.setItem('current_user_signature', agentData.signature || '');
                 localStorage.setItem('current_user_use_signature', String(!!agentData.use_signature));
+                if (agentData.full_name) localStorage.setItem('current_user_full_name', agentData.full_name);
+                if (agentData.id) localStorage.setItem('current_user_agent_id', agentData.id);
               }
             })
             .catch(e => console.warn('[sendHumanMessage] Falha ao recuperar assinatura em background:', e));
@@ -2753,9 +2766,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
       console.error("Erro na injeção de assinatura síncrona:", e);
     }
 
-    // Atualiza otimista UI imediatamente com status 'pending' (reloginho animado)
+    // Atualiza otimista UI imediatamente com status 'pending' (reloginho animado) e metadados do operador
     const pseudoId = 'optimistic-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
-    state.addMessageLocally(contactId, { id: pseudoId, pseudoId: pseudoId, text: finalMessageText, sender: 'human', status: 'pending', timestamp: new Date() });
+    state.addMessageLocally(contactId, {
+      id: pseudoId,
+      pseudoId: pseudoId,
+      text: finalMessageText,
+      sender: 'human',
+      status: 'pending',
+      timestamp: new Date(),
+      payload: resolvedOperatorName ? { operator_name: resolvedOperatorName, operator_id: resolvedOperatorId || undefined } : undefined
+    });
 
     // Auto-pause da IA por 30 minutos se o atendente mandou mensagem manual e ela não está pausada definitivamente
     if (state.globalAiEnabled && contact.bot_status !== 'paused') {
@@ -2825,7 +2846,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
       let sendError: any = null;
 
       try {
-        res = await sendTextMessage(state.tenantInfo.id, resolvedInstanceId, targetJid, finalMessageText, apiKey);
+        res = await sendTextMessage(
+          state.tenantInfo.id,
+          resolvedInstanceId,
+          targetJid,
+          finalMessageText,
+          apiKey,
+          10000,
+          resolvedOperatorName ? { operatorName: resolvedOperatorName, operatorId: resolvedOperatorId || undefined } : undefined
+        );
       } catch (callErr: any) {
         sendError = callErr;
       }
@@ -7502,6 +7531,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (myAgent) {
           localStorage.setItem('current_user_signature', myAgent.signature || '');
           localStorage.setItem('current_user_use_signature', String(!!myAgent.use_signature));
+          if (myAgent.full_name) localStorage.setItem('current_user_full_name', myAgent.full_name);
+          if (myAgent.id) localStorage.setItem('current_user_agent_id', myAgent.id);
         }
       }
     } catch (e) {
@@ -7754,6 +7785,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
             }).catch(err => console.warn('[ChatStore] Falha ao notificar cancel-ai no backend:', err));
           } catch (notifyErr) {
             console.warn('[ChatStore] Erro ao disparar cancel-ai:', notifyErr);
+          }
+        } else if (payload.ai_paused === false) {
+          try {
+            const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+            fetch(`${API_URL}/api/v1/messages/resume-ai`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-tenant-id': tenant.id
+              },
+              body: JSON.stringify({
+                conversationId: conv.id
+              })
+            }).catch(err => console.warn('[ChatStore] Falha ao notificar resume-ai no backend:', err));
+          } catch (resumeErr) {
+            console.warn('[ChatStore] Erro ao disparar resume-ai:', resumeErr);
           }
         }
 

@@ -712,6 +712,64 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.2.8',
+    date: '2026-11-20',
+    summary: 'RAG 2.0 de Última Geração (Gatekeeper Pré-Ingestão IA, Auditoria & Higienização em 1 Clique, Busca Híbrida PT-BR, Escopo & Análise Profunda por Caixa), Retomada de IA e Isolamento Estrito por Tenant',
+    notes: [
+      {
+        id: 'feat-rag-v2-gatekeeper-studio-828',
+        category: 'features',
+        title: 'Base de Conhecimento RAG 2.0 com Gatekeeper IA, Auditoria Forense & Análise Profunda por Caixa',
+        description: 'Reconstrução completa da Base de Conhecimento (/knowledge) com visual SaaS dual light/dark, Gatekeeper pré-ingestão via Gemini 2.5 Flash que detecta redundâncias/ruído/PII e refatora documentos antes de vetorizar, Auditoria de Saúde 0–100% com Higienização em 1 clique, Buscador Híbrido (pgvector HNSW iterative_scan + Full-Text PT-BR + RRF + MMR), Análise Profunda por Caixa em 10 camadas (escopo Global vs Caixa com Playbook de Comportamento) e AddRagModal saneado no Chat.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+        guide: {
+          moduleGroup: 'system',
+          moduleLabel: 'Configurações • Base de Conhecimento Global & por Caixa (RAG 2.0)',
+          purpose: 'Garantir que os robôs e a Luna IA consultem uma base de conhecimento limpa, sem lixo, duplicidades ou vazamento de PII, mantendo saúde de 100% nos vetores e permitindo regras exclusivas por Caixa de Entrada.',
+          whereToAccess: [
+            '1. Menu Lateral Esquerdo ➔ Configurações ➔ Base de Conhecimento (/knowledge)',
+            '2. Confira no topo o Score de Saúde RAG 2.0 e clique em "Auditoria & Higienização" caso haja duplicidades ou alertas',
+            '3. Para inserir conteúdo novo, arraste um arquivo ou clique em "Colar Texto / Analisar IA" para revisar e refatorar no Gatekeeper antes de gravar',
+            '4. Use "Aprender de uma Caixa (10 Camadas)" para minerar conhecimento limpo direto do histórico de WhatsApp'
+          ],
+          howToTest: [
+            '1. Acesse Configurações ➔ Base de Conhecimento (/knowledge) e confira a contagem real de fragmentos no pgvector e o Score de Saúde.',
+            '2. No bloco "Testar Busca Híbrida (RAG 2.0)", pesquise um produto, preço, horário ou política e inspecione os chunks e o preview do prompt.',
+            '3. Abra "Colar Texto / Analisar IA", cole um rascunho ou texto repetido e confirme que o Gatekeeper detecta duplicidade ou sugere refatoração limpa antes de salvar.'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Tela: Base de Conhecimento RAG 2.0 (/knowledge) ➔ Gatekeeper, Auditoria & Busca Híbrida',
+            contextElements: ['📊 Saúde RAG 2.0 (%)', '🧹 Auditoria & Higienização', '⚡ Testar Busca Híbrida', '🤖 Aprender de uma Caixa'],
+            targetButtonLabel: '✨ Colar Texto / Analisar IA',
+            targetButtonPosition: 'Zona de Ingestão Inteligente no topo da Base de Conhecimento (/knowledge)',
+            visualPreviewVariant: 'chat-history-sync'
+          },
+          quickAction: {
+            label: 'Abrir Base de Conhecimento RAG 2.0',
+            route: '/knowledge'
+          }
+        }
+      },
+      {
+        id: 'imp-rag-v2-sql-worker-828',
+        category: 'improvements',
+        title: 'Motor RAG v8.2.0: Correção da RPC Ambígua (PGRST203), Chunking de Produtos & Dedup Semântico',
+        description: 'Eliminada a sobrecarga de match_knowledge_chunks que causava falha silenciosa no Supabase, criado índice GIN PT-BR + RPC híbrida match_knowledge_chunks_hybrid com hnsw.iterative_scan e suporte a instance_id, chunking estrutural <= 135 palavras para caber na janela de 256 tokens do MiniLM e bloqueio de duplicidades no auto-rag-trainer e sync de cardápio.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-300/30'
+      },
+      {
+        id: 'imp-resume-ai-operator-remote-828',
+        category: 'improvements',
+        title: 'Retomada de IA (/resume-ai), Badge de Operador/Bot & Isolamento Strict do Acesso Remoto',
+        description: 'Adicionado endpoint /api/v1/messages/resume-ai para reativar orquestradores/especialistas de IA sob demanda, rastreamento explícito de operator_name e bot_name nas mensagens enviadas pelo painel ou aparelho, e isolamento estrito default-deny por tenant no Acesso Remoto X-Point.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-300/30'
+      }
+    ]
+  },
+  {
     version: '8.2.7',
     date: '2026-11-17',
     summary: 'Menu Unificado no Funil (Escopo de Busca & Filtros Ocultos), Proteção Estrita de Nomes de Contatos (Fim do Bug LOCASERV) e Fallback para Telefone',

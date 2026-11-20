@@ -426,7 +426,9 @@ router.get('/instances/:instanceId/ping-whatsapp', requireTenant, async (req, re
 router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => {
     try {
         const { instanceId } = req.params;
-        const { method, args } = req.body;
+        const { method, args, meta: invokeMeta } = req.body;
+        const operatorName = typeof invokeMeta?.operatorName === 'string' && invokeMeta.operatorName.trim() ? invokeMeta.operatorName.trim() : null;
+        const operatorId = typeof invokeMeta?.operatorId === 'string' && invokeMeta.operatorId.trim() ? invokeMeta.operatorId.trim() : null;
 
         // Se a instância pertence a outro worker (ex: alpha-worker vs production-worker), encaminha a requisição diretamente ao nó detentor do socket
         if (await forwardInternalInstanceRequest(req, res, instanceId)) {
@@ -643,7 +645,7 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                         recordStructuredEvent({ event: 'BAILEYS_SEND_START', traceId, instanceId, direction: 'outbound', attempt: 1 });
                         
                         // Dispara com skipDelay e timeout de 8.0s (tentativa única) para cobrir handshakes Signal a frio sem estourar o timeout HTTP do cliente (18s)
-                        const sendPromise = sendFn(targetJid, content, { skipDelay: true, isHuman: true });
+                        const sendPromise = sendFn(targetJid, content, { skipDelay: true, isHuman: true, operatorName, operatorId });
                         const timeoutPromise = new Promise((_, reject) => 
                             setTimeout(() => reject(new Error('TIMEOUT_FASTPATH_SEND')), 8000)
                         );
@@ -696,9 +698,16 @@ router.post('/instances/:instanceId/invoke', requireTenant, async (req, res) => 
                             const epClass = EventProcessor || processor?.constructor;
 
                             if (processor && sentResult && sentResult.key) {
+                                if (operatorName) {
+                                    sentResult.operator_name = operatorName;
+                                    if (operatorId) sentResult.operator_id = operatorId;
+                                }
                                 if (epClass && !epClass.humanMessagesCache) epClass.humanMessagesCache = new Map();
                                 if (epClass && epClass.humanMessagesCache) {
-                                    epClass.humanMessagesCache.set(`${instanceId}_${sentResult.key.id}`, true);
+                                    epClass.humanMessagesCache.set(
+                                        `${instanceId}_${sentResult.key.id}`,
+                                        operatorName ? { operator_name: operatorName, operator_id: operatorId } : true
+                                    );
                                     setTimeout(() => epClass.humanMessagesCache && epClass.humanMessagesCache.delete(`${instanceId}_${sentResult.key.id}`), 60000);
                                 }
 

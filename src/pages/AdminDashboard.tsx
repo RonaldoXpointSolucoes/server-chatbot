@@ -1,12 +1,72 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Building, CreditCard, ScrollText, LogOut, Search, Plus, Activity, Lock, CheckCircle2, Shield, X, Loader2, Smartphone, Trash2, FolderTree, AlertTriangle, Pencil, Mail, Filter, SlidersHorizontal } from 'lucide-react';
+import { LayoutDashboard, Building, CreditCard, ScrollText, LogOut, Search, Plus, Activity, Lock, CheckCircle2, Shield, X, Loader2, Smartphone, Trash2, FolderTree, AlertTriangle, Pencil, Mail, Filter, SlidersHorizontal, Monitor } from 'lucide-react';
 import { cn } from './ChatDashboard';
 import { Navigate } from 'react-router-dom';
 import { supabase, masterSupabase } from '../services/supabase';
 import ThemeToggle from '../components/ThemeToggle';
+import {
+  isRemoteAccessEnabledForCompany,
+  parseAllowedEmailsInput,
+} from '../utils/remoteAccess.mjs';
 
 type TabType = 'overview' | 'companies' | 'economic_groups' | 'plans' | 'billing' | 'instances';
+
+function RemoteAccessToggleSection({
+  enabled,
+  onToggle,
+  allowedEmailsText,
+  onAllowedEmailsChange,
+}: {
+  enabled: boolean;
+  onToggle: (next: boolean) => void;
+  allowedEmailsText: string;
+  onAllowedEmailsChange: (next: string) => void;
+}) {
+  return (
+    <div className="rounded-2xl border border-indigo-500/20 bg-indigo-500/5 p-4 space-y-3">
+      <label className="flex items-start justify-between gap-3 cursor-pointer">
+        <div className="flex items-start gap-2.5 min-w-0">
+          <div className="p-2 rounded-xl bg-indigo-500/15 text-indigo-500 shrink-0 mt-0.5">
+            <Monitor size={16} />
+          </div>
+          <div>
+            <div className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-white">
+              Ativar Acesso Remoto (XPoint Remote)
+            </div>
+            <p className="text-[11px] text-[#54656f] dark:text-[#aebac1] mt-0.5 leading-snug">
+              Libera o menu e painel de acesso remoto exclusivamente para esta empresa. Desativado por padrão.
+            </p>
+          </div>
+        </div>
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => onToggle(e.target.checked)}
+          className="mt-1 h-4 w-4 accent-indigo-600 rounded cursor-pointer shrink-0"
+        />
+      </label>
+
+      {enabled && (
+        <div>
+          <label className="text-[11px] font-semibold text-[#54656f] dark:text-[#aebac1] uppercase tracking-wider block">
+            E-mails Google Liberados desta Empresa
+          </label>
+          <textarea
+            rows={2}
+            value={allowedEmailsText}
+            onChange={(e) => onAllowedEmailsChange(e.target.value)}
+            placeholder="ex: operador@gmail.com, suporte@empresa.com"
+            className="w-full mt-1.5 bg-white dark:bg-[#111b21] dark:text-white border border-black/10 dark:border-white/10 rounded-xl px-3 py-2 text-xs outline-none focus:border-indigo-500"
+          />
+          <p className="text-[10.5px] text-[#54656f] dark:text-[#8696a0] mt-1">
+            Separe múltiplos e-mails por vírgula ou quebra de linha. Lista isolada por empresa.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
@@ -19,7 +79,17 @@ export default function AdminDashboard() {
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'trial' | 'suspended'>('all');
   const [planFilter, setPlanFilter] = useState<string>('all');
   const [showNewCompany, setShowNewCompany] = useState(false);
-  const [newCompany, setNewCompany] = useState({ name: '', plan_id: '', instance: '', email: '', password: '', economic_group_id: '', google_email: '' });
+  const [newCompany, setNewCompany] = useState({
+    name: '',
+    plan_id: '',
+    instance: '',
+    email: '',
+    password: '',
+    economic_group_id: '',
+    google_email: '',
+    remote_access_enabled: false,
+    allowed_google_emails_text: '',
+  });
   
   const [showNewGroup, setShowNewGroup] = useState(false);
   const [showEditGroup, setShowEditGroup] = useState<any>(null);
@@ -239,6 +309,7 @@ export default function AdminDashboard() {
     let success = false;
     const selectedInst = newCompany.instance || null;
 
+    const parsedAllowedEmails = parseAllowedEmailsInput(newCompany.allowed_google_emails_text);
     const payload = {
       name: newCompany.name,
       plan_id: newCompany.plan_id || null,
@@ -247,7 +318,11 @@ export default function AdminDashboard() {
       password: newCompany.password,
       economic_group_id: newCompany.economic_group_id || null,
       status: 'active',
-      settings: newCompany.google_email?.trim() ? { google_email: newCompany.google_email.trim().toLowerCase() } : {},
+      settings: {
+        ...(newCompany.google_email?.trim() ? { google_email: newCompany.google_email.trim().toLowerCase() } : {}),
+        remote_access_enabled: Boolean(newCompany.remote_access_enabled),
+        ...(parsedAllowedEmails.length > 0 ? { allowed_google_emails: parsedAllowedEmails } : {}),
+      },
       current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
     };
 
@@ -336,7 +411,17 @@ export default function AdminDashboard() {
     }
     
     setShowNewCompany(false);
-    setNewCompany({ name: '', plan_id: '', instance: '', email: '', password: '', economic_group_id: '', google_email: '' });
+    setNewCompany({
+      name: '',
+      plan_id: '',
+      instance: '',
+      email: '',
+      password: '',
+      economic_group_id: '',
+      google_email: '',
+      remote_access_enabled: false,
+      allowed_google_emails_text: '',
+    });
     fetchData();
   };
 
@@ -369,9 +454,16 @@ export default function AdminDashboard() {
         })
       }).catch(() => null);
 
+      const parsedAllowedEmails = parseAllowedEmailsInput(showEditCompany.allowed_google_emails_text);
       const updatedSettings = {
         ...(showEditCompany.settings || {}),
-        google_email: showEditCompany.google_email?.trim() ? showEditCompany.google_email.trim().toLowerCase() : (showEditCompany.settings?.google_email || null)
+        google_email: showEditCompany.google_email?.trim()
+          ? showEditCompany.google_email.trim().toLowerCase()
+          : (showEditCompany.settings?.google_email || null),
+        remote_access_enabled: Boolean(showEditCompany.settings?.remote_access_enabled),
+        ...(typeof showEditCompany.allowed_google_emails_text === 'string'
+          ? { allowed_google_emails: parsedAllowedEmails }
+          : {}),
       };
 
       await masterSupabase.from('companies').update({
@@ -590,7 +682,16 @@ export default function AdminDashboard() {
                          {comp.status === 'trial' && <span className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-orange-500/10 text-orange-500 rounded-full font-bold text-[11px] uppercase tracking-wide leading-none h-6"><Activity size={12} /> Trial</span>}
                          {comp.status === 'suspended' && <span className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-red-500/10 text-red-500 rounded-full font-bold text-[11px] uppercase tracking-wide leading-none h-6"><Lock size={12} /> Bloqueado</span>}
                        </td>
-                       <td className="p-3 font-semibold">{comp.name}</td>
+                       <td className="p-3 font-semibold">
+                         <div className="flex items-center gap-2 flex-wrap">
+                           <span>{comp.name}</span>
+                           {isRemoteAccessEnabledForCompany(comp) && (
+                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-600 dark:text-indigo-300 border border-indigo-500/25 text-[10px] font-bold">
+                               <Monitor size={10} /> Acesso Remoto
+                             </span>
+                           )}
+                         </div>
+                       </td>
                        <td className="p-3 font-medium text-[#54656f] dark:text-[#aebac1]">{comp.plans?.name || '---'}</td>
                        <td className="p-3 font-medium text-[#54656f] dark:text-[#aebac1]">
                          {comp.current_period_end ? new Date(comp.current_period_end).toLocaleDateString() : 'N/A'}
@@ -611,7 +712,17 @@ export default function AdminDashboard() {
                           })()}
                         </td>
                         <td className="p-3 text-right flex justify-end gap-2">
-                          <button onClick={() => setShowEditCompany(comp)} className="text-blue-500 hover:text-blue-600 font-semibold text-xs px-3 py-1.5 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 transition-colors">
+                          <button
+                            onClick={() =>
+                              setShowEditCompany({
+                                ...comp,
+                                allowed_google_emails_text: Array.isArray(comp?.settings?.allowed_google_emails)
+                                  ? comp.settings.allowed_google_emails.join(', ')
+                                  : '',
+                              })
+                            }
+                            className="text-blue-500 hover:text-blue-600 font-semibold text-xs px-3 py-1.5 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 transition-colors"
+                          >
                             Editar
                           </button>
                           <button onClick={() => setShowDeleteModal({type: 'company', id: comp.id, name: comp.name})} className="text-red-500 hover:text-red-600 font-semibold text-xs px-3 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 transition-colors">
@@ -785,6 +896,14 @@ export default function AdminDashboard() {
                         ))}
                      </select>
                   </div>
+                  <RemoteAccessToggleSection
+                    enabled={Boolean(newCompany.remote_access_enabled)}
+                    onToggle={(next) => setNewCompany({ ...newCompany, remote_access_enabled: next })}
+                    allowedEmailsText={newCompany.allowed_google_emails_text}
+                    onAllowedEmailsChange={(next) =>
+                      setNewCompany({ ...newCompany, allowed_google_emails_text: next })
+                    }
+                  />
                </form>
              </div>
              <div className="p-6 border-t border-black/5 dark:border-white/5 shrink-0 bg-white/50 dark:bg-[#202c33]/50">
@@ -851,6 +970,25 @@ export default function AdminDashboard() {
                         ))}
                      </select>
                   </div>
+                  <RemoteAccessToggleSection
+                    enabled={Boolean(showEditCompany?.settings?.remote_access_enabled)}
+                    onToggle={(next) =>
+                      setShowEditCompany({
+                        ...showEditCompany,
+                        settings: {
+                          ...(showEditCompany?.settings || {}),
+                          remote_access_enabled: next,
+                        },
+                      })
+                    }
+                    allowedEmailsText={showEditCompany?.allowed_google_emails_text ?? ''}
+                    onAllowedEmailsChange={(next) =>
+                      setShowEditCompany({
+                        ...showEditCompany,
+                        allowed_google_emails_text: next,
+                      })
+                    }
+                  />
                </form>
              </div>
              <div className="p-6 border-t border-black/5 dark:border-white/5 shrink-0 bg-white/50 dark:bg-[#202c33]/50">

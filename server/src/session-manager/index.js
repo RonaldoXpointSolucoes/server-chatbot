@@ -2545,12 +2545,32 @@ class SessionManager {
                                         }
                                         const { EventProcessor, default: eventProcessor } = await import('../event-processor/index.js');
                                         if (result && result.key && result.key.id) {
-                                            const isAuto = options?.isAutomation || options?.senderType === 'automation' || content?.isAutomation;
-                                            if (isAuto && EventProcessor && EventProcessor.automationMessagesCache) {
-                                                EventProcessor.automationMessagesCache.set(`${instanceId}_${result.key.id}`, true);
-                                            }
-                                            if ((options?.isHuman || options?.senderType === 'human' || content?.isHuman) && EventProcessor && EventProcessor.humanMessagesCache) {
-                                                EventProcessor.humanMessagesCache.set(`${instanceId}_${result.key.id}`, true);
+                                            const cacheKey = `${instanceId}_${result.key.id}`;
+                                            const isBotMsg = Boolean(options?.isBot || options?.senderType === 'bot' || content?.isBot);
+                                            const isAuto = !isBotMsg && Boolean(options?.isAutomation || options?.senderType === 'automation' || content?.isAutomation);
+                                            if (isBotMsg && EventProcessor) {
+                                                if (!EventProcessor.botMessagesCache) EventProcessor.botMessagesCache = new Map();
+                                                const botMeta = {
+                                                    bot_name: options?.botName || content?.botName || 'Luna IA',
+                                                    bot_id: options?.botId || content?.botId || null
+                                                };
+                                                result.bot_name = botMeta.bot_name;
+                                                if (botMeta.bot_id) result.bot_id = botMeta.bot_id;
+                                                EventProcessor.botMessagesCache.set(cacheKey, botMeta);
+                                                setTimeout(() => EventProcessor.botMessagesCache?.delete(cacheKey), 60000);
+                                            } else if (isAuto && EventProcessor && EventProcessor.automationMessagesCache) {
+                                                EventProcessor.automationMessagesCache.set(cacheKey, true);
+                                                setTimeout(() => EventProcessor.automationMessagesCache?.delete(cacheKey), 60000);
+                                            } else if ((options?.isHuman || options?.senderType === 'human' || content?.isHuman) && EventProcessor && EventProcessor.humanMessagesCache) {
+                                                const humanMeta = options?.operatorName
+                                                    ? { operator_name: options.operatorName, operator_id: options.operatorId || null }
+                                                    : true;
+                                                if (options?.operatorName) {
+                                                    result.operator_name = options.operatorName;
+                                                    if (options?.operatorId) result.operator_id = options.operatorId;
+                                                }
+                                                EventProcessor.humanMessagesCache.set(cacheKey, humanMeta);
+                                                setTimeout(() => EventProcessor.humanMessagesCache?.delete(cacheKey), 60000);
                                             }
                                             
                                             const mockUpsert = {

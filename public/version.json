@@ -1,5 +1,5 @@
 {
-  "version": "8.2.7",
-  "buildDate": "2026-11-18T02:25:02.396Z",
-  "summary": "Menu Unificado no Funil (Escopo de Busca & Filtros Ocultos), Proteção Estrita de Nomes de Contatos (Fim do Bug LOCASERV) e Fallback para Telefone"
+  "version": "8.2.8",
+  "buildDate": "2026-11-20T11:17:11.125Z",
+  "summary": "RAG 2.0 de Última Geração (Gatekeeper Pré-Ingestão IA, Auditoria & Higienização em 1 Clique, Busca Híbrida PT-BR, Escopo & Análise Profunda por Caixa), Retomada de IA e Isolamento Estrito por Tenant"
 }
