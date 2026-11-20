@@ -140,17 +140,27 @@ export const AddRagModal: React.FC<AddRagModalProps> = ({
         formattedContent = `# ${category} — Regra de Negócio\n\n## Diretriz Oficial\n${knowledgeText.trim()}\n`;
       }
 
+      const fetchWithTimeout = async (url: string, init: RequestInit, timeoutMs: number) => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+          return await fetch(url, { ...init, signal: controller.signal });
+        } finally {
+          clearTimeout(timer);
+        }
+      };
+
       // 1. Curadoria Pré-Ingestão (Evita duplicidade exata/semântica, lixo ou conflitos antes de gravar no banco)
       let uploadSuccess = false;
       try {
-        const analyzeRes = await fetch(`${ENGINE_URL}/api/v1/knowledge/analyze`, {
+        const analyzeRes = await fetchWithTimeout(`${ENGINE_URL}/api/v1/knowledge/analyze`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'x-tenant-id': tenantId
           },
           body: JSON.stringify({ title: fileName, content: formattedContent })
-        });
+        }, 30000);
 
         if (analyzeRes.ok) {
           const analyzeData = await analyzeRes.json().catch(() => null);
@@ -159,7 +169,7 @@ export const AddRagModal: React.FC<AddRagModalProps> = ({
             throw new Error(analysis.recommendationSummary || 'Conteúdo duplicado ou sem valor informacional novo para a base.');
           }
 
-          const commitRes = await fetch(`${ENGINE_URL}/api/v1/knowledge/commit`, {
+          const commitRes = await fetchWithTimeout(`${ENGINE_URL}/api/v1/knowledge/commit`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -174,7 +184,7 @@ export const AddRagModal: React.FC<AddRagModalProps> = ({
               qualityScore: analysis?.qualityScore ?? 92,
               source: 'chat_add_rag_modal'
             })
-          });
+          }, 30000);
 
           if (commitRes.ok) {
             uploadSuccess = true;
@@ -187,11 +197,11 @@ export const AddRagModal: React.FC<AddRagModalProps> = ({
           const virtualFile = new File([formattedContent], fileName, { type: 'text/markdown' });
           const formData = new FormData();
           formData.append('file', virtualFile);
-          const response = await fetch(`${ENGINE_URL}/api/v1/knowledge/upload`, {
+          const response = await fetchWithTimeout(`${ENGINE_URL}/api/v1/knowledge/upload`, {
             method: 'POST',
             headers: { 'x-tenant-id': tenantId },
             body: formData
-          });
+          }, 35000);
           if (response.ok) {
             uploadSuccess = true;
           } else {

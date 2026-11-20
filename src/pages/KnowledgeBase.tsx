@@ -48,6 +48,24 @@ import { InboxDeepAnalysisModal } from '../components/modals/InboxDeepAnalysisMo
 
 const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
 
+/**
+ * Executa fetch com timeout explícito (AbortController) para impedir travamento de UI quando a rede ou IA oscilar.
+ */
+async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = 20000): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      throw new Error('Tempo limite esgotado ao aguardar o servidor RAG. Tente novamente.');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 const RAG_CATEGORIES = [
   'Cardápio & Produtos',
   'Entregas & Pagamentos',
@@ -546,15 +564,24 @@ export default function KnowledgeBase() {
     return () => clearTimeout(delayDebounce);
   }, [searchTerm, tenantId]);
 
+  const isFetchingDocsRef = useRef(false);
+  const hasProcessingDocsRef = useRef(false);
+
   const fetchDocuments = async () => {
+    if (isFetchingDocsRef.current) return;
+    isFetchingDocsRef.current = true;
     try {
-      const overviewRes = await fetch(`${ENGINE_URL}/api/v1/knowledge/overview`, {
-        headers: { 'x-tenant-id': tenantId }
-      }).catch(() => null);
+      const overviewRes = await fetchWithTimeout(
+        `${ENGINE_URL}/api/v1/knowledge/overview`,
+        { headers: { 'x-tenant-id': tenantId } },
+        10000
+      ).catch(() => null);
 
       if (overviewRes && overviewRes.ok) {
         const payload = await overviewRes.json();
-        setDocuments(payload.documents || []);
+        const nextDocs = payload.documents || [];
+        hasProcessingDocsRef.current = nextDocs.some((d: any) => d.status === 'processing');
+        setDocuments(nextDocs);
         setOverviewStats(payload.stats || null);
         return;
       }
@@ -567,10 +594,13 @@ export default function KnowledgeBase() {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setDocuments(data || []);
+      const fallbackDocs = data || [];
+      hasProcessingDocsRef.current = fallbackDocs.some((d: any) => d.status === 'processing');
+      setDocuments(fallbackDocs);
     } catch (err) {
       console.error('Erro listando documentos do RAG:', err);
     } finally {
+      isFetchingDocsRef.current = false;
       setIsInitialLoading(false);
     }
   };
@@ -578,12 +608,9 @@ export default function KnowledgeBase() {
   useEffect(() => {
     fetchDocuments();
     const interval = setInterval(() => {
-      setDocuments(prev => {
-        if (prev.some(d => d.status === 'processing')) {
-          fetchDocuments();
-        }
-        return prev;
-      });
+      if (hasProcessingDocsRef.current) {
+        fetchDocuments();
+      }
     }, 2500);
     return () => clearInterval(interval);
   }, [tenantId]);
@@ -596,20 +623,20 @@ export default function KnowledgeBase() {
       if (file) {
         const fd = new FormData();
         fd.append('file', file);
-        response = await fetch(`${ENGINE_URL}/api/v1/knowledge/analyze`, {
+        response = await fetchWithTimeout(`${ENGINE_URL}/api/v1/knowledge/analyze`, {
           method: 'POST',
           headers: { 'x-tenant-id': tenantId },
           body: fd
-        });
+        }, 35000);
       } else {
-        response = await fetch(`${ENGINE_URL}/api/v1/knowledge/analyze`, {
+        response = await fetchWithTimeout(`${ENGINE_URL}/api/v1/knowledge/analyze`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'x-tenant-id': tenantId
           },
           body: JSON.stringify({ title: title || 'conhecimento.md', content: content || '' })
-        });
+        }, 35000);
       }
 
       const data = await response.json().catch(() => ({}));
@@ -653,7 +680,7 @@ export default function KnowledgeBase() {
         ? (targetDoc.instance_id ?? null)
         : (selectedScope !== 'all' && selectedScope !== 'global' ? selectedScope : null);
 
-      const response = await fetch(`${ENGINE_URL}/api/v1/knowledge/commit`, {
+      const response = await fetchWithTimeout(`${ENGINE_URL}/api/v1/knowledge/commit`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -668,7 +695,7 @@ export default function KnowledgeBase() {
           content: curationDraftMarkdown,
           qualityScore: curationModal.qualityScore
         })
-      });
+      }, 35000);
 
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
@@ -760,11 +787,11 @@ export default function KnowledgeBase() {
     formData.append('file', file);
 
     try {
-      const response = await fetch(`${ENGINE_URL}/api/v1/knowledge/upload`, {
+      const response = await fetchWithTimeout(`${ENGINE_URL}/api/v1/knowledge/upload`, {
         method: 'POST',
         headers: { 'x-tenant-id': tenantId },
         body: formData
-      });
+      }, 45000);
 
       const resData = await response.json().catch(() => ({}));
       if (!response.ok) {
@@ -788,13 +815,13 @@ export default function KnowledgeBase() {
     setIsAuditing(true);
     if (!silent) setShowAuditDrawer(true);
     try {
-      const res = await fetch(`${ENGINE_URL}/api/v1/knowledge/audit`, {
+      const res = await fetchWithTimeout(`${ENGINE_URL}/api/v1/knowledge/audit`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'x-tenant-id': tenantId
         }
-      });
+      }, 25000);
       const data = await res.json();
       if (!res.ok || !data.report) {
         throw new Error(data.error || 'Falha na auditoria.');
@@ -817,13 +844,13 @@ export default function KnowledgeBase() {
     if (!confirm('Deseja executar o saneamento automático agora? Bases vazias (0 vetores) e chunks duplicados serão removidos e URLs quebradas serão corrigidas.')) return;
     setIsSanitizing(true);
     try {
-      const res = await fetch(`${ENGINE_URL}/api/v1/knowledge/sanitize`, {
+      const res = await fetchWithTimeout(`${ENGINE_URL}/api/v1/knowledge/sanitize`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'x-tenant-id': tenantId
         }
-      });
+      }, 45000);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Falha no saneamento');
 
@@ -890,14 +917,14 @@ export default function KnowledgeBase() {
     if (!viewingFile || !viewContent.trim()) return;
     setIsRefactoringEditor(true);
     try {
-      const res = await fetch(`${ENGINE_URL}/api/v1/knowledge/analyze`, {
+      const res = await fetchWithTimeout(`${ENGINE_URL}/api/v1/knowledge/analyze`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'x-tenant-id': tenantId
         },
         body: JSON.stringify({ title: viewingFile.name, content: viewContent })
-      });
+      }, 35000);
       const data = await res.json();
       if (!res.ok || !data.analysis?.refactoredMarkdown) {
         throw new Error(data.error || 'Falha ao refatorar texto.');
@@ -1066,7 +1093,7 @@ export default function KnowledgeBase() {
     if (customQuery) setTestQuery(customQuery);
     setIsTesting(true);
     try {
-      const response = await fetch(`${ENGINE_URL}/api/v1/knowledge/match`, {
+      const response = await fetchWithTimeout(`${ENGINE_URL}/api/v1/knowledge/match`, {
         method: 'POST',
         headers: {
           'x-tenant-id': tenantId,
@@ -1076,7 +1103,7 @@ export default function KnowledgeBase() {
           query: q,
           ...(matchScopeInstanceId ? { instanceId: matchScopeInstanceId } : {})
         })
-      });
+      }, 20000);
       const data = await response.json();
       if (data.matches) {
         setTestResults(data.matches);

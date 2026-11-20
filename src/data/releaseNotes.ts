@@ -712,6 +712,29 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.2.9',
+    date: '2026-11-20',
+    summary: 'Blindagem Anti-Travamento Ponta a Ponta: Índice (tenant_id, timestamp DESC) contra Timeouts 57014 no Supabase, Timeout 18s + Fallback no Gatekeeper RAG e Timeouts de Rede no Frontend',
+    notes: [
+      {
+        id: 'fix-postgres-messages-tenant-index-829',
+        category: 'fixes',
+        title: 'Índice Composto na Tabela messages (tenant_id, timestamp DESC) & Proteção de Relatórios',
+        description: 'Eliminado o erro 57014 (canceling statement due to statement timeout) em consultas globais de mensagens por empresa com a criação automática de idx_messages_tenant_timestamp nas migrações do servidor (server v8.2.1), janela timeout estendida para DDL e limite protetor de 400 linhas nos relatórios de atendimentos resolvidos.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      },
+      {
+        id: 'fix-rag-timeouts-and-polling-829',
+        category: 'improvements',
+        title: 'Timeouts Explícitos no Gatekeeper IA (18s) & Requisições Frontend RAG 2.0 (AbortController)',
+        description: 'Adicionada corrida com timeout de 18s na chamada Gemini do Gatekeeper (/api/v1/knowledge/analyze) com fallback curatorial automático imediato, fetchWithTimeout (10s–45s) em toda a Base de Conhecimento (/knowledge) e AddRagModal, além de correção do polling com useRef para evitar requisições concorrentes ou congelamentos de interface.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-300/30'
+      }
+    ]
+  },
+  {
     version: '8.2.8',
     date: '2026-11-20',
     summary: 'RAG 2.0 de Última Geração (Gatekeeper Pré-Ingestão IA, Auditoria & Higienização em 1 Clique, Busca Híbrida PT-BR, Escopo & Análise Profunda por Caixa), Retomada de IA e Isolamento Estrito por Tenant',

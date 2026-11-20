@@ -5539,14 +5539,15 @@ export function ClosedTicketsModal({ isOpen, onClose }: ClosedTicketsModalProps)
       }
 
       if (startIso && endIso) {
-        msgQuery = msgQuery.gte('timestamp', startIso).lte('timestamp', endIso);
+        msgQuery = msgQuery.gte('timestamp', startIso).lte('timestamp', endIso).limit(400);
       } else if (startIso) {
-        msgQuery = msgQuery.gte('timestamp', startIso);
+        msgQuery = msgQuery.gte('timestamp', startIso).limit(400);
       } else {
         msgQuery = msgQuery.limit(200);
       }
 
-      const { data: resolutionMsgs } = await msgQuery;
+      const { data: resolutionMsgs, error: resMsgErr } = await msgQuery;
+      if (resMsgErr) console.warn('Erro na busca de mensagens resolvidas:', resMsgErr.message || resMsgErr);
 
       if (resolutionMsgs && resolutionMsgs.length > 0) {
         const newConvIds = Array.from(new Set(

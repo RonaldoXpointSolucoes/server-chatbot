@@ -1,5 +1,5 @@
 {
-  "version": "8.2.8",
-  "buildDate": "2026-11-20T11:17:11.125Z",
-  "summary": "RAG 2.0 de Última Geração (Gatekeeper Pré-Ingestão IA, Auditoria & Higienização em 1 Clique, Busca Híbrida PT-BR, Escopo & Análise Profunda por Caixa), Retomada de IA e Isolamento Estrito por Tenant"
+  "version": "8.2.9",
+  "buildDate": "2026-11-20T11:54:33.784Z",
+  "summary": "Blindagem Anti-Travamento Ponta a Ponta: Índice (tenant_id, timestamp DESC) contra Timeouts 57014 no Supabase, Timeout 18s + Fallback no Gatekeeper RAG e Timeouts de Rede no Frontend"
 }

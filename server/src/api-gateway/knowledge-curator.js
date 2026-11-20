@@ -8,6 +8,16 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+function withTimeout(promise, ms, label = 'OPERATION_TIMEOUT') {
+    let timer = null;
+    const timeoutPromise = new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(label)), ms);
+    });
+    return Promise.race([promise, timeoutPromise]).finally(() => {
+        if (timer) clearTimeout(timer);
+    });
+}
+
 export function isValidUuid(value) {
     return typeof value === 'string' && UUID_REGEX.test(value.trim());
 }
@@ -702,7 +712,11 @@ Retorne ESTRITAMENTE um JSON válido com este schema exato:
   "recommendationSummary": "Explicação executiva curta (2-3 linhas) em português claro recomendando o que fazer."
 }`;
 
-            const result = await model.generateContent(prompt);
+            const result = await withTimeout(
+                model.generateContent(prompt),
+                18000,
+                'GEMINI_ANALYZE_TIMEOUT_18S'
+            );
             const rawJson = result.response.text().trim();
             const parsed = JSON.parse(rawJson.replace(/^```json\s*|\s*```$/g, ''));
 

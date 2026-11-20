@@ -976,6 +976,9 @@ async function runMigrations() {
           CREATE INDEX IF NOT EXISTS idx_messages_instance_timestamp
             ON public.messages (instance_id, "timestamp" DESC);
 
+          CREATE INDEX IF NOT EXISTS idx_messages_tenant_timestamp
+            ON public.messages (tenant_id, "timestamp" DESC);
+
           CREATE INDEX IF NOT EXISTS idx_messages_direction_timestamp
             ON public.messages (direction, "timestamp" DESC);
 
@@ -1009,6 +1012,8 @@ async function runMigrations() {
 
           NOTIFY pgrst, 'reload schema';
         `;
+        // Evita timeout curto do Postgres ao criar índices em tabelas grandes (ex: messages)
+        await client.query("SET statement_timeout = '120000'");
         await client.query(migrationSQL);
         console.log("[Migration] Migração DDL e RLS executada com sucesso!");
     } catch (err) {
