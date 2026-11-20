@@ -1,10 +1,30 @@
 import express from 'express';
 import multer from 'multer';
 import { pipeline } from '../embeddings/pipeline.js';
-import { supabase } from '../supabase.js';
-import { PDFParse } from 'pdf-parse';
+import { supabase as defaultSupabase } from '../supabase.js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import autoRagTrainer from '../automation-worker/auto-rag-trainer.js';
+import {
+    isValidUuid,
+    sanitizeRagText,
+    computeNormalizedHash,
+    detectSensitiveOrNoisyPatterns,
+    extractTextFromFile,
+    semanticChunkDocument,
+    inferCategoryFromContent,
+    fetchAllTenantChunks,
+    analyzeCandidateForTenant,
+    commitCuratedDocument,
+    auditTenantKnowledgeHealth,
+    sanitizeTenantKnowledgeBase,
+    hybridRetrieveKnowledge as defaultHybridRetrieveKnowledge
+} from './knowledge-curator.js';
+import {
+    startInboxDeepAnalysis as defaultStartInboxDeepAnalysis,
+    getInboxAnalysisStatus as defaultGetInboxAnalysisStatus,
+    getInboxAnalysisRun as defaultGetInboxAnalysisRun,
+    extractBehaviorProfileSummary
+} from './inbox-knowledge-analyzer.js';
 import {
     encryptGeminiKey,
     decryptGeminiKey,
@@ -17,38 +37,418 @@ import {
     isValidPlainGeminiKey
 } from '../utils/geminiVault.js';
 
-const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } }); // 100MB
 
 // Singleton para o modelo de embeddings local, grátis e offline
-class EmbeddingsPipeline {
+class DefaultEmbeddingsPipeline {
   static task = 'feature-extraction';
   static model = 'Xenova/all-MiniLM-L6-v2';
   static instance = null;
 
   static async getInstance(progress_callback = null) {
     if (this.instance === null) {
-      // Primeira vez ele vai baixar do HuggingFace (~22MB) pro sistema local
       this.instance = await pipeline(this.task, this.model, { quantized: true, progress_callback });
     }
     return this.instance;
   }
 }
 
-// Helper: Text Splitter (Chunking semântico básico)
-function splitTextIntoChunks(text, chunkSize = 300, overlap = 50) {
-  const words = text.split(/\s+/);
-  const chunks = [];
-  let i = 0;
-  while (i < words.length) {
-    const chunk = words.slice(i, i + chunkSize).join(' ');
-    chunks.push(chunk);
-    i += (chunkSize - overlap);
-  }
-  return chunks;
+function splitTextIntoChunks(text, documentName = 'Base', category = 'Geral') {
+  return semanticChunkDocument(text, { documentName, category });
 }
 
-// Rota de Injeção RAG (Upload de Arquivos multi-empresa)
+const suspendedKnowledgeKeys = new Set();
+
+function buildLocalHelperFallback(action, text, user_query) {
+    const baseText = String(text || user_query || '').trim();
+    if (action === 'summarize-context') {
+        return 'Atendimento em andamento via WhatsApp';
+    }
+    if (action === 'humanize' || action === 'empathize') {
+        return baseText ? `Com certeza! 😊 ${baseText}` : 'Olá! Como posso te ajudar hoje? 😊';
+    }
+    if (action === 'emoji') {
+        return baseText ? `${baseText} 😊✨` : 'Olá! 👋😊';
+    }
+    if (action === 'suggest') {
+        return 'Olá! 😊 Entendi perfeitamente sua solicitação. Já estou verificando aqui para te ajudar da melhor forma!';
+    }
+    return baseText || 'Olá! Como posso te ajudar?';
+}
+
+// Função para sincronizar todas as correções de IA para um único documento RAG da empresa
+export async function syncCorrectionsToRagDocument(tenantId) {
+    const supabase = defaultSupabase;
+    try {
+        console.log(`[Corrections RAG Sync] Sincronizando correções da empresa ${tenantId} para o RAG...`);
+        const { data: corrections, error: fetchErr } = await supabase
+            .from('ai_reasoning_adjustments')
+            .select('user_query, original_response, corrected_response, context_summary, created_at')
+            .eq('tenant_id', tenantId)
+            .order('created_at', { ascending: false });
+
+        if (fetchErr) throw fetchErr;
+
+        const docName = "Manual de Raciocínio e Ajustes da I.A";
+
+        if (!corrections || corrections.length === 0) {
+            console.log(`[Corrections RAG Sync] Nenhuma correção encontrada. Excluindo documento antigo se existir.`);
+            const { data: oldDocs } = await supabase
+                .from('knowledge_documents')
+                .select('id')
+                .eq('tenant_id', tenantId)
+                .eq('name', docName);
+
+            if (oldDocs && oldDocs.length > 0) {
+                const ids = oldDocs.map(d => d.id);
+                await supabase.from('knowledge_chunks').delete().in('document_id', ids).eq('tenant_id', tenantId);
+                await supabase.from('knowledge_documents').delete().in('id', ids).eq('tenant_id', tenantId);
+            }
+            return;
+        }
+
+        let content = `# Manual de Raciocínio, Tom de Voz e Instruções Corrigidas da I.A.\n\n`;
+        content += `Este documento contém correções reais feitas por atendentes humanos para guiar as respostas da I.A.\n\n---\n\n`;
+
+        corrections.forEach((c, idx) => {
+            const cleanQuery = sanitizeRagText(c.user_query || '');
+            const cleanOriginal = sanitizeRagText(c.original_response || '');
+            const cleanCorrected = sanitizeRagText(c.corrected_response || '');
+            const cleanContext = sanitizeRagText(c.context_summary || '');
+
+            content += `## Correção ${idx + 1}:\n`;
+            if (cleanContext) {
+                content += `### Memória da Conversa (Contexto):\n"${cleanContext}"\n\n`;
+            }
+            content += `### Pergunta Similar do Cliente:\n"${cleanQuery}"\n\n`;
+            if (cleanOriginal) {
+                content += `### Resposta Incorreta Original (Não repetir):\n"${cleanOriginal}"\n\n`;
+            }
+            content += `### Comportamento e Resposta Esperada Corrigida (Seguir esta linha):\n"${cleanCorrected}"\n\n`;
+            content += `---\n\n`;
+        });
+
+        content = sanitizeRagText(content);
+        const contentHash = computeNormalizedHash(content);
+
+        let { data: doc, error: docErr } = await supabase
+            .from('knowledge_documents')
+            .select('id')
+            .eq('tenant_id', tenantId)
+            .eq('name', docName)
+            .order('created_at', { ascending: true })
+            .limit(1)
+            .maybeSingle();
+
+        if (docErr) throw docErr;
+
+        if (!doc) {
+            const { data: newDoc, error: createErr } = await supabase
+                .from('knowledge_documents')
+                .insert([{
+                    tenant_id: tenantId,
+                    name: docName,
+                    type: 'text/markdown',
+                    status: 'processing',
+                    content_hash: contentHash,
+                    metadata: { size: content.length, category: 'Regras & Ajustes I.A.', source: 'corrections_system', content_hash: contentHash, last_update: new Date().toISOString() }
+                }])
+                .select('*')
+                .single();
+
+            if (createErr) throw createErr;
+            doc = newDoc;
+        } else {
+            await supabase
+                .from('knowledge_documents')
+                .update({
+                    status: 'processing',
+                    content_hash: contentHash,
+                    metadata: { size: content.length, category: 'Regras & Ajustes I.A.', source: 'corrections_system', content_hash: contentHash, last_update: new Date().toISOString() }
+                })
+                .eq('id', doc.id);
+        }
+
+        const docId = doc.id;
+        await supabase.from('knowledge_chunks').delete().eq('document_id', docId).eq('tenant_id', tenantId);
+
+        const chunks = semanticChunkDocument(content, {
+            documentName: docName,
+            category: 'Regras & Ajustes I.A.'
+        });
+        const transformer = await DefaultEmbeddingsPipeline.getInstance();
+        const dbChunks = [];
+
+        for (let i = 0; i < chunks.length; i++) {
+            const ch = chunks[i];
+            const output = await transformer(ch.embeddingText || ch.content, { pooling: 'mean', normalize: true });
+            const embeddingVector = Array.from(output.data);
+
+            dbChunks.push({
+                document_id: docId,
+                tenant_id: tenantId,
+                content: ch.content,
+                embedding: embeddingVector,
+                chunk_index: i,
+                metadata: {
+                    document_name: docName,
+                    section_title: ch.sectionTitle,
+                    category: 'Regras & Ajustes I.A.',
+                    chunk_hash: ch.chunkHash,
+                    word_count: ch.wordCount,
+                    source: 'corrections_system',
+                    rag_version: '2.0'
+                }
+            });
+
+            if (dbChunks.length >= 100) {
+                await supabase.from('knowledge_chunks').insert([...dbChunks]);
+                dbChunks.length = 0;
+            }
+        }
+
+        if (dbChunks.length > 0) {
+            await supabase.from('knowledge_chunks').insert(dbChunks);
+        }
+
+        await supabase
+            .from('knowledge_documents')
+            .update({
+                status: 'ready',
+                content_hash: contentHash,
+                metadata: {
+                    size: content.length,
+                    category: 'Regras & Ajustes I.A.',
+                    source: 'corrections_system',
+                    content_hash: contentHash,
+                    rag_version: '2.0',
+                    chunks_total: chunks.length,
+                    chunks_processed: chunks.length,
+                    current_status: 'Concluído com sucesso!',
+                    last_update: new Date().toISOString()
+                }
+            })
+            .eq('id', docId);
+
+        console.log(`[Corrections RAG Sync] Manual sincronizado com sucesso para o tenant ${tenantId}. Documento ID: ${docId} (${chunks.length} chunks)`);
+    } catch (e) {
+        console.error(`[Corrections RAG Sync] Erro crítico ao sincronizar correções para o RAG:`, e);
+    }
+}
+
+export function createKnowledgeRouter(deps = {}) {
+    const router = express.Router();
+    const supabase = deps.supabase || defaultSupabase;
+    const EmbeddingsPipeline = deps.EmbeddingsPipeline || DefaultEmbeddingsPipeline;
+    const hybridRetrieveKnowledge = deps.hybridRetrieveKnowledge || defaultHybridRetrieveKnowledge;
+    const invalidateBehaviorCache = deps.invalidateBehaviorCache || (() => {});
+    const startInboxDeepAnalysis = deps.inboxAnalyzer?.startInboxDeepAnalysis || defaultStartInboxDeepAnalysis;
+    const getInboxAnalysisStatus = deps.inboxAnalyzer?.getInboxAnalysisStatus || defaultGetInboxAnalysisStatus;
+    const getInboxAnalysisRun = deps.inboxAnalyzer?.getInboxAnalysisRun || defaultGetInboxAnalysisRun;
+
+// ============================================================================
+// RAG 2.0: OVERVIEW REAL, GATEKEEPER PRÉ-INGESTÃO, AUDITORIA E CURADORIA
+// ============================================================================
+
+// Retorna documentos enriquecidos com a contagem REAL de vetores do pgvector
+router.get('/overview', async (req, res) => {
+    try {
+        const tenant_id = req.headers['x-tenant-id'] || req.query?.tenant_id;
+        const agent_id = req.headers['x-agent-id'] || req.query?.agent_id || null;
+        const instance_scope = req.query?.instance_id || req.headers['x-instance-id'] || 'all';
+        if (!tenant_id) return res.status(400).json({ error: 'x-tenant-id required' });
+
+        let docQuery = supabase
+            .from('knowledge_documents')
+            .select('*')
+            .eq('tenant_id', tenant_id)
+            .order('created_at', { ascending: false });
+
+        if (agent_id) {
+            docQuery = docQuery.eq('agent_id', agent_id);
+        } else {
+            docQuery = docQuery.is('agent_id', null);
+        }
+
+        if (instance_scope === 'global') {
+            docQuery = docQuery.is('instance_id', null);
+        } else if (isValidUuid(instance_scope)) {
+            docQuery = docQuery.eq('instance_id', String(instance_scope).trim());
+        }
+
+        const [{ data: docs, error: docErr }, allChunks] = await Promise.all([
+            docQuery,
+            fetchAllTenantChunks(supabase, tenant_id, false)
+        ]);
+        if (docErr) throw docErr;
+
+        const chunksByDoc = new Map();
+        for (const ch of allChunks) {
+            if (!agent_id && ch.agent_id) continue;
+            if (agent_id && ch.agent_id !== agent_id) continue;
+            chunksByDoc.set(ch.document_id, (chunksByDoc.get(ch.document_id) || 0) + 1);
+        }
+
+        const enrichedDocs = (docs || []).map(doc => {
+            const realChunksCount = chunksByDoc.get(doc.id) || 0;
+            return {
+                ...doc,
+                real_chunks_count: realChunksCount,
+                category: doc.metadata?.category || inferCategoryFromContent(doc.name, ''),
+                quality_score: doc.metadata?.quality_score ?? null
+            };
+        });
+
+        const totalRealChunks = enrichedDocs.reduce((acc, d) => acc + d.real_chunks_count, 0);
+        const emptyDocsCount = enrichedDocs.filter(d => d.status !== 'processing' && d.real_chunks_count === 0).length;
+        const menuDocsCount = enrichedDocs.filter(d => /cardapio/i.test(d.name || '')).length;
+        const readyDocuments = enrichedDocs.filter(d => d.status === 'ready' || d.status === 'processed').length;
+
+        let healthScore = 100;
+        if (emptyDocsCount > 0) healthScore -= Math.min(30, emptyDocsCount * 12);
+        if (menuDocsCount > 1) healthScore -= 15;
+        if (totalRealChunks > 300) healthScore -= 20; // Sinal típico de auto-aprendizado inflado/redundante
+
+        res.json({
+            documents: enrichedDocs,
+            stats: {
+                totalDocuments: enrichedDocs.length,
+                readyDocuments,
+                processingDocuments: enrichedDocs.filter(d => d.status === 'processing').length,
+                totalRealChunks,
+                emptyDocsCount,
+                duplicateMenuAlert: menuDocsCount > 1,
+                healthScore: Math.max(0, healthScore)
+            }
+        });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Gatekeeper Pré-Ingestão: Extrai, analisa duplicidade/ruído/LGPD/conflitos e refatora com IA ANTES de gravar no banco
+router.post('/analyze', upload.single('file'), async (req, res) => {
+    try {
+        const tenant_id = req.headers['x-tenant-id'] || req.body?.tenant_id;
+        const agent_id = req.headers['x-agent-id'] || req.body?.agent_id || null;
+        if (!tenant_id) return res.status(400).json({ error: 'x-tenant-id required' });
+
+        let originalName = req.body?.title || 'conhecimento_manual.txt';
+        let rawText = '';
+
+        if (req.file) {
+            originalName = req.file.originalname;
+            rawText = await extractTextFromFile(req.file.buffer, req.file.mimetype, req.file.originalname);
+        } else if (req.body?.content) {
+            rawText = String(req.body.content);
+        } else {
+            return res.status(400).json({ error: 'Envie um arquivo ou conteúdo textual para análise.' });
+        }
+
+        const transformer = await EmbeddingsPipeline.getInstance();
+        const apiKey = await resolveServerOrTenantGeminiKey(supabase, tenant_id);
+
+        const analysis = await analyzeCandidateForTenant({
+            supabase,
+            transformer,
+            apiKey,
+            tenantId: tenant_id,
+            agentId: agent_id,
+            originalName,
+            rawText
+        });
+
+        return res.json({ success: true, analysis });
+    } catch (e) {
+        console.error('[RAG Analyze] Erro na análise pré-ingestão:', e);
+        return res.status(500).json({ error: e.message });
+    }
+});
+
+// Commit Curado RAG 2.0: Grava texto refatorado após revisão ou ação direta (create | merge | replace)
+router.post('/commit', async (req, res) => {
+    try {
+        const tenant_id = req.headers['x-tenant-id'] || req.body?.tenant_id;
+        const agent_id = req.headers['x-agent-id'] || req.body?.agent_id || null;
+        if (!tenant_id) return res.status(400).json({ error: 'x-tenant-id required' });
+
+        const {
+            mode = 'create',
+            targetDocumentId = null,
+            title = 'base_conhecimento.md',
+            category,
+            content,
+            qualityScore = 90,
+            source = 'curated_rag_v2',
+            instanceId = req.body?.instance_id || req.headers['x-instance-id'] || null,
+            behaviorProfile = null
+        } = req.body || {};
+
+        if (!content || String(content).trim().length < 10) {
+            return res.status(400).json({ error: 'Conteúdo insuficiente para vetorização.' });
+        }
+
+        const transformer = await EmbeddingsPipeline.getInstance();
+        const result = await commitCuratedDocument({
+            supabase,
+            transformer,
+            tenantId: tenant_id,
+            agentId: agent_id,
+            instanceId: isValidUuid(instanceId) ? String(instanceId).trim() : null,
+            mode,
+            targetDocumentId,
+            title,
+            category,
+            content,
+            qualityScore,
+            source,
+            behaviorProfile
+        });
+
+        invalidateBehaviorCache(tenant_id, isValidUuid(instanceId) ? String(instanceId).trim() : null);
+        return res.json({ success: true, ...result });
+    } catch (e) {
+        console.error('[RAG Commit] Erro ao gravar base curada:', e);
+        return res.status(500).json({ error: e.message });
+    }
+});
+
+// Auditoria Forense Completa de Saúde do RAG do Tenant
+router.post('/audit', async (req, res) => {
+    try {
+        const tenant_id = req.headers['x-tenant-id'] || req.body?.tenant_id;
+        if (!tenant_id) return res.status(400).json({ error: 'x-tenant-id required' });
+
+        const report = await auditTenantKnowledgeHealth({ supabase, tenantId: tenant_id });
+        return res.json({ success: true, report });
+    } catch (e) {
+        console.error('[RAG Audit] Erro na auditoria:', e);
+        return res.status(500).json({ error: e.message });
+    }
+});
+
+// Saneamento Automático: Remove bases vazias, deduplica chunks redundantes, corrige URLs e sincroniza metadados
+router.post('/sanitize', async (req, res) => {
+    try {
+        const tenant_id = req.headers['x-tenant-id'] || req.body?.tenant_id;
+        if (!tenant_id) return res.status(400).json({ error: 'x-tenant-id required' });
+
+        const transformer = await EmbeddingsPipeline.getInstance();
+        const summary = await sanitizeTenantKnowledgeBase({
+            supabase,
+            transformer,
+            tenantId: tenant_id
+        });
+        const updatedReport = await auditTenantKnowledgeHealth({ supabase, tenantId: tenant_id });
+
+        return res.json({ success: true, summary, report: updatedReport });
+    } catch (e) {
+        console.error('[RAG Sanitize] Erro no saneamento:', e);
+        return res.status(500).json({ error: e.message });
+    }
+});
+
+// Rota de Injeção RAG (Upload de Arquivos multi-empresa com sanitização e chunking semântico 2.0)
 router.post('/upload', upload.single('file'), async (req, res) => {
     try {
         // Obrigatório passar o x-tenant-id em multitenant
@@ -59,18 +459,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
         if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
 
         const { originalname, buffer, mimetype, size } = req.file;
-
-        let content = '';
-
-        // Extração de Textos PDF vs outros (TXT, CSV)
-        if (mimetype === 'application/pdf') {
-            const parser = new PDFParse({ data: buffer });
-            const data = await parser.getText();
-            content = data.text;
-            await parser.destroy();
-        } else {
-            content = buffer.toString('utf-8');
-        }
+        const content = await extractTextFromFile(buffer, mimetype, originalname);
 
         console.log(`[Upload Debug] File: ${originalname}, Mime: ${mimetype}, Buffer Size: ${buffer.length}, Extracted Content Length: ${content?.length || 0}`);
 
@@ -78,6 +467,34 @@ router.post('/upload', upload.single('file'), async (req, res) => {
             console.log(`[Upload Debug] Failed: Content is empty or undetectable.`);
             return res.status(400).json({ error: 'Arquivo vazio ou texto indetectável.' });
         }
+
+        const noiseAlerts = detectSensitiveOrNoisyPatterns(content);
+        const hasFatalJunk = noiseAlerts.some(a => a.type === 'lixo' && a.severity === 'critical');
+        if (hasFatalJunk && req.headers['x-force-upload'] !== 'true') {
+            return res.status(422).json({
+                error: noiseAlerts.find(a => a.type === 'lixo')?.description || 'Conteúdo considerado inválido ou de teste para RAG.'
+            });
+        }
+
+        const contentHash = computeNormalizedHash(content);
+        if (req.headers['x-force-upload'] !== 'true') {
+            let dupCheckQ = supabase
+                .from('knowledge_documents')
+                .select('id, name')
+                .eq('tenant_id', tenant_id)
+                .eq('content_hash', contentHash);
+            if (agent_id) dupCheckQ = dupCheckQ.eq('agent_id', agent_id);
+            else dupCheckQ = dupCheckQ.is('agent_id', null);
+            const { data: exactDup } = await dupCheckQ.maybeSingle();
+            if (exactDup) {
+                return res.status(409).json({
+                    error: `Conteúdo idêntico ao documento já cadastrado "${exactDup.name}".`,
+                    duplicateDocumentId: exactDup.id
+                });
+            }
+        }
+
+        const inferredCategory = inferCategoryFromContent(originalname, content);
 
         // 1. Grava na knowledge_documents para aparecer na UI
         const { data: docData, error: docError } = await supabase
@@ -88,7 +505,8 @@ router.post('/upload', upload.single('file'), async (req, res) => {
                 name: originalname,
                 type: mimetype,
                 status: 'processing',
-                metadata: { size }
+                content_hash: contentHash,
+                metadata: { size, category: inferredCategory, content_hash: contentHash, rag_version: '2.0' }
             }])
             .select('*')
             .single();
@@ -98,98 +516,116 @@ router.post('/upload', upload.single('file'), async (req, res) => {
         const documentId = docData.id;
 
         // Responder com sucesso rápido para UI (evitar timeout) e delegar processamento pesado!
-        res.json({ status: 'processing', document_id: documentId, message: 'Vetorização iniciada.' });
+        res.json({ status: 'processing', document_id: documentId, document: docData, message: 'Vetorização semântica iniciada.' });
 
-        // -- BACKGROUND PROCESS ENGINE --
+        // -- BACKGROUND PROCESS ENGINE (Chunking Semântico + Deduplicação) --
         (async () => {
             try {
-                const chunks = splitTextIntoChunks(content, 300, 50);
-                
-                // Grava inicialmente a quantidade total de chunks
+                const chunks = semanticChunkDocument(content, {
+                    documentName: originalname,
+                    category: inferredCategory
+                });
+
                 await supabase.from('knowledge_documents').update({
-                    metadata: { 
-                        size, 
-                        chunks_total: chunks.length, 
+                    metadata: {
+                        size,
+                        category: inferredCategory,
+                        content_hash: contentHash,
+                        rag_version: '2.0',
+                        chunks_total: chunks.length,
                         chunks_processed: 0,
-                        current_status: 'Carregando pipeline de Inteligência Artificial...' 
+                        current_status: 'Carregando pipeline de Inteligência Artificial...'
                     }
                 }).eq('id', documentId);
 
                 const transformer = await EmbeddingsPipeline.getInstance();
+                const otherChunks = await fetchAllTenantChunks(supabase, tenant_id, false);
+                const otherHashes = new Set(
+                    otherChunks
+                        .filter(c => c.document_id !== documentId)
+                        .map(c => c.metadata?.chunk_hash || computeNormalizedHash(String(c.content || '').replace(/^\[[^\]]+\]\s*/, '')))
+                );
 
                 const dbChunks = [];
+                let skippedDuplicates = 0;
 
-                // Vetorizar todos os Chunks usando a IA embarcada
                 for (let i = 0; i < chunks.length; i++) {
-                    const chunkText = chunks[i];
-                    
-                    // Atualiza o progresso no banco de dados
-                    await supabase.from('knowledge_documents').update({
-                        metadata: { 
-                            size, 
-                            chunks_total: chunks.length, 
-                            chunks_processed: i,
-                            current_status: `Vetorizando trecho ${i + 1} de ${chunks.length}...`
-                        }
-                    }).eq('id', documentId);
+                    const ch = chunks[i];
+                    if (otherHashes.has(ch.chunkHash)) {
+                        skippedDuplicates++;
+                        continue;
+                    }
 
-                    if(chunkText.trim().length < 5) continue;
+                    if (i % 5 === 0) {
+                        await supabase.from('knowledge_documents').update({
+                            metadata: {
+                                size,
+                                category: inferredCategory,
+                                content_hash: contentHash,
+                                rag_version: '2.0',
+                                chunks_total: chunks.length,
+                                chunks_processed: i,
+                                current_status: `Vetorizando bloco semântico ${i + 1} de ${chunks.length}...`
+                            }
+                        }).eq('id', documentId);
+                    }
 
-                    // Gerar matriz de similaridade
-                    const output = await transformer(chunkText, { pooling: 'mean', normalize: true });
+                    const output = await transformer(ch.embeddingText || ch.content, { pooling: 'mean', normalize: true });
                     const embeddingVector = Array.from(output.data);
 
                     dbChunks.push({
                         document_id: documentId,
                         tenant_id,
                         agent_id,
-                        content: chunkText,
+                        content: ch.content,
                         embedding: embeddingVector,
-                        chunk_index: i
+                        chunk_index: dbChunks.length,
+                        metadata: {
+                            document_name: originalname,
+                            section_title: ch.sectionTitle,
+                            category: ch.category,
+                            chunk_hash: ch.chunkHash,
+                            word_count: ch.wordCount,
+                            char_count: ch.charCount,
+                            rag_version: '2.0'
+                        }
                     });
-                    
-                    // Supabase tem limites de inserção por lote. Caso DBChunks fique gigante, fariamos batch.
-                    // Inserindo em lotes de 100 para evitar payload grande demais.
+
                     if (dbChunks.length >= 100) {
                         await supabase.from('knowledge_chunks').insert([...dbChunks]);
                         dbChunks.length = 0;
                     }
                 }
 
-                // Inserir o resto
                 if (dbChunks.length > 0) {
-                    await supabase.from('knowledge_documents').update({
-                        metadata: { 
-                            size, 
-                            chunks_total: chunks.length, 
-                            chunks_processed: chunks.length - 1,
-                            current_status: 'Salvando vetores semânticos no banco de dados...' 
-                        }
-                    }).eq('id', documentId);
-
                     await supabase.from('knowledge_chunks').insert(dbChunks);
                 }
 
-                // Arquivo 100% lido pela IA.
-                await supabase.from('knowledge_documents').update({ 
+                const realInsertedCount = chunks.length - skippedDuplicates;
+                await supabase.from('knowledge_documents').update({
                     status: 'ready',
-                    metadata: { 
-                        size, 
-                        chunks_total: chunks.length, 
-                        chunks_processed: chunks.length,
-                        current_status: 'Concluído com sucesso!' 
+                    content_hash: contentHash,
+                    metadata: {
+                        size,
+                        category: inferredCategory,
+                        content_hash: contentHash,
+                        rag_version: '2.0',
+                        chunks_total: realInsertedCount,
+                        chunks_processed: realInsertedCount,
+                        skipped_duplicates: skippedDuplicates,
+                        current_status: 'Concluído com sucesso!'
                     }
                 }).eq('id', documentId);
 
             } catch (bgError) {
                 console.error("Erro crítico no Pipeline RAG:", bgError);
-                await supabase.from('knowledge_documents').update({ 
-                    status: 'error', 
-                    metadata: { 
+                await supabase.from('knowledge_documents').update({
+                    status: 'error',
+                    metadata: {
                         size,
-                        err: bgError.message, 
-                        current_status: `Falha: ${bgError.message}` 
-                    } 
+                        err: bgError.message,
+                        current_status: `Falha: ${bgError.message}`
+                    }
                 }).eq('id', documentId);
             }
         })();
@@ -199,11 +635,81 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     }
 });
 
+// ============================================================================
+// ANÁLISE PROFUNDA DE HISTÓRICO POR CAIXA (SUBMENU DA CAIXA -> RAG ISOLADO)
+// IMPORTANTE: Declarado ANTES de rotas com /:id para evitar sombreamento Express
+// ============================================================================
+
+router.get('/inbox-analyze/runs/:runId', async (req, res) => {
+    try {
+        const tenant_id = req.headers['x-tenant-id'] || req.query?.tenant_id;
+        if (!tenant_id) return res.status(400).json({ error: 'x-tenant-id required' });
+
+        const run = await getInboxAnalysisRun({
+            supabase,
+            tenantId: tenant_id,
+            runId: req.params.runId
+        });
+        if (!run) return res.status(404).json({ error: 'Execução de análise não encontrada.' });
+        return res.json({ ok: true, run });
+    } catch (e) {
+        return res.status(e.statusCode || 500).json({ error: e.message });
+    }
+});
+
+router.get('/inbox-analyze/:instanceId/status', async (req, res) => {
+    try {
+        const tenant_id = req.headers['x-tenant-id'] || req.query?.tenant_id;
+        if (!tenant_id) return res.status(400).json({ error: 'x-tenant-id required' });
+
+        const statusData = await getInboxAnalysisStatus({
+            supabase,
+            tenantId: tenant_id,
+            instanceId: req.params.instanceId
+        });
+        return res.json({ ok: true, ...statusData });
+    } catch (e) {
+        return res.status(e.statusCode || 500).json({ error: e.message });
+    }
+});
+
+router.post('/inbox-analyze/:instanceId/start', async (req, res) => {
+    try {
+        const tenant_id = req.headers['x-tenant-id'] || req.body?.tenant_id;
+        if (!tenant_id) return res.status(400).json({ error: 'x-tenant-id required' });
+
+        const mode = req.body?.mode === 'full' ? 'full' : 'incremental';
+        const result = await startInboxDeepAnalysis({
+            supabase,
+            tenantId: tenant_id,
+            instanceId: req.params.instanceId,
+            mode,
+            deps: {
+                invalidateCache: invalidateBehaviorCache,
+                getTransformer: () => EmbeddingsPipeline.getInstance()
+            }
+        });
+
+        if (result.conflict) {
+            return res.status(409).json({
+                conflict: true,
+                error: 'Já existe uma análise em andamento para esta caixa.',
+                activeRun: result.activeRun
+            });
+        }
+
+        return res.status(202).json({ ok: true, run: result.run });
+    } catch (e) {
+        return res.status(e.statusCode || 500).json({ error: e.message });
+    }
+});
+
 // Listar seus documentos (Isolados pelo RLS / tenant)
 router.get('/', async (req, res) => {
     try {
         const tenant_id = req.headers['x-tenant-id'];
         const agent_id = req.headers['x-agent-id'];
+        const instance_scope = req.query?.instance_id || req.headers['x-instance-id'] || 'all';
         if (!tenant_id) return res.status(400).json({ error: 'x-tenant-id required' });
 
         let query = supabase
@@ -218,6 +724,12 @@ router.get('/', async (req, res) => {
             query = query.is('agent_id', null);
         }
 
+        if (instance_scope === 'global') {
+            query = query.is('instance_id', null);
+        } else if (isValidUuid(instance_scope)) {
+            query = query.eq('instance_id', String(instance_scope).trim());
+        }
+
         const { data, error } = await query;
         res.json(data);
     } catch(e) {
@@ -225,7 +737,29 @@ router.get('/', async (req, res) => {
     }
 });
 
-// Resgata o conteúdo completo extraído do documento (Concatenando os chunks)
+// Resgata os chunks individuais de um documento (Raio-X de Vetores)
+router.get('/:id/chunks', async (req, res) => {
+    try {
+        const tenant_id = req.headers['x-tenant-id'];
+        const docId = req.params.id;
+        if (!tenant_id) return res.status(400).json({ error: 'x-tenant-id required' });
+
+        const { data, error } = await supabase
+            .from('knowledge_chunks')
+            .select('id, document_id, chunk_index, content, metadata')
+            .eq('document_id', docId)
+            .eq('tenant_id', tenant_id)
+            .order('chunk_index', { ascending: true, nullsFirst: false })
+            .limit(300);
+
+        if (error) throw error;
+        res.json({ chunks: data || [] });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Resgata o conteúdo completo extraído do documento (preservando quebras de parágrafo sem cabeçalhos repetidos)
 router.get('/:id/content', async (req, res) => {
     try {
         const tenant_id = req.headers['x-tenant-id'];
@@ -250,8 +784,10 @@ router.get('/:id/content', async (req, res) => {
         const { data, error } = await query;
         if (error) throw error;
 
-        // Se por algum motivo existirem chunks antigos sem chunk_index, a ordem original pode não estar estritamente preservada (mas será unida).
-        const fullContent = data.map(c => c.content).join(' ');
+        const fullContent = (data || [])
+            .map(c => String(c.content || '').replace(/^\[[^\]]+\]\n?/, '').trim())
+            .filter(Boolean)
+            .join('\n\n');
         
         res.json({ content: fullContent });
     } catch(e) {
@@ -278,46 +814,134 @@ router.post('/manual-train', async (req, res) => {
         res.status(500).json({ error: e.message });
     }
 });
-// Atualiza o documento enviando um novo conteúdo em formato de texto (Re-vetorização)
+// Atualiza o documento enviando um novo conteúdo em formato de texto (Re-vetorização Semântica 2.0)
+// Alterna escopo do documento atomicamente entre Global da Empresa (null) e Exclusivo da Caixa (UUID)
+router.patch('/:id/scope', async (req, res) => {
+    try {
+        const tenant_id = req.headers['x-tenant-id'];
+        const docId = req.params.id;
+        if (!tenant_id) return res.status(400).json({ error: 'x-tenant-id required' });
+
+        const rawInstanceId = req.body?.instanceId ?? null;
+        if (rawInstanceId !== null && rawInstanceId !== '' && !isValidUuid(rawInstanceId)) {
+            return res.status(400).json({ error: 'instanceId inválido. Envie UUID válido ou null para Global.' });
+        }
+        const targetInstanceId = rawInstanceId && String(rawInstanceId).trim() ? String(rawInstanceId).trim() : null;
+
+        const { data: existingDoc, error: docErr } = await supabase
+            .from('knowledge_documents')
+            .select('*')
+            .eq('id', docId)
+            .eq('tenant_id', tenant_id)
+            .maybeSingle();
+
+        if (docErr) throw docErr;
+        if (!existingDoc) return res.status(404).json({ error: 'Documento não encontrado.' });
+
+        if (targetInstanceId) {
+            const { data: inst, error: instErr } = await supabase
+                .from('whatsapp_instances')
+                .select('id')
+                .eq('id', targetInstanceId)
+                .eq('tenant_id', tenant_id)
+                .maybeSingle();
+            if (instErr) throw instErr;
+            if (!inst) return res.status(404).json({ error: 'Caixa de entrada não encontrada para esta empresa.' });
+        }
+
+        const nextMeta = {
+            ...(existingDoc.metadata || {}),
+            instance_id: targetInstanceId,
+            updated_at: new Date().toISOString()
+        };
+
+        const { data: updatedDoc, error: updDocErr } = await supabase
+            .from('knowledge_documents')
+            .update({ instance_id: targetInstanceId, metadata: nextMeta })
+            .eq('id', docId)
+            .eq('tenant_id', tenant_id)
+            .select('*')
+            .single();
+        if (updDocErr) throw updDocErr;
+
+        const { error: updChunksErr } = await supabase
+            .from('knowledge_chunks')
+            .update({ instance_id: targetInstanceId })
+            .eq('document_id', docId)
+            .eq('tenant_id', tenant_id);
+        if (updChunksErr) throw updChunksErr;
+
+        invalidateBehaviorCache(tenant_id, existingDoc.instance_id || targetInstanceId);
+        return res.json({ ok: true, document: updatedDoc });
+    } catch (e) {
+        return res.status(500).json({ error: e.message });
+    }
+});
+
+// Atualizar e RE-PROCESSAR o conteúdo completo de um documento (com Chunking Semântico RAG 2.0)
 router.put('/:id', async (req, res) => {
     try {
         const tenant_id = req.headers['x-tenant-id'];
         const agent_id = req.headers['x-agent-id'] || null;
         const docId = req.params.id;
-        const { content } = req.body;
+        const { content, title, category } = req.body;
 
         if (!tenant_id) return res.status(400).json({ error: 'x-tenant-id required' });
         if (!content || content.trim() === '') return res.status(400).json({ error: 'O conteúdo não pode ser vazio.' });
 
-        // 1. Atualizar status na doc para processando
-        let updateQuery = supabase.from('knowledge_documents').update({ status: 'processing' }).eq('id', docId).eq('tenant_id', tenant_id);
+        const cleanContent = sanitizeRagText(content);
+        const contentHash = computeNormalizedHash(cleanContent);
+
+        const { data: existingDoc } = await supabase
+            .from('knowledge_documents')
+            .select('id, name, instance_id, metadata')
+            .eq('id', docId)
+            .eq('tenant_id', tenant_id)
+            .maybeSingle();
+
+        const preservedInstanceId = existingDoc?.instance_id ?? null;
+        const finalName = title ? String(title).trim() : (existingDoc?.name || 'base_conhecimento.md');
+        const finalCategory = category || existingDoc?.metadata?.category || inferCategoryFromContent(finalName, cleanContent);
+        const refreshedBehaviorProfile = (existingDoc?.metadata?.source === 'inbox_deep_analyzer' || /#\s*[^\n]*(?:Identidade|Comportamento|Tom de Voz)/i.test(cleanContent))
+            ? extractBehaviorProfileSummary(cleanContent)
+            : existingDoc?.metadata?.behavior_profile;
+
+        let updateQuery = supabase
+            .from('knowledge_documents')
+            .update({
+                name: finalName,
+                status: 'processing',
+                content_hash: contentHash
+            })
+            .eq('id', docId)
+            .eq('tenant_id', tenant_id);
         if (agent_id) updateQuery = updateQuery.eq('agent_id', agent_id); else updateQuery = updateQuery.is('agent_id', null);
         const { error: updateError } = await updateQuery;
         
         if (updateError) throw updateError;
 
-        // Retorna ok para a UI rapidamente.
-        res.json({ status: 'processing', document_id: docId, message: 'Re-vetorização iniciada.' });
+        res.json({ status: 'processing', document_id: docId, message: 'Re-vetorização semântica iniciada.' });
 
-        // -- BACKGROUND PROCESS ENGINE --
         (async () => {
             try {
-                // 2. Apagar TODOS os chunks antigos deste documento!
                 await supabase.from('knowledge_chunks').delete().eq('document_id', docId).eq('tenant_id', tenant_id);
 
-                // 3. Gerar novos chunks e embeddings
-                const chunks = splitTextIntoChunks(content, 300, 50);
-                
-                // Grava inicialmente a quantidade total de chunks
-                const docCheck = await supabase.from('knowledge_documents').select('metadata').eq('id', docId).single();
-                const size = docCheck.data?.metadata?.size || 0;
+                const chunks = semanticChunkDocument(cleanContent, {
+                    documentName: finalName,
+                    category: finalCategory
+                });
+                const size = Buffer.byteLength(cleanContent, 'utf-8');
 
                 await supabase.from('knowledge_documents').update({
-                    metadata: { 
-                        size, 
-                        chunks_total: chunks.length, 
+                    metadata: {
+                        ...(existingDoc?.metadata || {}),
+                        size,
+                        category: finalCategory,
+                        content_hash: contentHash,
+                        rag_version: '2.0',
+                        chunks_total: chunks.length,
                         chunks_processed: 0,
-                        current_status: 'Carregando pipeline de Inteligência Artificial...' 
+                        current_status: 'Gerando novos vetores semânticos...'
                     }
                 }).eq('id', docId);
 
@@ -325,30 +949,28 @@ router.put('/:id', async (req, res) => {
                 const dbChunks = [];
 
                 for (let i = 0; i < chunks.length; i++) {
-                    const chunkText = chunks[i];
-                    
-                    // Atualiza o progresso no banco de dados
-                    await supabase.from('knowledge_documents').update({
-                        metadata: { 
-                            size, 
-                            chunks_total: chunks.length, 
-                            chunks_processed: i,
-                            current_status: `Re-vetorizando trecho ${i + 1} de ${chunks.length}...`
-                        }
-                    }).eq('id', docId);
-
-                    if(chunkText.trim().length < 5) continue;
-
-                    const output = await transformer(chunkText, { pooling: 'mean', normalize: true });
+                    const ch = chunks[i];
+                    const output = await transformer(ch.embeddingText || ch.content, { pooling: 'mean', normalize: true });
                     const embeddingVector = Array.from(output.data);
 
                     dbChunks.push({
                         document_id: docId,
                         tenant_id,
                         agent_id,
-                        content: chunkText,
+                        instance_id: preservedInstanceId,
+                        content: ch.content,
                         embedding: embeddingVector,
-                        chunk_index: i
+                        chunk_index: i,
+                        metadata: {
+                            document_name: finalName,
+                            section_title: ch.sectionTitle,
+                            category: ch.category,
+                            chunk_hash: ch.chunkHash,
+                            word_count: ch.wordCount,
+                            char_count: ch.charCount,
+                            instance_id: preservedInstanceId,
+                            rag_version: '2.0'
+                        }
                     });
 
                     if (dbChunks.length >= 100) {
@@ -358,38 +980,37 @@ router.put('/:id', async (req, res) => {
                 }
 
                 if (dbChunks.length > 0) {
-                    await supabase.from('knowledge_documents').update({
-                        metadata: { 
-                            size, 
-                            chunks_total: chunks.length, 
-                            chunks_processed: chunks.length - 1,
-                            current_status: 'Salvando vetores semânticos no banco de dados...' 
-                        }
-                    }).eq('id', docId);
-
                     await supabase.from('knowledge_chunks').insert(dbChunks);
                 }
 
-                // 4. Marca doc como ready
-                await supabase.from('knowledge_documents').update({ 
+                await supabase.from('knowledge_documents').update({
                     status: 'ready',
-                    metadata: { 
-                        size, 
-                        chunks_total: chunks.length, 
+                    content_hash: contentHash,
+                    metadata: {
+                        ...(existingDoc?.metadata || {}),
+                        size,
+                        category: finalCategory,
+                        content_hash: contentHash,
+                        instance_id: preservedInstanceId,
+                        ...(refreshedBehaviorProfile ? { behavior_profile: refreshedBehaviorProfile } : {}),
+                        rag_version: '2.0',
+                        chunks_total: chunks.length,
                         chunks_processed: chunks.length,
                         current_status: 'Concluído com sucesso!',
-                        updated_at: new Date().toISOString()
+                        updated_at: new Date().toISOString(),
+                        last_update: new Date().toISOString()
                     }
                 }).eq('id', docId);
+                invalidateBehaviorCache(tenant_id, preservedInstanceId);
 
             } catch (bgError) {
                 console.error("Erro crítico na Re-vetorização do RAG:", bgError);
-                await supabase.from('knowledge_documents').update({ 
-                    status: 'error', 
-                    metadata: { 
-                        err: bgError.message, 
-                        current_status: `Falha na re-vetorização: ${bgError.message}` 
-                    } 
+                await supabase.from('knowledge_documents').update({
+                    status: 'error',
+                    metadata: {
+                        err: bgError.message,
+                        current_status: `Falha na re-vetorização: ${bgError.message}`
+                    }
                 }).eq('id', docId);
             }
         })();
@@ -417,18 +1038,20 @@ router.delete('/:id', async (req, res) => {
         const { error } = await query;
         if (error) throw error;
 
+        invalidateBehaviorCache(tenant_id);
         res.json({ success: true });
     } catch(e) {
         res.status(500).json({ error: e.message });
     }
 });
 
-// API de TESTE de Matching (Para provar o RAG com Supabase pgvector)
+// API de TESTE de Matching Híbrido (Simulador Raio-X RAG 2.0 com RRF + MMR)
 router.post('/match', async (req, res) => {
    try {
         const tenant_id = req.headers['x-tenant-id'];
         const agent_id = req.headers['x-agent-id'] || null;
-        const { query } = req.body;
+        const { query, topK = 5, instanceId = null, instance_id = null } = req.body;
+        const effectiveInstanceId = instanceId || instance_id || req.headers['x-instance-id'] || null;
         
         if (!query || !tenant_id) return res.status(400).json({ error: 'Missing query or tenant' });
 
@@ -437,227 +1060,27 @@ router.post('/match', async (req, res) => {
         const output = await transformer(query, { pooling: 'mean', normalize: true, priority: 1 });
         const queryEmbedding = Array.from(output.data);
 
-        // 2. Busca Semântica (IA) com Assertividade Elevada (match_threshold 0.45)
-        const { data: semanticMatches, error: semanticError } = await supabase.rpc('match_knowledge_chunks', {
-             query_embedding: queryEmbedding,
-             match_threshold: 0.45,
-             match_count: 5,
-             p_tenant_id: tenant_id,
-             p_agent_id: agent_id
+        // 2. Busca Híbrida 2.0 (Vetorial pgvector + FTS PT-BR + RRF + MMR Diversity)
+        const finalMatches = await hybridRetrieveKnowledge({
+            supabase,
+            queryEmbedding,
+            queryText: query,
+            tenantId: tenant_id,
+            agentId: agent_id,
+            instanceId: effectiveInstanceId,
+            topK: Math.min(Number(topK) || 5, 8),
+            vectorThreshold: 0.24
         });
 
-        if (semanticError) throw semanticError;
+        const promptPreview = finalMatches.length > 0
+            ? finalMatches.map((m, idx) => `[Fonte ${idx + 1}: ${m.document_name}${m.section ? ` > ${m.section}` : ''}]\n${m.content}`).join('\n---\n')
+            : '';
 
-        // 3. Busca Textual Exata (Keyword Match / Fallback WebSearch do Postgres)
-        // Isso garante que palavras como "cadastro" e "produto" tenham peso extremo se baterem exato!
-        let formattedQuery = query.trim().split(/\s+/).join(' | '); // Formata para websearch OR/AND se quiser
-        let queryBuilder = supabase
-            .from('knowledge_chunks')
-            .select('id, document_id, content, metadata')
-            .eq('tenant_id', tenant_id)
-            .textSearch('content', query, { type: 'websearch', config: 'portuguese' })
-            .limit(3);
-
-        if (agent_id) {
-            // Busca o texto no agent E nos globais (null)
-            queryBuilder = queryBuilder.or(`agent_id.is.null,agent_id.eq.${agent_id}`);
-        } else {
-            queryBuilder = queryBuilder.is('agent_id', null);
-        }
-
-        const { data: textMatches, error: textError } = await queryBuilder;
-
-        // 4. Fusão e Deduplicação (Algoritmo de Reciprocal Rank Fusion / Bônus Simplificado)
-        const fusionMap = new Map();
-
-        // Processa Semântica
-        if (semanticMatches) {
-            semanticMatches.forEach(match => {
-                fusionMap.set(match.id, { 
-                    ...match, 
-                    method: 'Semântico (RAG)', 
-                    finalScore: match.similarity 
-                });
-            });
-        }
-
-        // Processa Textual
-        if (textMatches && !textError) {
-            textMatches.forEach(match => {
-                if (fusionMap.has(match.id)) {
-                    // Match perfeito: A semântica E a palavra-chave encontraram o mesmo texto. Bônus massivo!
-                    const existing = fusionMap.get(match.id);
-                    existing.finalScore += 0.25; 
-                    existing.method = 'Sinergia Híbrida (Vetor + Exact)';
-                } else {
-                    // Encontrado APENAS pela palavra chave exata. Assume grau forte (75%).
-                    fusionMap.set(match.id, { 
-                        ...match, 
-                        similarity: 0.75, 
-                        method: 'Exato (Lexical)', 
-                        finalScore: 0.75 
-                    });
-                }
-            });
-        }
-
-        // Ordena os Campeões Absolutos
-        const finalMatches = Array.from(fusionMap.values())
-            .sort((a, b) => b.finalScore - a.finalScore)
-            .slice(0, 4) // Retorna os 4 arquivos mais tops
-            .map(m => ({
-                 content: m.content,
-                 similarity: m.finalScore > 1 ? 1 : m.finalScore, // Trava maximo em 100%
-                 method: m.method
-            }));
-
-        res.json({ matches: finalMatches });
+        res.json({ matches: finalMatches, promptPreview });
    } catch(e) {
         res.status(500).json({ error: e.message });
    }
 });
-
-// Função para sincronizar todas as correções de IA para um único documento RAG da empresa
-async function syncCorrectionsToRagDocument(tenantId) {
-    try {
-        console.log(`[Corrections RAG Sync] Sincronizando correções da empresa ${tenantId} para o RAG...`);
-        // 1. Busca todos os raciocínios da empresa
-        const { data: corrections, error: fetchErr } = await supabase
-            .from('ai_reasoning_adjustments')
-            .select('user_query, original_response, corrected_response, context_summary, created_at')
-            .eq('tenant_id', tenantId)
-            .order('created_at', { ascending: false });
-
-        if (fetchErr) throw fetchErr;
-
-        const docName = "Manual de Raciocínio e Ajustes da I.A";
-
-        // 2. Se não houver correções, deleta o documento do RAG
-        if (!corrections || corrections.length === 0) {
-            console.log(`[Corrections RAG Sync] Nenhuma correção encontrada. Excluindo documento antigo se existir.`);
-            const { data: oldDoc } = await supabase
-                .from('knowledge_documents')
-                .select('id')
-                .eq('tenant_id', tenantId)
-                .eq('name', docName)
-                .maybeSingle();
-
-            if (oldDoc) {
-                await supabase.from('knowledge_chunks').delete().eq('document_id', oldDoc.id).eq('tenant_id', tenantId);
-                await supabase.from('knowledge_documents').delete().eq('id', oldDoc.id).eq('tenant_id', tenantId);
-            }
-            return;
-        }
-
-        // 3. Monta o markdown unificado do documento
-        let content = `# Manual de Raciocínio, Tom de Voz e Instruções Corrigidas da I.A.\n\n`;
-        content += `Este documento contém correções reais feitas por atendentes humanos para guiar as respostas da I.A. Siga de forma estrita as diretrizes de tom, empatia, escuta ativa e as respostas corretas abaixo para obter uma conversa de altíssimo nível humano e natural.\n\n---\n\n`;
-        
-        corrections.forEach((c, idx) => {
-            content += `## Correção ${idx + 1}:\n`;
-            if (c.context_summary) {
-                content += `### Memória da Conversa (Contexto):\n"${c.context_summary}"\n\n`;
-            }
-            content += `### Pergunta Similar do Cliente:\n"${c.user_query}"\n\n`;
-            if (c.original_response) {
-                content += `### Resposta Incorreta Original (Não repetir):\n"${c.original_response}"\n\n`;
-            }
-            content += `### Comportamento e Resposta Esperada Corrigida (Seguir esta linha):\n"${c.corrected_response}"\n\n`;
-            content += `---\n\n`;
-        });
-
-        // 4. Busca ou cria o documento correspondente em knowledge_documents
-        let { data: doc, error: docErr } = await supabase
-            .from('knowledge_documents')
-            .select('id')
-            .eq('tenant_id', tenantId)
-            .eq('name', docName)
-            .maybeSingle();
-
-        if (docErr) throw docErr;
-
-        if (!doc) {
-            const { data: newDoc, error: createErr } = await supabase
-                .from('knowledge_documents')
-                .insert([{
-                    tenant_id: tenantId,
-                    name: docName,
-                    type: 'text/markdown',
-                    status: 'processing',
-                    metadata: { size: content.length, source: 'corrections_system', last_update: new Date().toISOString() }
-                }])
-                .select('*')
-                .single();
-
-            if (createErr) throw createErr;
-            doc = newDoc;
-        } else {
-            // Atualiza status para processing
-            await supabase
-                .from('knowledge_documents')
-                .update({ 
-                    status: 'processing',
-                    metadata: { size: content.length, source: 'corrections_system', last_update: new Date().toISOString() }
-                })
-                .eq('id', doc.id);
-        }
-
-        const docId = doc.id;
-
-        // 5. Deleta trechos (chunks) antigos
-        await supabase.from('knowledge_chunks').delete().eq('document_id', docId).eq('tenant_id', tenantId);
-
-        // 6. Divide o documento em chunks e vetoriza usando o pipeline de embeddings local
-        const chunks = splitTextIntoChunks(content, 350, 50);
-        const transformer = await EmbeddingsPipeline.getInstance();
-        const dbChunks = [];
-
-        for (let i = 0; i < chunks.length; i++) {
-            const chunkText = chunks[i];
-            if (chunkText.trim().length < 5) continue;
-
-            const output = await transformer(chunkText, { pooling: 'mean', normalize: true });
-            const embeddingVector = Array.from(output.data);
-
-            dbChunks.push({
-                document_id: docId,
-                tenant_id: tenantId,
-                content: chunkText,
-                embedding: embeddingVector,
-                chunk_index: i
-            });
-
-            if (dbChunks.length >= 100) {
-                await supabase.from('knowledge_chunks').insert([...dbChunks]);
-                dbChunks.length = 0;
-            }
-        }
-
-        if (dbChunks.length > 0) {
-            await supabase.from('knowledge_chunks').insert(dbChunks);
-        }
-
-        // 7. Marca o documento como pronto
-        await supabase
-            .from('knowledge_documents')
-            .update({ 
-                status: 'ready',
-                metadata: { 
-                    size: content.length, 
-                    source: 'corrections_system',
-                    chunks_total: chunks.length,
-                    chunks_processed: chunks.length,
-                    current_status: 'Concluído com sucesso!',
-                    last_update: new Date().toISOString()
-                }
-            })
-            .eq('id', docId);
-
-        console.log(`[Corrections RAG Sync] Manual sincronizado com sucesso para o tenant ${tenantId}. Documento ID: ${docId}`);
-    } catch (e) {
-        console.error(`[Corrections RAG Sync] Erro crítico ao sincronizar correções para o RAG:`, e);
-    }
-}
 
 // Rota para salvar alterações de raciocínio / correções da IA
 router.post('/corrections', async (req, res) => {
@@ -775,25 +1198,6 @@ router.delete('/corrections/:id', async (req, res) => {
         res.status(500).json({ error: e.message });
     }
 });
-
-const suspendedKnowledgeKeys = new Set();
-
-function buildLocalHelperFallback(action, text, user_query) {
-    const baseText = String(text || user_query || '').trim();
-    if (action === 'summarize-context') {
-        return 'Atendimento em andamento via WhatsApp';
-    }
-    if (action === 'humanize' || action === 'empathize') {
-        return baseText ? `Com certeza! 😊 ${baseText}` : 'Olá! Como posso te ajudar hoje? 😊';
-    }
-    if (action === 'emoji') {
-        return baseText ? `${baseText} 😊✨` : 'Olá! 👋😊';
-    }
-    if (action === 'suggest') {
-        return 'Olá! 😊 Entendi perfeitamente sua solicitação. Já estou verificando aqui para te ajudar da melhor forma!';
-    }
-    return baseText || 'Olá! Como posso te ajudar?';
-}
 
 // Rota auxiliar IA para processar, humanizar e sugerir melhorias de respostas
 router.post('/corrections/helper', async (req, res) => {
@@ -1429,4 +1833,8 @@ router.post('/gemini-proxy', async (req, res) => {
     }
 });
 
-export default router;
+    return router;
+}
+
+const defaultRouter = createKnowledgeRouter();
+export default defaultRouter;
