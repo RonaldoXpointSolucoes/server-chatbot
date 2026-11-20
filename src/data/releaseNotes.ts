@@ -712,6 +712,29 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.3.1',
+    date: '2026-11-20',
+    summary: 'Blindagem de Entrega & Recibos WhatsApp (Não-Regressão delivered ➔ SERVER_ACK, Motor v8.2.2) e Isolamento Estrito do Seletor de Empresas',
+    notes: [
+      {
+        id: 'fix-receipt-non-regression-831',
+        category: 'fixes',
+        title: 'Proteção contra Regressão de Checkmarks (delivered ➔ SERVER_ACK) & Correção de Ingestão',
+        description: 'Corrigida condição de corrida em que recibos de sincronização tardios (SERVER_ACK) sobrescreviam mensagens já entregues (✓✓) no banco e na interface em tempo real, além de blindagem monotônica em updateMessageLocally/scheduleStatusReconciliation no chatStore e eliminação definitiva do erro isHistory is not defined no servidor Node (server v8.2.2).',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      },
+      {
+        id: 'imp-workspace-switcher-strict-auth-831',
+        category: 'improvements',
+        title: 'Isolamento Estrito das Empresas Vinculadas no Seletor de Workspace',
+        description: 'Refatorado o carregamento em MainSidebar e WorkspaceSwitcherPopover via resolveStrictlyAuthorizedCompanyIds para listar exclusivamente as empresas associadas ao usuário autenticado (tenant_id, allowed_companies e propriedade por e-mail), sem expansão global indevida.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-300/30'
+      }
+    ]
+  },
+  {
     version: '8.3.0',
     date: '2026-11-20',
     summary: 'Novo Seletor & Trocador de Empresas (Portal Flutuante Desktop & Bottom Sheet Mobile) com Busca Instantânea, Grupo Econômico e Correção de Corte/Lista Vazia',

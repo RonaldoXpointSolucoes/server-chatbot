@@ -1,5 +1,5 @@
 {
-  "version": "8.3.0",
-  "buildDate": "2026-11-20T13:40:10.943Z",
-  "summary": "Novo Seletor & Trocador de Empresas (Portal Flutuante Desktop & Bottom Sheet Mobile) com Busca Instantânea, Grupo Econômico e Correção de Corte/Lista Vazia"
+  "version": "8.3.1",
+  "buildDate": "2026-11-20T17:39:10.496Z",
+  "summary": "Blindagem de Entrega & Recibos WhatsApp (Não-Regressão delivered ➔ SERVER_ACK, Motor v8.2.2) e Isolamento Estrito do Seletor de Empresas"
 }

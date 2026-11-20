@@ -6,8 +6,6 @@ import {
   Plus,
   RefreshCw,
   Search,
-  ShieldCheck,
-  Sparkles,
   X
 } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -22,9 +20,7 @@ interface WorkspaceSwitcherPopoverProps {
   companies: WorkspaceCompanyItem[];
   activeTenantId: string | null;
   isLoading: boolean;
-  isMasterAdmin: boolean;
   canAccessMasterPanel: boolean;
-  preferredGroupId?: string | null;
   onSelectCompany: (company: WorkspaceCompanyItem) => void;
   onRefresh: () => void;
   onOpenMasterPanel: () => void;
@@ -53,9 +49,7 @@ export const WorkspaceSwitcherPopover: React.FC<WorkspaceSwitcherPopoverProps> =
   companies,
   activeTenantId,
   isLoading,
-  isMasterAdmin,
   canAccessMasterPanel,
-  preferredGroupId,
   onSelectCompany,
   onRefresh,
   onOpenMasterPanel,
@@ -96,15 +90,15 @@ export const WorkspaceSwitcherPopover: React.FC<WorkspaceSwitcherPopoverProps> =
       }
 
       const rect = anchorEl?.getBoundingClientRect();
-      const desiredWidth = Math.min(388, Math.max(320, vw - 24));
+      const desiredWidth = Math.min(380, Math.max(320, vw - 24));
       const rawLeft = rect ? rect.left + 8 : 12;
       const clampedLeft = Math.max(12, Math.min(rawLeft, vw - desiredWidth - 12));
       const rawTop = rect ? rect.bottom + 8 : 70;
       const availableBelow = vh - rawTop - 16;
-      const maxHeight = Math.max(260, Math.min(480, availableBelow));
+      const maxHeight = Math.max(240, Math.min(460, availableBelow));
 
       setCoords({
-        top: Math.max(12, Math.min(rawTop, vh - 280)),
+        top: Math.max(12, Math.min(rawTop, vh - 260)),
         left: clampedLeft,
         width: desiredWidth,
         maxHeight,
@@ -124,7 +118,7 @@ export const WorkspaceSwitcherPopover: React.FC<WorkspaceSwitcherPopoverProps> =
   useEffect(() => {
     if (!isOpen) return;
     const timer = setTimeout(() => {
-      if (typeof window !== 'undefined' && window.innerWidth >= 640 && companies.length > 2) {
+      if (typeof window !== 'undefined' && window.innerWidth >= 640 && companies.length > 3) {
         searchInputRef.current?.focus();
       }
     }, 50);
@@ -237,7 +231,9 @@ export const WorkspaceSwitcherPopover: React.FC<WorkspaceSwitcherPopoverProps> =
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 dark:text-[#aebac1] truncate">
-                {isMasterAdmin ? 'Visão SaaS Master • Todas as empresas' : 'Workspaces vinculados à sua conta'}
+                {companies.length === 1
+                  ? 'Empresa associada ao seu login'
+                  : 'Empresas vinculadas ao seu login'}
               </p>
             </div>
           </div>
@@ -265,8 +261,8 @@ export const WorkspaceSwitcherPopover: React.FC<WorkspaceSwitcherPopoverProps> =
           </div>
         </div>
 
-        {/* Busca rápida quando há mais de 2 empresas ou pesquisa ativa */}
-        {(companies.length > 2 || searchTerm.length > 0) && (
+        {/* Busca rápida quando há mais de 3 empresas vinculadas ou pesquisa ativa */}
+        {(companies.length > 3 || searchTerm.length > 0) && (
           <div className="px-3 py-2.5 border-b border-slate-200/60 dark:border-white/5 shrink-0 bg-slate-50/70 dark:bg-white/[0.02]">
             <div className="relative flex items-center">
               <Search size={14} className="absolute left-3 text-slate-400 pointer-events-none" />
@@ -275,7 +271,7 @@ export const WorkspaceSwitcherPopover: React.FC<WorkspaceSwitcherPopoverProps> =
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Buscar empresa por nome ou e-mail..."
+                placeholder="Buscar empresa vinculada..."
                 className="w-full pl-9 pr-8 py-2 text-xs rounded-xl bg-white dark:bg-[#202c33] border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-[#8696a0] focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15 transition-all"
               />
               {searchTerm && (
@@ -292,11 +288,11 @@ export const WorkspaceSwitcherPopover: React.FC<WorkspaceSwitcherPopoverProps> =
           </div>
         )}
 
-        {/* Lista de empresas */}
-        <div className="flex-1 overflow-y-auto styled-scrollbar p-2 space-y-1">
+        {/* Lista de empresas vinculadas ao usuário */}
+        <div className="flex-1 overflow-y-auto styled-scrollbar p-2.5 space-y-1.5">
           {isLoading && companies.length === 0 ? (
             <div className="space-y-2 p-1" aria-busy="true">
-              {[0, 1, 2].map((idx) => (
+              {[0, 1].map((idx) => (
                 <div
                   key={idx}
                   className="flex items-center gap-3 p-3 rounded-xl bg-slate-100/80 dark:bg-white/5 animate-pulse"
@@ -322,7 +318,7 @@ export const WorkspaceSwitcherPopover: React.FC<WorkspaceSwitcherPopoverProps> =
               <p className="text-[11px] text-slate-500 dark:text-[#aebac1]">
                 {searchTerm
                   ? 'Tente buscar por outro termo ou limpe o filtro.'
-                  : 'Verifique suas permissões ou recarregue a lista.'}
+                  : 'Seu login está vinculado apenas à empresa ativa no momento.'}
               </p>
               {searchTerm && (
                 <button
@@ -339,7 +335,6 @@ export const WorkspaceSwitcherPopover: React.FC<WorkspaceSwitcherPopoverProps> =
               const isActive = ws.id === activeTenantId;
               const isHighlighted = index === highlightedIndex && !coords.isMobile;
               const isSuspended = String(ws.status || '').toLowerCase() === 'suspended';
-              const isSameGroup = Boolean(preferredGroupId && ws.economic_group_id === preferredGroupId);
               const initial = (ws.name || 'E').trim().substring(0, 1).toUpperCase();
 
               return (
@@ -349,7 +344,7 @@ export const WorkspaceSwitcherPopover: React.FC<WorkspaceSwitcherPopoverProps> =
                   onMouseEnter={() => setHighlightedIndex(index)}
                   onClick={() => onSelectCompany(ws)}
                   className={cn(
-                    'w-full min-h-[48px] flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl text-left transition-all duration-150',
+                    'w-full min-h-[52px] flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl text-left transition-all duration-150',
                     'active:scale-[0.98] focus:outline-none',
                     isActive
                       ? 'bg-gradient-to-r from-emerald-500/15 via-emerald-500/10 to-teal-500/5 border border-emerald-500/35 shadow-sm'
@@ -383,11 +378,6 @@ export const WorkspaceSwitcherPopover: React.FC<WorkspaceSwitcherPopoverProps> =
                         >
                           {ws.name}
                         </span>
-                        {isSameGroup && !isActive && (
-                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-indigo-500/15 text-indigo-600 dark:text-indigo-300 shrink-0">
-                            Grupo
-                          </span>
-                        )}
                       </div>
                       <div className="flex items-center gap-2 mt-0.5 text-[10.5px] text-slate-500 dark:text-[#8696a0]">
                         {ws.email && <span className="truncate">{ws.email}</span>}
@@ -401,12 +391,12 @@ export const WorkspaceSwitcherPopover: React.FC<WorkspaceSwitcherPopoverProps> =
                   </div>
 
                   {isActive ? (
-                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-extrabold bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 shrink-0">
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-extrabold bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 shrink-0">
                       <CheckCircle2 size={12} />
                       <span>Ativa</span>
                     </span>
                   ) : (
-                    <span className="text-[11px] font-semibold text-slate-400 dark:text-[#8696a0] shrink-0">
+                    <span className="px-2.5 py-1 rounded-lg text-[11px] font-semibold text-slate-500 dark:text-[#aebac1] bg-slate-200/60 dark:bg-white/5 shrink-0">
                       Entrar
                     </span>
                   )}
@@ -424,9 +414,8 @@ export const WorkspaceSwitcherPopover: React.FC<WorkspaceSwitcherPopoverProps> =
               onClick={onOpenMasterPanel}
               className="w-full min-h-[44px] flex items-center justify-center gap-2 px-3.5 py-2.5 bg-gradient-to-r from-[#00a884] to-[#008f6f] hover:from-[#00bfa5] hover:to-[#00a884] text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-500/20 active:scale-[0.98] transition-all"
             >
-              {isMasterAdmin ? <ShieldCheck size={15} /> : <Plus size={15} />}
+              <Plus size={15} />
               <span>Cadastrar Nova Empresa (Painel Master)</span>
-              <Sparkles size={13} className="opacity-80" />
             </button>
           </div>
         )}

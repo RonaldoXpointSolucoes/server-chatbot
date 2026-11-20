@@ -60,10 +60,10 @@ import { useChatStore, hasUserAccessToInstance, instanceCache } from '../store/c
 import { useXPointRemoteBridge, useXPointRemoteStore } from '../hooks/useXPointRemoteBridge';
 import { resolveRemoteAccessEnabled } from '../utils/remoteAccess.mjs';
 import {
-  isMasterWorkspaceAdmin,
   mergeAndSortWorkspaces,
   normalizeAllowedCompanyIds,
-  normalizeEmailValue
+  normalizeEmailValue,
+  resolveStrictlyAuthorizedCompanyIds
 } from '../utils/workspaceSwitcher.mjs';
 import { supabase, masterSupabase } from '../services/supabase';
 import { createPortal } from 'react-dom';
@@ -277,14 +277,6 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
   const [isLoadingCompanies, setIsLoadingCompanies] = useState(false);
   const workspaceTriggerRef = React.useRef<HTMLDivElement>(null);
   const refreshCompaniesRef = React.useRef<((allowedOverride?: string[]) => Promise<any>) | null>(null);
-  const isMasterAdmin = useMemo(() => {
-    if (typeof window === 'undefined') return false;
-    return isMasterWorkspaceAdmin({
-      email: currentUserEmail,
-      adminToken: sessionStorage.getItem('admin_token') || localStorage.getItem('admin_token'),
-      saasAdmin: sessionStorage.getItem('saas_admin') || localStorage.getItem('saas_admin')
-    });
-  }, [currentUserEmail]);
   const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
   const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const [currentCompanyContext, setCurrentCompanyContext] = useState<any>(() => {
@@ -419,18 +411,24 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
        }
 
        let resolvedAllowedCompanies: string[] = [];
-       if (userEmail && storage) {
+       const resolvedEmail = normalizeEmailValue(userEmail || session?.user?.email);
+       if (resolvedEmail && storage) {
            const { data: userData } = await supabase
              .from('tenant_users')
-             .select('full_name, allowed_companies, allowed_instances')
-             .ilike('email', userEmail)
+             .select('tenant_id, full_name, allowed_companies, allowed_instances')
+             .ilike('email', resolvedEmail)
              .maybeSingle();
              
            if (userData) {
-              resolvedAllowedCompanies = normalizeAllowedCompanyIds(userData.allowed_companies);
-              const isRonaldo = userEmail?.toLowerCase() === 'ronaldo.xpointsolucoes@gmail.com';
+              resolvedAllowedCompanies = resolveStrictlyAuthorizedCompanyIds({
+                activeTenantId: tenantId,
+                userRole: userRole || currentUserRole,
+                allowedFromUser: userData.allowed_companies,
+                userPrimaryTenantId: userData.tenant_id
+              });
+              const isRonaldo = resolvedEmail === 'ronaldo.xpointsolucoes@gmail.com';
+              storage.setItem('allowed_companies', JSON.stringify(resolvedAllowedCompanies));
               if (!isRonaldo) {
-                 storage.setItem('allowed_companies', JSON.stringify(userData.allowed_companies || []));
                  storage.setItem('allowed_instances', JSON.stringify(userData.allowed_instances || []));
               } else {
                  storage.removeItem('allowed_instances');
@@ -550,12 +548,6 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
           return null;
         }
 
-        const isMaster = isMasterWorkspaceAdmin({
-          email: currentUserEmail,
-          adminToken: sessionStorage.getItem('admin_token') || localStorage.getItem('admin_token'),
-          saasAdmin: sessionStorage.getItem('saas_admin') || localStorage.getItem('saas_admin')
-        });
-
         let currentCompany: any = null;
         const { data: currData, error: currentError } = await supabase
           .from('companies')
@@ -572,16 +564,6 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
           currentCompany = currData;
         }
 
-        // Fallback seguro quando o JWT ainda está hidratando ou Master acessou outro tenant
-        if (!currentCompany && isMaster && tenantId) {
-          const { data: masterCurr } = await masterSupabase
-            .from('companies')
-            .select('*')
-            .eq('id', tenantId)
-            .maybeSingle();
-          if (masterCurr) currentCompany = masterCurr;
-        }
-
         if (currentCompany) {
           setCurrentCompanyContext(currentCompany);
           useChatStore.setState((s) =>
@@ -595,98 +577,84 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
           }
         }
 
-        let companiesData: any[] = [];
+        // Busca estritamente restrita às empresas associadas ao usuário autenticado (nunca lista todas as empresas do SaaS)
+        const { data: { session: liveSession } } = await supabase.auth.getSession().catch(() => ({ data: { session: null } }));
+        const verifiedEmail = normalizeEmailValue(liveSession?.user?.email || currentUserEmail);
 
-        if (isMaster) {
-          const { data: allMasterComps, error: masterErr } = await masterSupabase
-            .from('companies')
-            .select('id, name, email, status, plan_id, economic_group_id')
-            .order('created_at', { ascending: false });
-          if (!masterErr && Array.isArray(allMasterComps) && allMasterComps.length > 0) {
-            companiesData = allMasterComps;
+        let userRecord: { tenant_id?: string | null; allowed_companies?: unknown; role?: string | null } | null = null;
+        if (verifiedEmail) {
+          const { data: tuRow } = await supabase
+            .from('tenant_users')
+            .select('tenant_id, allowed_companies, role')
+            .ilike('email', verifiedEmail)
+            .maybeSingle();
+          if (tuRow) {
+            userRecord = tuRow;
+          } else if (!liveSession) {
+            // Se o JWT ainda não hidratou após reload, consulta apenas a linha do e-mail salvo
+            const { data: tuFallback } = await masterSupabase
+              .from('tenant_users')
+              .select('tenant_id, allowed_companies, role')
+              .ilike('email', verifiedEmail)
+              .maybeSingle();
+            if (tuFallback) userRecord = tuFallback;
           }
         }
 
-        if (companiesData.length === 0) {
-          const candidateMap = new Map<string, any>();
-          const authorizedIds = Array.from(new Set([tenantId, ...allowedCompanies].filter(Boolean)));
-          const matchEmails = Array.from(new Set([
-            normalizeEmailValue(currentUserEmail),
-            normalizeEmailValue(currentCompany?.email)
-          ].filter(Boolean)));
+        const roleEffective = String(userRecord?.role || currentUserRole || 'agent').toLowerCase();
+        const isRestrictedRole =
+          roleEffective === 'agent' ||
+          roleEffective === 'agente' ||
+          roleEffective === 'operator' ||
+          roleEffective === 'operador';
 
-          const queries: Promise<any>[] = [];
+        let ownerCompanyIds: string[] = [];
+        if (!isRestrictedRole && verifiedEmail) {
+          const { data: ownedByEmail } = await supabase
+            .from('companies')
+            .select('id')
+            .eq('email', verifiedEmail);
+          if (Array.isArray(ownedByEmail)) {
+            ownerCompanyIds = ownedByEmail.map(c => c.id).filter(Boolean);
+          }
+        }
 
-          if (authorizedIds.length > 0) {
-            queries.push(
-              supabase
-                .from('companies')
-                .select('id, name, email, status, plan_id, economic_group_id')
-                .in('id', authorizedIds)
-            );
+        const authorizedIds = resolveStrictlyAuthorizedCompanyIds({
+          activeTenantId: tenantId,
+          userRole: roleEffective,
+          allowedFromUser: userRecord?.allowed_companies ?? allowedCompanies,
+          userPrimaryTenantId: userRecord?.tenant_id ?? null,
+          ownerCompanyIds
+        });
+
+        let companiesData: any[] = [];
+        if (authorizedIds.length > 0) {
+          const { data: scopedRows, error: scopedErr } = await supabase
+            .from('companies')
+            .select('id, name, email, status, plan_id')
+            .in('id', authorizedIds);
+
+          if (!scopedErr && Array.isArray(scopedRows) && scopedRows.length > 0) {
+            companiesData = scopedRows;
           }
 
-          if (currentUserRole !== 'agent' && currentUserRole !== 'Agente') {
-            for (const mail of matchEmails) {
-              queries.push(
-                supabase
-                  .from('companies')
-                  .select('id, name, email, status, plan_id, economic_group_id')
-                  .eq('email', mail)
-              );
-            }
-            if (currentCompany?.economic_group_id) {
-              queries.push(
-                supabase
-                  .from('companies')
-                  .select('id, name, email, status, plan_id, economic_group_id')
-                  .eq('economic_group_id', currentCompany.economic_group_id)
-              );
+          // Se o RLS bloqueou algum ID explicitamente autorizado em tenant_users.allowed_companies (ex: admin secundário da mesma conta ou JWT ainda hidratando)
+          if (companiesData.length < authorizedIds.length && verifiedEmail && (userRecord || ownerCompanyIds.length > 0 || authorizedIds.includes(tenantId))) {
+            const { data: authorizedExactRows } = await masterSupabase
+              .from('companies')
+              .select('id, name, email, status, plan_id')
+              .in('id', authorizedIds);
+            if (Array.isArray(authorizedExactRows) && authorizedExactRows.length > 0) {
+              companiesData = authorizedExactRows;
             }
           }
-
-          const results = await Promise.allSettled(queries);
-          for (const res of results) {
-            if (res.status === 'fulfilled' && res.value?.data && Array.isArray(res.value.data)) {
-              for (const row of res.value.data) {
-                if (row?.id) candidateMap.set(row.id, row);
-              }
-            }
-          }
-
-          // Fallback estritamente restrito aos IDs já autorizados em tenant_users.allowed_companies se RLS atrasar
-          if (candidateMap.size === 0 && authorizedIds.length > 0 && currentUserEmail) {
-            const { data: verifiedUser } = await masterSupabase
-              .from('tenant_users')
-              .select('tenant_id, allowed_companies')
-              .ilike('email', currentUserEmail)
-              .maybeSingle();
-            const dbAllowed = Array.from(
-              new Set([
-                verifiedUser?.tenant_id,
-                ...normalizeAllowedCompanyIds(verifiedUser?.allowed_companies)
-              ].filter(Boolean))
-            );
-            if (dbAllowed.length > 0) {
-              const { data: allowedRows } = await masterSupabase
-                .from('companies')
-                .select('id, name, email, status, plan_id, economic_group_id')
-                .in('id', dbAllowed);
-              for (const row of allowedRows || []) {
-                if (row?.id) candidateMap.set(row.id, row);
-              }
-            }
-          }
-
-          companiesData = Array.from(candidateMap.values());
         }
 
         const merged = mergeAndSortWorkspaces({
           companies: companiesData,
           activeTenantId: tenantId,
           activeCompanyFallback: currentCompany || tenantInfo || currentCompanyContext,
-          userEmail: currentUserEmail || currentCompany?.email,
-          preferredGroupId: currentCompany?.economic_group_id || tenantInfo?.economic_group_id || null
+          userEmail: verifiedEmail || currentUserEmail
         });
 
         setUserCompanies(merged);
@@ -901,10 +869,10 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
         aria-expanded={showWorkspaceMenu}
         className={cn(
           "h-16 flex items-center px-3.5 border-b border-gray-250/60 dark:border-[#2a3942]/60 transition-colors group relative z-30 select-none",
-          (userCompanies.length > 1 || currentUserRole === 'admin' || isMasterAdmin) ? "hover:bg-gray-200/60 dark:hover:bg-[#202c33] cursor-pointer active:scale-[0.99]" : ""
+          (userCompanies.length > 1 || currentUserRole === 'admin') ? "hover:bg-gray-200/60 dark:hover:bg-[#202c33] cursor-pointer active:scale-[0.99]" : ""
         )}
         onClick={() => {
-          if (userCompanies.length > 1 || currentUserRole === 'admin' || isMasterAdmin) {
+          if (userCompanies.length > 1 || currentUserRole === 'admin') {
             const nextOpen = !showWorkspaceMenu;
             setShowWorkspaceMenu(nextOpen);
             if (nextOpen && userCompanies.length <= 1) {
@@ -913,7 +881,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
           }
         }}
         onKeyDown={(e) => {
-          if ((e.key === 'Enter' || e.key === ' ') && (userCompanies.length > 1 || currentUserRole === 'admin' || isMasterAdmin)) {
+          if ((e.key === 'Enter' || e.key === ' ') && (userCompanies.length > 1 || currentUserRole === 'admin')) {
             e.preventDefault();
             setShowWorkspaceMenu(prev => !prev);
           }
@@ -931,7 +899,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
                 ? currentCompanyContext.name 
                 : (typeof window !== 'undefined' && localStorage.getItem('current_tenant_name') && localStorage.getItem('current_tenant_name') !== 'Carregando...' ? localStorage.getItem('current_tenant_name') : null) || 'X-Point Soluções'}
           </h2>
-          {(userCompanies.length > 1 || currentUserRole === 'admin' || isMasterAdmin) && (
+          {(userCompanies.length > 1 || currentUserRole === 'admin') && (
             <p className="text-[10px] font-medium text-[#667781] dark:text-[#8696a0] truncate mt-0.5">
               {userCompanies.length > 1
                 ? `${userCompanies.length} empresas • Clique p/ trocar`
@@ -939,7 +907,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
             </p>
           )}
         </div>
-        {(userCompanies.length > 1 || currentUserRole === 'admin' || isMasterAdmin) && (
+        {(userCompanies.length > 1 || currentUserRole === 'admin') && (
           <div className={cn(
             "p-1.5 rounded-lg transition-all shrink-0 border",
             showWorkspaceMenu
@@ -972,16 +940,14 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
         </button>
       </div>
 
-      {/* Seletor / Trocador de Empresa via Portal (nunca cortado ou oculto atrás do painel direito) */}
+      {/* Seletor / Trocador de Empresa via Portal (restrito às empresas vinculadas ao usuário) */}
       <WorkspaceSwitcherPopover
-        isOpen={showWorkspaceMenu && (userCompanies.length > 1 || currentUserRole === 'admin' || isMasterAdmin)}
+        isOpen={showWorkspaceMenu && (userCompanies.length > 1 || currentUserRole === 'admin')}
         anchorEl={workspaceTriggerRef.current}
         companies={userCompanies}
         activeTenantId={tenantId || null}
         isLoading={isLoadingCompanies}
-        isMasterAdmin={isMasterAdmin}
-        canAccessMasterPanel={currentUserRole === 'admin' || isMasterAdmin}
-        preferredGroupId={currentCompanyContext?.economic_group_id || tenantInfo?.economic_group_id || null}
+        canAccessMasterPanel={currentUserRole === 'admin'}
         onSelectCompany={handleSwitchWorkspace}
         onRefresh={() => refreshCompaniesRef.current?.()}
         onOpenMasterPanel={() => {

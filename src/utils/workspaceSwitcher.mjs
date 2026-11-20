@@ -2,14 +2,6 @@ export function normalizeEmailValue(value) {
   return String(value || '').trim().toLowerCase();
 }
 
-export function isMasterWorkspaceAdmin({ email, adminToken, saasAdmin } = {}) {
-  const normEmail = normalizeEmailValue(email);
-  if (normEmail === 'ronaldo.xpointsolucoes@gmail.com') {
-    return true;
-  }
-  return String(adminToken || '') === 'true' && String(saasAdmin || '') === 'true';
-}
-
 export function normalizeAllowedCompanyIds(raw) {
   if (Array.isArray(raw)) {
     return Array.from(new Set(raw.map(v => String(v || '').trim()).filter(Boolean)));
@@ -27,6 +19,39 @@ export function normalizeAllowedCompanyIds(raw) {
   return [];
 }
 
+/**
+ * Resolve estritamente os IDs de empresas associadas ao usuário autenticado
+ * a partir de seu registro em `tenant_users` (`tenant_id` + `allowed_companies`)
+ * e empresas em que seu próprio e-mail seja proprietário (nunca expandindo para outros tenants).
+ */
+export function resolveStrictlyAuthorizedCompanyIds({
+  activeTenantId = null,
+  userRole = 'agent',
+  allowedFromUser = [],
+  userPrimaryTenantId = null,
+  ownerCompanyIds = []
+} = {}) {
+  const roleLower = String(userRole || '').toLowerCase();
+  const isRestrictedRole = roleLower === 'agent' || roleLower === 'agente' || roleLower === 'operator' || roleLower === 'operador';
+
+  const set = new Set();
+  for (const id of normalizeAllowedCompanyIds(allowedFromUser)) {
+    set.add(id);
+  }
+  if (userPrimaryTenantId && String(userPrimaryTenantId).trim()) {
+    set.add(String(userPrimaryTenantId).trim());
+  }
+  if (!isRestrictedRole) {
+    for (const id of normalizeAllowedCompanyIds(ownerCompanyIds)) {
+      set.add(id);
+    }
+  }
+  if (set.size === 0 && activeTenantId && String(activeTenantId).trim()) {
+    set.add(String(activeTenantId).trim());
+  }
+  return Array.from(set);
+}
+
 const STANDALONE_PLACEHOLDER_ID = '00000000-0000-0000-0000-000000000000';
 
 export function mergeAndSortWorkspaces({
@@ -34,7 +59,6 @@ export function mergeAndSortWorkspaces({
   activeTenantId = null,
   activeCompanyFallback = null,
   userEmail = null,
-  preferredGroupId = null,
   includeStandalonePlaceholder = false
 } = {}) {
   const normUserEmail = normalizeEmailValue(userEmail);
@@ -59,8 +83,7 @@ export function mergeAndSortWorkspaces({
       name: activeCompanyFallback.name || 'Empresa Atual',
       email: activeCompanyFallback.email || userEmail || null,
       status: activeCompanyFallback.status || 'active',
-      plan_id: activeCompanyFallback.plan_id || null,
-      economic_group_id: activeCompanyFallback.economic_group_id || null
+      plan_id: activeCompanyFallback.plan_id || null
     });
   }
 
@@ -68,8 +91,7 @@ export function mergeAndSortWorkspaces({
     if (comp.id === activeTenantId) return 0;
     const compEmail = normalizeEmailValue(comp.email);
     if (normUserEmail && compEmail === normUserEmail) return 1;
-    if (preferredGroupId && comp.economic_group_id === preferredGroupId) return 2;
-    return 3;
+    return 2;
   };
 
   return Array.from(byId.values()).sort((a, b) => {
