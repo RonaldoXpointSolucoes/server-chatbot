@@ -24,6 +24,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { MessageBubble } from '../components/chat/MessageBubble';
 import { AddRagModal } from '../components/chat/AddRagModal';
 import { BaileysInstanceHubModal } from '../components/modals/BaileysInstanceHubModal';
+import { InboxDeepAnalysisModal } from '../components/modals/InboxDeepAnalysisModal';
 import { invokeBaileysAction, getInstanceApiUrl } from '../services/whatsappEngine';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -772,7 +773,7 @@ export default function ChatDashboard() {
         // 1. Fetch explicit companies with document_type = 'cnpj' OR fantasy_name OR document_number
         const { data: explicitCompanies } = await supabase
           .from('contacts')
-          .select('id, name, custom_name, fantasy_name, document_number, document_type, tags, company_ids, phone')
+          .select('id, tenant_id, name, custom_name, fantasy_name, document_number, document_type, tags, company_ids, phone')
           .eq('tenant_id', tenantId)
           .or('document_type.eq.cnpj,fantasy_name.neq.,document_number.neq.');
 
@@ -803,7 +804,7 @@ export default function ChatDashboard() {
           if (idsToFetch.length > 0) {
             const { data: linkedCompanies } = await supabase
               .from('contacts')
-              .select('id, name, custom_name, fantasy_name, document_number, document_type, tags, company_ids, phone')
+              .select('id, tenant_id, name, custom_name, fantasy_name, document_number, document_type, tags, company_ids, phone')
               .eq('tenant_id', tenantId)
               .in('id', idsToFetch);
               
@@ -1782,6 +1783,7 @@ export default function ChatDashboard() {
   const [isTechDocsOpen, setIsTechDocsOpen] = useState(false);
   const [isSnoozedListOpen, setIsSnoozedListOpen] = useState(false);
   const [isBaileysHubOpen, setIsBaileysHubOpen] = useState(false);
+  const [deepAnalysisInbox, setDeepAnalysisInbox] = useState<{ id: string; name: string } | null>(null);
   const [isPollModalOpen, setIsPollModalOpen] = useState(false);
   const [pollQuestion, setPollQuestion] = useState('');
   const [pollOptions, setPollOptions] = useState<string[]>(['Quero fazer um pedido', 'Ver Cardápio Digital', 'Falar com Atendente']);
@@ -3663,8 +3665,9 @@ export default function ChatDashboard() {
     }
   }, [activeChatId, activeChat, draftNewChat, isOpeningNotificationChat]);
 
-  // Sincronização em tempo real do contato ativo com a ponte bidirecional XPoint Remote (AppRemoto v1.4.8)
+  // Sincronização em tempo real do contato ativo com a ponte bidirecional XPoint Remote (somente quando habilitado para a empresa)
   const {
+    isRemoteAccessEnabled,
     isOpen: isXPointRemoteOpen,
     widthMode: xpointRemoteWidthMode,
     customWidthPx: xpointRemoteCustomWidth,
@@ -3676,9 +3679,20 @@ export default function ChatDashboard() {
   } = useXPointRemoteBridge();
 
   useEffect(() => {
-    const remoteCtx = resolveContactRemoteContext(activeChat, allCompanies, useChatStore.getState().contacts);
+    if (!isRemoteAccessEnabled) {
+      setXPointRemoteActiveContext(resolveContactRemoteContext(null, [], [], tenantInfo?.id));
+      return;
+    }
+    const remoteCtx = resolveContactRemoteContext(
+      activeChat,
+      allCompanies,
+      useChatStore.getState().contacts,
+      tenantInfo?.id
+    );
     setXPointRemoteActiveContext(remoteCtx);
   }, [
+    isRemoteAccessEnabled,
+    tenantInfo?.id,
     activeChat?.id,
     activeChat?.conv_id,
     activeChat?.document_number,
@@ -7872,8 +7886,20 @@ export default function ChatDashboard() {
                             </div>
                           </div>
 
-                          {/* Lado Direito: Status Tag e Switch Toggle */}
-                          <div className="flex items-center gap-2 shrink-0 mr-0.5">
+                          {/* Lado Direito: Status Tag, Análise Profunda e Switch Toggle */}
+                          <div className="flex items-center gap-1.5 shrink-0 mr-0.5">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setActiveDropdown(null);
+                                setDeepAnalysisInbox({ id: inst.id, name: displayName });
+                              }}
+                              className="p-1.5 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-500 dark:text-indigo-400 border border-indigo-500/20 transition-colors cursor-pointer"
+                              title={`Análise Profunda do Histórico (${displayName})`}
+                            >
+                              <BrainCircuit size={13} />
+                            </button>
                             <span className={cn(
                               "text-[9px] font-semibold px-2 py-0.5 rounded-full border tracking-wide uppercase shrink-0",
                               isConn 
@@ -9727,12 +9753,12 @@ export default function ChatDashboard() {
             {/* Right Header Area — Cápsula Glassmorphism Adaptativa por Container */}
             <div className="chat-header-actions flex items-center gap-1 sm:gap-1.5 shrink-0 px-1.5 py-1 rounded-full bg-white/60 dark:bg-white/[0.04] border border-black/5 dark:border-white/[0.08] shadow-inner">
               
-              {/* Botão Compacto de Acesso Remoto (XPoint Remote) */}
-              {activeChat && (
+              {/* Botão Compacto de Acesso Remoto (somente empresas habilitadas) */}
+              {isRemoteAccessEnabled && activeChat && (
                 <button
                   type="button"
                   onClick={() => {
-                    const ctx = resolveContactRemoteContext(activeChat, allCompanies, contacts);
+                    const ctx = resolveContactRemoteContext(activeChat, allCompanies, contacts, tenantInfo?.id);
                     toggleXPointRemotePanel(ctx);
                   }}
                   className={cn(
@@ -10206,25 +10232,27 @@ export default function ChatDashboard() {
                 </button>
                 {mobileHeaderMenuOpen && (
                    <div className="mobile-actions-drawer absolute right-0 top-12 w-[272px] max-w-[calc(100vw-1.5rem)] bg-white/95 dark:bg-[#233138]/95 backdrop-blur-xl rounded-2xl shadow-[0_12px_40px_rgb(0,0,0,0.22)] border border-gray-100 dark:border-white/10 p-3 z-[100] animate-in fade-in zoom-in-95 duration-200 flex flex-col gap-2.5">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const ctx = resolveContactRemoteContext(activeChat, allCompanies, contacts);
-                          toggleXPointRemotePanel(ctx);
-                          setMobileHeaderMenuOpen(false);
-                        }}
-                        className="flex items-center justify-between gap-2 px-3 py-2.5 bg-cyan-50 text-cyan-700 dark:bg-cyan-500/10 dark:text-cyan-300 hover:bg-cyan-100 dark:hover:bg-cyan-500/20 rounded-xl transition-all text-sm font-semibold border border-cyan-200 dark:border-cyan-500/20 w-full shadow-sm active:scale-95"
-                      >
-                        <div className="flex items-center gap-2">
-                          <Monitor size={16} />
-                          <span>Acesso Remoto</span>
-                        </div>
-                        {xpointRemoteResolvedInfo && (
-                          <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-600 dark:text-emerald-300">
-                            {xpointRemoteResolvedInfo.onlineDevices}/{xpointRemoteResolvedInfo.totalDevices}
-                          </span>
-                        )}
-                      </button>
+                      {isRemoteAccessEnabled && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const ctx = resolveContactRemoteContext(activeChat, allCompanies, contacts, tenantInfo?.id);
+                            toggleXPointRemotePanel(ctx);
+                            setMobileHeaderMenuOpen(false);
+                          }}
+                          className="flex items-center justify-between gap-2 px-3 py-2.5 bg-cyan-50 text-cyan-700 dark:bg-cyan-500/10 dark:text-cyan-300 hover:bg-cyan-100 dark:hover:bg-cyan-500/20 rounded-xl transition-all text-sm font-semibold border border-cyan-200 dark:border-cyan-500/20 w-full shadow-sm active:scale-95"
+                        >
+                          <div className="flex items-center gap-2">
+                            <Monitor size={16} />
+                            <span>Acesso Remoto</span>
+                          </div>
+                          {xpointRemoteResolvedInfo && (
+                            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-600 dark:text-emerald-300">
+                              {xpointRemoteResolvedInfo.onlineDevices}/{xpointRemoteResolvedInfo.totalDevices}
+                            </span>
+                          )}
+                        </button>
+                      )}
 
                       {hasGlobalMenuLink && (
                         <button
@@ -14596,6 +14624,14 @@ export default function ChatDashboard() {
         instanceId={activeChat?.instance_id || activeChannelFilter || ''}
         instanceName={connectedInstanceName || ''}
         activeChatJid={activeChat?.whatsapp_jid || activeChat?.phone || ''}
+      />
+      <InboxDeepAnalysisModal
+        isOpen={Boolean(deepAnalysisInbox)}
+        onClose={() => setDeepAnalysisInbox(null)}
+        tenantId={tenantInfo?.id || localStorage.getItem('current_tenant_id') || ''}
+        companyName={tenantInfo?.name}
+        instanceId={deepAnalysisInbox?.id || ''}
+        instanceName={deepAnalysisInbox?.name || ''}
       />
 
       {/* Modal 2: Criar e Enviar Enquete Nativa Clicável (Poll) */}

@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { supabase, masterSupabase } from '../../services/supabase';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Search, Settings2, Trash2, Smartphone, Inbox, MessageSquare, Building2, X, Loader2 } from 'lucide-react';
+import { Plus, Search, Settings2, Trash2, Smartphone, Inbox, MessageSquare, Building2, X, Loader2, BrainCircuit } from 'lucide-react';
 import { useChatStore } from '../../store/chatStore';
 import { migrateInstanceHistory } from '../../services/whatsappEngine';
+import { InboxDeepAnalysisModal } from '../../components/modals/InboxDeepAnalysisModal';
 
 const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
 
@@ -35,6 +36,7 @@ export default function InboxesList() {
 
   // Re-vincular empresa de caixa existente
   const [reassignTarget, setReassignTarget] = useState<WhatsAppInstance | null>(null);
+  const [deepAnalysisTarget, setDeepAnalysisTarget] = useState<WhatsAppInstance | null>(null);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
   const [isCreatingNewCompany, setIsCreatingNewCompany] = useState<boolean>(false);
   const [newCompanyName, setNewCompanyName] = useState<string>('');
@@ -354,6 +356,17 @@ export default function InboxesList() {
                         <button
                            onClick={(e) => {
                               e.stopPropagation();
+                              setDeepAnalysisTarget(inst);
+                           }}
+                           className="p-3 bg-[#202c33] hover:bg-indigo-500 hover:text-white text-indigo-400 rounded-xl transition-all border border-white/5 hover:border-indigo-500 hover:shadow-[0_0_15px_rgba(99,102,241,0.3)] flex items-center gap-1.5 font-semibold text-xs"
+                           title="Analisar histórico desta caixa e gerar Base IA"
+                        >
+                           <BrainCircuit size={18} />
+                           <span className="hidden md:inline">Análise Profunda (IA)</span>
+                        </button>
+                        <button
+                           onClick={(e) => {
+                              e.stopPropagation();
                               setReassignTarget(inst);
                               setSelectedCompanyId(inst.tenant_id || tenantId || '');
                               setIsCreatingNewCompany(false);
@@ -515,6 +528,15 @@ export default function InboxesList() {
                </div>
              </div>
           </div>
+       )}
+       {deepAnalysisTarget && (
+         <InboxDeepAnalysisModal
+           isOpen={Boolean(deepAnalysisTarget)}
+           onClose={() => setDeepAnalysisTarget(null)}
+           tenantId={deepAnalysisTarget.tenant_id || tenantId || ''}
+           instanceId={deepAnalysisTarget.id}
+           instanceName={deepAnalysisTarget.display_name}
+         />
        )}
     </div>
   );

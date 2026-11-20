@@ -6,6 +6,8 @@ import { ChevronLeft, Save, Plus, Settings2, Users, Clock, Star, Bot, Server, To
 import { NOTIFICATION_SOUNDS, playNotificationSound } from '../../utils/AudioEngine';
 import { fetchUserInboxNotificationPreferences, toggleInboxNotification, updateInboxEventTypePreference, NotificationEventType, UserInboxNotificationPreference } from '../../services/notificationPreferences';
 import { BaileysInstanceHubModal } from '../../components/modals/BaileysInstanceHubModal';
+import { InboxDeepAnalysisModal } from '../../components/modals/InboxDeepAnalysisModal';
+import { BrainCircuit } from 'lucide-react';
 interface InstanceData {
   id: string;
   display_name: string;
@@ -42,6 +44,7 @@ export default function InboxSettings() {
 
   // QR Code States
   const [showQr, setShowQr] = useState(false);
+  const [isDeepAnalysisOpen, setIsDeepAnalysisOpen] = useState(false);
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [qrLoading, setQrLoading] = useState(false);
   const [successConnectId, setSuccessConnectId] = useState<string | null>(null);
@@ -417,10 +420,17 @@ export default function InboxSettings() {
              <ChevronLeft size={18} className="mr-1" /> Anterior <span className="mx-2">Caixas de Entrada</span>
           </div>
 
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-3">
              <h1 className="text-3xl font-bold text-white tracking-tight flex items-center gap-2">
                {instance.display_name} <span className="text-gray-400 text-2xl font-medium">({instance.phone_number ? `+${instance.phone_number}` : 'Aguardando Dispositivo'})</span>
              </h1>
+             <button
+               onClick={() => setIsDeepAnalysisOpen(true)}
+               className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white text-xs font-bold flex items-center gap-2 shadow-lg shadow-indigo-500/20 transition-all cursor-pointer"
+             >
+               <BrainCircuit size={16} />
+               <span>Análise Profunda desta Caixa (IA & RAG)</span>
+             </button>
           </div>
 
           <div className="flex bg-transparent border-b border-white/10 w-full overflow-x-auto overflow-y-hidden hide-scrollbar mt-4">
@@ -1079,6 +1089,15 @@ export default function InboxSettings() {
              </div>
           </div>
        )}
-    </div>
-  );
-}
+        {instance && (
+           <InboxDeepAnalysisModal
+             isOpen={isDeepAnalysisOpen}
+             onClose={() => setIsDeepAnalysisOpen(false)}
+             tenantId={instance.tenant_id || tenantId || ''}
+             instanceId={instance.id}
+             instanceName={instance.display_name}
+           />
+        )}
+     </div>
+   );
+ }

@@ -52,11 +52,13 @@ import {
   BellOff,
   Building2,
   Ticket,
-  Monitor
+  Monitor,
+  BrainCircuit
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useChatStore, hasUserAccessToInstance, instanceCache } from '../store/chatStore';
-import { useXPointRemoteBridge } from '../hooks/useXPointRemoteBridge';
+import { useXPointRemoteBridge, useXPointRemoteStore } from '../hooks/useXPointRemoteBridge';
+import { resolveRemoteAccessEnabled } from '../utils/remoteAccess.mjs';
 import { supabase } from '../services/supabase';
 import { createPortal } from 'react-dom';
 import { getLocalNotificationPrefs, fetchUserInboxNotificationPreferences, toggleInboxNotification } from '../services/notificationPreferences';
@@ -67,6 +69,7 @@ import { AgentSettingsModal } from './AgentSettingsModal';
 import { CreateInboxModal } from './modals/CreateInboxModal';
 import { ManageGroupsModal } from './modals/ManageGroupsModal';
 import { AiDiagnosticsModal } from './modals/AiDiagnosticsModal';
+import { InboxDeepAnalysisModal } from './modals/InboxDeepAnalysisModal';
 
 const SidebarContext = React.createContext<{ onClose?: () => void }>({});
 
@@ -75,7 +78,13 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
   const location = useLocation();
   const isAppEmbedded = location.pathname.startsWith('/apps/');
   const theme = useChatStore(state => state.theme);
-  const { isOpen: isRemoteDrawerOpen, toggleDrawer: toggleRemoteDrawer, currentActiveSession: remoteActiveSession, activeResolvedInfo: remoteResolvedInfo } = useXPointRemoteBridge();
+  const {
+    isRemoteAccessEnabled: isRemoteAccessEnabledBridge,
+    isOpen: isRemoteDrawerOpen,
+    toggleDrawer: toggleRemoteDrawer,
+    currentActiveSession: remoteActiveSession,
+    activeResolvedInfo: remoteResolvedInfo,
+  } = useXPointRemoteBridge();
   const tenantInfo = useChatStore(state => state.tenantInfo);
   const tenantIdFromStore = tenantInfo?.id;
   const tenantId = tenantIdFromStore || (typeof window !== 'undefined' ? (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')) : null);
@@ -155,6 +164,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
     // 2. Limpeza local da store (imediata)
     try {
       useChatStore.getState().clearStore();
+      useXPointRemoteStore.getState().resetForTenantChange(null);
     } catch (storeErr) {
       console.error('Erro ao limpar chatStore:', storeErr);
     }
@@ -268,6 +278,8 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
     }
     return null;
   });
+  const isRemoteAccessEnabled =
+    isRemoteAccessEnabledBridge || resolveRemoteAccessEnabled(tenantInfo, currentCompanyContext);
   const globalAiEnabled = useChatStore(state => state.globalAiEnabled);
   const setGlobalAiEnabled = useChatStore(state => state.setGlobalAiEnabled);
   const globalAiAuditInfo = useChatStore(state => state.globalAiAuditInfo);
@@ -279,6 +291,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
   const aiDiagnosticsReport = useChatStore(state => state.aiDiagnosticsReport);
   const runAiDiagnostics = useChatStore(state => state.runAiDiagnostics);
   const [instanceContextMenu, setInstanceContextMenu] = useState<{ id: string, name: string, status?: string, x: number, y: number } | null>(null);
+  const [deepAnalysisTarget, setDeepAnalysisTarget] = useState<{ id: string, name: string } | null>(null);
   const [myConversationsMenu, setMyConversationsMenu] = useState<{ x: number, y: number } | null>(null);
   const [isAgentSettingsOpen, setIsAgentSettingsOpen] = useState(false);
   const [agentSettingsTab, setAgentSettingsTab] = useState<'profile' | 'notifications'>('profile');
@@ -521,6 +534,11 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
         }
         
         setCurrentCompanyContext(currentCompany);
+        useChatStore.setState((s) =>
+          s.tenantInfo && s.tenantInfo.id === currentCompany.id && !s.tenantInfo.settings
+            ? { tenantInfo: currentCompany as any }
+            : {}
+        );
         setGlobalAiEnabled(currentCompany.global_ai_enabled ?? true);
         if (currentCompany.settings?.global_ai_audit) {
            setGlobalAiAuditInfo(currentCompany.settings.global_ai_audit);
@@ -653,6 +671,12 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'companies', filter: `id=eq.${tenantId}` }, (payload) => {
           console.log("Realtime event for company received:", payload);
           if (payload.new) {
+              setCurrentCompanyContext(payload.new);
+              useChatStore.setState((s) =>
+                s.tenantInfo && s.tenantInfo.id === payload.new.id
+                  ? { tenantInfo: { ...s.tenantInfo, ...(payload.new as any) } }
+                  : {}
+              );
               if (typeof payload.new.global_ai_enabled !== 'undefined') {
                   setGlobalAiEnabled(payload.new.global_ai_enabled);
               }
@@ -674,7 +698,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
   const handleSwitchWorkspace = (company: any) => {
     if (company.id === tenantId) return;
     
-    // Higienização completa dos filtros de canal entre workspaces/tenants
+    // Higienização completa dos filtros de canal e estado do Acesso Remoto entre empresas
     localStorage.removeItem('activeChannelFilter');
     localStorage.removeItem('activeChannelName');
     localStorage.removeItem('selectedChannelFilters');
@@ -685,6 +709,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
 
     try {
       useChatStore.getState().clearChannelFilters();
+      useXPointRemoteStore.getState().resetForTenantChange(company.id);
     } catch (e) {}
     
     if (localStorage.getItem('current_tenant_id')) {
@@ -1070,19 +1095,34 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
                                })()}
                              </div>
                           }
-                          actionNode={!isConnected ? (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                useChatStore.getState().openQRModal(inst.id);
-                              }}
-                              className="p-1 hover:bg-[#00a884]/20 text-[#00a884] rounded-md transition-colors"
-                              title="Reconectar / Ler QR Code"
-                            >
-                              <QrCode size={13} />
-                            </button>
-                          ) : undefined}
-                          alwaysShowAction={!isConnected}
+                          actionNode={
+                            <div className={cn("flex items-center gap-0.5", (unreadCount > 0 || notifPrefs[inst.id]?.is_enabled === false) ? "mr-7" : "")}>
+                              {!isConnected && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    useChatStore.getState().openQRModal(inst.id);
+                                  }}
+                                  className="p-1 hover:bg-[#00a884]/20 text-[#00a884] rounded-md transition-colors"
+                                  title="Reconectar / Ler QR Code"
+                                >
+                                  <QrCode size={13} />
+                                </button>
+                              )}
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const rect = e.currentTarget.getBoundingClientRect();
+                                  setInstanceContextMenu({ id: inst.id, name: inst.display_name, status, x: rect.right, y: rect.bottom + 4 });
+                                }}
+                                className="p-1 rounded-md text-[#8696a0] hover:text-emerald-400 hover:bg-[#00a884]/15 transition-colors opacity-80 group-hover/channel:opacity-100"
+                                title={`Submenu da caixa ${inst.display_name || ''}`}
+                              >
+                                <MoreVertical size={13} />
+                              </button>
+                            </div>
+                          }
+                          alwaysShowAction={true}
                           isActive={activeChannelFilter === inst.id || activeChannelFilter === inst.display_name}
                           className={cn(!isConnected && !isConnecting ? "opacity-60 hover:opacity-100 hover:bg-gray-200/30 dark:hover:bg-[#202c33]/40" : isConnecting ? "opacity-90 hover:opacity-100 hover:bg-yellow-500/5" : "")}
                           onClick={() => {
@@ -1165,28 +1205,30 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
               isActive={window.location.pathname === '/apps/agenda'}
             />
 
-            <NavItem 
-              title={
-                <div className="flex items-center justify-between gap-2 w-full">
-                  <span>Acesso Remoto</span>
-                  {remoteActiveSession ? (
-                    <span className="px-1.5 py-0.5 rounded-full bg-emerald-500 text-white text-[9px] font-bold animate-pulse">
-                      #{remoteActiveSession.protocolNumber}
-                    </span>
-                  ) : remoteResolvedInfo && remoteResolvedInfo.onlineDevices > 0 ? (
-                    <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-500 border border-emerald-500/30 text-[9.5px] font-bold">
-                      {remoteResolvedInfo.onlineDevices} ON
-                    </span>
-                  ) : null}
-                </div>
-              }
-              icon={<Monitor size={16} className={isRemoteDrawerOpen ? "text-indigo-500" : "text-indigo-400"} />} 
-              onClick={() => {
-                toggleRemoteDrawer();
-                onClose?.();
-              }}
-              isActive={isRemoteDrawerOpen}
-            />
+            {isRemoteAccessEnabled && m('Acesso Remoto') && (
+              <NavItem 
+                title={
+                  <div className="flex items-center justify-between gap-2 w-full">
+                    <span>Acesso Remoto</span>
+                    {remoteActiveSession ? (
+                      <span className="px-1.5 py-0.5 rounded-full bg-emerald-500 text-white text-[9px] font-bold animate-pulse">
+                        #{remoteActiveSession.protocolNumber}
+                      </span>
+                    ) : remoteResolvedInfo && remoteResolvedInfo.onlineDevices > 0 ? (
+                      <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-500 border border-emerald-500/30 text-[9.5px] font-bold">
+                        {remoteResolvedInfo.onlineDevices} ON
+                      </span>
+                    ) : null}
+                  </div>
+                }
+                icon={<Monitor size={16} className={isRemoteDrawerOpen ? "text-indigo-500" : "text-indigo-400"} />} 
+                onClick={() => {
+                  toggleRemoteDrawer();
+                  onClose?.();
+                }}
+                isActive={isRemoteDrawerOpen}
+              />
+            )}
           </CollapsibleSection>
 
           <CollapsibleSection 
@@ -1279,16 +1321,18 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
           </CollapsibleSection>
 
           <CollapsibleSection title="Apps" icon={<Puzzle size={16} />} isOpen={expandedSections.apps} onToggle={() => toggleSection('apps')}>
-            <NavItem 
-              title="XPoint Remote (Acesso Remoto)" 
-              icon={<Monitor size={15} className="text-indigo-400" />}
-              isSub 
-              onClick={() => {
-                toggleRemoteDrawer();
-                onClose?.();
-              }}
-              isActive={isRemoteDrawerOpen}
-            />
+            {isRemoteAccessEnabled && (
+              <NavItem 
+                title="XPoint Remote (Acesso Remoto)" 
+                icon={<Monitor size={15} className="text-indigo-400" />}
+                isSub 
+                onClick={() => {
+                  toggleRemoteDrawer();
+                  onClose?.();
+                }}
+                isActive={isRemoteDrawerOpen}
+              />
+            )}
             <NavItem 
               title="Portal / Cadastros" 
               isSub 
@@ -1530,16 +1574,27 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
           onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setInstanceContextMenu(null); }}
         >
           <div 
-            className="absolute bg-[#202c33] border border-[#2a3942] rounded-lg shadow-xl py-1 min-w-[180px] z-[100000] animate-in fade-in zoom-in-95 duration-100"
+            className="absolute bg-[#202c33] border border-[#2a3942] rounded-xl shadow-2xl py-1.5 min-w-[230px] z-[100000] animate-in fade-in zoom-in-95 duration-100"
             style={{ 
-              top: Math.min(instanceContextMenu.y, window.innerHeight - 100), 
-              left: Math.min(instanceContextMenu.x, window.innerWidth - 180)
+              top: Math.min(instanceContextMenu.y, window.innerHeight - 260), 
+              left: Math.min(instanceContextMenu.x, window.innerWidth - 250)
             }}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-3 py-2 border-b border-[#2a3942] mb-1">
               <span className="text-xs font-semibold text-[#8696a0] truncate block">{instanceContextMenu.name}</span>
             </div>
+            <button 
+              className="w-full text-left px-4 py-2 text-sm font-semibold text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 transition-colors flex items-center gap-2 border-b border-[#2a3942] mb-1"
+              onClick={(e) => {
+                 e.stopPropagation();
+                 setDeepAnalysisTarget({ id: instanceContextMenu.id, name: instanceContextMenu.name });
+                 setInstanceContextMenu(null);
+              }}
+            >
+              <BrainCircuit size={14} className="text-emerald-400 shrink-0" />
+              Análise Profunda (Base IA)
+            </button>
             <button 
               className="w-full text-left px-4 py-2 text-sm text-[#d1d7db] hover:bg-[#2a3942] transition-colors flex items-center gap-2"
               onClick={async (e) => {
@@ -1708,6 +1763,14 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
         onClose={() => setManageGroupsTarget(null)}
         instanceId={manageGroupsTarget?.id || null}
         instanceName={manageGroupsTarget?.name || null}
+      />
+      <InboxDeepAnalysisModal
+        isOpen={Boolean(deepAnalysisTarget)}
+        onClose={() => setDeepAnalysisTarget(null)}
+        tenantId={tenantId || ''}
+        companyName={tenantInfo?.name || currentCompanyContext?.name}
+        instanceId={deepAnalysisTarget?.id || ''}
+        instanceName={deepAnalysisTarget?.name || ''}
       />
 
       {/* Modal de Auditoria do Robô I.A */}

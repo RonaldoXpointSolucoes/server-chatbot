@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useWaCallsStore } from '../store/useWaCallsStore';
 import QRCode from 'react-qr-code';
 import { useDevStore } from '../store/devStore';
-import { Smartphone, CheckCircle, Loader2, AlertCircle, RefreshCw, Key, Shield, MessageSquare, Terminal, Eye, Link, Unlink, Activity, ShieldAlert, Cpu, Network, FileDown, Lock, Server, Users, StopCircle, QrCode, RefreshCcw, LogOut, Download, Clock, Zap, Building2, HelpCircle, Archive, Trash2, Edit3, Save, X, PlusCircle, Maximize2, MoreVertical, Copy, ArrowRight, Settings, CheckCircle2, ChevronRight, Phone, UserCircle2, Signal, Plus, EyeOff, EyeIcon, User, ExternalLink } from 'lucide-react';
+import { Smartphone, CheckCircle, Loader2, AlertCircle, RefreshCw, Key, Shield, MessageSquare, Terminal, Eye, Link, Unlink, Activity, ShieldAlert, Cpu, Network, FileDown, Lock, Server, Users, StopCircle, QrCode, RefreshCcw, LogOut, Download, Clock, Zap, Building2, HelpCircle, Archive, Trash2, Edit3, Save, X, PlusCircle, Maximize2, MoreVertical, Copy, ArrowRight, Settings, CheckCircle2, ChevronRight, Phone, UserCircle2, Signal, Plus, EyeOff, EyeIcon, User, ExternalLink, BrainCircuit } from 'lucide-react';
 
 interface WhatsAppInstance {
   id: string;
@@ -26,12 +26,14 @@ interface TenantItem {
 import { supabase } from '../services/supabase';
 import { createInstance, migrateInstanceHistory, getInstanceApiUrl } from '../services/whatsappEngine';
 import { BaileysInstanceHubModal } from '../components/modals/BaileysInstanceHubModal';
+import { InboxDeepAnalysisModal } from '../components/modals/InboxDeepAnalysisModal';
 
 const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
 
 export default function InstancesDashboard() {
   const [instances, setInstances] = useState<WhatsAppInstance[]>([]);
   const [hubInstance, setHubInstance] = useState<WhatsAppInstance | null>(null);
+  const [deepAnalysisInstance, setDeepAnalysisInstance] = useState<WhatsAppInstance | null>(null);
   const [stats, setStats] = useState<Record<string, { contacts: number, messages: number }>>({});
   const [loading, setLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
@@ -1620,6 +1622,15 @@ export default function InstancesDashboard() {
                       <Zap size={16} /> Central WhatsApp
                     </button>
 
+                    {/* Botão Análise Profunda da Caixa (IA & Base RAG) */}
+                    <button
+                      onClick={() => setDeepAnalysisInstance(inst)}
+                      className="px-3.5 py-2.5 bg-gradient-to-r from-teal-600 to-indigo-600 hover:from-teal-500 hover:to-indigo-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2 shadow-md shadow-teal-500/20 active:scale-95 cursor-pointer"
+                      title="Analisar histórico real desta caixa e implantar conhecimento/comportamento na Base RAG"
+                    >
+                      <BrainCircuit size={16} /> Análise Profunda (RAG)
+                    </button>
+
                     {/* Botão Link de Conexão Direta ConectaZap (Sem Login) */}
                     <button
                       onClick={() => {
@@ -1672,6 +1683,15 @@ export default function InstancesDashboard() {
             tenantId={hubInstance.tenant_id || localStorage.getItem('current_tenant_id') || ''}
             instanceId={hubInstance.id}
             instanceName={hubInstance.display_name}
+          />
+        )}
+        {deepAnalysisInstance && (
+          <InboxDeepAnalysisModal
+            isOpen={Boolean(deepAnalysisInstance)}
+            onClose={() => setDeepAnalysisInstance(null)}
+            tenantId={deepAnalysisInstance.tenant_id || localStorage.getItem('current_tenant_id') || ''}
+            instanceId={deepAnalysisInstance.id}
+            instanceName={deepAnalysisInstance.display_name}
           />
         )}
 
