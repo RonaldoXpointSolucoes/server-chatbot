@@ -6,6 +6,16 @@ import { getBrPhoneVariations, getCanonicalBrPhone } from '../event-processor/he
 import { gastrofoodCache } from './gastrofood-cache.js';
 import { normalizeUrlsInText } from '../flow-runtime/url-helper.js';
 import { decryptGeminiKey } from '../utils/geminiVault.js';
+import {
+  semanticChunkDocument,
+  computeNormalizedHash,
+  hybridRetrieveKnowledge,
+  isValidUuid
+} from '../api-gateway/knowledge-curator.js';
+import {
+  getInboxBehaviorProfile,
+  formatInboxBehaviorPromptSection
+} from './inbox-behavior-cache.js';
 
 const tenantStorage = new AsyncLocalStorage();
 
@@ -1247,26 +1257,36 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
             }
         }
         
-        // Verifica se já existe documento RAG pronto com exatamente o mesmo tamanho para evitar pico de CPU (ONNX) desnecessário na VPS
+        const contentHash = computeNormalizedHash(cardapioText);
+
+        // Verifica se já existe documento RAG 2.0 pronto com o mesmo hash e chunks válidos para evitar pico de CPU (ONNX)
         const { data: oldDocs } = await supabase
             .from('knowledge_documents')
-            .select('id, name, status, metadata')
+            .select('id, name, status, content_hash, metadata')
             .eq('tenant_id', tenantId)
-            .in('name', [docName, 'cardapio_burguer_plus.txt']);
+            .in('name', [docName, 'cardapio_burguer_plus.txt', 'Cardapio Dixital Texto.txt']);
 
         const alreadyUpToDate = Array.isArray(oldDocs) && oldDocs.length === 1 &&
             oldDocs[0].name === docName &&
             oldDocs[0].status === 'ready' &&
-            Number(oldDocs[0].metadata?.size) === cardapioText.length;
+            oldDocs[0].metadata?.rag_version === '2.0' &&
+            Number(oldDocs[0].metadata?.chunks_total || 0) > 0 &&
+            (oldDocs[0].content_hash === contentHash || Number(oldDocs[0].metadata?.size) === cardapioText.length);
 
         if (alreadyUpToDate) {
-            console.log(`[AutoHealing - RAG] Cardápio inalterado (${cardapioText.length} bytes). Mantendo vetorização RAG existente e preservando CPU da VPS.`);
+            console.log(`[AutoHealing - RAG] Cardápio inalterado (${cardapioText.length} bytes). Mantendo vetorização RAG 2.0 existente.`);
         } else {
             if (oldDocs && oldDocs.length > 0) {
                 const docIds = oldDocs.map(d => d.id);
                 await supabase.from('knowledge_chunks').delete().in('document_id', docIds);
                 await supabase.from('knowledge_documents').delete().in('id', docIds);
             }
+
+            const chunks = semanticChunkDocument(cardapioText, {
+                documentName: docName,
+                category: 'Cardápio & Produtos',
+                maxWords: 120
+            });
             
             // Insere novo documento
             const { data: docData, error: docError } = await supabase
@@ -1276,7 +1296,17 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
                     name: docName,
                     type: 'text/plain',
                     status: 'processing',
-                    metadata: { size: cardapioText.length }
+                    content_hash: contentHash,
+                    metadata: {
+                        size: cardapioText.length,
+                        category: 'Cardápio & Produtos',
+                        content_hash: contentHash,
+                        source: 'gastrofood_auto_heal',
+                        rag_version: '2.0',
+                        chunks_total: chunks.length,
+                        chunks_processed: 0,
+                        current_status: 'Vetorizando cardápio por produto...'
+                    }
                 }])
                 .select('*')
                 .single();
@@ -1284,38 +1314,39 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
             if (docError) throw docError;
             const documentId = docData.id;
             
-            const splitTextIntoChunks = (text, chunkSize = 150, overlap = 20) => {
-                const words = text.split(/\s+/);
-                const chunks = [];
-                let i = 0;
-                while (i < words.length) {
-                    const chunk = words.slice(i, i + chunkSize).join(' ');
-                    chunks.push(chunk);
-                    i += (chunkSize - overlap);
-                }
-                return chunks;
-            };
-            
-            const chunks = splitTextIntoChunks(cardapioText, 150, 20);
             const transformer = await LocalEmbeddingsPipeline.getInstance();
             const dbChunks = [];
             
             for (let i = 0; i < chunks.length; i++) {
-                const chunkText = chunks[i];
-                if (chunkText.trim().length < 5) continue;
+                const ch = chunks[i];
+                if (!ch.content || ch.content.trim().length < 5) continue;
                 
                 // Cede o Event Loop a cada chunk para não bloquear heartbeats do Baileys nem requisições HTTP na VPS de 2 vCPUs
                 await new Promise(r => setTimeout(r, 25));
-                const output = await transformer(chunkText, { pooling: 'mean', normalize: true });
+                const output = await transformer(ch.embeddingText || ch.content, { pooling: 'mean', normalize: true });
                 const embeddingVector = Array.from(output.data);
                 
                 dbChunks.push({
                     document_id: documentId,
                     tenant_id: tenantId,
-                    content: chunkText,
+                    content: ch.content,
                     embedding: embeddingVector,
-                    chunk_index: i
+                    chunk_index: i,
+                    metadata: {
+                        document_name: docName,
+                        section_title: ch.sectionTitle,
+                        category: 'Cardápio & Produtos',
+                        chunk_hash: ch.chunkHash,
+                        word_count: ch.wordCount,
+                        source: 'gastrofood_auto_heal',
+                        rag_version: '2.0'
+                    }
                 });
+
+                if (dbChunks.length >= 100) {
+                    await supabase.from('knowledge_chunks').insert([...dbChunks]);
+                    dbChunks.length = 0;
+                }
             }
             
             if (dbChunks.length > 0) {
@@ -1324,10 +1355,24 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
             
             await supabase
                 .from('knowledge_documents')
-                .update({ status: 'ready' })
+                .update({
+                    status: 'ready',
+                    content_hash: contentHash,
+                    metadata: {
+                        size: cardapioText.length,
+                        category: 'Cardápio & Produtos',
+                        content_hash: contentHash,
+                        source: 'gastrofood_auto_heal',
+                        rag_version: '2.0',
+                        chunks_total: chunks.length,
+                        chunks_processed: chunks.length,
+                        last_update: new Date().toISOString(),
+                        current_status: 'Concluído com sucesso!'
+                    }
+                })
                 .eq('id', documentId);
                 
-            console.log(`[AutoHealing - RAG] Sincronização e vetorização RAG finalizadas com SUCESSO!`);
+            console.log(`[AutoHealing - RAG] Sincronização e vetorização RAG 2.0 finalizadas (${chunks.length} chunks semânticos)!`);
         }
         
     } catch (ragErr) {
@@ -1867,30 +1912,89 @@ class AutomationWorker {
         setInterval(syncAllCardapios, 60 * 60 * 1000);
     }
 
-    async getRecentMessagesForRouting(tenantId, conversationId, limit = 6) {
-        if (!conversationId) return '';
+    detectSpecialistRole(botSettings) {
+        if (!botSettings) return 'unified';
+        const sig = `${botSettings.name || ''} ${botSettings.role || ''} ${botSettings.category || ''} ${botSettings.description || ''}`.toLowerCase();
+        if (sig.includes('recepção') || sig.includes('recepcao') || sig.includes('acolhimento')) return 'reception';
+        if (sig.includes('luna menu') || sig.includes('especialista em cardápio') || sig.includes('especialista em cardapio') || /\bmenu\b/.test(String(botSettings.name || '').toLowerCase())) return 'menu';
+        if (sig.includes('luna status') || sig.includes('luna entrega') || sig.includes('luna qualidade') || sig.includes('luna ponte')) return 'status';
+        if (sig.includes('luna pedido') || /\bpedido\b/.test(String(botSettings.name || '').toLowerCase())) return 'order';
+        return 'unified';
+    }
+
+    async getActiveSessionMessages(tenantId, conversationId, limit = 24) {
+        if (!conversationId) return [];
         try {
             const { data } = await supabase.from('messages')
-                .select('text_content, sender_type, raw_payload')
+                .select('text_content, sender_type, direction, timestamp, raw_payload')
                 .eq('tenant_id', tenantId)
                 .eq('conversation_id', conversationId)
                 .order('timestamp', { ascending: false })
                 .limit(limit);
-            
-            if (!data || data.length === 0) return '';
-            
-            const formatted = data.reverse().map(m => {
-                const isUser = m.sender_type !== 'bot' && m.sender_type !== 'agent' && m.sender_type !== 'system';
-                if (isUser) {
-                    return `Cliente: ${m.text_content || ''}`;
-                } else if (m.sender_type === 'system') {
-                    return `Sistema: ${m.text_content || ''}`;
-                } else {
-                    const botName = m.raw_payload?.bot_name || 'Atendente';
-                    return `${botName}: ${m.text_content || ''}`;
+
+            if (!data || data.length === 0) return [];
+
+            const chronological = [...data].reverse();
+            const SESSION_GAP_MS = 8 * 60 * 60 * 1000; // 8 horas de inatividade encerra sessão anterior
+            let startIndex = 0;
+            let lastActiveTs = null;
+
+            for (let i = 0; i < chronological.length; i++) {
+                const m = chronological[i];
+                const txt = String(m.text_content || '');
+                const isResolvedMarker = m.sender_type === 'system' && (txt.includes('Resolvido por') || txt.includes('Resolvido em lote'));
+                if (isResolvedMarker) {
+                    startIndex = i + 1;
+                    lastActiveTs = null;
+                    continue;
                 }
+                if (m.sender_type === 'system') continue;
+
+                const curTs = m.timestamp ? new Date(m.timestamp).getTime() : NaN;
+                if (!Number.isNaN(curTs)) {
+                    if (lastActiveTs !== null && (curTs - lastActiveTs > SESSION_GAP_MS)) {
+                        startIndex = i;
+                    }
+                    lastActiveTs = curTs;
+                }
+            }
+
+            return chronological.slice(startIndex).filter(m => m.sender_type !== 'system');
+        } catch (e) {
+            console.error('[AutomationWorker] Erro ao obter sessão ativa da conversa:', e);
+            return [];
+        }
+    }
+
+    async getRecentMessagesForRouting(tenantId, conversationId, limit = 10) {
+        if (!conversationId) return '';
+        try {
+            const sessionMsgs = await this.getActiveSessionMessages(tenantId, conversationId, Math.max(limit * 2, 20));
+            if (!sessionMsgs || sessionMsgs.length === 0) return '';
+
+            const recentSlice = sessionMsgs.slice(-limit);
+            const formatted = recentSlice.map(m => {
+                const isStoreSide =
+                    m.sender_type === 'bot' ||
+                    m.sender_type === 'human' ||
+                    m.sender_type === 'agent' ||
+                    m.sender_type === 'automation' ||
+                    m.direction === 'outbound';
+
+                if (!isStoreSide) {
+                    return `Cliente: ${m.text_content || ''}`;
+                }
+                if (m.sender_type === 'bot') {
+                    const botName = m.raw_payload?.bot_name || 'Luna IA';
+                    return `IA (${botName}): ${m.text_content || ''}`;
+                }
+                if (m.sender_type === 'automation') {
+                    return `Automação: ${m.text_content || ''}`;
+                }
+                const opName = m.raw_payload?.operator_name || 'Equipe Humana';
+                return `Atendente Humano (${opName}): ${m.text_content || ''}`;
             });
-            
+
             return formatted.join('\n');
         } catch (e) {
             console.error('[AutomationWorker] Erro ao obter histórico para roteamento:', e);
@@ -1942,13 +2046,13 @@ class AutomationWorker {
 
             let historyText = '';
             if (tenantId && conversationId) {
-                const history = await this.getRecentMessagesForRouting(tenantId, conversationId, 8);
+                const history = await this.getRecentMessagesForRouting(tenantId, conversationId, 10);
                 if (history) {
-                    historyText = `\nHistórico recente da conversa (mensagens mais antigas primeiro):\n${history}\n`;
+                    historyText = `\nHistórico da sessão atual de atendimento (mensagens mais antigas primeiro):\n${history}\n`;
                 }
             }
 
-            prompt = `Você é o Orquestrador de atendimento inteligente do ecossistema de robôs. Analise a mensagem atual do cliente e o histórico recente da conversa para decidir qual dos seguintes agentes especialistas é o mais adequado para responder ao cliente com base em seus nomes e descrições.
+            prompt = `Você é o Orquestrador de atendimento inteligente do ecossistema Luna. Analise a mensagem atual do cliente e o histórico da sessão ativa para escolher qual agente especialista deve responder agora.
 
 Agentes especialistas disponíveis para responder:
 ${candidates.map(b => `- ID: "${b.id}" | Nome: "${b.name}" | Descrição: "${b.description || 'Sem descrição.'}"`).join('\n')}
@@ -1956,15 +2060,15 @@ ${historyText}
 Mensagem atual do cliente:
 "${textMessage}"
 
-Regras fundamentais de roteamento:
-1. Saudação inicial / Primeiro contato: Se a mensagem for um cumprimento inicial, apresentação ou abertura de conversa (ex: "olá", "oi", "boa noite", "bom dia", "tudo bem?", "como funciona?"), você DEVE obrigatoriamente rotear para o robô de Recepção/Acolhimento (ex: "Luna Recepção" ou recepcionista equivalente).
-2. Fluxo de pedido: Se a conversa estiver ativamente no fluxo de um pedido (ex: o cliente está escolhendo produtos, adicionais, informando endereço de entrega, selecionando a forma de pagamento, ou confirmando o resumo do pedido), você deve continuar roteando para o bot de pedido (ex: "Luna Pedido"). Respostas curtas como "não", "sim", "está certo", "crédito", "débito", "pix", "dinheiro" ou dados de endereço fazem parte do fechamento de pedido e devem permanecer com o bot de pedido.
-3. Cardápio e dúvidas sobre itens: Se o cliente perguntar sobre opções de produtos, sabores, ingredientes, combos ou solicitar o link do cardápio, roteie para o robô de Cardápio/Menu (ex: "Luna Menu").
-4. Atendimento Humano: Se o cliente pedir expressamente para falar com uma pessoa/atendente humano ou relatar problema grave, priorize o bot de suporte/humano.
-5. Continuidade: Só mude de agente se o cliente de fato mudar claramente o assunto.
+Regras fundamentais e estritas de roteamento:
+1. Saudação inicial pura / Abertura sem pedido nem dúvida específica: Se a mensagem for APENAS um cumprimento inicial ou abertura genérica (ex: "olá", "oi", "boa noite", "bom dia", "tudo bem?", "estão abertos?") e ainda NÃO houver pedido em andamento nesta sessão, roteie para o robô de Recepção/Acolhimento (ex: "Luna Recepção").
+2. Pedido de Cardápio ou Dúvidas sobre Produtos: Se o cliente pedir para ver o cardápio/menu (ex: "gostaria do cardápio", "manda o cardápio", "cardápio", "menu") ou tirar dúvidas sobre opções, sabores, ingredientes, preços, marmitas ou combos SEM ainda estar fechando itens específicos, roteie para o robô de Cardápio/Menu (ex: "Luna Menu").
+3. Montagem e Fechamento de Pedido (Prioridade de Continuidade): Se o cliente disser o que quer pedir/comprar (ex: "quero um Plus Bacon", "vou querer esse", "manda 2 combos", "quero fazer um pedido") OU se no histórico desta sessão o especialista de pedidos ("Luna Pedido") já estiver conduzindo a escolha de adicionais, entrega/retirada, CEP/endereço, forma de pagamento ou confirmação final, mantenha OBRIGATORIAMENTE com o robô de pedido ("Luna Pedido"). Respostas curtas como "sim", "não", "ao ponto", "entrega", "retirada", "pix", "cartão", "dinheiro" ou números de CEP/residência pertencem à continuidade do pedido.
+4. Atendimento Humano / Problemas Graves: Se o cliente pedir expressamente para falar com um atendente humano ou relatar reclamação grave, priorize o especialista correspondente ou mantenha o especialista atual para acionar a transferência humana.
+5. Estabilidade: Evite trocar de especialista sem mudança clara de intenção do cliente.
 ${orchestratorInstructions ? `\nDiretrizes adicionais do Orquestrador:\n${orchestratorInstructions}\n` : ''}
 
-Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem formatações adicionais, sem markdown, sem aspas. Exemplo de resposta: "${candidates[0].id}".`;
+Responda APENAS com o ID exato do agente escolhido, sem markdown e sem aspas. Exemplo: ${candidates[0].id}`;
 
             const result = await callWithGeminiRetry(() => model.generateContent(prompt), 'routeMessageToBot');
             const responseText = result.response.text().trim();
@@ -2020,22 +2124,26 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
         }
     }
 
-    async getConversationHistory(tenantId, conversationId, limit = 10) {
+    async getConversationHistory(tenantId, conversationId, limit = 16) {
         if (!conversationId) return [];
-        const { data } = await supabase.from('messages')
-            .select('text_content, sender_type')
-            .eq('tenant_id', tenantId)
-            .eq('conversation_id', conversationId)
-            .order('timestamp', { ascending: false })
-            .limit(limit);
-        
-        if (!data) return [];
-        
-        // Return chronologically
-        const rawHistory = data.reverse().map(m => ({
-            role: m.sender_type === 'bot' || m.sender_type === 'agent' ? 'model' : 'user',
-            parts: [{ text: m.text_content || '' }]
-        }));
+        const sessionMsgs = await this.getActiveSessionMessages(tenantId, conversationId, Math.max(limit * 2, 24));
+        if (!sessionMsgs || sessionMsgs.length === 0) return [];
+
+        const recentMsgs = sessionMsgs.slice(-limit);
+        const rawHistory = recentMsgs
+            .filter(m => m.sender_type !== 'system' && String(m.text_content || '').trim() !== '')
+            .map(m => {
+                const isStoreSide =
+                    m.sender_type === 'bot' ||
+                    m.sender_type === 'human' ||
+                    m.sender_type === 'agent' ||
+                    m.sender_type === 'automation' ||
+                    m.direction === 'outbound';
+                return {
+                    role: isStoreSide ? 'model' : 'user',
+                    parts: [{ text: String(m.text_content || '').trim() }]
+                };
+            });
 
         // Sanitize history for Gemini (Must start with 'user', roles must alternate)
         const sanitizedHistory = [];
@@ -2325,6 +2433,7 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
             isClosed = false;
             let nomeDiaAtual = 'Segunda-feira';
             let currentTimeStr = '00:00';
+            let saudacaoHorario = 'Olá';
             
             try {
                 const nowBr = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
@@ -2335,6 +2444,9 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                 const currentHour = nowBr.getHours();
                 const currentMinute = nowBr.getMinutes();
                 currentTimeStr = `${String(currentHour).padStart(2, '0')}:${String(currentMinute).padStart(2, '0')}`;
+                if (currentHour >= 5 && currentHour < 12) saudacaoHorario = 'Bom dia';
+                else if (currentHour >= 12 && currentHour < 18) saudacaoHorario = 'Boa tarde';
+                else saudacaoHorario = 'Boa noite';
                 
                 const horariosEstrutura = companySettings.horarios_estrutura;
                 if (horariosEstrutura && Array.isArray(horariosEstrutura)) {
@@ -2378,6 +2490,7 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
             const replaceTokens = (text) => {
                 if (!text || typeof text !== 'string') return text;
                 return text
+                    .replace(/\[SAUDACAO_HORARIO\]/g, saudacaoHorario)
                     .replace(/\[NOME_DA_EMPRESA\]/g, vars.nomeIa)
                     .replace(/\[ENDERECO_DA_EMPRESA\]/g, vars.endereco)
                     .replace(/\[HORARIO_FUNCIONAMENTO\]/g, vars.horarioFuncionamento)
@@ -2433,22 +2546,27 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                 }
             }
 
-            // 1. Busca contexto no RAG
+            // 1. Busca contexto Híbrido no RAG 2.0 (Vetorial pgvector + FTS PT-BR + RRF + Anti-Redundância)
             const transformer = await LocalEmbeddingsPipeline.getInstance();
             const output = await transformer(expandedQueryText, { pooling: 'mean', normalize: true, priority: 1 });
             const queryEmbedding = Array.from(output.data);
 
-            const { data: semanticMatches } = await supabase.rpc('match_knowledge_chunks', {
-                 query_embedding: queryEmbedding,
-                 match_threshold: 0.45,
-                 match_count: 3,
-                 p_tenant_id: tenantId
+            const safeInboxInstanceId = isValidUuid(instanceId) ? instanceId : null;
+            const semanticMatches = await hybridRetrieveKnowledge({
+                supabase,
+                queryEmbedding,
+                queryText: textMessage || expandedQueryText,
+                tenantId,
+                agentId: botId || botSettings?.id || null,
+                instanceId: safeInboxInstanceId,
+                topK: 5,
+                vectorThreshold: 0.24
             });
 
             let contextText = '';
             if (semanticMatches && semanticMatches.length > 0) {
-                contextText = "\n\n### CONTEXTO DA BASE DE CONHECIMENTO ###\nVocê pode usar as informações a seguir para basear sua resposta caso seja útil:\n" +
-                              semanticMatches.map(m => m.content).join("\n---\n");
+                contextText = "\n\n### CONTEXTO DA BASE DE CONHECIMENTO (RAG HÍBRIDO 2.0) ###\nUse as informações oficiais e validadas abaixo caso sejam úteis para responder com exatidão:\n" +
+                              semanticMatches.map((m, i) => `[Fonte ${i + 1}: ${m.document_name}${m.section ? ` > ${m.section}` : ''}]\n${m.content}`).join("\n---\n");
             }
 
             // 1b. Busca correções de raciocínio / comportamento da IA
@@ -2479,26 +2597,24 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                 console.error('[AutomationWorker] Erro ao buscar correções de IA:', errCorr);
             }
 
-            // Determina se é a primeira mensagem do bot nesta conversa (usando LIMIT 1 em vez de count exact)
-            let isFirstMessage = false;
-            if (conversationId) {
-                try {
-                    const { data: firstOut } = await supabase
-                        .from('messages')
-                        .select('id')
-                        .eq('tenant_id', tenantId)
-                        .eq('conversation_id', conversationId)
-                        .eq('direction', 'outbound')
-                        .limit(1);
-                    isFirstMessage = (!firstOut || firstOut.length === 0);
-                } catch (errFirstMsg) {
-                    console.error('[AutomationWorker] Erro ao verificar primeira mensagem:', errFirstMsg);
-                }
-            } else {
-                isFirstMessage = true; // Se não houver conversa ativa ainda no BD, considera como a primeira
-            }
+            // Determina a sessão ativa atual (pós último ticket Resolvido ou hiato > 8h) e papel modular do especialista
+            const activeSessionMsgs = conversationId ? await this.getActiveSessionMessages(tenantId, conversationId, 24) : [];
+            const hasStoreReplyInCurrentSession = activeSessionMsgs.some(m =>
+                m.sender_type === 'bot' ||
+                m.sender_type === 'human' ||
+                m.sender_type === 'agent' ||
+                m.direction === 'outbound'
+            );
+            const hasMenuLinkAlreadySent = Boolean(vars.linkCardapio) && activeSessionMsgs.some(m =>
+                (m.sender_type === 'bot' || m.sender_type === 'human' || m.direction === 'outbound') &&
+                String(m.text_content || '').toLowerCase().includes(vars.linkCardapio.replace(/^https?:\/\/(www\.)?/i, '').toLowerCase())
+            );
+            const isFirstMessage = !hasStoreReplyInCurrentSession;
+            const specialistRole = this.detectSpecialistRole(botSettings);
+            const isMenuOrOrderRole = specialistRole === 'menu' || specialistRole === 'order' || specialistRole === 'unified';
+            const isOrderCapableRole = specialistRole === 'order' || specialistRole === 'unified';
 
-            // 2. Prepara o System Prompt
+            // 2. Prepara o System Prompt Modular (respeitando estritamente o papel do especialista ativo)
             let basePrompt = botSettings.systemPrompt || botSettings.system_prompt || "Você é um assistente prestativo.";
             
             // Regra Global Estrita: Ocultar arquitetura interna de sub-robôs e unificar a persona como "Luna"
@@ -2509,12 +2625,12 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                           `4. Para o cliente, você é única e seu nome é apenas Luna.\n`;
 
             // Regra Global de Humanização do Atendimento (WhatsApp Brasil)
-            basePrompt += `\n\n### DIRETRIZES DE HUMANIZAÇÃO E TOM DE VOZ (ESTRITAS) ###\n` +
+            basePrompt += `\n\n### DIRETRIZES DE HUMANIZAÇÃO, FOCO CONTEXTUAL E TOM DE VOZ (ESTRITAS) ###\n` +
                           `1. Você deve soar como um ser humano extremamente caloroso, empático, educado e prestativo no WhatsApp, não como um assistente corporativo frio ou robótico.\n` +
                           `2. EVITE terminologias robóticas, jargões formais ou expressões engessadas (ex: "prezado", "prezada", "procedimento", "conforme solicitado", "estarei verificando", "atendimento transferido", "aguarde um instante/momento").\n` +
-                          `3. Use escuta ativa: valide as emoções do cliente. Se ele relatar um problema ou demonstrar urgência/ansiedade, responda com empatia profunda (ex: "Entendo perfeitamente", "Sinto muito por isso, deixa comigo que vou resolver", "Vou te ajudar agora mesmo").\n` +
+                          `3. REGRA DE OURO DE CONTEXTO (UMA PERGUNTA POR VEZ): Responda diretamente ao que o cliente acabou de falar/pedir. NUNCA mande questionários longos de cadastro nem mude de assunto abruptamente.\n` +
                           `4. Escreva com naturalidade: use parágrafos curtos, linguagem coloquial profissional fluida do Brasil e adicione de 1 a 3 emojis calorosos para humanizar a conversa, sem exagerar.\n` +
-                          `5. PRIORIZE E SIGA ESTRITAMENTE as instruções e exemplos de respostas corrigidas que constam no Manual de Raciocínio e Ajustes da I.A ou nas correções anteriores. Se houver uma correção registrada para uma pergunta similar do cliente, você deve replicar o estilo, o tom e a solução adotada pelo atendente humano.\n`;
+                          `5. PRIORIZE E SIGA ESTRITAMENTE as instruções e exemplos de respostas corrigidas que constam no Manual de Raciocínio e Ajustes da I.A ou nas correções anteriores.\n`;
 
             // Regra Global de Acompanhamento de Pedido e Notificações em Tempo Real (ESTRITA E CRÍTICA)
             basePrompt += `\n\n### DIRETRIZES DE ACOMPANHAMENTO EM TEMPO REAL E STATUS DE PEDIDO (ESTRITAS E OBRIGATÓRIAS) ###\n` +
@@ -2539,105 +2655,92 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                           `   - "Perfeito, Tatiane! Pode deixar que avisaremos você por aqui em tempo real! 😉🛵" (e NUNCA "Perfeito, Tatiane Almeida!")\n` +
                           `4. Mantenha essa personalização afetuosa e natural, chamando o cliente exclusivamente pelo primeiro nome no decorrer da conversa.\n`;
 
-            // Regra Global de Perfil do Estabelecimento e Entendimento de Refeições/Marmitas no Delivery (ESTRITAS E OBRIGATÓRIAS)
-            basePrompt += `\n\n### DIRETRIZES DE PERFIL DO ESTABELECIMENTO E REFEIÇÕES/MARMITAS NO DELIVERY (ESTRITAS E OBRIGATÓRIAS) ###\n` +
-                          `1. PERFIL DO ESTABELECIMENTO: A nossa empresa é HAMBURGUERIA E RESTAURANTE! Nós servimos tanto hambúrgueres artesanais, lanches, combos, porções, sucos, sobremesas e bebidas, QUANTO refeições completas, pratos executivos, pratos feitos e MARMITAS no delivery!\n` +
-                          `2. ENTENDIMENTO DE MARMITAS E REFEIÇÕES (CRÍTICO):\n` +
-                          `   - Quando o cliente perguntar ou solicitar "marmita", "marmitas", "marmitex", "quentinha", "almoço", "comida caseira", "prato feito", "PF", "refeição" ou "refeições", compreenda IMEDIATAMENTE que se trata das opções da categoria/grupo "Refeições" do nosso cardápio no Gastrofood!\n` +
-                          `   - PROIBIÇÃO ABSOLUTA: NUNCA, sob hipótese alguma, diga que não temos marmitas ou que somos apenas hamburgueria. Nós TEMOS SIM marmitas e refeições deliciosas todos os dias no delivery!\n` +
-                          `   - AÇÃO OBRIGATÓRIA: Chame SEMPRE a ferramenta "Consultar_produtos_cardapio" com termo_busca: "marmita" ou "refeições" para obter os pratos executivos disponíveis (ex: Contra Filé à Milanesa, Feijoada, Contra Filé à Parmegiana, Frango Assado, Bife a Rolê, Virado à Paulista, Filé de Frango, Salmão Grelhado, Picadinho, Panqueca, Bisteca, etc.).\n` +
-                          `   - DETALHES DAS MARMITAS/REFEIÇÕES: Explique com simpatia e carinho que cada refeição/marmita dá direito a 3 acompanhamentos à escolha do cliente (arroz, feijão, batata frita, salada, farofa, etc.), pagando apenas o valor da proteína!\n`;
+            if (vars.linkCardapio) {
+                basePrompt += `\n\n### DIRETRIZES DO CARDÁPIO DIGITAL (ESTRITAS E OBRIGATÓRIAS) ###\n` +
+                              `1. O link oficial do cardápio digital da empresa é: [LINK_CARDAPIO]. Sempre que se referir ao cardápio digital, site ou menu, envie exatamente [LINK_CARDAPIO].\n` +
+                              `2. PRIORIDADE ABSOLUTA: NUNCA informe qualquer outro link de cardápio encontrado em documentos antigos. O link [LINK_CARDAPIO] é soberano.\n` +
+                              `3. Quando o cliente pedir apenas para ver o cardápio (ex: "gostaria do cardápio", "manda o cardápio", "cardápio"), envie o link [LINK_CARDAPIO] de forma direta, cordial e acolhedora, colocando-se à disposição para tirar dúvidas ou anotar o pedido — SEM despejar listas imensas de produtos e SEM pedir CEP ou dados cadastrais.\n`;
+            }
 
-            // Regra Global de Entendimento de Saladas (ESTRITA)
-            basePrompt += `\n\n### DIRETRIZES DE ENTENDIMENTO DE SALADAS (ESTRITAS) ###\n` +
-                          `1. Se o cliente solicitar uma "salada", diferencie claramente entre "salada de verdade" (como a SALADA CAESAR ou Salada de Frutas) e "lanches/combos com salada" (como Lanche Plus Salada ou Combo Plus Salada, que são hambúrgueres).\n` +
-                          `2. Se o cliente disser que quer comer uma salada (prato leve), apresente a SALADA CAESAR como o item principal e ideal de salada do cardápio, antes de citar lanches que apenas contêm salada em sua composição.\n`;
+            // Regra Global de Formatação, Espaçamento e Estética Visual no WhatsApp
+            basePrompt += `\n\n### DIRETRIZES GLOBAIS DE FORMATAÇÃO E ESPAÇAMENTO NO WHATSAPP ###\n` +
+                          `1. QUEBRAS DE LINHA DUPLAS: Sempre pule uma linha em branco (\\n\\n) entre cada parágrafo para leitura leve no celular.\n` +
+                          `2. DESTAQUE VISUAL DE LINKS: Posicione links em uma linha isolada com emoji temático (ex:\\n\\n🍔 [LINK_CARDAPIO]\\n\\n).\n`;
 
-            // Regra de Prioridade do Cardápio Digital e Envio na Primeira Mensagem
-            basePrompt += `\n\n### DIRETRIZES DO CARDÁPIO DIGITAL (ESTRITAS E OBRIGATÓRIAS) ###\n` +
-                          `1. O link oficial do cardápio digital da empresa é: [LINK_CARDAPIO]. Você DEVE usar e enviar exatamente este link: [LINK_CARDAPIO] sempre que se referir ao cardápio digital, site, menu ou onde fazer pedidos.\n` +
-                          `2. PRIORIDADE ABSOLUTA: NUNCA sob nenhuma circunstância use ou informe qualquer outro link ou URL de cardápio/site que você encontrar na Base de Conhecimento (RAG) ou no contexto dos arquivos. O link [LINK_CARDAPIO] é soberano e anula qualquer outro link divergente encontrado nos documentos.\n` +
-                          `3. Quando o cliente pedir o link do cardápio, envie apenas e exatamente o link [LINK_CARDAPIO].\n` +
-                          `4. REGRAS PARA INCLUIR LINKS DE PRODUTOS E CARDÁPIO (CRÍTICAS):\n` +
-                          `   - Se você estiver listando ou recomendando até 3 produtos (no máximo 3), você DEVE incluir o link individual de cada produto logo abaixo dele, usando o 'link_produto' retornado pela ferramenta 'Consultar_produtos_cardapio'.\n` +
-                          `     * Formato do link do produto: se construir o link manualmente, ele deve seguir a estrutura exata: [LINK_CARDAPIO]/loja/burguerplus/produto/CODIGO_DO_PRODUTO (por exemplo: https://www.burguerplus.com.br/loja/burguerplus/produto/CODIGO_DO_PRODUTO).\n` +
-                          `   - Se a lista de produtos for grande (mais de 3 produtos), você NÃO DEVE incluir os links individuais de cada produto para não poluir a mensagem. Em vez disso, apresente os produtos de forma limpa e, ao final da lista, envie apenas o link geral do cardápio digital (ex: '[LINK_CARDAPIO]').\n`;
-            
-            // Regra Global de Formatação, Espaçamento e Estética Visual no WhatsApp (ESTRITA E OBRIGATÓRIA)
-            basePrompt += `\n\n### DIRETRIZES GLOBAIS DE FORMATAÇÃO, ESPAÇAMENTO E ESTÉTICA VISUAL (ESTRITAS E OBRIGATÓRIAS) ###\n` +
-                          `1. QUEBRAS DE LINHA DUPLAS E AREJAMENTO OBRIGATÓRIO:\n` +
-                          `   - NUNCA envie mensagens compactadas em blocos únicos de texto. Textos aglomerados são difíceis de ler no celular e tornam a conversa cansativa.\n` +
-                          `   - Você DEVE SEMPRE pular UMA LINHA EM BRANCO (usando duas quebras de linha \\n\\n) entre cada parágrafo, saudação, bloco explicativo, lista e encerramento.\n` +
-                          `2. DESTAQUE VISUAL DE LINKS:\n` +
-                          `   - Sempre posicione links em uma linha isolada, com linha em branco antes e depois, antecedido de emoji temático (exemplo:\n\n🍔 [LINK_CARDAPIO]\n\n).\n` +
-                          `3. LISTAGEM DE PRODUTOS E ITENS:\n` +
-                          `   - Para cada produto ou item apresentado, mantenha uma formatação limpa e espaçada, separando os itens com linha em branco:\n` +
-                          `     *Nome do Produto*\n` +
-                          `     Descrição: [Descrição do produto]\n` +
-                          `     Preço: R$ [Preço]\n` +
-                          `     👉 Acesse e peça aqui: [link_produto] (se lista até 3 produtos)\n\n` +
-                          `4. EMOJIS HUMANIZADOS:\n` +
-                          `   - Utilize de 1 a 3 emojis calorosos em posições estratégicas (ao lado de cumprimentos, links ou agradecimentos) para enriquecer o visual de forma leve e acolhedora.\n`;
+            // Regras específicas de Cardápio/Produtos: injetadas SOMENTE em robôs de Menu, Pedido ou Unificado
+            if (isMenuOrOrderRole) {
+                basePrompt += `\n\n### DIRETRIZES DE CARDÁPIO, REFEIÇÕES/MARMITAS, SALADAS E PREÇOS REAIS (ESTRITAS) ###\n` +
+                              `1. PERFIL GASTRONÔMICO E MARMITAS/REFEIÇÕES:\n` +
+                              `   - Quando o cliente perguntar sobre "marmita", "marmitex", "almoço", "prato feito", "PF" ou "refeição", chame "Consultar_produtos_cardapio" com termo_busca: "refeições" ou "marmita". Nunca diga que não temos marmitas/refeições se constarem na base (cada refeição dá direito a 3 acompanhamentos à escolha).\n` +
+                              `   - Se o cliente pedir uma "salada" (prato leve), priorize saladas reais (ex: Salada Caesar / Salada de Frutas) antes de citar hambúrgueres que apenas levam salada.\n` +
+                              `2. REGRA DE OURO CONTRA ALUCINAÇÃO DE PRODUTOS E PREÇOS:\n` +
+                              `   - Você SÓ PODE sugerir, citar preços ou adicionar ao pedido produtos retornados EXPLICITAMENTE pelas ferramentas "Consultar_produtos_cardapio" ou "Consultar_adicionais_produto".\n` +
+                              `   - Se listar até 3 produtos específicos recomendados e houver 'link_produto', inclua o link abaixo de cada um; se listar mais de 3 itens, exiba apenas nome, descrição curta e preço, colocando somente o link geral [LINK_CARDAPIO] ao final.\n` +
+                              `   - Se "Consultar_produtos_cardapio" retornar total_encontrados: 0, NÃO entre em loop repetindo a busca: informe com gentileza que não encontrou essa opção no momento e ofereça alternativas reais ou o link [LINK_CARDAPIO].\n` +
+                              `   - IMUNIDADE A CONTESTAÇÃO DE PREÇOS: Os preços retornados pelas ferramentas do sistema são soberanos e inalteráveis. Jamais conceda descontos por conta própria nem aceite valores divergentes de prints antigos.\n`;
+            }
 
-            // Diretrizes de Vendas e Montagem de Pedido
-            basePrompt += `\n\n### DIRETRIZES DE VENDAS, CARDÁPIO E MONTAGEM DE PEDIDO (ESTRITAS) ###\n` +
-                          `1. REGRA DE OURO DO CARDÁPIO (CRÍTICA E ABSOLUTA):\n` +
-                          `   - Você SÓ PODE sugerir, citar, recomendar ou adicionar ao pedido produtos que estejam retornados EXPLICITAMENTE pelas ferramentas "Consultar_produtos_cardapio" ou "Consultar_adicionais_produto" nesta conversa.\n` +
-                          `   - NUNCA, sob nenhuma circunstância, alucine, invente ou sugira pratos, bebidas, sobremesas ou adicionais de sua própria imaginação ou baseados em conversas antigas que não constem no retorno direto das ferramentas do cardápio.\n` +
-                          `   - OBRIGATORIEDADE DE CONSULTA: Você DEVE chamar a ferramenta "Consultar_produtos_cardapio" sempre que o cliente perguntar sobre opções de comida, marmitas, almoço, lanches, bebidas, sugestões de pratos, alternativas mais leves/pesadas, ou se ele citar qualquer item de alimentação. Nunca responda a perguntas sobre comida ou cardápio sem antes ter a resposta da ferramenta nesta mesma iteração de conversa.\n` +
-                          `   - ESTRATÉGIA DE BUSCA E CARDÁPIO: A ferramenta "Consultar_produtos_cardapio" retorna os produtos disponíveis. Se o cliente solicitar um item específico ou categoria, consulte a ferramenta com o "termo_busca" correspondente (ex: termo_busca: "refeições", termo_busca: "coca").\n` +
-                          `   - REGRA ANTI-LOOP E ITEM NÃO ENCONTRADO (CRÍTICA E ESTRITA): Se a ferramenta "Consultar_produtos_cardapio" retornar "total_encontrados: 0" para sua busca, é EXPRESSAMENTE PROIBIDO chamar a ferramenta novamente para o mesmo item ou com pequenas variações/sinônimos nesta mesma mensagem. Responda imediatamente ao cliente informando com carinho e educação que no momento não dispomos dessa opção específica, oferecendo as opções disponíveis na casa ou enviando o link do cardápio digital.\n` +
-                          `2. FLUXO DE MONTAGEM DO PEDIDO (ESTRITO):\n` +
-                          `   - Quando o cliente demonstrar interesse em um produto, você deve consultar os opcionais/adicionais desse produto usando a ferramenta "Consultar_adicionais_produto".\n` +
-                          `   - Identifique quais passos de adicionais são OBRIGATÓRIOS (onde qtd_minima > 0). Você DEVE perguntar ao cliente a preferência dele para cada passo obrigatório antes de prosseguir (ex: ponto da carne, acompanhamentos da marmita/refeição, etc.).\n` +
-                          `   - Apresente também as opções extras/adicionais opcionais (ex: bacon, queijo extra, ovo, etc.) e pergunte de forma simpática se ele deseja adicionar alguma dessas opções no item.\n` +
-                          `   - Quando o cliente fechar o que deseja, faça um resumo claro de todos os itens e seus respectivos adicionais selecionados, mostrando o preço de cada um e o total acumulado do pedido.\n` +
-                          `   - Coleta de Dados do Cliente: Para concluir a montagem do pedido, você DEVE verificar se o cliente possui cadastro completo:
-                                  1. Se o cliente possui cadastro com nome e endereço (CEP, rua, número) válidos, CONFIRME os dados de endereço e utilize-o diretamente!
-                                  2. Se o cliente tem cadastro sem endereço ou não tem cadastro, solicite apenas o CEP e o número da residência. NUNCA peça dados desnecessários como rua, bairro e cidade se o cliente puder fornecer o CEP, pois com o CEP (chame a ferramenta "Consultar_cep") e o número da residência você consegue buscar/preencher todo o restante automaticamente.
-                                  3. IMPORTANTE: Após preencher ou confirmar o CEP e número, pergunte obrigatoriamente se é condomínio (se sim, solicite o número do apartamento e bloco/torre) e pergunte também se há um ponto de referência para a entrega.
-                                  4. Atualize o cadastro do contato utilizando a ferramenta "Atualizar_endereco_contato" assim que obtiver as informações novas/atualizadas de CEP, rua, número, bairro, cidade, estado, apartamento (ap), bloco (bloco), ponto de referência (referencia) e coordenadas, para garantir que a ficha de cadastro do contato esteja sempre em sincronia. E use estes dados atualizados para emitir o pedido na API do GastroFood ("Enviar_pedido_gastrofood").\n` +
-                          `   - Ao final, após confirmar os detalhes do endereço e o resumo do pedido com os adicionais, informe o total e pergunte a forma de pagamento (Dinheiro, Cartão, Pix).\n` +
-                          `   - Nunca invente preços ou opções. Sempre baseie-se estritamente no retorno das ferramentas "Consultar_produtos_cardapio" e "Consultar_adicionais_produto".\n` +
-                          `3. Quando o cliente pedir o link do cardápio, envie apenas e exatamente o link [LINK_CARDAPIO].\n`;
+            // Regras de Papel Estrito para RECEPÇÃO e MENU (Impede cobrança precoce de cadastro/CEP fora de contexto!)
+            if (specialistRole === 'reception') {
+                basePrompt += `\n\n### ESCOPO ESTRITO DESTE AGENTE: RECEPÇÃO E ACOLHIMENTO ###\n` +
+                              `- Sua única missão agora é acolher o cliente com simpatia (${saudacaoHorario}!), disponibilizar o link do cardápio quando oportuno e descobrir como ajudá-lo (ver cardápio, fazer pedido ou acompanhar pedido).\n` +
+                              `- PROIBIÇÃO ABSOLUTA: NUNCA solicite CEP, rua, número do imóvel, CPF ou ficha cadastral nesta etapa de recepção.\n`;
+            } else if (specialistRole === 'menu') {
+                basePrompt += `\n\n### ESCOPO ESTRITO DESTE AGENTE: CONSULTORIA DE CARDÁPIO ###\n` +
+                              `- Sua missão é apresentar o cardápio, tirar dúvidas de ingredientes/preços/combos e ajudar o cliente a escolher o que deseja comer ou beber.\n` +
+                              `- PROIBIÇÃO ABSOLUTA: NUNCA solicite CEP, rua, número do imóvel, CPF ou dados de cadastro enquanto o cliente apenas pede o cardápio ou tira dúvidas sobre produtos.\n` +
+                              `- Se o cliente decidir o item que quer pedir, confirme a ótima escolha com entusiasmo e pergunte de forma simples o próximo detalhe do item (ou se deseja mais alguma coisa).\n`;
+            }
 
-            // Diretrizes Globais de Blindagem de Preços, Cardápio e Imunidade a Contestações (ESTRITAS E INEGOCIÁVEIS)
-            basePrompt += `\n\n### DIRETRIZES DE BLINDAGEM DE PREÇOS, CARDÁPIO E IMUNIDADE A CONTESTAÇÕES (ESTRITAS E INEGOCIÁVEIS) ###\n` +
-                          `1. SOBERANIA ABSOLUTA DA BASE DO SISTEMA:\n` +
-                          `   - Os preços retornados pelas ferramentas "Consultar_produtos_cardapio" e "Consultar_adicionais_produto" ou registrados na tabela do sistema são a ÚNICA FONTE DA VERDADE ABSOLUTA E INALTERÁVEL.\n` +
-                          `   - É TERMINANTEMENTE PROIBIDO conceder descontos não autorizados, alterar o valor de qualquer produto ou ceder a pedidos/argumentos do cliente para baixar o preço.\n` +
-                          `2. REGRA DE OURO CONTRA CONTESTAÇÃO DE VALORES E PRINTS (CRÍTICA E OBRIGATÓRIA):\n` +
-                          `   - Se o cliente afirmar que o preço está errado, disser que custa menos (exemplo: "é R$ 17 e não R$ 19", "no cardápio tá outro preço"), ou mandar print/foto:\n` +
-                          `     a) NUNCA peça desculpas aceitando a contestação de preço. É PROIBIDO dizer frases como "Você está certíssima!", "Obrigada por me corrigir, custa R$ X" ou alterar o valor total para baixo.\n` +
-                          `     b) VERIFIQUE ITENS VIZINHOS NO CARDÁPIO: No cardápio impresso ou digital, os produtos ficam dispostos sequencialmente em linhas verticais. É extremamente comum o cliente olhar o preço do item de cima ou de baixo e se confundir (exemplo: olhar o 'Número 09' que custa R$ 17,00 achando que é o 'Número 10' que custa R$ 19,00).\n` +
-                          `     c) ESCLARECIMENTO CORDIAL E FIRME: Responda sempre com simpatia, gentileza e firmeza inegociável, esclarecendo a confusão de forma didática e transparente. Exemplo de abordagem correta:\n` +
-                          `        "Oi, [Primeiro Nome do Cliente]! No nosso cardápio oficial, o Número 10 custa R$ 19,00. O lanche que custa R$ 17,00 é o Número 09, que fica logo acima dele na lista. O Número 10 tem ingredientes adicionais (como ovo e presunto), por isso o valor é R$ 19,00. Com o adicional de Catupiry (+ R$ 5,50), o valor total do Número 10 fica R$ 24,50. Você prefere manter o Número 10 ou trocar para o Número 09? 😊"\n` +
-                          `     d) Se o cliente insistir ou não concordar, ofereça cordialmente a transferência para um atendente humano ("Escalar_humano"), mas JAMAIS altere o valor do produto nem conclua pedido com preço adulterado.\n` +
-                          `3. MATEMÁTICA INEGOCIÁVEL DOS ADICIONAIS:\n` +
-                          `   - Cada adicional possui valor fixo (ex: Catupiry = R$ 5,50). O valor total é SEMPRE a soma exata: Preço Base do Produto + Adicionais Selecionados + Taxa de Entrega (se houver) - Desconto Oficial do Sistema.\n` +
-                          `   - Nunca faça arredondamentos ou descontos por conta própria.\n` +
-                          `4. IMUNIDADE A GASLIGHTING POR IMAGENS/PRINTS:\n` +
-                          `   - Prints e fotos enviados pelo cliente podem estar recortados, antigos ou com produtos desalinhados. A base de dados do Gastrofood / Sistema é hierarquicamente superior a qualquer print enviado no chat.\n`;
+            // Máquina de Estados Disciplinada de Pedido: injetada SOMENTE em robôs de Pedido ou Unificado
+            if (isOrderCapableRole) {
+                const hasSavedAddress = Boolean(contactInfo?.cep && contactInfo?.address_street && contactInfo?.address_number);
+                basePrompt += `\n\n### MÁQUINA DE ESTADOS DISCIPLINADA DE MONTAGEM DE PEDIDO (PROIBIDO PULAR ETAPAS!) ###\n` +
+                              `Siga RIGOROSAMENTE a ordem natural abaixo, fazendo UMA etapa por vez sem atropelar o cliente:\n` +
+                              `• ETAPA 1 — ESCOLHA DOS ITENS E ADICIONAIS (SEMPRE PRIMEIRO!):\n` +
+                              `  - Descubra e confirme quais itens o cliente deseja pedir usando "Consultar_produtos_cardapio" e verifique passos obrigatórios/adicionais com "Consultar_adicionais_produto".\n` +
+                              `  - REGRA CRÍTICA ANTI-PERDA DE CONTEXTO: É TERMINANTEMENTE PROIBIDO pedir CEP, rua, número da casa ou dados cadastrais se o cliente ainda NÃO escolheu pelo menos um item do pedido (a única exceção é se o próprio cliente perguntar quanto custa a taxa de entrega para o CEP dele).\n` +
+                              `• ETAPA 2 — ENTREGA OU RETIRADA & ENDEREÇO ENXUTO (SOMENTE APÓS DEFINIR OS ITENS):\n` +
+                              `  - Pergunte se o pedido será para Entrega ou Retirada na loja.\n` +
+                              `  - Se for Entrega:\n` +
+                              `    * ${hasSavedAddress ? `O cliente JÁ POSSUI endereço salvo na ficha (${contactInfo.address_street}, Nº ${contactInfo.address_number} - CEP ${contactInfo.cep}). NÃO peça tudo de novo: apenas confirme com simpatia se a entrega será neste mesmo endereço!` : `Solicite de forma leve APENAS o CEP e o número da residência (NUNCA envie listas burocráticas pedindo rua, bairro, cidade e sobrenome de uma vez, pois com o CEP você consulta a rua automaticamente via "Consultar_cep"). Após obter CEP e número, pergunte apenas se há complemento/apartamento ou ponto de referência e salve via "Atualizar_endereco_contato".`}\n` +
+                              `• ETAPA 3 — FORMA DE PAGAMENTO (OBRIGATÓRIA ANTES DO RESUMO):\n` +
+                              `  - Pergunte a forma de pagamento (Pix, Cartão de Crédito, Cartão de Débito ou Dinheiro — se dinheiro, pergunte se precisa de troco).\n` +
+                              `• ETAPA 4 — RESUMO COMPLETO E CONFIRMAÇÃO EXPLÍCITA:\n` +
+                              `  - Exiba o resumo organizado (Itens + Adicionais, Endereço/Retirada, Forma de Pagamento, Taxa de Entrega e Total) e aguarde o "sim/ok/pode confirmar" explícito antes de chamar "Enviar_pedido_gastrofood".\n`;
+            }
 
             if (isFirstMessage) {
-                basePrompt += `\n⚠️ AVISO DE PRIMEIRA MENSAGEM (URGENTE/OBRIGATÓRIO): Esta é a PRIMEIRA mensagem desta conversa. Você DEVE saudar o cliente com carinho chamando-o pelo seu PRIMEIRO NOME e OBRIGATORIAMENTE incluir o link oficial do cardápio digital [LINK_CARDAPIO] nesta resposta inicial.\n` +
-                              `Modelo de Abertura Padrão (Siga estritamente esta estrutura acolhedora e calorosa):\n` +
-                              `"Olá, [Primeiro Nome do Cliente]! Seja muito bem-vindo(a) à [NOME_DA_EMPRESA]! 😊\n\n` +
-                              `Agradecemos pelo seu contato. Segue o link do nosso cardápio para você conferir todas as nossas opções:\n` +
-                              `🍔 [LINK_CARDAPIO]\n\n` +
-                              `Caso tenha qualquer dúvida ou precise de uma recomendação, estamos à disposição para ajudar.\n` +
-                              `Esperamos seu pedido! 😋"\n` +
-                              `(Substitua [Primeiro Nome do Cliente] EXCLUSIVAMENTE pelo primeiro nome do cliente (ex: Vanessa ou Tatiane - NUNCA use sobrenome), [NOME_DA_EMPRESA] pelo nome da empresa e [LINK_CARDAPIO] pelo link oficial do cardápio).\n` +
-                              `Além disso, se houver um bloco de texto customizado sob a tag '[PRIMEIRA MENSSAGEM A SER ENVIADA]' ou '[PRIMEIRA MENSAGEM A SER ENVIADA]' no seu prompt de sistema, você DEVE retornar o texto daquele bloco como sua resposta inicial.\n`;
+                basePrompt += `\n\n### CONTEXTO DE ABERTURA DESTA SESSÃO (PRIMEIRA RESPOSTA AO CLIENTE) ###\n` +
+                              `- Esta é a primeira resposta da loja ao cliente nesta sessão atual (horário atual: ${saudacaoHorario}).\n` +
+                              `- Cumprimente o cliente com "${saudacaoHorario}" pelo PRIMEIRO NOME de forma calorosa${vars.linkCardapio ? `, inclua o link oficial [LINK_CARDAPIO]` : ''} e responda diretamente ao que ele escreveu (se ele já pediu o cardápio ou perguntou algo, atenda ao pedido dele na mesma mensagem de abertura sem rodeios!).\n`;
             } else {
-                basePrompt += `\n\n### DIRETRIZES DE MENSAGENS EM CONVERSA EM ANDAMENTO (NÃO REPETIR BOAS-VINDAS) ###\n` +
-                              `1. CONVERSA EM ANDAMENTO: Esta NÃO é a primeira mensagem da conversa. As boas-vindas já foram enviadas anteriormente.\n` +
-                              `2. PROIBIÇÃO ABSOLUTA DE REPETIR BOAS-VINDAS: NUNCA repita saudações longas ou textos formais de abertura (como "Seja muito bem-vindo(a)", "Agradecemos pelo seu contato", "Olá, tudo bem? Aqui é a Luna"). Vá direto ao assunto de forma calorosa, ágil e educada.\n` +
-                              `3. SOLICITAÇÃO DE CARDÁPIO EM CONVERSA EXISTENTE: Se o cliente pedir o cardápio ou menu agora (ex: "cardápio", "menu", "quero ver as opções"), envie uma resposta curta, direta e amigável com o link isolado sem textões de boas-vindas. Exemplo:\n` +
-                              `   "Com certeza, [Primeiro Nome do Cliente]! Segue o link do nosso cardápio digital completo para você escolher:\n\n` +
-                              `   🍔 [LINK_CARDAPIO]\n\n` +
-                              `   Se quiser alguma recomendação ou tirar dúvidas sobre os lanches e combos, é só me falar! 😉"\n` +
-                              `4. NÃO REPETIR LINKS EM SEQUÊNCIA: Se você já enviou o link do cardápio na mensagem anterior e o cliente apenas comentou algo ou fez uma pergunta pontual (ex: "tem refrigerante?"), responda à pergunta diretamente sem reenviar o link do cardápio desnecessariamente.\n`;
+                const recentTranscript = activeSessionMsgs.slice(-6).map(m => {
+                    const isStore = m.sender_type === 'bot' || m.sender_type === 'human' || m.sender_type === 'agent' || m.direction === 'outbound';
+                    const who = !isStore ? 'Cliente' : (m.sender_type === 'bot' ? 'Luna' : `Atendente (${m.raw_payload?.operator_name || 'Equipe'})`);
+                    return `  - ${who}: "${String(m.text_content || '').replace(/\s+/g, ' ').slice(0, 220)}"`;
+                }).join('\n');
+
+                basePrompt += `\n\n### DIRETRIZES DE CONVERSA JÁ EM ANDAMENTO NESTA SESSÃO ###\n` +
+                              `1. A conversa JÁ ESTÁ EM ANDAMENTO nesta sessão (um atendente ou você mesma já falou com o cliente agora há pouco).\n` +
+                              `2. PROIBIÇÃO ABSOLUTA DE REPETIR BOAS-VINDAS: NUNCA repita textos formais de boas-vindas ("Olá, seja muito bem-vindo(a)", "Agradecemos pelo seu contato", "${saudacaoHorario}! Aqui é a Luna"). Continue a conversa de forma fluida e direta!\n` +
+                              `3. ${hasMenuLinkAlreadySent ? `ATENÇÃO: O link do cardápio (${vars.linkCardapio}) JÁ FOI ENVIADO nesta sessão! Não reenvie o link novamente a menos que o cliente peça de novo.` : `Se o cliente estiver pedindo o cardápio agora (ex: "gostaria do cardápio", "cardápio", "menu"), responda de forma curta, simpática e direta enviando [LINK_CARDAPIO] e colocando-se à disposição, sem pedir cadastro ou CEP.`}\n` +
+                              (recentTranscript ? `4. Resumo fiel das últimas mensagens desta sessão ativa:\n${recentTranscript}\n` : '');
+            }
+
+            // Playbook Comportamental consolidado por Análise Profunda da Caixa (fonte única em knowledge_documents)
+            try {
+                const inboxBehavior = await getInboxBehaviorProfile({
+                    supabase,
+                    tenantId,
+                    instanceId: safeInboxInstanceId
+                });
+                const behaviorSection = formatInboxBehaviorPromptSection(inboxBehavior);
+                if (behaviorSection) {
+                    basePrompt += behaviorSection;
+                }
+            } catch (errBehavior) {
+                console.warn('[AutomationWorker] Erro ao carregar Playbook Comportamental da caixa:', errBehavior?.message || errBehavior);
             }
 
             if (botInstructions && botInstructions.trim().length > 0) {
@@ -2784,6 +2887,8 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
             // Filtra declarações de funções com base nos endpoints habilitados no robô
             const endpointToolsMap = {
                 Consultar_cep: 'cep',
+                Atualizar_endereco_contato: 'cep',
+                Atualizar_nome_contato: 'cadastro',
                 Consultar_produtos_cardapio: 'cardapio',
                 Consultar_adicionais_produto: 'adicionais',
                 Validar_cliente_cadastrado: 'cliente',
@@ -3084,7 +3189,7 @@ Responda APENAS com o ID do agente escolhido, exatamente como está listado, sem
                         }
                         else if (call.name === "Enviar_texto_separado") {
                             if (sock) {
-                                await sock.sendMessage(jid, { text: call.args.texto });
+                                await sock.sendMessage(jid, { text: call.args.texto }, { isBot: true, botName: botSettings?.name || 'Luna IA', botId: botSettings?.id });
                             }
                             functionResult = { status: "Mensagem enviada com sucesso" };
                         }
@@ -4622,7 +4727,7 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
                 } else {
                     try {
                         const sendFn = activeSock.sendMessage || activeSock.originalSendMessage;
-                        msgResult = await sendFn(jid, { text: finalResponseText }, { isAutomation: true });
+                        msgResult = await sendFn(jid, { text: finalResponseText }, { isBot: true, botName: botSettings?.name || 'Luna IA', botId: botSettings?.id });
                     } catch (directErr) {
                         const isConnClosed = directErr.message && (
                             directErr.message.includes('Connection Closed') ||
@@ -4647,7 +4752,7 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
                                 const isFreshReady = freshSock && (!freshSock.ws || freshSock.ws.isOpen || freshSock.ws.readyState === 1);
                                 if (isFreshReady) {
                                     const retrySendFn = freshSock.sendMessage || freshSock.originalSendMessage;
-                                    msgResult = await retrySendFn(jid, { text: finalResponseText }, { isAutomation: true });
+                                    msgResult = await retrySendFn(jid, { text: finalResponseText }, { isBot: true, botName: botSettings?.name || 'Luna IA', botId: botSettings?.id });
                                     freshSent = true;
                                 }
                             } catch (freshErr) {
@@ -4671,7 +4776,12 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
                     }).catch(()=>{});
                 } catch (logErr) {}
                 if (msgResult && msgResult.key) {
-                    const { data: savedMsg } = await supabase.from('messages').insert({
+                    const botPayload = {
+                        ...msgResult,
+                        bot_name: botSettings?.name || 'Luna IA',
+                        bot_id: botSettings?.id
+                    };
+                    let { data: savedMsg, error: insBotErr } = await supabase.from('messages').insert({
                         tenant_id: tenantId,
                         instance_id: instanceId,
                         conversation_id: conversationId,
@@ -4681,12 +4791,20 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
                         text_content: finalResponseText,
                         whatsapp_message_id: msgResult.key.id,
                         sender_type: 'bot',
-                        raw_payload: {
-                            ...msgResult,
-                            bot_name: botSettings?.name || 'IA ChatBoot',
-                            bot_id: botSettings?.id
-                        }
+                        raw_payload: botPayload
                     }).select('*').single();
+
+                    if (insBotErr && msgResult.key.id) {
+                        const { data: updatedBotMsg } = await supabase.from('messages')
+                            .update({
+                                sender_type: 'bot',
+                                raw_payload: botPayload
+                            })
+                            .eq('whatsapp_message_id', msgResult.key.id)
+                            .select('*')
+                            .maybeSingle();
+                        if (updatedBotMsg) savedMsg = updatedBotMsg;
+                    }
 
                     if (conversationId) {
                         await supabase.from('conversations').update({

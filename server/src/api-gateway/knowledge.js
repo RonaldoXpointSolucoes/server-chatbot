@@ -25,6 +25,7 @@ import {
     getInboxAnalysisRun as defaultGetInboxAnalysisRun,
     extractBehaviorProfileSummary
 } from './inbox-knowledge-analyzer.js';
+import { invalidateInboxBehaviorCache as defaultInvalidateBehaviorCache } from '../automation-worker/inbox-behavior-cache.js';
 import {
     encryptGeminiKey,
     decryptGeminiKey,
@@ -241,7 +242,7 @@ export function createKnowledgeRouter(deps = {}) {
     const supabase = deps.supabase || defaultSupabase;
     const EmbeddingsPipeline = deps.EmbeddingsPipeline || DefaultEmbeddingsPipeline;
     const hybridRetrieveKnowledge = deps.hybridRetrieveKnowledge || defaultHybridRetrieveKnowledge;
-    const invalidateBehaviorCache = deps.invalidateBehaviorCache || (() => {});
+    const invalidateBehaviorCache = deps.invalidateBehaviorCache || defaultInvalidateBehaviorCache;
     const startInboxDeepAnalysis = deps.inboxAnalyzer?.startInboxDeepAnalysis || defaultStartInboxDeepAnalysis;
     const getInboxAnalysisStatus = deps.inboxAnalyzer?.getInboxAnalysisStatus || defaultGetInboxAnalysisStatus;
     const getInboxAnalysisRun = deps.inboxAnalyzer?.getInboxAnalysisRun || defaultGetInboxAnalysisRun;
