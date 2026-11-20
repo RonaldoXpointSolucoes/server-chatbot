@@ -7352,7 +7352,7 @@ export default function ChatDashboard() {
                   }
                   return globalAiEnabled ? "Desativar Robô I.A (Global)" : "Ativar Robô I.A (Global)";
                 })()}
-                onClick={toggleGlobalAi}
+                onClick={() => toggleGlobalAi()}
               >
                 <Bot size={18} className={cn("transition-transform duration-500", globalAiEnabled && "animate-pulse scale-105")} />
                 {/* Indicador de Status */}

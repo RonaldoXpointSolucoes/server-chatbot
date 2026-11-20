@@ -712,6 +712,29 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.3.3',
+    date: '2026-11-20',
+    summary: 'Persistência Definitiva do Switch Robô I.A ao Fechar/Reabrir com Cache por Empresa e Confirmação Real no Banco',
+    notes: [
+      {
+        id: 'fix-global-ai-persistence-reopen-833',
+        category: 'fixes',
+        title: 'Correção do Reset do Botão "Robô I.A" para Ativo ao Fechar e Reabrir',
+        description: 'Eliminado o falso estado "Robô I.A Ativo" exibido na reabertura do aplicativo quando a I.A global já estava desativada em companies.global_ai_enabled: o estado agora inicializa imediatamente a partir do cache isolado por empresa, executa fallback estritamente autorizado caso o RLS retorne vazio antes da hidratação do JWT e re-sincroniza automaticamente nos eventos SIGNED_IN/TOKEN_REFRESHED e Realtime.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      },
+      {
+        id: 'imp-global-ai-write-confirmation-833',
+        category: 'improvements',
+        title: 'Confirmação Real de Escrita no PostgreSQL & Proteção Anti-Clique Duplo no Robô I.A',
+        description: 'toggleGlobalAi agora serializa alternâncias concorrentes, valida o retorno real da linha atualizada via .select(...).maybeSingle() (detectando falsos sucessos HTTP 204 do PostgREST com 0 linhas por RLS), preserva os demais campos de companies.settings, exibe alerta revertendo estado em falha e confirma em toast quando o Robô I.A é pausado.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
+      }
+    ]
+  },
+  {
     version: '8.3.2',
     date: '2026-11-20',
     summary: 'Pausa Imediata da I.A em Qualquer Envio de Operador (Motor v8.2.3), Botão DevLogger Compacto com Alerta Sonar de Erros e Sincronização RAG Exclusiva vs Global no Submenu da Caixa',

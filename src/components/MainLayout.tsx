@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import { MainSidebar } from './MainSidebar';
 import EvolutionModal from './EvolutionModal';
+import { supabase } from '../services/supabase';
 import { useChatStore } from '../store/chatStore';
 import { useWaCallsStore } from '../store/useWaCallsStore';
 import WaCallsWidget from './WaCallsWidget';
@@ -41,9 +42,17 @@ export function MainLayout() {
     // essencial se o usuário der F5 diretamente em páginas como /settings/account ou /settings/logs
     useChatStore.getState().fetchTenantConfig();
 
+    // Re-sincroniza empresas e status do Robô I.A quando a sessão Supabase autentica ou renova o JWT no reabrir
+    const { data: authListener } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        useChatStore.getState().fetchTenantConfig();
+      }
+    });
+
     // Inicializa a conexão SSE do WaCalls para recebimento de chamadas de voz
     useWaCallsStore.getState().initSSE();
     return () => {
+      authListener?.subscription?.unsubscribe();
       useWaCallsStore.getState().closeSSE();
     };
   }, []);

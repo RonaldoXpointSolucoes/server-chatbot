@@ -1,10 +1,113 @@
 import { create } from 'zustand';
-import { supabase, ContactRow } from '../services/supabase';
+import { supabase, masterSupabase, ContactRow } from '../services/supabase';
 import { playNotificationSound } from '../utils/AudioEngine';
 import { useDevStore } from './devStore';
 import { shouldNotifyForEvent, NotificationEventType } from '../services/notificationPreferences';
 import { runAiHealthCheck, AiDiagnosticsReport } from '../services/aiHealthCheckService';
 import { clearLegacyGlobalRemoteStorage } from '../utils/remoteAccess.mjs';
+import {
+  normalizeAllowedCompanyIds,
+  normalizeEmailValue,
+  resolveStrictlyAuthorizedCompanyIds
+} from '../utils/workspaceSwitcher.mjs';
+import {
+  getActiveTenantIdFromStorage,
+  readCachedGlobalAiState,
+  writeCachedGlobalAiState,
+  resolveHydratedGlobalAiState,
+  isPostgrestUpdateConfirmed
+} from '../utils/globalAiPersistence.mjs';
+
+let isGlobalAiToggleInFlight = false;
+
+const dispatchGlobalAiToast = (
+  message: string,
+  type: 'success' | 'info' | 'warning' | 'error' = 'info',
+  duration = 4000
+) => {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent('toast', { detail: { message, type, duration } }));
+};
+
+/**
+ * Verifica associação estrita do usuário autenticado à empresa alvo
+ * antes de executar fallback via service role quando o RLS negar por corrida de JWT/sessão.
+ */
+async function resolveVerifiedCompanyAuthorization(targetTenantId: string): Promise<{
+  authorized: boolean;
+  canToggleAi: boolean;
+  companyRow: any | null;
+}> {
+  if (!targetTenantId) {
+    return { authorized: false, canToggleAi: false, companyRow: null };
+  }
+  try {
+    const { data: sessionData } = await supabase.auth.getSession().catch(() => ({ data: { session: null } }));
+    const sessionEmail = normalizeEmailValue(sessionData?.session?.user?.email);
+    const storedEmail = typeof window !== 'undefined'
+      ? normalizeEmailValue(localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email'))
+      : '';
+    const activeEmail = sessionEmail || storedEmail;
+    if (!activeEmail) {
+      return { authorized: false, canToggleAi: false, companyRow: null };
+    }
+
+    const [{ data: userRow }, { data: ownerRows }] = await Promise.all([
+      masterSupabase
+        .from('tenant_users')
+        .select('id, email, role, tenant_id, allowed_companies')
+        .ilike('email', activeEmail)
+        .maybeSingle(),
+      masterSupabase
+        .from('companies')
+        .select('id, name, email, status, plan_id, global_ai_enabled, settings, evolution_api_instance')
+        .ilike('email', activeEmail)
+    ]);
+
+    const ownerCompanyIds = (ownerRows || []).map((c: any) => c.id);
+    if (!userRow && ownerCompanyIds.length === 0) {
+      return { authorized: false, canToggleAi: false, companyRow: null };
+    }
+
+    const authorizedIds = resolveStrictlyAuthorizedCompanyIds({
+      activeTenantId: targetTenantId,
+      userRole: userRow?.role || 'admin',
+      allowedFromUser: userRow?.allowed_companies,
+      userPrimaryTenantId: userRow?.tenant_id,
+      ownerCompanyIds
+    });
+
+    const explicitAllowed = normalizeAllowedCompanyIds(userRow?.allowed_companies);
+    const isMemberOfTarget =
+      authorizedIds.includes(targetTenantId) &&
+      (
+        ownerCompanyIds.includes(targetTenantId) ||
+        userRow?.tenant_id === targetTenantId ||
+        explicitAllowed.includes(targetTenantId)
+      );
+
+    if (!isMemberOfTarget) {
+      return { authorized: false, canToggleAi: false, companyRow: null };
+    }
+
+    const roleLower = String(userRow?.role || '').toLowerCase();
+    const canToggleAi = roleLower !== 'agent' && roleLower !== 'agente';
+    let companyRow = (ownerRows || []).find((c: any) => c.id === targetTenantId) || null;
+    if (!companyRow) {
+      const { data: targetRow } = await masterSupabase
+        .from('companies')
+        .select('id, name, email, status, plan_id, global_ai_enabled, settings, evolution_api_instance')
+        .eq('id', targetTenantId)
+        .maybeSingle();
+      companyRow = targetRow || null;
+    }
+
+    return { authorized: true, canToggleAi, companyRow };
+  } catch (err) {
+    console.warn('[GlobalAI] Falha ao verificar autorização da empresa:', err);
+    return { authorized: false, canToggleAi: false, companyRow: null };
+  }
+}
 import {
   classifyUploadFailure,
   isOfflineBrowser,
@@ -1307,9 +1410,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setHistorySyncError: (error) => set({ historySyncError: error }),
   isOffline: typeof navigator !== 'undefined' ? !navigator.onLine : false,
   setOfflineStatus: (status) => set({ isOffline: status }),
-  globalAiEnabled: true,
+  globalAiEnabled: (() => {
+    const cached = readCachedGlobalAiState(getActiveTenantIdFromStorage());
+    return cached ? cached.enabled : true;
+  })(),
   setGlobalAiEnabled: (enabled) => set({ globalAiEnabled: enabled }),
-  globalAiAuditInfo: null,
+  globalAiAuditInfo: (() => {
+    const cached = readCachedGlobalAiState(getActiveTenantIdFromStorage());
+    return cached ? cached.audit : null;
+  })(),
   setGlobalAiAuditInfo: (audit) => set({ globalAiAuditInfo: audit }),
   aiDiagnosticsReport: null,
   isAiValidating: false,
@@ -1332,11 +1441,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   toggleGlobalAi: async (forceState?: boolean) => {
-    const tenant = get().tenantInfo;
-    if (!tenant) return;
-    const prevValue = get().globalAiEnabled;
-    const prevAudit = get().globalAiAuditInfo;
-    const newValue = typeof forceState === 'boolean' ? forceState : !prevValue;
+    if (isGlobalAiToggleInFlight) return;
+    const existingTenant = get().tenantInfo;
+    const targetTenantId = existingTenant?.id || getActiveTenantIdFromStorage();
+    if (!targetTenantId) {
+      dispatchGlobalAiToast('Não foi possível identificar a empresa ativa para salvar o Robô I.A.', 'warning', 4000);
+      return;
+    }
+    const tenant = existingTenant?.id ? existingTenant : ({ id: targetTenantId } as any);
+    isGlobalAiToggleInFlight = true;
+    try {
+      const prevValue = get().globalAiEnabled;
+      const prevAudit = get().globalAiAuditInfo;
+      const newValue = typeof forceState === 'boolean' ? forceState : !prevValue;
 
     // Se estiver ativando o Robô I.A, disparar validação de prontidão
     if (newValue) {
@@ -1403,25 +1520,87 @@ export const useChatStore = create<ChatState>((set, get) => ({
       globalAiEnabled: newValue,
       globalAiAuditInfo: auditData
     });
+    writeCachedGlobalAiState(tenant.id, { enabled: newValue, audit: auditData });
 
     try {
       // Buscar settings atuais no Supabase para não sobrescrever outros campos do JSONB
-      const { data: comp } = await supabase.from('companies').select('settings').eq('id', tenant.id).maybeSingle();
-      const currentSettings = (comp?.settings && typeof comp.settings === 'object') ? comp.settings : {};
+      const { data: comp } = await supabase.from('companies').select('id, settings').eq('id', tenant.id).maybeSingle();
+      let preVerifiedAuth: Awaited<ReturnType<typeof resolveVerifiedCompanyAuthorization>> | null = null;
+      if (!comp) {
+        preVerifiedAuth = await resolveVerifiedCompanyAuthorization(tenant.id);
+      }
+
+      const currentSettings =
+        (comp?.settings && typeof comp.settings === 'object')
+          ? comp.settings
+          : (preVerifiedAuth?.companyRow?.settings && typeof preVerifiedAuth.companyRow.settings === 'object')
+            ? preVerifiedAuth.companyRow.settings
+            : (tenant?.settings && typeof tenant.settings === 'object' ? tenant.settings : {});
+
       const updatedSettings = {
         ...currentSettings,
         global_ai_audit: auditData
       };
 
-      const { error } = await supabase.from('companies').update({
-        global_ai_enabled: newValue,
-        settings: updatedSettings
-      }).eq('id', tenant.id);
+      const { data: updatedRow, error: updateErr } = await supabase
+        .from('companies')
+        .update({
+          global_ai_enabled: newValue,
+          settings: updatedSettings
+        })
+        .eq('id', tenant.id)
+        .select('id, global_ai_enabled, settings')
+        .maybeSingle();
 
-      if (error) throw error;
+      let confirmedRow: any = updatedRow;
+      let finalSettings = updatedSettings;
+
+      // PostgREST retorna HTTP 204 (updatedRow=null, error=null) quando RLS bloqueia UPDATE (0 linhas alteradas).
+      if (!isPostgrestUpdateConfirmed({ updatedRow, error: updateErr })) {
+        const authCheck = preVerifiedAuth || await resolveVerifiedCompanyAuthorization(tenant.id);
+        if (!authCheck.authorized || !authCheck.canToggleAi) {
+          throw updateErr || new Error('Sessão expirada ou sem permissão RLS para atualizar companies.global_ai_enabled');
+        }
+
+        const baseSettings =
+          (authCheck.companyRow?.settings && typeof authCheck.companyRow.settings === 'object')
+            ? authCheck.companyRow.settings
+            : currentSettings;
+        finalSettings = {
+          ...baseSettings,
+          global_ai_audit: auditData
+        };
+
+        const { data: fallbackRow, error: fallbackErr } = await masterSupabase
+          .from('companies')
+          .update({
+            global_ai_enabled: newValue,
+            settings: finalSettings
+          })
+          .eq('id', tenant.id)
+          .select('id, global_ai_enabled, settings')
+          .maybeSingle();
+
+        if (!isPostgrestUpdateConfirmed({ updatedRow: fallbackRow, error: fallbackErr })) {
+          throw fallbackErr || new Error('Banco não confirmou gravação em companies.global_ai_enabled');
+        }
+        confirmedRow = fallbackRow;
+      }
+
+      const persistedEnabled =
+        typeof confirmedRow?.global_ai_enabled === 'boolean' ? confirmedRow.global_ai_enabled : newValue;
+      const persistedAudit = confirmedRow?.settings?.global_ai_audit || auditData;
+
+      writeCachedGlobalAiState(tenant.id, { enabled: persistedEnabled, audit: persistedAudit });
 
       set(s => ({
-        tenantInfo: s.tenantInfo ? { ...s.tenantInfo, global_ai_enabled: newValue, settings: updatedSettings } : s.tenantInfo
+        globalAiEnabled: persistedEnabled,
+        globalAiAuditInfo: persistedAudit,
+        tenantInfo: s.tenantInfo
+          ? { ...s.tenantInfo, global_ai_enabled: persistedEnabled, settings: confirmedRow?.settings || finalSettings }
+          : (preVerifiedAuth?.companyRow
+              ? { ...preVerifiedAuth.companyRow, global_ai_enabled: persistedEnabled, settings: confirmedRow?.settings || finalSettings }
+              : s.tenantInfo)
       }));
 
       get().logOperation(
@@ -1429,11 +1608,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
         'companies',
         tenant.id,
         { global_ai_enabled: prevValue, global_ai_audit: prevAudit },
-        { global_ai_enabled: newValue, global_ai_audit: auditData }
+        { global_ai_enabled: persistedEnabled, global_ai_audit: persistedAudit }
       );
+
+      if (!persistedEnabled) {
+        dispatchGlobalAiToast('⏸️ Robô I.A desativado e salvo para esta empresa.', 'info', 3500);
+      }
     } catch (e) {
       console.error("Erro ao atualizar status global do IA:", e);
+      writeCachedGlobalAiState(tenant.id, { enabled: prevValue, audit: prevAudit });
       set({ globalAiEnabled: prevValue, globalAiAuditInfo: prevAudit }); // Reverter
+      dispatchGlobalAiToast('Não foi possível salvar o status do Robô I.A no banco. Alteração revertida.', 'error', 5000);
+    }
+    } finally {
+      isGlobalAiToggleInFlight = false;
     }
   },
 
@@ -6745,14 +6933,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
       let currentTenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
 
       // Dispara busca imediata da empresa ativa em background se tenantId já existe no storage
-      if (currentTenantId) {
+      if (currentTenantId && currentTenantId !== 'undefined' && currentTenantId !== 'null') {
+        const cachedEarlyState = readCachedGlobalAiState(currentTenantId);
+        if (cachedEarlyState && (!get().tenantInfo || get().tenantInfo?.id !== currentTenantId)) {
+          set({
+            globalAiEnabled: cachedEarlyState.enabled,
+            globalAiAuditInfo: cachedEarlyState.audit
+          });
+        }
         supabase.from('companies').select('*').eq('id', currentTenantId).maybeSingle().then(({ data: earlyTenantData }) => {
           if (earlyTenantData) {
+            const resolvedEarly = resolveHydratedGlobalAiState({
+              dbCompany: earlyTenantData,
+              cachedState: readCachedGlobalAiState(earlyTenantData.id)
+            });
+            writeCachedGlobalAiState(earlyTenantData.id, resolvedEarly);
             set({
               tenantInfo: earlyTenantData,
               connectedInstanceName: earlyTenantData.evolution_api_instance || null,
-              globalAiEnabled: earlyTenantData.global_ai_enabled ?? true,
-              globalAiAuditInfo: earlyTenantData.settings?.global_ai_audit || null
+              globalAiEnabled: resolvedEarly.enabled,
+              globalAiAuditInfo: resolvedEarly.audit
             });
             if (earlyTenantData.name && earlyTenantData.name !== 'Carregando...') {
               localStorage.setItem('current_tenant_name', earlyTenantData.name);
@@ -6794,14 +6994,35 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       if (!currentTenantId) return;
 
-      const { data: tenantData } = await supabase.from('companies').select('*').eq('id', currentTenantId).maybeSingle();
+      let { data: tenantData } = await supabase.from('companies').select('*').eq('id', currentTenantId).maybeSingle();
+
+      if (!tenantData) {
+        const verified = await resolveVerifiedCompanyAuthorization(currentTenantId);
+        if (verified.authorized && verified.companyRow) {
+          tenantData = verified.companyRow;
+        }
+      }
+
+      const cachedTenantAi = readCachedGlobalAiState(currentTenantId);
+      const resolvedTenantAi = resolveHydratedGlobalAiState({
+        dbCompany: tenantData,
+        cachedState: cachedTenantAi
+      });
+
+      if (!tenantData && cachedTenantAi) {
+        set({
+          globalAiEnabled: resolvedTenantAi.enabled,
+          globalAiAuditInfo: resolvedTenantAi.audit
+        });
+      }
 
       if (tenantData) {
+        writeCachedGlobalAiState(tenantData.id, resolvedTenantAi);
         set({
           tenantInfo: tenantData,
           connectedInstanceName: tenantData.evolution_api_instance || null,
-          globalAiEnabled: tenantData.global_ai_enabled ?? true,
-          globalAiAuditInfo: tenantData.settings?.global_ai_audit || null
+          globalAiEnabled: resolvedTenantAi.enabled,
+          globalAiAuditInfo: resolvedTenantAi.audit
         });
         if (tenantData.name && tenantData.name !== 'Carregando...') {
           localStorage.setItem('current_tenant_name', tenantData.name);

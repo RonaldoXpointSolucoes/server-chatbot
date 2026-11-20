@@ -65,6 +65,11 @@ import {
   normalizeEmailValue,
   resolveStrictlyAuthorizedCompanyIds
 } from '../utils/workspaceSwitcher.mjs';
+import {
+  readCachedGlobalAiState,
+  writeCachedGlobalAiState,
+  resolveHydratedGlobalAiState
+} from '../utils/globalAiPersistence.mjs';
 import { supabase, masterSupabase } from '../services/supabase';
 import { createPortal } from 'react-dom';
 import { WorkspaceSwitcherPopover } from './WorkspaceSwitcherPopover';
@@ -565,15 +570,24 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
         }
 
         if (currentCompany) {
+          const resolvedActiveAi = resolveHydratedGlobalAiState({
+            dbCompany: currentCompany,
+            cachedState: readCachedGlobalAiState(currentCompany.id)
+          });
+          writeCachedGlobalAiState(currentCompany.id, resolvedActiveAi);
           setCurrentCompanyContext(currentCompany);
           useChatStore.setState((s) =>
             s.tenantInfo && s.tenantInfo.id === currentCompany.id && !s.tenantInfo.settings
               ? { tenantInfo: currentCompany as any }
               : {}
           );
-          setGlobalAiEnabled(currentCompany.global_ai_enabled ?? true);
-          if (currentCompany.settings?.global_ai_audit) {
-            setGlobalAiAuditInfo(currentCompany.settings.global_ai_audit);
+          setGlobalAiEnabled(resolvedActiveAi.enabled);
+          setGlobalAiAuditInfo(resolvedActiveAi.audit);
+        } else if (tenantId) {
+          const cachedActiveAi = readCachedGlobalAiState(tenantId);
+          if (cachedActiveAi) {
+            setGlobalAiEnabled(cachedActiveAi.enabled);
+            setGlobalAiAuditInfo(cachedActiveAi.audit);
           }
         }
 
@@ -642,10 +656,27 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
           if (companiesData.length < authorizedIds.length && verifiedEmail && (userRecord || ownerCompanyIds.length > 0 || authorizedIds.includes(tenantId))) {
             const { data: authorizedExactRows } = await masterSupabase
               .from('companies')
-              .select('id, name, email, status, plan_id')
+              .select('id, name, email, status, plan_id, global_ai_enabled, settings, evolution_api_instance')
               .in('id', authorizedIds);
             if (Array.isArray(authorizedExactRows) && authorizedExactRows.length > 0) {
               companiesData = authorizedExactRows;
+              if (!currentCompany && tenantId) {
+                const recoveredActive = authorizedExactRows.find((c: any) => c.id === tenantId);
+                if (recoveredActive) {
+                  const resolvedRecovered = resolveHydratedGlobalAiState({
+                    dbCompany: recoveredActive,
+                    cachedState: readCachedGlobalAiState(tenantId)
+                  });
+                  writeCachedGlobalAiState(tenantId, resolvedRecovered);
+                  setCurrentCompanyContext(recoveredActive);
+                  useChatStore.setState((s) => ({
+                    tenantInfo: s.tenantInfo?.id === recoveredActive.id ? s.tenantInfo : (recoveredActive as any),
+                    connectedInstanceName: recoveredActive.evolution_api_instance || s.connectedInstanceName,
+                    globalAiEnabled: resolvedRecovered.enabled,
+                    globalAiAuditInfo: resolvedRecovered.audit
+                  }));
+                }
+              }
             }
           }
         }
@@ -771,11 +802,16 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
                   ? { tenantInfo: { ...s.tenantInfo, ...(payload.new as any) } }
                   : {}
               );
+              const resolvedRealtimeAi = resolveHydratedGlobalAiState({
+                dbCompany: payload.new,
+                cachedState: readCachedGlobalAiState(tenantId)
+              });
+              writeCachedGlobalAiState(tenantId, resolvedRealtimeAi);
               if (typeof payload.new.global_ai_enabled !== 'undefined') {
-                  setGlobalAiEnabled(payload.new.global_ai_enabled);
+                  setGlobalAiEnabled(resolvedRealtimeAi.enabled);
               }
-              if (payload.new.settings?.global_ai_audit) {
-                  setGlobalAiAuditInfo(payload.new.settings.global_ai_audit);
+              if (payload.new.settings?.global_ai_audit || resolvedRealtimeAi.audit) {
+                  setGlobalAiAuditInfo(resolvedRealtimeAi.audit);
               }
           }
       })
