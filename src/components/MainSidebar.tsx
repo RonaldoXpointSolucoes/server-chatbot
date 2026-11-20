@@ -59,8 +59,15 @@ import { cn } from '../lib/utils';
 import { useChatStore, hasUserAccessToInstance, instanceCache } from '../store/chatStore';
 import { useXPointRemoteBridge, useXPointRemoteStore } from '../hooks/useXPointRemoteBridge';
 import { resolveRemoteAccessEnabled } from '../utils/remoteAccess.mjs';
-import { supabase } from '../services/supabase';
+import {
+  isMasterWorkspaceAdmin,
+  mergeAndSortWorkspaces,
+  normalizeAllowedCompanyIds,
+  normalizeEmailValue
+} from '../utils/workspaceSwitcher.mjs';
+import { supabase, masterSupabase } from '../services/supabase';
 import { createPortal } from 'react-dom';
+import { WorkspaceSwitcherPopover } from './WorkspaceSwitcherPopover';
 import { getLocalNotificationPrefs, fetchUserInboxNotificationPreferences, toggleInboxNotification } from '../services/notificationPreferences';
 
 import { formatPhoneNumber } from '../utils/format';
@@ -267,6 +274,17 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
   }, [contacts, currentAgent, tenantId, instances]);
   
   const [userCompanies, setUserCompanies] = useState<any[]>([]);
+  const [isLoadingCompanies, setIsLoadingCompanies] = useState(false);
+  const workspaceTriggerRef = React.useRef<HTMLDivElement>(null);
+  const refreshCompaniesRef = React.useRef<((allowedOverride?: string[]) => Promise<any>) | null>(null);
+  const isMasterAdmin = useMemo(() => {
+    if (typeof window === 'undefined') return false;
+    return isMasterWorkspaceAdmin({
+      email: currentUserEmail,
+      adminToken: sessionStorage.getItem('admin_token') || localStorage.getItem('admin_token'),
+      saasAdmin: sessionStorage.getItem('saas_admin') || localStorage.getItem('saas_admin')
+    });
+  }, [currentUserEmail]);
   const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
   const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const [currentCompanyContext, setCurrentCompanyContext] = useState<any>(() => {
@@ -400,6 +418,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
           storage.setItem('current_user_id', session.user.id);
        }
 
+       let resolvedAllowedCompanies: string[] = [];
        if (userEmail && storage) {
            const { data: userData } = await supabase
              .from('tenant_users')
@@ -408,6 +427,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
              .maybeSingle();
              
            if (userData) {
+              resolvedAllowedCompanies = normalizeAllowedCompanyIds(userData.allowed_companies);
               const isRonaldo = userEmail?.toLowerCase() === 'ronaldo.xpointsolucoes@gmail.com';
               if (!isRonaldo) {
                  storage.setItem('allowed_companies', JSON.stringify(userData.allowed_companies || []));
@@ -423,7 +443,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
            }
        }
        
-       const comp = await fetchCompanies();
+       const comp = await fetchCompanies(resolvedAllowedCompanies);
        await fetchInstances(comp);
     };
 
@@ -513,85 +533,191 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
       }
     };
 
-    const fetchCompanies = async () => {
+    const fetchCompanies = async (allowedOverride?: string[]) => {
+      setIsLoadingCompanies(true);
       try {
-        const { data: currentCompany, error: currentError } = await supabase
+        const storage = getActiveStorage();
+        const allowedCompsStr = storage ? storage.getItem('allowed_companies') : null;
+        const allowedFromStorage = normalizeAllowedCompanyIds(allowedCompsStr);
+        const allowedCompanies = allowedOverride && allowedOverride.length > 0
+          ? allowedOverride
+          : allowedFromStorage;
+
+        if ((currentUserRole === 'agent' || currentUserRole === 'Agente') && allowedCompanies.length > 0 && !allowedCompanies.includes(tenantId)) {
+          const newTenantId = allowedCompanies[0];
+          if (storage) storage.setItem('current_tenant_id', newTenantId);
+          window.location.reload();
+          return null;
+        }
+
+        const isMaster = isMasterWorkspaceAdmin({
+          email: currentUserEmail,
+          adminToken: sessionStorage.getItem('admin_token') || localStorage.getItem('admin_token'),
+          saasAdmin: sessionStorage.getItem('saas_admin') || localStorage.getItem('saas_admin')
+        });
+
+        let currentCompany: any = null;
+        const { data: currData, error: currentError } = await supabase
           .from('companies')
           .select('*')
           .eq('id', tenantId)
           .maybeSingle();
-          
+
         if (currentError) {
-           console.warn("[DEBUG] MainSidebar fetchCompanies erro ao buscar empresa:", {
-             tenantId,
-             currentError
-           });
-           return null;
+          console.warn("[DEBUG] MainSidebar fetchCompanies erro ao buscar empresa:", {
+            tenantId,
+            currentError
+          });
+        } else if (currData) {
+          currentCompany = currData;
         }
 
-        if (!currentCompany) {
-           return null;
-        }
-        
-        setCurrentCompanyContext(currentCompany);
-        useChatStore.setState((s) =>
-          s.tenantInfo && s.tenantInfo.id === currentCompany.id && !s.tenantInfo.settings
-            ? { tenantInfo: currentCompany as any }
-            : {}
-        );
-        setGlobalAiEnabled(currentCompany.global_ai_enabled ?? true);
-        if (currentCompany.settings?.global_ai_audit) {
-           setGlobalAiAuditInfo(currentCompany.settings.global_ai_audit);
+        // Fallback seguro quando o JWT ainda está hidratando ou Master acessou outro tenant
+        if (!currentCompany && isMaster && tenantId) {
+          const { data: masterCurr } = await masterSupabase
+            .from('companies')
+            .select('*')
+            .eq('id', tenantId)
+            .maybeSingle();
+          if (masterCurr) currentCompany = masterCurr;
         }
 
-        const storage = getActiveStorage();
-        const allowedCompsStr = storage ? storage.getItem('allowed_companies') : null;
-        let allowedCompanies: string[] = [];
-        if (allowedCompsStr) {
-          try {
-             allowedCompanies = JSON.parse(allowedCompsStr);
-          } catch(e) {}
-        }
-
-        if (currentUserRole === 'agent' || currentUserRole === 'Agente') {
-           if (allowedCompanies.length > 0 && !allowedCompanies.includes(tenantId)) {
-               const newTenantId = allowedCompanies[0];
-               if (storage) storage.setItem('current_tenant_id', newTenantId);
-               window.location.reload();
-               return null;
-           }
+        if (currentCompany) {
+          setCurrentCompanyContext(currentCompany);
+          useChatStore.setState((s) =>
+            s.tenantInfo && s.tenantInfo.id === currentCompany.id && !s.tenantInfo.settings
+              ? { tenantInfo: currentCompany as any }
+              : {}
+          );
+          setGlobalAiEnabled(currentCompany.global_ai_enabled ?? true);
+          if (currentCompany.settings?.global_ai_audit) {
+            setGlobalAiAuditInfo(currentCompany.settings.global_ai_audit);
+          }
         }
 
         let companiesData: any[] = [];
-        
-        if (currentUserRole === 'agent' || currentUserRole === 'Agente') {
-           if (allowedCompanies.length > 0) {
-               const { data, error } = await supabase
-                 .from('companies')
-                 .select('id, name, status, plan_id')
-                 .in('id', allowedCompanies)
-                 .order('created_at', { ascending: false });
-               if (!error && data) companiesData = data;
-           }
-        } else if (currentCompany.email) {
-           const { data, error } = await supabase
-             .from('companies')
-             .select('id, name, status, plan_id')
-             .eq('email', currentCompany.email)
-             .order('created_at', { ascending: false });
-           if (!error && data) companiesData = data;
+
+        if (isMaster) {
+          const { data: allMasterComps, error: masterErr } = await masterSupabase
+            .from('companies')
+            .select('id, name, email, status, plan_id, economic_group_id')
+            .order('created_at', { ascending: false });
+          if (!masterErr && Array.isArray(allMasterComps) && allMasterComps.length > 0) {
+            companiesData = allMasterComps;
+          }
         }
 
-        setUserCompanies(companiesData);
-        return currentCompany;
+        if (companiesData.length === 0) {
+          const candidateMap = new Map<string, any>();
+          const authorizedIds = Array.from(new Set([tenantId, ...allowedCompanies].filter(Boolean)));
+          const matchEmails = Array.from(new Set([
+            normalizeEmailValue(currentUserEmail),
+            normalizeEmailValue(currentCompany?.email)
+          ].filter(Boolean)));
 
+          const queries: Promise<any>[] = [];
+
+          if (authorizedIds.length > 0) {
+            queries.push(
+              supabase
+                .from('companies')
+                .select('id, name, email, status, plan_id, economic_group_id')
+                .in('id', authorizedIds)
+            );
+          }
+
+          if (currentUserRole !== 'agent' && currentUserRole !== 'Agente') {
+            for (const mail of matchEmails) {
+              queries.push(
+                supabase
+                  .from('companies')
+                  .select('id, name, email, status, plan_id, economic_group_id')
+                  .eq('email', mail)
+              );
+            }
+            if (currentCompany?.economic_group_id) {
+              queries.push(
+                supabase
+                  .from('companies')
+                  .select('id, name, email, status, plan_id, economic_group_id')
+                  .eq('economic_group_id', currentCompany.economic_group_id)
+              );
+            }
+          }
+
+          const results = await Promise.allSettled(queries);
+          for (const res of results) {
+            if (res.status === 'fulfilled' && res.value?.data && Array.isArray(res.value.data)) {
+              for (const row of res.value.data) {
+                if (row?.id) candidateMap.set(row.id, row);
+              }
+            }
+          }
+
+          // Fallback estritamente restrito aos IDs já autorizados em tenant_users.allowed_companies se RLS atrasar
+          if (candidateMap.size === 0 && authorizedIds.length > 0 && currentUserEmail) {
+            const { data: verifiedUser } = await masterSupabase
+              .from('tenant_users')
+              .select('tenant_id, allowed_companies')
+              .ilike('email', currentUserEmail)
+              .maybeSingle();
+            const dbAllowed = Array.from(
+              new Set([
+                verifiedUser?.tenant_id,
+                ...normalizeAllowedCompanyIds(verifiedUser?.allowed_companies)
+              ].filter(Boolean))
+            );
+            if (dbAllowed.length > 0) {
+              const { data: allowedRows } = await masterSupabase
+                .from('companies')
+                .select('id, name, email, status, plan_id, economic_group_id')
+                .in('id', dbAllowed);
+              for (const row of allowedRows || []) {
+                if (row?.id) candidateMap.set(row.id, row);
+              }
+            }
+          }
+
+          companiesData = Array.from(candidateMap.values());
+        }
+
+        const merged = mergeAndSortWorkspaces({
+          companies: companiesData,
+          activeTenantId: tenantId,
+          activeCompanyFallback: currentCompany || tenantInfo || currentCompanyContext,
+          userEmail: currentUserEmail || currentCompany?.email,
+          preferredGroupId: currentCompany?.economic_group_id || tenantInfo?.economic_group_id || null
+        });
+
+        setUserCompanies(merged);
+        return currentCompany;
       } catch (err) {
         console.error('Erro ao buscar empresas multi-tenant:', err);
+        setUserCompanies((prev) =>
+          prev.length > 0
+            ? prev
+            : mergeAndSortWorkspaces({
+                companies: [],
+                activeTenantId: tenantId,
+                activeCompanyFallback: tenantInfo || currentCompanyContext,
+                userEmail: currentUserEmail
+              })
+        );
         return null;
+      } finally {
+        setIsLoadingCompanies(false);
       }
     };
 
+    refreshCompaniesRef.current = fetchCompanies;
+
     fetchAgentPermissionsAndData();
+
+    const { data: authSub } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        fetchCompanies();
+      }
+    });
     const sidebarChannelName = `sidebar_instances_realtime_${tenantId}`;
     const existingSidebarChannel = supabase.getChannels().find(c => c.topic === `realtime:${sidebarChannelName}`);
     if (existingSidebarChannel) {
@@ -689,6 +815,7 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
 
     return () => {
       if (debounceTimer) clearTimeout(debounceTimer);
+      authSub?.subscription?.unsubscribe();
       supabase.removeChannel(channel);
       supabase.removeChannel(permsChannel);
       supabase.removeChannel(companyChannel);
@@ -696,7 +823,8 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
   }, [tenantId]);
 
   const handleSwitchWorkspace = (company: any) => {
-    if (company.id === tenantId) return;
+    setShowWorkspaceMenu(false);
+    if (!company?.id || company.id === tenantId) return;
     
     // Higienização completa dos filtros de canal e estado do Acesso Remoto entre empresas
     localStorage.removeItem('activeChannelFilter');
@@ -712,12 +840,14 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
       useXPointRemoteStore.getState().resetForTenantChange(company.id);
     } catch (e) {}
     
-    if (localStorage.getItem('current_tenant_id')) {
-        localStorage.setItem('current_tenant_id', company.id);
-        localStorage.setItem('current_tenant_name', company.name);
-    } else {
-        sessionStorage.setItem('current_tenant_id', company.id);
-        sessionStorage.setItem('current_tenant_name', company.name);
+    const keepLogged = localStorage.getItem('keep_logged') === 'true' || Boolean(localStorage.getItem('current_tenant_id'));
+    if (keepLogged) {
+      localStorage.setItem('current_tenant_id', company.id);
+      localStorage.setItem('current_tenant_name', company.name);
+    }
+    if (sessionStorage.getItem('current_tenant_id') || !keepLogged) {
+      sessionStorage.setItem('current_tenant_id', company.id);
+      sessionStorage.setItem('current_tenant_name', company.name);
     }
     
     window.location.reload();
@@ -764,29 +894,66 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
       
       {/* Workspace Header Premium */}
       <div 
+        ref={workspaceTriggerRef}
+        role="button"
+        tabIndex={0}
+        aria-haspopup="dialog"
+        aria-expanded={showWorkspaceMenu}
         className={cn(
-          "h-16 flex items-center px-4 border-b border-gray-250/60 dark:border-[#2a3942]/60 transition-colors group relative z-50",
-          (userCompanies.length > 1 || currentUserRole === 'admin') ? "hover:bg-gray-200/50 dark:hover:bg-[#202c33] cursor-pointer" : ""
+          "h-16 flex items-center px-3.5 border-b border-gray-250/60 dark:border-[#2a3942]/60 transition-colors group relative z-30 select-none",
+          (userCompanies.length > 1 || currentUserRole === 'admin' || isMasterAdmin) ? "hover:bg-gray-200/60 dark:hover:bg-[#202c33] cursor-pointer active:scale-[0.99]" : ""
         )}
         onClick={() => {
-          if (userCompanies.length > 1 || currentUserRole === 'admin') {
-            setShowWorkspaceMenu(!showWorkspaceMenu);
+          if (userCompanies.length > 1 || currentUserRole === 'admin' || isMasterAdmin) {
+            const nextOpen = !showWorkspaceMenu;
+            setShowWorkspaceMenu(nextOpen);
+            if (nextOpen && userCompanies.length <= 1) {
+              refreshCompaniesRef.current?.();
+            }
+          }
+        }}
+        onKeyDown={(e) => {
+          if ((e.key === 'Enter' || e.key === ' ') && (userCompanies.length > 1 || currentUserRole === 'admin' || isMasterAdmin)) {
+            e.preventDefault();
+            setShowWorkspaceMenu(prev => !prev);
           }
         }}
       >
-        <img src="/pwa-192x192.png" alt="Logo" className="w-7 h-7 object-contain rounded-lg shadow-sm shrink-0" />
+        <div className="relative shrink-0">
+          <img src="/pwa-192x192.png" alt="Logo" className="w-8 h-8 object-contain rounded-xl shadow-sm ring-1 ring-black/5 dark:ring-white/10" />
+          <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-[#f0f2f5] dark:ring-[#111b21]" />
+        </div>
         <div className={cn("flex-1 min-w-0 ml-3 transition-all duration-200", "group-[.is-minimized]/sidebar:opacity-0 group-[.is-minimized]/sidebar:w-0 group-[.is-minimized]/sidebar:hidden group-hover/sidebar:!opacity-100 group-hover/sidebar:!w-auto group-hover/sidebar:!block")}>
-          <h2 className="font-semibold text-[#111b21] dark:text-[#e9edef] truncate text-[15px] tracking-tight group-hover:text-emerald-600 dark:group-hover:text-white transition-colors">
+          <h2 className="font-bold text-[#111b21] dark:text-[#e9edef] truncate text-[14.5px] leading-tight tracking-tight group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
             {tenantInfo?.name && tenantInfo.name !== 'Carregando...' 
               ? tenantInfo.name 
               : currentCompanyContext?.name && currentCompanyContext.name !== 'Carregando...' 
                 ? currentCompanyContext.name 
                 : (typeof window !== 'undefined' && localStorage.getItem('current_tenant_name') && localStorage.getItem('current_tenant_name') !== 'Carregando...' ? localStorage.getItem('current_tenant_name') : null) || 'X-Point Soluções'}
           </h2>
+          {(userCompanies.length > 1 || currentUserRole === 'admin' || isMasterAdmin) && (
+            <p className="text-[10px] font-medium text-[#667781] dark:text-[#8696a0] truncate mt-0.5">
+              {userCompanies.length > 1
+                ? `${userCompanies.length} empresas • Clique p/ trocar`
+                : 'Trocar empresa'}
+            </p>
+          )}
         </div>
-        {(userCompanies.length > 1 || currentUserRole === 'admin') && (
-          <div className={cn("bg-gray-200/60 dark:bg-[#2a3942] group-hover:bg-gray-300 dark:group-hover:bg-[#3b4a54] p-1 rounded transition-colors", "group-[.is-minimized]/sidebar:hidden group-hover/sidebar:!block")}>
-             <ChevronDown size={14} className="text-[#54656f] dark:text-[#8696a0] group-hover:text-emerald-600 dark:group-hover:text-white transition-colors" />
+        {(userCompanies.length > 1 || currentUserRole === 'admin' || isMasterAdmin) && (
+          <div className={cn(
+            "p-1.5 rounded-lg transition-all shrink-0 border",
+            showWorkspaceMenu
+              ? "bg-emerald-500/15 border-emerald-500/35 text-emerald-600 dark:text-emerald-400"
+              : "bg-gray-200/70 dark:bg-[#2a3942] border-transparent group-hover:bg-gray-300 dark:group-hover:bg-[#3b4a54] text-[#54656f] dark:text-[#8696a0]",
+            "group-[.is-minimized]/sidebar:hidden group-hover/sidebar:!flex items-center justify-center"
+          )}>
+            <ChevronDown
+              size={14}
+              className={cn(
+                "transition-transform duration-200",
+                showWorkspaceMenu ? "rotate-180 text-emerald-600 dark:text-emerald-400" : "group-hover:text-emerald-600 dark:group-hover:text-white"
+              )}
+            />
           </div>
         )}
 
@@ -797,55 +964,32 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
             e.stopPropagation();
             onClose?.();
           }}
-          className="lg:hidden p-1.5 ml-2 rounded-lg text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
+          className="lg:hidden p-2 ml-1.5 rounded-xl text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
           title="Fechar Menu"
           aria-label="Fechar Menu"
         >
           <X size={18} />
         </button>
-
-        {/* Workspace Dropdown Panel */}
-        {showWorkspaceMenu && (userCompanies.length > 1 || currentUserRole === 'admin') && (
-          <div className="absolute top-[68px] left-2 w-[340px] bg-white dark:bg-[#1e1e24] border border-gray-200 dark:border-[#2a2a2f] rounded-xl shadow-2xl overflow-hidden z-[9999] animate-in fade-in slide-in-from-top-2 duration-200">
-             
-             <div className="max-h-[300px] overflow-y-auto styled-scrollbar py-2">
-                {userCompanies.map((ws) => (
-                  <div 
-                    key={ws.id} 
-                    onClick={() => handleSwitchWorkspace(ws)}
-                    className={cn(
-                      "flex items-center justify-between px-4 py-2 hover:bg-gray-100 dark:hover:bg-[#2a2a2f]/50 cursor-pointer transition-colors",
-                      ws.id === tenantId ? "bg-indigo-500/10 dark:bg-indigo-500/20 border-l-2 border-indigo-500" : ""
-                    )}
-                  >
-                     <div className="flex items-center gap-3 min-w-0 flex-1">
-                        <div className="w-5 h-5 rounded bg-gradient-to-tr from-indigo-500/20 to-purple-500/20 flex items-center justify-center shrink-0 border border-indigo-500/30">
-                          <span className="text-[10px] font-bold text-indigo-400">{ws.name.substring(0, 1).toUpperCase()}</span>
-                        </div>
-                        <span className={cn("text-sm truncate", ws.id === tenantId ? "text-gray-900 dark:text-white font-medium" : "text-gray-700 dark:text-slate-300")}>{ws.name}</span>
-                     </div>
-                     {ws.id === tenantId && (
-                       <CheckCircle2 size={14} className="text-indigo-400 shrink-0 ml-2" />
-                     )}
-                  </div>
-                ))}
-             </div>
-             <div className="p-2 border-t border-gray-200 dark:border-[#2a2a2f] bg-gray-50 dark:bg-[#18181b]">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setShowWorkspaceMenu(false);
-                    navigate('/admin');
-                  }}
-                  className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-[#00a884] hover:bg-[#008f6f] text-white rounded-lg text-xs font-bold transition shadow-sm"
-                >
-                  <Plus size={14} />
-                  <span>Cadastrar Nova Empresa (Painel Master)</span>
-                </button>
-             </div>
-          </div>
-        )}
       </div>
+
+      {/* Seletor / Trocador de Empresa via Portal (nunca cortado ou oculto atrás do painel direito) */}
+      <WorkspaceSwitcherPopover
+        isOpen={showWorkspaceMenu && (userCompanies.length > 1 || currentUserRole === 'admin' || isMasterAdmin)}
+        anchorEl={workspaceTriggerRef.current}
+        companies={userCompanies}
+        activeTenantId={tenantId || null}
+        isLoading={isLoadingCompanies}
+        isMasterAdmin={isMasterAdmin}
+        canAccessMasterPanel={currentUserRole === 'admin' || isMasterAdmin}
+        preferredGroupId={currentCompanyContext?.economic_group_id || tenantInfo?.economic_group_id || null}
+        onSelectCompany={handleSwitchWorkspace}
+        onRefresh={() => refreshCompaniesRef.current?.()}
+        onOpenMasterPanel={() => {
+          setShowWorkspaceMenu(false);
+          navigate('/admin');
+        }}
+        onClose={() => setShowWorkspaceMenu(false)}
+      />
 
       <div className={cn("flex-1 overflow-y-auto w-full styled-scrollbar", reopenedTicketToast ? "pb-32" : "pb-20")}>
         

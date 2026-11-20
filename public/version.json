@@ -1,5 +1,5 @@
 {
-  "version": "8.2.9",
-  "buildDate": "2026-11-20T11:54:33.784Z",
-  "summary": "Blindagem Anti-Travamento Ponta a Ponta: Índice (tenant_id, timestamp DESC) contra Timeouts 57014 no Supabase, Timeout 18s + Fallback no Gatekeeper RAG e Timeouts de Rede no Frontend"
+  "version": "8.3.0",
+  "buildDate": "2026-11-20T13:40:10.943Z",
+  "summary": "Novo Seletor & Trocador de Empresas (Portal Flutuante Desktop & Bottom Sheet Mobile) com Busca Instantânea, Grupo Econômico e Correção de Corte/Lista Vazia"
 }

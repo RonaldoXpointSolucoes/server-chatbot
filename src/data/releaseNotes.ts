@@ -712,6 +712,55 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.3.0',
+    date: '2026-11-20',
+    summary: 'Novo Seletor & Trocador de Empresas (Portal Flutuante Desktop & Bottom Sheet Mobile) com Busca Instantânea, Grupo Econômico e Correção de Corte/Lista Vazia',
+    notes: [
+      {
+        id: 'feat-workspace-switcher-portal-830',
+        category: 'features',
+        title: 'Seletor & Trocador de Empresas Redesenhado (Portal + Busca + Mobile Bottom Sheet)',
+        description: 'Reconstrução completa do menu de troca de empresa na barra lateral (WorkspaceSwitcherPopover via createPortal no body com z-[99999]): nunca é cortado na borda de 260px nem escondido atrás do painel de chat, conta com busca instantânea por nome/e-mail, navegação por teclado (↑/↓/Enter/Esc), badges "Ativa" e "Grupo", Skeleton Loader durante carregamento e conversão automática para Bottom Sheet ergonômica (alvos >= 48px) em celulares.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+        guide: {
+          moduleGroup: 'system',
+          moduleLabel: 'Barra Lateral • Seletor & Trocador de Empresas',
+          purpose: 'Permitir visualizar e alternar com rapidez entre todas as empresas vinculadas (Multi-Empresa, Grupo Econômico, allowed_companies ou Painel Master) sem cortes visuais, sem sobreposição por painéis vizinhos e sem listas vazias.',
+          whereToAccess: [
+            '1. Menu Lateral Esquerdo ➔ Topo da Barra (nome da empresa atual + seta ▼)',
+            '2. Clique no card da empresa para abrir o Seletor Flutuante (ou Bottom Sheet no celular)',
+            '3. Digite na busca instantânea ou clique diretamente na empresa desejada para entrar, ou use o botão inferior para abrir o Painel Master (/admin)'
+          ],
+          howToTest: [
+            '1. No topo esquerdo da barra lateral, clique no nome da empresa atual ou no botão da seta (▼).',
+            '2. Confirme que o painel abre totalmente visível acima das demais áreas (sem cortar "Cadastrar Nova Empresa (Painel Master)") e lista suas empresas vinculadas com o selo "Ativa" na atual.',
+            '3. No celular ou janela estreita, confirme que o seletor abre em formato de gaveta inferior (Bottom Sheet) fluida e responsiva.'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Tela: Barra Lateral Esquerda ➔ Topo da Empresa Atual',
+            contextElements: ['🏢 Avatar + Nome da Empresa', '📊 X empresas vinculadas', '🛡️ Painel Master (/admin)'],
+            targetButtonLabel: '▼ Trocar Empresa (Topo)',
+            targetButtonPosition: 'Canto superior esquerdo da barra lateral, ao lado do nome da empresa ativa',
+            visualPreviewVariant: 'chat-history-sync'
+          },
+          quickAction: {
+            label: 'Testar no Painel (/chat)',
+            route: '/chat'
+          }
+        }
+      },
+      {
+        id: 'fix-workspace-list-empty-fallback-830',
+        category: 'fixes',
+        title: 'Correção Definitiva de Lista Vazia no Trocador de Empresas & Sincronização Multi-Storage',
+        description: 'Corrigido fetchCompanies em MainSidebar.tsx para considerar allowed_companies também para administradores, unir empresas do mesmo economic_group_id e e-mail, re-sincronizar após hidratação do JWT via onAuthStateChange, sincronizar localStorage e sessionStorage no handleSwitchWorkspace e garantir fallback da empresa ativa sem exibir bloco vazio.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      }
+    ]
+  },
+  {
     version: '8.2.9',
     date: '2026-11-20',
     summary: 'Blindagem Anti-Travamento Ponta a Ponta: Índice (tenant_id, timestamp DESC) contra Timeouts 57014 no Supabase, Timeout 18s + Fallback no Gatekeeper RAG e Timeouts de Rede no Frontend',
