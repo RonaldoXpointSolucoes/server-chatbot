@@ -25,6 +25,10 @@ import {
   resolvePhoneFallback,
   sanitizeContactNameValue
 } from '../utils/contactName.mjs';
+import {
+  pickHigherMessageStatus,
+  shouldReconcileMessageStatus
+} from '../utils/messageStatus.mjs';
 
 export const getBrPhoneVariations = (phoneStr: string | null | undefined): string[] => {
   if (!phoneStr) return [];
@@ -4359,20 +4363,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
 
           if (isMatch) {
-            // Evita regressão de status (ex: não regredir de read/delivered para sent)
-            const statusPriority: Record<string, number> = {
-              'pending': 1,
-              'sent': 2,
-              'server_ack': 2,
-              'delivered': 3,
-              'delivery_ack': 3,
-              'read': 4,
-              'played': 4
-            };
-            const currentPrio = statusPriority[String(m.status).toLowerCase()] || 0;
-            const newPrio = statusPriority[targetStatus] || 0;
-
-            const finalStatus = newPrio >= currentPrio ? newStatus : m.status;
+            // Evita regressão de status (ex: não regredir de read/delivered para SERVER_ACK/sent)
+            const finalStatus = pickHigherMessageStatus(m.status, newStatus) || m.status;
             const resolvedId = (!isValidUuid(m.id) && isValidUuid(identifier.id))
               ? identifier.id!
               : ((String(m.id).startsWith('optimistic-') || String(m.id).startsWith('EDGE_')) && (newWhatsappId || identifier.whatsapp_id) 
@@ -4425,9 +4417,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
           if (isMatch) {
             contactChanged = true;
             anyChanged = true;
+            const safeStatus = updates.status !== undefined
+              ? (pickHigherMessageStatus(m.status, updates.status) || m.status)
+              : m.status;
             return {
               ...m,
               ...updates,
+              status: safeStatus,
               id: updates.id || (!isValidUuid(m.id) && isValidUuid(identifier.id) ? identifier.id! : m.id),
               whatsapp_id: updates.whatsapp_id || m.whatsapp_id || identifier.whatsapp_id,
               mediaUrl: updates.mediaUrl !== undefined ? updates.mediaUrl : m.mediaUrl,
@@ -4461,7 +4457,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             (m.status === 'pending' && normalizeMessageTextForComparison(m.text) === normalizeMessageTextForComparison(text))
           );
 
-          if (msg && (msg.status === 'pending' || msg.status === 'sent')) {
+          if (msg && shouldReconcileMessageStatus(msg.status)) {
             const cleanText = (text || '').trim();
             let query = supabase.from('messages').select('id, whatsapp_message_id, status');
             if (waId && !waId.startsWith('EDGE_')) {

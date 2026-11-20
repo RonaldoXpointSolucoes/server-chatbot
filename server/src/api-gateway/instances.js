@@ -1770,7 +1770,13 @@ router.post('/instances/:instanceId/send-media-url', requireTenant, express.json
 
                 Promise.resolve().then(async () => {
                     try {
-                        const { default: eventProcessor } = await import('../event-processor/index.js');
+                        const { EventProcessor, default: eventProcessor } = await import('../event-processor/index.js');
+                        const epClass = EventProcessor || eventProcessor?.constructor;
+                        if (epClass && realWaId) {
+                            if (!epClass.humanMessagesCache) epClass.humanMessagesCache = new Map();
+                            epClass.humanMessagesCache.set(`${instanceId}_${realWaId}`, true);
+                            setTimeout(() => epClass.humanMessagesCache && epClass.humanMessagesCache.delete(`${instanceId}_${realWaId}`), 60000);
+                        }
                         const msgPayload = directRes?.message || (
                             messageType === 'image' ? { imageMessage: { url: mediaUrl, mimetype: detectedMime, caption: caption || '' } } :
                             messageType === 'video' ? { videoMessage: { url: mediaUrl, mimetype: detectedMime, caption: caption || '' } } :

@@ -320,4 +320,66 @@ export function resolveBatchContactName(existingContact, incomingName, targetPho
     return sanitizeIncomingContactName(incomingName, targetPhone, blockedNames) || targetPhone;
 }
 
+export const STATUS_PRIORITY = Object.freeze({
+    pending: 0,
+    sent: 1,
+    server_ack: 2,
+    delivered: 3,
+    delivery_ack: 3,
+    read: 4,
+    played: 5
+});
+
+/**
+ * Maps a message delivery/read status string to a monotonic precedence rank.
+ * Unknown or empty statuses resolve to -1 so valid acks can advance them safely.
+ */
+export function resolveStatusPriority(status) {
+    if (typeof status !== 'string') return -1;
+    const normalized = status.trim().toLowerCase();
+    return Object.hasOwn(STATUS_PRIORITY, normalized) ? STATUS_PRIORITY[normalized] : -1;
+}
+
+/**
+ * Returns true only when transitioning from currentStatus to nextStatus
+ * strictly advances delivery progress without ever regressing (e.g. blocks
+ * late companion SERVER_ACK from overwriting delivered/read/played).
+ */
+export function shouldAcceptStatusTransition(currentStatus, nextStatus) {
+    const nextRank = resolveStatusPriority(nextStatus);
+    if (nextRank < 0) return false;
+    const currentRank = resolveStatusPriority(currentStatus);
+    return nextRank > currentRank;
+}
+
+/**
+ * Normalizes a Baileys protobuf/unix timestamp into a bounded Date,
+ * falling back to nowMs if missing, future-skewed (>60s), or >30 days stale.
+ */
+export function parseWhatsAppTimestamp(timestampSecs, nowMs = Date.now()) {
+    let tsDate = new Date(nowMs);
+    if (typeof timestampSecs === 'number') {
+        tsDate = new Date(timestampSecs * 1000);
+    } else if (timestampSecs && typeof timestampSecs.low === 'number') {
+        tsDate = new Date(timestampSecs.low * 1000);
+    }
+    const originalMs = tsDate.getTime();
+    if (originalMs > 0 && originalMs <= nowMs + 60000 && (nowMs - originalMs < 30 * 86400000)) {
+        return new Date(originalMs);
+    }
+    return new Date(nowMs);
+}
+
+/**
+ * Identifies whether a messages.upsert event represents historical sync
+ * (append/reconcile or older than 60s) rather than a live realtime message.
+ */
+export function isHistoricalUpsert(upsertType, tsDate, nowMs = Date.now()) {
+    return Boolean(
+        upsertType === 'append' ||
+        upsertType === 'reconcile' ||
+        (tsDate && (nowMs - tsDate.getTime() > 60000))
+    );
+}
+
 

@@ -23,19 +23,26 @@ import {
     getCanonicalBrPhone,
     getBrPhoneVariations,
     sanitizeIncomingContactName,
-    resolveBatchContactName
+    resolveBatchContactName,
+    resolveStatusPriority,
+    shouldAcceptStatusTransition,
+    parseWhatsAppTimestamp,
+    isHistoricalUpsert
 } from './helpers.js';
 import { createInstanceConfigLoader, createOrderDetailsFetcher } from './resilience.js';
 
 class EventProcessor {
-    constructor() {
+    constructor(options = {}) {
+        const startBackgroundLoops = options.startBackgroundLoops !== false;
         this.messageQueue = [];
         this.isFlushing = false;
         this.flushPending = false;
         this.tenantInstancesCache = new Map();
         
         // Loop de processamento em lote de segurança a cada 500ms
-        setInterval(() => this.flushQueue(), 500);
+        if (startBackgroundLoops) {
+            setInterval(() => this.flushQueue(), 500).unref?.();
+        }
         
         this.tenantConfigs = new Map();
         this.instanceConfigs = new Map();
@@ -67,34 +74,36 @@ class EventProcessor {
         this.isFlushingStatus = false;
         
         // Loop de reconciliation assíncrono para status (a cada 1s)
-        setInterval(() => this.flushStatusQueue(), 1000);
+        if (startBackgroundLoops) {
+            setInterval(() => this.flushStatusQueue(), 1000).unref?.();
 
-        // Loop de auto-recuperação de mensagens não sincronizadas (Self-Healing a cada 60s)
-        setInterval(() => this.reconcileMissingMessages(), 60000);
-        
-        // Cleanup loop para evitar memory leaks nos status pendentes e cache de mensagens processadas
-        setInterval(() => {
-            const now = Date.now();
-            for (const [key, value] of this.pendingStatuses.entries()) {
-                if (now - value.timestamp > 300000) { // 5 minutos de TTL
-                    this.pendingStatuses.delete(key);
-                }
-            }
-            if (this.processedMessagesCache) {
-                for (const [key, timestamp] of this.processedMessagesCache.entries()) {
-                    if (now - timestamp > 120000) { // 2 minutos de TTL
-                        this.processedMessagesCache.delete(key);
+            // Loop de auto-recuperação de mensagens não sincronizadas (Self-Healing a cada 60s)
+            setInterval(() => this.reconcileMissingMessages(), 60000).unref?.();
+            
+            // Cleanup loop para evitar memory leaks nos status pendentes e cache de mensagens processadas
+            setInterval(() => {
+                const now = Date.now();
+                for (const [key, value] of this.pendingStatuses.entries()) {
+                    if (now - value.timestamp > 300000) { // 5 minutos de TTL
+                        this.pendingStatuses.delete(key);
                     }
                 }
-            }
-            if (this.profilePicCache && this.profilePicCache.size > 0) {
-                for (const [key, timestamp] of this.profilePicCache.entries()) {
-                    if (now - timestamp > 6 * 60 * 60 * 1000) { // 6 horas de TTL
-                        this.profilePicCache.delete(key);
+                if (this.processedMessagesCache) {
+                    for (const [key, timestamp] of this.processedMessagesCache.entries()) {
+                        if (now - timestamp > 120000) { // 2 minutos de TTL
+                            this.processedMessagesCache.delete(key);
+                        }
                     }
                 }
-            }
-        }, 60000);
+                if (this.profilePicCache && this.profilePicCache.size > 0) {
+                    for (const [key, timestamp] of this.profilePicCache.entries()) {
+                        if (now - timestamp > 6 * 60 * 60 * 1000) { // 6 horas de TTL
+                            this.profilePicCache.delete(key);
+                        }
+                    }
+                }
+            }, 60000).unref?.();
+        }
     }
 
     async reconcileMissingMessages() {
@@ -197,16 +206,25 @@ class EventProcessor {
     }
     
     updatePendingStatus(msgId, newStatus) {
-        if (!this.pendingStatuses) return;
+        if (!this.pendingStatuses) return false;
         const existing = this.pendingStatuses.get(msgId);
-        if (existing) {
-            if (existing.status === 'read') return; // Cannot downgrade from read
-            if (existing.status === 'delivered' && newStatus === 'SERVER_ACK') return; // Cannot downgrade from delivered
+        if (!shouldAcceptStatusTransition(existing?.status, newStatus)) {
+            return false; // Block equal or regressive status updates (e.g. late SERVER_ACK after delivered)
         }
         this.pendingStatuses.set(msgId, { status: newStatus, timestamp: Date.now() });
+        return true;
     }
 
     queueStatusUpdate(tenantId, instanceId, messageId, status) {
+        if (resolveStatusPriority(status) < 0) return false;
+        const queued = this.statusUpdateQueue.get(messageId);
+        if (queued && !shouldAcceptStatusTransition(queued.status, status)) {
+            return false; // Never overwrite a queued higher/equal status with a stale lower ack
+        }
+        const pending = this.pendingStatuses?.get(messageId);
+        if (!queued && pending && resolveStatusPriority(status) < resolveStatusPriority(pending.status)) {
+            return false;
+        }
         // Enfileira para reconciliation assíncrono caso o banco sofra delay (Race Condition Mitigation)
         this.statusUpdateQueue.set(messageId, {
             tenantId,
@@ -214,6 +232,7 @@ class EventProcessor {
             status,
             timestamp: Date.now()
         });
+        return true;
     }
 
     async flushStatusQueue() {
@@ -242,7 +261,7 @@ class EventProcessor {
 
             if (toProcess.length === 0) return;
 
-            // Agrupa as atualizações pendentes por status para fazer bulk update
+            // Agrupa as atualizações pendentes por status para fazer bulk update (aplica do menor para o maior)
             const statusGroups = {
                 'SERVER_ACK': [],
                 'delivered': [],
@@ -266,16 +285,12 @@ class EventProcessor {
                              .in('whatsapp_message_id', chunk);
 
                          if (existing && existing.length > 0) {
-                             const idsToUpdate = existing.filter(e => {
-                                 // Evita regressão
-                                 if (e.status === 'read' && status !== 'read') return false;
-                                 if (e.status === 'delivered' && status === 'SERVER_ACK') return false;
-                                 return true;
-                             }).map(e => e.id);
+                             const rowsToUpdate = existing.filter(e => shouldAcceptStatusTransition(e.status, status));
+                             const idsToUpdate = rowsToUpdate.map(e => e.id);
 
                              if (idsToUpdate.length > 0) {
                                  await supabase.from('messages').update({ status }).in('id', idsToUpdate);
-                                 for (const e of existing) {
+                                 for (const e of rowsToUpdate) {
                                      const targetTenant = e.tenant_id || this.tenantId;
                                      if (targetTenant) {
                                          realtime.publishInboxEvent(targetTenant, 'message.update', {
@@ -617,6 +632,10 @@ class EventProcessor {
                 // para que a interface (CRM) possa mostrar conversas de 'self-chat' (testes do próprio usuário).
                 const isSelfChat = (ownerPhone && phone === ownerPhone);
 
+                // Trata data da mensagem e classificação histórica antes de rotular a origem do envio fromMe
+                const tsDate = parseWhatsAppTimestamp(msg.messageTimestamp);
+                const isHistory = isHistoricalUpsert(m.type, tsDate);
+
                 const humanCacheEntry = EventProcessor.humanMessagesCache && EventProcessor.humanMessagesCache.get(`${instanceId}_${msg.key.id}`);
                 const isHuman = Boolean(humanCacheEntry);
                 const botCacheEntry = EventProcessor.botMessagesCache && EventProcessor.botMessagesCache.get(`${instanceId}_${msg.key.id}`);
@@ -648,24 +667,6 @@ class EventProcessor {
                 const pushName = (msg.key.fromMe && !isSelfChat)
                     ? phone
                     : sanitizeIncomingContactName(msg.pushName, phone);
-                
-                // Trata data da mensagem
-                const timestampSecs = msg.messageTimestamp;
-                let tsDate = new Date();
-                if (typeof timestampSecs === 'number') {
-                    tsDate = new Date(timestampSecs * 1000);
-                } else if (timestampSecs && typeof timestampSecs.low === 'number') {
-                    tsDate = new Date(timestampSecs.low * 1000);
-                }
-
-                // Preserva a fidelidade do horário real de envio da mensagem no WhatsApp
-                const nowMs = Date.now();
-                const originalMs = tsDate.getTime();
-                if (originalMs > 0 && originalMs <= nowMs + 60000 && (nowMs - originalMs < 30 * 86400000)) {
-                    tsDate = new Date(originalMs);
-                } else {
-                    tsDate = new Date(nowMs);
-                }
 
 
                 let textMessage = this.extractTextFromMessage(msg);
@@ -908,12 +909,12 @@ class EventProcessor {
                     msgType,
                     textMessage,
                     isSelfChat,
-                    isHistory: Boolean(m.type === 'append' || m.type === 'reconcile' || (tsDate && (Date.now() - tsDate.getTime() > 60000)))
+                    isHistory
                 });
 
                 // Otimização de Baixa Latência (<1s): Força flush imediato da fila para mensagens em tempo real
                 // (tanto mensagens do cliente no WhatsApp quanto do atendente no CRM)
-                const isLiveRealtime = !Boolean(m.type === 'append' || m.type === 'reconcile' || (tsDate && (Date.now() - tsDate.getTime() > 60000)));
+                const isLiveRealtime = !isHistory;
                 console.log(`[EventProcessor] [MSG_TRACE:INBOUND_ENQUEUED] Instância: ${instanceId} | MsgId: ${msg.key?.id} | De: ${phone} | Direção: ${direction} | Live: ${isLiveRealtime}`);
 
                 if (senderType === 'human' || isLiveRealtime) {
@@ -1670,9 +1671,9 @@ class EventProcessor {
                                  stream = await downloadContentFromMessage(mediaMeta, b.msgType.replace('Message', ''));
                              } catch (dlErr) {
                                  const dlMsg = dlErr?.message || String(dlErr || '');
-                                 if (dlMsg.includes('Failed to fetch stream') && typeof sock?.updateMediaMessage === 'function' && b.rawMsg?.key) {
+                                 if (dlMsg.includes('Failed to fetch stream') && typeof b.sock?.updateMediaMessage === 'function' && b.rawMsg?.key) {
                                      try {
-                                         const updatedMsg = await sock.updateMediaMessage(b.rawMsg);
+                                         const updatedMsg = await b.sock.updateMediaMessage(b.rawMsg);
                                          const refreshedMeta = this.extractMediaMeta(updatedMsg || b.rawMsg, b.msgType) || mediaMeta;
                                          stream = await downloadContentFromMessage(refreshedMeta, b.msgType.replace('Message', ''));
                                      } catch (refreshErr) {
@@ -2353,7 +2354,9 @@ class EventProcessor {
                 const { data: instCheck } = await supabase.from('whatsapp_instances').select('id, tenant_id').eq('id', instanceId).limit(1);
                 if (!instCheck || instCheck.length === 0) {
                     console.warn(`[EventProcessor] Instância ${instanceId} não existe mais no banco de dados. Encerrando sessão de memória residual.`);
-                    sessionManager.closeSession(instanceId).catch(() => {});
+                    import('../session-manager/index.js')
+                        .then(({ default: sessionManager }) => sessionManager?.closeSession?.(instanceId))
+                        .catch(() => {});
                     return;
                 }
                 if (instCheck[0].tenant_id && instCheck[0].tenant_id !== '00000000-0000-0000-0000-000000000000') {
@@ -2486,6 +2489,20 @@ class EventProcessor {
         return extractTypeFromMessage(msg);
     }
 
+    applyOutboundStatusUpdate(tenantId, instanceId, messageId, newStatus) {
+        if (!messageId || !newStatus) return false;
+        // Only advance forward; rejects delayed SERVER_ACK / duplicate receipts cleanly
+        if (!this.updatePendingStatus(messageId, newStatus)) {
+            return false;
+        }
+        this.queueStatusUpdate(tenantId, instanceId, messageId, newStatus);
+        realtime.publishInboxEvent(tenantId, 'message.update', {
+            whatsapp_message_id: messageId,
+            status: newStatus
+        }).catch(() => {});
+        return true;
+    }
+
     async handleMessageReceiptUpdate(tenantId, instanceId, sock, updates) {
         if (!updates || updates.length === 0) return;
         tenantId = await this.resolveInstanceTenantId(instanceId, tenantId);
@@ -2519,16 +2536,7 @@ class EventProcessor {
                     details: { status: newStatus, source: 'message-receipt.update' }
                 });
 
-                // Salva na memória p/ flushQueue (novas mensagens)
-                this.updatePendingStatus(update.key.id, newStatus);
-                // Enfileira p/ reconciliation (mensagens já existentes)
-                this.queueStatusUpdate(tenantId, instanceId, update.key.id, newStatus);
-
-                // Notifica a interface em tempo real via Broadcast (<50ms de latência)
-                realtime.publishInboxEvent(tenantId, 'message.update', {
-                    whatsapp_message_id: update.key.id,
-                    status: newStatus
-                }).catch(() => {});
+                this.applyOutboundStatusUpdate(tenantId, instanceId, update.key.id, newStatus);
             }
 
         } catch (e) {
@@ -2558,16 +2566,7 @@ class EventProcessor {
                         whatsappMessageId: key.id, direction: 'outbound',
                         details: { status: newStatus, source: 'messages.update' }
                     });
-                    // Salva na memória p/ flushQueue
-                    this.updatePendingStatus(key.id, newStatus);
-                    // Enfileira p/ reconciliation assíncrona
-                    this.queueStatusUpdate(tenantId, instanceId, key.id, newStatus);
-
-                    // Notifica a interface em tempo real via Broadcast (<50ms de latência)
-                    realtime.publishInboxEvent(tenantId, 'message.update', {
-                        whatsapp_message_id: key.id,
-                        status: newStatus
-                    }).catch(() => {});
+                    this.applyOutboundStatusUpdate(tenantId, instanceId, key.id, newStatus);
                 } else {
                     const is463Error = (update.messageStubParameters && update.messageStubParameters[0] === '463') || (update.error === '463') || (update.error && String(update.error).includes('463'));
                     if (is463Error && key?.id) {
