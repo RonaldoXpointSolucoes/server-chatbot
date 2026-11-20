@@ -13,6 +13,7 @@ import {
 
 export const ALLOWED_AUTHOR_SENDER_TYPES = new Set(['client', 'human', 'agent']);
 export const ACTIVE_RUN_STATUSES = ['queued', 'collecting', 'filtering', 'synthesizing', 'vectorizing'];
+export const ORPHAN_RUN_TIMEOUT_MS = 20 * 60 * 1000;
 export const MAX_MAP_BATCHES = 10;
 export const MAX_DISCARDED_SAMPLES = 15;
 
@@ -370,9 +371,18 @@ function buildCompanyWhitelist(companySettings = {}, repeatedCompanyTokens = new
         addValue(companySettings.chave_pix);
         addValue(companySettings.zipCode);
         addValue(companySettings.cep);
-        addValue(companySettings.phone);
-        addValue(companySettings.whatsapp);
         addValue(companySettings.email);
+
+        for (const rawPhone of [companySettings.phone, companySettings.whatsapp]) {
+            if (!rawPhone) continue;
+            addValue(rawPhone);
+            const digits = String(rawPhone).replace(/\D/g, '');
+            if (digits.length >= 10 && digits.length <= 11) {
+                digitWhitelist.add(`55${digits}`);
+            } else if (digits.startsWith('55') && digits.length >= 12) {
+                digitWhitelist.add(digits.slice(2));
+            }
+        }
     }
 
     let storeStreetCore = '';
@@ -431,9 +441,9 @@ export function maskPiiPreservingCompanyData(text = '', companySettings = {}, re
         digitWhitelist.has(digits) ? m : `${prefix}[CEP_PROTEGIDO]`
     ));
 
-    // 5. Client delivery addresses (street + number / block + apt)
+    // 5. Client delivery addresses (street + number / multi-part block + apt)
     maskedText = maskedText.replace(
-        /\b(?:rua|av\.?|avenida|travessa|alameda|estrada|rodovia)\s+[^\n,;]{3,55}(?:,?\s*(?:n[º°]?\.?\s*)?\d{1,5})?(?:[^\n.]{0,45}?(?:bloco|torre|ap(?:to)?\.?|apartamento|casa)\s*[a-zA-Z0-9-]+)?/gi,
+        /\b(?:rua|av\.?|avenida|travessa|alameda|estrada|rodovia)\s+[^\n,;]{3,55}(?:,?\s*(?:n[º°]?\.?\s*)?\d{1,5})?(?:[,\s-]+(?:bloco|torre|ap(?:to)?\.?|apartamento|casa|lote|quadra|fundos|sala)\s*[a-zA-Z0-9-]+)*/gi,
         (match) => {
             const normMatch = normalizeForComparison(match);
             if (storeStreetCore && normMatch.includes(storeStreetCore)) {
@@ -445,7 +455,7 @@ export function maskPiiPreservingCompanyData(text = '', companySettings = {}, re
     );
 
     maskedText = maskedText.replace(
-        /\b(?:torre\s*\d+|bloco\s*[a-z0-9]+)\s*[-,]?\s*(?:ap(?:to)?\.?|apartamento)\s*\d+\b/gi,
+        /\b(?:(?:torre\s*\d+|bloco\s*[a-z0-9]+)(?:[,\s-]+(?:ap(?:to)?\.?|apartamento)\s*\d+[a-z]?)?|(?:ap(?:to)?\.?|apartamento)\s*\d+[a-z]?)\b/gi,
         () => {
             maskedCount++;
             return '[COMPLEMENTO_PROTEGIDO]';
@@ -469,8 +479,15 @@ export function extractBehaviorProfileSummary(markdown = '', maxLength = 900) {
     const text = String(markdown || '').trim();
     if (!text) return '';
 
-    const sectionMatch = text.match(/#\s*(?:\d+\.\s*)?[^\n]*(?:Identidade|Comportamento|Tom de Voz)[^\n]*\n([\s\S]*?)(?=\n#\s+|$)/i);
-    const body = (sectionMatch ? sectionMatch[1] : text).trim();
+    const sectionMatch = text.match(/^#{1,3}\s*(?:\d+\.\s*)?[^\n]*(?:Identidade|Comportamento|Tom de Voz)[^\n]*\r?\n([\s\S]*?)(?=\r?\n#{1,3}\s+|$)/im);
+    let body = '';
+    if (sectionMatch) {
+        body = sectionMatch[1].trim();
+    } else if (!/^#{1,3}\s+/m.test(text)) {
+        body = text;
+    } else {
+        return '';
+    }
     if (!body) return '';
 
     if (body.length <= maxLength) return body;
@@ -892,7 +909,10 @@ Responda APENAS com o Markdown final limpo, sem introduções fora dos títulos.
 async function updateRunRecord(supabase, runId, patch) {
     const { error } = await supabase
         .from('inbox_knowledge_runs')
-        .update(patch)
+        .update({
+            ...patch,
+            updated_at: new Date().toISOString()
+        })
         .eq('id', runId);
     if (error) {
         console.warn(`[InboxAnalyzer] Falha ao atualizar run ${runId}:`, error.message);
@@ -1300,15 +1320,29 @@ export async function startInboxDeepAnalysis({
         throw err;
     }
 
-    const { data: activeRun } = await supabase
+    const { data: existingActiveRuns } = await supabase
         .from('inbox_knowledge_runs')
         .select('*')
         .eq('tenant_id', tenantId)
         .eq('instance_id', instanceId)
         .in('status', ACTIVE_RUN_STATUSES)
         .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .limit(5);
+
+    const nowMs = Date.now();
+    let activeRun = null;
+    for (const candidateRun of (existingActiveRuns || [])) {
+        const refTs = Date.parse(candidateRun.updated_at || candidateRun.created_at || '') || 0;
+        if (refTs > 0 && (nowMs - refTs) > ORPHAN_RUN_TIMEOUT_MS) {
+            await updateRunRecord(supabase, candidateRun.id, {
+                status: 'failed',
+                error_message: 'Execução anterior expirada (reinício ou timeout do servidor).',
+                completed_at: new Date().toISOString()
+            });
+        } else if (!activeRun) {
+            activeRun = candidateRun;
+        }
+    }
 
     if (activeRun) {
         return { conflict: true, activeRun };
@@ -1342,7 +1376,21 @@ export async function startInboxDeepAnalysis({
         .select('*')
         .single();
 
-    if (insErr) throw insErr;
+    if (insErr) {
+        if (insErr.code === '23505') {
+            const { data: racedRun } = await supabase
+                .from('inbox_knowledge_runs')
+                .select('*')
+                .eq('tenant_id', tenantId)
+                .eq('instance_id', instanceId)
+                .in('status', ACTIVE_RUN_STATUSES)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+            return { conflict: true, activeRun: racedRun || null };
+        }
+        throw insErr;
+    }
 
     const completionPromise = runInboxDeepAnalysisJob({
         supabase,

@@ -39,11 +39,22 @@ export function buildInboxKnowledgeMigrationSql() {
             document_id uuid NULL,
             error_message text NULL,
             created_at timestamp with time zone NOT NULL DEFAULT now(),
+            updated_at timestamp with time zone NOT NULL DEFAULT now(),
             completed_at timestamp with time zone NULL
           );
 
+          ALTER TABLE IF EXISTS public.inbox_knowledge_runs
+            ADD COLUMN IF NOT EXISTS updated_at timestamp with time zone NOT NULL DEFAULT now();
+
+          ALTER TABLE IF EXISTS public.inbox_knowledge_runs ENABLE ROW LEVEL SECURITY;
+          REVOKE ALL ON TABLE public.inbox_knowledge_runs FROM anon, authenticated;
+
           CREATE INDEX IF NOT EXISTS inbox_knowledge_runs_tenant_instance_idx
             ON public.inbox_knowledge_runs (tenant_id, instance_id, created_at DESC);
+
+          CREATE UNIQUE INDEX IF NOT EXISTS inbox_knowledge_runs_active_unique_idx
+            ON public.inbox_knowledge_runs (tenant_id, instance_id)
+            WHERE status IN ('queued', 'collecting', 'filtering', 'synthesizing', 'vectorizing');
 
           DROP FUNCTION IF EXISTS public.match_knowledge_chunks(vector, double precision, integer, uuid);
           DROP FUNCTION IF EXISTS public.match_knowledge_chunks(vector, double precision, integer, uuid, text);
@@ -62,6 +73,7 @@ export function buildInboxKnowledgeMigrationSql() {
           RETURNS TABLE (
             id uuid,
             document_id uuid,
+            instance_id uuid,
             content text,
             metadata jsonb,
             similarity double precision
@@ -75,6 +87,7 @@ export function buildInboxKnowledgeMigrationSql() {
             SELECT
               kc.id,
               kc.document_id,
+              kc.instance_id,
               kc.content,
               kc.metadata,
               1 - (kc.embedding <=> query_embedding) AS similarity
@@ -107,6 +120,7 @@ export function buildInboxKnowledgeMigrationSql() {
           RETURNS TABLE (
             id uuid,
             document_id uuid,
+            instance_id uuid,
             document_name text,
             content text,
             metadata jsonb,
@@ -178,6 +192,7 @@ export function buildInboxKnowledgeMigrationSql() {
               SELECT
                 coalesce(v.id, l.id) AS id,
                 coalesce(v.document_id, l.document_id) AS document_id,
+                coalesce(v.instance_id, l.instance_id) AS instance_id,
                 coalesce(v.document_name, l.document_name) AS document_name,
                 coalesce(v.content, l.content) AS content,
                 coalesce(v.metadata, l.metadata) AS metadata,

@@ -417,3 +417,31 @@ test('startInboxDeepAnalysis preserves previous watermark untouched if LLM fails
     assert.match(supabase._state.runs[0].error_message, /Gemini 503/i);
     assert.equal(supabase._state.instance.last_knowledge_analyzed_at, prevTs, 'Watermark MUST NOT advance on failure');
 });
+
+test('startInboxDeepAnalysis recovers stale orphaned active runs older than 20 minutes so server crashes never deadlock', async () => {
+    const staleCreated = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    const supabase = createJobSupabaseMock({
+        runs: [{
+            id: 'run-orphan',
+            tenant_id: TENANT_ID,
+            instance_id: INSTANCE_ID,
+            status: 'synthesizing',
+            progress_pct: 50,
+            created_at: staleCreated,
+            updated_at: staleCreated
+        }],
+        messages: []
+    });
+
+    const res = await analyzer.startInboxDeepAnalysis({
+        supabase,
+        tenantId: TENANT_ID,
+        instanceId: INSTANCE_ID,
+        mode: 'incremental',
+        deps: { resolveApiKey: async () => 'fake-key' }
+    });
+
+    assert.equal(res.conflict, undefined, 'Orphaned stale run must be expired instead of permanently blocking');
+    assert.equal(supabase._state.runs[0].status, 'failed');
+    await res.completionPromise;
+});

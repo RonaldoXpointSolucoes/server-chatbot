@@ -38,3 +38,15 @@ test('buildInboxKnowledgeMigrationSql drops overloaded RPC signatures and adds p
     assert.match(sql, /GRANT EXECUTE ON FUNCTION public\.match_knowledge_chunks\(vector\(384\), double precision, integer, uuid, text, uuid\) TO anon, authenticated, service_role/i);
     assert.match(sql, /GRANT EXECUTE ON FUNCTION public\.match_knowledge_chunks_hybrid\(vector\(384\), text, uuid, text, double precision, integer, uuid\) TO anon, authenticated, service_role/i);
 });
+
+test('buildInboxKnowledgeMigrationSql secures inbox_knowledge_runs with RLS+REVOKE, orphan lock index, and returns instance_id from RPCs', () => {
+    const sql = buildInboxKnowledgeMigrationSql();
+
+    assert.match(sql, /ALTER TABLE IF EXISTS public\.inbox_knowledge_runs ENABLE ROW LEVEL SECURITY;/i);
+    assert.match(sql, /REVOKE ALL ON TABLE public\.inbox_knowledge_runs FROM anon, authenticated;/i);
+    assert.match(sql, /updated_at timestamp with time zone NOT NULL DEFAULT now\(\)/i);
+    assert.match(sql, /CREATE UNIQUE INDEX IF NOT EXISTS inbox_knowledge_runs_active_unique_idx/i);
+
+    assert.match(sql, /CREATE OR REPLACE FUNCTION public\.match_knowledge_chunks\([\s\S]*RETURNS TABLE \([\s\S]*instance_id uuid/i);
+    assert.match(sql, /CREATE OR REPLACE FUNCTION public\.match_knowledge_chunks_hybrid\([\s\S]*RETURNS TABLE \([\s\S]*instance_id uuid/i);
+});

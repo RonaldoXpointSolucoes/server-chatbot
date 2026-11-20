@@ -373,6 +373,17 @@ router.post('/commit', async (req, res) => {
         const agent_id = req.headers['x-agent-id'] || req.body?.agent_id || null;
         if (!tenant_id) return res.status(400).json({ error: 'x-tenant-id required' });
 
+        const hasExplicitInstance =
+            Object.prototype.hasOwnProperty.call(req.body || {}, 'instanceId') ||
+            Object.prototype.hasOwnProperty.call(req.body || {}, 'instance_id') ||
+            Boolean(req.headers['x-instance-id']);
+        const rawInstanceId = hasExplicitInstance
+            ? (req.body?.instanceId ?? req.body?.instance_id ?? req.headers['x-instance-id'] ?? null)
+            : undefined;
+        const resolvedCommitInstanceId = rawInstanceId === undefined
+            ? undefined
+            : (isValidUuid(rawInstanceId) ? String(rawInstanceId).trim() : null);
+
         const {
             mode = 'create',
             targetDocumentId = null,
@@ -381,7 +392,6 @@ router.post('/commit', async (req, res) => {
             content,
             qualityScore = 90,
             source = 'curated_rag_v2',
-            instanceId = req.body?.instance_id || req.headers['x-instance-id'] || null,
             behaviorProfile = null
         } = req.body || {};
 
@@ -395,7 +405,7 @@ router.post('/commit', async (req, res) => {
             transformer,
             tenantId: tenant_id,
             agentId: agent_id,
-            instanceId: isValidUuid(instanceId) ? String(instanceId).trim() : null,
+            instanceId: resolvedCommitInstanceId,
             mode,
             targetDocumentId,
             title,
@@ -406,7 +416,8 @@ router.post('/commit', async (req, res) => {
             behaviorProfile
         });
 
-        invalidateBehaviorCache(tenant_id, isValidUuid(instanceId) ? String(instanceId).trim() : null);
+        const committedInstId = result?.document?.instance_id ?? null;
+        invalidateBehaviorCache(tenant_id, committedInstId === null ? undefined : committedInstId);
         return res.json({ success: true, ...result });
     } catch (e) {
         console.error('[RAG Commit] Erro ao gravar base curada:', e);
@@ -540,7 +551,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
                 }).eq('id', documentId);
 
                 const transformer = await EmbeddingsPipeline.getInstance();
-                const otherChunks = await fetchAllTenantChunks(supabase, tenant_id, false);
+                const otherChunks = await fetchAllTenantChunks(supabase, tenant_id, false, null);
                 const otherHashes = new Set(
                     otherChunks
                         .filter(c => c.document_id !== documentId)
@@ -865,14 +876,38 @@ router.patch('/:id/scope', async (req, res) => {
             .single();
         if (updDocErr) throw updDocErr;
 
-        const { error: updChunksErr } = await supabase
+        const { data: docChunks } = await supabase
             .from('knowledge_chunks')
-            .update({ instance_id: targetInstanceId })
+            .select('id, metadata')
             .eq('document_id', docId)
             .eq('tenant_id', tenant_id);
-        if (updChunksErr) throw updChunksErr;
 
-        invalidateBehaviorCache(tenant_id, existingDoc.instance_id || targetInstanceId);
+        if (Array.isArray(docChunks) && docChunks.length > 0) {
+            for (const ch of docChunks) {
+                const { error: chUpdErr } = await supabase
+                    .from('knowledge_chunks')
+                    .update({
+                        instance_id: targetInstanceId,
+                        metadata: {
+                            ...(ch.metadata || {}),
+                            instance_id: targetInstanceId
+                        }
+                    })
+                    .eq('id', ch.id)
+                    .eq('tenant_id', tenant_id);
+                if (chUpdErr) throw chUpdErr;
+            }
+        } else {
+            const { error: updChunksErr } = await supabase
+                .from('knowledge_chunks')
+                .update({ instance_id: targetInstanceId })
+                .eq('document_id', docId)
+                .eq('tenant_id', tenant_id);
+            if (updChunksErr) throw updChunksErr;
+        }
+
+        const involvesGlobalScope = existingDoc.instance_id === null || targetInstanceId === null;
+        invalidateBehaviorCache(tenant_id, involvesGlobalScope ? undefined : targetInstanceId);
         return res.json({ ok: true, document: updatedDoc });
     } catch (e) {
         return res.status(500).json({ error: e.message });
@@ -903,9 +938,10 @@ router.put('/:id', async (req, res) => {
         const preservedInstanceId = existingDoc?.instance_id ?? null;
         const finalName = title ? String(title).trim() : (existingDoc?.name || 'base_conhecimento.md');
         const finalCategory = category || existingDoc?.metadata?.category || inferCategoryFromContent(finalName, cleanContent);
-        const refreshedBehaviorProfile = (existingDoc?.metadata?.source === 'inbox_deep_analyzer' || /#\s*[^\n]*(?:Identidade|Comportamento|Tom de Voz)/i.test(cleanContent))
-            ? extractBehaviorProfileSummary(cleanContent)
-            : existingDoc?.metadata?.behavior_profile;
+        const hasBehaviorTrack = existingDoc?.metadata?.source === 'inbox_deep_analyzer' || existingDoc?.metadata?.behavior_profile !== undefined;
+        const refreshedBehaviorProfile = (hasBehaviorTrack || /^#{1,3}\s*[^\n]*(?:Identidade|Comportamento|Tom de Voz)/im.test(cleanContent))
+            ? (extractBehaviorProfileSummary(cleanContent) || null)
+            : undefined;
 
         let updateQuery = supabase
             .from('knowledge_documents')
@@ -993,7 +1029,7 @@ router.put('/:id', async (req, res) => {
                         category: finalCategory,
                         content_hash: contentHash,
                         instance_id: preservedInstanceId,
-                        ...(refreshedBehaviorProfile ? { behavior_profile: refreshedBehaviorProfile } : {}),
+                        ...(refreshedBehaviorProfile !== undefined ? { behavior_profile: refreshedBehaviorProfile } : {}),
                         rag_version: '2.0',
                         chunks_total: chunks.length,
                         chunks_processed: chunks.length,
@@ -1002,7 +1038,7 @@ router.put('/:id', async (req, res) => {
                         last_update: new Date().toISOString()
                     }
                 }).eq('id', docId);
-                invalidateBehaviorCache(tenant_id, preservedInstanceId);
+                invalidateBehaviorCache(tenant_id, preservedInstanceId === null ? undefined : preservedInstanceId);
 
             } catch (bgError) {
                 console.error("Erro crítico na Re-vetorização do RAG:", bgError);

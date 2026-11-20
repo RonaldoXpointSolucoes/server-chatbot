@@ -49,6 +49,15 @@ function createRoutesSupabaseMock() {
             };
             const builder = {
                 select() { return builder; },
+                delete() { q.op = 'delete'; return builder; },
+                insert(rows) {
+                    q.op = 'insert';
+                    if (table === 'knowledge_chunks') {
+                        const inserted = rows.map((r, i) => ({ id: `c-new-${i}`, ...r }));
+                        state.chunks.push(...inserted);
+                    }
+                    return Promise.resolve({ data: rows, error: null });
+                },
                 update(payload) { q.op = 'update'; q.payload = payload; return builder; },
                 eq(c, v) { q.filters.push(['eq', c, v]); return builder; },
                 is(c, v) { q.filters.push(['is', c, v]); return builder; },
@@ -68,6 +77,10 @@ function createRoutesSupabaseMock() {
                     return Promise.resolve({ data: execSelect()[0] || null, error: null });
                 },
                 then(resolve, reject) {
+                    if (q.op === 'delete' && table === 'knowledge_chunks') {
+                        state.chunks = state.chunks.filter(c => !applyFilter([c]).length);
+                        return Promise.resolve({ data: [], error: null }).then(resolve, reject);
+                    }
                     if (q.op === 'update') {
                         if (table === 'knowledge_documents') {
                             const matched = applyFilter(state.docs);
@@ -250,5 +263,39 @@ test('GET /overview filters by instance_id (global | uuid) and POST /match forwa
         });
         assert.equal(matchRes.status, 200);
         assert.equal(capturedMatchArgs.instanceId, INSTANCE_ID);
+    });
+});
+
+test('PATCH /:id/scope syncs chunk metadata.instance_id and flushes full tenant cache on Global changes; PUT /:id clears removed behavior_profile', async () => {
+    const supabase = createRoutesSupabaseMock();
+    supabase._state.docs[0].metadata = { source: 'inbox_deep_analyzer', behavior_profile: 'Tom Antigo', instance_id: INSTANCE_ID };
+    const invalidated = [];
+
+    const router = createKnowledgeRouter({
+        supabase,
+        EmbeddingsPipeline: { getInstance: async () => async () => ({ data: new Float32Array(384).fill(0.05) }) },
+        invalidateBehaviorCache: (tId, iId) => invalidated.push({ tId, iId })
+    });
+
+    await withTestServer(router, async (baseUrl) => {
+        // Promote to Global -> must sync chunk metadata + invalidate entire tenant cache (iId === undefined)
+        const globalRes = await fetch(`${baseUrl}/${DOC_ID}/scope`, {
+            method: 'PATCH',
+            headers: { 'x-tenant-id': TENANT_ID, 'content-type': 'application/json' },
+            body: JSON.stringify({ instanceId: null })
+        });
+        assert.equal(globalRes.status, 200);
+        assert.equal(supabase._state.chunks[0].metadata.instance_id, null);
+        assert.equal(invalidated[0].iId, undefined, 'Promoting to Global must flush cache across ALL inboxes');
+
+        // Edit via PUT /:id removing behavior section -> must clear stale behavior_profile
+        const putRes = await fetch(`${baseUrl}/${DOC_ID}`, {
+            method: 'PUT',
+            headers: { 'x-tenant-id': TENANT_ID, 'content-type': 'application/json' },
+            body: JSON.stringify({ content: '# 2. Regras Operacionais\n- Nova política comercial clara e objetiva sem seção de comportamento.' })
+        });
+        assert.equal(putRes.status, 200);
+        await new Promise(r => setTimeout(r, 40));
+        assert.equal(supabase._state.docs[0].metadata.behavior_profile, null);
     });
 });

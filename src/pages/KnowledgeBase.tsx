@@ -646,6 +646,13 @@ export default function KnowledgeBase() {
     if (!curationModal || !curationDraftMarkdown.trim()) return;
     setIsCommittingCurated(true);
     try {
+      const targetDoc = curationMode !== 'create' && curationTargetDocId
+        ? documents.find(d => d.id === curationTargetDocId)
+        : null;
+      const effectiveCommitInstanceId = targetDoc
+        ? (targetDoc.instance_id ?? null)
+        : (selectedScope !== 'all' && selectedScope !== 'global' ? selectedScope : null);
+
       const response = await fetch(`${ENGINE_URL}/api/v1/knowledge/commit`, {
         method: 'POST',
         headers: {
@@ -655,6 +662,7 @@ export default function KnowledgeBase() {
         body: JSON.stringify({
           mode: curationMode,
           targetDocumentId: curationMode === 'create' ? null : (curationTargetDocId || null),
+          instanceId: effectiveCommitInstanceId,
           title: curationTitle.trim() || 'base_conhecimento.md',
           category: curationCategory,
           content: curationDraftMarkdown,

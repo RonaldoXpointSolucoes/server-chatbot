@@ -8,7 +8,8 @@ import {
     collectRepeatedCompanyTokens,
     scoreAndPackMapBatches,
     maskPiiPreservingCompanyData,
-    auditAndCleanSynthesizedMarkdown
+    auditAndCleanSynthesizedMarkdown,
+    extractBehaviorProfileSummary
 } from '../src/api-gateway/inbox-knowledge-analyzer.js';
 
 test('computeAnalysisWindow handles first-time incremental, subsequent incremental, and forced full modes', () => {
@@ -165,4 +166,24 @@ test('Layers 8 & 9: auditAndCleanSynthesizedMarkdown strips ERP menu prices, PII
     assert.ok(res.discardedSamples.length >= 2);
     assert.ok(res.behaviorProfile.length > 30 && res.behaviorProfile.length <= 950);
     assert.match(res.behaviorProfile, /primeiro nome/i);
+});
+
+test('Layer 5 redacts multi-part complement apto 32 after Bloco B and extractBehaviorProfileSummary handles ## headings safely', () => {
+    const dialogue = 'Cliente: Entrega no CEP 06787-500, Rua Padre Cícero, nº 145, Bloco B apto 32 e meu outro ap 14.';
+    const { maskedText } = maskPiiPreservingCompanyData(dialogue, {}, new Set());
+    assert.doesNotMatch(maskedText, /apto?\s*32/i, 'apt number after Bloco B must NOT leak');
+    assert.doesNotMatch(maskedText, /ap\s*14/i, 'standalone ap number must NOT leak');
+
+    const mdSub = `## 1. Identidade, Comportamento & Tom de Voz
+- Adote linguagem direta, acolhedora e objetiva.
+
+## 2. Regras Operacionais
+- Pagamentos via PIX somente no CNPJ oficial.`;
+    const extracted = extractBehaviorProfileSummary(mdSub);
+    assert.match(extracted, /linguagem direta/i);
+    assert.doesNotMatch(extracted, /Pagamentos via PIX/i, 'Must stop before ## 2 heading');
+
+    const mdWithoutBehavior = `# 2. Regras Operacionais
+- Apenas regras financeiras aqui sem seção de comportamento.`;
+    assert.equal(extractBehaviorProfileSummary(mdWithoutBehavior), '', 'Must return empty when explicit heading omits behavior section');
 });

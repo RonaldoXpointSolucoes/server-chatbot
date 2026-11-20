@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -15,6 +15,52 @@ import {
 } from '../../utils/inboxKnowledgeUtils.mjs';
 
 const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+
+interface DiscardedSample {
+  reason: string;
+  sample: string;
+}
+
+interface InboxRunRecord {
+  id: string;
+  status: string;
+  progress_pct?: number;
+  current_stage?: number;
+  current_step_label?: string | null;
+  stats?: Record<string, unknown> | null;
+  discarded_samples?: DiscardedSample[] | null;
+  extracted_behavior_summary?: string | null;
+  result_markdown?: string | null;
+  document_id?: string | null;
+  error_message?: string | null;
+}
+
+interface LinkedInboxDoc {
+  id: string;
+  name?: string;
+  instance_id?: string | null;
+  metadata?: {
+    behavior_profile?: string | null;
+  } | null;
+}
+
+interface InboxStatusResponse {
+  instance?: {
+    id: string;
+    display_name?: string;
+    last_knowledge_analyzed_at?: string | null;
+    last_knowledge_document_id?: string | null;
+  } | null;
+  pendingEligibleCount?: number;
+  activeRun?: InboxRunRecord | null;
+  lastCompletedRun?: InboxRunRecord | null;
+  recentRuns?: InboxRunRecord[];
+  linkedDocument?: LinkedInboxDoc | null;
+}
+
+function getErrMessage(err: unknown, fallback: string): string {
+  return err instanceof Error && err.message ? err.message : fallback;
+}
 
 export interface InboxDeepAnalysisModalProps {
   isOpen: boolean;
@@ -37,14 +83,16 @@ export const InboxDeepAnalysisModal: React.FC<InboxDeepAnalysisModalProps> = ({
 }) => {
   const navigate = useNavigate();
   const tenantInfo = useChatStore((s) => s.tenantInfo);
+  const onCompletedRef = useRef(onCompleted);
+  onCompletedRef.current = onCompleted;
 
   const resolvedCompanyName = companyName || (tenantInfo?.id === tenantId ? tenantInfo?.name : '') || 'Empresa Ativa';
 
   const [loadingStatus, setLoadingStatus] = useState(false);
   const [starting, setStarting] = useState(false);
   const [confirmFullReset, setConfirmFullReset] = useState(false);
-  const [statusData, setStatusData] = useState<any>(null);
-  const [activeRun, setActiveRun] = useState<any>(null);
+  const [statusData, setStatusData] = useState<InboxStatusResponse | null>(null);
+  const [activeRun, setActiveRun] = useState<InboxRunRecord | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [resultTab, setResultTab] = useState<'document' | 'discarded'>('document');
   const [togglingScope, setTogglingScope] = useState(false);
@@ -57,7 +105,7 @@ export const InboxDeepAnalysisModal: React.FC<InboxDeepAnalysisModalProps> = ({
       const res = await fetch(`${ENGINE_URL}/api/v1/knowledge/inbox-analyze/${instanceId}/status`, {
         headers: { 'x-tenant-id': tenantId }
       });
-      const json = await res.json();
+      const json = (await res.json()) as InboxStatusResponse & { error?: string };
       if (!res.ok) throw new Error(json?.error || 'Falha ao consultar checkpoint da caixa.');
       setStatusData(json);
       if (json.activeRun) {
@@ -69,20 +117,27 @@ export const InboxDeepAnalysisModal: React.FC<InboxDeepAnalysisModalProps> = ({
       } else {
         setActiveRun(null);
       }
-    } catch (err: any) {
-      setErrorMsg(err?.message || 'Erro ao carregar status da análise profunda.');
+    } catch (err: unknown) {
+      setErrorMsg(getErrMessage(err, 'Erro ao carregar status da análise profunda.'));
     } finally {
       setLoadingStatus(false);
     }
   }, [tenantId, instanceId]);
 
   useEffect(() => {
-    if (!isOpen) {
+    if (!isOpen || !instanceId) {
       setConfirmFullReset(false);
+      setStatusData(null);
+      setActiveRun(null);
+      setErrorMsg(null);
       return;
     }
+    setConfirmFullReset(false);
+    setStatusData(null);
+    setActiveRun(null);
+    setErrorMsg(null);
     loadStatus();
-  }, [isOpen, loadStatus]);
+  }, [isOpen, instanceId, loadStatus]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -106,13 +161,13 @@ export const InboxDeepAnalysisModal: React.FC<InboxDeepAnalysisModalProps> = ({
         const res = await fetch(`${ENGINE_URL}/api/v1/knowledge/inbox-analyze/runs/${activeRunId}`, {
           headers: { 'x-tenant-id': tenantId }
         });
-        const json = await res.json();
+        const json = (await res.json()) as { run?: InboxRunRecord };
         if (cancelled || !res.ok || !json?.run) return;
         setActiveRun(json.run);
         if (!isActiveRunStatus(json.run.status)) {
           loadStatus();
           if (json.run.status === 'completed' || json.run.status === 'no_new_data') {
-            onCompleted?.(json.run.document_id || null);
+            onCompletedRef.current?.(json.run.document_id || null);
           }
         }
       } catch {
@@ -124,7 +179,7 @@ export const InboxDeepAnalysisModal: React.FC<InboxDeepAnalysisModalProps> = ({
       cancelled = true;
       clearInterval(timer);
     };
-  }, [isPolling, activeRunId, tenantId, loadStatus, onCompleted]);
+  }, [isPolling, activeRunId, tenantId, loadStatus]);
 
   const handleStartAnalysis = async (mode: 'incremental' | 'full') => {
     if (!tenantId || !instanceId || starting) return;
@@ -140,7 +195,7 @@ export const InboxDeepAnalysisModal: React.FC<InboxDeepAnalysisModalProps> = ({
         },
         body: JSON.stringify({ mode })
       });
-      const json = await res.json();
+      const json = (await res.json()) as { run?: InboxRunRecord; activeRun?: InboxRunRecord; error?: string };
       if (res.status === 409 && json?.activeRun) {
         setActiveRun(json.activeRun);
         return;
@@ -149,8 +204,8 @@ export const InboxDeepAnalysisModal: React.FC<InboxDeepAnalysisModalProps> = ({
       if (json?.run) {
         setActiveRun(json.run);
       }
-    } catch (err: any) {
-      setErrorMsg(err?.message || 'Erro ao iniciar análise da caixa.');
+    } catch (err: unknown) {
+      setErrorMsg(getErrMessage(err, 'Erro ao iniciar análise da caixa.'));
     } finally {
       setStarting(false);
     }
@@ -174,11 +229,11 @@ export const InboxDeepAnalysisModal: React.FC<InboxDeepAnalysisModalProps> = ({
         },
         body: JSON.stringify({ instanceId: nextInstanceId })
       });
-      const json = await res.json();
+      const json = (await res.json()) as { document?: LinkedInboxDoc; error?: string };
       if (!res.ok) throw new Error(json?.error || 'Erro ao alterar escopo do documento.');
-      setStatusData((prev: any) => prev ? { ...prev, linkedDocument: json.document } : prev);
-    } catch (err: any) {
-      setErrorMsg(err?.message || 'Erro ao alternar visibilidade Global/Caixa.');
+      setStatusData(prev => (prev ? { ...prev, linkedDocument: json.document || prev.linkedDocument } : prev));
+    } catch (err: unknown) {
+      setErrorMsg(getErrMessage(err, 'Erro ao alternar visibilidade Global/Caixa.'));
     } finally {
       setTogglingScope(false);
     }

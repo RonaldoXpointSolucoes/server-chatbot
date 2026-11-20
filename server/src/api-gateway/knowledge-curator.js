@@ -772,7 +772,7 @@ export async function commitCuratedDocument({
     transformer,
     tenantId,
     agentId = null,
-    instanceId = null,
+    instanceId = undefined,
     mode = 'create', // 'create' | 'replace' | 'merge'
     targetDocumentId = null,
     title = 'conhecimento.md',
@@ -790,21 +790,21 @@ export async function commitCuratedDocument({
         throw new Error('O conteúdo refatorado não pode estar vazio.');
     }
 
-    const safeInstanceId = normalizeUuidOrNull(instanceId);
     let docId = targetDocumentId;
     let finalContent = cleanContent;
     let finalName = String(title || 'conhecimento.md').trim();
-    const contentHash = computeNormalizedHash(finalContent);
+    let existingDoc = null;
 
-    if (mode === 'merge' && targetDocumentId) {
-        const { data: existingDoc } = await supabase
+    if ((mode === 'replace' || mode === 'merge') && targetDocumentId) {
+        const { data: loadedDoc } = await supabase
             .from('knowledge_documents')
-            .select('id, name, metadata')
+            .select('id, name, instance_id, metadata')
             .eq('id', targetDocumentId)
             .eq('tenant_id', tenantId)
             .maybeSingle();
+        existingDoc = loadedDoc || null;
 
-        if (existingDoc) {
+        if (existingDoc && mode === 'merge') {
             finalName = existingDoc.name;
             const { data: prevChunks } = await supabase
                 .from('knowledge_chunks')
@@ -820,6 +820,10 @@ export async function commitCuratedDocument({
         }
     }
 
+    const safeInstanceId = instanceId !== undefined
+        ? normalizeUuidOrNull(instanceId)
+        : normalizeUuidOrNull(existingDoc?.instance_id ?? null);
+    const contentHash = computeNormalizedHash(finalContent);
     const effectiveCategory = category || inferCategoryFromContent(finalName, finalContent);
     const chunks = semanticChunkDocument(finalContent, {
         documentName: finalName,
@@ -830,58 +834,7 @@ export async function commitCuratedDocument({
         throw new Error('Nenhum fragmento semântico válido pôde ser gerado deste conteúdo.');
     }
 
-    // Create or update knowledge_documents row first
-    const baseMeta = {
-        ...(extraMetadata && typeof extraMetadata === 'object' ? extraMetadata : {}),
-        size: Buffer.byteLength(finalContent, 'utf-8'),
-        chunks_total: chunks.length,
-        chunks_processed: 0,
-        category: effectiveCategory,
-        quality_score: qualityScore,
-        content_hash: contentHash,
-        rag_version: '2.0',
-        instance_id: safeInstanceId,
-        ...(behaviorProfile ? { behavior_profile: behaviorProfile } : {}),
-        source,
-        current_status: 'Gerando vetores semânticos...',
-        updated_at: new Date().toISOString()
-    };
-
-    if ((mode === 'replace' || mode === 'merge') && docId) {
-        await supabase.from('knowledge_chunks').delete().eq('document_id', docId).eq('tenant_id', tenantId);
-        const { error: updDocErr } = await supabase
-            .from('knowledge_documents')
-            .update({
-                name: finalName,
-                type: type || 'text/markdown',
-                instance_id: safeInstanceId,
-                status: 'processing',
-                content_hash: contentHash,
-                metadata: baseMeta
-            })
-            .eq('id', docId)
-            .eq('tenant_id', tenantId);
-        if (updDocErr) throw updDocErr;
-    } else {
-        const { data: newDoc, error: insDocErr } = await supabase
-            .from('knowledge_documents')
-            .insert([{
-                tenant_id: tenantId,
-                agent_id: agentId,
-                instance_id: safeInstanceId,
-                name: finalName,
-                type: type || 'text/markdown',
-                status: 'processing',
-                content_hash: contentHash,
-                metadata: baseMeta
-            }])
-            .select('*')
-            .single();
-        if (insDocErr) throw insDocErr;
-        docId = newDoc.id;
-    }
-
-    // Embed chunks & perform same-scope deduplication (never block an inbox using another inbox's chunk)
+    // Generate embeddings & same-scope deduplication BEFORE deleting any previous chunks
     const otherChunks = await fetchAllTenantChunks(supabase, tenantId, false, safeInstanceId);
     const otherHashes = new Set(
         otherChunks
@@ -926,6 +879,63 @@ export async function commitCuratedDocument({
                 source
             }
         });
+    }
+
+    if ((mode === 'replace' || mode === 'merge') && docId && dbChunks.length === 0) {
+        throw new Error('Nenhum fragmento inédito válido pôde ser gerado para substituir o documento sem esvaziá-lo.');
+    }
+
+    const baseMeta = {
+        ...(extraMetadata && typeof extraMetadata === 'object' ? extraMetadata : {}),
+        size: Buffer.byteLength(finalContent, 'utf-8'),
+        chunks_total: chunks.length,
+        chunks_processed: 0,
+        category: effectiveCategory,
+        quality_score: qualityScore,
+        content_hash: contentHash,
+        rag_version: '2.0',
+        instance_id: safeInstanceId,
+        ...(behaviorProfile ? { behavior_profile: behaviorProfile } : {}),
+        source,
+        current_status: 'Gravando vetores semânticos...',
+        updated_at: new Date().toISOString()
+    };
+
+    if ((mode === 'replace' || mode === 'merge') && docId) {
+        const { error: updDocErr } = await supabase
+            .from('knowledge_documents')
+            .update({
+                name: finalName,
+                type: type || 'text/markdown',
+                instance_id: safeInstanceId,
+                status: 'processing',
+                content_hash: contentHash,
+                metadata: baseMeta
+            })
+            .eq('id', docId)
+            .eq('tenant_id', tenantId);
+        if (updDocErr) throw updDocErr;
+        await supabase.from('knowledge_chunks').delete().eq('document_id', docId).eq('tenant_id', tenantId);
+    } else {
+        const { data: newDoc, error: insDocErr } = await supabase
+            .from('knowledge_documents')
+            .insert([{
+                tenant_id: tenantId,
+                agent_id: agentId,
+                instance_id: safeInstanceId,
+                name: finalName,
+                type: type || 'text/markdown',
+                status: 'processing',
+                content_hash: contentHash,
+                metadata: baseMeta
+            }])
+            .select('*')
+            .single();
+        if (insDocErr) throw insDocErr;
+        docId = newDoc.id;
+        for (const row of dbChunks) {
+            row.document_id = docId;
+        }
     }
 
     for (let i = 0; i < dbChunks.length; i += 100) {
@@ -992,8 +1002,9 @@ export async function auditTenantKnowledgeHealth({ supabase, tenantId }) {
     for (const c of chunks) {
         const rawBody = String(c.content || '').replace(/^\[[^\]]+\]\s*/g, '');
         const hash = computeNormalizedHash(rawBody);
-        if (!normalizedHashBuckets.has(hash)) normalizedHashBuckets.set(hash, []);
-        normalizedHashBuckets.get(hash).push(c);
+        const scopedKey = `${c.instance_id || 'global'}::${hash}`;
+        if (!normalizedHashBuckets.has(scopedKey)) normalizedHashBuckets.set(scopedKey, []);
+        normalizedHashBuckets.get(scopedKey).push(c);
 
         if (!c.embedding) unindexedNullVecs++;
         if (/https?:\/\/\./i.test(c.content || '')) brokenUrlChunkIds.push(c.id);
@@ -1008,14 +1019,15 @@ export async function auditTenantKnowledgeHealth({ supabase, tenantId }) {
         if (group.length > 1) exactDuplicateChunksCount += (group.length - 1);
     }
 
-    // Sample-safe semantic near-duplicate scan (cosine >= 0.90)
+    // Sample-safe semantic near-duplicate scan (cosine >= 0.90) scoped per inbox/global
     // Caps O(N^2) pairwise checks at 450 distinct chunks to guarantee sub-200ms execution
     const uniqueHashesSeen = new Set();
     const distinctSampleChunks = [];
     for (const c of chunks) {
         const h = computeNormalizedHash(String(c.content || '').replace(/^\[[^\]]+\]\s*/g, ''));
-        if (!uniqueHashesSeen.has(h) && c.embedding) {
-            uniqueHashesSeen.add(h);
+        const scopedSampleKey = `${c.instance_id || 'global'}::${h}`;
+        if (!uniqueHashesSeen.has(scopedSampleKey) && c.embedding) {
+            uniqueHashesSeen.add(scopedSampleKey);
             distinctSampleChunks.push({ ...c, _vec: parsePgVector(c.embedding) });
         }
         if (distinctSampleChunks.length >= 450) break;
@@ -1028,6 +1040,9 @@ export async function auditTenantKnowledgeHealth({ supabase, tenantId }) {
         const isMenuA = ci.metadata?.category === 'Cardápio & Produtos';
         for (let j = i + 1; j < distinctSampleChunks.length; j++) {
             const cj = distinctSampleChunks[j];
+            if (ci.instance_id && cj.instance_id && ci.instance_id !== cj.instance_id) {
+                continue;
+            }
             const isMenuB = cj.metadata?.category === 'Cardápio & Produtos';
             const sim = cosineSimilarityVec(ci._vec, cj._vec);
             const jaccard = isMenuA && isMenuB ? tokenJaccardSimilarity(ci.content, cj.content) : 1;
@@ -1232,13 +1247,33 @@ export async function sanitizeTenantKnowledgeBase({ supabase, transformer, tenan
         }
     }
 
-    // 2. Deduplicate chunks & fix broken URLs across remaining docs
-    const globalKeptHashes = new Set();
-    const globalKeptVecs = [];
+    // 2. Deduplicate chunks & fix broken URLs partitioned strictly by scope (Global first, then each inbox independently)
+    const sortedDocs = [...(docs || [])].sort((a, b) => {
+        const aGlobal = !a.instance_id ? 0 : 1;
+        const bGlobal = !b.instance_id ? 0 : 1;
+        return aGlobal - bGlobal;
+    });
 
-    for (const d of (docs || [])) {
+    const keptHashesByScope = new Map();
+    const keptVecsByScope = new Map();
+    const getScopeHashes = (scopeKey) => {
+        if (!keptHashesByScope.has(scopeKey)) keptHashesByScope.set(scopeKey, new Set());
+        return keptHashesByScope.get(scopeKey);
+    };
+    const getScopeVecs = (scopeKey) => {
+        if (!keptVecsByScope.has(scopeKey)) keptVecsByScope.set(scopeKey, []);
+        return keptVecsByScope.get(scopeKey);
+    };
+
+    for (const d of sortedDocs) {
         const dChunks = (chunksByDoc.get(d.id) || []).sort((a, b) => (a.chunk_index ?? 999999) - (b.chunk_index ?? 999999));
         if (dChunks.length === 0) continue;
+
+        const docScopeKey = d.instance_id || 'global';
+        const scopeHashes = getScopeHashes(docScopeKey);
+        const scopeVecs = getScopeVecs(docScopeKey);
+        const globalHashes = getScopeHashes('global');
+        const globalVecs = getScopeVecs('global');
 
         const idsToDelete = [];
         let survivingCount = 0;
@@ -1260,9 +1295,10 @@ export async function sanitizeTenantKnowledgeBase({ supabase, transformer, tenan
             const cHash = computeNormalizedHash(bodyForHash);
             const vec = parsePgVector(c.embedding);
 
-            let isDuplicate = globalKeptHashes.has(cHash);
-            if (!isDuplicate && vec && globalKeptVecs.length < 300) {
-                for (const prev of globalKeptVecs) {
+            let isDuplicate = scopeHashes.has(cHash) || (docScopeKey !== 'global' && globalHashes.has(cHash));
+            if (!isDuplicate && vec) {
+                const candidateVecs = docScopeKey !== 'global' ? [...globalVecs, ...scopeVecs] : globalVecs;
+                for (const prev of candidateVecs.slice(0, 300)) {
                     if (cosineSimilarityVec(vec, prev) >= 0.93) {
                         isDuplicate = true;
                         break;
@@ -1273,8 +1309,8 @@ export async function sanitizeTenantKnowledgeBase({ supabase, transformer, tenan
             if (isDuplicate) {
                 idsToDelete.push(c.id);
             } else {
-                globalKeptHashes.add(cHash);
-                if (vec && globalKeptVecs.length < 300) globalKeptVecs.push(vec);
+                scopeHashes.add(cHash);
+                if (vec && scopeVecs.length < 300) scopeVecs.push(vec);
                 survivingCount++;
             }
         }
@@ -1349,7 +1385,7 @@ export async function hybridRetrieveKnowledge({
         candidates = hybridRows.map(r => ({
             id: r.id,
             document_id: r.document_id,
-            instance_id: r.instance_id ?? r.metadata?.instance_id ?? null,
+            instance_id: r.instance_id !== undefined ? r.instance_id : (r.metadata?.instance_id ?? null),
             document_name: r.document_name || r.metadata?.document_name || 'Base de Conhecimento',
             section: r.metadata?.section_title || '',
             content: r.content,
@@ -1377,7 +1413,7 @@ export async function hybridRetrieveKnowledge({
             candidates.push({
                 id: r.id,
                 document_id: r.document_id,
-                instance_id: r.instance_id ?? r.metadata?.instance_id ?? null,
+                instance_id: r.instance_id !== undefined ? r.instance_id : (r.metadata?.instance_id ?? null),
                 document_name: r.metadata?.document_name || 'Base de Conhecimento',
                 section: r.metadata?.section_title || '',
                 content: r.content,
@@ -1459,7 +1495,7 @@ export async function hybridRetrieveKnowledge({
                 const newItem = {
                     id: er.id,
                     document_id: er.document_id,
-                    instance_id: er.instance_id ?? er.metadata?.instance_id ?? null,
+                    instance_id: er.instance_id !== undefined ? er.instance_id : (er.metadata?.instance_id ?? null),
                     document_name: er.metadata?.document_name || 'Base de Conhecimento',
                     section: er.metadata?.section_title || '',
                     content: er.content,
@@ -1482,7 +1518,7 @@ export async function hybridRetrieveKnowledge({
             ? sigTokens.filter(t => normC.includes(t)).length / sigTokens.length
             : 0;
         const phraseBonus = c.exact_phrase_hit ? 0.18 : 0;
-        const isCurrentInboxChunk = Boolean(safeInstanceId && (c.instance_id === safeInstanceId || c.metadata?.instance_id === safeInstanceId));
+        const isCurrentInboxChunk = Boolean(safeInstanceId && c.instance_id === safeInstanceId);
         const inboxPriorityBonus = isCurrentInboxChunk ? 0.06 : 0;
         const effLex = Math.max(Math.min(1, c.lexical_score), tokenCov * 0.85);
         const hasVec = c.vector_similarity > 0;
@@ -1509,8 +1545,8 @@ export async function hybridRetrieveKnowledge({
         };
     }).sort((a, b) => {
         if (b.similarity !== a.similarity) return b.similarity - a.similarity;
-        const aInb = safeInstanceId && (a.instance_id === safeInstanceId || a.metadata?.instance_id === safeInstanceId) ? 1 : 0;
-        const bInb = safeInstanceId && (b.instance_id === safeInstanceId || b.metadata?.instance_id === safeInstanceId) ? 1 : 0;
+        const aInb = safeInstanceId && a.instance_id === safeInstanceId ? 1 : 0;
+        const bInb = safeInstanceId && b.instance_id === safeInstanceId ? 1 : 0;
         return bInb - aInb;
     });
 

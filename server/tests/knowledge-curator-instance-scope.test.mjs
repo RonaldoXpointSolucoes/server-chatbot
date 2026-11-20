@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import {
     isValidUuid,
     commitCuratedDocument,
-    hybridRetrieveKnowledge
+    hybridRetrieveKnowledge,
+    auditTenantKnowledgeHealth,
+    sanitizeTenantKnowledgeBase
 } from '../src/api-gateway/knowledge-curator.js';
 
 const TENANT_ID = '11111111-1111-4111-8111-111111111111';
@@ -204,4 +206,173 @@ test('hybridRetrieveKnowledge passes p_instance_id to RPC, normalizes non-UUID s
         topK: 2
     });
     assert.equal(supabase.calls.rpcCalls[1].params.p_instance_id, null, 'Non-UUID simulator must become null for SQL UUID safety');
+});
+
+test('auditTenantKnowledgeHealth and sanitizeTenantKnowledgeBase isolate duplicate checks across different inboxes', async () => {
+    const docs = [
+        { id: 'doc-com', tenant_id: TENANT_ID, instance_id: INST_COMERCIAL, name: 'Comercial', status: 'ready', metadata: { chunks_total: 1 } },
+        { id: 'doc-fin', tenant_id: TENANT_ID, instance_id: INST_FINANCEIRO, name: 'Financeiro', status: 'ready', metadata: { chunks_total: 1 } }
+    ];
+    const sharedContent = '[Geral] Nossa chave Pix oficial de pagamento antecipado usa o CNPJ cadastrado da empresa.';
+    const sharedEmb = new Array(384).fill(0.05);
+    const chunks = [
+        { id: 'c-com', document_id: 'doc-com', tenant_id: TENANT_ID, instance_id: INST_COMERCIAL, chunk_index: 0, content: sharedContent, metadata: {}, embedding: sharedEmb },
+        { id: 'c-fin', document_id: 'doc-fin', tenant_id: TENANT_ID, instance_id: INST_FINANCEIRO, chunk_index: 0, content: sharedContent, metadata: {}, embedding: sharedEmb }
+    ];
+    const deletedChunkIds = [];
+    const deletedDocIds = [];
+    const mockDb = {
+        from(table) {
+            const st = { table, op: 'select', filters: [] };
+            const exec = () => {
+                if (table === 'companies') return [{ name: 'Empresa', settings: {} }];
+                if (table === 'knowledge_documents') return docs;
+                if (table === 'knowledge_chunks') return chunks;
+                return [];
+            };
+            const b = {
+                select() { return b; },
+                delete() { st.op = 'delete'; return b; },
+                update() { st.op = 'update'; return b; },
+                eq(c, v) { st.filters.push(['eq', c, v]); return b; },
+                in(c, v) {
+                    if (st.op === 'delete' && table === 'knowledge_chunks' && c === 'id') deletedChunkIds.push(...v);
+                    return b;
+                },
+                order() { return b; },
+                range(a, e) { return Promise.resolve({ data: exec().slice(a, e + 1), error: null }); },
+                maybeSingle() { return Promise.resolve({ data: exec()[0] || null, error: null }); },
+                then(res, rej) {
+                    if (st.op === 'delete' && table === 'knowledge_documents') {
+                        const idFilter = st.filters.find(f => f[1] === 'id');
+                        if (idFilter) deletedDocIds.push(idFilter[2]);
+                    }
+                    return Promise.resolve({ data: exec(), error: null }).then(res, rej);
+                }
+            };
+            return b;
+        }
+    };
+
+    const audit = await auditTenantKnowledgeHealth({ supabase: mockDb, tenantId: TENANT_ID });
+    assert.equal(audit.stats.exact_duplicate_chunks, 0, 'Same text in two different inboxes must NOT count as duplicate');
+    assert.equal(audit.stats.near_duplicate_pairs, 0, 'Same vector in two different inboxes must NOT count as near duplicate');
+
+    const sanitize = await sanitizeTenantKnowledgeBase({ supabase: mockDb, transformer: createFakeTransformer(), tenantId: TENANT_ID });
+    assert.equal(sanitize.removedDuplicateChunks, 0, 'Sanitize must NOT erase identical chunks from a distinct inbox');
+    assert.equal(deletedChunkIds.length, 0);
+    assert.equal(deletedDocIds.length, 0);
+});
+
+test('commitCuratedDocument preserves existing chunks on embedding failure and preserves existing instance_id on replace/merge', async () => {
+    let chunkDeletedBeforeEmbed = false;
+    let chunkDeleteCount = 0;
+    const insertedChunks = [];
+    const insertedOrUpdatedDocs = [];
+
+    const mockDb = {
+        from(table) {
+            const st = { table, op: 'select', payload: null };
+            const b = {
+                select() { return b; },
+                delete() {
+                    st.op = 'delete';
+                    if (table === 'knowledge_chunks') chunkDeleteCount++;
+                    return b;
+                },
+                update(p) { st.op = 'update'; st.payload = p; if (table === 'knowledge_documents') insertedOrUpdatedDocs.push(p); return b; },
+                insert(rows) { st.op = 'insert'; if (table === 'knowledge_chunks') insertedChunks.push(...rows); return b; },
+                eq() { return b; },
+                is() { return b; },
+                or() { return b; },
+                order() { return b; },
+                range() { return Promise.resolve({ data: [], error: null }); },
+                maybeSingle() {
+                    if (table === 'knowledge_documents') {
+                        return Promise.resolve({ data: { id: 'doc-old', name: 'Comercial', instance_id: INST_COMERCIAL, metadata: {} }, error: null });
+                    }
+                    return Promise.resolve({ data: null, error: null });
+                },
+                single() {
+                    return Promise.resolve({ data: { id: 'doc-old', instance_id: INST_COMERCIAL, ...(st.payload || {}) }, error: null });
+                },
+                then(res, rej) { return Promise.resolve({ data: [], error: null }).then(res, rej); }
+            };
+            return b;
+        }
+    };
+
+    // 1. Failing embedder must abort BEFORE deleting previous chunks
+    await assert.rejects(
+        commitCuratedDocument({
+            supabase: mockDb,
+            transformer: async () => {
+                if (chunkDeleteCount > 0) chunkDeletedBeforeEmbed = true;
+                throw new Error('Embed OOM');
+            },
+            tenantId: TENANT_ID,
+            mode: 'replace',
+            targetDocumentId: 'doc-old',
+            content: '# Regra\n\nConteúdo válido longo o suficiente para gerar chunk semântico.',
+            yieldMs: 0
+        }),
+        /Embed OOM/
+    );
+    assert.equal(chunkDeleteCount, 0, 'Existing chunks MUST NOT be deleted before new embeddings succeed');
+    assert.equal(chunkDeletedBeforeEmbed, false);
+
+    // 2. Successful replace with omitted instanceId preserves existingDoc.instance_id
+    const okRes = await commitCuratedDocument({
+        supabase: mockDb,
+        transformer: createFakeTransformer(),
+        tenantId: TENANT_ID,
+        mode: 'replace',
+        targetDocumentId: 'doc-old',
+        content: '# Regra\n\nConteúdo válido longo o suficiente para gerar chunk semântico atualizado.',
+        yieldMs: 0
+    });
+    assert.equal(okRes.document.instance_id, INST_COMERCIAL);
+    assert.equal(insertedChunks[0].instance_id, INST_COMERCIAL);
+});
+
+test('hybridRetrieveKnowledge trusts authoritative SQL instance_id=null even if stale metadata.instance_id has old inbox UUID', async () => {
+    const supabase = createCuratorSupabaseMock({
+        rpcHybridRows: [
+            {
+                id: 'c-stale-global',
+                document_id: 'd-global',
+                instance_id: null,
+                document_name: 'Doc Promovido para Global',
+                content: 'Política de entrega expressa padrão válida para todas as unidades.',
+                metadata: { instance_id: INST_COMERCIAL }, // stale!
+                vector_similarity: 0.72,
+                lexical_score: 0.5,
+                rrf_score: 0.05
+            },
+            {
+                id: 'c-true-inbox',
+                document_id: 'd-inbox',
+                instance_id: INST_COMERCIAL,
+                document_name: 'Comercial Atual',
+                content: 'Política de entrega expressa específica desta caixa comercial.',
+                metadata: { instance_id: INST_COMERCIAL },
+                vector_similarity: 0.72,
+                lexical_score: 0.5,
+                rrf_score: 0.062
+            }
+        ]
+    });
+
+    const matches = await hybridRetrieveKnowledge({
+        supabase,
+        queryEmbedding: new Array(384).fill(0.05),
+        queryText: 'politica entrega expressa',
+        tenantId: TENANT_ID,
+        instanceId: INST_COMERCIAL,
+        topK: 2
+    });
+
+    assert.equal(matches[0].id, 'c-true-inbox');
+    assert.equal(matches[1].instance_id, null, 'Authoritative SQL column instance_id=null must win over stale metadata');
+    assert.ok(matches[0].similarity > matches[1].similarity, 'Promoted global doc with stale metadata must not match priority bonus of true inbox doc');
 });
