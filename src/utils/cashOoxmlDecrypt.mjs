@@ -1,6 +1,6 @@
-import XLSX from 'xlsx';
+import * as XLSX from 'xlsx';
 
-const XLSXLib = XLSX?.CFB ? XLSX : XLSX?.default || XLSX;
+const XLSXLib = XLSX?.CFB ? XLSX : (XLSX?.default || XLSX);
 
 // S-box & inverse S-box para decifragem AES-ECB (ECMA-376 Standard Encryption)
 const INV_SBOX = new Uint8Array([
@@ -141,14 +141,12 @@ function aesDecryptEcb(cipherBytes, keyBytes) {
 
 async function digestHash(alg, data) {
   const subtle = globalThis.crypto?.subtle;
-  if (subtle) {
-    const map = { SHA1: 'SHA-1', 'SHA-1': 'SHA-1', SHA256: 'SHA-256', 'SHA-256': 'SHA-256', SHA512: 'SHA-512', 'SHA-512': 'SHA-512' };
-    const buf = await subtle.digest(map[alg] || alg, data);
-    return new Uint8Array(buf);
+  if (!subtle) {
+    throw new Error('WebCrypto API (crypto.subtle) não disponível neste ambiente.');
   }
-  const nodeCrypto = await import('node:crypto');
-  const map = { SHA1: 'sha1', 'SHA-1': 'sha1', SHA256: 'sha256', 'SHA-256': 'sha256', SHA512: 'sha512', 'SHA-512': 'sha512' };
-  return new Uint8Array(nodeCrypto.createHash(map[alg] || alg.toLowerCase()).update(data).digest());
+  const map = { SHA1: 'SHA-1', 'SHA-1': 'SHA-1', SHA256: 'SHA-256', 'SHA-256': 'SHA-256', SHA512: 'SHA-512', 'SHA-512': 'SHA-512' };
+  const buf = await subtle.digest(map[alg] || alg, data);
+  return new Uint8Array(buf);
 }
 
 async function aesDecryptCbc(cipherBytes, keyBytes, ivBytes) {

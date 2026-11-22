@@ -3,6 +3,25 @@ import {
   buildSessionPersistencePayload,
   isMissingCashTableError
 } from '../utils/cashReconciliationServiceHelper.mjs';
+import {
+  CashAiAnalysis,
+  CashManualInputs,
+  CashMirrorRow,
+  CashDrawerSummary,
+  CashFinancialMetrics,
+  CashReconciliationResult,
+  CashResolutionAction,
+  ParsedCashFileResult
+} from '../types/cashReconciliation';
+
+export interface ReconciledSummarySnapshot {
+  mirrorRows?: CashMirrorRow[];
+  cashDrawerSummary?: CashDrawerSummary;
+  financialMetrics?: CashFinancialMetrics;
+  manualInputs?: CashManualInputs;
+  manualResolutions?: CashResolutionAction[];
+  parsedFilesSnapshot?: ParsedCashFileResult[];
+}
 
 export interface CashSessionRow {
   id: string;
@@ -19,8 +38,8 @@ export interface CashSessionRow {
   cash_drawer_counted_cents?: number | null;
   cash_sangria_cents: number;
   cash_notes?: string | null;
-  reconciled_summary: any;
-  ai_last_analysis?: any;
+  reconciled_summary: ReconciledSummarySnapshot;
+  ai_last_analysis?: CashAiAnalysis | null;
   created_by_email?: string | null;
   closed_at?: string | null;
   created_at?: string;
@@ -54,18 +73,20 @@ function readLocalJson<T>(key: string, fallback: T): T {
 function writeLocalJson(key: string, value: unknown) {
   try {
     localStorage.setItem(key, JSON.stringify(value));
-  } catch (_) {}
+  } catch (err) {
+    console.warn('[Conferência Caixa] Falha ao gravar cache local:', err);
+  }
 }
 
-function isRlsOrJwtError(error: any): boolean {
+function isRlsOrJwtError(error: { code?: string; message?: string } | null | undefined): boolean {
   const code = String(error?.code || '');
   const msg = String(error?.message || '').toLowerCase();
   return code === '42501' || code === 'PGRST301' || msg.includes('row-level security') || msg.includes('jwt');
 }
 
 async function runWithTenantClient<T>(
-  fn: (client: typeof supabase) => Promise<{ data: T; error: any }>
-): Promise<{ data: T; error: any; usedFallback: boolean }> {
+  fn: (client: typeof supabase) => PromiseLike<{ data: T | null; error: { code?: string; message?: string } | null }>
+): Promise<{ data: T | null; error: { code?: string; message?: string } | null; usedFallback: boolean }> {
   const first = await fn(supabase);
   if (!first.error || !isRlsOrJwtError(first.error)) {
     return { ...first, usedFallback: false };
@@ -105,17 +126,17 @@ export async function saveCashReconciliationSession(params: {
   tenantId: string;
   userEmail?: string;
   sessionId?: string | null;
-  parsedFiles: any[];
-  result: any;
-  manualInputs: any;
-  manualResolutions: any[];
-  aiAnalysis?: any;
+  parsedFiles: ParsedCashFileResult[];
+  result: CashReconciliationResult;
+  manualInputs: CashManualInputs;
+  manualResolutions: CashResolutionAction[];
+  aiAnalysis?: CashAiAnalysis | null;
   markClosed?: boolean;
 }): Promise<{ sessionId: string; schemaMissing: boolean; savedAt: string }> {
   const { sessionPayload, filePayloads, itemPayloads } = buildSessionPersistencePayload(params);
   const nowIso = new Date().toISOString();
 
-  const writeSession = async (client: typeof supabase) => {
+  const writeSession = (client: typeof supabase) => {
     if (params.sessionId) {
       return client
         .from('cash_reconciliation_sessions')
@@ -133,13 +154,13 @@ export async function saveCashReconciliationSession(params: {
   };
 
   const res = await runWithTenantClient<{ id: string }>(writeSession);
-  if (res.error) {
+  if (res.error || !res.data) {
     if (isMissingCashTableError(res.error)) {
       const localList = readLocalJson<CashSessionRow[]>(localSessionsKey(params.tenantId), []);
       const localId = params.sessionId || `local_${Date.now()}`;
       const record: CashSessionRow = {
         id: localId,
-        ...sessionPayload,
+        ...(sessionPayload as Omit<CashSessionRow, 'id'>),
         created_at: nowIso,
         updated_at: nowIso
       };
@@ -147,7 +168,7 @@ export async function saveCashReconciliationSession(params: {
       writeLocalJson(localSessionsKey(params.tenantId), updated);
       return { sessionId: localId, schemaMissing: true, savedAt: nowIso };
     }
-    throw res.error;
+    throw res.error || new Error('Falha ao salvar sessão de conferência.');
   }
 
   const savedSessionId = res.data.id;

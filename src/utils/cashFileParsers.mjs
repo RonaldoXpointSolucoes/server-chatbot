@@ -1,4 +1,4 @@
-import XLSX from 'xlsx';
+import * as XLSX from 'xlsx';
 import {
   DEFAULT_FORMULA_CONFIG,
   normalizeAsciiUpper,
@@ -10,7 +10,7 @@ import {
   decryptOoxmlPackage
 } from './cashOoxmlDecrypt.mjs';
 
-const XLSXLib = XLSX?.read ? XLSX : XLSX?.default || XLSX;
+const XLSXLib = (XLSX?.read && XLSX?.SSF && XLSX?.utils) ? XLSX : (XLSX?.default || XLSX);
 
 /**
  * Converte strings monetárias brasileiras/americanas ou números JS para centavos inteiros.
