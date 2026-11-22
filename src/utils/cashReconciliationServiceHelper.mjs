@@ -206,3 +206,68 @@ export function computeHistoricalHealthStats(sessions = []) {
     series
   };
 }
+
+export const MIRROR_KEY_TO_CATEGORIES = {
+  saldo_dinheiro: ['dinheiro'],
+  cartao: ['cartao'],
+  pix: ['pix'],
+  pendentes: ['pendente'],
+  ifood: ['ifood'],
+  pago_online: ['pago_online'],
+  ticket: ['ticket'],
+  sem_bandeira: ['sem_bandeira'],
+  outros: ['outros', 'pago_online', 'sem_bandeira']
+};
+
+export function filterVisibleMirrorRows(mirrorRows = [], categoryRealOverrides = {}, showZeroRows = false) {
+  const rows = Array.isArray(mirrorRows) ? mirrorRows : [];
+  const overrides = categoryRealOverrides || {};
+  const isNonZeroOrOverridden = (row) =>
+    Number(row.systemCents || 0) !== 0 ||
+    Number(row.realCents || 0) !== 0 ||
+    overrides[row.key] !== undefined;
+
+  const hiddenCount = rows.filter(r => !isNonZeroOrOverridden(r)).length;
+  const visibleRows = showZeroRows ? rows : rows.filter(isNonZeroOrOverridden);
+  return { visibleRows, hiddenCount };
+}
+
+export function buildMirrorRowDetails(result = {}, rowKey = '') {
+  const categories = MIRROR_KEY_TO_CATEGORIES[rowKey] || [rowKey];
+  const catSet = new Set(categories);
+
+  const matchedPairs = (result.matchedPairs || []).filter(
+    pair =>
+      (pair.systemItems || []).some(s => catSet.has(s.category)) ||
+      (pair.realItems || []).some(r => catSet.has(r.category))
+  );
+
+  const suggestions = (result.suggestions || []).filter(
+    sug =>
+      (sug.systemItems || []).some(s => catSet.has(s.category)) ||
+      (sug.realItems || []).some(r => catSet.has(r.category))
+  );
+
+  const missingItems = (result.missingInBank || []).filter(s => catSet.has(s.category));
+  const extraItems = (result.extraInBank || []).filter(r => catSet.has(r.category));
+
+  const systemCategoryItems = (result.systemItems || []).filter(s => catSet.has(s.category));
+  const reclassifiedOutItems = (result.systemItems || []).filter(
+    s => s.metadata?.reclassifiedFrom && catSet.has(s.metadata.reclassifiedFrom) && !catSet.has(s.category)
+  );
+
+  const pendingDebtors = rowKey === 'pendentes' ? (result.financialMetrics?.pendingDebtors || []) : [];
+  const saidasDetalhadas = rowKey === 'saldo_dinheiro' ? (result.cashDrawerSummary?.saidasDetalhadas || []) : [];
+
+  return {
+    categories,
+    matchedPairs,
+    suggestions,
+    missingItems,
+    extraItems,
+    systemCategoryItems,
+    reclassifiedOutItems,
+    pendingDebtors,
+    saidasDetalhadas
+  };
+}

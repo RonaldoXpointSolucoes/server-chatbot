@@ -10,7 +10,8 @@ import {
   Power,
   Loader2,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  ChevronRight
 } from 'lucide-react';
 import {
   CashAiAnalysis,
@@ -22,7 +23,14 @@ import {
   formatCents
 } from '../../types/cashReconciliation';
 import { CashRuleRow } from '../../services/cashReconciliationService';
-import { parseUiMoneyInputToCents } from '../../utils/cashReconciliationServiceHelper.mjs';
+import {
+  filterVisibleMirrorRows,
+  parseUiMoneyInputToCents
+} from '../../utils/cashReconciliationServiceHelper.mjs';
+import {
+  CashMirrorRowDetailPanel,
+  CashSystemCategoryTarget
+} from './CashMirrorRowDetailPanel';
 
 type TabKey = 'espelho' | 'sugestoes' | 'faltam' | 'sobram' | 'auditoria' | 'ia';
 
@@ -34,6 +42,7 @@ interface CashReconciliationWorkbenchProps {
   onRejectSuggestion: (suggestionId: string) => void;
   onManualLink: (systemIds: string[], realIds: string[]) => void;
   onIgnoreItem: (side: 'system' | 'real', id: string) => void;
+  onReclassifySystemItem: (systemId: string, targetCategory: CashSystemCategoryTarget | null) => void;
   rules: CashRuleRow[];
   onCreateRule: (rule: {
     rule_type: CashRuleRow['rule_type'];
@@ -64,6 +73,7 @@ export function CashReconciliationWorkbench({
   onRejectSuggestion,
   onManualLink,
   onIgnoreItem,
+  onReclassifySystemItem,
   rules,
   onCreateRule,
   onToggleRule,
@@ -72,9 +82,11 @@ export function CashReconciliationWorkbench({
   isAnalyzingAi,
   onRunAiAnalysis
 }: CashReconciliationWorkbenchProps) {
-  const [activeTab, setActiveTab] = useState<TabKey>(
-    result.suggestions?.length > 0 ? 'sugestoes' : 'espelho'
-  );
+  const [activeTab, setActiveTab] = useState<TabKey>('espelho');
+  const [expandedMirrorKey, setExpandedMirrorKey] = useState<string | null>(null);
+  const [showZeroMirrorRows, setShowZeroMirrorRows] = useState(false);
+  const [editingMirrorKey, setEditingMirrorKey] = useState<string | null>(null);
+  const [draftMirrorTexts, setDraftMirrorTexts] = useState<Record<string, string>>({});
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedMissingId, setSelectedMissingId] = useState<string | null>(null);
   const [selectedExtraId, setSelectedExtraId] = useState<string | null>(null);
@@ -157,6 +169,10 @@ export function CashReconciliationWorkbench({
 
   const drawer = result.cashDrawerSummary || {};
   const metrics = result.financialMetrics || {};
+  const mirrorVisibility = useMemo(
+    () => filterVisibleMirrorRows(result.mirrorRows || [], manualInputs.categoryRealOverrides || {}, showZeroMirrorRows),
+    [result.mirrorRows, manualInputs.categoryRealOverrides, showZeroMirrorRows]
+  );
 
   return (
     <div className="rounded-3xl border border-slate-200/80 dark:border-[#2a3942] bg-white/90 dark:bg-[#202c33]/90 backdrop-blur-xl shadow-sm overflow-hidden">
@@ -239,7 +255,16 @@ export function CashReconciliationWorkbench({
                     value={cashText}
                     onChange={(e) => {
                       setCashText(e.target.value);
-                      onUpdateManualInputs({ cashCountedCents: parseInputToCents(e.target.value) });
+                      const nextOverrides = { ...(manualInputs.categoryRealOverrides || {}) };
+                      if (nextOverrides.saldo_dinheiro !== undefined) {
+                        delete nextOverrides.saldo_dinheiro;
+                        onUpdateManualInputs({
+                          cashCountedCents: parseInputToCents(e.target.value),
+                          categoryRealOverrides: nextOverrides
+                        });
+                      } else {
+                        onUpdateManualInputs({ cashCountedCents: parseInputToCents(e.target.value) });
+                      }
                     }}
                     placeholder="Ex: 257,27"
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-[#2a3942] bg-white dark:bg-[#111b21] text-sm font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#00a884]"
@@ -277,7 +302,24 @@ export function CashReconciliationWorkbench({
               </div>
 
               {/* Tabela Espelho SISTEMA x REAL x DIF */}
-              <div className="lg:col-span-2 overflow-x-auto">
+              <div className="lg:col-span-2 space-y-2.5 overflow-x-auto">
+                <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+                  <span className="text-[11px] font-medium text-slate-500 dark:text-[#8696a0]">
+                    Clique em uma linha para ver a conciliação, diferenças e ajustar a forma manualmente.
+                  </span>
+                  {mirrorVisibility.hiddenCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowZeroMirrorRows((v) => !v)}
+                      className="text-[11px] font-bold text-[#00a884] hover:underline"
+                    >
+                      {showZeroMirrorRows
+                        ? `Ocultar ${mirrorVisibility.hiddenCount} linha(s) zerada(s)`
+                        : `Mostrar ${mirrorVisibility.hiddenCount} linha(s) zerada(s)`}
+                    </button>
+                  )}
+                </div>
+
                 <table className="w-full text-left border-collapse">
                   <thead>
                     <tr className="border-b border-slate-200 dark:border-[#2a3942] text-[10px] uppercase tracking-wider text-slate-500 dark:text-[#8696a0]">
@@ -288,58 +330,110 @@ export function CashReconciliationWorkbench({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-[#2a3942]/70 text-xs sm:text-sm">
-                    {(result.mirrorRows || []).map((row: CashMirrorRow) => {
+                    {mirrorVisibility.visibleRows.map((row: CashMirrorRow) => {
                       const diff = Number(row.diffCents || 0);
-                      const isEditable = !row.isAuto && row.key !== 'saldo_dinheiro';
+                      const isEditable = !row.isAuto;
+                      const isExpanded = expandedMirrorKey === row.key;
+                      const inputValue =
+                        editingMirrorKey === row.key
+                          ? (draftMirrorTexts[row.key] ?? '')
+                          : (row.hasRealInput ? centsToInputStr(row.realCents) : '');
+
                       return (
-                        <tr key={row.key} className="hover:bg-slate-50/70 dark:hover:bg-[#111b21]/50 transition-colors">
-                          <td className="py-2.5 px-3">
-                            <div className="font-bold text-slate-800 dark:text-[#e9edef] flex items-center gap-2">
-                              <span>{row.label}</span>
-                              {row.isAuto && (
-                                <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[9.5px] font-bold">
-                                  AUTO
-                                </span>
-                              )}
-                            </div>
-                            {row.sourceNote && (
-                              <p className="text-[10.5px] text-slate-500 dark:text-[#8696a0]">{row.sourceNote}</p>
-                            )}
-                          </td>
-                          <td className="py-2.5 px-3 text-right font-semibold text-slate-700 dark:text-[#d1d7db] tabular-nums">
-                            {formatCents(row.systemCents)}
-                          </td>
-                          <td className="py-2.5 px-3 text-right font-bold text-slate-900 dark:text-white tabular-nums">
-                            {isEditable ? (
-                              <input
-                                type="text"
-                                defaultValue={row.hasRealInput ? centsToInputStr(row.realCents) : ''}
-                                onBlur={(e) => {
-                                  const parsed = parseInputToCents(e.target.value);
-                                  const nextOverrides = { ...(manualInputs.categoryRealOverrides || {}) };
-                                  if (parsed === null) delete nextOverrides[row.key];
-                                  else nextOverrides[row.key] = parsed;
-                                  onUpdateManualInputs({ categoryRealOverrides: nextOverrides });
-                                }}
-                                placeholder="0,00"
-                                className="w-24 text-right px-2 py-1 rounded-lg border border-slate-200 dark:border-[#2a3942] bg-white dark:bg-[#111b21] text-xs font-bold focus:outline-none focus:ring-2 focus:ring-[#00a884]"
-                              />
-                            ) : (
-                              formatCents(row.realCents)
-                            )}
-                          </td>
-                          <td
-                            className={`py-2.5 px-3 text-right font-black tabular-nums ${
-                              Math.abs(diff) <= 1
-                                ? 'text-emerald-600 dark:text-emerald-400'
-                                : diff < 0
-                                  ? 'text-rose-600 dark:text-rose-400'
-                                  : 'text-indigo-600 dark:text-indigo-400'
+                        <React.Fragment key={row.key}>
+                          <tr
+                            onClick={() => setExpandedMirrorKey(isExpanded ? null : row.key)}
+                            title="Clique para detalhar a conciliação e ajustar lançamentos desta categoria"
+                            className={`cursor-pointer transition-colors ${
+                              isExpanded
+                                ? 'bg-[#00a884]/8 dark:bg-[#00a884]/10'
+                                : 'hover:bg-slate-50/70 dark:hover:bg-[#111b21]/50'
                             }`}
                           >
-                            {diff > 0 ? '+' : ''}{formatCents(diff)}
-                          </td>
-                        </tr>
+                            <td className="py-2.5 px-3">
+                              <div className="font-bold text-slate-800 dark:text-[#e9edef] flex items-center gap-1.5">
+                                {isExpanded ? (
+                                  <ChevronDown size={14} className="text-[#00a884] shrink-0" />
+                                ) : (
+                                  <ChevronRight size={14} className="text-slate-400 shrink-0" />
+                                )}
+                                <span>{row.label}</span>
+                                {row.isAuto && (
+                                  <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[9.5px] font-bold">
+                                    AUTO
+                                  </span>
+                                )}
+                              </div>
+                              {row.sourceNote && (
+                                <p className="text-[10.5px] pl-5 text-slate-500 dark:text-[#8696a0]">{row.sourceNote}</p>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-semibold text-slate-700 dark:text-[#d1d7db] tabular-nums">
+                              {formatCents(row.systemCents)}
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-bold text-slate-900 dark:text-white tabular-nums">
+                              {isEditable ? (
+                                <input
+                                  type="text"
+                                  value={inputValue}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onFocus={(e) => {
+                                    setEditingMirrorKey(row.key);
+                                    setDraftMirrorTexts((prev) => ({
+                                      ...prev,
+                                      [row.key]: row.hasRealInput ? centsToInputStr(row.realCents) : ''
+                                    }));
+                                    e.target.select();
+                                  }}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setDraftMirrorTexts((prev) => ({ ...prev, [row.key]: val }));
+                                    const parsed = parseInputToCents(val);
+                                    const nextOverrides = { ...(manualInputs.categoryRealOverrides || {}) };
+                                    if (parsed === null) delete nextOverrides[row.key];
+                                    else nextOverrides[row.key] = parsed;
+                                    onUpdateManualInputs({ categoryRealOverrides: nextOverrides });
+                                  }}
+                                  onBlur={() => {
+                                    setEditingMirrorKey((curr) => (curr === row.key ? null : curr));
+                                  }}
+                                  placeholder="0,00"
+                                  aria-label={`Valor real de ${row.label}`}
+                                  className="w-24 sm:w-28 text-right px-2.5 py-1 rounded-lg border border-slate-300 dark:border-[#2a3942] bg-white dark:bg-[#111b21] text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#00a884]"
+                                />
+                              ) : (
+                                formatCents(row.realCents)
+                              )}
+                            </td>
+                            <td
+                              className={`py-2.5 px-3 text-right font-black tabular-nums ${
+                                Math.abs(diff) <= 1
+                                  ? 'text-emerald-600 dark:text-emerald-400'
+                                  : diff < 0
+                                    ? 'text-rose-600 dark:text-rose-400'
+                                    : 'text-indigo-600 dark:text-indigo-400'
+                              }`}
+                            >
+                              {diff > 0 ? '+' : ''}{formatCents(diff)}
+                            </td>
+                          </tr>
+                          {isExpanded && (
+                            <tr>
+                              <td colSpan={4} className="p-2 sm:p-3 bg-slate-50/40 dark:bg-[#111b21]/40">
+                                <CashMirrorRowDetailPanel
+                                  row={row}
+                                  result={result}
+                                  onConfirmSuggestion={onConfirmSuggestion}
+                                  onRejectSuggestion={onRejectSuggestion}
+                                  onManualLink={onManualLink}
+                                  onIgnoreItem={onIgnoreItem}
+                                  onReclassifySystemItem={onReclassifySystemItem}
+                                  onClose={() => setExpandedMirrorKey(null)}
+                                />
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
                       );
                     })}
                     <tr className="bg-slate-100/80 dark:bg-[#111b21] font-black text-sm">

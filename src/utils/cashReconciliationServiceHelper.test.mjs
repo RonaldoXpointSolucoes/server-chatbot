@@ -93,7 +93,12 @@ test('isMissingCashTableError detects PostgREST PGRST205 and Postgres 42P01 clea
   assert.equal(isMissingCashTableError({ code: '23505', message: 'duplicate key' }), false);
 });
 
-import { parseUiMoneyInputToCents, SESSION_LIST_COLUMNS } from './cashReconciliationServiceHelper.mjs';
+import {
+  parseUiMoneyInputToCents,
+  SESSION_LIST_COLUMNS,
+  filterVisibleMirrorRows,
+  buildMirrorRowDetails
+} from './cashReconciliationServiceHelper.mjs';
 
 test('parseUiMoneyInputToCents handles pt-BR thousand separators and empty inputs accurately', () => {
   assert.equal(parseUiMoneyInputToCents(''), null);
@@ -109,4 +114,71 @@ test('SESSION_LIST_COLUMNS excludes heavy reconciled_summary snapshot blob', () 
   assert.equal(SESSION_LIST_COLUMNS.includes('ai_last_analysis'), false);
   assert.match(SESSION_LIST_COLUMNS, /reference_date/);
   assert.match(SESSION_LIST_COLUMNS, /health_score/);
+});
+
+test('filterVisibleMirrorRows hides rows with zero system and zero real unless overridden or toggled', () => {
+  const rows = [
+    { key: 'saldo_dinheiro', systemCents: 88807, realCents: 0 },
+    { key: 'ifood', systemCents: 0, realCents: 0 },
+    { key: 'ticket', systemCents: 0, realCents: 0 },
+    { key: 'pix', systemCents: 132564, realCents: 154704 },
+    { key: 'outros', systemCents: 0, realCents: 500 }
+  ];
+
+  const hidden = filterVisibleMirrorRows(rows, {}, false);
+  assert.deepEqual(hidden.visibleRows.map(r => r.key), ['saldo_dinheiro', 'pix', 'outros']);
+  assert.equal(hidden.hiddenCount, 2);
+
+  const overridden = filterVisibleMirrorRows(rows, { ticket: 0 }, false);
+  assert.deepEqual(overridden.visibleRows.map(r => r.key), ['saldo_dinheiro', 'ticket', 'pix', 'outros']);
+
+  const allShown = filterVisibleMirrorRows(rows, {}, true);
+  assert.equal(allShown.visibleRows.length, 5);
+  assert.equal(allShown.hiddenCount, 2);
+});
+
+test('buildMirrorRowDetails groups matched pairs, suggestions, extra/missing items and reclassified items by mirror row', () => {
+  const mockResult = {
+    systemItems: [
+      { id: 's1', category: 'dinheiro', amountCents: 3500, metadata: {} },
+      { id: 's2', category: 'cartao', amountCents: 2000, metadata: { reclassifiedFrom: 'dinheiro', reclassifiedTo: 'cartao' } },
+      { id: 's3', category: 'pix', amountCents: 5000, metadata: {} }
+    ],
+    matchedPairs: [
+      { id: 'm1', systemItems: [{ id: 's3', category: 'pix' }], realItems: [{ id: 'r1', category: 'pix' }], amountCents: 5000 },
+      { id: 'm2', systemItems: [{ id: 's2', category: 'cartao' }], realItems: [{ id: 'r2', category: 'cartao' }], amountCents: 2000 }
+    ],
+    suggestions: [
+      { id: 'sug1', reasonType: 'swapped_method', systemItems: [{ id: 's1', category: 'dinheiro' }], realItems: [{ id: 'r3', category: 'pix' }], amountCents: 3500 }
+    ],
+    missingInBank: [
+      { id: 's4', category: 'pix', amountCents: 1200 }
+    ],
+    extraInBank: [
+      { id: 'r3', category: 'pix', amountCents: 3500 },
+      { id: 'r4', category: 'cartao', amountCents: 2500 }
+    ],
+    cashDrawerSummary: {
+      saidasDetalhadas: [{ label: 'VALE ISAAC', amountCents: 5000, isSangria: false }]
+    },
+    financialMetrics: {
+      pendingDebtors: [{ debtor: 'JOAO', amountCents: 1000 }]
+    }
+  };
+
+  const cashDetails = buildMirrorRowDetails(mockResult, 'saldo_dinheiro');
+  assert.equal(cashDetails.systemCategoryItems.length, 1);
+  assert.equal(cashDetails.reclassifiedOutItems.length, 1);
+  assert.equal(cashDetails.reclassifiedOutItems[0].id, 's2');
+  assert.equal(cashDetails.suggestions.length, 1);
+  assert.equal(cashDetails.saidasDetalhadas.length, 1);
+
+  const pixDetails = buildMirrorRowDetails(mockResult, 'pix');
+  assert.equal(pixDetails.matchedPairs.length, 1);
+  assert.equal(pixDetails.suggestions.length, 1);
+  assert.equal(pixDetails.missingItems.length, 1);
+  assert.equal(pixDetails.extraItems.length, 1);
+
+  const pendDetails = buildMirrorRowDetails(mockResult, 'pendentes');
+  assert.equal(pendDetails.pendingDebtors.length, 1);
 });

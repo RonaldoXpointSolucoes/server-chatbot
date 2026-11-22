@@ -265,3 +265,64 @@ test('runCashReconciliation does not double-count confirmed swapped Dinheiro->Di
   });
   assert.equal(ghostCheck.matchedPairs.length, 0);
 });
+
+test('runCashReconciliation supports reclassify_system (Dinheiro->Cartao) and saldo_dinheiro override', () => {
+  const sampleFiles = [
+    {
+      fileType: 'pdv_vendas',
+      status: 'ok',
+      periodStart: '2026-11-19',
+      periodEnd: '2026-11-19',
+      rows: [
+        { rowIndex: 1, numero: '001', modulo: 'MESA', origem: 'MESA', amountCents: 10000, receivedCents: 10000, recebidoEmBranco: false, changeCents: 0, formaPagto: 'CARTÃO', administradora: 'CREDITO', category: 'cartao', subType: 'credito', dateStr: '2026-11-19', timeStr: '12:00:00', secondsOfDay: 43200, operador: 'Op1', nomeMaquina: 'SERVIDOR' },
+        { rowIndex: 2, numero: '002', modulo: 'MESA', origem: 'MESA', amountCents: 3500, receivedCents: 3500, recebidoEmBranco: false, changeCents: 0, formaPagto: 'DINHEIRO', administradora: 'DINHEIRO', category: 'dinheiro', subType: 'dinheiro', dateStr: '2026-11-19', timeStr: '12:15:00', secondsOfDay: 44100, operador: 'Op1', nomeMaquina: 'SERVIDOR' },
+        { rowIndex: 3, numero: '003', modulo: 'MESA', origem: 'MESA', amountCents: 2000, receivedCents: 2000, recebidoEmBranco: false, changeCents: 0, formaPagto: 'DINHEIRO', administradora: 'DINHEIRO', category: 'dinheiro', subType: 'dinheiro', dateStr: '2026-11-19', timeStr: '12:20:00', secondsOfDay: 44400, operador: 'Op1', nomeMaquina: 'SERVIDOR' }
+      ]
+    },
+    {
+      fileType: 'adquirente_rede',
+      status: 'ok',
+      periodStart: '2026-11-19',
+      periodEnd: '2026-11-19',
+      rows: [
+        { rowIndex: 1, source: 'rede', isApproved: true, category: 'cartao', subType: 'credito', amountCents: 10000, feeCents: 200, netCents: 9800, dateStr: '2026-11-19', timeStr: '12:00:10', secondsOfDay: 43210 },
+        { rowIndex: 2, source: 'rede', isApproved: true, category: 'cartao', subType: 'debito', amountCents: 3500, feeCents: 50, netCents: 3450, dateStr: '2026-11-19', timeStr: '12:15:20', secondsOfDay: 44120 }
+      ]
+    }
+  ];
+
+  const before = runCashReconciliation({
+    parsedFiles: sampleFiles,
+    manualInputs: { categoryRealOverrides: { saldo_dinheiro: 2000 } }
+  });
+
+  // Override direto no campo Real de Saldo em Dinheiro
+  const cashRowBefore = before.mirrorRows.find(r => r.key === 'saldo_dinheiro');
+  assert.equal(cashRowBefore.realCents, 2000);
+  assert.equal(cashRowBefore.hasRealInput, true);
+
+  // Usuário ajusta venda de R$ 35,00 que estava em DINHEIRO -> foi para CARTÃO
+  const dinheiro35 = before.systemItems.find(s => s.category === 'dinheiro' && s.amountCents === 3500);
+  assert.ok(dinheiro35);
+
+  const after = runCashReconciliation({
+    parsedFiles: sampleFiles,
+    manualInputs: { categoryRealOverrides: { saldo_dinheiro: 2000 } },
+    manualResolutions: [{ action: 'reclassify_system', systemIds: [dinheiro35.id], targetCategory: 'cartao' }]
+  });
+
+  const cashRowAfter = after.mirrorRows.find(r => r.key === 'saldo_dinheiro');
+  const cardRowAfter = after.mirrorRows.find(r => r.key === 'cartao');
+  assert.equal(cashRowAfter.systemCents, 2000);
+  assert.equal(cashRowAfter.diffCents, 0);
+  assert.equal(cardRowAfter.systemCents, 13500);
+  assert.equal(cardRowAfter.realCents, 13500);
+  assert.equal(cardRowAfter.diffCents, 0);
+  assert.equal(after.systemTotalCents, before.systemTotalCents);
+  assert.equal(after.matchedPairs.length, 2);
+  assert.equal(after.extraInBank.length, 0);
+  assert.equal(after.status, 'balanced');
+  const adjustedItem = after.systemItems.find(s => s.id === dinheiro35.id);
+  assert.equal(adjustedItem.category, 'cartao');
+  assert.equal(adjustedItem.metadata.reclassifiedFrom, 'dinheiro');
+});

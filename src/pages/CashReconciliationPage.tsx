@@ -431,6 +431,18 @@ export default function CashReconciliationPage() {
                   }
                 ])
               }
+              onReclassifySystemItem={(systemId, targetCategory) =>
+                setManualResolutions((prev) => {
+                  const withoutPrior = prev.filter(
+                    (r) => !(r.action === 'reclassify_system' && r.systemIds?.includes(systemId))
+                  );
+                  if (!targetCategory) return withoutPrior;
+                  return [
+                    ...withoutPrior,
+                    { action: 'reclassify_system', systemIds: [systemId], targetCategory }
+                  ];
+                })
+              }
               rules={rules}
               onCreateRule={async (rule) => {
                 if (!tenantId) return;

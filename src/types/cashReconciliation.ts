@@ -134,10 +134,11 @@ export interface CashManualInputs {
 }
 
 export interface CashResolutionAction {
-  action: 'confirm_suggestion' | 'reject_suggestion' | 'manual_link' | 'ignore_item';
+  action: 'confirm_suggestion' | 'reject_suggestion' | 'manual_link' | 'ignore_item' | 'reclassify_system';
   suggestionId?: string;
   systemIds?: string[];
   realIds?: string[];
+  targetCategory?: 'dinheiro' | 'cartao' | 'pix' | 'pendente';
 }
 
 export interface CashAiAnalysis {

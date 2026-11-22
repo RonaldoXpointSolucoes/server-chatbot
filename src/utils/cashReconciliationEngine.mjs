@@ -299,6 +299,41 @@ export function runCashReconciliation({
   const c6PayPostCutoffPix = c6PayApprovedPix.filter(c => !usedC6pDedup.has(c.id));
   const realItems = [...ofxPixItems, ...redeApproved, ...c6PayApprovedCards, ...c6PayPostCutoffPix];
 
+  // Aplicar reclassificações manuais de forma de pagamento no PDV antes do pareamento automático
+  const validTargetCats = new Set(['dinheiro', 'cartao', 'pix', 'pendente']);
+  const latestTargetBySysId = new Map();
+  for (const res of manualResolutions || []) {
+    if (res?.action === 'reclassify_system' && res.targetCategory && validTargetCats.has(res.targetCategory)) {
+      for (const sid of res.systemIds || []) {
+        latestTargetBySysId.set(sid, res.targetCategory);
+      }
+    }
+  }
+
+  const reclassifiedDeltaByCat = {
+    dinheiro: 0,
+    cartao: 0,
+    pix: 0,
+    pendente: 0,
+    ifood: 0,
+    ticket: 0,
+    outros: 0
+  };
+  for (const s of systemItems) {
+    const newCat = latestTargetBySysId.get(s.id);
+    if (!newCat || newCat === s.category) continue;
+    const origCat = s.category;
+    reclassifiedDeltaByCat[origCat] = (reclassifiedDeltaByCat[origCat] || 0) - s.amountCents;
+    reclassifiedDeltaByCat[newCat] = (reclassifiedDeltaByCat[newCat] || 0) + s.amountCents;
+    s.category = newCat;
+    s.metadata = {
+      ...(s.metadata || {}),
+      reclassifiedFrom: origCat,
+      reclassifiedTo: newCat
+    };
+    s.matchReason = `Forma ajustada manualmente de ${origCat.toUpperCase()} para ${newCat.toUpperCase()}`;
+  }
+
   // Aplicar resoluções manuais explícitas antes dos passes automáticos
   const usedSys = new Set();
   const usedReal = new Set();
@@ -523,7 +558,7 @@ export function runCashReconciliation({
   const txtSum = txtFile?.summary || {};
 
   const fundoManhaCents = relCash.fundoManhaCents ?? txtSum.fundoCaixaCents ?? 0;
-  const vendaDinheiroCents = pdvFile ? pdvTotals.dinheiro : (relCash.vendaDinheiroCents ?? 0);
+  const vendaDinheiroCents = Math.max(0, (pdvFile ? pdvTotals.dinheiro : (relCash.vendaDinheiroCents ?? 0)) + reclassifiedDeltaByCat.dinheiro);
   const fundoNoiteCents = relCash.fundoNoiteCents ?? 0;
   const outrasEntradasCents = relCash.outrasEntradasCents ?? 0;
   const sangriaRelConfCents = (relCash.sangriaManhaCents || 0) + (relCash.sangriaNoiteCents || 0);
@@ -561,15 +596,15 @@ export function runCashReconciliation({
     : (relConfFile?.summary?.realRows?.saldo_dinheiro ?? null);
 
   const overrides = manualInputs.categoryRealOverrides || {};
-  const sysSaldoDinheiro = relSys.saldo_dinheiro ?? expectedTotalCents;
-  const sysCartao = Math.max(0, (relSys.cartao ?? pdvTotals.cartao) - ignoredSysByCat.cartao);
-  const sysIfood = relSys.ifood ?? pdvTotals.ifood;
-  const sysPendentes = relSys.pendentes ?? (pdvFile ? pdvTotals.pendente : (txtSum.notaPendenteCents || 0));
-  const sysPix = Math.max(0, (relSys.pix ?? pdvTotals.pix) - ignoredSysByCat.pix);
+  const sysSaldoDinheiro = Math.max(0, (relSys.saldo_dinheiro !== undefined ? relSys.saldo_dinheiro + reclassifiedDeltaByCat.dinheiro : expectedTotalCents));
+  const sysCartao = Math.max(0, (relSys.cartao ?? pdvTotals.cartao) - ignoredSysByCat.cartao + reclassifiedDeltaByCat.cartao);
+  const sysIfood = Math.max(0, (relSys.ifood ?? pdvTotals.ifood) + reclassifiedDeltaByCat.ifood);
+  const sysPendentes = Math.max(0, (relSys.pendentes ?? (pdvFile ? pdvTotals.pendente : (txtSum.notaPendenteCents || 0))) + reclassifiedDeltaByCat.pendente);
+  const sysPix = Math.max(0, (relSys.pix ?? pdvTotals.pix) - ignoredSysByCat.pix + reclassifiedDeltaByCat.pix);
   const sysPagoOnline = relSys.pago_online ?? 0;
-  const sysTicket = relSys.ticket ?? pdvTotals.ticket;
+  const sysTicket = Math.max(0, (relSys.ticket ?? pdvTotals.ticket) + reclassifiedDeltaByCat.ticket);
   const sysSemBandeira = relSys.sem_bandeira ?? 0;
-  const sysOutros = relSys.outros ?? pdvTotals.outros;
+  const sysOutros = Math.max(0, (relSys.outros ?? pdvTotals.outros) + reclassifiedDeltaByCat.outros);
 
   const makeMirrorRow = (key, label, systemCents, computedRealCents, isAuto = false, sourceNote = '') => {
     const realCents = overrides[key] !== undefined ? overrides[key] : computedRealCents;
@@ -610,9 +645,11 @@ export function runCashReconciliation({
   const digitalRealTotal = realCartaoCents + realPixCents;
   const digitalDiffCents = digitalRealTotal - digitalSystemTotal;
 
+  const hasCashRealInformed = countedCents !== null || overrides.saldo_dinheiro !== undefined;
+
   // Score de saúde (0-100): mede qualidade da conciliação digital + diferença confirmada
   const baseVolume = Math.max(digitalSystemTotal, systemTotalCents, 1);
-  const absFocusDiff = countedCents !== null ? Math.abs(confirmedDiffCents) : Math.abs(digitalDiffCents);
+  const absFocusDiff = hasCashRealInformed ? Math.abs(confirmedDiffCents) : Math.abs(digitalDiffCents);
   const diffRatio = Math.min(1, absFocusDiff / baseVolume);
   const rawScore = Math.max(0, Math.min(100, Math.round((1 - diffRatio * 1.5) * 100 - suggestions.length * 2 - missingInBank.length * 1.5)));
 
@@ -620,7 +657,7 @@ export function runCashReconciliation({
   if (suggestions.length > 0 && absFocusDiff <= Math.max(tol, 100)) {
     status = 'attention';
   } else if (absFocusDiff > Math.max(tol, 100)) {
-    const referenceDiff = countedCents !== null ? confirmedDiffCents : digitalDiffCents;
+    const referenceDiff = hasCashRealInformed ? confirmedDiffCents : digitalDiffCents;
     status = referenceDiff < 0 ? 'shortage' : 'surplus';
   } else if (missingInBank.length > 0 || extraInBank.length > 0) {
     status = 'attention';
