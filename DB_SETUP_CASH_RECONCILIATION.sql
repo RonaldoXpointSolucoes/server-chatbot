@@ -125,28 +125,38 @@ DROP POLICY IF EXISTS cash_sessions_tenant_policy ON public.cash_reconciliation_
 CREATE POLICY cash_sessions_tenant_policy ON public.cash_reconciliation_sessions
   FOR ALL USING (
     auth.role() = 'service_role'
-    OR EXISTS (
-      SELECT 1 FROM public.companies c
-      WHERE c.id = cash_reconciliation_sessions.tenant_id
-        AND lower(c.email) = lower(COALESCE(auth.jwt() ->> 'email', ''))
-    )
-    OR EXISTS (
-      SELECT 1 FROM public.tenant_users tu
-      WHERE tu.tenant_id = cash_reconciliation_sessions.tenant_id
-        AND lower(tu.email) = lower(COALESCE(auth.jwt() ->> 'email', ''))
+    OR (
+      NULLIF(trim(COALESCE(auth.jwt() ->> 'email', '')), '') IS NOT NULL
+      AND (
+        EXISTS (
+          SELECT 1 FROM public.companies c
+          WHERE c.id = cash_reconciliation_sessions.tenant_id
+            AND lower(c.email) = lower(auth.jwt() ->> 'email')
+        )
+        OR EXISTS (
+          SELECT 1 FROM public.tenant_users tu
+          WHERE tu.tenant_id = cash_reconciliation_sessions.tenant_id
+            AND lower(tu.email) = lower(auth.jwt() ->> 'email')
+        )
+      )
     )
   )
   WITH CHECK (
     auth.role() = 'service_role'
-    OR EXISTS (
-      SELECT 1 FROM public.companies c
-      WHERE c.id = cash_reconciliation_sessions.tenant_id
-        AND lower(c.email) = lower(COALESCE(auth.jwt() ->> 'email', ''))
-    )
-    OR EXISTS (
-      SELECT 1 FROM public.tenant_users tu
-      WHERE tu.tenant_id = cash_reconciliation_sessions.tenant_id
-        AND lower(tu.email) = lower(COALESCE(auth.jwt() ->> 'email', ''))
+    OR (
+      NULLIF(trim(COALESCE(auth.jwt() ->> 'email', '')), '') IS NOT NULL
+      AND (
+        EXISTS (
+          SELECT 1 FROM public.companies c
+          WHERE c.id = cash_reconciliation_sessions.tenant_id
+            AND lower(c.email) = lower(auth.jwt() ->> 'email')
+        )
+        OR EXISTS (
+          SELECT 1 FROM public.tenant_users tu
+          WHERE tu.tenant_id = cash_reconciliation_sessions.tenant_id
+            AND lower(tu.email) = lower(auth.jwt() ->> 'email')
+        )
+      )
     )
   );
 
@@ -154,28 +164,38 @@ DROP POLICY IF EXISTS cash_files_tenant_policy ON public.cash_reconciliation_fil
 CREATE POLICY cash_files_tenant_policy ON public.cash_reconciliation_files
   FOR ALL USING (
     auth.role() = 'service_role'
-    OR EXISTS (
-      SELECT 1 FROM public.companies c
-      WHERE c.id = cash_reconciliation_files.tenant_id
-        AND lower(c.email) = lower(COALESCE(auth.jwt() ->> 'email', ''))
-    )
-    OR EXISTS (
-      SELECT 1 FROM public.tenant_users tu
-      WHERE tu.tenant_id = cash_reconciliation_files.tenant_id
-        AND lower(tu.email) = lower(COALESCE(auth.jwt() ->> 'email', ''))
+    OR (
+      NULLIF(trim(COALESCE(auth.jwt() ->> 'email', '')), '') IS NOT NULL
+      AND (
+        EXISTS (
+          SELECT 1 FROM public.companies c
+          WHERE c.id = cash_reconciliation_files.tenant_id
+            AND lower(c.email) = lower(auth.jwt() ->> 'email')
+        )
+        OR EXISTS (
+          SELECT 1 FROM public.tenant_users tu
+          WHERE tu.tenant_id = cash_reconciliation_files.tenant_id
+            AND lower(tu.email) = lower(auth.jwt() ->> 'email')
+        )
+      )
     )
   )
   WITH CHECK (
     auth.role() = 'service_role'
-    OR EXISTS (
-      SELECT 1 FROM public.companies c
-      WHERE c.id = cash_reconciliation_files.tenant_id
-        AND lower(c.email) = lower(COALESCE(auth.jwt() ->> 'email', ''))
-    )
-    OR EXISTS (
-      SELECT 1 FROM public.tenant_users tu
-      WHERE tu.tenant_id = cash_reconciliation_files.tenant_id
-        AND lower(tu.email) = lower(COALESCE(auth.jwt() ->> 'email', ''))
+    OR (
+      NULLIF(trim(COALESCE(auth.jwt() ->> 'email', '')), '') IS NOT NULL
+      AND (
+        EXISTS (
+          SELECT 1 FROM public.companies c
+          WHERE c.id = cash_reconciliation_files.tenant_id
+            AND lower(c.email) = lower(auth.jwt() ->> 'email')
+        )
+        OR EXISTS (
+          SELECT 1 FROM public.tenant_users tu
+          WHERE tu.tenant_id = cash_reconciliation_files.tenant_id
+            AND lower(tu.email) = lower(auth.jwt() ->> 'email')
+        )
+      )
     )
   );
 
@@ -183,28 +203,38 @@ DROP POLICY IF EXISTS cash_items_tenant_policy ON public.cash_reconciliation_ite
 CREATE POLICY cash_items_tenant_policy ON public.cash_reconciliation_items
   FOR ALL USING (
     auth.role() = 'service_role'
-    OR EXISTS (
-      SELECT 1 FROM public.companies c
-      WHERE c.id = cash_reconciliation_items.tenant_id
-        AND lower(c.email) = lower(COALESCE(auth.jwt() ->> 'email', ''))
-    )
-    OR EXISTS (
-      SELECT 1 FROM public.tenant_users tu
-      WHERE tu.tenant_id = cash_reconciliation_items.tenant_id
-        AND lower(tu.email) = lower(COALESCE(auth.jwt() ->> 'email', ''))
+    OR (
+      NULLIF(trim(COALESCE(auth.jwt() ->> 'email', '')), '') IS NOT NULL
+      AND (
+        EXISTS (
+          SELECT 1 FROM public.companies c
+          WHERE c.id = cash_reconciliation_items.tenant_id
+            AND lower(c.email) = lower(auth.jwt() ->> 'email')
+        )
+        OR EXISTS (
+          SELECT 1 FROM public.tenant_users tu
+          WHERE tu.tenant_id = cash_reconciliation_items.tenant_id
+            AND lower(tu.email) = lower(auth.jwt() ->> 'email')
+        )
+      )
     )
   )
   WITH CHECK (
     auth.role() = 'service_role'
-    OR EXISTS (
-      SELECT 1 FROM public.companies c
-      WHERE c.id = cash_reconciliation_items.tenant_id
-        AND lower(c.email) = lower(COALESCE(auth.jwt() ->> 'email', ''))
-    )
-    OR EXISTS (
-      SELECT 1 FROM public.tenant_users tu
-      WHERE tu.tenant_id = cash_reconciliation_items.tenant_id
-        AND lower(tu.email) = lower(COALESCE(auth.jwt() ->> 'email', ''))
+    OR (
+      NULLIF(trim(COALESCE(auth.jwt() ->> 'email', '')), '') IS NOT NULL
+      AND (
+        EXISTS (
+          SELECT 1 FROM public.companies c
+          WHERE c.id = cash_reconciliation_items.tenant_id
+            AND lower(c.email) = lower(auth.jwt() ->> 'email')
+        )
+        OR EXISTS (
+          SELECT 1 FROM public.tenant_users tu
+          WHERE tu.tenant_id = cash_reconciliation_items.tenant_id
+            AND lower(tu.email) = lower(auth.jwt() ->> 'email')
+        )
+      )
     )
   );
 
@@ -212,27 +242,37 @@ DROP POLICY IF EXISTS cash_rules_tenant_policy ON public.cash_reconciliation_rul
 CREATE POLICY cash_rules_tenant_policy ON public.cash_reconciliation_rules
   FOR ALL USING (
     auth.role() = 'service_role'
-    OR EXISTS (
-      SELECT 1 FROM public.companies c
-      WHERE c.id = cash_reconciliation_rules.tenant_id
-        AND lower(c.email) = lower(COALESCE(auth.jwt() ->> 'email', ''))
-    )
-    OR EXISTS (
-      SELECT 1 FROM public.tenant_users tu
-      WHERE tu.tenant_id = cash_reconciliation_rules.tenant_id
-        AND lower(tu.email) = lower(COALESCE(auth.jwt() ->> 'email', ''))
+    OR (
+      NULLIF(trim(COALESCE(auth.jwt() ->> 'email', '')), '') IS NOT NULL
+      AND (
+        EXISTS (
+          SELECT 1 FROM public.companies c
+          WHERE c.id = cash_reconciliation_rules.tenant_id
+            AND lower(c.email) = lower(auth.jwt() ->> 'email')
+        )
+        OR EXISTS (
+          SELECT 1 FROM public.tenant_users tu
+          WHERE tu.tenant_id = cash_reconciliation_rules.tenant_id
+            AND lower(tu.email) = lower(auth.jwt() ->> 'email')
+        )
+      )
     )
   )
   WITH CHECK (
     auth.role() = 'service_role'
-    OR EXISTS (
-      SELECT 1 FROM public.companies c
-      WHERE c.id = cash_reconciliation_rules.tenant_id
-        AND lower(c.email) = lower(COALESCE(auth.jwt() ->> 'email', ''))
-    )
-    OR EXISTS (
-      SELECT 1 FROM public.tenant_users tu
-      WHERE tu.tenant_id = cash_reconciliation_rules.tenant_id
-        AND lower(tu.email) = lower(COALESCE(auth.jwt() ->> 'email', ''))
+    OR (
+      NULLIF(trim(COALESCE(auth.jwt() ->> 'email', '')), '') IS NOT NULL
+      AND (
+        EXISTS (
+          SELECT 1 FROM public.companies c
+          WHERE c.id = cash_reconciliation_rules.tenant_id
+            AND lower(c.email) = lower(auth.jwt() ->> 'email')
+        )
+        OR EXISTS (
+          SELECT 1 FROM public.tenant_users tu
+          WHERE tu.tenant_id = cash_reconciliation_rules.tenant_id
+            AND lower(tu.email) = lower(auth.jwt() ->> 'email')
+        )
+      )
     )
   );

@@ -21,6 +21,42 @@ function buildNormalizedInputs(parsedFiles) {
   return { pdvFile, relConfFile, txtFile, ofxFiles, redeFiles, c6PayFiles };
 }
 
+function shortHash(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(36);
+}
+
+function createIdGenerator() {
+  const counts = new Map();
+  return (prefix, signatureParts) => {
+    const sig = signatureParts.map(p => String(p ?? '')).join('|');
+    const occ = (counts.get(sig) || 0) + 1;
+    counts.set(sig, occ);
+    return `${prefix}_${shortHash(sig)}_${occ}`;
+  };
+}
+
+function getItemTimestampSec(item) {
+  if (item?.dateStr && /^\d{4}-\d{2}-\d{2}$/.test(item.dateStr)) {
+    const dayMs = Date.parse(`${item.dateStr}T00:00:00Z`);
+    if (Number.isFinite(dayMs)) {
+      return Math.floor(dayMs / 1000) + (item.secondsOfDay || 0);
+    }
+  }
+  return null;
+}
+
+function getTimeDiffSec(a, b) {
+  const ta = getItemTimestampSec(a);
+  const tb = getItemTimestampSec(b);
+  if (ta !== null && tb !== null) return Math.abs(ta - tb);
+  return Math.abs((a.secondsOfDay || 0) - (b.secondsOfDay || 0));
+}
+
 function getTerminalAffinityPenalty(pdvItem, realItem) {
   const term = String(pdvItem.terminalName || '').toUpperCase();
   if (term.includes('REDE')) {
@@ -32,10 +68,10 @@ function getTerminalAffinityPenalty(pdvItem, realItem) {
   return 0;
 }
 
-function findBestSubsetSums(targetCents, candidates, maxLen, tolCents, maxWindowSec, targetSec) {
+function findBestSubsetSums(targetCents, candidates, maxLen, tolCents, maxWindowSec, targetItem) {
   const pool = candidates
-    .filter(c => c.amountCents > 0 && c.amountCents < targetCents && Math.abs(c.secondsOfDay - targetSec) <= maxWindowSec)
-    .sort((a, b) => Math.abs(a.secondsOfDay - targetSec) - Math.abs(b.secondsOfDay - targetSec))
+    .filter(c => c.amountCents > 0 && c.amountCents < targetCents && getTimeDiffSec(c, targetItem) <= maxWindowSec)
+    .sort((a, b) => getTimeDiffSec(a, targetItem) - getTimeDiffSec(b, targetItem))
     .slice(0, 22);
 
   if (pool.length < 2) return null;
@@ -45,7 +81,7 @@ function findBestSubsetSums(targetCents, candidates, maxLen, tolCents, maxWindow
   function dfs(startIdx, chosen, sum) {
     if (chosen.length >= 2) {
       if (Math.abs(sum - targetCents) <= tolCents) {
-        const span = Math.max(...chosen.map(c => Math.abs(c.secondsOfDay - targetSec)));
+        const span = Math.max(...chosen.map(c => getTimeDiffSec(c, targetItem)));
         if (span < bestSpan) {
           bestSpan = span;
           best = [...chosen];
@@ -77,6 +113,7 @@ export function runCashReconciliation({
   const cfg = { ...DEFAULT_FORMULA_CONFIG, ...(rulesConfig || {}) };
   const tol = Number.isFinite(cfg.amountToleranceCents) ? cfg.amountToleranceCents : 1;
   const { pdvFile, relConfFile, txtFile, ofxFiles, redeFiles, c6PayFiles } = buildNormalizedInputs(parsedFiles);
+  const nextId = createIdGenerator();
 
   // 1. Itens de Sistema (PDV)
   const systemItems = [];
@@ -106,7 +143,7 @@ export function runCashReconciliation({
 
     if (row.amountCents > 0) {
       systemItems.push({
-        id: `sys_${idx}`,
+        id: nextId('sys', ['pdv', row.dateStr, row.timeStr, row.amountCents, row.numero, row.administradora || row.formaPagto]),
         side: 'system',
         source: 'pdv',
         category: cat,
@@ -139,9 +176,9 @@ export function runCashReconciliation({
   const debitAuditItems = [];
 
   for (const f of ofxFiles) {
-    for (const [idx, row] of (f.rows || []).entries()) {
+    for (const row of (f.rows || [])) {
       const base = {
-        id: `real_ofx_${ofxFiles.indexOf(f)}_${idx}`,
+        id: nextId('real_ofx', [row.source || 'ofx', row.fitid || row.refnum, row.dateStr, row.timeStr, row.amountCents, row.memo]),
         side: 'real',
         source: row.source || 'ofx',
         category: row.ofxClass === 'pix_cliente' ? 'pix' : 'nao_pdv',
@@ -167,9 +204,9 @@ export function runCashReconciliation({
   const redeApproved = [];
   const notAuthorizedItems = [];
   for (const f of redeFiles) {
-    for (const [idx, row] of (f.rows || []).entries()) {
+    for (const row of (f.rows || [])) {
       const item = {
-        id: `real_rede_${redeFiles.indexOf(f)}_${idx}`,
+        id: nextId('real_rede', ['rede', row.nsu || row.transactionId, row.dateStr, row.timeStr, row.amountCents, row.subType]),
         side: 'real',
         source: 'rede',
         category: row.category,
@@ -194,9 +231,15 @@ export function runCashReconciliation({
   const c6PayApprovedCards = [];
   const c6PayApprovedPix = [];
   for (const f of c6PayFiles) {
-    for (const [idx, row] of (f.rows || []).entries()) {
+    const reportSingleDay = f.periodStart && f.periodStart === f.periodEnd ? f.periodStart : '';
+    for (const row of (f.rows || [])) {
+      // Se um relatório diário da C6 Pay (ex.: 19/11) traz uma venda noturna carimbada no dia seguinte (ex.: 20/11 às 21:51), alinha com a data do relatório
+      const effectiveDateStr =
+        reportSingleDay && row.dateStr && row.dateStr !== reportSingleDay && row.secondsOfDay >= 6 * 3600
+          ? reportSingleDay
+          : row.dateStr;
       const item = {
-        id: `real_c6p_${c6PayFiles.indexOf(f)}_${idx}`,
+        id: nextId('real_c6p', ['c6pay', row.nsu || row.idPdc, effectiveDateStr, row.timeStr, row.amountCents, row.subType]),
         side: 'real',
         source: 'c6pay',
         category: row.category,
@@ -204,14 +247,14 @@ export function runCashReconciliation({
         amountCents: row.amountCents,
         netAmountCents: row.netCents,
         feeCents: row.feeCents || 0,
-        dateStr: row.dateStr,
+        dateStr: effectiveDateStr,
         timeStr: row.timeStr,
         secondsOfDay: row.secondsOfDay,
         referenceCode: row.nsu || row.idPdc || '',
         description: `C6 Pay ${row.subType?.toUpperCase() || ''} ${row.bandeira || ''}`.trim(),
         terminalName: row.idPdc ? `PDC ${row.idPdc}` : 'Maquininha C6 Pay',
         operatorName: '',
-        metadata: { statusRaw: row.statusRaw, bandeira: row.bandeira, idPdc: row.idPdc }
+        metadata: { statusRaw: row.statusRaw, bandeira: row.bandeira, idPdc: row.idPdc, rawDateStr: row.dateStr }
       };
       if (!row.isApproved) {
         notAuthorizedItems.push({ ...item, side: 'audit', matchStatus: 'not_authorized' });
@@ -227,7 +270,7 @@ export function runCashReconciliation({
   for (const c6p of c6PayApprovedPix) {
     for (const ofx of ofxPixItems) {
       if (Math.abs(c6p.amountCents - ofx.amountCents) <= tol) {
-        const dt = Math.abs(c6p.secondsOfDay - ofx.secondsOfDay);
+        const dt = getTimeDiffSec(c6p, ofx);
         if (dt <= cfg.ofxPixDedupWindowSec) {
           ofxDedupPairs.push({ c6p, ofx, dt });
         }
@@ -273,12 +316,13 @@ export function runCashReconciliation({
     } else if (res.action === 'confirm_suggestion' && res.suggestionId) {
       confirmedSuggestionIds.add(res.suggestionId);
     } else if (res.action === 'manual_link' && res.systemIds?.length && res.realIds?.length) {
-      res.systemIds.forEach(id => usedSys.add(id));
-      res.realIds.forEach(id => usedReal.add(id));
-      const sysObjs = systemItems.filter(s => res.systemIds.includes(s.id));
-      const realObjs = realItems.filter(r => res.realIds.includes(r.id));
+      const sysObjs = systemItems.filter(s => res.systemIds.includes(s.id) && !usedSys.has(s.id) && !ignoredIds.has(s.id));
+      const realObjs = realItems.filter(r => res.realIds.includes(r.id) && !usedReal.has(r.id) && !ignoredIds.has(r.id));
+      if (sysObjs.length === 0 || realObjs.length === 0) continue;
+      sysObjs.forEach(s => usedSys.add(s.id));
+      realObjs.forEach(r => usedReal.add(r.id));
       matchedPairs.push({
-        id: `match_manual_${res.systemIds.join('_')}`,
+        id: `match_manual_${sysObjs.map(s => s.id).join('_')}`,
         matchType: 'matched_manual',
         reasonType: 'manual_link',
         reasonText: 'Vínculo confirmado manualmente pelo conferente',
@@ -300,7 +344,7 @@ export function runCashReconciliation({
       if (sys.category !== real.category) continue;
       const amtDiff = Math.abs(sys.amountCents - real.amountCents);
       if (amtDiff > tol) continue;
-      const dt = Math.abs(sys.secondsOfDay - real.secondsOfDay);
+      const dt = getTimeDiffSec(sys, real);
       if (dt > cfg.exactMatchWindowSec) continue;
 
       const penalty = getTerminalAffinityPenalty(sys, real);
@@ -336,7 +380,7 @@ export function runCashReconciliation({
       if (usedReal.has(real.id) || ignoredIds.has(real.id)) continue;
       const amtDiff = Math.abs(sys.amountCents - real.amountCents);
       if (amtDiff > tol) continue;
-      const dt = Math.abs(sys.secondsOfDay - real.secondsOfDay);
+      const dt = getTimeDiffSec(sys, real);
       if (dt > cfg.swapWindowSec) continue;
 
       const prio = (sys.category === 'dinheiro' || sys.category === 'pendente') ? 0 : 900;
@@ -391,7 +435,7 @@ export function runCashReconciliation({
     if (usedSys.has(sys.id) || ignoredIds.has(sys.id) || reservedSugSys.has(sys.id)) continue;
     if (sys.category !== 'pix' && sys.category !== 'cartao' && sys.category !== 'dinheiro') continue;
     const freeReal = realItems.filter(r => !usedReal.has(r.id) && !ignoredIds.has(r.id) && !reservedSugReal.has(r.id));
-    const subset = findBestSubsetSums(sys.amountCents, freeReal, 4, tol, cfg.splitWindowSec, sys.secondsOfDay);
+    const subset = findBestSubsetSums(sys.amountCents, freeReal, 4, tol, cfg.splitWindowSec, sys);
     if (!subset) continue;
 
     const sugId = `sug_split_${sys.id}_${subset.map(r => r.id).join('_')}`;
@@ -430,7 +474,7 @@ export function runCashReconciliation({
   for (const real of realItems) {
     if (usedReal.has(real.id) || ignoredIds.has(real.id) || reservedSugReal.has(real.id)) continue;
     const freeSys = systemItems.filter(s => !usedSys.has(s.id) && !ignoredIds.has(s.id) && !reservedSugSys.has(s.id) && s.category !== 'outros');
-    const subset = findBestSubsetSums(real.amountCents, freeSys, 4, tol, cfg.splitWindowSec, real.secondsOfDay);
+    const subset = findBestSubsetSums(real.amountCents, freeSys, 4, tol, cfg.splitWindowSec, real);
     if (!subset) continue;
 
     const sugId = `sug_group_${real.id}_${subset.map(s => s.id).join('_')}`;
@@ -494,24 +538,34 @@ export function runCashReconciliation({
     .filter(m => m.reasonType === 'swapped_method' && m.systemItems.some(s => s.category === 'dinheiro'))
     .reduce((acc, m) => acc + m.amountCents, 0);
 
-  const realPixCents = realItems.filter(r => r.category === 'pix').reduce((s, r) => s + r.amountCents, 0);
-  const realCartaoCents = realItems.filter(r => r.category === 'cartao').reduce((s, r) => s + r.amountCents, 0);
+  const adjustedCashExpectedCents = expectedAfterSangriaCents - swappedToDigitalCents;
+
+  const activeRealItems = realItems.filter(r => !ignoredIds.has(r.id));
+  const realPixCents = activeRealItems.filter(r => r.category === 'pix').reduce((s, r) => s + r.amountCents, 0);
+  const realCartaoCents = activeRealItems.filter(r => r.category === 'cartao').reduce((s, r) => s + r.amountCents, 0);
+
+  const ignoredSysByCat = { pix: 0, cartao: 0 };
+  for (const s of systemItems) {
+    if (ignoredIds.has(s.id) && (s.category === 'pix' || s.category === 'cartao')) {
+      ignoredSysByCat[s.category] += s.amountCents;
+    }
+  }
 
   const countedCents = manualInputs.cashCountedCents !== undefined && manualInputs.cashCountedCents !== null
     ? Number(manualInputs.cashCountedCents)
     : null;
 
-  // Para o espelho RelConferencia, dinheiro real = dinheiro contado + sangria adicional feita fora da RelConferencia
+  // Para o espelho RelConferencia, dinheiro real = dinheiro contado + sangria adicional feita fora da RelConferencia (sem somar trocas digitais em duplicidade)
   const cashRealMirrorCents = countedCents !== null
-    ? countedCents + Math.max(0, sangriaCents - sangriaRelConfCents) + swappedToDigitalCents
+    ? countedCents + Math.max(0, sangriaCents - sangriaRelConfCents)
     : (relConfFile?.summary?.realRows?.saldo_dinheiro ?? null);
 
   const overrides = manualInputs.categoryRealOverrides || {};
   const sysSaldoDinheiro = relSys.saldo_dinheiro ?? expectedTotalCents;
-  const sysCartao = relSys.cartao ?? pdvTotals.cartao;
+  const sysCartao = Math.max(0, (relSys.cartao ?? pdvTotals.cartao) - ignoredSysByCat.cartao);
   const sysIfood = relSys.ifood ?? pdvTotals.ifood;
   const sysPendentes = relSys.pendentes ?? (pdvFile ? pdvTotals.pendente : (txtSum.notaPendenteCents || 0));
-  const sysPix = relSys.pix ?? pdvTotals.pix;
+  const sysPix = Math.max(0, (relSys.pix ?? pdvTotals.pix) - ignoredSysByCat.pix);
   const sysPagoOnline = relSys.pago_online ?? 0;
   const sysTicket = relSys.ticket ?? pdvTotals.ticket;
   const sysSemBandeira = relSys.sem_bandeira ?? 0;
@@ -519,12 +573,22 @@ export function runCashReconciliation({
 
   const makeMirrorRow = (key, label, systemCents, computedRealCents, isAuto = false, sourceNote = '') => {
     const realCents = overrides[key] !== undefined ? overrides[key] : computedRealCents;
-    const diffCents = realCents !== null && realCents !== undefined ? realCents - systemCents : -systemCents;
-    return { key, label, systemCents, realCents: realCents ?? 0, hasRealInput: realCents !== null && realCents !== undefined, diffCents, isAuto, sourceNote };
+    const hasRealInput = realCents !== null && realCents !== undefined;
+    const diffCents = hasRealInput ? realCents - systemCents : -systemCents;
+    return { key, label, systemCents, realCents: realCents ?? 0, hasRealInput, diffCents, isAuto, sourceNote };
   };
 
   const mirrorRows = [
-    makeMirrorRow('saldo_dinheiro', 'Saldo em Dinheiro', sysSaldoDinheiro, cashRealMirrorCents, false, swappedToDigitalCents > 0 ? `Inclui R$ ${(swappedToDigitalCents / 100).toFixed(2)} trocados p/ digital` : ''),
+    makeMirrorRow(
+      'saldo_dinheiro',
+      'Saldo em Dinheiro',
+      sysSaldoDinheiro,
+      cashRealMirrorCents,
+      false,
+      swappedToDigitalCents > 0
+        ? `R$ ${(swappedToDigitalCents / 100).toFixed(2)} recebidos via Pix/Cartão (compensa no Total Geral)`
+        : ''
+    ),
     makeMirrorRow('cartao', 'Crédito, Débito e Voucher', sysCartao, realCartaoCents, true, 'Rede + C6 Pay'),
     makeMirrorRow('ifood', 'iFood', sysIfood, relConfFile?.summary?.realRows?.ifood ?? (sysIfood === 0 ? 0 : null), false),
     makeMirrorRow('pendentes', 'Pendentes', sysPendentes, relConfFile?.summary?.realRows?.pendentes ?? (sysPendentes === 0 ? 0 : null), false),
@@ -539,14 +603,16 @@ export function runCashReconciliation({
   const realTotalCents = mirrorRows.reduce((s, r) => s + r.realCents, 0);
   const diffTotalCents = realTotalCents - systemTotalCents;
 
+  // Diferença apenas das linhas efetivamente apuradas/informadas (evita que Pendentes não digitados forcem falsa FALTA)
+  const confirmedDiffCents = mirrorRows.filter(r => r.hasRealInput).reduce((s, r) => s + r.diffCents, 0);
+
   const digitalSystemTotal = sysCartao + sysPix;
   const digitalRealTotal = realCartaoCents + realPixCents;
   const digitalDiffCents = digitalRealTotal - digitalSystemTotal;
 
-  // Score de saúde (0-100): mede qualidade da conciliação digital + diferença total
+  // Score de saúde (0-100): mede qualidade da conciliação digital + diferença confirmada
   const baseVolume = Math.max(digitalSystemTotal, systemTotalCents, 1);
-  const unresolvedCount = missingInBank.length + extraInBank.length + suggestions.length;
-  const absFocusDiff = countedCents !== null ? Math.abs(diffTotalCents) : Math.abs(digitalDiffCents);
+  const absFocusDiff = countedCents !== null ? Math.abs(confirmedDiffCents) : Math.abs(digitalDiffCents);
   const diffRatio = Math.min(1, absFocusDiff / baseVolume);
   const rawScore = Math.max(0, Math.min(100, Math.round((1 - diffRatio * 1.5) * 100 - suggestions.length * 2 - missingInBank.length * 1.5)));
 
@@ -554,14 +620,14 @@ export function runCashReconciliation({
   if (suggestions.length > 0 && absFocusDiff <= Math.max(tol, 100)) {
     status = 'attention';
   } else if (absFocusDiff > Math.max(tol, 100)) {
-    const referenceDiff = countedCents !== null ? diffTotalCents : digitalDiffCents;
+    const referenceDiff = countedCents !== null ? confirmedDiffCents : digitalDiffCents;
     status = referenceDiff < 0 ? 'shortage' : 'surplus';
   } else if (missingInBank.length > 0 || extraInBank.length > 0) {
     status = 'attention';
   }
 
-  const totalMdrFeeCents = realItems.reduce((s, r) => s + (r.feeCents || 0), 0);
-  const totalNetDigitalCents = realItems.reduce((s, r) => s + (r.netAmountCents ?? r.amountCents), 0);
+  const totalMdrFeeCents = activeRealItems.reduce((s, r) => s + (r.feeCents || 0), 0);
+  const totalNetDigitalCents = activeRealItems.reduce((s, r) => s + (r.netAmountCents ?? r.amountCents), 0);
 
   const referenceDate = pdvFile?.periodStart || txtFile?.periodStart || redeFiles[0]?.periodStart || c6PayFiles[0]?.periodStart || ofxFiles[0]?.periodStart || new Date().toISOString().slice(0, 10);
 
@@ -586,6 +652,7 @@ export function runCashReconciliation({
       outrasSaidasCents,
       expectedTotalCents,
       expectedAfterSangriaCents,
+      adjustedCashExpectedCents,
       countedCents,
       swappedToDigitalCents,
       saidasDetalhadas: txtSum.saidasDetalhadas || []

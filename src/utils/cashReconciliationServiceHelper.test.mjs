@@ -92,3 +92,21 @@ test('isMissingCashTableError detects PostgREST PGRST205 and Postgres 42P01 clea
   assert.equal(isMissingCashTableError({ code: '42P01', message: 'relation "cash_reconciliation_sessions" does not exist' }), true);
   assert.equal(isMissingCashTableError({ code: '23505', message: 'duplicate key' }), false);
 });
+
+import { parseUiMoneyInputToCents, SESSION_LIST_COLUMNS } from './cashReconciliationServiceHelper.mjs';
+
+test('parseUiMoneyInputToCents handles pt-BR thousand separators and empty inputs accurately', () => {
+  assert.equal(parseUiMoneyInputToCents(''), null);
+  assert.equal(parseUiMoneyInputToCents('   '), null);
+  assert.equal(parseUiMoneyInputToCents('1.257,27'), 125727);
+  assert.equal(parseUiMoneyInputToCents('257,27'), 25727);
+  assert.equal(parseUiMoneyInputToCents('1257.27'), 125727);
+  assert.equal(parseUiMoneyInputToCents('-50,00'), -5000);
+});
+
+test('SESSION_LIST_COLUMNS excludes heavy reconciled_summary snapshot blob', () => {
+  assert.equal(SESSION_LIST_COLUMNS.includes('reconciled_summary'), false);
+  assert.equal(SESSION_LIST_COLUMNS.includes('ai_last_analysis'), false);
+  assert.match(SESSION_LIST_COLUMNS, /reference_date/);
+  assert.match(SESSION_LIST_COLUMNS, /health_score/);
+});

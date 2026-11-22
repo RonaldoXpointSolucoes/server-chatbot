@@ -71,8 +71,15 @@ export function mergeCompanyFormulaRules(customRules = []) {
         if (!config.nonPdvOfxKeywords.includes(upper)) config.nonPdvOfxKeywords.push(upper);
       }
     } else if (type === 'engine_setting' && targetValue) {
+      const NUMERIC_SETTINGS = new Set([
+        'amountToleranceCents',
+        'ofxPixDedupWindowSec',
+        'swapWindowSec',
+        'splitWindowSec',
+        'exactMatchWindowSec'
+      ]);
       const num = Number(targetValue);
-      if (Number.isFinite(num) && num >= 0 && Object.prototype.hasOwnProperty.call(config, pattern)) {
+      if (NUMERIC_SETTINGS.has(pattern) && Number.isFinite(num) && num >= 0) {
         config[pattern] = Math.round(num);
       }
     }

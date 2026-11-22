@@ -66,6 +66,7 @@ export interface CashDrawerSummary {
   outrasSaidasCents?: number;
   expectedTotalCents?: number;
   expectedAfterSangriaCents?: number;
+  adjustedCashExpectedCents?: number;
   countedCents?: number | null;
   swappedToDigitalCents?: number;
   saidasDetalhadas?: Array<{ label: string; amountCents: number; isSangria: boolean }>;

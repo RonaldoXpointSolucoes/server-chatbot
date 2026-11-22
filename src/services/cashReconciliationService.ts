@@ -1,7 +1,8 @@
 import { supabase, masterSupabase } from './supabase';
 import {
   buildSessionPersistencePayload,
-  isMissingCashTableError
+  isMissingCashTableError,
+  SESSION_LIST_COLUMNS
 } from '../utils/cashReconciliationServiceHelper.mjs';
 import {
   CashAiAnalysis,
@@ -103,7 +104,7 @@ export async function listCashReconciliationSessions(
   const { data, error } = await runWithTenantClient<CashSessionRow[]>((client) =>
     client
       .from('cash_reconciliation_sessions')
-      .select('*')
+      .select(SESSION_LIST_COLUMNS)
       .eq('tenant_id', tenantId)
       .order('reference_date', { ascending: false })
       .order('created_at', { ascending: false })
@@ -122,6 +123,34 @@ export async function listCashReconciliationSessions(
   return { sessions: data || [], schemaMissing: false };
 }
 
+export async function loadCashReconciliationSession(
+  tenantId: string,
+  sessionId: string
+): Promise<CashSessionRow | null> {
+  if (!tenantId || !sessionId) return null;
+  if (sessionId.startsWith('local_')) {
+    const localList = readLocalJson<CashSessionRow[]>(localSessionsKey(tenantId), []);
+    return localList.find(s => s.id === sessionId) || null;
+  }
+
+  const { data, error } = await runWithTenantClient<CashSessionRow>((client) =>
+    client
+      .from('cash_reconciliation_sessions')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .eq('id', sessionId)
+      .maybeSingle()
+  );
+  if (error) {
+    if (isMissingCashTableError(error)) {
+      const localList = readLocalJson<CashSessionRow[]>(localSessionsKey(tenantId), []);
+      return localList.find(s => s.id === sessionId) || null;
+    }
+    throw error;
+  }
+  return data;
+}
+
 export async function saveCashReconciliationSession(params: {
   tenantId: string;
   userEmail?: string;
@@ -135,9 +164,10 @@ export async function saveCashReconciliationSession(params: {
 }): Promise<{ sessionId: string; schemaMissing: boolean; savedAt: string }> {
   const { sessionPayload, filePayloads, itemPayloads } = buildSessionPersistencePayload(params);
   const nowIso = new Date().toISOString();
+  const isRemoteUpdate = Boolean(params.sessionId && !params.sessionId.startsWith('local_'));
 
   const writeSession = (client: typeof supabase) => {
-    if (params.sessionId) {
+    if (isRemoteUpdate && params.sessionId) {
       return client
         .from('cash_reconciliation_sessions')
         .update(sessionPayload)
@@ -164,7 +194,7 @@ export async function saveCashReconciliationSession(params: {
         created_at: nowIso,
         updated_at: nowIso
       };
-      const updated = [record, ...localList.filter(s => s.id !== localId)].slice(0, 30);
+      const updated = [record, ...localList.filter(s => s.id !== localId)].slice(0, 15);
       writeLocalJson(localSessionsKey(params.tenantId), updated);
       return { sessionId: localId, schemaMissing: true, savedAt: nowIso };
     }
@@ -174,21 +204,34 @@ export async function saveCashReconciliationSession(params: {
   const savedSessionId = res.data.id;
   const activeClient = res.usedFallback ? masterSupabase : supabase;
 
-  if (params.sessionId) {
-    await activeClient.from('cash_reconciliation_items').delete().eq('session_id', savedSessionId).eq('tenant_id', params.tenantId);
-    await activeClient.from('cash_reconciliation_files').delete().eq('session_id', savedSessionId).eq('tenant_id', params.tenantId);
+  if (isRemoteUpdate) {
+    const { error: delItemsErr } = await activeClient
+      .from('cash_reconciliation_items')
+      .delete()
+      .eq('session_id', savedSessionId)
+      .eq('tenant_id', params.tenantId);
+    if (delItemsErr) throw delItemsErr;
+
+    const { error: delFilesErr } = await activeClient
+      .from('cash_reconciliation_files')
+      .delete()
+      .eq('session_id', savedSessionId)
+      .eq('tenant_id', params.tenantId);
+    if (delFilesErr) throw delFilesErr;
   }
 
   if (filePayloads.length > 0) {
-    await activeClient
+    const { error: insFilesErr } = await activeClient
       .from('cash_reconciliation_files')
       .insert(filePayloads.map(f => ({ ...f, session_id: savedSessionId })));
+    if (insFilesErr) throw insFilesErr;
   }
 
   if (itemPayloads.length > 0) {
     for (let i = 0; i < itemPayloads.length; i += 200) {
       const chunk = itemPayloads.slice(i, i + 200).map(it => ({ ...it, session_id: savedSessionId }));
-      await activeClient.from('cash_reconciliation_items').insert(chunk);
+      const { error: insItemsErr } = await activeClient.from('cash_reconciliation_items').insert(chunk);
+      if (insItemsErr) throw insItemsErr;
     }
   }
 

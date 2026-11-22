@@ -274,9 +274,10 @@ export function CashHealthDashboard({ result, historicalStats, onSelectSession }
               </p>
             </div>
           </div>
-          {drawer.swappedToDigitalCents > 0 && (
+          {(drawer.swappedToDigitalCents || 0) > 0 && (
             <p className="text-[10.5px] text-amber-600 dark:text-amber-400 mt-1.5">
-              +{formatCents(drawer.swappedToDigitalCents)} trocados p/ Pix/Cartão confirmados
+              Ajustado c/ trocas p/ digital ({formatCents(drawer.swappedToDigitalCents)}): esperado físico{' '}
+              <strong>{formatCents(drawer.adjustedCashExpectedCents)}</strong>
             </p>
           )}
         </div>

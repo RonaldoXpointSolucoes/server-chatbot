@@ -44,6 +44,14 @@ test('mergeCompanyFormulaRules applies custom company rules with precedence over
   assert.equal(normalizePdvPayment('CARTÃO', 'VR ALIM REFEICAO', cfg).category, 'ticket');
   assert.equal(cfg.amountToleranceCents, 5);
   assert.equal(classifyOfxCredit('PIX RECEBIDO FORNECEDOR XYZ', '01a1f443-9631-0ebe-d222-1b4905cf6ace', 15000, cfg), 'credito_nao_pdv');
+
+  // Engine setting não pode sobrescrever arrays de configuração como nonPdvOfxKeywords
+  const safeCfg = mergeCompanyFormulaRules([
+    { rule_type: 'engine_setting', pattern: 'nonPdvOfxKeywords', target_value: '999', is_active: true },
+    { rule_type: 'engine_setting', pattern: 'adminRules', target_value: '1', is_active: true }
+  ]);
+  assert.ok(Array.isArray(safeCfg.nonPdvOfxKeywords));
+  assert.ok(Array.isArray(safeCfg.adminRules));
 });
 
 test('classifyOfxCredit recognizes UUID-backed Pix without "Pix" prefix, PAYGO settlements and non-PDV transfers', () => {

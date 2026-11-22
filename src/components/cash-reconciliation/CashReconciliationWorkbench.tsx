@@ -22,6 +22,7 @@ import {
   formatCents
 } from '../../types/cashReconciliation';
 import { CashRuleRow } from '../../services/cashReconciliationService';
+import { parseUiMoneyInputToCents } from '../../utils/cashReconciliationServiceHelper.mjs';
 
 type TabKey = 'espelho' | 'sugestoes' | 'faltam' | 'sobram' | 'auditoria' | 'ia';
 
@@ -48,12 +49,7 @@ interface CashReconciliationWorkbenchProps {
   onRunAiAnalysis: (question?: string) => void;
 }
 
-function parseInputToCents(val: string): number | null {
-  const cleaned = val.replace(/[^0-9,.-]/g, '').replace(',', '.');
-  if (!cleaned) return null;
-  const num = Number.parseFloat(cleaned);
-  return Number.isFinite(num) ? Math.round(num * 100) : null;
-}
+const parseInputToCents = parseUiMoneyInputToCents;
 
 function centsToInputStr(cents: number | null | undefined): string {
   if (cents === null || cents === undefined) return '';
@@ -768,6 +764,23 @@ export function CashReconciliationWorkbench({
                             >
                               Aplicar Vínculo
                             </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {aiAnalysis.fileDiagnoses?.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-[11px] font-black uppercase text-amber-600 dark:text-amber-400">
+                        Diagnóstico de Arquivos & Leitura
+                      </p>
+                      {aiAnalysis.fileDiagnoses.map((fd, idx: number) => (
+                        <div key={idx} className="rounded-xl bg-amber-500/5 border border-amber-500/25 p-3 text-xs">
+                          <p className="font-bold text-slate-900 dark:text-white">{fd.fileName}</p>
+                          <p className="text-slate-700 dark:text-[#d1d7db] mt-0.5">{fd.issue}</p>
+                          {fd.fixGuidance && (
+                            <p className="text-amber-700 dark:text-amber-300 mt-1 font-medium">{fd.fixGuidance}</p>
                           )}
                         </div>
                       ))}

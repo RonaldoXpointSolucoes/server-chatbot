@@ -28,4 +28,5 @@ test('buildCashReconciliationMigrationSql creates idempotent multi-tenant tables
   assert.match(sql, /cash_reconciliation_rules_tenant_idx/i);
   assert.match(sql, /reconciled_summary\s+JSONB/i);
   assert.match(sql, /ai_last_analysis\s+JSONB/i);
+  assert.match(sql, /NULLIF\s*\(\s*trim\s*\(\s*COALESCE\s*\(\s*auth\.jwt\(\)\s*->>\s*'email'/i);
 });

@@ -149,35 +149,17 @@ async function digestHash(alg, data) {
   return new Uint8Array(buf);
 }
 
-async function aesDecryptCbc(cipherBytes, keyBytes, ivBytes) {
-  const subtle = globalThis.crypto?.subtle;
-  if (subtle) {
-    const cryptoKey = await subtle.importKey('raw', keyBytes, { name: 'AES-CBC' }, false, ['decrypt']);
-    // WebCrypto exige PKCS7 válido no fim; para segmentos OOXML sem padding final adicionamos bloco auxiliar ou usamos Node fallback quando não alinhado
-    const paddedBlockCount = Math.ceil(cipherBytes.length / 16) * 16;
-    const aligned = new Uint8Array(paddedBlockCount);
-    aligned.set(cipherBytes.subarray(0, paddedBlockCount));
-    try {
-      const dec = await subtle.decrypt({ name: 'AES-CBC', iv: ivBytes }, cryptoKey, aligned);
-      return new Uint8Array(dec);
-    } catch {
-      // Fallback para descriptografia bloco-a-bloco sem validar padding PKCS7
-      const ecb = aesDecryptEcb(aligned, keyBytes);
-      const res = new Uint8Array(aligned.length);
-      let prev = ivBytes;
-      for (let i = 0; i < aligned.length; i += 16) {
-        for (let b = 0; b < 16; b++) res[i + b] = ecb[i + b] ^ prev[b];
-        prev = aligned.subarray(i, i + 16);
-      }
-      return res;
-    }
-  }
-  const ecb = aesDecryptEcb(cipherBytes, keyBytes);
-  const res = new Uint8Array(ecb.length);
+function aesDecryptCbc(cipherBytes, keyBytes, ivBytes) {
+  // Segmentos OOXML usam AES-CBC sem padding PKCS7; deciframos bloco a bloco para jamais truncar 0x01..0x10 finais
+  const paddedBlockCount = Math.ceil(cipherBytes.length / 16) * 16;
+  const aligned = new Uint8Array(paddedBlockCount);
+  aligned.set(cipherBytes.subarray(0, paddedBlockCount));
+  const ecb = aesDecryptEcb(aligned, keyBytes);
+  const res = new Uint8Array(aligned.length);
   let prev = ivBytes;
-  for (let i = 0; i < ecb.length; i += 16) {
+  for (let i = 0; i < aligned.length; i += 16) {
     for (let b = 0; b < 16; b++) res[i + b] = ecb[i + b] ^ prev[b];
-    prev = cipherBytes.subarray(i, i + 16);
+    prev = aligned.subarray(i, i + 16);
   }
   return res;
 }
@@ -317,13 +299,15 @@ async function decryptAgileEncryption(infoBytes, pkgBytes, password) {
   const kdHashAlg = getXmlAttr(xml, /<keyData\b[^>]*>/i, 'hashAlgorithm') || 'SHA512';
   const kdBlockSize = Number(getXmlAttr(xml, /<keyData\b[^>]*>/i, 'blockSize') || 16);
 
-  const pSalt = base64ToBytes(getXmlAttr(xml, /<p:encryptedKey\b[^>]*>/i, 'saltValue') || '');
-  const spinCount = Number(getXmlAttr(xml, /<p:encryptedKey\b[^>]*>/i, 'spinCount') || 100000);
-  const pKeyBits = Number(getXmlAttr(xml, /<p:encryptedKey\b[^>]*>/i, 'keyBits') || 256);
-  const pHashAlg = getXmlAttr(xml, /<p:encryptedKey\b[^>]*>/i, 'hashAlgorithm') || 'SHA512';
-  const encVerifierInput = base64ToBytes(getXmlAttr(xml, /<p:encryptedKey\b[^>]*>/i, 'encryptedVerifierHashInput') || '');
-  const encVerifierValue = base64ToBytes(getXmlAttr(xml, /<p:encryptedKey\b[^>]*>/i, 'encryptedVerifierHashValue') || '');
-  const encKeyValue = base64ToBytes(getXmlAttr(xml, /<p:encryptedKey\b[^>]*>/i, 'encryptedKeyValue') || '');
+  const encKeyTagRegex = /<(?:\w+:)?encryptedKey\b[^>]*>/i;
+  const pSalt = base64ToBytes(getXmlAttr(xml, encKeyTagRegex, 'saltValue') || '');
+  const pBlockSize = Number(getXmlAttr(xml, encKeyTagRegex, 'blockSize') || kdBlockSize || 16);
+  const spinCount = Number(getXmlAttr(xml, encKeyTagRegex, 'spinCount') || 100000);
+  const pKeyBits = Number(getXmlAttr(xml, encKeyTagRegex, 'keyBits') || 256);
+  const pHashAlg = getXmlAttr(xml, encKeyTagRegex, 'hashAlgorithm') || 'SHA512';
+  const encVerifierInput = base64ToBytes(getXmlAttr(xml, encKeyTagRegex, 'encryptedVerifierHashInput') || '');
+  const encVerifierValue = base64ToBytes(getXmlAttr(xml, encKeyTagRegex, 'encryptedVerifierHashValue') || '');
+  const encKeyValue = base64ToBytes(getXmlAttr(xml, encKeyTagRegex, 'encryptedKeyValue') || '');
 
   let h = await digestHash(pHashAlg, concatBytes(pSalt, encodeUtf16Le(password)));
   const iterBuf = new Uint8Array(4);
@@ -343,9 +327,9 @@ async function decryptAgileEncryption(infoBytes, pkgBytes, password) {
   const kValue = await deriveKeyForBlock([0xd7, 0xaa, 0x0f, 0x6d, 0x30, 0x61, 0x34, 0x4e]);
   const kSecret = await deriveKeyForBlock([0x14, 0x6e, 0x0b, 0xe7, 0xab, 0xac, 0xd0, 0xd6]);
 
-  const ivSalt = padOrTruncate(pSalt, kdBlockSize, 0x36);
-  const decInput = await aesDecryptCbc(encVerifierInput, kInput, ivSalt);
-  const decValue = await aesDecryptCbc(encVerifierValue, kValue, ivSalt);
+  const ivSalt = padOrTruncate(pSalt, pBlockSize, 0x36);
+  const decInput = aesDecryptCbc(encVerifierInput, kInput, ivSalt);
+  const decValue = aesDecryptCbc(encVerifierValue, kValue, ivSalt);
   const expectedHash = await digestHash(pHashAlg, decInput.subarray(0, encVerifierInput.length));
 
   if (!bytesEqual(expectedHash, decValue.subarray(0, expectedHash.length))) {
@@ -354,7 +338,7 @@ async function decryptAgileEncryption(infoBytes, pkgBytes, password) {
     throw err;
   }
 
-  const packageKey = (await aesDecryptCbc(encKeyValue, kSecret, ivSalt)).subarray(0, keyLen);
+  const packageKey = aesDecryptCbc(encKeyValue, kSecret, ivSalt).subarray(0, keyLen);
   const unencryptedSize = readU32(pkgBytes, 0) + readU32(pkgBytes, 4) * 0x100000000;
   const cipherData = pkgBytes.subarray(8);
   const result = new Uint8Array(unencryptedSize);
@@ -367,7 +351,7 @@ async function decryptAgileEncryption(infoBytes, pkgBytes, password) {
     const ivRaw = await digestHash(kdHashAlg, concatBytes(kdSalt, segBuf));
     const iv = padOrTruncate(ivRaw, kdBlockSize, 0x36);
     const chunk = cipherData.subarray(offset, Math.min(cipherData.length, offset + segSize));
-    const decChunk = await aesDecryptCbc(chunk, packageKey, iv);
+    const decChunk = aesDecryptCbc(chunk, packageKey, iv);
     const copyLen = Math.min(decChunk.length, unencryptedSize - offset);
     if (copyLen > 0) result.set(decChunk.subarray(0, copyLen), offset);
   }

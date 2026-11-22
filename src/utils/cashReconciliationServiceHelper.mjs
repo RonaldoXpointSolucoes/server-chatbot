@@ -1,6 +1,35 @@
 /**
  * Helpers puros de serialização, validação e agregação histórica para Conferência de Caixa.
  */
+import { parseMoneyToCents } from './cashFileParsers.mjs';
+
+export const SESSION_LIST_COLUMNS = [
+  'id',
+  'tenant_id',
+  'reference_date',
+  'shift_label',
+  'store_name',
+  'operator_name',
+  'status',
+  'health_score',
+  'system_total_cents',
+  'real_total_cents',
+  'diff_cents',
+  'cash_drawer_counted_cents',
+  'cash_sangria_cents',
+  'cash_notes',
+  'created_by_email',
+  'closed_at',
+  'created_at',
+  'updated_at'
+].join(', ');
+
+export function parseUiMoneyInputToCents(raw) {
+  if (raw === null || raw === undefined) return null;
+  const trimmed = String(raw).trim();
+  if (!trimmed || trimmed === '-') return null;
+  return parseMoneyToCents(trimmed);
+}
 
 export function isMissingCashTableError(error) {
   if (!error) return false;

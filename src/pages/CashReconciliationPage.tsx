@@ -22,6 +22,7 @@ import {
   CashSessionRow,
   CashRuleRow,
   listCashReconciliationSessions,
+  loadCashReconciliationSession,
   saveCashReconciliationSession,
   listCashFormulaRules,
   saveCashFormulaRule,
@@ -176,21 +177,28 @@ export default function CashReconciliationPage() {
     setAiAnalysis(null);
   };
 
-  const handleLoadSession = (sessionId: string) => {
-    const session = sessions.find(s => s.id === sessionId);
-    if (!session) return;
-    setActiveSessionId(session.id);
-    const snap = session.reconciled_summary || {};
-    const restoredFiles: UploadedCashFileItem[] = (snap.parsedFilesSnapshot || []).map((pf: ParsedCashFileResult, idx: number) => ({
-      id: `saved_${session.id}_${idx}`,
-      fileName: pf.fileName,
-      fileSizeBytes: 0,
-      parsed: pf
-    }));
-    setFiles(restoredFiles);
-    setManualInputs(snap.manualInputs || { cashCountedCents: session.cash_drawer_counted_cents, notes: session.cash_notes || '' });
-    setManualResolutions(snap.manualResolutions || []);
-    setAiAnalysis(session.ai_last_analysis || null);
+  const handleLoadSession = async (sessionId: string) => {
+    if (!tenantId) return;
+    try {
+      const fullSession = await loadCashReconciliationSession(tenantId, sessionId);
+      const session = fullSession || sessions.find(s => s.id === sessionId);
+      if (!session) return;
+      setActiveSessionId(session.id);
+      const snap = session.reconciled_summary || {};
+      const restoredFiles: UploadedCashFileItem[] = (snap.parsedFilesSnapshot || []).map((pf: ParsedCashFileResult, idx: number) => ({
+        id: `saved_${session.id}_${idx}`,
+        fileName: pf.fileName,
+        fileSizeBytes: 0,
+        parsed: pf
+      }));
+      setFiles(restoredFiles);
+      setManualInputs(snap.manualInputs || { cashCountedCents: session.cash_drawer_counted_cents, notes: session.cash_notes || '' });
+      setManualResolutions(snap.manualResolutions || []);
+      setAiAnalysis(session.ai_last_analysis || null);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Erro ao abrir sessão salva.';
+      notifyToast(msg, 'error');
+    }
   };
 
   const handleSaveSession = async (markClosed = false) => {

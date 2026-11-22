@@ -157,3 +157,111 @@ test('runCashReconciliation computes clean mirrorRows without NaN when RelConfer
   assert.equal(res.status, 'balanced');
   assert.ok(Number.isFinite(res.healthScore));
 });
+
+test('runCashReconciliation does not double-count confirmed swapped Dinheiro->Digital into realTotalCents and respects ignored items and multi-day dates', async () => {
+  const parsedFiles = await load19NovParsedFiles();
+
+  // Sem confirmar trocas ainda, apura baseline
+  const initial = runCashReconciliation({
+    parsedFiles,
+    rulesConfig: DEFAULT_FORMULA_CONFIG,
+    manualInputs: { cashCountedCents: 0 } // zero físico se 25740 foi pro digital + 63080 sangria -> vamos testar gaveta real de 0 vs 25727-25740
+  });
+  const digitalPixBefore = initial.mirrorRows.find(r => r.key === 'pix').realCents;
+  const digitalCardBefore = initial.mirrorRows.find(r => r.key === 'cartao').realCents;
+
+  // Cenário exato: gaveta física teve R$ 0,00 porque R$ 257,40 foram no digital e R$ 630,67/630,80 na sangria
+  const swapped = initial.suggestions.filter(s => s.reasonType === 'swapped_method');
+  const confirmed = runCashReconciliation({
+    parsedFiles,
+    rulesConfig: DEFAULT_FORMULA_CONFIG,
+    manualInputs: { cashCountedCents: -13 },
+    manualResolutions: swapped.map(s => ({ action: 'confirm_suggestion', suggestionId: s.id }))
+  });
+
+  // 1. Confirmar trocas NÃO deve inflar saldo_dinheiro.realCents nem duplicar realTotalCents!
+  assert.equal(confirmed.mirrorRows.find(r => r.key === 'pix').realCents, digitalPixBefore);
+  assert.equal(confirmed.mirrorRows.find(r => r.key === 'cartao').realCents, digitalCardBefore);
+  assert.equal(confirmed.mirrorRows.find(r => r.key === 'saldo_dinheiro').realCents, 63080 - 13);
+  assert.equal(confirmed.cashDrawerSummary.adjustedCashExpectedCents, 25727 - 25740);
+
+  // 2. Ignorar um item extra no banco deve descontá-lo do realPixCents / realCartaoCents
+  const extraCard = confirmed.extraInBank.find(e => e.category === 'cartao');
+  const afterIgnore = runCashReconciliation({
+    parsedFiles,
+    rulesConfig: DEFAULT_FORMULA_CONFIG,
+    manualInputs: { cashCountedCents: -13 },
+    manualResolutions: [
+      ...swapped.map(s => ({ action: 'confirm_suggestion', suggestionId: s.id })),
+      { action: 'ignore_item', realIds: [extraCard.id] }
+    ]
+  });
+  assert.equal(
+    afterIgnore.mirrorRows.find(r => r.key === 'cartao').realCents,
+    digitalCardBefore - extraCard.amountCents
+  );
+
+  // 3. Pendentes sem input REAL manual não devem forçar status 'shortage' quando caixa + digital batem
+  const cleanDay = runCashReconciliation({
+    parsedFiles: [
+      {
+        fileType: 'pdv_vendas',
+        status: 'ok',
+        periodStart: '2026-11-19',
+        periodEnd: '2026-11-19',
+        rows: [
+          { rowIndex: 1, numero: '001', modulo: 'MESA', origem: 'MESA', amountCents: 5000, receivedCents: 5000, recebidoEmBranco: false, changeCents: 0, formaPagto: 'CARTÃO', administradora: 'PIX', category: 'pix', subType: 'pix_pdv', dateStr: '2026-11-19', timeStr: '12:00:00', secondsOfDay: 43200, operador: 'Op1', nomeMaquina: 'SERVIDOR' },
+          { rowIndex: 2, numero: '002', modulo: 'MESA', origem: 'MESA', amountCents: 10000, receivedCents: 10000, recebidoEmBranco: false, changeCents: 0, formaPagto: 'NOTA PENDENTE', administradora: 'NOTA PENDENTE', category: 'pendente', subType: 'nota_pendente', dateStr: '2026-11-19', timeStr: '12:10:00', secondsOfDay: 43800, operador: 'Op1', nomeMaquina: 'SERVIDOR' }
+        ]
+      },
+      {
+        fileType: 'extrato_ofx',
+        status: 'ok',
+        periodStart: '2026-11-19',
+        periodEnd: '2026-11-19',
+        rows: [
+          { source: 'ofx', ofxClass: 'pix_cliente', category: 'pix', amountCents: 5000, dateStr: '2026-11-19', timeStr: '12:00:10', secondsOfDay: 43210, memo: 'PIX CLIENTE' }
+        ]
+      }
+    ],
+    manualInputs: { cashCountedCents: 0 }
+  });
+  assert.equal(cleanDay.status, 'balanced');
+
+  // 4. Multi-dia OFX não deve casar dias diferentes; virada meia-noite (23:55 vs 00:02 D+1) deve casar
+  const multiDay = runCashReconciliation({
+    parsedFiles: [
+      {
+        fileType: 'pdv_vendas',
+        status: 'ok',
+        periodStart: '2026-11-19',
+        periodEnd: '2026-11-19',
+        rows: [
+          { rowIndex: 1, numero: '001', modulo: 'MESA', origem: 'MESA', amountCents: 5000, receivedCents: 5000, recebidoEmBranco: false, changeCents: 0, formaPagto: 'CARTÃO', administradora: 'PIX', category: 'pix', subType: 'pix_pdv', dateStr: '2026-11-19', timeStr: '12:00:00', secondsOfDay: 43200, operador: 'Op1', nomeMaquina: 'SERVIDOR' },
+          { rowIndex: 2, numero: '002', modulo: 'MESA', origem: 'MESA', amountCents: 7500, receivedCents: 7500, recebidoEmBranco: false, changeCents: 0, formaPagto: 'CARTÃO', administradora: 'PIX', category: 'pix', subType: 'pix_pdv', dateStr: '2026-11-19', timeStr: '23:55:00', secondsOfDay: 86100, operador: 'Op1', nomeMaquina: 'SERVIDOR' }
+        ]
+      },
+      {
+        fileType: 'extrato_ofx',
+        status: 'ok',
+        periodStart: '2026-11-18',
+        periodEnd: '2026-11-20',
+        rows: [
+          { source: 'ofx', ofxClass: 'pix_cliente', category: 'pix', amountCents: 5000, dateStr: '2026-11-18', timeStr: '12:00:05', secondsOfDay: 43205, memo: 'PIX DIA ANTERIOR' },
+          { source: 'ofx', ofxClass: 'pix_cliente', category: 'pix', amountCents: 7500, dateStr: '2026-11-20', timeStr: '00:02:00', secondsOfDay: 120, memo: 'PIX VIRADA MEIA NOITE' }
+        ]
+      }
+    ]
+  });
+  assert.equal(multiDay.matchedPairs.length, 1);
+  assert.equal(multiDay.matchedPairs[0].amountCents, 7500);
+  assert.equal(multiDay.missingInBank.length, 1);
+  assert.equal(multiDay.missingInBank[0].amountCents, 5000);
+
+  // 5. manual_link com IDs inexistentes não deve criar par fantasma
+  const ghostCheck = runCashReconciliation({
+    parsedFiles: [],
+    manualResolutions: [{ action: 'manual_link', systemIds: ['nao_existe'], realIds: ['nao_existe_2'] }]
+  });
+  assert.equal(ghostCheck.matchedPairs.length, 0);
+});
