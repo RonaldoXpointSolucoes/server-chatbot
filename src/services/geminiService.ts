@@ -1,5 +1,6 @@
 import { useChatStore } from "../store/chatStore";
 import { SUPERPOWERS_SKILLS, formatSkillsMarkdownSection } from "../data/superpowersSkills";
+import { buildCashAiAnalysisPrompt, parseCashAiAnalysisResponse } from "../utils/cashAiDiagnostics.mjs";
 
 // Token simbólico que representa a chave gerenciada exclusivamente no Backend (IP Restrito no Google Cloud).
 // NUNCA expor chaves reais (AIza... ou AQ....) no bundle cliente ou no repositório público.
@@ -2304,6 +2305,42 @@ RESPONDA ESTRITAMENTE EM FORMATO JSON VÁLIDO (sem comentários ou texto fora do
       console.error('[GeminiService] Erro ao parsear checklist JSON:', parseErr, responseText);
       throw new Error('A IA não retornou uma estrutura JSON válida. Tente reformular ou anexar um documento mais nítido.');
     }
+  }
+
+  async analyzeCashReconciliationIssues(params: {
+    reconciliation: any;
+    parseErrors?: any[];
+    rulesConfig?: any;
+    userQuestion?: string;
+  }): Promise<{
+    summary: string;
+    hypotheses: Array<{
+      title: string;
+      systemItemIds: string[];
+      realItemIds: string[];
+      confidence: 'alta' | 'media' | 'baixa';
+      explanation: string;
+    }>;
+    fileDiagnoses: Array<{ fileName: string; issue: string; fixGuidance: string }>;
+    formulaSuggestions: Array<{
+      ruleType: 'normalize_admin' | 'ignore_ofx_memo' | 'engine_setting';
+      pattern: string;
+      targetValue: string;
+      reason: string;
+    }>;
+  }> {
+    if (!this.isConfigured()) {
+      throw new Error('Serviço de IA não disponível no momento.');
+    }
+
+    const prompt = buildCashAiAnalysisPrompt(params);
+    const model = this.getGenAI().getGenerativeModel({
+      model: 'gemini-2.5-flash',
+      generationConfig: { responseMimeType: 'application/json' }
+    });
+    const result = await model.generateContent(prompt);
+    const responseText = (await result.response).text().trim();
+    return parseCashAiAnalysisResponse(responseText);
   }
 }
 
