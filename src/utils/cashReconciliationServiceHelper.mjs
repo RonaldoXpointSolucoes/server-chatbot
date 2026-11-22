@@ -271,3 +271,198 @@ export function buildMirrorRowDetails(result = {}, rowKey = '') {
     saidasDetalhadas
   };
 }
+
+export function buildActiveDraftStorageKey(tenantId) {
+  return `cash_recon_active_draft_${String(tenantId || '').trim()}`;
+}
+
+export function buildDraftDismissedStorageKey(tenantId) {
+  return `cash_recon_draft_dismissed_${String(tenantId || '').trim()}`;
+}
+
+export function serializeActiveCashDraft({
+  activeSessionId = null,
+  files = [],
+  manualInputs = {},
+  manualResolutions = [],
+  aiAnalysis = null
+} = {}) {
+  const safeFiles = (Array.isArray(files) ? files : [])
+    .filter(f => f && f.parsed && f.parsed.status === 'ok')
+    .map(f => ({
+      id: f.id,
+      fileName: f.fileName,
+      fileSizeBytes: Number(f.fileSizeBytes || 0),
+      parsed: f.parsed
+    }));
+
+  return {
+    version: 1,
+    activeSessionId: activeSessionId || null,
+    files: safeFiles,
+    manualInputs: manualInputs || {},
+    manualResolutions: Array.isArray(manualResolutions) ? manualResolutions : [],
+    aiAnalysis: aiAnalysis || null,
+    updatedAt: new Date().toISOString()
+  };
+}
+
+export function saveActiveCashDraftToStorage(storage, tenantId, draft) {
+  if (!storage || !tenantId) return false;
+  const serialized = serializeActiveCashDraft(draft);
+  if (serialized.files.length === 0) {
+    storage.removeItem(buildActiveDraftStorageKey(tenantId));
+    return false;
+  }
+  try {
+    storage.setItem(buildActiveDraftStorageKey(tenantId), JSON.stringify(serialized));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function loadActiveCashDraftFromStorage(storage, tenantId) {
+  if (!storage || !tenantId) return null;
+  try {
+    const raw = storage.getItem(buildActiveDraftStorageKey(tenantId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.files) || parsed.files.length === 0) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function clearActiveCashDraftFromStorage(storage, tenantId) {
+  if (!storage || !tenantId) return;
+  try {
+    storage.removeItem(buildActiveDraftStorageKey(tenantId));
+  } catch {
+    // ignorar falha de acesso ao storage
+  }
+}
+
+export function isDraftAutoResumeDismissed(storage, tenantId) {
+  if (!storage || !tenantId) return false;
+  try {
+    return storage.getItem(buildDraftDismissedStorageKey(tenantId)) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function setDraftAutoResumeDismissed(storage, tenantId, dismissed) {
+  if (!storage || !tenantId) return;
+  try {
+    const key = buildDraftDismissedStorageKey(tenantId);
+    if (dismissed) storage.setItem(key, '1');
+    else storage.removeItem(key);
+  } catch {
+    // ignorar falha de acesso ao storage
+  }
+}
+
+export function pickMostRecentOpenDraftSession(sessions = []) {
+  const open = (Array.isArray(sessions) ? sessions : []).filter(s => s && !s.closed_at);
+  if (open.length === 0) return null;
+  open.sort((a, b) => {
+    const ta = Date.parse(a.updated_at || a.created_at || '') || 0;
+    const tb = Date.parse(b.updated_at || b.created_at || '') || 0;
+    return tb - ta;
+  });
+  return open[0];
+}
+
+export function buildHealthMetricDetail(result = {}, metricKey = '') {
+  const metrics = result.financialMetrics || {};
+  const realItems = Array.isArray(result.realItems) ? result.realItems : [];
+  const drawer = result.cashDrawerSummary || {};
+  const getMirror = (k) => (result.mirrorRows || []).find(r => r.key === k) || { systemCents: 0, realCents: 0, diffCents: 0 };
+
+  if (metricKey === 'fees') {
+    const feeItems = realItems
+      .filter(it => Number(it.feeCents || 0) > 0)
+      .sort((a, b) => Number(b.feeCents || 0) - Number(a.feeCents || 0));
+    const bySource = new Map();
+    for (const it of feeItems) {
+      const key = `${it.source || 'outro'}`;
+      const cur = bySource.get(key) || { source: key.toUpperCase(), count: 0, grossCents: 0, feeCents: 0, netCents: 0 };
+      cur.count += 1;
+      cur.grossCents += Number(it.amountCents || 0);
+      cur.feeCents += Number(it.feeCents || 0);
+      cur.netCents += Number(it.netAmountCents ?? it.amountCents ?? 0);
+      bySource.set(key, cur);
+    }
+    return {
+      metricKey,
+      totalFeeCents: Number(metrics.totalMdrFeeCents || 0),
+      items: feeItems,
+      bySource: Array.from(bySource.values())
+    };
+  }
+
+  if (metricKey === 'net_digital') {
+    const channelMap = new Map();
+    for (const it of realItems) {
+      const key = `${it.source || 'outro'}_${it.category || 'outros'}`;
+      const label = `${String(it.source || '').toUpperCase()} (${String(it.category || '').toUpperCase()})`;
+      const cur = channelMap.get(key) || { key, label, count: 0, grossCents: 0, feeCents: 0, netCents: 0 };
+      cur.count += 1;
+      cur.grossCents += Number(it.amountCents || 0);
+      cur.feeCents += Number(it.feeCents || 0);
+      cur.netCents += Number(it.netAmountCents ?? it.amountCents ?? 0);
+      channelMap.set(key, cur);
+    }
+    return {
+      metricKey,
+      totalNetDigitalCents: Number(metrics.totalNetDigitalCents || 0),
+      totalFeeCents: Number(metrics.totalMdrFeeCents || 0),
+      channels: Array.from(channelMap.values())
+    };
+  }
+
+  if (metricKey === 'cancelled') {
+    return {
+      metricKey,
+      cancelledCount: Number(metrics.cancelledCount || 0),
+      cancelledCents: Number(metrics.cancelledCents || 0),
+      items: Array.isArray(metrics.cancelledItems) ? metrics.cancelledItems : []
+    };
+  }
+
+  if (metricKey === 'discounts') {
+    return {
+      metricKey,
+      discountsCents: Number(metrics.discountsCents || 0),
+      internalConsumptionCents: Number(metrics.internalConsumptionCents || 0),
+      systemTotalCents: Number(result.systemTotalCents || 0)
+    };
+  }
+
+  if (metricKey === 'delivery_house_fees') {
+    const deliveryFeeCents = Number(metrics.deliveryFeeCents || 0);
+    const serviceFeeCents = Number(metrics.serviceFeeCents || 0);
+    return {
+      metricKey,
+      deliveryFeeCents,
+      serviceFeeCents,
+      totalCents: deliveryFeeCents + serviceFeeCents
+    };
+  }
+
+  const pixSys = Number(getMirror('pix').systemCents || 0);
+  const cardSys = Number(getMirror('cartao').systemCents || 0);
+  const cashSys = Number(drawer.vendaDinheiroCents || 0);
+  const pendSys = Number(getMirror('pendentes').systemCents || 0);
+  return {
+    metricKey: 'guests',
+    guestCount: Number(metrics.guestCount || 0),
+    averageTicketCents: Number(metrics.averageTicketCents || 0),
+    revenueConsideredCents: pixSys + cardSys + cashSys,
+    pendingCount: Array.isArray(metrics.pendingDebtors) ? metrics.pendingDebtors.length : 0,
+    pendingCents: pendSys,
+    internalConsumptionCents: Number(metrics.internalConsumptionCents || 0)
+  };
+}

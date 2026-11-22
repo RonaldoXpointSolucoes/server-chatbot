@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import {
   Scale,
@@ -16,7 +16,15 @@ import { parseUploadedCashFile } from '../utils/cashFileParsers.mjs';
 import { mergeCompanyFormulaRules } from '../utils/cashFormulaRules.mjs';
 import { runCashReconciliation } from '../utils/cashReconciliationEngine.mjs';
 import { buildCashReconciliationMigrationSql } from '../utils/cashReconciliationSchema.mjs';
-import { computeHistoricalHealthStats } from '../utils/cashReconciliationServiceHelper.mjs';
+import {
+  computeHistoricalHealthStats,
+  loadActiveCashDraftFromStorage,
+  saveActiveCashDraftToStorage,
+  clearActiveCashDraftFromStorage,
+  isDraftAutoResumeDismissed,
+  setDraftAutoResumeDismissed,
+  pickMostRecentOpenDraftSession
+} from '../utils/cashReconciliationServiceHelper.mjs';
 import { geminiService } from '../services/geminiService';
 import {
   CashSessionRow,
@@ -65,8 +73,60 @@ export default function CashReconciliationPage() {
   const [aiAnalysis, setAiAnalysis] = useState<CashAiAnalysis | null>(null);
   const [isAnalyzingAi, setIsAnalyzingAi] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [selectedMirrorKey, setSelectedMirrorKey] = useState<string | null>(null);
+  const [workbenchResetKey, setWorkbenchResetKey] = useState(0);
+
+  const hydratedTenantRef = useRef<string>('');
+  const filesRef = useRef<UploadedCashFileItem[]>([]);
+  filesRef.current = files;
 
   const rulesConfig = useMemo(() => mergeCompanyFormulaRules(rules), [rules]);
+
+  // Hidrata rascunho em andamento imediatamente ao abrir a tela (preserva navegação entre abas do CRM)
+  useEffect(() => {
+    if (!tenantId || typeof window === 'undefined') return;
+    if (hydratedTenantRef.current === tenantId) return;
+    hydratedTenantRef.current = tenantId;
+
+    const draft = loadActiveCashDraftFromStorage(window.localStorage, tenantId);
+    if (draft && Array.isArray(draft.files) && draft.files.length > 0) {
+      setFiles(draft.files);
+      setActiveSessionId(draft.activeSessionId || null);
+      setManualInputs(draft.manualInputs || {});
+      setManualResolutions(draft.manualResolutions || []);
+      setAiAnalysis(draft.aiAnalysis || null);
+    }
+  }, [tenantId]);
+
+  // Auto-salva rascunho local sempre que arquivos, inputs ou ajustes mudam
+  useEffect(() => {
+    if (!tenantId || typeof window === 'undefined') return;
+    if (hydratedTenantRef.current !== tenantId) return;
+    saveActiveCashDraftToStorage(window.localStorage, tenantId, {
+      activeSessionId,
+      files,
+      manualInputs,
+      manualResolutions,
+      aiAnalysis
+    });
+  }, [tenantId, activeSessionId, files, manualInputs, manualResolutions, aiAnalysis]);
+
+  const applyLoadedSession = useCallback((session: CashSessionRow) => {
+    setActiveSessionId(session.id);
+    const snap = session.reconciled_summary || {};
+    const restoredFiles: UploadedCashFileItem[] = (snap.parsedFilesSnapshot || []).map((pf: ParsedCashFileResult, idx: number) => ({
+      id: `saved_${session.id}_${idx}`,
+      fileName: pf.fileName,
+      fileSizeBytes: 0,
+      parsed: pf
+    }));
+    setFiles(restoredFiles);
+    setManualInputs(snap.manualInputs || { cashCountedCents: session.cash_drawer_counted_cents, notes: session.cash_notes || '' });
+    setManualResolutions(snap.manualResolutions || []);
+    setAiAnalysis(session.ai_last_analysis || null);
+    setSelectedMirrorKey(null);
+    setWorkbenchResetKey((k) => k + 1);
+  }, []);
 
   const loadTenantData = useCallback(async () => {
     if (!tenantId) return;
@@ -76,10 +136,22 @@ export default function CashReconciliationPage() {
       setSessions(sessRes.sessions);
       setRules(rulesRes.rules);
       setSchemaMissing(sessRes.schemaMissing || rulesRes.schemaMissing);
+
+      // Se não há arquivos carregados em cache local e o usuário não clicou em "Nova Conferência", retoma o último rascunho aberto do Supabase
+      const localDraftDismissed = typeof window !== 'undefined' && isDraftAutoResumeDismissed(window.localStorage, tenantId);
+      if (filesRef.current.length === 0 && !localDraftDismissed) {
+        const openDraft = pickMostRecentOpenDraftSession(sessRes.sessions);
+        if (openDraft) {
+          const fullDraft = await loadCashReconciliationSession(tenantId, openDraft.id);
+          if (fullDraft && filesRef.current.length === 0) {
+            applyLoadedSession(fullDraft);
+          }
+        }
+      }
     } catch (err: unknown) {
       console.error('[Conferência Caixa] Erro ao carregar histórico:', err);
     }
-  }, [tenantId]);
+  }, [tenantId, applyLoadedSession]);
 
   useEffect(() => {
     loadTenantData();
@@ -99,6 +171,9 @@ export default function CashReconciliationPage() {
   const historicalStats = useMemo(() => computeHistoricalHealthStats(sessions), [sessions]);
 
   const handleAddFiles = async (fileList: FileList | File[]) => {
+    if (tenantId && typeof window !== 'undefined') {
+      setDraftAutoResumeDismissed(window.localStorage, tenantId, false);
+    }
     setIsProcessingFiles(true);
     try {
       const incoming = Array.from(fileList);
@@ -168,31 +243,29 @@ export default function CashReconciliationPage() {
   };
 
   const handleResetNew = () => {
+    if (tenantId && typeof window !== 'undefined') {
+      clearActiveCashDraftFromStorage(window.localStorage, tenantId);
+      setDraftAutoResumeDismissed(window.localStorage, tenantId, true);
+    }
     setActiveSessionId(null);
     setFiles([]);
     setManualInputs({});
     setManualResolutions([]);
     setAiAnalysis(null);
+    setSelectedMirrorKey(null);
+    setWorkbenchResetKey((k) => k + 1);
   };
 
   const handleLoadSession = async (sessionId: string) => {
     if (!tenantId) return;
+    if (typeof window !== 'undefined') {
+      setDraftAutoResumeDismissed(window.localStorage, tenantId, false);
+    }
     try {
       const fullSession = await loadCashReconciliationSession(tenantId, sessionId);
       const session = fullSession || sessions.find(s => s.id === sessionId);
       if (!session) return;
-      setActiveSessionId(session.id);
-      const snap = session.reconciled_summary || {};
-      const restoredFiles: UploadedCashFileItem[] = (snap.parsedFilesSnapshot || []).map((pf: ParsedCashFileResult, idx: number) => ({
-        id: `saved_${session.id}_${idx}`,
-        fileName: pf.fileName,
-        fileSizeBytes: 0,
-        parsed: pf
-      }));
-      setFiles(restoredFiles);
-      setManualInputs(snap.manualInputs || { cashCountedCents: session.cash_drawer_counted_cents, notes: session.cash_notes || '' });
-      setManualResolutions(snap.manualResolutions || []);
-      setAiAnalysis(session.ai_last_analysis || null);
+      applyLoadedSession(session);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Erro ao abrir sessão salva.';
       notifyToast(msg, 'error');
@@ -216,13 +289,28 @@ export default function CashReconciliationPage() {
       });
       setActiveSessionId(res.sessionId);
       setSchemaMissing(res.schemaMissing);
+      if (typeof window !== 'undefined') {
+        if (markClosed) {
+          clearActiveCashDraftFromStorage(window.localStorage, tenantId);
+          setDraftAutoResumeDismissed(window.localStorage, tenantId, true);
+        } else {
+          setDraftAutoResumeDismissed(window.localStorage, tenantId, false);
+          saveActiveCashDraftToStorage(window.localStorage, tenantId, {
+            activeSessionId: res.sessionId,
+            files,
+            manualInputs,
+            manualResolutions,
+            aiAnalysis
+          });
+        }
+      }
       await loadTenantData();
       notifyToast(
         markClosed
           ? 'Conferência fechada e salva no histórico!'
           : res.schemaMissing
-            ? 'Salvo localmente (execute DB_SETUP_CASH_RECONCILIATION.sql para sincronizar no Supabase).'
-            : 'Rascunho salvo no Supabase!',
+            ? 'Rascunho salvo localmente (execute DB_SETUP_CASH_RECONCILIATION.sql para sincronizar no Supabase).'
+            : 'Rascunho salvo! Você pode sair da tela e continuar depois.',
         res.schemaMissing ? 'warning' : 'success'
       );
     } catch (err: unknown) {
@@ -296,7 +384,7 @@ export default function CashReconciliationPage() {
                   <option value="" className="dark:bg-[#202c33]">Histórico ({sessions.length})...</option>
                   {sessions.map((s) => (
                     <option key={s.id} value={s.id} className="dark:bg-[#202c33]">
-                      {s.reference_date} • {s.health_score}% • {formatCents(s.diff_cents)}
+                      {s.reference_date} • {s.health_score}% • {formatCents(s.diff_cents)}{!s.closed_at ? ' (Rascunho)' : ''}
                     </option>
                   ))}
                 </select>
@@ -405,12 +493,15 @@ export default function CashReconciliationPage() {
               result={reconciliationResult}
               historicalStats={historicalStats}
               onSelectSession={handleLoadSession}
+              onOpenMirrorCategory={(mirrorKey) => setSelectedMirrorKey(mirrorKey)}
             />
 
             <CashReconciliationWorkbench
-              key={activeSessionId || 'draft'}
+              key={workbenchResetKey}
               result={reconciliationResult}
               manualInputs={manualInputs}
+              selectedMirrorKey={selectedMirrorKey}
+              onSelectMirrorKey={setSelectedMirrorKey}
               onUpdateManualInputs={(patch) => setManualInputs(prev => ({ ...prev, ...patch }))}
               onConfirmSuggestion={(suggestionId) =>
                 setManualResolutions(prev => [...prev, { action: 'confirm_suggestion', suggestionId }])

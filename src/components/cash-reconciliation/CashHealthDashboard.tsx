@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   CheckCircle2,
   AlertTriangle,
@@ -13,7 +13,8 @@ import {
   Coffee,
   Percent,
   Users,
-  Activity
+  Activity,
+  ChevronRight
 } from 'lucide-react';
 
 import {
@@ -21,6 +22,7 @@ import {
   CashReconciliationResult,
   formatCents
 } from '../../types/cashReconciliation';
+import { CashMetricDetailModal, HealthMetricKey } from './CashMetricDetailModal';
 
 interface CashHealthDashboardProps {
   result: CashReconciliationResult;
@@ -42,6 +44,7 @@ interface CashHealthDashboardProps {
     }>;
   };
   onSelectSession?: (sessionId: string) => void;
+  onOpenMirrorCategory?: (mirrorKey: string) => void;
 }
 
 const STATUS_BADGE: Record<string, { label: string; badgeClass: string; barClass: string; icon: React.ReactNode }> = {
@@ -71,7 +74,8 @@ const STATUS_BADGE: Record<string, { label: string; badgeClass: string; barClass
   }
 };
 
-export function CashHealthDashboard({ result, historicalStats, onSelectSession }: CashHealthDashboardProps) {
+export function CashHealthDashboard({ result, historicalStats, onSelectSession, onOpenMirrorCategory }: CashHealthDashboardProps) {
+  const [activeMetricKey, setActiveMetricKey] = useState<HealthMetricKey | null>(null);
   const statusMeta = STATUS_BADGE[result.status] || STATUS_BADGE.attention;
   const getMirror = (key: string): CashMirrorRow =>
     result.mirrorRows?.find((r) => r.key === key) || {
@@ -202,7 +206,11 @@ export function CashHealthDashboard({ result, historicalStats, onSelectSession }
       {/* 4 Cards por Canal */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
         {/* PIX */}
-        <div className="rounded-2xl border border-slate-200/80 dark:border-[#2a3942] bg-white/85 dark:bg-[#202c33]/85 backdrop-blur-md p-4 shadow-sm">
+        <button
+          type="button"
+          onClick={() => onOpenMirrorCategory?.('pix')}
+          className="text-left rounded-2xl border border-slate-200/80 dark:border-[#2a3942] bg-white/85 dark:bg-[#202c33]/85 hover:border-[#00a884]/50 backdrop-blur-md p-4 shadow-sm transition-all active:scale-[0.99] cursor-pointer"
+        >
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-600 dark:text-[#aebac1] flex items-center gap-1.5">
               <QrCode size={15} className="text-cyan-500" />
@@ -224,10 +232,14 @@ export function CashHealthDashboard({ result, historicalStats, onSelectSession }
               <p className="text-sm font-bold text-slate-600 dark:text-[#aebac1] tabular-nums">{formatCents(pixRow.systemCents)}</p>
             </div>
           </div>
-        </div>
+        </button>
 
         {/* Cartões */}
-        <div className="rounded-2xl border border-slate-200/80 dark:border-[#2a3942] bg-white/85 dark:bg-[#202c33]/85 backdrop-blur-md p-4 shadow-sm">
+        <button
+          type="button"
+          onClick={() => onOpenMirrorCategory?.('cartao')}
+          className="text-left rounded-2xl border border-slate-200/80 dark:border-[#2a3942] bg-white/85 dark:bg-[#202c33]/85 hover:border-[#00a884]/50 backdrop-blur-md p-4 shadow-sm transition-all active:scale-[0.99] cursor-pointer"
+        >
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-600 dark:text-[#aebac1] flex items-center gap-1.5">
               <CreditCard size={15} className="text-indigo-500" />
@@ -249,10 +261,14 @@ export function CashHealthDashboard({ result, historicalStats, onSelectSession }
               <p className="text-sm font-bold text-slate-600 dark:text-[#aebac1] tabular-nums">{formatCents(cardRow.systemCents)}</p>
             </div>
           </div>
-        </div>
+        </button>
 
         {/* Dinheiro */}
-        <div className="rounded-2xl border border-slate-200/80 dark:border-[#2a3942] bg-white/85 dark:bg-[#202c33]/85 backdrop-blur-md p-4 shadow-sm">
+        <button
+          type="button"
+          onClick={() => onOpenMirrorCategory?.('saldo_dinheiro')}
+          className="text-left rounded-2xl border border-slate-200/80 dark:border-[#2a3942] bg-white/85 dark:bg-[#202c33]/85 hover:border-[#00a884]/50 backdrop-blur-md p-4 shadow-sm transition-all active:scale-[0.99] cursor-pointer"
+        >
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-600 dark:text-[#aebac1] flex items-center gap-1.5">
               <Banknote size={15} className="text-emerald-500" />
@@ -280,10 +296,14 @@ export function CashHealthDashboard({ result, historicalStats, onSelectSession }
               <strong>{formatCents(drawer.adjustedCashExpectedCents)}</strong>
             </p>
           )}
-        </div>
+        </button>
 
         {/* Pendentes & Auditoria */}
-        <div className="rounded-2xl border border-slate-200/80 dark:border-[#2a3942] bg-white/85 dark:bg-[#202c33]/85 backdrop-blur-md p-4 shadow-sm">
+        <button
+          type="button"
+          onClick={() => onOpenMirrorCategory?.('pendentes')}
+          className="text-left rounded-2xl border border-slate-200/80 dark:border-[#2a3942] bg-white/85 dark:bg-[#202c33]/85 hover:border-[#00a884]/50 backdrop-blur-md p-4 shadow-sm transition-all active:scale-[0.99] cursor-pointer"
+        >
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-600 dark:text-[#aebac1] flex items-center gap-1.5">
               <Clock size={15} className="text-amber-500" />
@@ -303,36 +323,97 @@ export function CashHealthDashboard({ result, historicalStats, onSelectSession }
               <p className="text-sm font-bold text-slate-600 dark:text-[#aebac1] tabular-nums">{formatCents(metrics.internalConsumptionCents)}</p>
             </div>
           </div>
-        </div>
+        </button>
       </div>
 
-      {/* Faixa de Custos, Taxas e Risco Operacional */}
+      {/* Faixa de Custos, Taxas e Risco Operacional (todos clicáveis) */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
-        <div className="rounded-xl border border-slate-200/70 dark:border-[#2a3942] bg-white/75 dark:bg-[#202c33]/75 px-3 py-2.5">
-          <p className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1"><Percent size={11} /> Taxas Cartão</p>
+        <button
+          type="button"
+          onClick={() => setActiveMetricKey('fees')}
+          className="text-left group rounded-xl border border-slate-200/70 dark:border-[#2a3942] bg-white/75 dark:bg-[#202c33]/75 hover:border-[#00a884]/60 px-3 py-2.5 transition-all cursor-pointer active:scale-[0.98]"
+          title="Clique para detalhar taxas MDR por maquininha"
+        >
+          <div className="flex items-center justify-between text-[10px] uppercase font-bold text-slate-400">
+            <span className="flex items-center gap-1"><Percent size={11} /> Taxas Cartão</span>
+            <ChevronRight size={11} className="opacity-50 group-hover:opacity-100 group-hover:text-[#00a884]" />
+          </div>
           <p className="text-sm font-black text-rose-600 dark:text-rose-400 mt-0.5 tabular-nums">{formatCents(metrics.totalMdrFeeCents)}</p>
-        </div>
-        <div className="rounded-xl border border-slate-200/70 dark:border-[#2a3942] bg-white/75 dark:bg-[#202c33]/75 px-3 py-2.5">
-          <p className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1"><Receipt size={11} /> Líquido Digital</p>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveMetricKey('net_digital')}
+          className="text-left group rounded-xl border border-slate-200/70 dark:border-[#2a3942] bg-white/75 dark:bg-[#202c33]/75 hover:border-[#00a884]/60 px-3 py-2.5 transition-all cursor-pointer active:scale-[0.98]"
+          title="Clique para detalhar valor líquido digital por canal"
+        >
+          <div className="flex items-center justify-between text-[10px] uppercase font-bold text-slate-400">
+            <span className="flex items-center gap-1"><Receipt size={11} /> Líquido Digital</span>
+            <ChevronRight size={11} className="opacity-50 group-hover:opacity-100 group-hover:text-[#00a884]" />
+          </div>
           <p className="text-sm font-black text-emerald-600 dark:text-emerald-400 mt-0.5 tabular-nums">{formatCents(metrics.totalNetDigitalCents)}</p>
-        </div>
-        <div className="rounded-xl border border-slate-200/70 dark:border-[#2a3942] bg-white/75 dark:bg-[#202c33]/75 px-3 py-2.5">
-          <p className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1"><Ban size={11} /> Cancelados ({metrics.cancelledCount || 0})</p>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveMetricKey('cancelled')}
+          className="text-left group rounded-xl border border-slate-200/70 dark:border-[#2a3942] bg-white/75 dark:bg-[#202c33]/75 hover:border-[#00a884]/60 px-3 py-2.5 transition-all cursor-pointer active:scale-[0.98]"
+          title="Clique para listar os itens cancelados"
+        >
+          <div className="flex items-center justify-between text-[10px] uppercase font-bold text-slate-400">
+            <span className="flex items-center gap-1"><Ban size={11} /> Cancelados ({metrics.cancelledCount || 0})</span>
+            <ChevronRight size={11} className="opacity-50 group-hover:opacity-100 group-hover:text-[#00a884]" />
+          </div>
           <p className="text-sm font-black text-slate-800 dark:text-[#e9edef] mt-0.5 tabular-nums">{formatCents(metrics.cancelledCents)}</p>
-        </div>
-        <div className="rounded-xl border border-slate-200/70 dark:border-[#2a3942] bg-white/75 dark:bg-[#202c33]/75 px-3 py-2.5">
-          <p className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1"><Coffee size={11} /> Descontos</p>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveMetricKey('discounts')}
+          className="text-left group rounded-xl border border-slate-200/70 dark:border-[#2a3942] bg-white/75 dark:bg-[#202c33]/75 hover:border-[#00a884]/60 px-3 py-2.5 transition-all cursor-pointer active:scale-[0.98]"
+          title="Clique para ver descontos e consumo interno"
+        >
+          <div className="flex items-center justify-between text-[10px] uppercase font-bold text-slate-400">
+            <span className="flex items-center gap-1"><Coffee size={11} /> Descontos</span>
+            <ChevronRight size={11} className="opacity-50 group-hover:opacity-100 group-hover:text-[#00a884]" />
+          </div>
           <p className="text-sm font-black text-slate-800 dark:text-[#e9edef] mt-0.5 tabular-nums">{formatCents(metrics.discountsCents)}</p>
-        </div>
-        <div className="rounded-xl border border-slate-200/70 dark:border-[#2a3942] bg-white/75 dark:bg-[#202c33]/75 px-3 py-2.5">
-          <p className="text-[10px] uppercase font-bold text-slate-400">Taxa Entrega + Casa</p>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveMetricKey('delivery_house_fees')}
+          className="text-left group rounded-xl border border-slate-200/70 dark:border-[#2a3942] bg-white/75 dark:bg-[#202c33]/75 hover:border-[#00a884]/60 px-3 py-2.5 transition-all cursor-pointer active:scale-[0.98]"
+          title="Clique para separar taxa de entrega e taxa da casa"
+        >
+          <div className="flex items-center justify-between text-[10px] uppercase font-bold text-slate-400">
+            <span>Taxa Entrega + Casa</span>
+            <ChevronRight size={11} className="opacity-50 group-hover:opacity-100 group-hover:text-[#00a884]" />
+          </div>
           <p className="text-sm font-black text-slate-800 dark:text-[#e9edef] mt-0.5 tabular-nums">{formatCents((metrics.deliveryFeeCents || 0) + (metrics.serviceFeeCents || 0))}</p>
-        </div>
-        <div className="rounded-xl border border-slate-200/70 dark:border-[#2a3942] bg-white/75 dark:bg-[#202c33]/75 px-3 py-2.5">
-          <p className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1"><Users size={11} /> Pessoas ({metrics.guestCount || 0})</p>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveMetricKey('guests')}
+          className="text-left group rounded-xl border border-slate-200/70 dark:border-[#2a3942] bg-white/75 dark:bg-[#202c33]/75 hover:border-[#00a884]/60 px-3 py-2.5 transition-all cursor-pointer active:scale-[0.98]"
+          title="Clique para ver resumo de público e ticket médio"
+        >
+          <div className="flex items-center justify-between text-[10px] uppercase font-bold text-slate-400">
+            <span className="flex items-center gap-1"><Users size={11} /> Pessoas ({metrics.guestCount || 0})</span>
+            <ChevronRight size={11} className="opacity-50 group-hover:opacity-100 group-hover:text-[#00a884]" />
+          </div>
           <p className="text-sm font-black text-slate-800 dark:text-[#e9edef] mt-0.5 tabular-nums">{formatCents(metrics.averageTicketCents)}/p</p>
-        </div>
+        </button>
       </div>
+
+      {activeMetricKey && (
+        <CashMetricDetailModal
+          metricKey={activeMetricKey}
+          result={result}
+          onClose={() => setActiveMetricKey(null)}
+        />
+      )}
 
       {/* Histórico Multi-Dias de Saúde */}
       {historicalStats.totalSessions > 0 && (

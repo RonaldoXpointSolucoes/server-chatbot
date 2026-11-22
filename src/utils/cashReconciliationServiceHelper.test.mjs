@@ -97,7 +97,14 @@ import {
   parseUiMoneyInputToCents,
   SESSION_LIST_COLUMNS,
   filterVisibleMirrorRows,
-  buildMirrorRowDetails
+  buildMirrorRowDetails,
+  saveActiveCashDraftToStorage,
+  loadActiveCashDraftFromStorage,
+  clearActiveCashDraftFromStorage,
+  isDraftAutoResumeDismissed,
+  setDraftAutoResumeDismissed,
+  pickMostRecentOpenDraftSession,
+  buildHealthMetricDetail
 } from './cashReconciliationServiceHelper.mjs';
 
 test('parseUiMoneyInputToCents handles pt-BR thousand separators and empty inputs accurately', () => {
@@ -181,4 +188,95 @@ test('buildMirrorRowDetails groups matched pairs, suggestions, extra/missing ite
 
   const pendDetails = buildMirrorRowDetails(mockResult, 'pendentes');
   assert.equal(pendDetails.pendingDebtors.length, 1);
+});
+
+test('active draft storage helpers roundtrip parsed files, manual inputs and auto-resume dismissal per tenant', () => {
+  const mem = new Map();
+  const mockStorage = {
+    getItem: (k) => (mem.has(k) ? mem.get(k) : null),
+    setItem: (k, v) => mem.set(k, String(v)),
+    removeItem: (k) => mem.delete(k)
+  };
+
+  assert.equal(loadActiveCashDraftFromStorage(mockStorage, 't1'), null);
+
+  saveActiveCashDraftToStorage(mockStorage, 't1', {
+    activeSessionId: 'sess-123',
+    files: [
+      {
+        id: 'f1',
+        fileName: 'Planilha.xlsx',
+        fileSizeBytes: 1024,
+        arrayBuffer: new ArrayBuffer(8),
+        parsed: { fileType: 'pdv_vendas', status: 'ok', rows: [{ id: 1 }], summary: { ok: true } }
+      }
+    ],
+    manualInputs: { cashCountedCents: 25727, categoryRealOverrides: { saldo_dinheiro: 88807 } },
+    manualResolutions: [{ action: 'reclassify_system', systemIds: ['s1'], targetCategory: 'cartao' }],
+    aiAnalysis: null
+  });
+
+  const loaded = loadActiveCashDraftFromStorage(mockStorage, 't1');
+  assert.equal(loaded.activeSessionId, 'sess-123');
+  assert.equal(loaded.files.length, 1);
+  assert.equal(loaded.files[0].arrayBuffer, undefined);
+  assert.equal(loaded.manualInputs.categoryRealOverrides.saldo_dinheiro, 88807);
+  assert.equal(loaded.manualResolutions.length, 1);
+  assert.equal(loadActiveCashDraftFromStorage(mockStorage, 't2'), null);
+
+  setDraftAutoResumeDismissed(mockStorage, 't1', true);
+  assert.equal(isDraftAutoResumeDismissed(mockStorage, 't1'), true);
+  setDraftAutoResumeDismissed(mockStorage, 't1', false);
+  assert.equal(isDraftAutoResumeDismissed(mockStorage, 't1'), false);
+
+  clearActiveCashDraftFromStorage(mockStorage, 't1');
+  assert.equal(loadActiveCashDraftFromStorage(mockStorage, 't1'), null);
+});
+
+test('pickMostRecentOpenDraftSession returns newest unclosed draft and ignores closed sessions', () => {
+  const closedOnly = [{ id: 'a', closed_at: '2026-11-22T10:00:00Z', updated_at: '2026-11-22T10:00:00Z' }];
+  assert.equal(pickMostRecentOpenDraftSession(closedOnly), null);
+
+  const mixed = [
+    { id: 'closed-1', closed_at: '2026-11-22T12:00:00Z', updated_at: '2026-11-22T12:00:00Z' },
+    { id: 'draft-older', closed_at: null, updated_at: '2026-11-22T09:00:00Z' },
+    { id: 'draft-newest', closed_at: null, updated_at: '2026-11-22T11:30:00Z' }
+  ];
+  assert.equal(pickMostRecentOpenDraftSession(mixed)?.id, 'draft-newest');
+});
+
+test('buildHealthMetricDetail extracts itemized breakdowns for all 6 operational metric cards', () => {
+  const mockResult = {
+    realItems: [
+      { id: 'r1', source: 'rede', category: 'cartao', subCategory: 'credito', amountCents: 10000, feeCents: 300, netAmountCents: 9700, timeStr: '12:00:00', description: 'Rede CREDITO VISA' },
+      { id: 'r2', source: 'ofx', category: 'pix', subCategory: 'pix_cliente', amountCents: 5000, feeCents: 0, netAmountCents: 5000, timeStr: '12:05:00', description: 'PIX CLIENTE' }
+    ],
+    financialMetrics: {
+      totalMdrFeeCents: 300,
+      totalNetDigitalCents: 14700,
+      cancelledCount: 1,
+      cancelledCents: 6900,
+      cancelledItems: [{ table: '005', item: 'Costela Prime 12h', qty: 1 }],
+      internalConsumptionCents: 35500,
+      discountsCents: 5480,
+      deliveryFeeCents: 5700,
+      serviceFeeCents: 11435,
+      guestCount: 62,
+      averageTicketCents: 7719,
+      pendingDebtors: [{ debtor: 'CLEITON', amountCents: 14000 }]
+    },
+    cashDrawerSummary: { vendaDinheiroCents: 34510 },
+    mirrorRows: [
+      { key: 'pix', systemCents: 132564, realCents: 154704 },
+      { key: 'cartao', systemCents: 311510, realCents: 317310 },
+      { key: 'pendentes', systemCents: 40900, realCents: 0 }
+    ]
+  };
+
+  assert.equal(buildHealthMetricDetail(mockResult, 'fees').items.length, 1);
+  assert.equal(buildHealthMetricDetail(mockResult, 'net_digital').channels.length, 2);
+  assert.equal(buildHealthMetricDetail(mockResult, 'cancelled').items[0].item, 'Costela Prime 12h');
+  assert.equal(buildHealthMetricDetail(mockResult, 'discounts').discountsCents, 5480);
+  assert.equal(buildHealthMetricDetail(mockResult, 'delivery_house_fees').totalCents, 17135);
+  assert.equal(buildHealthMetricDetail(mockResult, 'guests').guestCount, 62);
 });
