@@ -71,10 +71,8 @@ export default function CashReconciliationPage() {
   const loadTenantData = useCallback(async () => {
     if (!tenantId) return;
     try {
-      const [sessRes, rulesRes] = await Promise.all([
-        listCashReconciliationSessions(tenantId, 30),
-        listCashFormulaRules(tenantId)
-      ]);
+      const sessRes = await listCashReconciliationSessions(tenantId, 30);
+      const rulesRes = await listCashFormulaRules(tenantId, sessRes.schemaMissing);
       setSessions(sessRes.sessions);
       setRules(rulesRes.rules);
       setSchemaMissing(sessRes.schemaMissing || rulesRes.schemaMissing);

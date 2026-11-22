@@ -86,6 +86,9 @@ function localApiGeminiPlugin() {
 
 // https://vite.dev/config/
 export default defineConfig({
+  server: {
+    port: 5173,
+  },
   define: {
     'import.meta.env.PACKAGE_VERSION': JSON.stringify(packageJson.version),
     'import.meta.env.PACKAGE_BUILD_DATE': JSON.stringify(new Date().toISOString())

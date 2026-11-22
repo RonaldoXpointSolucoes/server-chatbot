@@ -79,15 +79,23 @@ function writeLocalJson(key: string, value: unknown) {
   }
 }
 
-function isRlsOrJwtError(error: { code?: string; message?: string } | null | undefined): boolean {
+function isRlsOrJwtError(error: { code?: string; message?: string; status?: number } | null | undefined): boolean {
   const code = String(error?.code || '');
+  const status = Number(error?.status || 0);
   const msg = String(error?.message || '').toLowerCase();
-  return code === '42501' || code === 'PGRST301' || msg.includes('row-level security') || msg.includes('jwt');
+  return status === 401 || status === 403 || code === '42501' || code === 'PGRST301' || msg.includes('row-level security') || msg.includes('jwt');
 }
 
 async function runWithTenantClient<T>(
-  fn: (client: typeof supabase) => PromiseLike<{ data: T | null; error: { code?: string; message?: string } | null }>
-): Promise<{ data: T | null; error: { code?: string; message?: string } | null; usedFallback: boolean }> {
+  fn: (client: typeof supabase) => PromiseLike<{ data: T | null; error: { code?: string; message?: string; status?: number } | null }>
+): Promise<{ data: T | null; error: { code?: string; message?: string; status?: number } | null; usedFallback: boolean }> {
+  // Evita disparo garantido de 401/403 (que polui o DevLogger) quando o app está autenticado sem JWT Supabase Auth
+  const { data: sessionData } = await supabase.auth.getSession().catch(() => ({ data: { session: null } }));
+  if (!sessionData?.session?.access_token) {
+    const directMaster = await fn(masterSupabase);
+    return { ...directMaster, usedFallback: true };
+  }
+
   const first = await fn(supabase);
   if (!first.error || !isRlsOrJwtError(first.error)) {
     return { ...first, usedFallback: false };
@@ -239,9 +247,16 @@ export async function saveCashReconciliationSession(params: {
 }
 
 export async function listCashFormulaRules(
-  tenantId: string
+  tenantId: string,
+  skipRemote = false
 ): Promise<{ rules: CashRuleRow[]; schemaMissing: boolean }> {
   if (!tenantId) return { rules: [], schemaMissing: false };
+  if (skipRemote) {
+    return {
+      rules: readLocalJson<CashRuleRow[]>(localRulesKey(tenantId), []),
+      schemaMissing: true
+    };
+  }
   const { data, error } = await runWithTenantClient<CashRuleRow[]>((client) =>
     client
       .from('cash_reconciliation_rules')

@@ -1345,6 +1345,10 @@ export default function DevLogger() {
              if (response.status === 406 && detailsStr.includes('PGRST116')) {
                 return response;
              }
+             // Ignorar PGRST205 apenas das tabelas opcionais de Conferência de Caixa (módulo já exibe banner de setup + fallback local)
+             if (response.status === 404 && detailsStr.includes('PGRST205') && url.includes('/cash_reconciliation_')) {
+                return response;
+             }
              
              let sourcePrefix = 'Fetch (External)';
              if (url.includes('supabase.co')) sourcePrefix = 'Fetch (Supabase REST)';
