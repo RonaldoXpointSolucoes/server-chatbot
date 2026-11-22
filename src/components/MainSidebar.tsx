@@ -53,7 +53,8 @@ import {
   Building2,
   Ticket,
   Monitor,
-  BrainCircuit
+  BrainCircuit,
+  Scale
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useChatStore, hasUserAccessToInstance, instanceCache } from '../store/chatStore';
@@ -1562,12 +1563,18 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
              </div>
           </CollapsibleSection>
 
-          <div className="mt-2">
+          <div className="mt-2 space-y-0.5">
             <NavItem 
               icon={<MessageSquareReply size={16} />} 
               title="Respostas Prontas" 
               onClick={() => navigate('/settings/canned-responses')} 
               isActive={window.location.pathname === '/settings/canned-responses'}
+            />
+            <NavItem 
+              icon={<Scale size={16} />} 
+              title="Conferência Caixa" 
+              onClick={() => navigate('/conferencia-caixa')} 
+              isActive={window.location.pathname === '/conferencia-caixa'}
             />
           </div>
         </div>

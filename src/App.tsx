@@ -72,6 +72,7 @@ const VoucherScanner = lazyWithRetry(() => import('./pages/voucher/VoucherScanne
 const CompanyPortalLogin = lazyWithRetry(() => import('./pages/voucher/CompanyPortalLogin'));
 const CompanyPortalDashboard = lazyWithRetry(() => import('./pages/voucher/CompanyPortalDashboard'));
 const TechnicalDocumentationPage = lazyWithRetry(() => import('./pages/TechnicalDocumentationPage'));
+const CashReconciliationPage = lazyWithRetry(() => import('./pages/CashReconciliationPage'));
 
 function RouteLoadingFallback() {
   return (
@@ -179,6 +180,7 @@ export default function App() {
             <Route path="/settings/labels" element={<LabelsSettings />} />
             <Route path="/settings/bots" element={<BotsList />} />
             <Route path="/settings/canned-responses" element={<CannedResponses />} />
+            <Route path="/conferencia-caixa" element={<ErrorBoundary><CashReconciliationPage /></ErrorBoundary>} />
             <Route path="/settings/prompt-builder" element={<PromptBuilder />} />
             <Route path="/settings/automation" element={<AutomationSettings />} />
             <Route path="/settings/logs" element={<OperationLogs />} />
