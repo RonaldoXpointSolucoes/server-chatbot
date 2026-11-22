@@ -26,6 +26,7 @@ import { AddRagModal } from '../components/chat/AddRagModal';
 import { BaileysInstanceHubModal } from '../components/modals/BaileysInstanceHubModal';
 import { InboxDeepAnalysisModal } from '../components/modals/InboxDeepAnalysisModal';
 import { invokeBaileysAction, getInstanceApiUrl } from '../services/whatsappEngine';
+import { shouldPreserveHumanAiPauseOnResolve } from '../utils/aiPause.mjs';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { supabase } from '../services/supabase';
@@ -3111,7 +3112,7 @@ export default function ChatDashboard() {
     }
   };
 
-  const executeResolve = async (contactId: string, reactivateAi: boolean) => {
+  const executeResolve = async (contactId: string, reactivateAi: boolean, forceReactivateAi = false) => {
     // Limpa o estado de histórico expandido do ticket resolvido (para que uma futura nova conversa abra em 'today')
     delete expandedHistoryByChatRef.current[contactId];
     const realTargetIdForClear = getRealContactId(contactId);
@@ -3134,7 +3135,10 @@ export default function ChatDashboard() {
 
     try {
       // 2. Atualização otimista atômica (resolve e abre o próximo chat em < 1ms) + persistência em background
-      const resolvePromise = resolveConversation(contactId, reactivateAi, { nextActiveChatId: nextContactId });
+      const resolvePromise = resolveConversation(contactId, reactivateAi, {
+        nextActiveChatId: nextContactId,
+        forceReactivateAi
+      });
 
       if (nextContactId) {
         setActiveChat(nextContactId);
@@ -3228,9 +3232,9 @@ export default function ChatDashboard() {
                 ? activeTicket
                 : null;
 
-              // Fecha e muda de tela instantaneamente (< 50ms) preservando pausa definitiva
-              const isDefinitivelyPaused = contact?.bot_status === 'paused' || (contact?.ai_paused_manually && !contact?.bot_paused_until);
-              const resolveResultPromise = executeResolve(contactId, !isDefinitivelyPaused);
+              // Fecha e muda de tela instantaneamente (< 50ms) preservando pausa definitiva ou janela recente humana (30m)
+              const preserveHumanPause = shouldPreserveHumanAiPauseOnResolve(contact);
+              const resolveResultPromise = executeResolve(contactId, !preserveHumanPause, false);
 
               // Análise de IA e enriquecimento do ticket correm 100% em background
               (async () => {
@@ -3348,8 +3352,8 @@ export default function ChatDashboard() {
       }
     }
 
-    const isDefinitivelyPaused = contact?.bot_status === 'paused' || (contact?.ai_paused_manually && !contact?.bot_paused_until);
-    await executeResolve(contactId, !isDefinitivelyPaused);
+    const preserveHumanPause = shouldPreserveHumanAiPauseOnResolve(contact);
+    await executeResolve(contactId, !preserveHumanPause, false);
   };
 
   const handlePrepareDraftChat = async (phoneNumber: string, targetInstance?: string | null) => {
@@ -6064,8 +6068,14 @@ export default function ChatDashboard() {
               ? activeTicket
               : null;
 
+            const modalTargetContact = contacts.find(c => c.id === targetContactId) || activeChat;
+            const hadHumanPauseCooldown = shouldPreserveHumanAiPauseOnResolve(modalTargetContact);
             // Fecha modal e muda a tela imediatamente (< 50ms)
-            const resolveResultPromise = executeResolve(targetContactId, reactivateAi);
+            const resolveResultPromise = executeResolve(
+              targetContactId,
+              reactivateAi,
+              Boolean(reactivateAi && hadHumanPauseCooldown)
+            );
 
             // Atualiza estatísticas, checklist mestre e resumo no ticket em background
             (async () => {

@@ -8,7 +8,11 @@ import path from 'path';
 import * as tus from 'tus-js-client';
 import FlowEngine from '../flow-runtime/index.js';
 import AutomationWorker from '../automation-worker/agent.js';
-import { pauseAiImmediatelyForHumanOperator } from '../automation-worker/human-pause.js';
+import {
+    pauseAiImmediatelyForHumanOperator,
+    evaluateRecentHumanConversationGuard,
+    DEFAULT_HUMAN_CONVERSATION_WINDOW_MS
+} from '../automation-worker/human-pause.js';
 import PushService from '../push-service/index.js';
 import crypto from 'crypto';
 import { logAndNotifyConnectionEvent } from './connection-notifier.js';
@@ -1430,11 +1434,56 @@ class EventProcessor {
              
              const updatedStatusMap = new Map();
              const updatedAiPausedMap = new Map();
+             const recentHumanGuardMap = new Map();
+
+             // Verifica no banco se um operador humano enviou mensagem recentemente (últimos 30 min)
+             // antes de reabrir qualquer conversa para o robô (protege casos de Pix/atendimento humano ou pós-Resolver rápido).
+             const candidateGuardConvIds = [];
+             for (const [key, data] of convMap.entries()) {
+                 const exist = existingConvMap.get(key);
+                 const contactBotStatus = contactBotStatusMap.get(data.contact_id) || 'active';
+                 if (exist?.id && data.has_inbound && !data.has_human_outbound && contactBotStatus !== 'paused') {
+                     candidateGuardConvIds.push(exist.id);
+                 }
+             }
+             if (candidateGuardConvIds.length > 0) {
+                 try {
+                     const sinceIso = new Date(Date.now() - DEFAULT_HUMAN_CONVERSATION_WINDOW_MS).toISOString();
+                     const { data: recentConvMsgs } = await supabase
+                         .from('messages')
+                         .select('conversation_id, sender_type, direction, text_content, timestamp, raw_payload')
+                         .in('conversation_id', candidateGuardConvIds)
+                         .gte('timestamp', sinceIso)
+                         .order('timestamp', { ascending: false })
+                         .limit(Math.min(candidateGuardConvIds.length * 10, 100));
+
+                     if (Array.isArray(recentConvMsgs) && recentConvMsgs.length > 0) {
+                         const byConv = new Map();
+                         for (const m of recentConvMsgs) {
+                             if (!byConv.has(m.conversation_id)) byConv.set(m.conversation_id, []);
+                             byConv.get(m.conversation_id).push(m);
+                         }
+                         for (const [convIdKey, msgsList] of byConv.entries()) {
+                             const guard = evaluateRecentHumanConversationGuard(msgsList);
+                             if (guard.blocked) {
+                                 recentHumanGuardMap.set(convIdKey, guard);
+                             }
+                         }
+                     }
+                 } catch (guardErr) {
+                     console.warn('[BatchProcessor] Aviso ao verificar histórico humano recente:', guardErr?.message || guardErr);
+                 }
+             }
              
              for(const [key, data] of convMap.entries()) {
                  const exist = existingConvMap.get(key);
                  const contactBotStatus = contactBotStatusMap.get(data.contact_id) || 'active';
-                 const isContactPaused = contactBotStatus === 'paused';
+                 const isMemHumanPaused = Boolean(AutomationWorker.isRecentlyHumanPaused?.({
+                     conversationId: exist?.id,
+                     contactId: data.contact_id
+                 }));
+                 const isDbHumanGuarded = Boolean(exist?.id && recentHumanGuardMap.has(exist.id));
+                 const isContactPaused = contactBotStatus === 'paused' || isMemHumanPaused || isDbHumanGuarded;
                  const transition = resolveBatchConversationTransition(exist, data, isContactPaused);
 
                  const finalStatus = transition.status;
@@ -1610,7 +1659,14 @@ class EventProcessor {
                  const isConvPaused = updatedAiPausedMap.has(mapKey) ? updatedAiPausedMap.get(mapKey) : (existingConvMap.get(`${b.tenantId}_${b.instanceId}_${cid}`)?.ai_paused || false);
                  const contactBotStatus = contactBotStatusMap.get(cid) || 'active';
                  const isContactPaused = contactBotStatus === 'paused';
-                 b.aiPaused = isConvPaused || isContactPaused;
+                 const isMemHumanPausedItem = Boolean(AutomationWorker.isRecentlyHumanPaused?.({
+                     conversationId: b.conversationId,
+                     contactId: cid,
+                     jid: b.jid,
+                     phone: b.phone
+                 }));
+                 const isDbHumanGuardedItem = Boolean(b.conversationId && recentHumanGuardMap.has(b.conversationId));
+                 b.aiPaused = isConvPaused || isContactPaused || isMemHumanPausedItem || isDbHumanGuardedItem;
                  
                  if (!b.conversationId) return; // ignora falha bruta
 
@@ -2007,7 +2063,18 @@ class EventProcessor {
 
                          // Responde apenas se a conversa estiver sob os cuidados do bot ('bot' ou 'teste_robo')
                          // E não seja um self-chat nem conversa onde humano acabou de enviar mensagem no lote
-                         if (!b.isSelfChat && !b.aiPaused && !humanOutboundConvIds.has(b.conversationId) && (b.convStatus === 'bot' || b.convStatus === 'teste_robo' || b.convStatus === 'open')) {
+                         if (
+                             !b.isSelfChat &&
+                             !b.aiPaused &&
+                             !humanOutboundConvIds.has(b.conversationId) &&
+                             !AutomationWorker.isRecentlyHumanPaused?.({
+                                 conversationId: b.conversationId,
+                                 contactId: cid,
+                                 jid: b.jid,
+                                 phone: b.phone
+                             }) &&
+                             (b.convStatus === 'bot' || b.convStatus === 'teste_robo' || b.convStatus === 'open')
+                         ) {
                              const existingTrigger = aiTriggerMap.get(b.conversationId);
                              if (!existingTrigger || new Date(msg.timestamp) > new Date(existingTrigger.msg.timestamp)) {
                                  aiTriggerMap.set(b.conversationId, { msg, b });

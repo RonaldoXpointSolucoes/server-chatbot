@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { pauseAiImmediatelyForHumanOperator } from '../src/automation-worker/human-pause.js';
+import {
+  pauseAiImmediatelyForHumanOperator,
+  evaluateRecentHumanConversationGuard,
+  fetchRecentHumanConversationGuard
+} from '../src/automation-worker/human-pause.js';
 import AutomationWorker from '../src/automation-worker/agent.js';
 
 const TENANT_ID = '11111111-1111-4111-8111-111111111111';
@@ -126,4 +130,142 @@ test('AutomationWorker.triggerGeneration aborts BEFORE calling generateResponse 
   assert.equal(llmCalled, false, 'LLM must never be invoked after operator intervened');
   assert.equal(AutomationWorker.pendingJobs.size, 0);
   AutomationWorker.recentHumanPauseMap.clear();
+});
+
+test('evaluateRecentHumanConversationGuard blocks AI even after ticket resolved when human sent Pix <30m ago', () => {
+  const nowMs = Date.UTC(2026, 10, 22, 0, 29, 25);
+  const res = evaluateRecentHumanConversationGuard([
+    { sender_type: 'automation', direction: 'outbound', timestamp: '2026-11-22T00:15:23Z', text_content: 'Pedido a caminho' },
+    { sender_type: 'client', direction: 'inbound', timestamp: '2026-11-22T00:26:39Z', text_content: 'Manda a chave do pix' },
+    { sender_type: 'human', direction: 'outbound', timestamp: '2026-11-22T00:27:30Z', text_content: '*Ronaldo Clemente:* Chave Pix: 59075836000106' },
+    { sender_type: 'system', direction: 'outgoing', timestamp: '2026-11-22T00:27:35Z', text_content: '✅ Resolvido por Agente dia 21/11/2026, 21:27:35' },
+    { sender_type: 'client', direction: 'inbound', timestamp: '2026-11-22T00:29:23Z', text_content: 'Chave dando inválida' }
+  ], { nowMs });
+
+  assert.equal(res.blocked, true);
+  assert.equal(res.reason, 'recent_human_operator_message');
+});
+
+test('evaluateRecentHumanConversationGuard ignores automation messages, expired human msgs (>30m), and explicit AI resume', () => {
+  const nowMs = Date.UTC(2026, 10, 22, 1, 15, 0);
+
+  // Explicit resume newer than human message allows AI
+  const resumedRes = evaluateRecentHumanConversationGuard([
+    { sender_type: 'human', direction: 'outbound', timestamp: new Date(nowMs - 120000).toISOString(), text_content: 'Oi' },
+    { sender_type: 'system', direction: 'outgoing', timestamp: new Date(nowMs - 30000).toISOString(), text_content: '▶️ IA Luna Retomada por Ronaldo' }
+  ], { nowMs });
+  assert.equal(resumedRes.blocked, false);
+  assert.equal(resumedRes.reason, 'explicit_ai_resume');
+
+  // Automation outbound alone does not block AI
+  const autoRes = evaluateRecentHumanConversationGuard([
+    { sender_type: 'automation', direction: 'outbound', timestamp: new Date(nowMs - 60000).toISOString(), text_content: 'Pedido saiu para entrega' }
+  ], { nowMs });
+  assert.equal(autoRes.blocked, false);
+
+  // Human outbound older than 30m allows new session
+  const expiredRes = evaluateRecentHumanConversationGuard([
+    { sender_type: 'human', direction: 'outbound', timestamp: new Date(nowMs - 45 * 60000).toISOString(), text_content: 'Tudo bem?' }
+  ], { nowMs });
+  assert.equal(expiredRes.blocked, false);
+});
+
+test('fetchRecentHumanConversationGuard + checkCanSendAiResponse block on real conversation schema without 400 error', async () => {
+  const realCols = new Set(['id', 'status', 'ai_paused', 'ai_paused_manually', 'snoozed_until']);
+  const contactCols = new Set(['id', 'bot_status', 'bot_paused_until']);
+  const nowIso = new Date().toISOString();
+  const futureIso = new Date(Date.now() + 20 * 60000).toISOString();
+
+  // Temporary test verifying checkCanSendAiResponse returns disallowed cleanly when conversation is paused OR contact has bot_paused_until > now
+  // Note: checkCanSendAiResponse uses module supabase directly; we test pure evaluator + fetchRecentHumanConversationGuard here
+  const mockSb = {
+    from(table) {
+      let cols = '';
+      const q = {
+        select(c) { cols = c; return q; },
+        eq() { return q; },
+        order() { return q; },
+        limit() { return q; },
+        maybeSingle: async () => {
+          if (table === 'conversations') {
+            for (const col of cols.split(',').map(s => s.trim())) {
+              if (!realCols.has(col)) return { data: null, error: { code: '42703', message: `column conversations.${col} does not exist` } };
+            }
+            return { data: { id: CONV_ID, status: 'open', ai_paused: true, ai_paused_manually: true, snoozed_until: null }, error: null };
+          }
+          if (table === 'contacts') {
+            for (const col of cols.split(',').map(s => s.trim())) {
+              if (!contactCols.has(col)) return { data: null, error: { code: '42703', message: `column contacts.${col} does not exist` } };
+            }
+            return { data: { id: CONTACT_ID, bot_status: 'active', bot_paused_until: futureIso }, error: null };
+          }
+          return { data: null, error: null };
+        },
+        then(resolve) {
+          return Promise.resolve({
+            data: [
+              { sender_type: 'human', direction: 'outbound', timestamp: nowIso, text_content: 'Nosso pix é 59075836000106' }
+            ],
+            error: null
+          }).then(resolve);
+        }
+      };
+      return q;
+    }
+  };
+
+  const guard = await fetchRecentHumanConversationGuard({ supabase: mockSb, conversationId: CONV_ID });
+  assert.equal(guard.blocked, true);
+
+  AutomationWorker.recentHumanPauseMap = new Map();
+  const realCheckConvPaused = await AutomationWorker.checkCanSendAiResponse(CONV_ID, CONTACT_ID, '5511992144843@s.whatsapp.net', mockSb);
+  assert.equal(realCheckConvPaused.allowed, false);
+});
+
+test('AutomationWorker.checkCanSendAiResponse blocks even on resolved+unpaused conv when human sent Pix <30m ago and enforces real schema', async () => {
+  const realConvCols = new Set(['id', 'status', 'ai_paused', 'ai_paused_manually', 'snoozed_until']);
+  const realContactCols = new Set(['id', 'bot_status', 'bot_paused_until']);
+  const nowIso = new Date().toISOString();
+
+  const mockLucieneSb = {
+    from(table) {
+      let cols = '';
+      const q = {
+        select(c) { cols = c; return q; },
+        eq() { return q; },
+        order() { return q; },
+        limit() { return q; },
+        maybeSingle: async () => {
+          if (table === 'conversations') {
+            for (const col of cols.split(',').map(s => s.trim())) {
+              assert.ok(realConvCols.has(col), `Invalid conversations column queried: ${col}`);
+            }
+            return { data: { id: CONV_ID, status: 'resolved', ai_paused: false, ai_paused_manually: false, snoozed_until: null }, error: null };
+          }
+          if (table === 'contacts') {
+            for (const col of cols.split(',').map(s => s.trim())) {
+              assert.ok(realContactCols.has(col), `Invalid contacts column queried: ${col}`);
+            }
+            return { data: { id: CONTACT_ID, bot_status: 'active', bot_paused_until: null }, error: null };
+          }
+          return { data: null, error: null };
+        },
+        then(resolve) {
+          return Promise.resolve({
+            data: [
+              { sender_type: 'human', direction: 'outbound', timestamp: nowIso, text_content: '*Ronaldo Clemente:* Nosso pix é 59075836000106' },
+              { sender_type: 'system', direction: 'outgoing', timestamp: nowIso, text_content: '✅ Resolvido por Agente' }
+            ],
+            error: null
+          }).then(resolve);
+        }
+      };
+      return q;
+    }
+  };
+
+  AutomationWorker.recentHumanPauseMap = new Map();
+  const check = await AutomationWorker.checkCanSendAiResponse(CONV_ID, CONTACT_ID, '5511995072270@s.whatsapp.net', mockLucieneSb);
+  assert.equal(check.allowed, false);
+  assert.match(check.reason, /Operador humano/);
 });

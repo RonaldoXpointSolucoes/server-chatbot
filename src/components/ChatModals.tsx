@@ -4,6 +4,7 @@ import { useChatStore } from '../store/chatStore';
 import { cn } from '../lib/utils';
 import { formatDocumentNumber } from '../utils/format';
 import { geminiService, sanitizeChecklistItems } from '../services/geminiService';
+import { isContactDefinitivelyPaused, shouldPreserveHumanAiPauseOnResolve } from '../utils/aiPause.mjs';
 
 interface BaseModalProps {
   isOpen: boolean;
@@ -4373,8 +4374,8 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
   useEffect(() => {
     if (!isOpen) return;
 
-    const isDefinitivelyPaused = contact?.bot_status === 'paused' || (contact?.ai_paused_manually && !contact?.bot_paused_until);
-    setReactivateAi(!isDefinitivelyPaused);
+    const preserveHumanPause = shouldPreserveHumanAiPauseOnResolve(contact);
+    setReactivateAi(!preserveHumanPause);
 
     if (activeTicket) {
       setProblemDesc(activeTicket.problem_description || '');
@@ -4767,10 +4768,12 @@ export function ResolveTicketModal({ isOpen, onClose, activeTicket, contact, onC
                 <span className="text-[11px] font-bold text-gray-800 dark:text-white leading-none">
                   Reativar Inteligência Luna
                 </span>
-                <span className={cn("text-[9px] mt-1 leading-normal", (contact?.bot_status === 'paused' || (contact?.ai_paused_manually && !contact?.bot_paused_until)) ? "text-amber-500 font-medium" : "text-gray-400")}>
-                  {(contact?.bot_status === 'paused' || (contact?.ai_paused_manually && !contact?.bot_paused_until))
+                <span className={cn("text-[9px] mt-1 leading-normal", shouldPreserveHumanAiPauseOnResolve(contact) ? "text-amber-500 font-medium" : "text-gray-400")}>
+                  {isContactDefinitivelyPaused(contact)
                     ? "Contato pausado definitivamente. Ative apenas se desejar reabilitar a IA."
-                    : "Permite que a IA volte a responder o cliente automaticamente."}
+                    : shouldPreserveHumanAiPauseOnResolve(contact)
+                      ? "Atendente interagiu recentemente — IA permanece em espera para não atropelar sua conversa."
+                      : "Permite que a IA volte a responder o cliente automaticamente."}
                 </span>
               </div>
             </div>

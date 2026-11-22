@@ -712,6 +712,37 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.3.4',
+    date: '2026-11-22',
+    summary: 'Proteção Anti-Atropelamento da I.A Pós-Envio Humano/Pix (Frontend + Motor v8.2.4) e Correção de Atualização de Conversas',
+    notes: [
+      {
+        id: 'fix-human-ai-pause-cooldown-834',
+        category: 'fixes',
+        title: 'Proteção da Pausa Humana da I.A em Envios Manuais e Após Resolver Ticket',
+        description: 'Quando um operador envia uma mensagem ao cliente (ex.: envio de chave Pix pelo painel ou aparelho WhatsApp) e o ticket é resolvido em seguida, a I.A agora respeita a janela ativa de 30 minutos de tutela humana (shouldPreserveHumanAiPauseOnResolve + guarda no Motor v8.2.4), evitando respostas automáticas indevidas até que haja retomada explícita.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      },
+      {
+        id: 'fix-update-conversation-field-conv-834',
+        category: 'fixes',
+        title: 'Estabilização de updateConversationField e Eliminação de "Erro ao atualizar campo da conversa"',
+        description: 'Corrigido ReferenceError (conv is not defined) quando a conversa já estava carregada em memória (auto-atribuição em envios, alteração manual de atendente e reabertura de adiamentos), adicionada validação estrita de UUID em messages.instance_id, checagem pré-otimista de status snoozed e whitelist de colunas enviadas ao PostgreSQL.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      },
+      {
+        id: 'imp-sync-human-guard-motor-834',
+        category: 'improvements',
+        title: 'Sincronização da Guarda Humana entre EventProcessor, AutomationWorker e Modal de Resolução',
+        description: 'EventProcessor e AutomationWorker (v8.2.4) passaram a consultar mensagens recentes de operadores nos últimos 30 minutos antes de devolver a conversa ao modo bot, exibindo no modal de resolução o aviso claro de espera ativa para não atropelar o atendimento humano.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
+      }
+    ]
+  },
+  {
     version: '8.3.3',
     date: '2026-11-20',
     summary: 'Persistência Definitiva do Switch Robô I.A ao Fechar/Reabrir com Cache por Empresa e Confirmação Real no Banco',

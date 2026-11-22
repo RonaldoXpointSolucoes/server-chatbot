@@ -421,11 +421,25 @@ export function resolveBatchConversationTransition(exist, data, isContactPaused 
             if (data.has_human_outbound) {
                 nextStatus = 'open';
             } else if (data.has_inbound) {
-                nextStatus = (nextAiPaused || isContactPaused) ? 'open' : 'bot';
+                if (isContactPaused) {
+                    nextStatus = 'open';
+                    nextAiPaused = true;
+                    nextAiPausedManually = true;
+                } else if (exist.ai_paused && !exist.ai_paused_manually && exist.status === 'resolved') {
+                    nextStatus = 'bot';
+                    nextAiPaused = false;
+                    nextAiPausedManually = false;
+                } else {
+                    nextStatus = nextAiPaused ? 'open' : 'bot';
+                }
             }
         }
 
         if (exist.status === 'open' && data?.has_inbound && !data?.has_human_outbound) {
+            if (isContactPaused) {
+                nextAiPaused = true;
+                nextAiPausedManually = true;
+            }
             nextStatus = (nextAiPaused || isContactPaused) ? 'open' : 'bot';
         }
 
@@ -435,11 +449,17 @@ export function resolveBatchConversationTransition(exist, data, isContactPaused 
             nextStatus = 'open';
         }
 
+        const promotedFromResolvedPause = Boolean(
+            data?.has_inbound &&
+            isContactPaused &&
+            (exist.status === 'resolved' || exist.status === 'closed' || exist.status === 'snoozed')
+        );
+
         return {
             status: nextStatus,
             ai_paused: nextAiPaused,
             ai_paused_manually: nextAiPausedManually,
-            hasHumanOverride: Boolean(data?.has_human_outbound)
+            hasHumanOverride: Boolean(data?.has_human_outbound || promotedFromResolvedPause)
         };
     }
 

@@ -481,7 +481,7 @@ router.post(['/cancel-ai', '/messages/cancel-ai'], requireTenant, async (req, re
 router.post(['/resume-ai', '/messages/resume-ai'], requireTenant, async (req, res) => {
     try {
         const tenantId = req.tenantId;
-        const { conversationId } = req.body;
+        const { conversationId, clearOnly } = req.body;
         if (!conversationId) {
             return res.status(400).json({ ok: false, error: 'conversationId é obrigatório.' });
         }
@@ -499,6 +499,12 @@ router.post(['/resume-ai', '/messages/resume-ai'], requireTenant, async (req, re
 
         if (await forwardInternalInstanceRequest(req, res, conv.instance_id)) {
             return;
+        }
+
+        if (clearOnly) {
+            const rawTarget = conv.contacts?.whatsapp_jid || conv.contacts?.phone;
+            AutomationWorker.clearHumanPauseOverride?.(conversationId, rawTarget || null, conv.contact_id);
+            return res.json({ ok: true, cleared: true, triggered: false });
         }
 
         const [{ data: companyData }, { data: botsData }, { data: instData }, { data: recentMsgs }] = await Promise.all([

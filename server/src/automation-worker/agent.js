@@ -16,6 +16,10 @@ import {
   getInboxBehaviorProfile,
   formatInboxBehaviorPromptSection
 } from './inbox-behavior-cache.js';
+import {
+  DEFAULT_HUMAN_CONVERSATION_WINDOW_MS,
+  fetchRecentHumanConversationGuard
+} from './human-pause.js';
 
 const tenantStorage = new AsyncLocalStorage();
 
@@ -1471,9 +1475,17 @@ class AutomationWorker {
         return keys;
     }
 
-    markHumanPause({ conversationId = null, contactId = null, jid = null, phone = null, reason = 'envio_operador', ttlMs = 30000 } = {}) {
+    markHumanPause({ conversationId = null, contactId = null, jid = null, phone = null, reason = 'envio_operador', ttlMs = DEFAULT_HUMAN_CONVERSATION_WINDOW_MS } = {}) {
         if (!this.recentHumanPauseMap) this.recentHumanPauseMap = new Map();
-        const expiresAt = Date.now() + ttlMs;
+        const now = Date.now();
+        if (this.recentHumanPauseMap.size > 2000) {
+            for (const [entryKey, entryVal] of this.recentHumanPauseMap.entries()) {
+                if (!entryVal || entryVal.expiresAt <= now) {
+                    this.recentHumanPauseMap.delete(entryKey);
+                }
+            }
+        }
+        const expiresAt = now + ttlMs;
         for (const k of this._buildHumanPauseKeys({ conversationId, contactId, jid, phone })) {
             this.recentHumanPauseMap.set(k, { expiresAt, reason });
         }
@@ -1813,14 +1825,19 @@ class AutomationWorker {
                 supabase.from('conversations').update({
                     status: 'open',
                     ai_paused: true,
-                    ai_paused_manually: false,
-                    bot_paused_until: pauseUntil,
-                    ai_paused_until: pauseUntil
+                    ai_paused_manually: false
                 }).eq('id', conversationId).then(() => {
-                    console.log(`[AvisoImpressao] Conversa ${conversationId} marcada como pausada até ${pauseUntil} no banco.`);
+                    console.log(`[AvisoImpressao] Conversa ${conversationId} marcada como pausada no banco.`);
                 }).catch(err => {
-                    console.warn('[AvisoImpressao] Erro ao salvar pausa de 60 minutos no banco:', err.message);
+                    console.warn('[AvisoImpressao] Erro ao salvar pausa de 60 minutos na conversa:', err.message);
                 });
+                if (contactInfo?.id) {
+                    supabase.from('contacts').update({
+                        bot_paused_until: pauseUntil
+                    }).eq('id', contactInfo.id).catch(err => {
+                        console.warn('[AvisoImpressao] Erro ao salvar bot_paused_until no contato:', err.message);
+                    });
+                }
             }
 
             return true;
@@ -4578,7 +4595,7 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
         });
     }
 
-    async checkCanSendAiResponse(conversationId, contactId, jid = null) {
+    async checkCanSendAiResponse(conversationId, contactId, jid = null, supabaseClient = supabase) {
         try {
             const recentPauseReason = this.isRecentlyHumanPaused({ conversationId, contactId, jid });
             if (recentPauseReason) {
@@ -4587,61 +4604,87 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
                     reason: `Intervenção recente de operador humano (${recentPauseReason})`
                 };
             }
-            if (conversationId) {
-                const { data: currentConv } = await supabase
-                    .from('conversations')
-                    .select('id, status, ai_paused, ai_paused_manually, snoozed_until, bot_paused_until, ai_paused_until')
-                    .eq('id', conversationId)
-                    .maybeSingle();
 
-                if (currentConv) {
-                    const nowIso = new Date().toISOString();
-                    const pauseExpiry = currentConv.bot_paused_until || currentConv.ai_paused_until;
+            const nowMs = Date.now();
+            const nowIso = new Date(nowMs).toISOString();
 
-                    // Se a pausa temporária (ex: 60 minutos pós-impressão) expirou e não foi pausada manualmente pelo operador, reativa a IA automaticamente
-                    if (pauseExpiry && pauseExpiry <= nowIso && currentConv.ai_paused && !currentConv.ai_paused_manually) {
-                        console.log(`[AutomationWorker] Período de pausa temporária (${pauseExpiry}) expirou para a conversa ${conversationId}. Reativando IA automaticamente.`);
-                        supabase.from('conversations').update({
-                            ai_paused: false,
-                            bot_paused_until: null,
-                            ai_paused_until: null,
-                            status: 'bot'
-                        }).eq('id', conversationId)
-                        .then(() => {})
-                        .catch((err) => {
-                            console.warn('[AutomationWorker] Falha ao auto-reativar IA pós-pausa temporária:', err?.message || err);
-                        });
-                        currentConv.ai_paused = false;
-                        currentConv.bot_paused_until = null;
-                        currentConv.ai_paused_until = null;
-                        currentConv.status = 'bot';
-                    }
+            const [convRes, contactRes, humanGuard] = await Promise.all([
+                conversationId
+                    ? supabaseClient
+                        .from('conversations')
+                        .select('id, status, ai_paused, ai_paused_manually, snoozed_until')
+                        .eq('id', conversationId)
+                        .maybeSingle()
+                    : Promise.resolve({ data: null, error: null }),
+                contactId
+                    ? supabaseClient
+                        .from('contacts')
+                        .select('id, bot_status, bot_paused_until')
+                        .eq('id', contactId)
+                        .maybeSingle()
+                    : Promise.resolve({ data: null, error: null }),
+                conversationId
+                    ? fetchRecentHumanConversationGuard({ supabase: supabaseClient, conversationId, nowMs })
+                    : Promise.resolve({ blocked: false })
+            ]);
 
-                    const isPaused = currentConv.ai_paused === true;
-                    const isHumanHandled = currentConv.status === 'open' && !currentConv.ai_paused;
-                    const isSnoozed = currentConv.status === 'snoozed' || (currentConv.snoozed_until && currentConv.snoozed_until > nowIso);
-                    const isTempPaused = pauseExpiry && pauseExpiry > nowIso;
-
-                    if (isPaused || isHumanHandled || isSnoozed || isTempPaused) {
-                        return { 
-                            allowed: false, 
-                            reason: `Conversa em estado restritivo (status: ${currentConv.status}, ai_paused: ${isPaused}, tempPaused: ${isTempPaused ? 'Até ' + pauseExpiry : false}, snoozed: ${isSnoozed})` 
-                        };
-                    }
-                }
+            if (convRes?.error) {
+                console.warn('[AutomationWorker] Erro ao consultar conversa em checkCanSendAiResponse (fail-closed):', convRes.error.message);
+                return {
+                    allowed: false,
+                    reason: `Falha ao validar estado da conversa (${convRes.error.message})`
+                };
             }
 
-            if (contactId) {
-                const { data: currentContact } = await supabase
-                    .from('contacts')
-                    .select('id, bot_status')
-                    .eq('id', contactId)
-                    .maybeSingle();
+            if (humanGuard?.blocked) {
+                return {
+                    allowed: false,
+                    reason: `Operador humano acionou/conversou recentemente com o cliente (${humanGuard.lastHumanAt})`
+                };
+            }
 
-                if (currentContact && currentContact.bot_status === 'paused') {
-                    return { 
-                        allowed: false, 
-                        reason: `Contato ${contactId} com bot_status='paused'` 
+            const currentConv = convRes?.data || null;
+            const currentContact = contactRes?.data || null;
+            const pauseExpiry = currentContact?.bot_paused_until || null;
+            const pauseExpiryMs = pauseExpiry ? new Date(pauseExpiry).getTime() : 0;
+            const isTempPaused = Boolean(Number.isFinite(pauseExpiryMs) && pauseExpiryMs > nowMs);
+
+            if (currentContact?.bot_status === 'paused') {
+                return {
+                    allowed: false,
+                    reason: `Contato ${contactId} com bot_status='paused'`
+                };
+            }
+
+            if (isTempPaused) {
+                return {
+                    allowed: false,
+                    reason: `Contato ${contactId} com pausa temporária de operador ativa até ${pauseExpiry}`
+                };
+            }
+
+            if (currentConv) {
+                // Se a pausa temporária (ex: 60m pós-impressão) expirou e NÃO foi pausada manualmente, reativa automaticamente
+                if (pauseExpiry && pauseExpiryMs <= nowMs && currentConv.ai_paused && !currentConv.ai_paused_manually) {
+                    console.log(`[AutomationWorker] Período de pausa temporária (${pauseExpiry}) expirou para a conversa ${conversationId}. Reativando IA automaticamente.`);
+                    Promise.all([
+                        supabaseClient.from('conversations').update({ ai_paused: false, status: 'bot' }).eq('id', conversationId),
+                        contactId ? supabaseClient.from('contacts').update({ bot_paused_until: null }).eq('id', contactId) : Promise.resolve()
+                    ]).catch((err) => {
+                        console.warn('[AutomationWorker] Falha ao auto-reativar IA pós-pausa temporária:', err?.message || err);
+                    });
+                    currentConv.ai_paused = false;
+                    currentConv.status = 'bot';
+                }
+
+                const isPaused = currentConv.ai_paused === true;
+                const isHumanHandled = currentConv.status === 'open' && !currentConv.ai_paused;
+                const isSnoozed = currentConv.status === 'snoozed' || Boolean(currentConv.snoozed_until && currentConv.snoozed_until > nowIso);
+
+                if (isPaused || isHumanHandled || isSnoozed) {
+                    return {
+                        allowed: false,
+                        reason: `Conversa em estado restritivo (status: ${currentConv.status}, ai_paused: ${isPaused}, snoozed: ${isSnoozed})`
                     };
                 }
             }
@@ -4649,7 +4692,7 @@ Preencha apenas os campos que você conseguir identificar na conversa. Mantenha 
             return { allowed: true };
         } catch (e) {
             console.error('[AutomationWorker] Erro ao verificar permissão de envio da IA:', e);
-            return { allowed: true };
+            return { allowed: false, reason: `Exceção na validação de pausa humana: ${e?.message || e}` };
         }
     }
 

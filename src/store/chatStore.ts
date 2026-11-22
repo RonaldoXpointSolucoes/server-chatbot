@@ -132,7 +132,17 @@ import {
   pickHigherMessageStatus,
   shouldReconcileMessageStatus
 } from '../utils/messageStatus.mjs';
-import { resolveOperatorSendAiPauseAction } from '../utils/aiPause.mjs';
+import {
+  resolveOperatorSendAiPauseAction,
+  shouldPreserveHumanAiPauseOnResolve,
+  resolvePostResolveAiPauseState
+} from '../utils/aiPause.mjs';
+import {
+  buildConversationsDbUpdatePayload,
+  resolveValidMessageInstanceUuid,
+  shouldEmitSnoozeReopenSystemMessage,
+  resolveSystemMessageConversationId
+} from '../utils/conversationFieldUpdate.mjs';
 
 const triggerBackendCancelAiImmediately = (
   tenantId: string | undefined,
@@ -1008,7 +1018,7 @@ interface ChatState {
   resolveConversation: (
     contactId: string,
     reactivateAi?: boolean,
-    options?: { nextActiveChatId?: string | null }
+    options?: { nextActiveChatId?: string | null; forceReactivateAi?: boolean }
   ) => Promise<{ closedTicket?: any } | void>;
 
   // Detalhes de Tickets e Histórico
@@ -4731,7 +4741,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       currentState.contacts.find(c => Boolean(c.conv_id && msg.conversation_id && c.conv_id === msg.conversation_id));
     let shouldWakeUp = false;
 
-    const isAiPaused = targetContact ? (targetContact.ai_paused === true || targetContact.bot_status === 'paused') : false;
+    const isAiPaused = targetContact ? (targetContact.ai_paused === true || shouldPreserveHumanAiPauseOnResolve(targetContact)) : false;
     if (targetContact && msg.sender === 'client' && targetContact.conv_status !== 'open' && !targetContact.is_blocked && isAiPaused) {
       shouldWakeUp = true;
     }
@@ -4757,7 +4767,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             updatedStatus = 'open';
             updatedSnooze = undefined;
           } else if (msg.sender === 'client' && !c.is_blocked && (c.conv_status === 'resolved' || c.conv_status === 'closed' || c.conv_status === 'snoozed' || !c.conv_status)) {
-            const cPaused = c.ai_paused === true || c.bot_status === 'paused';
+            const cPaused = c.ai_paused === true || shouldPreserveHumanAiPauseOnResolve(c);
             updatedStatus = cPaused ? 'open' : 'bot';
             updatedSnooze = undefined;
           }
@@ -5217,24 +5227,32 @@ export const useChatStore = create<ChatState>((set, get) => ({
     resolvingContactLocks.add(lockKey);
 
     const currentUserEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
+    const currentUserName = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_name') || localStorage.getItem('current_user_name')) : null;
     let agentName = 'Agente';
     if (currentUserEmail) {
-      const agent = get().agents.find(a => a.email === currentUserEmail);
-      if (agent && agent.full_name) agentName = agent.full_name;
+      const agent = get().agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail.toLowerCase());
+      if (agent && agent.full_name) {
+        agentName = agent.full_name;
+      } else if (currentUserName && currentUserName.trim()) {
+        agentName = currentUserName.trim();
+      }
+    } else if (currentUserName && currentUserName.trim()) {
+      agentName = currentUserName.trim();
     }
 
     const targetContact = findContactByIdAndInstance(get().contacts, contactId, cachedInstUuid || instId);
-    const isDefinitivelyPaused = targetContact?.bot_status === 'paused' || (targetContact?.ai_paused_manually && !targetContact?.bot_paused_until);
-
-    let nextAiPaused = false;
-    if (isDefinitivelyPaused) {
-      nextAiPaused = true;
-    } else if (reactivateAi !== undefined) {
-      nextAiPaused = !reactivateAi;
-    } else {
-      const isPausedManually = targetContact?.ai_paused_manually || false;
-      nextAiPaused = isPausedManually ? true : false;
-    }
+    const hadRecentHumanCooldown = shouldPreserveHumanAiPauseOnResolve(targetContact);
+    const pauseDecision = resolvePostResolveAiPauseState({
+      contact: targetContact,
+      reactivateAi,
+      forceReactivateAi: Boolean(options?.forceReactivateAi)
+    });
+    const {
+      nextAiPaused,
+      nextAiPausedManually,
+      nextBotStatus,
+      nextBotPausedUntil
+    } = pauseDecision;
 
     const knownConvId = targetContact?.conv_id && isValidUuid(targetContact.conv_id) ? targetContact.conv_id : null;
     const preResolveLastMsgAt = targetContact?.last_message_at || null;
@@ -5289,9 +5307,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
             assigned_to: null,
             conv_status: 'resolved',
             ai_paused: nextAiPaused,
-            ai_paused_manually: nextAiPaused,
-            bot_status: nextAiPaused ? 'paused' : 'active',
-            bot_paused_until: isDefinitivelyPaused ? null : (nextAiPaused ? c.bot_paused_until : null),
+            ai_paused_manually: nextAiPausedManually,
+            bot_status: nextBotStatus,
+            bot_paused_until: nextBotPausedUntil,
             snoozed_until: null,
             snoozed_at: null,
             snoozed_by: null,
@@ -5342,7 +5360,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           assigned_to: null,
           status: 'resolved',
           ai_paused: nextAiPaused,
-          ai_paused_manually: nextAiPaused,
+          ai_paused_manually: nextAiPausedManually,
           unread_count: 0,
           snoozed_until: null,
           snoozed_at: null,
@@ -5353,7 +5371,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           assigned_to: null,
           status: 'resolved',
           ai_paused: nextAiPaused,
-          ai_paused_manually: nextAiPaused,
+          ai_paused_manually: nextAiPausedManually,
           unread_count: 0,
           snoozed_until: null,
           snoozed_at: null,
@@ -5369,6 +5387,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         convUpdatePromise = updQuery;
       }
 
+      const explicitResumeOnResolve = Boolean(options?.forceReactivateAi && reactivateAi && hadRecentHumanCooldown && !nextAiPaused && conv?.id);
+
       const [msgRes, contactUpdRes, convUpdRes] = await Promise.all([
         conv
           ? supabase.from('messages').insert({
@@ -5383,12 +5403,37 @@ export const useChatStore = create<ChatState>((set, get) => ({
         supabase
           .from('contacts')
           .update({
-            bot_status: nextAiPaused ? 'paused' : 'active',
-            bot_paused_until: isDefinitivelyPaused ? null : (nextAiPaused ? targetContact?.bot_paused_until || null : null)
+            bot_status: nextBotStatus,
+            bot_paused_until: nextBotPausedUntil
           })
           .eq('id', realContactId),
         convUpdatePromise
       ]);
+
+      if (explicitResumeOnResolve && conv?.id) {
+        try {
+          await supabase.from('messages').insert({
+            conversation_id: conv.id,
+            tenant_id: tenantInfo.id,
+            text_content: `▶️ IA Luna Retomada por ${agentName} ao encerrar ticket`,
+            sender_type: 'system',
+            direction: 'outgoing',
+            instance_id: conv.instance_id || resolvedInstId,
+            raw_payload: { ai_resumed: true }
+          });
+          const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+          fetch(`${API_URL}/api/v1/messages/resume-ai`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-tenant-id': tenantInfo.id
+            },
+            body: JSON.stringify({ conversationId: conv.id, clearOnly: true })
+          }).catch(() => {});
+        } catch (resumeClearErr) {
+          console.warn('[resolveConversation] Aviso ao limpar trava de pausa humana na retomada explícita:', resumeClearErr);
+        }
+      }
 
       if (convUpdRes?.error) {
         throw convUpdRes.error;
@@ -7950,9 +7995,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const tenant = get().tenantInfo;
     if (!tenant) return;
 
-    const prevContactSnapshot = get().contacts.find(c => c.id === contactId);
-    const prevAiPaused = Boolean(prevContactSnapshot?.ai_paused);
     const realContactId = getRealContactId(contactId);
+    const prevContactSnapshot =
+      get().contacts.find(c => c.id === contactId) ||
+      get().contacts.find(c => getRealContactId(c.id) === realContactId);
+    const prevAiPaused = Boolean(prevContactSnapshot?.ai_paused);
+    const prevConvStatus = prevContactSnapshot?.conv_status || null;
+    const prevAssignedTo = prevContactSnapshot?.assigned_to ?? null;
     const knownConvId = prevContactSnapshot?.conv_id && isValidUuid(prevContactSnapshot.conv_id)
       ? prevContactSnapshot.conv_id
       : null;
@@ -7967,15 +8016,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
     }
 
-    // UI Otimista (Separa flags internas que não pertencem ao schema de conversations)
-    const { snoozed_by_system, ai_paused_until, ...dbPayload } = payload as any;
-    if ('ai_paused' in payload) {
-      dbPayload.status = payload.ai_paused ? 'open' : 'bot';
-    }
+    // UI Otimista (filtra estritamente colunas válidas de `conversations`)
+    const { snoozed_by_system } = payload as any;
+    const dbPayload = buildConversationsDbUpdatePayload(payload);
 
     set((state) => ({
       contacts: state.contacts.map((c) => {
-        if (c.id === contactId) {
+        if (c.id === contactId || (contactId === realContactId && getRealContactId(c.id) === realContactId)) {
           const stateUpdates: any = {};
           if ('status' in payload) stateUpdates.conv_status = payload.status;
           if ('snoozed_until' in payload) stateUpdates.snoozed_until = payload.snoozed_until;
@@ -8011,38 +8058,80 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     try {
       const instId = getInstanceIdFromContact(contactId);
-      let convId = knownConvId;
+      const cachedInstUuid = instId ? instanceCache.getId(instId) : null;
+      let resolvedInstId: string | null = cachedInstUuid || (instId && isValidUuid(instId) ? instId : null);
+      let queriedConvId: string | null = null;
 
-      if (!convId) {
-        const resolvedInstId = await resolveInstanceUuid(tenant.id, instId);
+      if (!knownConvId) {
+        resolvedInstId = resolvedInstId || (await resolveInstanceUuid(tenant.id, instId));
         let query = supabase.from('conversations').select('id').eq('contact_id', realContactId).eq('tenant_id', tenant.id);
         if (resolvedInstId) query = query.eq('instance_id', resolvedInstId);
-        const { data: conv, error: convErr } = await query.order('last_message_at', { ascending: false }).limit(1).maybeSingle();
+        const { data: queriedConv, error: convErr } = await query.order('last_message_at', { ascending: false }).limit(1).maybeSingle();
 
         if (convErr) {
           console.error('Erro ao buscar conversa no Supabase:', convErr.message);
           throw convErr;
         }
-        convId = conv?.id || null;
+        queriedConvId = queriedConv?.id || null;
       }
 
+      const convId = resolveSystemMessageConversationId({ knownConvId, queriedConvId });
       if (!convId) {
         console.warn('Nenhuma conversa encontrada para o contato:', realContactId);
         return;
       }
 
-      const { error } = await supabase.from('conversations').update(dbPayload).eq('id', convId);
-      if (error) throw error;
+      if (Object.keys(dbPayload).length > 0) {
+        const { error } = await supabase.from('conversations').update(dbPayload).eq('id', convId);
+        if (error) throw error;
+      }
 
       const currentContacts = get().contacts;
-      const contact = currentContacts.find(c => c.id === contactId) || prevContactSnapshot;
+      const contact =
+        currentContacts.find(c => c.id === contactId) ||
+        prevContactSnapshot;
+      const safeMsgInstanceId = resolveValidMessageInstanceUuid({
+        cachedUuid: resolvedInstId,
+        instId,
+        contactInstanceId: contact?.instance_id
+      });
+
+      const emitConversationSystemMessage = async (pseudoPrefix: string, msgText: string) => {
+        try {
+          const dbMsg = {
+            conversation_id: convId,
+            tenant_id: tenant.id,
+            text_content: msgText,
+            sender_type: 'system',
+            direction: 'outgoing',
+            timestamp: new Date().toISOString(),
+            status: 'sent',
+            instance_id: safeMsgInstanceId
+          };
+          const { error: msgErr } = await supabase.from('messages').insert(dbMsg);
+          if (msgErr) {
+            console.warn('[updateConversationField] Aviso ao gravar mensagem de sistema:', msgErr.message);
+          }
+          get().addMessageLocally(contactId, {
+            id: `${pseudoPrefix}-${Date.now()}`,
+            text: msgText,
+            sender: 'system',
+            timestamp: new Date()
+          });
+        } catch (auditMsgErr: any) {
+          console.warn('[updateConversationField] Falha não bloqueante na mensagem de sistema:', auditMsgErr?.message || auditMsgErr);
+        }
+      };
 
       if ('ai_paused' in payload) {
         const botStatusPayload: any = {
           bot_status: payload.ai_paused && !payload.ai_paused_until ? 'paused' : 'active',
           bot_paused_until: payload.ai_paused_until || null
         };
-        await supabase.from('contacts').update(botStatusPayload).eq('id', realContactId);
+        const { error: contactUpdErr } = await supabase.from('contacts').update(botStatusPayload).eq('id', realContactId);
+        if (contactUpdErr) {
+          console.warn('[updateConversationField] Aviso ao atualizar status de bot no contato:', contactUpdErr.message);
+        }
 
         if (payload.ai_paused && !knownConvId) {
           triggerBackendCancelAiImmediately(tenant.id, {
@@ -8087,29 +8176,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
               statusText = '⏸️ IA Luna Pausada Definitivamente';
             }
           }
-          const msgText = `${statusText} por ${operatorName}`;
-
-          const dbMsg = {
-            conversation_id: convId,
-            tenant_id: tenant.id,
-            text_content: msgText,
-            sender_type: 'system',
-            direction: 'outgoing',
-            timestamp: new Date().toISOString(),
-            status: 'sent',
-            instance_id: instId && instId !== 'default' ? instId : null
-          };
-
-          await supabase.from('messages').insert(dbMsg);
-
-          const pseudoId = 'system-aipaused-' + Date.now();
-          get().addMessageLocally(contactId, { id: pseudoId, text: msgText, sender: 'system', timestamp: new Date() });
+          await emitConversationSystemMessage('system-aipaused', `${statusText} por ${operatorName}`);
         }
       }
 
       // 1. Identificar se foi uma reabertura de atendimento reagendado/adiado (snoozed -> open)
-
-      if (contact && contact.conv_status === 'snoozed' && payload.status === 'open') {
+      if (shouldEmitSnoozeReopenSystemMessage({ prevStatus: prevConvStatus, payload })) {
         const currentUserEmail = typeof window !== 'undefined' ? (localStorage.getItem('current_user_email') || sessionStorage.getItem('current_user_email')) : null;
         const currentUserName = typeof window !== 'undefined' ? (localStorage.getItem('current_user_name') || sessionStorage.getItem('current_user_name')) : null;
         const me = get().agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail?.toLowerCase());
@@ -8127,54 +8199,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
           });
         };
 
-        const dateSnoozeStr = formatDateSystem(contact.snoozed_at || contact.created_at);
+        const dateSnoozeStr = formatDateSystem(prevContactSnapshot?.snoozed_at || prevContactSnapshot?.created_at);
         const dateReopenStr = formatDateSystem(new Date());
         const rebuilderName = snoozed_by_system ? 'Sistema (Prazo Expirado)' : operatorName;
-
-        const msgText = `🔄 Esta conversa foi reagendada dia ${dateSnoozeStr} e reaberta hoje, ${dateReopenStr} por ${rebuilderName}`;
-
-        const dbMsg = {
-          conversation_id: conv.id,
-          tenant_id: tenant.id,
-          text_content: msgText,
-          sender_type: 'system',
-          direction: 'outgoing',
-          timestamp: new Date().toISOString(),
-          status: 'sent',
-          instance_id: instId && instId !== 'default' ? instId : null
-        };
-
-        await supabase.from('messages').insert(dbMsg);
-
-        const pseudoId = 'system-reopen-' + Date.now();
-        get().addMessageLocally(contactId, { id: pseudoId, text: msgText, sender: 'system', timestamp: new Date() });
+        await emitConversationSystemMessage(
+          'system-reopen',
+          `🔄 Esta conversa foi reagendada dia ${dateSnoozeStr} e reaberta hoje, ${dateReopenStr} por ${rebuilderName}`
+        );
       }
 
-      // 2. Identificar se foi uma atribuição de agente
-      if ('assigned_to' in payload && payload.assigned_to) {
+      // 2. Identificar se foi uma atribuição de agente real (com mudança de atribuído)
+      if ('assigned_to' in payload && payload.assigned_to && payload.assigned_to !== prevAssignedTo) {
+        const lastAgentId = String(payload.assigned_to).split(',').filter(Boolean).pop();
         let agentName = 'Agente';
-        const agent = get().agents.find(a => a.id === payload.assigned_to);
+        const agent = get().agents.find(a => a.id === payload.assigned_to || a.id === lastAgentId);
         if (agent && agent.full_name) agentName = agent.full_name;
-
-        const msgText = `🎫 Atribuído para ${agentName} dia ${new Date().toLocaleString('pt-BR')}`;
-        const dbMsg = {
-          conversation_id: conv.id,
-          tenant_id: tenant.id,
-          text_content: msgText,
-          sender_type: 'system',
-          direction: 'outgoing',
-          timestamp: new Date().toISOString(),
-          status: 'sent',
-          instance_id: instId && instId !== 'default' ? instId : null
-        };
-
-        await supabase.from('messages').insert(dbMsg);
-
-        const pseudoId = 'system-assign-' + Date.now();
-        get().addMessageLocally(contactId, { id: pseudoId, text: msgText, sender: 'system', timestamp: new Date() });
+        await emitConversationSystemMessage(
+          'system-assign',
+          `🎫 Atribuído para ${agentName} dia ${new Date().toLocaleString('pt-BR')}`
+        );
       }
-    } catch (e) {
-      console.error('Erro ao atualizar campo da conversa:', e);
+    } catch (e: any) {
+      console.error('Erro ao atualizar campo da conversa:', e?.message || e);
     }
   },
 

@@ -72,3 +72,33 @@ test('resolveBatchConversationTransition forces open + ai_paused=true immediatel
   assert.equal(transition.ai_paused_manually, true);
   assert.equal(transition.hasHumanOverride, true);
 });
+
+test('resolveBatchConversationTransition reopens resolved conversation as open + ai_paused when human guard is active', () => {
+  const nowMs = Date.UTC(2026, 10, 22, 0, 29, 20);
+  const existResolvedStaleFlag = { id: 'conv-luciene', status: 'resolved', ai_paused: false, ai_paused_manually: false };
+  const transition = resolveBatchConversationTransition(
+    existResolvedStaleFlag,
+    { has_inbound: true, has_human_outbound: false, last_message_at: new Date(nowMs - 1000) },
+    true, // isContactPaused || hasActiveHumanGuard
+    nowMs
+  );
+
+  assert.equal(transition.status, 'open');
+  assert.equal(transition.ai_paused, true);
+  assert.equal(transition.ai_paused_manually, true);
+});
+
+test('resolveBatchConversationTransition clears expired temp pause on resolved chat when cooldown ended and not manually paused', () => {
+  const nowMs = Date.UTC(2026, 10, 22, 1, 30, 0);
+  const existResolvedTempPaused = { id: 'conv-2', status: 'resolved', ai_paused: true, ai_paused_manually: false };
+  const transition = resolveBatchConversationTransition(
+    existResolvedTempPaused,
+    { has_inbound: true, has_human_outbound: false, last_message_at: new Date(nowMs - 1000) },
+    false, // temporary cooldown expired and no recent human message
+    nowMs
+  );
+
+  assert.equal(transition.status, 'bot');
+  assert.equal(transition.ai_paused, false);
+  assert.equal(transition.ai_paused_manually, false);
+});
