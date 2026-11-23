@@ -14,19 +14,45 @@ import { GlobalToast } from './components/GlobalToast';
 
 function lazyWithRetry<T extends ComponentType<any>>(factory: () => Promise<{ default: T }>): React.LazyExoticComponent<T> {
   return lazy(async () => {
+    const attemptLoad = async () => {
+      const mod = await factory();
+      try {
+        sessionStorage.removeItem('lazy_chunk_reloaded');
+        sessionStorage.removeItem('lazy_chunk_reloaded_at');
+      } catch {
+        // ignore storage restrictions
+      }
+      return mod;
+    };
+
     try {
-      return await factory();
-    } catch (error: any) {
-      const msg = String(error?.message || '');
+      return await attemptLoad();
+    } catch (firstError: unknown) {
+      const msg = String((firstError as { message?: string })?.message || '');
       const isChunkError =
         msg.includes('Failed to fetch dynamically imported module') ||
         msg.includes('Importing a module script failed') ||
         msg.includes('Unable to preload CSS');
-      if (isChunkError && !sessionStorage.getItem('lazy_chunk_reloaded')) {
-        sessionStorage.setItem('lazy_chunk_reloaded', '1');
-        window.location.reload();
+
+      if (!isChunkError) throw firstError;
+
+      // Retentativa rápida antes de acionar reload por chunk desatualizado
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      try {
+        return await attemptLoad();
+      } catch (retryError: unknown) {
+        try {
+          const lastReloadAt = Number(sessionStorage.getItem('lazy_chunk_reloaded_at') || 0);
+          if (Date.now() - lastReloadAt > 10000) {
+            sessionStorage.setItem('lazy_chunk_reloaded_at', String(Date.now()));
+            window.location.reload();
+            return await new Promise<{ default: T }>(() => {});
+          }
+        } catch {
+          // fallback throws to ErrorBoundary
+        }
+        throw retryError;
       }
-      throw error;
     }
   });
 }

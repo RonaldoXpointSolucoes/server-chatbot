@@ -712,6 +712,63 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.3.5',
+    date: '2026-11-22',
+    summary: 'Novo Módulo Completo de Conferência de Caixa (PDV × Bancos OFX × Rede × C6 Pay) com Fórmula 1 Determinística, Auditor IA e Resiliência de Chunks',
+    notes: [
+      {
+        id: 'feat-conferencia-caixa-module-835',
+        category: 'features',
+        title: 'Novo Módulo "Conferência Caixa" no Menu Lateral com Conciliação Automática Multi-Arquivos',
+        description: 'Nova tela em /conferencia-caixa abaixo de Respostas Prontas para carregar juntos PlanilhaRecebimento, RelConferencia, Fechamento .txt, extratos OFX (C6/Itaú), Rede e C6 Pay (inclusive .xlsx protegidos por senha), cruzando centavo a centavo com deduplicação C6 Pay × OFX, rascunho automático ao navegar entre telas e persistência multi-tenant no Supabase.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+        guide: {
+          moduleGroup: 'system',
+          moduleLabel: 'Financeiro & Auditoria • Conferência de Caixa',
+          purpose: 'Eliminar horas de conferência manual cruzando automaticamente PDV, extratos bancários e maquininhas em segundos, apontando exatamente o que bateu, faltou, sobrou ou mudou de forma de pagamento.',
+          whereToAccess: [
+            '1. Menu Lateral Esquerdo ➔ Conferência Caixa (/conferencia-caixa)',
+            '2. Clique em "Carregar Arquivos" e envie juntos os relatórios do dia (.xlsx, .csv, .ofx, .txt)',
+            '3. Clique em qualquer linha do Espelho (Saldo em Dinheiro, Cartão, Pix, Pendentes) ou nos cartões de indicadores para abrir a auditoria em tela cheia'
+          ],
+          howToTest: [
+            '1. Acesse Conferência Caixa no menu lateral logo abaixo de Respostas Prontas.',
+            '2. Suba os relatórios do fechamento diário e observe o placar de Saúde do Caixa.',
+            '3. Clique em "Saldo em Dinheiro" para abrir a conciliação em tela cheia e testar mover uma venda ou preencher o campo Real.'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Tela: Menu Lateral ➔ Conferência Caixa (/conferencia-caixa)',
+            contextElements: ['💬 Respostas Prontas', '⚖️ Conferência Caixa', '📊 Espelho & Gaveta'],
+            targetButtonLabel: '⚖️ Conferência Caixa',
+            targetButtonPosition: 'Menu lateral esquerdo, imediatamente abaixo de "Respostas Prontas"',
+            visualPreviewVariant: 'chat-history-sync'
+          },
+          quickAction: {
+            label: 'Abrir Conferência Caixa',
+            route: '/conferencia-caixa'
+          }
+        }
+      },
+      {
+        id: 'imp-cash-reconciliation-workbench-ux-835',
+        category: 'improvements',
+        title: 'Espelho Interativo em Tela Cheia, Ajuste Manual de Forma e 6 Indicadores Clicáveis',
+        description: 'Linhas zeradas ocultadas por padrão no Espelho RelConferencia, campo Real de Saldo em Dinheiro liberado para digitação direta, modal de conciliação em tela cheia (createPortal) com reclassificação manual reversível (Dinheiro ↔ Cartão ↔ Pix ↔ Pendente) e abertura detalhada ao clicar nos 6 cartões operacionais (Taxas Cartão, Líquido Digital, Cancelados, Descontos, Taxa Entrega + Casa e Pessoas).',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
+      },
+      {
+        id: 'fix-lazy-chunk-retry-and-hmr-port-835',
+        category: 'fixes',
+        title: 'Recuperação Resiliente de Módulos Dinâmicos (lazyWithRetry) e ErrorBoundary Interativo',
+        description: 'Corrigido o travamento permanente de sessionStorage (lazy_chunk_reloaded) que impedia recarga automática em falhas subsequentes de importação dinâmica, adicionada retentativa automática antes do reload e incluídos botões de Recarregar Aplicativo / Tentar Novamente no ErrorBoundary.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      }
+    ]
+  },
+  {
     version: '8.3.4',
     date: '2026-11-22',
     summary: 'Proteção Anti-Atropelamento da I.A Pós-Envio Humano/Pix (Frontend + Motor v8.2.4) e Correção de Atualização de Conversas',
