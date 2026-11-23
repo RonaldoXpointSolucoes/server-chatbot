@@ -2,6 +2,8 @@
  * Regras configuráveis da "Fórmula 1" de normalização PDV e classificação de extratos OFX.
  */
 
+import { FILE_PASSWORD_RULE_PREFIX, formatSavedPasswordLabel } from './cashFilePasswordHelper.mjs';
+
 export const DEFAULT_FORMULA_CONFIG = Object.freeze({
   amountToleranceCents: 1,
   ofxPixDedupWindowSec: 15 * 60,
@@ -23,7 +25,8 @@ export const DEFAULT_FORMULA_CONFIG = Object.freeze({
     'C6PAY',
     'C6 PAY'
   ],
-  adminRules: []
+  adminRules: [],
+  savedFilePasswords: []
 });
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -45,7 +48,8 @@ export function mergeCompanyFormulaRules(customRules = []) {
     ...DEFAULT_FORMULA_CONFIG,
     nonPdvOfxKeywords: [...DEFAULT_FORMULA_CONFIG.nonPdvOfxKeywords],
     settlementOfxKeywords: [...DEFAULT_FORMULA_CONFIG.settlementOfxKeywords],
-    adminRules: [...DEFAULT_FORMULA_CONFIG.adminRules]
+    adminRules: [...DEFAULT_FORMULA_CONFIG.adminRules],
+    savedFilePasswords: [...DEFAULT_FORMULA_CONFIG.savedFilePasswords]
   };
 
   if (!Array.isArray(customRules)) return config;
@@ -71,6 +75,17 @@ export function mergeCompanyFormulaRules(customRules = []) {
         if (!config.nonPdvOfxKeywords.includes(upper)) config.nonPdvOfxKeywords.push(upper);
       }
     } else if (type === 'engine_setting' && targetValue) {
+      if (pattern.startsWith(FILE_PASSWORD_RULE_PREFIX)) {
+        const key = pattern.slice(FILE_PASSWORD_RULE_PREFIX.length);
+        config.savedFilePasswords.push({
+          pattern,
+          key,
+          label: formatSavedPasswordLabel(key, rule.notes || ''),
+          password: targetValue,
+          ruleId: rule.id
+        });
+        continue;
+      }
       const NUMERIC_SETTINGS = new Set([
         'amountToleranceCents',
         'ofxPixDedupWindowSec',

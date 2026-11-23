@@ -112,6 +112,16 @@ export interface CashReconciliationResult {
   financialMetrics: CashFinancialMetrics;
 }
 
+export interface SavedCashFilePassword {
+  pattern: string;
+  key: string;
+  label: string;
+  password: string;
+  ruleId?: string;
+  fileType?: string;
+  updatedAt?: string;
+}
+
 export interface ParsedCashFileResult {
   fileName: string;
   fileType: string;

@@ -11,7 +11,10 @@ import {
   Loader2,
   ChevronDown,
   ChevronUp,
-  ChevronRight
+  ChevronRight,
+  KeyRound,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import {
   CashAiAnalysis,
@@ -20,9 +23,11 @@ import {
   CashReconciliationItem,
   CashReconciliationResult,
   CashSuggestion,
+  SavedCashFilePassword,
   formatCents
 } from '../../types/cashReconciliation';
 import { CashRuleRow } from '../../services/cashReconciliationService';
+import { filterVisibleFormulaRules } from '../../utils/cashFilePasswordHelper.mjs';
 import {
   filterVisibleMirrorRows,
   formatDateBr,
@@ -47,6 +52,8 @@ interface CashReconciliationWorkbenchProps {
   onIgnoreItem: (side: 'system' | 'real', id: string) => void;
   onReclassifySystemItem: (systemId: string, targetCategory: CashSystemCategoryTarget | null) => void;
   rules: CashRuleRow[];
+  savedPasswords?: SavedCashFilePassword[];
+  onDeleteSavedPassword?: (patternKey: string, ruleId?: string) => Promise<void>;
   onCreateRule: (rule: {
     rule_type: CashRuleRow['rule_type'];
     pattern: string;
@@ -80,6 +87,8 @@ export function CashReconciliationWorkbench({
   onIgnoreItem,
   onReclassifySystemItem,
   rules,
+  savedPasswords = [],
+  onDeleteSavedPassword,
   onCreateRule,
   onToggleRule,
   onDeleteRule,
@@ -908,10 +917,17 @@ export function CashReconciliationWorkbench({
             </div>
 
             {/* Gerenciador de Regras da Fórmula 1 */}
+            {savedPasswords.length > 0 && (
+              <SavedFilePasswordsCard
+                savedPasswords={savedPasswords}
+                onDeleteSavedPassword={onDeleteSavedPassword}
+              />
+            )}
+
             <div className="rounded-2xl border border-slate-200 dark:border-[#2a3942] p-4 space-y-4">
               <div>
                 <h4 className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-[#aebac1]">
-                  Regras Customizadas da Fórmula 1 ({rules.length})
+                  Regras Customizadas da Fórmula 1 ({filterVisibleFormulaRules(rules).length})
                 </h4>
                 <p className="text-[11px] text-slate-500 dark:text-[#8696a0]">
                   Regras salvas para esta empresa são aplicadas automaticamente em toda nova conferência.
@@ -971,9 +987,9 @@ export function CashReconciliationWorkbench({
                 </button>
               </div>
 
-              {rules.length > 0 && (
+              {filterVisibleFormulaRules(rules).length > 0 && (
                 <div className="divide-y divide-slate-100 dark:divide-[#2a3942] text-xs">
-                  {rules.map((r) => (
+                  {filterVisibleFormulaRules(rules).map((r) => (
                     <div key={r.id} className="py-2 flex items-center justify-between gap-2">
                       <div>
                         <span className="font-bold text-slate-800 dark:text-white">{r.pattern}</span>{' '}
@@ -1026,6 +1042,66 @@ export function CashReconciliationWorkbench({
           />
         );
       })()}
+    </div>
+  );
+}
+
+function SavedFilePasswordsCard({
+  savedPasswords,
+  onDeleteSavedPassword
+}: {
+  savedPasswords: SavedCashFilePassword[];
+  onDeleteSavedPassword?: (patternKey: string, ruleId?: string) => Promise<void>;
+}) {
+  const [revealedPattern, setRevealedPattern] = useState<string | null>(null);
+
+  return (
+    <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/5 p-4 space-y-3">
+      <div>
+        <h4 className="text-xs font-black uppercase tracking-wider text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
+          <KeyRound size={13} />
+          Senhas Fixas Memorizadas de Planilhas ({savedPasswords.length})
+        </h4>
+        <p className="text-[11px] text-slate-500 dark:text-[#8696a0] mt-0.5">
+          Estas senhas abrem automaticamente suas planilhas protegidas (como Relatorio-Vendas-C6Pay_Detalhado) nas próximas conferências desta empresa.
+        </p>
+      </div>
+
+      <div className="divide-y divide-emerald-500/15 text-xs">
+        {savedPasswords.map((sp) => {
+          const isRevealed = revealedPattern === sp.pattern;
+          return (
+            <div key={sp.pattern} className="py-2 flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <span className="font-bold text-slate-800 dark:text-white block truncate">{sp.label}</span>
+                <span className="text-[11px] font-mono text-slate-500 dark:text-[#8696a0]">
+                  Senha: {isRevealed ? sp.password : '••••••••'}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setRevealedPattern(isRevealed ? null : sp.pattern)}
+                  className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-white hover:bg-white/60 dark:hover:bg-[#111b21]"
+                  title={isRevealed ? 'Ocultar senha' : 'Mostrar senha'}
+                >
+                  {isRevealed ? <EyeOff size={13} /> : <Eye size={13} />}
+                </button>
+                {onDeleteSavedPassword && (
+                  <button
+                    type="button"
+                    onClick={() => onDeleteSavedPassword(sp.pattern, sp.ruleId)}
+                    className="px-2 py-1 rounded-lg text-rose-500 hover:bg-rose-500/10 text-[11px] font-bold flex items-center gap-1"
+                    title="Remover senha salva (será solicitada no próximo envio)"
+                  >
+                    <Trash2 size={12} /> Esquecer
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

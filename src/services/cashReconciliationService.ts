@@ -5,6 +5,16 @@ import {
   SESSION_LIST_COLUMNS
 } from '../utils/cashReconciliationServiceHelper.mjs';
 import {
+  FILE_PASSWORD_RULE_PREFIX,
+  buildPasswordRulePattern,
+  extractSavedPasswordsFromRules,
+  formatSavedPasswordLabel,
+  loadSavedFilePasswordsFromStorage,
+  mergeSavedFilePasswordLists,
+  removeSavedFilePasswordFromStorage,
+  upsertSavedFilePasswordInStorage
+} from '../utils/cashFilePasswordHelper.mjs';
+import {
   CashAiAnalysis,
   CashManualInputs,
   CashMirrorRow,
@@ -12,7 +22,8 @@ import {
   CashFinancialMetrics,
   CashReconciliationResult,
   CashResolutionAction,
-  ParsedCashFileResult
+  ParsedCashFileResult,
+  SavedCashFilePassword
 } from '../types/cashReconciliation';
 
 export interface ReconciledSummarySnapshot {
@@ -345,6 +356,111 @@ export async function deleteCashFormulaRule(tenantId: string, ruleId: string): P
 
   const { error } = await runWithTenantClient((client) =>
     client.from('cash_reconciliation_rules').delete().eq('id', ruleId).eq('tenant_id', tenantId)
+  );
+  if (error && !isMissingCashTableError(error)) throw error;
+}
+
+export function getMergedSavedFilePasswords(tenantId: string, rules: CashRuleRow[] = []): SavedCashFilePassword[] {
+  const storage = typeof window !== 'undefined' ? window.localStorage : null;
+  const local = loadSavedFilePasswordsFromStorage(storage, tenantId);
+  const remote = extractSavedPasswordsFromRules(rules);
+  return mergeSavedFilePasswordLists(local, remote) as SavedCashFilePassword[];
+}
+
+export async function upsertCashSavedFilePassword(
+  tenantId: string,
+  params: { fileName: string; fileType?: string; password: string }
+): Promise<{ rule: CashRuleRow | null; schemaMissing: boolean }> {
+  if (!tenantId || !params.password) {
+    return { rule: null, schemaMissing: false };
+  }
+
+  const pattern = buildPasswordRulePattern(params.fileName, params.fileType || '');
+  const label = formatSavedPasswordLabel(pattern, params.fileName);
+
+  if (typeof window !== 'undefined') {
+    upsertSavedFilePasswordInStorage(window.localStorage, tenantId, {
+      pattern,
+      label,
+      fileName: params.fileName,
+      fileType: params.fileType || '',
+      password: params.password
+    });
+  }
+
+  try {
+    const { data: existing, error: findErr } = await runWithTenantClient<CashRuleRow>((client) =>
+      client
+        .from('cash_reconciliation_rules')
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .eq('rule_type', 'engine_setting')
+        .eq('pattern', pattern)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+    );
+
+    if (findErr && isMissingCashTableError(findErr)) {
+      return { rule: null, schemaMissing: true };
+    }
+
+    if (existing?.id) {
+      if (existing.target_value === params.password && existing.is_active !== false) {
+        return { rule: existing, schemaMissing: false };
+      }
+      const { data: updated, error: updErr } = await runWithTenantClient<CashRuleRow>((client) =>
+        client
+          .from('cash_reconciliation_rules')
+          .update({ target_value: params.password, is_active: true, notes: label })
+          .eq('id', existing.id)
+          .eq('tenant_id', tenantId)
+          .select('*')
+          .single()
+      );
+      if (updErr) {
+        if (isMissingCashTableError(updErr)) return { rule: null, schemaMissing: true };
+        throw updErr;
+      }
+      return { rule: updated, schemaMissing: false };
+    }
+
+    return await saveCashFormulaRule(tenantId, {
+      rule_type: 'engine_setting',
+      pattern,
+      target_value: params.password,
+      source_origin: 'user',
+      notes: label
+    });
+  } catch (err) {
+    console.warn('[Conferência Caixa] Senha fixa salva localmente; falha ao sincronizar na nuvem:', err);
+    return { rule: null, schemaMissing: false };
+  }
+}
+
+export async function deleteCashSavedFilePassword(
+  tenantId: string,
+  patternOrKey: string,
+  ruleId?: string
+): Promise<void> {
+  if (!tenantId || !patternOrKey) return;
+  if (typeof window !== 'undefined') {
+    removeSavedFilePasswordFromStorage(window.localStorage, tenantId, patternOrKey);
+  }
+  if (ruleId) {
+    await deleteCashFormulaRule(tenantId, ruleId);
+    return;
+  }
+  const fullPattern = patternOrKey.startsWith(FILE_PASSWORD_RULE_PREFIX)
+    ? patternOrKey
+    : `${FILE_PASSWORD_RULE_PREFIX}${patternOrKey}`;
+  const { error } = await runWithTenantClient((client) =>
+    client
+      .from('cash_reconciliation_rules')
+      .delete()
+      .eq('tenant_id', tenantId)
+      .eq('rule_type', 'engine_setting')
+      .eq('pattern', fullPattern)
   );
   if (error && !isMissingCashTableError(error)) throw error;
 }

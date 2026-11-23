@@ -712,6 +712,56 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.3.7',
+    date: '2026-11-22',
+    summary: 'Desbloqueio Automático de Planilhas Protegidas (C6 Pay / 6 Primeiros Dígitos do CNPJ) com Memória de Senha Fixa por Empresa',
+    notes: [
+      {
+        id: 'feat-cash-fixed-password-memory-837',
+        category: 'features',
+        title: 'Memória de Senha Fixa na 1ª Vez para Planilhas Protegidas (Relatorio-Vendas-C6Pay_Detalhado)',
+        description: 'Na primeira vez que uma planilha criptografada é enviada, um modal assistido solicita a senha (com dica padrão C6 Pay dos 6 primeiros dígitos do CNPJ e extração automática caso cole o CNPJ completo) e salva a senha fixa por empresa no Supabase e cache local — nas próximas conferências, o arquivo abre automaticamente sem pedir senha novamente.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+        guide: {
+          moduleGroup: 'system',
+          moduleLabel: 'Conferência Caixa • Upload Inteligente de Planilhas',
+          purpose: 'Evitar que o operador precise digitar todos os dias a senha fixa de relatórios protegidos (especialmente Relatorio-Vendas-C6Pay_Detalhado), pedindo a senha apenas na primeira vez e automatizando o desbloqueio em todos os envios futuros.',
+          whereToAccess: [
+            '1. Menu Lateral Esquerdo ➔ Conferência Caixa (/conferencia-caixa)',
+            '2. Clique em "Carregar Arquivos" e envie a planilha protegida (ex.: Relatorio-Vendas-C6Pay_Detalhado.xlsx)',
+            '3. Na 1ª vez, digite os 6 primeiros dígitos do CNPJ (ou cole o CNPJ inteiro) no modal exibido e mantenha marcado "Salvar senha fixa para esta empresa"',
+            '4. Gerenciamento opcional: Aba "Auditor IA & Fórmula 1" ➔ Bloco "Senhas Fixas Memorizadas de Planilhas"'
+          ],
+          howToTest: [
+            '1. Em Conferência Caixa (/conferencia-caixa), envie uma planilha Relatorio-Vendas-C6Pay_Detalhado protegida por senha.',
+            '2. Informe a senha na 1ª vez pelo modal que abre automaticamente e clique em "Desbloquear e Salvar Senha".',
+            '3. Clique em "Nova Conferência" (ou recarregue a página) e envie a planilha novamente: ela abrirá direto com o selo "Auto-desbloqueada", sem pedir senha.'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Tela: Conferência Caixa (/conferencia-caixa) ➔ Dropzone & Modal de Senha',
+            contextElements: ['📤 Carregar Arquivos', '🔒 Relatorio-Vendas-C6Pay_Detalhado.xlsx', '🔑 Auto-desbloqueada'],
+            targetButtonLabel: '🔓 Desbloquear e Salvar Senha',
+            targetButtonPosition: 'Modal automático no 1º envio protegido + selo "Auto-desbloqueada" nos envios seguintes',
+            visualPreviewVariant: 'chat-history-sync'
+          },
+          quickAction: {
+            label: 'Abrir Conferência Caixa',
+            route: '/conferencia-caixa'
+          }
+        }
+      },
+      {
+        id: 'imp-cash-password-security-controls-837',
+        category: 'improvements',
+        title: 'Selo "Auto-desbloqueada", Desbloqueio em Lote e Painel Mascarado de Senhas Fixas',
+        description: 'Planilhas abertas automaticamente exibem o selo "Auto-desbloqueada" nos cards de upload; entradas de senha ficam isoladas fora do texto da Fórmula 1 e do prompt da IA, podendo ser reveladas ou removidas ("Esquecer") na aba Auditor IA & Fórmula 1 caso a senha da empresa mude.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
+      }
+    ]
+  },
+  {
     version: '8.3.6',
     date: '2026-11-22',
     summary: 'Novo Módulo Completo de Conferência de Caixa (PDV × Bancos OFX × Rede × C6 Pay) com Fórmula 1 Determinística, Auditor IA, Datas pt-BR e Resiliência de Chunks',

@@ -28,17 +28,26 @@ import {
 } from '../utils/cashReconciliationServiceHelper.mjs';
 import { geminiService } from '../services/geminiService';
 import {
-  CashSessionRow,
   CashRuleRow,
+  CashSessionRow,
   listCashReconciliationSessions,
   loadCashReconciliationSession,
   saveCashReconciliationSession,
   listCashFormulaRules,
   saveCashFormulaRule,
   toggleCashFormulaRule,
-  deleteCashFormulaRule
+  deleteCashFormulaRule,
+  getMergedSavedFilePasswords,
+  upsertCashSavedFilePassword,
+  deleteCashSavedFilePassword
 } from '../services/cashReconciliationService';
+import {
+  extractSavedPasswordsFromRules,
+  loadSavedFilePasswordsFromStorage,
+  mergeSavedFilePasswordLists
+} from '../utils/cashFilePasswordHelper.mjs';
 import { CashUploadDropzone, UploadedCashFileItem } from '../components/cash-reconciliation/CashUploadDropzone';
+import { CashPasswordPromptModal } from '../components/cash-reconciliation/CashPasswordPromptModal';
 import { CashHealthDashboard, CashHealthHistoryCard } from '../components/cash-reconciliation/CashHealthDashboard';
 import { CashReconciliationWorkbench } from '../components/cash-reconciliation/CashReconciliationWorkbench';
 import {
@@ -47,6 +56,7 @@ import {
   CashReconciliationResult,
   CashResolutionAction,
   ParsedCashFileResult,
+  SavedCashFilePassword,
   formatCents
 } from '../types/cashReconciliation';
 
@@ -57,15 +67,18 @@ function notifyToast(message: string, type: 'success' | 'info' | 'warning' | 'er
 export default function CashReconciliationPage() {
   const outlet = (useOutletContext() as { showMainSidebar?: boolean; setShowMainSidebar?: (v: boolean) => void }) || {};
   const storeTenantId = useChatStore((s) => s.tenantInfo?.id);
+  const storeTenantSettings = useChatStore((s) => s.tenantInfo?.settings);
   const currentUserEmail = useChatStore((s) => s.currentUserEmail);
   const tenantId = storeTenantId || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id') || '';
 
   const [files, setFiles] = useState<UploadedCashFileItem[]>([]);
   const [isProcessingFiles, setIsProcessingFiles] = useState(false);
+  const [passwordModalFileId, setPasswordModalFileId] = useState<string | null>(null);
 
   const [sessions, setSessions] = useState<CashSessionRow[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [rules, setRules] = useState<CashRuleRow[]>([]);
+  const [localSavedPasswords, setLocalSavedPasswords] = useState<SavedCashFilePassword[]>([]);
   const [schemaMissing, setSchemaMissing] = useState(false);
 
   const [manualInputs, setManualInputs] = useState<CashManualInputs>({});
@@ -82,6 +95,20 @@ export default function CashReconciliationPage() {
   filesRef.current = files;
 
   const rulesConfig = useMemo(() => mergeCompanyFormulaRules(rules), [rules]);
+  const savedFilePasswords = useMemo(
+    () => mergeSavedFilePasswordLists(localSavedPasswords, extractSavedPasswordsFromRules(rules)) as SavedCashFilePassword[],
+    [localSavedPasswords, rules]
+  );
+
+  // Hidrata senhas fixas salvas no cache local imediatamente por tenant
+  useEffect(() => {
+    setPasswordModalFileId(null);
+    if (!tenantId || typeof window === 'undefined') {
+      setLocalSavedPasswords([]);
+      return;
+    }
+    setLocalSavedPasswords(loadSavedFilePasswordsFromStorage(window.localStorage, tenantId) as SavedCashFilePassword[]);
+  }, [tenantId]);
 
   // Hidrata rascunho em andamento imediatamente ao abrir a tela (preserva navegação entre abas do CRM)
   useEffect(() => {
@@ -179,14 +206,39 @@ export default function CashReconciliationPage() {
     try {
       const incoming = Array.from(fileList);
       const parsedItems: UploadedCashFileItem[] = [];
+      const currentSavedPasswords = tenantId ? getMergedSavedFilePasswords(tenantId, rules) : savedFilePasswords;
+      let autoUnlockedCount = 0;
 
       for (const file of incoming) {
         const arrayBuffer = await file.arrayBuffer();
+        let matchedAutoPassword = '';
         const parsed = await parseUploadedCashFile({
           fileName: file.name,
           arrayBuffer,
-          rulesConfig
+          rulesConfig,
+          savedPasswords: currentSavedPasswords,
+          tenantSettings: storeTenantSettings,
+          onPasswordMatched: (pwd: string) => {
+            matchedAutoPassword = pwd;
+          }
         });
+        if (parsed.status === 'ok' && parsed.summary?.autoUnlocked) {
+          autoUnlockedCount += 1;
+          if (tenantId && matchedAutoPassword && !currentSavedPasswords.some(sp => sp.password === matchedAutoPassword)) {
+            void upsertCashSavedFilePassword(tenantId, {
+              fileName: file.name,
+              fileType: parsed.fileType,
+              password: matchedAutoPassword
+            }).then((savedRes) => {
+              if (typeof window !== 'undefined') {
+                setLocalSavedPasswords(loadSavedFilePasswordsFromStorage(window.localStorage, tenantId) as SavedCashFilePassword[]);
+              }
+              if (savedRes.rule) {
+                setRules(prev => [savedRes.rule!, ...prev.filter(r => r.id !== savedRes.rule!.id)]);
+              }
+            });
+          }
+        }
         parsedItems.push({
           id: `${file.name}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
           fileName: file.name,
@@ -212,28 +264,89 @@ export default function CashReconciliationPage() {
         }
         return Array.from(byType.values());
       });
+
+      const firstLocked = parsedItems.find(it => it.parsed?.status === 'password_required');
+      if (firstLocked) {
+        setPasswordModalFileId(firstLocked.id);
+      }
+      if (autoUnlockedCount > 0) {
+        notifyToast(
+          `${autoUnlockedCount} planilha(s) protegida(s) aberta(s) automaticamente com a senha fixa salva!`,
+          'success'
+        );
+      }
     } finally {
       setIsProcessingFiles(false);
     }
   };
 
-  const handleUnlockPasswordFile = async (fileId: string, password: string) => {
-    const target = files.find(f => f.id === fileId);
-    if (!target) return;
+  const handleUnlockPasswordFile = async (fileId: string, password: string, saveFixed = true): Promise<boolean> => {
+    const target = filesRef.current.find(f => f.id === fileId);
+    if (!target) return false;
     setIsProcessingFiles(true);
     try {
+      let matchedPassword = '';
       const parsed = await parseUploadedCashFile({
         fileName: target.fileName,
         arrayBuffer: target.arrayBuffer,
         password,
-        rulesConfig
+        rulesConfig,
+        onPasswordMatched: (pwd: string) => {
+          matchedPassword = pwd;
+        }
       });
-      setFiles(prev => prev.map(f => (f.id === fileId ? { ...f, parsed } : f)));
-      if (parsed.status === 'ok') {
-        notifyToast(`Arquivo "${target.fileName}" desbloqueado com sucesso!`, 'success');
-      } else {
+
+      if (parsed.status !== 'ok') {
+        setFiles(prev => prev.map(f => (f.id === fileId ? { ...f, parsed } : f)));
         notifyToast(parsed.errorMessage || 'Senha inválida.', 'error');
+        return false;
       }
+
+      const effectivePassword = matchedPassword || password;
+      const unlockedPeers = new Map<string, ParsedCashFileResult>([[fileId, parsed]]);
+
+      for (const peer of filesRef.current) {
+        if (peer.id === fileId || peer.parsed?.status !== 'password_required' || !peer.arrayBuffer) continue;
+        const peerParsed = await parseUploadedCashFile({
+          fileName: peer.fileName,
+          arrayBuffer: peer.arrayBuffer,
+          password: effectivePassword,
+          rulesConfig
+        });
+        if (peerParsed.status === 'ok') {
+          unlockedPeers.set(peer.id, peerParsed);
+        }
+      }
+
+      let nextRemainingLockedId: string | null = null;
+      setFiles(prev => {
+        const nextFiles = prev.map(f => (unlockedPeers.has(f.id) ? { ...f, parsed: unlockedPeers.get(f.id)! } : f));
+        nextRemainingLockedId = nextFiles.find(f => f.parsed?.status === 'password_required')?.id || null;
+        return nextFiles;
+      });
+      setPasswordModalFileId(nextRemainingLockedId);
+
+      if (saveFixed && effectivePassword && tenantId) {
+        const savedRes = await upsertCashSavedFilePassword(tenantId, {
+          fileName: target.fileName,
+          fileType: parsed.fileType,
+          password: effectivePassword
+        });
+        if (typeof window !== 'undefined') {
+          setLocalSavedPasswords(loadSavedFilePasswordsFromStorage(window.localStorage, tenantId) as SavedCashFilePassword[]);
+        }
+        if (savedRes.rule) {
+          setRules(prev => [savedRes.rule!, ...prev.filter(r => r.id !== savedRes.rule!.id)]);
+        }
+      }
+
+      notifyToast(
+        saveFixed
+          ? `Arquivo "${target.fileName}" desbloqueado e senha fixa salva para os próximos envios!`
+          : `Arquivo "${target.fileName}" desbloqueado com sucesso!`,
+        'success'
+      );
+      return true;
     } finally {
       setIsProcessingFiles(false);
     }
@@ -449,9 +562,14 @@ export default function CashReconciliationPage() {
         <CashUploadDropzone
           files={files}
           isProcessing={isProcessingFiles}
+          savedPasswordsCount={savedFilePasswords.length}
           onAddFiles={handleAddFiles}
           onUnlockPasswordFile={handleUnlockPasswordFile}
-          onRemoveFile={handleRemoveFile}
+          onOpenPasswordModal={(id) => setPasswordModalFileId(id)}
+          onRemoveFile={(id) => {
+            if (passwordModalFileId === id) setPasswordModalFileId(null);
+            handleRemoveFile(id);
+          }}
         />
 
         {/* Conteúdo Principal vs Empty State */}
@@ -527,6 +645,20 @@ export default function CashReconciliationPage() {
                 })
               }
               rules={rules}
+              savedPasswords={savedFilePasswords}
+              onDeleteSavedPassword={async (patternKey, ruleId) => {
+                if (!tenantId) return;
+                await deleteCashSavedFilePassword(tenantId, patternKey, ruleId);
+                if (typeof window !== 'undefined') {
+                  setLocalSavedPasswords(loadSavedFilePasswordsFromStorage(window.localStorage, tenantId) as SavedCashFilePassword[]);
+                }
+                if (ruleId) {
+                  setRules(prev => prev.filter(r => r.id !== ruleId));
+                } else {
+                  setRules(prev => prev.filter(r => r.pattern !== patternKey && r.pattern !== `file_password:${patternKey}`));
+                }
+                notifyToast('Senha fixa removida. Será solicitada no próximo envio protegido.', 'info');
+              }}
               onCreateRule={async (rule) => {
                 if (!tenantId) return;
                 const saved = await saveCashFormulaRule(tenantId, rule);
@@ -550,6 +682,14 @@ export default function CashReconciliationPage() {
           </div>
         )}
       </div>
+
+      <CashPasswordPromptModal
+        file={files.find(f => f.id === passwordModalFileId) || null}
+        pendingCount={files.filter(f => f.parsed?.status === 'password_required').length}
+        isProcessing={isProcessingFiles}
+        onUnlock={handleUnlockPasswordFile}
+        onClose={() => setPasswordModalFileId(null)}
+      />
     </div>
   );
 }

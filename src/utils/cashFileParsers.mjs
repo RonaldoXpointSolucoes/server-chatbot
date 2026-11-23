@@ -9,6 +9,10 @@ import {
   isEncryptedOoxmlBuffer,
   decryptOoxmlPackage
 } from './cashOoxmlDecrypt.mjs';
+import {
+  buildPasswordCandidates,
+  isLikelyC6PayFileName
+} from './cashFilePasswordHelper.mjs';
 
 const XLSXLib = (XLSX?.read && XLSX?.SSF && XLSX?.utils) ? XLSX : (XLSX?.default || XLSX);
 
@@ -766,28 +770,49 @@ export async function parseUploadedCashFile({
   arrayBuffer,
   textContent,
   password,
-  rulesConfig = DEFAULT_FORMULA_CONFIG
+  savedPasswords = [],
+  tenantSettings = null,
+  rulesConfig = DEFAULT_FORMULA_CONFIG,
+  onPasswordMatched
 }) {
   try {
     let workingBytes = arrayBuffer ? (arrayBuffer instanceof Uint8Array ? arrayBuffer : new Uint8Array(arrayBuffer)) : null;
+    let unlockedBySavedOrAuto = false;
 
     if (workingBytes && isEncryptedOoxmlBuffer(workingBytes)) {
-      const candidatePasswords = password !== undefined && password !== '' ? [password] : ['VelvetSweatshop', ''];
+      const candidatePasswords = buildPasswordCandidates({
+        fileName,
+        customPassword: password,
+        savedPasswords,
+        rulesConfig,
+        tenantSettings
+      });
       let unlocked = null;
+      let matchedPassword = null;
       for (const pwd of candidatePasswords) {
         try {
           unlocked = await decryptOoxmlPackage(workingBytes, pwd);
+          matchedPassword = pwd;
           break;
         } catch (err) {
           if (err?.code !== 'INVALID_PASSWORD') throw err;
         }
       }
       if (!unlocked) {
+        const hadSavedPasswords = (savedPasswords?.length || 0) > 0 || (rulesConfig?.savedFilePasswords?.length || 0) > 0;
+        let errorMessage = 'Esta planilha Excel exige senha para leitura.';
+        if (password) {
+          errorMessage = 'Senha incorreta para abrir esta planilha.';
+        } else if (hadSavedPasswords) {
+          errorMessage = 'A senha fixa salva não abriu esta planilha. Informe a senha atualizada.';
+        } else if (isLikelyC6PayFileName(fileName)) {
+          errorMessage = 'Planilha protegida C6 Pay — informe os 6 primeiros dígitos do CNPJ na 1ª vez (será salva para os próximos envios).';
+        }
         return {
           fileName,
-          fileType: 'unknown',
+          fileType: isLikelyC6PayFileName(fileName) ? 'adquirente_c6pay' : 'unknown',
           status: 'password_required',
-          errorMessage: password ? 'Senha incorreta para abrir esta planilha.' : 'Esta planilha Excel exige senha para leitura.',
+          errorMessage,
           periodStart: '',
           periodEnd: '',
           warnings: [],
@@ -795,8 +820,22 @@ export async function parseUploadedCashFile({
           summary: {}
         };
       }
+      if (typeof onPasswordMatched === 'function' && matchedPassword !== null && matchedPassword !== '') {
+        onPasswordMatched(matchedPassword);
+      }
+      if (!password && matchedPassword !== null && matchedPassword !== '' && matchedPassword !== 'VelvetSweatshop') {
+        unlockedBySavedOrAuto = true;
+      }
       workingBytes = unlocked;
     }
+
+    const withAutoUnlockMeta = (parsedObj) => {
+      const result = { fileName, ...parsedObj };
+      if (unlockedBySavedOrAuto) {
+        result.summary = { ...(result.summary || {}), autoUnlocked: true };
+      }
+      return result;
+    };
 
     const isBinaryExcel = workingBytes && (
       (workingBytes[0] === 0x50 && workingBytes[1] === 0x4b) ||
@@ -811,31 +850,31 @@ export async function parseUploadedCashFile({
       const fmtMatrix = XLSXLib.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
 
       const kind = detectSpreadsheetKind(rawMatrix);
-      if (kind === 'pdv_vendas') return { fileName, ...parsePdvVendasMatrix(rawMatrix, fmtMatrix, rulesConfig) };
-      if (kind === 'rel_conferencia') return { fileName, ...parseRelConferenciaMatrix(rawMatrix) };
-      if (kind === 'adquirente_rede') return { fileName, ...parseRedeMatrix(rawMatrix, fmtMatrix) };
-      if (kind === 'adquirente_c6pay') return { fileName, ...parseC6PayMatrix(rawMatrix, fmtMatrix) };
-      return { fileName, ...parseGenericBankMatrix(rawMatrix, fmtMatrix, rulesConfig) };
+      if (kind === 'pdv_vendas') return withAutoUnlockMeta(parsePdvVendasMatrix(rawMatrix, fmtMatrix, rulesConfig));
+      if (kind === 'rel_conferencia') return withAutoUnlockMeta(parseRelConferenciaMatrix(rawMatrix));
+      if (kind === 'adquirente_rede') return withAutoUnlockMeta(parseRedeMatrix(rawMatrix, fmtMatrix));
+      if (kind === 'adquirente_c6pay') return withAutoUnlockMeta(parseC6PayMatrix(rawMatrix, fmtMatrix));
+      return withAutoUnlockMeta(parseGenericBankMatrix(rawMatrix, fmtMatrix, rulesConfig));
     }
 
     const text = textContent !== undefined ? String(textContent) : decodeTextBuffer(workingBytes || new Uint8Array());
     const trimmed = text.trim();
 
     if (/<OFX>/i.test(trimmed) || /<STMTTRN>/i.test(trimmed) || /OFXHEADER:/i.test(trimmed)) {
-      return { fileName, ...parseOfxText(trimmed, rulesConfig) };
+      return withAutoUnlockMeta(parseOfxText(trimmed, rulesConfig));
     }
 
     if (/MOVIMENTO FECHADO:/i.test(trimmed) || (/ENTRADAS NO TOTAL/i.test(trimmed) && /SAIDAS NO TOTAL/i.test(trimmed))) {
-      return { fileName, ...parseFechamentoTxt(trimmed) };
+      return withAutoUnlockMeta(parseFechamentoTxt(trimmed));
     }
 
     const csvMatrix = parseCsvToMatrix(trimmed);
     const kind = detectSpreadsheetKind(csvMatrix);
-    if (kind === 'pdv_vendas') return { fileName, ...parsePdvVendasMatrix(csvMatrix, csvMatrix, rulesConfig) };
-    if (kind === 'rel_conferencia') return { fileName, ...parseRelConferenciaMatrix(csvMatrix) };
-    if (kind === 'adquirente_rede') return { fileName, ...parseRedeMatrix(csvMatrix, csvMatrix) };
-    if (kind === 'adquirente_c6pay') return { fileName, ...parseC6PayMatrix(csvMatrix, csvMatrix) };
-    return { fileName, ...parseGenericBankMatrix(csvMatrix, csvMatrix, rulesConfig) };
+    if (kind === 'pdv_vendas') return withAutoUnlockMeta(parsePdvVendasMatrix(csvMatrix, csvMatrix, rulesConfig));
+    if (kind === 'rel_conferencia') return withAutoUnlockMeta(parseRelConferenciaMatrix(csvMatrix));
+    if (kind === 'adquirente_rede') return withAutoUnlockMeta(parseRedeMatrix(csvMatrix, csvMatrix));
+    if (kind === 'adquirente_c6pay') return withAutoUnlockMeta(parseC6PayMatrix(csvMatrix, csvMatrix));
+    return withAutoUnlockMeta(parseGenericBankMatrix(csvMatrix, csvMatrix, rulesConfig));
   } catch (err) {
     return {
       fileName,

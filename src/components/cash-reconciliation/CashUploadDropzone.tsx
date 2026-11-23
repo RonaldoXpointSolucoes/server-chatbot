@@ -71,16 +71,20 @@ const FILE_TYPE_META: Record<string, { label: string; colorClass: string; icon: 
 interface CashUploadDropzoneProps {
   files: UploadedCashFileItem[];
   isProcessing: boolean;
+  savedPasswordsCount?: number;
   onAddFiles: (fileList: FileList | File[]) => void;
-  onUnlockPasswordFile: (fileId: string, password: string) => void;
+  onUnlockPasswordFile: (fileId: string, password: string, saveFixed?: boolean) => Promise<boolean> | void;
+  onOpenPasswordModal?: (fileId: string) => void;
   onRemoveFile: (fileId: string) => void;
 }
 
 export function CashUploadDropzone({
   files,
   isProcessing,
+  savedPasswordsCount = 0,
   onAddFiles,
   onUnlockPasswordFile,
+  onOpenPasswordModal,
   onRemoveFile
 }: CashUploadDropzoneProps) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -137,6 +141,12 @@ export function CashUploadDropzone({
               <p className="text-xs text-slate-500 dark:text-[#8696a0] mt-0.5">
                 Aceita <span className="font-semibold text-slate-700 dark:text-[#d1d7db]">.xlsx, .xls, .csv, .ofx e .txt</span> juntos — identificação automática (DataDivas, C6 Bank, Itaú, Rede, C6 Pay e RelConferencia).
               </p>
+              {savedPasswordsCount > 0 && (
+                <p className="inline-flex items-center gap-1.5 mt-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
+                  <KeyRound size={11} className="shrink-0" />
+                  {savedPasswordsCount} senha(s) fixa(s) memorizada(s) — planilhas protegidas (ex.: C6 Pay) abrem automaticamente
+                </p>
+              )}
             </div>
           </div>
 
@@ -176,6 +186,15 @@ export function CashUploadDropzone({
                       {parsed.status === 'ok' && (
                         <CheckCircle2 size={14} className="text-emerald-500 shrink-0" />
                       )}
+                      {parsed.status === 'ok' && Boolean(parsed.summary?.autoUnlocked) && (
+                        <span
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-bold text-emerald-600 dark:text-emerald-400"
+                          title="Planilha desbloqueada automaticamente com a senha fixa salva da empresa"
+                        >
+                          <KeyRound size={10} />
+                          Auto-desbloqueada
+                        </span>
+                      )}
                       {isPwd && <Lock size={14} className="text-amber-500 shrink-0" />}
                       {isErr && <AlertTriangle size={14} className="text-rose-500 shrink-0" />}
                     </div>
@@ -206,29 +225,41 @@ export function CashUploadDropzone({
                 )}
 
                 {isPwd && (
-                  <div className="flex items-center gap-1.5 pt-1">
-                    <div className="relative flex-1">
-                      <KeyRound size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-amber-500" />
-                      <input
-                        type="password"
-                        value={passwordMap[item.id] || ''}
-                        onChange={(e) => setPasswordMap(prev => ({ ...prev, [item.id]: e.target.value }))}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            onUnlockPasswordFile(item.id, passwordMap[item.id] || '');
-                          }
-                        }}
-                        placeholder="Digite a senha do Excel..."
-                        className="w-full pl-7 pr-2 py-1.5 text-xs rounded-lg border border-amber-500/30 bg-amber-500/5 text-slate-800 dark:text-[#e9edef] focus:outline-none focus:ring-2 focus:ring-amber-500/30"
-                      />
+                  <div className="space-y-1.5 pt-1">
+                    <div className="flex items-center gap-1.5">
+                      <div className="relative flex-1">
+                        <KeyRound size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-amber-500" />
+                        <input
+                          type="password"
+                          value={passwordMap[item.id] || ''}
+                          onChange={(e) => setPasswordMap(prev => ({ ...prev, [item.id]: e.target.value }))}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              onUnlockPasswordFile(item.id, passwordMap[item.id] || '', true);
+                            }
+                          }}
+                          placeholder="Digite a senha fixa do Excel..."
+                          className="w-full pl-7 pr-2 py-1.5 text-xs rounded-lg border border-amber-500/30 bg-amber-500/5 text-slate-800 dark:text-[#e9edef] focus:outline-none focus:ring-2 focus:ring-amber-500/30"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => onUnlockPasswordFile(item.id, passwordMap[item.id] || '', true)}
+                        className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold active:scale-95 transition-all"
+                      >
+                        Abrir
+                      </button>
+                      {onOpenPasswordModal && (
+                        <button
+                          type="button"
+                          onClick={() => onOpenPasswordModal(item.id)}
+                          className="px-2 py-1.5 rounded-lg border border-amber-500/30 text-amber-600 dark:text-amber-300 text-[11px] font-bold hover:bg-amber-500/10 transition-colors"
+                          title="Abrir tela assistida de senha"
+                        >
+                          Tela
+                        </button>
+                      )}
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => onUnlockPasswordFile(item.id, passwordMap[item.id] || '')}
-                      className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold active:scale-95 transition-all"
-                    >
-                      Abrir
-                    </button>
                   </div>
                 )}
               </div>
