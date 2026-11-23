@@ -712,6 +712,89 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.4.0',
+    date: '2026-11-23',
+    summary: 'Dashboard Executivo de Conferência de Caixa, Exclusão de Fechamentos, Envio WhatsApp (FoodNext), Relatório PDF A4 e Memória Adaptativa de Bancos (Itaú + C6)',
+    notes: [
+      {
+        id: 'feat-cash-executive-dashboard-whatsapp-pdf-840',
+        category: 'features',
+        title: 'Novo Dashboard Executivo + Envio via WhatsApp (FoodNext) + Exportação PDF A4 & Exclusão de Caixas',
+        description: 'Ao abrir Conferência Caixa (/conferencia-caixa), uma nova tela de Dashboard Executivo exibe KPIs históricos, gráficos multi-turnos por data/horário/operador e a lista de fechamentos salvos com ações diretas para Abrir, Enviar Resumo por WhatsApp via instância FoodNext (solicitando o número apenas na 1ª vez), Gerar Relatório Executivo em PDF A4 e Excluir lançamentos duplicados.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+        guide: {
+          moduleGroup: 'system',
+          moduleLabel: 'Conferência Caixa • Dashboard Executivo, WhatsApp & PDF',
+          purpose: 'Centralizar o gerenciamento de fechamentos de caixa em uma visão limpa e executiva, permitindo remover caixas duplicados, exportar PDF A4 pronto para diretoria e enviar o resumo por WhatsApp em 1 clique pela instância FoodNext sem redigitar o celular da empresa.',
+          whereToAccess: [
+            '1. Menu Lateral Esquerdo ➔ Conferência Caixa (/conferencia-caixa) — abre diretamente no novo Dashboard Executivo',
+            '2. Nos cards de fechamento: clique em "Abrir", "WhatsApp", "PDF" ou no ícone de lixeira "Excluir" (ou em "+ Nova Conferência" no topo)',
+            '3. Dentro de um caixa aberto, use "← Voltar ao Dashboard" para alternar sem perder seu rascunho ou use os botões "WhatsApp" e "PDF" na barra superior'
+          ],
+          howToTest: [
+            '1. Acesse Conferência Caixa (/conferencia-caixa) e confira os KPIs consolidados, a barra de histórico por dia/horário e os cartões dos fechamentos.',
+            '2. Em um fechamento salvo (ou duplicado), clique no botão "Excluir" e confirme no modal com data/horário/operador.',
+            '3. Clique em "WhatsApp" em qualquer fechamento: na 1ª vez informe o celular da empresa e marque para manter salvo; nos próximos cliques o resumo será disparado direto pela API FoodNext.',
+            '4. Clique em "PDF" para abrir a visualização executiva limpa em A4 pronta para salvar em PDF.'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Tela: Conferência Caixa (/conferencia-caixa) ➔ Dashboard Executivo',
+            contextElements: ['📊 KPIs & Evolução', '➕ Nova Conferência', '📱 WhatsApp FoodNext', '🖨️ PDF A4', '🗑️ Excluir'],
+            targetButtonLabel: '+ Nova Conferência / WhatsApp / PDF',
+            targetButtonPosition: 'Painel inicial de /conferencia-caixa (cards de fechamentos) e barra superior do workspace',
+            visualPreviewVariant: 'chat-history-sync'
+          },
+          quickAction: {
+            label: 'Abrir Dashboard de Caixa',
+            route: '/conferencia-caixa'
+          }
+        }
+      },
+      {
+        id: 'feat-cash-adaptive-bank-routine-840',
+        category: 'features',
+        title: 'Memória Inteligente por Empresa dos Bancos Trabalhados (Itaú + C6) e Relatórios Diários',
+        description: 'Identificação canônica de bancos brasileiros em extratos OFX e planilhas (ex.: Banco Itaú 341 e Banco C6 336). O sistema aprende continuamente com o uso quais bancos e relatórios fazem parte da rotina da empresa, exibindo alerta específico caso algum banco habitual (ex.: Itaú ausente quando só o C6 foi enviado) ou relatório diário esteja faltando, com opção de dispensar pontualmente ("Sem mov. hoje").',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+        guide: {
+          moduleGroup: 'system',
+          moduleLabel: 'Conferência Caixa • Rotina Bancária Aprendida',
+          purpose: 'Garantir que nenhum extrato bancário (Itaú, C6 ou outro banco habitual da loja) ou relatório diário seja esquecido ao conciliar o caixa.',
+          whereToAccess: [
+            '1. Menu Lateral Esquerdo ➔ Conferência Caixa (/conferencia-caixa)',
+            '2. No Dashboard, confira os bancos memorizados no 4º cartão ("Rotina Bancária Aprendida") ou dentro da conferência no banner "Checklist dos Relatórios"',
+            '3. Caso algum banco não tenha tido movimento no dia, clique em "Sem mov. hoje" (ou "Reativar na rotina" quando desejar voltar a exigir)'
+          ],
+          howToTest: [
+            '1. Envie e salve uma conferência contendo os extratos OFX do Banco Itaú e do Banco C6 + adquirentes + relatórios do PDV.',
+            '2. Inicie "+ Nova Conferência" e envie apenas o OFX do C6: observe o checklist avisar automaticamente que faltou o extrato do Banco Itaú.'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Tela: Conferência Caixa ➔ Banner de Checklist & Rotina Aprendida',
+            contextElements: ['🏦 Banco C6 ✅', '⚠️ Banco Itaú Faltando', '💳 Rede & C6 Pay'],
+            targetButtonLabel: 'Ver Checklist / Rotina',
+            targetButtonPosition: 'Banner de Completude abaixo do upload e Cartão 4 do Dashboard Executivo',
+            visualPreviewVariant: 'chat-history-sync'
+          },
+          quickAction: {
+            label: 'Conferir Checklist de Bancos',
+            route: '/conferencia-caixa'
+          }
+        }
+      },
+      {
+        id: 'imp-cash-multi-shift-and-rule-isolation-840',
+        category: 'improvements',
+        title: 'Distinção de Múltiplos Caixas no Mesmo Dia & Isolamento de Configurações Internas',
+        description: 'Gráfico histórico, lista do Dashboard e seletor superior exibem horário HH:MM, operador e turno para diferenciar dois ou mais fechamentos na mesma data, mantendo registros internos de rotina e telefone WhatsApp protegidos fora da tabela editável da Fórmula 1.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
+      }
+    ]
+  },
+  {
     version: '8.3.9',
     date: '2026-11-22',
     summary: 'Checklist Inteligente 7 DataDivas + 3 Banco, Drill-Down em 2 Níveis (Cartões/PIX ➔ Operações ➔ Itens), Correção C6 Pay com Senha e DevLogger em system_logs',
