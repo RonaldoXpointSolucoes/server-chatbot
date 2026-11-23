@@ -241,6 +241,7 @@ export function CashWhatsappSendModal({
               <div className="rounded-xl border border-slate-200 dark:border-[#2a3942] bg-slate-50/80 dark:bg-[#202c33]/60 overflow-hidden">
                 <button
                   type="button"
+                  aria-expanded={showPreview}
                   onClick={() => setShowPreview((prev) => !prev)}
                   className="w-full px-3.5 py-2.5 flex items-center justify-between gap-2 text-xs font-bold text-slate-700 dark:text-[#e9edef] hover:bg-slate-100/80 dark:hover:bg-[#202c33] transition-colors"
                 >

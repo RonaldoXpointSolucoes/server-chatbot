@@ -116,6 +116,18 @@ function notifyToast(message: string, type: 'success' | 'info' | 'warning' | 'er
   window.dispatchEvent(new CustomEvent('toast', { detail: { message, type, duration: 4000 } }));
 }
 
+function formatCreatedTimeHm(rawTimestamp?: string | null): string {
+  if (!rawTimestamp) return '';
+  const str = String(rawTimestamp).trim();
+  if (!str) return '';
+  const parsed = new Date(str);
+  if (!Number.isNaN(parsed.getTime())) {
+    return `${String(parsed.getHours()).padStart(2, '0')}:${String(parsed.getMinutes()).padStart(2, '0')}`;
+  }
+  const match = str.match(/T(\d{2}:\d{2})/);
+  return match ? match[1] : '';
+}
+
 export default function CashReconciliationPage() {
   const outlet = (useOutletContext() as { showMainSidebar?: boolean; setShowMainSidebar?: (v: boolean) => void }) || {};
   const storeTenantId = useChatStore((s) => s.tenantInfo?.id);
@@ -148,6 +160,7 @@ export default function CashReconciliationPage() {
   const [busySessionId, setBusySessionId] = useState<string | null>(null);
   const [isSendingWhatsapp, setIsSendingWhatsapp] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const isActionLocked = Boolean(busySessionId) || isExportingPdf || isSendingWhatsapp;
   const [whatsappModalState, setWhatsappModalState] = useState<WhatsappModalState | null>(null);
   const [deleteTargetSession, setDeleteTargetSession] = useState<CashSessionRow | null>(null);
   const [isDeletingSession, setIsDeletingSession] = useState(false);
@@ -193,6 +206,14 @@ export default function CashReconciliationPage() {
   }, [files, rulesConfig, manualInputs, manualResolutions, routineProfile]);
 
   const historicalStats = useMemo(() => computeHistoricalHealthStats(sessions), [sessions]);
+
+  const sessionDateCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const s of sessions) {
+      counts.set(s.reference_date, (counts.get(s.reference_date) || 0) + 1);
+    }
+    return counts;
+  }, [sessions]);
 
   const activeSessionRow = useMemo(
     () => (activeSessionId ? sessions.find((s) => s.id === activeSessionId) || null : null),
@@ -722,14 +743,16 @@ export default function CashReconciliationPage() {
 
   const handleLoadSession = async (sessionId: string) => {
     const reqTenantId = tenantId;
-    if (!reqTenantId) return;
+    if (!reqTenantId || isActionLocked) return;
     setBusySessionId(sessionId);
     try {
       const fullSession = await loadCashReconciliationSession(reqTenantId, sessionId);
       if (activeTenantRef.current !== reqTenantId) return;
-      const session = fullSession || sessions.find(s => s.id === sessionId);
-      if (!session) return;
-      applyLoadedSession(session);
+      if (!fullSession) {
+        notifyToast('Não foi possível carregar os detalhes completos deste fechamento.', 'error');
+        return;
+      }
+      applyLoadedSession(fullSession);
       setViewMode('workspace');
     } catch (err: unknown) {
       if (activeTenantRef.current !== reqTenantId) return;
@@ -1028,7 +1051,7 @@ export default function CashReconciliationPage() {
 
   const handleTriggerWhatsappSend = async (sessionRow?: CashSessionRow | null, forceEditNumber = false) => {
     const reqTenantId = tenantId;
-    if (!reqTenantId) return;
+    if (!reqTenantId || isActionLocked) return;
     const payload = await resolveExportPayload(sessionRow);
     if (activeTenantRef.current !== reqTenantId || !payload) return;
 
@@ -1140,7 +1163,7 @@ export default function CashReconciliationPage() {
   };
 
   const handleExportPdf = async (sessionRow?: CashSessionRow | null) => {
-    if (typeof document === 'undefined') return;
+    if (typeof document === 'undefined' || isActionLocked) return;
     const reqTenantId = tenantId;
     setIsExportingPdf(true);
     try {
@@ -1191,6 +1214,7 @@ export default function CashReconciliationPage() {
           }
           win.addEventListener('afterprint', cleanup, { once: true });
           window.setTimeout(() => {
+            if (cleaned) return;
             try {
               win.focus();
               win.print();
@@ -1327,18 +1351,30 @@ export default function CashReconciliationPage() {
                 <History size={14} className="text-[#00a884] shrink-0" />
                 <select
                   value={activeSessionId || ''}
+                  disabled={isActionLocked}
+                  aria-label="Histórico de fechamentos"
                   onChange={(e) => {
                     if (e.target.value) void handleLoadSession(e.target.value);
                     else handleResetNew();
                   }}
-                  className="bg-transparent text-xs font-semibold text-slate-700 dark:text-[#e9edef] focus:outline-none max-w-[230px]"
+                  className="bg-transparent text-xs font-semibold text-slate-700 dark:text-[#e9edef] focus:outline-none max-w-[230px] disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <option value="" className="dark:bg-[#202c33]">Histórico ({sessions.length})...</option>
-                  {sessions.map((s) => (
-                    <option key={s.id} value={s.id} className="dark:bg-[#202c33]">
-                      {formatDateBr(s.reference_date)} • {s.health_score}% • {formatCents(s.diff_cents)}{!s.closed_at ? ' (Rascunho)' : ''}
-                    </option>
-                  ))}
+                  {sessions.map((s) => {
+                    const isSameDayDuplicate = (sessionDateCounts.get(s.reference_date) || 0) > 1;
+                    const timeHm = isSameDayDuplicate ? formatCreatedTimeHm(s.created_at) : '';
+                    const operatorOrShift = isSameDayDuplicate
+                      ? [s.operator_name?.trim(), s.shift_label?.trim()].filter(Boolean).join(' / ')
+                      : '';
+                    const duplicateMeta = [timeHm, operatorOrShift].filter(Boolean).join(' • ');
+                    return (
+                      <option key={s.id} value={s.id} className="dark:bg-[#202c33]">
+                        {formatDateBr(s.reference_date)}
+                        {duplicateMeta ? ` (${duplicateMeta})` : ''} • {s.health_score}% • {formatCents(s.diff_cents)}
+                        {!s.closed_at ? ' (Rascunho)' : ''}
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
             )}
@@ -1376,7 +1412,7 @@ export default function CashReconciliationPage() {
                 </button>
                 <button
                   type="button"
-                  disabled={isSendingWhatsapp || isSaving}
+                  disabled={isActionLocked || isSaving}
                   onClick={() => void handleTriggerWhatsappSend(activeSessionRow)}
                   title={savedWhatsappPhone ? 'Enviar resumo em 1 clique via FoodNext' : 'Informar número e enviar resumo via FoodNext'}
                   className="px-3 py-2 min-h-[38px] rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm active:scale-95 transition-all"
@@ -1386,7 +1422,7 @@ export default function CashReconciliationPage() {
                 </button>
                 <button
                   type="button"
-                  disabled={isExportingPdf}
+                  disabled={isActionLocked}
                   onClick={() => void handleExportPdf(activeSessionRow)}
                   title="Gerar e imprimir relatório executivo A4 em PDF"
                   className="px-3 py-2 min-h-[38px] rounded-xl border border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20 disabled:opacity-50 text-indigo-700 dark:text-indigo-300 text-xs font-bold flex items-center gap-1.5 active:scale-95 transition-all"
@@ -1397,7 +1433,7 @@ export default function CashReconciliationPage() {
                 {activeSessionId && (
                   <button
                     type="button"
-                    disabled={isDeletingSession || isSaving}
+                    disabled={isDeletingSession || isSaving || isActionLocked}
                     onClick={() => {
                       const target = buildWorkspaceSessionRow();
                       if (target) setDeleteTargetSession(target);
@@ -1445,6 +1481,7 @@ export default function CashReconciliationPage() {
             activeDraftFilesCount={files.length}
             activeDraftDate={activeDraftDate}
             busySessionId={busySessionId}
+            isActionLocked={isActionLocked}
             onNewConference={() => {
               handleResetNew();
               setViewMode('workspace');

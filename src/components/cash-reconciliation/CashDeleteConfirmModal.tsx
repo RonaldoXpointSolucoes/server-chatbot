@@ -179,6 +179,7 @@ export function CashDeleteConfirmModal({
         <div className="shrink-0 px-5 py-3.5 border-t border-slate-200 dark:border-[#2a3942] bg-slate-50/90 dark:bg-[#202c33]/90 flex flex-col-reverse sm:flex-row sm:items-center justify-end gap-2">
           <button
             type="button"
+            autoFocus
             disabled={isDeleting}
             onClick={onClose}
             className="w-full sm:w-auto px-4 py-2.5 min-h-[44px] rounded-xl border border-slate-200 dark:border-[#2a3942] bg-white dark:bg-[#111b21] text-xs font-bold text-slate-700 dark:text-[#d1d7db] hover:bg-slate-100 dark:hover:bg-[#202c33] active:scale-95 transition-all"

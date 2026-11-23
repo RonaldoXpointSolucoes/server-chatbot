@@ -53,6 +53,7 @@ export interface CashDashboardOverviewProps {
   activeDraftFilesCount?: number;
   activeDraftDate?: string;
   busySessionId?: string | null;
+  isActionLocked?: boolean;
   onNewConference: () => void;
   onContinueDraft: () => void;
   onDiscardDraft: () => void;
@@ -129,6 +130,7 @@ export function CashDashboardOverview({
   activeDraftFilesCount = 0,
   activeDraftDate = '',
   busySessionId = null,
+  isActionLocked = false,
   onNewConference,
   onContinueDraft,
   onDiscardDraft,
@@ -456,6 +458,7 @@ export function CashDashboardOverview({
 
             <button
               type="button"
+              aria-expanded={routineExpanded}
               onClick={() => setRoutineExpanded((prev) => !prev)}
               className="inline-flex items-center gap-1 text-[10.5px] font-bold text-slate-600 dark:text-[#aebac1] hover:text-[#00a884] active:scale-95 transition-all whitespace-nowrap"
             >
@@ -702,6 +705,7 @@ export function CashDashboardOverview({
                 const diffCents = Number(s.diff_cents || 0);
                 const signedDiff = `${diffCents > 0 ? '+' : diffCents < 0 ? '-' : ''}${formatCents(Math.abs(diffCents))}`;
                 const isBusy = busySessionId === s.id;
+                const disableCardActions = isActionLocked || Boolean(busySessionId);
                 const operatorLabel = s.operator_name?.trim() || 'Operador não informado';
                 const shiftLabel = s.shift_label?.trim() || 'Diário';
 
@@ -786,7 +790,7 @@ export function CashDashboardOverview({
                       <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 shrink-0">
                         <button
                           type="button"
-                          disabled={isBusy}
+                          disabled={disableCardActions}
                           onClick={() => onOpenSession(s.id)}
                           className="px-3 py-2 min-h-[40px] rounded-xl bg-slate-900 dark:bg-[#2a3942] hover:opacity-90 disabled:opacity-50 text-white text-xs font-bold flex items-center justify-center gap-1.5 active:scale-95 transition-all"
                         >
@@ -795,7 +799,7 @@ export function CashDashboardOverview({
                         </button>
                         <button
                           type="button"
-                          disabled={isBusy}
+                          disabled={disableCardActions}
                           onClick={() => onSendWhatsapp(s)}
                           className="px-3 py-2 min-h-[40px] rounded-xl bg-[#00a884] hover:bg-[#008f6f] disabled:opacity-50 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all"
                         >
@@ -804,7 +808,7 @@ export function CashDashboardOverview({
                         </button>
                         <button
                           type="button"
-                          disabled={isBusy}
+                          disabled={disableCardActions}
                           onClick={() => onExportPdf(s)}
                           className="px-3 py-2 min-h-[40px] rounded-xl border border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20 disabled:opacity-50 text-indigo-700 dark:text-indigo-300 text-xs font-bold flex items-center justify-center gap-1.5 active:scale-95 transition-all"
                         >
@@ -813,7 +817,7 @@ export function CashDashboardOverview({
                         </button>
                         <button
                           type="button"
-                          disabled={isBusy}
+                          disabled={disableCardActions}
                           onClick={() => onDeleteSession(s)}
                           className="px-3 py-2 min-h-[40px] rounded-xl border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 disabled:opacity-50 text-rose-700 dark:text-rose-300 text-xs font-bold flex items-center justify-center gap-1.5 active:scale-95 transition-all"
                         >

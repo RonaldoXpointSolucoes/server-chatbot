@@ -215,6 +215,7 @@ export function CashReportCompletenessBanner({
 
         <button
           type="button"
+          aria-expanded={expanded}
           onClick={() => setExpanded((prev) => !prev)}
           className="px-3 py-1.5 rounded-xl bg-white/85 dark:bg-[#111b21] border border-slate-200 dark:border-[#2a3942] font-bold text-[11px] text-slate-700 dark:text-[#d1d7db] hover:border-[#00a884] flex items-center gap-1 shrink-0 self-start sm:self-center active:scale-95 transition-all"
         >

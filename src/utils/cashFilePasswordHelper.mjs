@@ -90,13 +90,25 @@ export function formatSavedPasswordLabel(patternOrKey, notes = '') {
   return raw;
 }
 
+const INTERNAL_ENGINE_SETTING_PATTERNS = new Set([
+  'company_routine:profile',
+  'whatsapp_notify:phone'
+]);
+
 export function isFilePasswordRule(rule) {
   return Boolean(rule && String(rule.pattern || '').startsWith(FILE_PASSWORD_RULE_PREFIX));
 }
 
+export function isInternalCashSettingRule(rule) {
+  if (!rule) return false;
+  if (isFilePasswordRule(rule)) return true;
+  const pattern = String(rule.pattern || '').trim();
+  return INTERNAL_ENGINE_SETTING_PATTERNS.has(pattern);
+}
+
 export function filterVisibleFormulaRules(rules = []) {
   if (!Array.isArray(rules)) return [];
-  return rules.filter(r => !isFilePasswordRule(r));
+  return rules.filter(r => Boolean(r) && !isInternalCashSettingRule(r));
 }
 
 export function extractSavedPasswordsFromRules(rules = []) {

@@ -7,6 +7,7 @@ import {
   extractCnpjPrefix6,
   buildPasswordRulePattern,
   extractSavedPasswordsFromRules,
+  isInternalCashSettingRule,
   filterVisibleFormulaRules,
   loadSavedFilePasswordsFromStorage,
   upsertSavedFilePasswordInStorage,
@@ -129,4 +130,27 @@ test('storage de senhas fixas mantém isolamento estrito por tenant e faz merge 
   removeSavedFilePasswordFromStorage(storage, 'tenant-a', 'adquirente_c6pay');
   assert.equal(loadSavedFilePasswordsFromStorage(storage, 'tenant-a').length, 0);
   assert.equal(loadSavedFilePasswordsFromStorage(storage, 'tenant-b').length, 1);
+});
+
+test('filterVisibleFormulaRules exclui configurações internas (file_password, company_routine:profile, whatsapp_notify:phone) mantendo regras da Fórmula 1', () => {
+  const rules = [
+    { id: 'r-admin', rule_type: 'normalize_admin', pattern: 'REDE PIX', target_value: 'pix', is_active: true },
+    { id: 'r-ai-setting', rule_type: 'engine_setting', pattern: 'amountToleranceCents', target_value: '5', is_active: true, source_origin: 'ai' },
+    { id: 'r-ignore', rule_type: 'ignore_ofx_memo', pattern: 'LOCASERV', target_value: 'credito_nao_pdv', is_active: true },
+    { id: 'r-pwd', rule_type: 'engine_setting', pattern: `${FILE_PASSWORD_RULE_PREFIX}adquirente_c6pay`, target_value: '220593', is_active: true },
+    { id: 'r-routine', rule_type: 'engine_setting', pattern: 'company_routine:profile', target_value: '{"banks":{}}', is_active: true },
+    { id: 'r-wpp', rule_type: 'engine_setting', pattern: 'whatsapp_notify:phone', target_value: '5511999999999', is_active: true }
+  ];
+
+  assert.equal(isInternalCashSettingRule(rules[3]), true);
+  assert.equal(isInternalCashSettingRule(rules[4]), true);
+  assert.equal(isInternalCashSettingRule(rules[5]), true);
+  assert.equal(isInternalCashSettingRule(rules[0]), false);
+  assert.equal(isInternalCashSettingRule(rules[1]), false);
+
+  const visible = filterVisibleFormulaRules(rules);
+  assert.deepEqual(
+    visible.map((r) => r.id),
+    ['r-admin', 'r-ai-setting', 'r-ignore']
+  );
 });
