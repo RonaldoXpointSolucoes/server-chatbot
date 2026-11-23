@@ -18,6 +18,7 @@ import { runCashReconciliation } from '../utils/cashReconciliationEngine.mjs';
 import { buildCashReconciliationMigrationSql } from '../utils/cashReconciliationSchema.mjs';
 import {
   computeHistoricalHealthStats,
+  extractCashErrorMessage,
   loadActiveCashDraftFromStorage,
   saveActiveCashDraftToStorage,
   clearActiveCashDraftFromStorage,
@@ -381,8 +382,7 @@ export default function CashReconciliationPage() {
       if (!session) return;
       applyLoadedSession(session);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Erro ao abrir sessão salva.';
-      notifyToast(msg, 'error');
+      notifyToast(extractCashErrorMessage(err, 'Erro ao abrir sessão salva.'), 'error');
     }
   };
 
@@ -428,8 +428,7 @@ export default function CashReconciliationPage() {
         res.schemaMissing ? 'warning' : 'success'
       );
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'falha desconhecida';
-      notifyToast(`Erro ao salvar: ${message}`, 'error');
+      notifyToast(`Erro ao salvar: ${extractCashErrorMessage(err)}`, 'error');
     } finally {
       setIsSaving(false);
     }
@@ -449,8 +448,7 @@ export default function CashReconciliationPage() {
       setAiAnalysis(analysis);
       notifyToast('Auditoria com IA concluída!', 'success');
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Erro ao consultar IA.';
-      notifyToast(message, 'error');
+      notifyToast(extractCashErrorMessage(err, 'Erro ao consultar IA.'), 'error');
     } finally {
       setIsAnalyzingAi(false);
     }

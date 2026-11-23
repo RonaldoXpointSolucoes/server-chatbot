@@ -712,6 +712,29 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.3.8',
+    date: '2026-11-22',
+    summary: 'Correção Definitiva de Salvamento Multiempresa (RLS allowed_companies + HTTP 406) na Conferência de Caixa',
+    notes: [
+      {
+        id: 'fix-cash-save-multitenant-rls-406-838',
+        category: 'fixes',
+        title: 'Correção de "Erro ao salvar: falha desconhecida" e HTTP 406 para Usuários Multiempresa',
+        description: 'Atualizadas as políticas RLS no Supabase (DB_SETUP_CASH_RECONCILIATION.sql) para autorizar usuários com acesso via tenant_users.allowed_companies (ex.: Edilza em Burguer Plus), substituído .single() por .maybeSingle() nas gravações da Conferência Caixa para eliminar HTTP 406 e adicionada recuperação automática para sessões remotas removidas.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      },
+      {
+        id: 'imp-cash-error-diagnostics-and-fallback-838',
+        category: 'improvements',
+        title: 'Fallback Transparente em Leituras/Edições e Mensagens Reais de Erro PostgREST',
+        description: 'Operações na Conferência Caixa agora detectam respostas vazias/filtradas silenciosamente por RLS multiempresa (PGRST116 / 406 / SELECT vazio), carregando histórico e regras da loja corretamente e exibindo mensagens descritivas caso ocorra alguma falha de rede.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
+      }
+    ]
+  },
+  {
     version: '8.3.7',
     date: '2026-11-22',
     summary: 'Desbloqueio Automático de Planilhas Protegidas (C6 Pay / 6 Primeiros Dígitos do CNPJ) com Memória de Senha Fixa por Empresa',

@@ -106,7 +106,9 @@ import {
   pickMostRecentOpenDraftSession,
   buildHealthMetricDetail,
   formatDateBr,
-  formatDateBrShort
+  formatDateBrShort,
+  extractCashErrorMessage,
+  shouldRetryWithMasterClient
 } from './cashReconciliationServiceHelper.mjs';
 
 test('parseUiMoneyInputToCents handles pt-BR thousand separators and empty inputs accurately', () => {
@@ -294,4 +296,19 @@ test('formatDateBr and formatDateBrShort convert YYYY-MM-DD and ISO timestamps t
   assert.equal(formatDateBrShort('2026-11-19T03:00:00.000Z'), '19/11');
   assert.equal(formatDateBrShort('19/11/2026'), '19/11');
   assert.equal(formatDateBrShort('19 Nov'), '19 Nov');
+});
+
+test('extractCashErrorMessage and shouldRetryWithMasterClient handle PostgREST 406/PGRST116 and silent RLS filtering cleanly', () => {
+  assert.equal(
+    extractCashErrorMessage({ code: 'PGRST116', message: 'Cannot coerce the result to a single JSON object', status: 406 }),
+    'Cannot coerce the result to a single JSON object'
+  );
+  assert.equal(extractCashErrorMessage(new Error('Falha de rede')), 'Falha de rede');
+  assert.equal(extractCashErrorMessage(null, 'erro padrão'), 'erro padrão');
+
+  assert.equal(shouldRetryWithMasterClient({ data: null, error: { code: 'PGRST116', status: 406 } }), true);
+  assert.equal(shouldRetryWithMasterClient({ data: null, error: null, expectRow: true }), true);
+  assert.equal(shouldRetryWithMasterClient({ data: [], error: null, fallbackOnEmptyArray: true }), true);
+  assert.equal(shouldRetryWithMasterClient({ data: null, error: { code: 'PGRST205', status: 404 } }), false);
+  assert.equal(shouldRetryWithMasterClient({ data: { id: 'ok' }, error: null, expectRow: true }), false);
 });

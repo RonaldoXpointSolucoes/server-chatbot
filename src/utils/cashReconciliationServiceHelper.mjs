@@ -486,3 +486,48 @@ export function formatDateBrShort(rawDate) {
   if (br) return `${br[1]}/${br[2]}`;
   return str;
 }
+
+/**
+ * Extrai mensagem legível tanto de instâncias Error quanto de objetos PostgREST ({ message, details, hint, code }).
+ */
+export function extractCashErrorMessage(err, fallback = 'falha desconhecida') {
+  if (!err) return fallback;
+  if (typeof err === 'string') return err.trim() || fallback;
+  if (err instanceof Error && err.message) return err.message;
+  if (typeof err === 'object') {
+    const parts = [err.message, err.error_description, err.details, err.hint].filter(
+      (v) => typeof v === 'string' && v.trim().length > 0
+    );
+    if (parts.length > 0) return parts.join(' • ');
+    if (err.code) return `Código ${err.code}`;
+  }
+  return fallback;
+}
+
+/**
+ * Decide se a operação no cliente JWT deve tentar fallback no masterSupabase
+ * (ex.: erro de RLS/401/403/406/PGRST116 ou linha/lista filtrada silenciosamente em acesso multi-empresa).
+ */
+export function shouldRetryWithMasterClient({ data, error, expectRow = false, fallbackOnEmptyArray = false }) {
+  if (isMissingCashTableError(error)) return false;
+
+  if (error) {
+    const code = String(error?.code || '');
+    const status = Number(error?.status || 0);
+    const msg = String(error?.message || '').toLowerCase();
+    return (
+      status === 401 ||
+      status === 403 ||
+      status === 406 ||
+      code === '42501' ||
+      code === 'PGRST301' ||
+      code === 'PGRST116' ||
+      msg.includes('row-level security') ||
+      msg.includes('jwt')
+    );
+  }
+
+  if (expectRow && !data) return true;
+  if (fallbackOnEmptyArray && Array.isArray(data) && data.length === 0) return true;
+  return false;
+}

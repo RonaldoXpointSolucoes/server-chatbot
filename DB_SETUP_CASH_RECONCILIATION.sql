@@ -115,7 +115,7 @@ CREATE TRIGGER trg_cash_reconciliation_rules_updated
   FOR EACH ROW
   EXECUTE FUNCTION public.cash_reconciliation_touch_updated_at();
 
--- 5. Segurança RLS Multi-Tenant
+-- 5. Segurança RLS Multi-Tenant (inclui empresas vinculadas via tenant_users.allowed_companies)
 ALTER TABLE public.cash_reconciliation_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.cash_reconciliation_files ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.cash_reconciliation_items ENABLE ROW LEVEL SECURITY;
@@ -135,8 +135,14 @@ CREATE POLICY cash_sessions_tenant_policy ON public.cash_reconciliation_sessions
         )
         OR EXISTS (
           SELECT 1 FROM public.tenant_users tu
-          WHERE tu.tenant_id = cash_reconciliation_sessions.tenant_id
-            AND lower(tu.email) = lower(auth.jwt() ->> 'email')
+          WHERE lower(tu.email) = lower(auth.jwt() ->> 'email')
+            AND (
+              tu.tenant_id = cash_reconciliation_sessions.tenant_id
+              OR (
+                jsonb_typeof(tu.allowed_companies) = 'array'
+                AND tu.allowed_companies @> jsonb_build_array(cash_reconciliation_sessions.tenant_id::text)
+              )
+            )
         )
       )
     )
@@ -153,8 +159,14 @@ CREATE POLICY cash_sessions_tenant_policy ON public.cash_reconciliation_sessions
         )
         OR EXISTS (
           SELECT 1 FROM public.tenant_users tu
-          WHERE tu.tenant_id = cash_reconciliation_sessions.tenant_id
-            AND lower(tu.email) = lower(auth.jwt() ->> 'email')
+          WHERE lower(tu.email) = lower(auth.jwt() ->> 'email')
+            AND (
+              tu.tenant_id = cash_reconciliation_sessions.tenant_id
+              OR (
+                jsonb_typeof(tu.allowed_companies) = 'array'
+                AND tu.allowed_companies @> jsonb_build_array(cash_reconciliation_sessions.tenant_id::text)
+              )
+            )
         )
       )
     )
@@ -174,8 +186,14 @@ CREATE POLICY cash_files_tenant_policy ON public.cash_reconciliation_files
         )
         OR EXISTS (
           SELECT 1 FROM public.tenant_users tu
-          WHERE tu.tenant_id = cash_reconciliation_files.tenant_id
-            AND lower(tu.email) = lower(auth.jwt() ->> 'email')
+          WHERE lower(tu.email) = lower(auth.jwt() ->> 'email')
+            AND (
+              tu.tenant_id = cash_reconciliation_files.tenant_id
+              OR (
+                jsonb_typeof(tu.allowed_companies) = 'array'
+                AND tu.allowed_companies @> jsonb_build_array(cash_reconciliation_files.tenant_id::text)
+              )
+            )
         )
       )
     )
@@ -192,8 +210,14 @@ CREATE POLICY cash_files_tenant_policy ON public.cash_reconciliation_files
         )
         OR EXISTS (
           SELECT 1 FROM public.tenant_users tu
-          WHERE tu.tenant_id = cash_reconciliation_files.tenant_id
-            AND lower(tu.email) = lower(auth.jwt() ->> 'email')
+          WHERE lower(tu.email) = lower(auth.jwt() ->> 'email')
+            AND (
+              tu.tenant_id = cash_reconciliation_files.tenant_id
+              OR (
+                jsonb_typeof(tu.allowed_companies) = 'array'
+                AND tu.allowed_companies @> jsonb_build_array(cash_reconciliation_files.tenant_id::text)
+              )
+            )
         )
       )
     )
@@ -213,8 +237,14 @@ CREATE POLICY cash_items_tenant_policy ON public.cash_reconciliation_items
         )
         OR EXISTS (
           SELECT 1 FROM public.tenant_users tu
-          WHERE tu.tenant_id = cash_reconciliation_items.tenant_id
-            AND lower(tu.email) = lower(auth.jwt() ->> 'email')
+          WHERE lower(tu.email) = lower(auth.jwt() ->> 'email')
+            AND (
+              tu.tenant_id = cash_reconciliation_items.tenant_id
+              OR (
+                jsonb_typeof(tu.allowed_companies) = 'array'
+                AND tu.allowed_companies @> jsonb_build_array(cash_reconciliation_items.tenant_id::text)
+              )
+            )
         )
       )
     )
@@ -231,8 +261,14 @@ CREATE POLICY cash_items_tenant_policy ON public.cash_reconciliation_items
         )
         OR EXISTS (
           SELECT 1 FROM public.tenant_users tu
-          WHERE tu.tenant_id = cash_reconciliation_items.tenant_id
-            AND lower(tu.email) = lower(auth.jwt() ->> 'email')
+          WHERE lower(tu.email) = lower(auth.jwt() ->> 'email')
+            AND (
+              tu.tenant_id = cash_reconciliation_items.tenant_id
+              OR (
+                jsonb_typeof(tu.allowed_companies) = 'array'
+                AND tu.allowed_companies @> jsonb_build_array(cash_reconciliation_items.tenant_id::text)
+              )
+            )
         )
       )
     )
@@ -252,8 +288,14 @@ CREATE POLICY cash_rules_tenant_policy ON public.cash_reconciliation_rules
         )
         OR EXISTS (
           SELECT 1 FROM public.tenant_users tu
-          WHERE tu.tenant_id = cash_reconciliation_rules.tenant_id
-            AND lower(tu.email) = lower(auth.jwt() ->> 'email')
+          WHERE lower(tu.email) = lower(auth.jwt() ->> 'email')
+            AND (
+              tu.tenant_id = cash_reconciliation_rules.tenant_id
+              OR (
+                jsonb_typeof(tu.allowed_companies) = 'array'
+                AND tu.allowed_companies @> jsonb_build_array(cash_reconciliation_rules.tenant_id::text)
+              )
+            )
         )
       )
     )
@@ -270,8 +312,14 @@ CREATE POLICY cash_rules_tenant_policy ON public.cash_reconciliation_rules
         )
         OR EXISTS (
           SELECT 1 FROM public.tenant_users tu
-          WHERE tu.tenant_id = cash_reconciliation_rules.tenant_id
-            AND lower(tu.email) = lower(auth.jwt() ->> 'email')
+          WHERE lower(tu.email) = lower(auth.jwt() ->> 'email')
+            AND (
+              tu.tenant_id = cash_reconciliation_rules.tenant_id
+              OR (
+                jsonb_typeof(tu.allowed_companies) = 'array'
+                AND tu.allowed_companies @> jsonb_build_array(cash_reconciliation_rules.tenant_id::text)
+              )
+            )
         )
       )
     )

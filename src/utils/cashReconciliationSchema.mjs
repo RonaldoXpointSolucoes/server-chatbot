@@ -5,6 +5,38 @@ export const CASH_RECONCILIATION_TABLES = Object.freeze([
   'cash_reconciliation_rules'
 ]);
 
+function buildCashTenantPolicySql(policyName, tableName) {
+  const accessCheck = `(
+    auth.role() = 'service_role'
+    OR (
+      NULLIF(trim(COALESCE(auth.jwt() ->> 'email', '')), '') IS NOT NULL
+      AND (
+        EXISTS (
+          SELECT 1 FROM public.companies c
+          WHERE c.id = ${tableName}.tenant_id
+            AND lower(c.email) = lower(auth.jwt() ->> 'email')
+        )
+        OR EXISTS (
+          SELECT 1 FROM public.tenant_users tu
+          WHERE lower(tu.email) = lower(auth.jwt() ->> 'email')
+            AND (
+              tu.tenant_id = ${tableName}.tenant_id
+              OR (
+                jsonb_typeof(tu.allowed_companies) = 'array'
+                AND tu.allowed_companies @> jsonb_build_array(${tableName}.tenant_id::text)
+              )
+            )
+        )
+      )
+    )
+  )`;
+
+  return `DROP POLICY IF EXISTS ${policyName} ON public.${tableName};
+CREATE POLICY ${policyName} ON public.${tableName}
+  FOR ALL USING ${accessCheck}
+  WITH CHECK ${accessCheck};`;
+}
+
 /**
  * Gera o script DDL idempotente das tabelas multi-tenant de Conferência de Caixa.
  */
@@ -126,166 +158,18 @@ CREATE TRIGGER trg_cash_reconciliation_rules_updated
   FOR EACH ROW
   EXECUTE FUNCTION public.cash_reconciliation_touch_updated_at();
 
--- 5. Segurança RLS Multi-Tenant
+-- 5. Segurança RLS Multi-Tenant (inclui empresas vinculadas via tenant_users.allowed_companies)
 ALTER TABLE public.cash_reconciliation_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.cash_reconciliation_files ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.cash_reconciliation_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.cash_reconciliation_rules ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS cash_sessions_tenant_policy ON public.cash_reconciliation_sessions;
-CREATE POLICY cash_sessions_tenant_policy ON public.cash_reconciliation_sessions
-  FOR ALL USING (
-    auth.role() = 'service_role'
-    OR (
-      NULLIF(trim(COALESCE(auth.jwt() ->> 'email', '')), '') IS NOT NULL
-      AND (
-        EXISTS (
-          SELECT 1 FROM public.companies c
-          WHERE c.id = cash_reconciliation_sessions.tenant_id
-            AND lower(c.email) = lower(auth.jwt() ->> 'email')
-        )
-        OR EXISTS (
-          SELECT 1 FROM public.tenant_users tu
-          WHERE tu.tenant_id = cash_reconciliation_sessions.tenant_id
-            AND lower(tu.email) = lower(auth.jwt() ->> 'email')
-        )
-      )
-    )
-  )
-  WITH CHECK (
-    auth.role() = 'service_role'
-    OR (
-      NULLIF(trim(COALESCE(auth.jwt() ->> 'email', '')), '') IS NOT NULL
-      AND (
-        EXISTS (
-          SELECT 1 FROM public.companies c
-          WHERE c.id = cash_reconciliation_sessions.tenant_id
-            AND lower(c.email) = lower(auth.jwt() ->> 'email')
-        )
-        OR EXISTS (
-          SELECT 1 FROM public.tenant_users tu
-          WHERE tu.tenant_id = cash_reconciliation_sessions.tenant_id
-            AND lower(tu.email) = lower(auth.jwt() ->> 'email')
-        )
-      )
-    )
-  );
+${buildCashTenantPolicySql('cash_sessions_tenant_policy', 'cash_reconciliation_sessions')}
 
-DROP POLICY IF EXISTS cash_files_tenant_policy ON public.cash_reconciliation_files;
-CREATE POLICY cash_files_tenant_policy ON public.cash_reconciliation_files
-  FOR ALL USING (
-    auth.role() = 'service_role'
-    OR (
-      NULLIF(trim(COALESCE(auth.jwt() ->> 'email', '')), '') IS NOT NULL
-      AND (
-        EXISTS (
-          SELECT 1 FROM public.companies c
-          WHERE c.id = cash_reconciliation_files.tenant_id
-            AND lower(c.email) = lower(auth.jwt() ->> 'email')
-        )
-        OR EXISTS (
-          SELECT 1 FROM public.tenant_users tu
-          WHERE tu.tenant_id = cash_reconciliation_files.tenant_id
-            AND lower(tu.email) = lower(auth.jwt() ->> 'email')
-        )
-      )
-    )
-  )
-  WITH CHECK (
-    auth.role() = 'service_role'
-    OR (
-      NULLIF(trim(COALESCE(auth.jwt() ->> 'email', '')), '') IS NOT NULL
-      AND (
-        EXISTS (
-          SELECT 1 FROM public.companies c
-          WHERE c.id = cash_reconciliation_files.tenant_id
-            AND lower(c.email) = lower(auth.jwt() ->> 'email')
-        )
-        OR EXISTS (
-          SELECT 1 FROM public.tenant_users tu
-          WHERE tu.tenant_id = cash_reconciliation_files.tenant_id
-            AND lower(tu.email) = lower(auth.jwt() ->> 'email')
-        )
-      )
-    )
-  );
+${buildCashTenantPolicySql('cash_files_tenant_policy', 'cash_reconciliation_files')}
 
-DROP POLICY IF EXISTS cash_items_tenant_policy ON public.cash_reconciliation_items;
-CREATE POLICY cash_items_tenant_policy ON public.cash_reconciliation_items
-  FOR ALL USING (
-    auth.role() = 'service_role'
-    OR (
-      NULLIF(trim(COALESCE(auth.jwt() ->> 'email', '')), '') IS NOT NULL
-      AND (
-        EXISTS (
-          SELECT 1 FROM public.companies c
-          WHERE c.id = cash_reconciliation_items.tenant_id
-            AND lower(c.email) = lower(auth.jwt() ->> 'email')
-        )
-        OR EXISTS (
-          SELECT 1 FROM public.tenant_users tu
-          WHERE tu.tenant_id = cash_reconciliation_items.tenant_id
-            AND lower(tu.email) = lower(auth.jwt() ->> 'email')
-        )
-      )
-    )
-  )
-  WITH CHECK (
-    auth.role() = 'service_role'
-    OR (
-      NULLIF(trim(COALESCE(auth.jwt() ->> 'email', '')), '') IS NOT NULL
-      AND (
-        EXISTS (
-          SELECT 1 FROM public.companies c
-          WHERE c.id = cash_reconciliation_items.tenant_id
-            AND lower(c.email) = lower(auth.jwt() ->> 'email')
-        )
-        OR EXISTS (
-          SELECT 1 FROM public.tenant_users tu
-          WHERE tu.tenant_id = cash_reconciliation_items.tenant_id
-            AND lower(tu.email) = lower(auth.jwt() ->> 'email')
-        )
-      )
-    )
-  );
+${buildCashTenantPolicySql('cash_items_tenant_policy', 'cash_reconciliation_items')}
 
-DROP POLICY IF EXISTS cash_rules_tenant_policy ON public.cash_reconciliation_rules;
-CREATE POLICY cash_rules_tenant_policy ON public.cash_reconciliation_rules
-  FOR ALL USING (
-    auth.role() = 'service_role'
-    OR (
-      NULLIF(trim(COALESCE(auth.jwt() ->> 'email', '')), '') IS NOT NULL
-      AND (
-        EXISTS (
-          SELECT 1 FROM public.companies c
-          WHERE c.id = cash_reconciliation_rules.tenant_id
-            AND lower(c.email) = lower(auth.jwt() ->> 'email')
-        )
-        OR EXISTS (
-          SELECT 1 FROM public.tenant_users tu
-          WHERE tu.tenant_id = cash_reconciliation_rules.tenant_id
-            AND lower(tu.email) = lower(auth.jwt() ->> 'email')
-        )
-      )
-    )
-  )
-  WITH CHECK (
-    auth.role() = 'service_role'
-    OR (
-      NULLIF(trim(COALESCE(auth.jwt() ->> 'email', '')), '') IS NOT NULL
-      AND (
-        EXISTS (
-          SELECT 1 FROM public.companies c
-          WHERE c.id = cash_reconciliation_rules.tenant_id
-            AND lower(c.email) = lower(auth.jwt() ->> 'email')
-        )
-        OR EXISTS (
-          SELECT 1 FROM public.tenant_users tu
-          WHERE tu.tenant_id = cash_reconciliation_rules.tenant_id
-            AND lower(tu.email) = lower(auth.jwt() ->> 'email')
-        )
-      )
-    )
-  );
+${buildCashTenantPolicySql('cash_rules_tenant_policy', 'cash_reconciliation_rules')}
 `;
 }

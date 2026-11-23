@@ -1,7 +1,9 @@
 import { supabase, masterSupabase } from './supabase';
 import {
   buildSessionPersistencePayload,
+  extractCashErrorMessage,
   isMissingCashTableError,
+  shouldRetryWithMasterClient,
   SESSION_LIST_COLUMNS
 } from '../utils/cashReconciliationServiceHelper.mjs';
 import {
@@ -90,15 +92,9 @@ function writeLocalJson(key: string, value: unknown) {
   }
 }
 
-function isRlsOrJwtError(error: { code?: string; message?: string; status?: number } | null | undefined): boolean {
-  const code = String(error?.code || '');
-  const status = Number(error?.status || 0);
-  const msg = String(error?.message || '').toLowerCase();
-  return status === 401 || status === 403 || code === '42501' || code === 'PGRST301' || msg.includes('row-level security') || msg.includes('jwt');
-}
-
 async function runWithTenantClient<T>(
-  fn: (client: typeof supabase) => PromiseLike<{ data: T | null; error: { code?: string; message?: string; status?: number } | null }>
+  fn: (client: typeof supabase) => PromiseLike<{ data: T | null; error: { code?: string; message?: string; status?: number } | null }>,
+  options: { expectRow?: boolean; fallbackOnEmptyArray?: boolean } = {}
 ): Promise<{ data: T | null; error: { code?: string; message?: string; status?: number } | null; usedFallback: boolean }> {
   // Evita disparo garantido de 401/403 (que polui o DevLogger) quando o app está autenticado sem JWT Supabase Auth
   const { data: sessionData } = await supabase.auth.getSession().catch(() => ({ data: { session: null } }));
@@ -108,7 +104,14 @@ async function runWithTenantClient<T>(
   }
 
   const first = await fn(supabase);
-  if (!first.error || !isRlsOrJwtError(first.error)) {
+  if (
+    !shouldRetryWithMasterClient({
+      data: first.data,
+      error: first.error,
+      expectRow: options.expectRow,
+      fallbackOnEmptyArray: options.fallbackOnEmptyArray
+    })
+  ) {
     return { ...first, usedFallback: false };
   }
   const second = await fn(masterSupabase);
@@ -120,14 +123,16 @@ export async function listCashReconciliationSessions(
   limit = 30
 ): Promise<{ sessions: CashSessionRow[]; schemaMissing: boolean }> {
   if (!tenantId) return { sessions: [], schemaMissing: false };
-  const { data, error } = await runWithTenantClient<CashSessionRow[]>((client) =>
-    client
-      .from('cash_reconciliation_sessions')
-      .select(SESSION_LIST_COLUMNS)
-      .eq('tenant_id', tenantId)
-      .order('reference_date', { ascending: false })
-      .order('created_at', { ascending: false })
-      .limit(limit)
+  const { data, error } = await runWithTenantClient<CashSessionRow[]>(
+    (client) =>
+      client
+        .from('cash_reconciliation_sessions')
+        .select(SESSION_LIST_COLUMNS)
+        .eq('tenant_id', tenantId)
+        .order('reference_date', { ascending: false })
+        .order('created_at', { ascending: false })
+        .limit(limit),
+    { fallbackOnEmptyArray: true }
   );
 
   if (error) {
@@ -137,7 +142,7 @@ export async function listCashReconciliationSessions(
         schemaMissing: true
       };
     }
-    throw error;
+    throw new Error(extractCashErrorMessage(error, 'Erro ao listar conferências salvas.'));
   }
   return { sessions: data || [], schemaMissing: false };
 }
@@ -152,20 +157,22 @@ export async function loadCashReconciliationSession(
     return localList.find(s => s.id === sessionId) || null;
   }
 
-  const { data, error } = await runWithTenantClient<CashSessionRow>((client) =>
-    client
-      .from('cash_reconciliation_sessions')
-      .select('*')
-      .eq('tenant_id', tenantId)
-      .eq('id', sessionId)
-      .maybeSingle()
+  const { data, error } = await runWithTenantClient<CashSessionRow>(
+    (client) =>
+      client
+        .from('cash_reconciliation_sessions')
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .eq('id', sessionId)
+        .maybeSingle(),
+    { expectRow: true }
   );
   if (error) {
     if (isMissingCashTableError(error)) {
       const localList = readLocalJson<CashSessionRow[]>(localSessionsKey(tenantId), []);
       return localList.find(s => s.id === sessionId) || null;
     }
-    throw error;
+    throw new Error(extractCashErrorMessage(error, 'Erro ao carregar sessão de conferência.'));
   }
   return data;
 }
@@ -193,16 +200,25 @@ export async function saveCashReconciliationSession(params: {
         .eq('id', params.sessionId)
         .eq('tenant_id', params.tenantId)
         .select('id')
-        .single();
+        .maybeSingle();
     }
     return client
       .from('cash_reconciliation_sessions')
       .insert(sessionPayload)
       .select('id')
-      .single();
+      .maybeSingle();
   };
 
-  const res = await runWithTenantClient<{ id: string }>(writeSession);
+  let res = await runWithTenantClient<{ id: string }>(writeSession, { expectRow: true });
+
+  // Se o sessionId remoto não existir mais no banco (ex.: excluído), re-insere como nova sessão em vez de falhar
+  if (isRemoteUpdate && !res.error && !res.data) {
+    res = await runWithTenantClient<{ id: string }>(
+      (client) => client.from('cash_reconciliation_sessions').insert(sessionPayload).select('id').maybeSingle(),
+      { expectRow: true }
+    );
+  }
+
   if (res.error || !res.data) {
     if (isMissingCashTableError(res.error)) {
       const localList = readLocalJson<CashSessionRow[]>(localSessionsKey(params.tenantId), []);
@@ -217,40 +233,40 @@ export async function saveCashReconciliationSession(params: {
       writeLocalJson(localSessionsKey(params.tenantId), updated);
       return { sessionId: localId, schemaMissing: true, savedAt: nowIso };
     }
-    throw res.error || new Error('Falha ao salvar sessão de conferência.');
+    throw new Error(extractCashErrorMessage(res.error, 'Falha ao salvar sessão de conferência.'));
   }
 
   const savedSessionId = res.data.id;
   const activeClient = res.usedFallback ? masterSupabase : supabase;
 
-  if (isRemoteUpdate) {
+  if (isRemoteUpdate && savedSessionId === params.sessionId) {
     const { error: delItemsErr } = await activeClient
       .from('cash_reconciliation_items')
       .delete()
       .eq('session_id', savedSessionId)
       .eq('tenant_id', params.tenantId);
-    if (delItemsErr) throw delItemsErr;
+    if (delItemsErr) throw new Error(extractCashErrorMessage(delItemsErr, 'Erro ao limpar itens da sessão.'));
 
     const { error: delFilesErr } = await activeClient
       .from('cash_reconciliation_files')
       .delete()
       .eq('session_id', savedSessionId)
       .eq('tenant_id', params.tenantId);
-    if (delFilesErr) throw delFilesErr;
+    if (delFilesErr) throw new Error(extractCashErrorMessage(delFilesErr, 'Erro ao limpar arquivos da sessão.'));
   }
 
   if (filePayloads.length > 0) {
     const { error: insFilesErr } = await activeClient
       .from('cash_reconciliation_files')
       .insert(filePayloads.map(f => ({ ...f, session_id: savedSessionId })));
-    if (insFilesErr) throw insFilesErr;
+    if (insFilesErr) throw new Error(extractCashErrorMessage(insFilesErr, 'Erro ao gravar arquivos da sessão.'));
   }
 
   if (itemPayloads.length > 0) {
     for (let i = 0; i < itemPayloads.length; i += 200) {
       const chunk = itemPayloads.slice(i, i + 200).map(it => ({ ...it, session_id: savedSessionId }));
       const { error: insItemsErr } = await activeClient.from('cash_reconciliation_items').insert(chunk);
-      if (insItemsErr) throw insItemsErr;
+      if (insItemsErr) throw new Error(extractCashErrorMessage(insItemsErr, 'Erro ao gravar itens da conferência.'));
     }
   }
 
@@ -268,12 +284,14 @@ export async function listCashFormulaRules(
       schemaMissing: true
     };
   }
-  const { data, error } = await runWithTenantClient<CashRuleRow[]>((client) =>
-    client
-      .from('cash_reconciliation_rules')
-      .select('*')
-      .eq('tenant_id', tenantId)
-      .order('created_at', { ascending: false })
+  const { data, error } = await runWithTenantClient<CashRuleRow[]>(
+    (client) =>
+      client
+        .from('cash_reconciliation_rules')
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .order('created_at', { ascending: false }),
+    { fallbackOnEmptyArray: true }
   );
 
   if (error) {
@@ -283,7 +301,7 @@ export async function listCashFormulaRules(
         schemaMissing: true
       };
     }
-    throw error;
+    throw new Error(extractCashErrorMessage(error, 'Erro ao listar regras da Fórmula 1.'));
   }
   return { rules: data || [], schemaMissing: false };
 }
@@ -308,11 +326,12 @@ export async function saveCashFormulaRule(
     notes: rule.notes || ''
   };
 
-  const { data, error } = await runWithTenantClient<CashRuleRow>((client) =>
-    client.from('cash_reconciliation_rules').insert(payload).select('*').single()
+  const { data, error } = await runWithTenantClient<CashRuleRow>(
+    (client) => client.from('cash_reconciliation_rules').insert(payload).select('*').maybeSingle(),
+    { expectRow: true }
   );
 
-  if (error) {
+  if (error || !data) {
     if (isMissingCashTableError(error)) {
       const localList = readLocalJson<CashRuleRow[]>(localRulesKey(tenantId), []);
       const localRule: CashRuleRow = {
@@ -323,7 +342,7 @@ export async function saveCashFormulaRule(
       writeLocalJson(localRulesKey(tenantId), [localRule, ...localList]);
       return { rule: localRule, schemaMissing: true };
     }
-    throw error;
+    throw new Error(extractCashErrorMessage(error, 'Erro ao salvar regra da Fórmula 1.'));
   }
   return { rule: data, schemaMissing: false };
 }
@@ -338,10 +357,20 @@ export async function toggleCashFormulaRule(tenantId: string, ruleId: string, is
     return;
   }
 
-  const { error } = await runWithTenantClient((client) =>
-    client.from('cash_reconciliation_rules').update({ is_active: isActive }).eq('id', ruleId).eq('tenant_id', tenantId)
+  const { error } = await runWithTenantClient(
+    (client) =>
+      client
+        .from('cash_reconciliation_rules')
+        .update({ is_active: isActive })
+        .eq('id', ruleId)
+        .eq('tenant_id', tenantId)
+        .select('id')
+        .maybeSingle(),
+    { expectRow: true }
   );
-  if (error && !isMissingCashTableError(error)) throw error;
+  if (error && !isMissingCashTableError(error)) {
+    throw new Error(extractCashErrorMessage(error, 'Erro ao atualizar regra.'));
+  }
 }
 
 export async function deleteCashFormulaRule(tenantId: string, ruleId: string): Promise<void> {
@@ -354,10 +383,20 @@ export async function deleteCashFormulaRule(tenantId: string, ruleId: string): P
     return;
   }
 
-  const { error } = await runWithTenantClient((client) =>
-    client.from('cash_reconciliation_rules').delete().eq('id', ruleId).eq('tenant_id', tenantId)
+  const { error } = await runWithTenantClient(
+    (client) =>
+      client
+        .from('cash_reconciliation_rules')
+        .delete()
+        .eq('id', ruleId)
+        .eq('tenant_id', tenantId)
+        .select('id')
+        .maybeSingle(),
+    { expectRow: true }
   );
-  if (error && !isMissingCashTableError(error)) throw error;
+  if (error && !isMissingCashTableError(error)) {
+    throw new Error(extractCashErrorMessage(error, 'Erro ao excluir regra.'));
+  }
 }
 
 export function getMergedSavedFilePasswords(tenantId: string, rules: CashRuleRow[] = []): SavedCashFilePassword[] {
@@ -389,16 +428,18 @@ export async function upsertCashSavedFilePassword(
   }
 
   try {
-    const { data: existing, error: findErr } = await runWithTenantClient<CashRuleRow>((client) =>
-      client
-        .from('cash_reconciliation_rules')
-        .select('*')
-        .eq('tenant_id', tenantId)
-        .eq('rule_type', 'engine_setting')
-        .eq('pattern', pattern)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
+    const { data: existing, error: findErr } = await runWithTenantClient<CashRuleRow>(
+      (client) =>
+        client
+          .from('cash_reconciliation_rules')
+          .select('*')
+          .eq('tenant_id', tenantId)
+          .eq('rule_type', 'engine_setting')
+          .eq('pattern', pattern)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      { expectRow: true }
     );
 
     if (findErr && isMissingCashTableError(findErr)) {
@@ -409,18 +450,20 @@ export async function upsertCashSavedFilePassword(
       if (existing.target_value === params.password && existing.is_active !== false) {
         return { rule: existing, schemaMissing: false };
       }
-      const { data: updated, error: updErr } = await runWithTenantClient<CashRuleRow>((client) =>
-        client
-          .from('cash_reconciliation_rules')
-          .update({ target_value: params.password, is_active: true, notes: label })
-          .eq('id', existing.id)
-          .eq('tenant_id', tenantId)
-          .select('*')
-          .single()
+      const { data: updated, error: updErr } = await runWithTenantClient<CashRuleRow>(
+        (client) =>
+          client
+            .from('cash_reconciliation_rules')
+            .update({ target_value: params.password, is_active: true, notes: label })
+            .eq('id', existing.id)
+            .eq('tenant_id', tenantId)
+            .select('*')
+            .maybeSingle(),
+        { expectRow: true }
       );
-      if (updErr) {
+      if (updErr || !updated) {
         if (isMissingCashTableError(updErr)) return { rule: null, schemaMissing: true };
-        throw updErr;
+        throw new Error(extractCashErrorMessage(updErr, 'Erro ao atualizar senha fixa salva.'));
       }
       return { rule: updated, schemaMissing: false };
     }
@@ -454,13 +497,18 @@ export async function deleteCashSavedFilePassword(
   const fullPattern = patternOrKey.startsWith(FILE_PASSWORD_RULE_PREFIX)
     ? patternOrKey
     : `${FILE_PASSWORD_RULE_PREFIX}${patternOrKey}`;
-  const { error } = await runWithTenantClient((client) =>
-    client
-      .from('cash_reconciliation_rules')
-      .delete()
-      .eq('tenant_id', tenantId)
-      .eq('rule_type', 'engine_setting')
-      .eq('pattern', fullPattern)
+  const { error } = await runWithTenantClient(
+    (client) =>
+      client
+        .from('cash_reconciliation_rules')
+        .delete()
+        .eq('tenant_id', tenantId)
+        .eq('rule_type', 'engine_setting')
+        .eq('pattern', fullPattern)
+        .select('id'),
+    { fallbackOnEmptyArray: true }
   );
-  if (error && !isMissingCashTableError(error)) throw error;
+  if (error && !isMissingCashTableError(error)) {
+    throw new Error(extractCashErrorMessage(error, 'Erro ao remover senha fixa salva.'));
+  }
 }

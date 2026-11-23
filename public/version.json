@@ -1,5 +1,5 @@
 {
-  "version": "8.3.7",
-  "buildDate": "2026-11-23T01:43:56.713Z",
-  "summary": "Desbloqueio Automático de Planilhas Protegidas (C6 Pay / 6 Primeiros Dígitos do CNPJ) com Memória de Senha Fixa por Empresa"
+  "version": "8.3.8",
+  "buildDate": "2026-11-23T02:04:16.920Z",
+  "summary": "Correção Definitiva de Salvamento Multiempresa (RLS allowed_companies + HTTP 406) na Conferência de Caixa"
 }
