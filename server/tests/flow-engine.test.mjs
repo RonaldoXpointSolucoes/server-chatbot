@@ -195,8 +195,8 @@ function createMockSupabase(initialTables = {}) {
         flow_versions: [],
         companies: [{ id: 'tenant-1', name: 'X-Point', settings: { businessName: 'FoodNext Test' } }],
         tenants: [{ id: 'tenant-1', name: 'X-Point', settings: {} }],
-        contacts: [{ tenant_id: 'tenant-1', whatsapp_jid: '5511975960999@s.whatsapp.net', name: 'Ronaldo' }],
-        conversations: [{ id: 'conv-1', tenant_id: 'tenant-1', status: 'open', ai_paused: false, tags: [] }],
+        contacts: [{ id: 'contact-1', tenant_id: 'tenant-1', whatsapp_jid: '5511975960999@s.whatsapp.net', name: 'Ronaldo', tags: [] }],
+        conversations: [{ id: 'conv-1', tenant_id: 'tenant-1', contact_id: 'contact-1', status: 'open', ai_paused: false, assigned_to: null }],
         messages: [],
         execution_logs: [],
         wa_outgoing_messages: [],
@@ -475,7 +475,7 @@ test('FlowEngine integra escopo de instância, retry em buttons, condition items
     assert.equal(replySend.payload.text, 'Recebemos: ERRO PIX');
     assert.deepEqual(replySend.options.quoted, rawMsgInbound);
     assert.equal(sock.sent[5].payload.text, 'Envie o anexo sem legenda:');
-    assert.ok(mockDb.tables.conversations[0].tags.includes('vip-teste'));
+    assert.ok(mockDb.tables.contacts[0].tags.includes('vip-teste'));
 
     // 6. Envio de arquivo sem legenda (textMessage === '', mediaUrl presente) -> Handoff envia aviso e pausa IA!
     await engine.processIncomingMessage({

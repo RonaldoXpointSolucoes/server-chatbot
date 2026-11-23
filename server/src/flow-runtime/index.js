@@ -922,11 +922,14 @@ export class FlowEngine {
                     await this.logExecution(convState.id, stateRef, 'Atendimento transferido para humano');
 
                     if (conversationId) {
-                        await this.db.from('conversations').update({
+                        const { error: handoffUpdErr } = await this.db.from('conversations').update({
                             status: 'open',
                             ai_paused: true,
-                            assigned_agent_id: block.assigned_agent_id || null
+                            assigned_to: block.assigned_to || block.assigned_agent_id || null
                         }).eq('id', conversationId);
+                        if (handoffUpdErr) {
+                            console.warn('[FlowEngine] Aviso ao atualizar conversa no handoff:', handoffUpdErr.message);
+                        }
                     }
                     isPaused = true;
                 }
@@ -975,15 +978,21 @@ export class FlowEngine {
                         } else if (cmdAction === 'close_ticket') {
                             await this.db.from('conversations').update({ status: 'closed' }).eq('id', conversationId);
                         } else if (cmdAction === 'add_tag' && cmdValue) {
-                            const { data: convRow } = await this.db.from('conversations').select('tags').eq('id', conversationId).maybeSingle();
-                            const existingTags = Array.isArray(convRow?.tags) ? convRow.tags : [];
-                            if (!existingTags.includes(cmdValue)) {
-                                await this.db.from('conversations').update({ tags: [...existingTags, cmdValue] }).eq('id', conversationId);
+                            const { data: convRow } = await this.db.from('conversations').select('contact_id').eq('id', conversationId).maybeSingle();
+                            if (convRow?.contact_id) {
+                                const { data: contactRow } = await this.db.from('contacts').select('tags').eq('id', convRow.contact_id).maybeSingle();
+                                const existingTags = Array.isArray(contactRow?.tags) ? contactRow.tags : [];
+                                if (!existingTags.includes(cmdValue)) {
+                                    await this.db.from('contacts').update({ tags: [...existingTags, cmdValue] }).eq('id', convRow.contact_id);
+                                }
                             }
                         } else if (cmdAction === 'remove_tag' && cmdValue) {
-                            const { data: convRow } = await this.db.from('conversations').select('tags').eq('id', conversationId).maybeSingle();
-                            const existingTags = Array.isArray(convRow?.tags) ? convRow.tags : [];
-                            await this.db.from('conversations').update({ tags: existingTags.filter(t => t !== cmdValue) }).eq('id', conversationId);
+                            const { data: convRow } = await this.db.from('conversations').select('contact_id').eq('id', conversationId).maybeSingle();
+                            if (convRow?.contact_id) {
+                                const { data: contactRow } = await this.db.from('contacts').select('tags').eq('id', convRow.contact_id).maybeSingle();
+                                const existingTags = Array.isArray(contactRow?.tags) ? contactRow.tags : [];
+                                await this.db.from('contacts').update({ tags: existingTags.filter(t => t !== cmdValue) }).eq('id', convRow.contact_id);
+                            }
                         } else if (cmdAction === 'update_contact_name' && cmdValue) {
                             await this.db.from('contacts').update({ custom_name: cmdValue }).eq('tenant_id', tenantId).eq('whatsapp_jid', convState.remote_jid);
                             convState.variables.nome_cliente = cmdValue;
