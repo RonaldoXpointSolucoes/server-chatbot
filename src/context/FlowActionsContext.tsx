@@ -12,6 +12,7 @@ export interface BlockTheme {
 export const BLOCK_THEMES: Record<string, BlockTheme> = {
     // Bubbles (Laranja / Coral)
     send_message: { category: 'Bubbles', iconColor: 'text-orange-500', iconHex: '#ea580c', tagBg: 'bg-orange-500/20', tagText: 'text-orange-300', tagBorder: 'border-orange-500/30' },
+    text: { category: 'Bubbles', iconColor: 'text-orange-500', iconHex: '#ea580c', tagBg: 'bg-orange-500/20', tagText: 'text-orange-300', tagBorder: 'border-orange-500/30' },
     image: { category: 'Bubbles', iconColor: 'text-orange-500', iconHex: '#ea580c', tagBg: 'bg-orange-500/20', tagText: 'text-orange-300', tagBorder: 'border-orange-500/30' },
     video: { category: 'Bubbles', iconColor: 'text-orange-500', iconHex: '#ea580c', tagBg: 'bg-orange-500/20', tagText: 'text-orange-300', tagBorder: 'border-orange-500/30' },
     embed: { category: 'Bubbles', iconColor: 'text-orange-500', iconHex: '#ea580c', tagBg: 'bg-orange-500/20', tagText: 'text-orange-300', tagBorder: 'border-orange-500/30' },
@@ -19,6 +20,7 @@ export const BLOCK_THEMES: Record<string, BlockTheme> = {
 
     // Inputs (Laranja / Coral)
     ask: { category: 'Inputs', iconColor: 'text-orange-500', iconHex: '#ea580c', tagBg: 'bg-orange-500/20', tagText: 'text-orange-300', tagBorder: 'border-orange-500/30' },
+    text_input: { category: 'Inputs', iconColor: 'text-orange-500', iconHex: '#ea580c', tagBg: 'bg-orange-500/20', tagText: 'text-orange-300', tagBorder: 'border-orange-500/30' },
     number_input: { category: 'Inputs', iconColor: 'text-orange-500', iconHex: '#ea580c', tagBg: 'bg-orange-500/20', tagText: 'text-orange-300', tagBorder: 'border-orange-500/30' },
     email_input: { category: 'Inputs', iconColor: 'text-orange-500', iconHex: '#ea580c', tagBg: 'bg-orange-500/20', tagText: 'text-orange-300', tagBorder: 'border-orange-500/30' },
     website_input: { category: 'Inputs', iconColor: 'text-orange-500', iconHex: '#ea580c', tagBg: 'bg-orange-500/20', tagText: 'text-orange-300', tagBorder: 'border-orange-500/30' },
@@ -77,6 +79,8 @@ export interface FlowActionsContextType {
     onAddBlockToGroup: (groupId: string, blockData: any, targetIndex?: number) => void;
     selectedBlockId: string | null;
     setSelectedBlockId: (id: string | null) => void;
+    onOpenBlockInstructions?: (flowType: string) => void;
+    onGenerateBlockExample?: (flowType: string) => void;
 }
 
 export const FlowActionsContext = createContext<FlowActionsContextType | null>(null);

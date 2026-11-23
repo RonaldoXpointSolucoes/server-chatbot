@@ -12,6 +12,16 @@ if (typeof window !== 'undefined' && !(window as any).EmptyRanges) {
   }
 }
 
+// Em modo DEV (localhost), garante remoção de Service Workers legados para nunca servir bundles/queries em cache
+if (import.meta.env.DEV && typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then((regs) => {
+    regs.forEach((r) => r.unregister().catch(() => {}));
+  }).catch(() => {});
+  if ('caches' in window) {
+    caches.delete('static-resources').catch(() => {});
+  }
+}
+
 // Inicializa a captura centralizada de erros no frontend
 setupGlobalErrorLogging();
 

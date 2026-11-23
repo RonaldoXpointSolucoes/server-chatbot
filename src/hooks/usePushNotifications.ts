@@ -175,8 +175,20 @@ export function usePushNotifications() {
         // --- FIM SINCRONIZAÇÃO RBAC & MAPA DE CAIXAS ---
 
         return () => clearInterval(syncInterval);
-      } catch (error) {
-        console.error('Erro ao inicializar push notifications:', error);
+      } catch (error: any) {
+        const errName = String(error?.name || '');
+        const errMsg = String(error?.message || '');
+        const isExpectedUnsupportedPush =
+          errName === 'AbortError' ||
+          errName === 'NotAllowedError' ||
+          errName === 'NotSupportedError' ||
+          errMsg.includes('push service not available') ||
+          errMsg.includes('Registration failed');
+        if (isExpectedUnsupportedPush) {
+          console.info('[Push] Serviço de notificações push indisponível ou não autorizado neste navegador:', errMsg || errName);
+        } else {
+          console.warn('Aviso ao inicializar push notifications:', error);
+        }
       }
     };
 

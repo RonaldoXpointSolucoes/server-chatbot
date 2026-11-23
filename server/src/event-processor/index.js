@@ -2243,6 +2243,8 @@ class EventProcessor {
                                       conversationId: b.conversationId,
                                       jid: b.jid,
                                       textMessage: b.textMessage,
+                                      mediaUrl: b.mediaUrl || null,
+                                      messageType: b.msgType || 'text',
                                       rawPayload: b.rawMsg,
                                       sock: b.sock
                                   });

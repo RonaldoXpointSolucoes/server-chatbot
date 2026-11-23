@@ -1,21 +1,52 @@
 import { supabase } from '../supabase.js';
 import { normalizeUrlsInText } from './url-helper.js';
+import {
+    evaluateConditionBlock,
+    resolveMatchedOptionIndex,
+    buildChoiceHandleCandidates,
+    validateAndFormatBlockInput,
+    isFlowAllowedForInstance,
+    inferMediaMimeAndType,
+    buildWebhookFetchOptions,
+    extractJsonPath,
+    executeSandboxedScript,
+    resolveAbTestBranch,
+    createTickLoopGuard,
+} from './flow-helpers.js';
 
-class FlowEngine {
-    constructor() {
-        this.sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+export class FlowEngine {
+    constructor(deps = {}) {
+        this.db = deps.supabase || supabase;
+        this.sleep = deps.sleep || ((ms) => new Promise(resolve => setTimeout(resolve, ms)));
+        this.lastInboundPayloads = new Map();
     }
 
     /**
      * Ponto de entrada: Recebe todas as mensagens "inbound" processadas
      * Retorna true se a mensagem foi tratada pelo FlowEngine (evitando double-talk de bots IA)
      */
-    async processIncomingMessage({ tenantId, instanceId, conversationId, jid, textMessage, rawPayload, sock }) {
-        if (!textMessage) return false;
-        
+    async processIncomingMessage({ tenantId, instanceId, conversationId, jid, textMessage = '', mediaUrl = null, messageType = 'text', rawPayload = null, sock = null }) {
+        const normalizedText = textMessage !== undefined && textMessage !== null ? String(textMessage) : '';
+        if (!normalizedText && !mediaUrl) return false;
+
+        if (conversationId && rawPayload) {
+            this.lastInboundPayloads.set(conversationId, rawPayload);
+            if (this.lastInboundPayloads.size > 500) {
+                const oldestKey = this.lastInboundPayloads.keys().next().value;
+                this.lastInboundPayloads.delete(oldestKey);
+            }
+        }
+        const runtimeMeta = {
+            mediaUrl: mediaUrl || null,
+            messageType: messageType || 'text',
+            rawPayload: rawPayload || (conversationId ? this.lastInboundPayloads.get(conversationId) : null),
+            subflowDepth: 0,
+            visitedFlowIds: [],
+        };
+
         try {
             // 1. Procurar estado de conversa ativo no BOT (ordenado pelo mais recente para evitar falha caso haja duplicata histórica)
-            const { data: activeStates, error: stateErr } = await supabase
+            const { data: activeStates, error: stateErr } = await this.db
                 .from('conversation_states')
                 .select('*')
                 .eq('tenant_id', tenantId)
@@ -34,7 +65,7 @@ class FlowEngine {
             // Higieniza eventuais estados BOT_ACTIVE duplicados antigos do mesmo contato
             if (activeStates && activeStates.length > 1) {
                 const duplicateIds = activeStates.slice(1).map(s => s.id);
-                await supabase.from('conversation_states').update({ status: 'FINISHED' }).in('id', duplicateIds);
+                await this.db.from('conversation_states').update({ status: 'FINISHED' }).in('id', duplicateIds);
             }
 
             // Expiração automática (TTL de 12h) para sessões BOT_ACTIVE abandonadas pelo cliente
@@ -51,11 +82,11 @@ class FlowEngine {
             if (convState) {
                 // Tem uma conversa ativa, retoma o fluxo com a entrada do usuário
                 console.log(`[FlowEngine] Retomando fluxo ativo para ${jid} (state: ${convState.id})`);
-                await this.resumeFlow(tenantId, instanceId, conversationId, jid, convState, textMessage, sock);
+                await this.resumeFlow(tenantId, instanceId, conversationId, jid, convState, normalizedText, sock, runtimeMeta);
                 return true;
             } else {
                 // Não tem estado ativo, verificar gatilhos (Triggers)
-                const matched = await this.matchTriggers(tenantId, instanceId, conversationId, jid, textMessage, sock);
+                const matched = await this.matchTriggers(tenantId, instanceId, conversationId, jid, normalizedText, sock, runtimeMeta);
                 return Boolean(matched);
             }
 
@@ -68,8 +99,8 @@ class FlowEngine {
     /**
      * Verifica as regras de disparo (Triggers) dos Fluxos Públicos
      */
-    async matchTriggers(tenantId, instanceId, conversationId, jid, textMessage, sock) {
-        const { data: flows, error } = await supabase
+    async matchTriggers(tenantId, instanceId, conversationId, jid, textMessage, sock, runtimeMeta = {}) {
+        const { data: flows, error } = await this.db
             .from('flows')
             .select(`
                 id, 
@@ -83,9 +114,21 @@ class FlowEngine {
 
         if (error || !flows || flows.length === 0) return false;
 
-        for (const flow of flows) {
-            const rules = typeof flow.trigger_rules === 'string' ? JSON.parse(flow.trigger_rules) : flow.trigger_rules;
-            const isMatch = this.checkTriggerRules(rules, textMessage);
+        // Filtra apenas fluxos permitidos para a instância/caixa atual e prioriza regras específicas sobre wildcard ALL
+        const scopedFlows = flows
+            .map(flow => {
+                const parsedRules = typeof flow.trigger_rules === 'string' ? JSON.parse(flow.trigger_rules) : (flow.trigger_rules || []);
+                return { ...flow, parsedRules };
+            })
+            .filter(flow => isFlowAllowedForInstance({ trigger_rules: flow.parsedRules }, instanceId))
+            .sort((a, b) => {
+                const aHasSpecific = a.parsedRules.some(r => r && ['EXACT', 'STARTS_WITH', 'CONTAINS'].includes(r.type));
+                const bHasSpecific = b.parsedRules.some(r => r && ['EXACT', 'STARTS_WITH', 'CONTAINS'].includes(r.type));
+                return Number(bHasSpecific) - Number(aHasSpecific);
+            });
+
+        for (const flow of scopedFlows) {
+            const isMatch = this.checkTriggerRules(flow.parsedRules, textMessage);
             
             if (isMatch) {
                 const nodes = flow.flow_versions?.nodes || [];
@@ -104,8 +147,8 @@ class FlowEngine {
                 let tenantData = null;
                 try {
                     const [{ data: c }, { data: t }] = await Promise.all([
-                        supabase.from('companies').select('name, settings').eq('id', tenantId).maybeSingle(),
-                        supabase.from('tenants').select('name, settings').eq('id', tenantId).maybeSingle()
+                        this.db.from('companies').select('name, settings').eq('id', tenantId).maybeSingle(),
+                        this.db.from('tenants').select('name, settings').eq('id', tenantId).maybeSingle()
                     ]);
                     companyData = c;
                     tenantData = t;
@@ -129,7 +172,7 @@ class FlowEngine {
                 // Busca nome do contato se existir cadastrado
                 let customerName = jid.split('@')[0];
                 try {
-                    const { data: contact } = await supabase
+                    const { data: contact } = await this.db
                         .from('contacts')
                         .select('name, custom_name, fantasy_name')
                         .eq('tenant_id', tenantId)
@@ -153,7 +196,7 @@ class FlowEngine {
                 ) % 24;
                 const saudacao = brtHour >= 5 && brtHour < 12 ? 'Bom dia' : (brtHour >= 12 && brtHour < 18 ? 'Boa tarde' : 'Boa noite');
 
-                const { data: newState, error: insertErr } = await supabase
+                const { data: newState, error: insertErr } = await this.db
                     .from('conversation_states')
                     .insert({
                         tenant_id: tenantId,
@@ -161,6 +204,7 @@ class FlowEngine {
                         flow_version_id: flow.active_version_id,
                         current_node_id: startPoint.blockId ? `${startPoint.groupId}:${startPoint.blockId}` : startPoint.groupId,
                         variables: {
+                            __flow_id: flow.id,
                             pushName: customerName,
                             nome_cliente: customerName,
                             saudacao: saudacao,
@@ -188,7 +232,11 @@ class FlowEngine {
                     return false;
                 }
 
-                await this.executeFlowLoop(tenantId, instanceId, conversationId, newState, nodes, edges, sock, startPoint);
+                await this.executeFlowLoop(tenantId, instanceId, conversationId, newState, nodes, edges, sock, startPoint, {
+                    ...runtimeMeta,
+                    visitedFlowIds: [flow.id],
+                    subflowDepth: 0,
+                });
                 return true;
             }
         }
@@ -198,13 +246,15 @@ class FlowEngine {
     checkTriggerRules(rules, text) {
         if (!rules || !Array.isArray(rules) || rules.length === 0) return false;
         
-        const lowerText = text.toLowerCase().trim();
+        const lowerText = String(text || '').toLowerCase().trim();
         return rules.some(rule => {
-            const ruleValue = (rule.value || '').toLowerCase();
+            if (!rule || rule.type === '__META__' || rule.keyword === '__META__') return false;
+            const ruleValue = String(rule.value || rule.keyword || '').toLowerCase().trim();
+            if (!lowerText && rule.type !== 'ALL') return false;
             switch (rule.type) {
-                case 'EXACT': return lowerText === ruleValue;
-                case 'CONTAINS': return lowerText.includes(ruleValue);
-                case 'STARTS_WITH': return lowerText.startsWith(ruleValue);
+                case 'EXACT': return ruleValue.length > 0 && lowerText === ruleValue;
+                case 'CONTAINS': return ruleValue.length > 0 && lowerText.includes(ruleValue);
+                case 'STARTS_WITH': return ruleValue.length > 0 && lowerText.startsWith(ruleValue);
                 case 'ALL': return true;
                 default: return false;
             }
@@ -257,8 +307,8 @@ class FlowEngine {
     /**
      * Retoma a execução quando o usuário responde
      */
-    async resumeFlow(tenantId, instanceId, conversationId, jid, convState, textMessage, sock) {
-        const { data: fVersion } = await supabase
+    async resumeFlow(tenantId, instanceId, conversationId, jid, convState, textMessage, sock, runtimeMeta = {}) {
+        const { data: fVersion } = await this.db
             .from('flow_versions')
             .select('nodes, edges')
             .eq('id', convState.flow_version_id)
@@ -283,39 +333,57 @@ class FlowEngine {
             return;
         }
 
-        // Se estava aguardando input (ask, buttons, rating, website, telefone, etc.)
         const flowType = currBlock.flowType || currBlock.type;
         const varName = currBlock.var_name || currBlock.data?.var_name || 'user_response';
 
-        let sanitizedValue = textMessage.trim();
+        const validation = validateAndFormatBlockInput(currBlock, {
+            textMessage,
+            mediaUrl: runtimeMeta.mediaUrl || null,
+            messageType: runtimeMeta.messageType || 'text',
+        });
 
-        // Tratamento e validação conforme a variável do WhatsApp
+        convState.variables = convState.variables || {};
+
+        if (!validation.valid) {
+            const currentRetries = Number(convState.variables.__retry_count || 0) + 1;
+            const maxRetries = Math.max(0, Number(currBlock.max_retries ?? 3));
+            convState.variables.__retry_count = currentRetries;
+            await this.db.from('conversation_states').update({ variables: convState.variables }).eq('id', convState.id);
+
+            if (currentRetries <= maxRetries) {
+                if (validation.errorMessage) {
+                    await this.sendFlowMessageResilient({
+                        tenantId,
+                        instanceId,
+                        conversationId,
+                        jid,
+                        sock,
+                        payload: { text: `⚠️ ${validation.errorMessage}` },
+                        textContent: validation.errorMessage,
+                        messageType: 'text',
+                    });
+                }
+                return;
+            }
+            await this.logExecution(convState.id, currentRef, 'MAX_RETRIES_EXCEEDED', validation.errorMessage);
+            await this.finishState(convState.id);
+            return;
+        }
+
+        let sanitizedValue = validation.value || String(textMessage || '').trim();
         if (flowType === 'phone_input') {
             const digits = sanitizedValue.replace(/\D/g, '');
             sanitizedValue = (digits.length === 10 || digits.length === 11) ? `55${digits}` : digits;
-        } else if (flowType === 'website_input') {
-            if (!sanitizedValue.startsWith('http://') && !sanitizedValue.startsWith('https://')) {
-                sanitizedValue = `https://${sanitizedValue}`;
-            }
-        } else if (flowType === 'number_input') {
-            const numOnly = sanitizedValue.replace(/[^0-9.,]/g, '').replace(',', '.');
-            sanitizedValue = numOnly || sanitizedValue;
-        } else if (flowType === 'email_input') {
-            sanitizedValue = sanitizedValue.toLowerCase().replace(/\s/g, '');
         } else if (flowType === 'rating') {
-            const matchDigit = sanitizedValue.match(/[1-5]/);
-            sanitizedValue = matchDigit ? matchDigit[0] : sanitizedValue;
-            convState.variables = convState.variables || {};
             convState.variables['avaliacao_nota'] = sanitizedValue;
         }
 
+        delete convState.variables.__retry_count;
         if (varName) {
-            convState.variables = convState.variables || {};
             convState.variables[varName] = sanitizedValue;
-            await supabase.from('conversation_states').update({ variables: convState.variables }).eq('id', convState.id);
         }
+        await this.db.from('conversation_states').update({ variables: convState.variables }).eq('id', convState.id);
 
-        // Descobre o próximo bloco / grupo
         const nextPoint = this.resolveNextPoint(nodes, edges, parentGroup, currBlock, sanitizedValue, convState.variables);
 
         if (!nextPoint) {
@@ -324,133 +392,105 @@ class FlowEngine {
             return;
         }
 
-        await this.executeFlowLoop(tenantId, instanceId, conversationId, convState, nodes, edges, sock, nextPoint);
+        const visitedFlowIds = convState.variables.__flow_id ? [convState.variables.__flow_id] : (runtimeMeta.visitedFlowIds || []);
+        await this.executeFlowLoop(tenantId, instanceId, conversationId, convState, nodes, edges, sock, nextPoint, {
+            ...runtimeMeta,
+            visitedFlowIds,
+            subflowDepth: runtimeMeta.subflowDepth || 0,
+        });
     }
 
     /**
-     * Resolve qual é o próximo nó / bloco
+     * Resolve qual é o próximo nó / bloco (suporta buttons/poll/pic_choice/condition/ab_test e fluxo intra-grupo)
      */
-    resolveNextPoint(nodes, edges, currentGroup, currentBlock, userResponse = '', variables = {}) {
+    resolveNextPoint(nodes, edges, currentGroup, currentBlock, userResponse = '', variables = {}, overrideHandleIds = null) {
+        const toTargetPoint = (edge) => {
+            if (!edge) return null;
+            const targetGroup = nodes.find(n => n.id === edge.target);
+            if (!targetGroup) return null;
+            return {
+                groupId: targetGroup.id,
+                blockId: targetGroup.data?.blocks?.[0]?.id || null,
+                isLegacy: targetGroup.type !== 'typebot_group'
+            };
+        };
+
+        if (Array.isArray(overrideHandleIds) && overrideHandleIds.length > 0) {
+            const directEdge = edges.find(e =>
+                e.source === currentGroup?.id && overrideHandleIds.includes(e.sourceHandle)
+            );
+            const pt = toTargetPoint(directEdge);
+            if (pt) return pt;
+        }
+
         const flowType = currentBlock.flowType || currentBlock.type;
 
-        // Se for buttons, poll ou selection, tenta bater com as arestas de saída de cada opção
-        if (flowType === 'buttons' || flowType === 'cards' || flowType === 'pic_choice' || flowType === 'poll') {
-            const options = currentBlock.options || [];
-            const cleanResp = userResponse.toLowerCase().trim();
-
-            let matchedIndex = -1;
-            const numChoice = parseInt(cleanResp, 10);
-            if (!isNaN(numChoice) && numChoice >= 1 && numChoice <= options.length) {
-                matchedIndex = numChoice - 1;
-            } else {
-                matchedIndex = options.findIndex(opt => {
-                    const cleanOpt = opt.toLowerCase().trim();
-                    return cleanResp === cleanOpt || cleanOpt.includes(cleanResp) || cleanResp.includes(cleanOpt);
-                });
-            }
+        // 1. Escolhas estruturadas (buttons, cards, pic_choice, poll)
+        if (['buttons', 'cards', 'pic_choice', 'poll'].includes(flowType)) {
+            const options = Array.isArray(currentBlock.options) ? currentBlock.options : [];
+            const matchedIndex = resolveMatchedOptionIndex(userResponse, options);
 
             if (matchedIndex !== -1) {
                 const optPrefix = `${matchedIndex + 1}`;
                 const matchedOption = options[matchedIndex];
+                const matchedLabel = typeof matchedOption === 'string'
+                    ? matchedOption
+                    : matchedOption?.label || matchedOption?.title || '';
+                const handleCandidates = buildChoiceHandleCandidates(currentBlock.id, matchedIndex, matchedOption);
 
-                // 1. Busca aresta cuja label comece exatamente com o número escolhido ("1 -", "2 -", etc)
-                let edge = edges.find(e => 
+                let edge = edges.find(e =>
                     e.source === currentGroup?.id && (
+                        handleCandidates.includes(e.sourceHandle) ||
                         e.label?.startsWith(`${optPrefix} -`) ||
                         e.label?.startsWith(`${optPrefix}.`) ||
                         e.label?.startsWith(`${optPrefix} `) ||
-                        e.label === matchedOption ||
-                        e.sourceHandle === `${currentBlock.id}-${matchedIndex}` ||
-                        e.sourceHandle === `${matchedIndex}`
+                        (matchedLabel && e.label === matchedLabel)
                     )
                 );
 
-                // 2. Se não achou, pega as arestas conectadas a este grupo na ordem do array
+                // Se há apenas uma saída genérica no grupo (não ligada a outro botão), segue ela
                 if (!edge) {
-                    const blockEdges = edges.filter(e => e.source === currentGroup?.id);
-                    if (blockEdges.length > matchedIndex) {
-                        edge = blockEdges[matchedIndex];
+                    const genericGroupEdges = edges.filter(e =>
+                        e.source === currentGroup?.id &&
+                        (!e.sourceHandle || e.sourceHandle === currentBlock.id || e.sourceHandle === currentGroup?.id)
+                    );
+                    if (genericGroupEdges.length === 1) {
+                        edge = genericGroupEdges[0];
+                    } else {
+                        const blockEdges = edges.filter(e => e.source === currentGroup?.id && e.sourceHandle?.startsWith(`${currentBlock.id}`));
+                        if (blockEdges.length > matchedIndex) {
+                            edge = blockEdges[matchedIndex];
+                        }
                     }
                 }
 
-                if (edge) {
-                    const targetGroup = nodes.find(n => n.id === edge.target);
-                    if (targetGroup) {
-                        return {
-                            groupId: targetGroup.id,
-                            blockId: targetGroup.data?.blocks?.[0]?.id || null,
-                            isLegacy: targetGroup.type !== 'typebot_group'
-                        };
-                    }
-                }
+                const pt = toTargetPoint(edge);
+                if (pt) return pt;
             }
         }
 
-        // Se for um bloco condicional (condition)
+        // 2. Bloco condicional multi-regras (block.items[] ou legado)
         if (flowType === 'condition') {
-            const varName = currentBlock.variable || currentBlock.var_name || currentBlock.data?.variable || currentBlock.data?.var_name;
-            const operator = currentBlock.operator || currentBlock.data?.operator || 'is_set';
-            const expectedValue = (currentBlock.value || currentBlock.data?.value || '').toLowerCase().trim();
-            const actualValue = (variables && varName && variables[varName] !== undefined ? String(variables[varName]) : '').toLowerCase().trim();
-
-            let isTrue = false;
-            switch (operator) {
-                case 'equals':
-                case '==':
-                case '=':
-                    isTrue = actualValue === expectedValue;
-                    break;
-                case 'not_equals':
-                case '!=':
-                    isTrue = actualValue !== expectedValue;
-                    break;
-                case 'contains':
-                    isTrue = actualValue.includes(expectedValue);
-                    break;
-                case 'is_set':
-                case 'exists':
-                    isTrue = actualValue.length > 0;
-                    break;
-                case 'greater_than':
-                case '>':
-                    isTrue = Number(actualValue) > Number(expectedValue);
-                    break;
-                case 'less_than':
-                case '<':
-                    isTrue = Number(actualValue) < Number(expectedValue);
-                    break;
-                default:
-                    isTrue = actualValue.length > 0;
-            }
-
-            const targetBranch = isTrue ? 'true' : 'false';
-            let condEdge = edges.find(e => 
+            const evalRes = evaluateConditionBlock(currentBlock, variables);
+            let condEdge = edges.find(e =>
                 e.source === currentGroup?.id && (
-                    e.sourceHandle === targetBranch ||
-                    e.label?.toLowerCase() === (isTrue ? 'sim' : 'não') ||
-                    e.label?.toLowerCase() === (isTrue ? 'verdadeiro' : 'falso') ||
-                    e.label?.toLowerCase() === targetBranch
+                    evalRes.handleIds.includes(e.sourceHandle) ||
+                    (evalRes.matched && ['sim', 'verdadeiro', 'true'].includes((e.label || '').toLowerCase())) ||
+                    (!evalRes.matched && ['não', 'nao', 'senão', 'senao', 'falso', 'false', 'else'].includes((e.label || '').toLowerCase()))
                 )
             );
 
-            if (!condEdge) {
+            // Somente usa fallback posicional legado se NENHUMA aresta possuir sourceHandle moderno
+            if (!condEdge && (!currentBlock.items || currentBlock.items.length === 0)) {
                 const allCondEdges = edges.filter(e => e.source === currentGroup?.id);
-                condEdge = isTrue ? allCondEdges[0] : (allCondEdges[1] || allCondEdges[0]);
+                condEdge = evalRes.matched ? allCondEdges[0] : (allCondEdges[1] || null);
             }
 
-            if (condEdge) {
-                const targetGroup = nodes.find(n => n.id === condEdge.target);
-                if (targetGroup) {
-                    return {
-                        groupId: targetGroup.id,
-                        blockId: targetGroup.data?.blocks?.[0]?.id || null,
-                        isLegacy: targetGroup.type !== 'typebot_group'
-                    };
-                }
-            }
+            const pt = toTargetPoint(condEdge);
+            if (pt) return pt;
         }
 
-        // Se dentro do mesmo grupo ainda há blocos seguintes
+        // 3. Próximo bloco sequencial dentro do mesmo grupo
         if (currentGroup?.data?.blocks) {
             const blocks = currentGroup.data.blocks;
             const idx = blocks.findIndex(b => b.id === currentBlock.id);
@@ -463,37 +503,40 @@ class FlowEngine {
             }
         }
 
-        // Se for o último bloco do grupo (ou não tiver próximo interno), segue a aresta saindo do bloco ou do grupo
+        // 4. Último bloco do grupo: segue aresta saindo do bloco ou do grupo (excluindo handles específicos não casados)
         let outgoingEdge = edges.find(e => e.sourceHandle === currentBlock.id);
         if (!outgoingEdge && currentGroup) {
-            outgoingEdge = edges.find(e => e.source === currentGroup.id);
+            outgoingEdge = edges.find(e =>
+                e.source === currentGroup.id &&
+                (!e.sourceHandle || (!String(e.sourceHandle).includes('-opt-') && !String(e.sourceHandle).includes('-cond-') && !String(e.sourceHandle).endsWith('-else')))
+            );
         }
 
-        if (outgoingEdge) {
-            const targetGroup = nodes.find(n => n.id === outgoingEdge.target);
-            if (targetGroup) {
-                return {
-                    groupId: targetGroup.id,
-                    blockId: targetGroup.data?.blocks?.[0]?.id || null,
-                    isLegacy: targetGroup.type !== 'typebot_group'
-                };
-            }
-        }
-
-        return null;
+        return toTargetPoint(outgoingEdge);
     }
 
     /**
-     * Loop Ticking de Execução
+     * Loop Ticking de Execução com guarda anti-loop por tick e profundidade de subfluxos
      */
-    async executeFlowLoop(tenantId, instanceId, conversationId, convState, nodes, edges, sock, startPoint) {
+    async executeFlowLoop(tenantId, instanceId, conversationId, convState, nodes, edges, sock, startPoint, runtimeMeta = {}) {
         let isPaused = false;
         let currentPoint = startPoint;
         let iterationCount = 0;
-        const MAX_ITERATIONS = 25;
+        const MAX_ITERATIONS = 30;
+        const tickGuard = createTickLoopGuard(MAX_ITERATIONS, 2);
+        const subflowDepth = Number(runtimeMeta.subflowDepth || 0);
+        const visitedFlowIds = new Set(Array.isArray(runtimeMeta.visitedFlowIds) ? runtimeMeta.visitedFlowIds : []);
 
         while (!isPaused && currentPoint && iterationCount < MAX_ITERATIONS) {
             iterationCount++;
+
+            const loopCheck = tickGuard.recordVisit(currentPoint.groupId, currentPoint.blockId || '0');
+            if (loopCheck.aborted) {
+                console.warn(`[FlowEngine] Anti-Loop acionado para state ${convState.id}: ${loopCheck.reason}`);
+                await this.logExecution(convState.id, `${currentPoint.groupId}:${currentPoint.blockId || '0'}`, 'LOOP_ABORTED', loopCheck.reason);
+                await this.finishState(convState.id);
+                return;
+            }
 
             const parentGroup = nodes.find(n => n.id === currentPoint.groupId);
             if (!parentGroup) {
@@ -516,7 +559,7 @@ class FlowEngine {
             // Atualiza checkpoint do estado
             const stateRef = currentPoint.blockId ? `${currentPoint.groupId}:${currentPoint.blockId}` : currentPoint.groupId;
             convState.current_node_id = stateRef;
-            await supabase.from('conversation_states').update({ current_node_id: stateRef }).eq('id', convState.id);
+            await this.db.from('conversation_states').update({ current_node_id: stateRef }).eq('id', convState.id);
 
             const flowType = block.flowType || block.type;
 
@@ -589,8 +632,9 @@ class FlowEngine {
                 }
                 // 1.3 Mídia: Áudio Gravado (Nota de Voz PTT)
                 else if (flowType === 'audio') {
-                    const audioUrl = block.url || block.audio_url || block.data?.url;
+                    const audioUrl = normalizeUrlsInText(this.parseVariables(block.url || block.audio_url || block.data?.url || '', convState.variables)).trim();
                     if (audioUrl) {
+                        const inferred = inferMediaMimeAndType(audioUrl, 'audio');
                         await this.sendFlowMessageResilient({
                             tenantId,
                             instanceId,
@@ -599,8 +643,8 @@ class FlowEngine {
                             sock,
                             payload: {
                                 audio: { url: audioUrl },
-                                mimetype: 'audio/mp4',
-                                ptt: true
+                                mimetype: inferred.mimetype,
+                                ptt: block.ptt !== false
                             },
                             textContent: '[Mensagem de Voz]',
                             messageType: 'audio',
@@ -612,8 +656,9 @@ class FlowEngine {
                 }
                 // 1.4 Mídia: Incorporar / Documento / PDF
                 else if (flowType === 'embed') {
-                    const docUrl = block.url || block.data?.url;
-                    const fileName = block.fileName || block.label || 'documento.pdf';
+                    const docUrl = normalizeUrlsInText(this.parseVariables(block.url || block.data?.url || '', convState.variables)).trim();
+                    const inferred = inferMediaMimeAndType(docUrl, 'embed');
+                    const fileName = this.parseVariables(block.fileName || block.label || inferred.fileName || 'documento.pdf', convState.variables);
                     if (docUrl) {
                         await this.sendFlowMessageResilient({
                             tenantId,
@@ -624,7 +669,7 @@ class FlowEngine {
                             payload: {
                                 document: { url: docUrl },
                                 fileName: fileName,
-                                mimetype: 'application/pdf'
+                                mimetype: inferred.mimetype
                             },
                             textContent: `[Arquivo: ${fileName}]`,
                             messageType: 'document',
@@ -634,8 +679,8 @@ class FlowEngine {
                     }
                     currentPoint = this.resolveNextPoint(nodes, edges, parentGroup, block, '', convState.variables);
                 }
-                // 2. Pergunta / Inputs de Texto Especializados (Website, Telefone, Email, Número, etc.)
-                else if (['ask', 'number_input', 'email_input', 'website_input', 'phone_input', 'date_input', 'time_input'].includes(flowType)) {
+                // 2. Pergunta / Inputs de Texto Especializados (Texto, Website, Telefone, Email, Número, Data)
+                else if (['text_input', 'ask', 'number_input', 'email_input', 'website_input', 'phone_input', 'date_input', 'time_input'].includes(flowType)) {
                     const rawText = block.text || block.data?.text || 'Por favor, digite sua resposta:';
                     const parsedText = normalizeUrlsInText(this.parseVariables(rawText, convState.variables));
                     if (parsedText) {
@@ -729,11 +774,45 @@ class FlowEngine {
                     }
                     isPaused = true;
                 }
-                // 3. Menu de Opções / Botões / Seleção
+                // 3. Menu de Opções / Botões / Seleção de Imagens
                 else if (['buttons', 'pic_choice', 'cards'].includes(flowType)) {
-                    const prompt = block.label || block.text || 'Escolha uma das opções abaixo:';
-                    const options = block.options || ['Opção 1', 'Opção 2'];
-                    const formattedMenu = `${prompt}\n\n` + options.map((opt, i) => `*${i + 1}* - ${opt}`).join('\n');
+                    const prompt = block.text || block.label || 'Escolha uma das opções abaixo:';
+                    const rawOptions = Array.isArray(block.options) && block.options.length > 0 ? block.options : ['Opção 1', 'Opção 2'];
+                    const normalizedOptions = rawOptions.map((opt, idx) => {
+                        if (typeof opt === 'string') {
+                            return { label: opt, imageUrl: block.optionImages?.[idx] || '' };
+                        }
+                        return {
+                            label: opt?.label || opt?.title || `Opção ${idx + 1}`,
+                            imageUrl: opt?.imageUrl || opt?.url || block.optionImages?.[idx] || ''
+                        };
+                    });
+
+                    // Envia imagens das opções visuais (pic_choice / cards) se configuradas
+                    if (flowType === 'pic_choice') {
+                        for (let i = 0; i < normalizedOptions.length; i++) {
+                            const item = normalizedOptions[i];
+                            if (item.imageUrl) {
+                                await this.sendFlowMessageResilient({
+                                    tenantId,
+                                    instanceId,
+                                    conversationId,
+                                    jid: convState.remote_jid,
+                                    sock,
+                                    payload: {
+                                        image: { url: item.imageUrl },
+                                        caption: `*${i + 1}* - ${this.parseVariables(item.label, convState.variables)}`
+                                    },
+                                    textContent: `*${i + 1}* - ${item.label}`,
+                                    messageType: 'image',
+                                    mediaUrl: item.imageUrl
+                                });
+                                await this.sleep(400);
+                            }
+                        }
+                    }
+
+                    const formattedMenu = `${prompt}\n\n` + normalizedOptions.map((opt, i) => `*${i + 1}* - ${opt.label}`).join('\n');
                     const parsedText = normalizeUrlsInText(this.parseVariables(formattedMenu, convState.variables));
 
                     if (parsedText) {
@@ -770,7 +849,10 @@ class FlowEngine {
                         ? block.options
                         : ['Opção 1', 'Opção 2'];
                     let parsedOptions = rawOptions
-                        .map(opt => this.parseVariables(String(opt || '').trim(), convState.variables))
+                        .map(opt => {
+                            const label = typeof opt === 'string' ? opt : (opt?.label || opt?.title || '');
+                            return this.parseVariables(String(label || '').trim(), convState.variables);
+                        })
                         .filter(Boolean)
                         .slice(0, 12);
                     if (parsedOptions.length < 2) {
@@ -815,26 +897,127 @@ class FlowEngine {
                     const name = block.var_name || block.data?.name;
                     const value = block.text || block.data?.value || '';
                     if (name) {
+                        convState.variables = convState.variables || {};
                         convState.variables[name] = normalizeUrlsInText(this.parseVariables(value, convState.variables));
-                        await supabase.from('conversation_states').update({ variables: convState.variables }).eq('id', convState.id);
+                        await this.db.from('conversation_states').update({ variables: convState.variables }).eq('id', convState.id);
                     }
                     currentPoint = this.resolveNextPoint(nodes, edges, parentGroup, block, '', convState.variables);
                 }
                 // 5. Transferência para Atendente Humano (Handoff)
                 else if (flowType === 'handoff') {
-                    await supabase.from('conversation_states').update({ status: 'HANDOFF_HUMAN' }).eq('id', convState.id);
+                    const handoffMsg = normalizeUrlsInText(this.parseVariables(block.text || block.data?.text || '', convState.variables));
+                    if (handoffMsg) {
+                        await this.sendFlowMessageResilient({
+                            tenantId,
+                            instanceId,
+                            conversationId,
+                            jid: convState.remote_jid,
+                            sock,
+                            payload: { text: handoffMsg },
+                            textContent: handoffMsg,
+                            messageType: 'text'
+                        });
+                    }
+                    await this.db.from('conversation_states').update({ status: 'HANDOFF_HUMAN' }).eq('id', convState.id);
                     await this.logExecution(convState.id, stateRef, 'Atendimento transferido para humano');
-                    
+
                     if (conversationId) {
-                        await supabase.from('conversations').update({
+                        await this.db.from('conversations').update({
                             status: 'open',
-                            assigned_agent_id: null
+                            ai_paused: true,
+                            assigned_agent_id: block.assigned_agent_id || null
                         }).eq('id', conversationId);
                     }
                     isPaused = true;
                 }
+                // 5.1 Resposta com Citação Nativa (Reply / Quote)
+                else if (flowType === 'reply') {
+                    const rawReply = block.text || block.data?.text || '';
+                    const parsedReply = normalizeUrlsInText(this.parseVariables(rawReply, convState.variables));
+                    if (parsedReply) {
+                        const shouldQuote = block.quote_message !== false && Boolean(runtimeMeta.rawPayload);
+                        await this.sendFlowMessageResilient({
+                            tenantId,
+                            instanceId,
+                            conversationId,
+                            jid: convState.remote_jid,
+                            sock,
+                            payload: { text: parsedReply },
+                            textContent: parsedReply,
+                            messageType: 'text',
+                            sendOptions: shouldQuote ? { quoted: runtimeMeta.rawPayload } : {}
+                        });
+                        await this.sleep(1000);
+                    }
+                    currentPoint = this.resolveNextPoint(nodes, edges, parentGroup, block, '', convState.variables);
+                }
+                // 5.2 Comando de CRM / Controle
+                else if (flowType === 'command') {
+                    const cmdAction = block.command_action || 'add_tag';
+                    const cmdValue = this.parseVariables(block.command_value || block.text || '', convState.variables).trim();
+                    convState.variables = convState.variables || {};
+                    if (cmdAction === 'clear_variables') {
+                        const preserve = {
+                            __flow_id: convState.variables.__flow_id,
+                            pushName: convState.variables.pushName,
+                            nome_cliente: convState.variables.nome_cliente,
+                            NomeEmpresa: convState.variables.NomeEmpresa,
+                            remoteJid: convState.variables.remoteJid,
+                            telefone: convState.variables.telefone,
+                        };
+                        convState.variables = preserve;
+                        await this.db.from('conversation_states').update({ variables: convState.variables }).eq('id', convState.id);
+                    } else if (conversationId) {
+                        if (cmdAction === 'pause_ai') {
+                            await this.db.from('conversations').update({ ai_paused: true }).eq('id', conversationId);
+                        } else if (cmdAction === 'resume_ai') {
+                            await this.db.from('conversations').update({ ai_paused: false }).eq('id', conversationId);
+                        } else if (cmdAction === 'close_ticket') {
+                            await this.db.from('conversations').update({ status: 'closed' }).eq('id', conversationId);
+                        } else if (cmdAction === 'add_tag' && cmdValue) {
+                            const { data: convRow } = await this.db.from('conversations').select('tags').eq('id', conversationId).maybeSingle();
+                            const existingTags = Array.isArray(convRow?.tags) ? convRow.tags : [];
+                            if (!existingTags.includes(cmdValue)) {
+                                await this.db.from('conversations').update({ tags: [...existingTags, cmdValue] }).eq('id', conversationId);
+                            }
+                        } else if (cmdAction === 'remove_tag' && cmdValue) {
+                            const { data: convRow } = await this.db.from('conversations').select('tags').eq('id', conversationId).maybeSingle();
+                            const existingTags = Array.isArray(convRow?.tags) ? convRow.tags : [];
+                            await this.db.from('conversations').update({ tags: existingTags.filter(t => t !== cmdValue) }).eq('id', conversationId);
+                        } else if (cmdAction === 'update_contact_name' && cmdValue) {
+                            await this.db.from('contacts').update({ custom_name: cmdValue }).eq('tenant_id', tenantId).eq('whatsapp_jid', convState.remote_jid);
+                            convState.variables.nome_cliente = cmdValue;
+                        }
+                    }
+                    await this.logExecution(convState.id, stateRef, `Comando executado: ${cmdAction} (${cmdValue || '-'})`);
+                    currentPoint = this.resolveNextPoint(nodes, edges, parentGroup, block, '', convState.variables);
+                }
                 // 6. Condição (If)
                 else if (flowType === 'condition') {
+                    currentPoint = this.resolveNextPoint(nodes, edges, parentGroup, block, '', convState.variables);
+                }
+                // 6.1 Teste A/B (Split Aleatório)
+                else if (flowType === 'ab_test') {
+                    const abRes = resolveAbTestBranch(block);
+                    convState.variables = convState.variables || {};
+                    convState.variables.__ab_variant = abRes.variant.toUpperCase();
+                    if (block.var_name) {
+                        convState.variables[block.var_name] = abRes.variant.toUpperCase();
+                    }
+                    await this.db.from('conversation_states').update({ variables: convState.variables }).eq('id', convState.id);
+                    currentPoint = this.resolveNextPoint(nodes, edges, parentGroup, block, '', convState.variables, abRes.handleIds);
+                }
+                // 6.2 Execução de Script Sandbox
+                else if (flowType === 'script') {
+                    const rawCode = block.code || block.text || '';
+                    const scriptRes = executeSandboxedScript(rawCode, convState.variables || {}, 150);
+                    if (scriptRes.success) {
+                        convState.variables = scriptRes.variables;
+                        await this.db.from('conversation_states').update({ variables: convState.variables }).eq('id', convState.id);
+                    } else {
+                        console.warn(`[FlowEngine] Script falhou no bloco ${stateRef}:`, scriptRes.error);
+                        await this.logExecution(convState.id, stateRef, 'SCRIPT_ERROR', scriptRes.error);
+                    }
                     currentPoint = this.resolveNextPoint(nodes, edges, parentGroup, block, '', convState.variables);
                 }
                 // 7. Espera (Wait) com Indicador Real de "Digitando..." no WhatsApp
@@ -845,7 +1028,7 @@ class FlowEngine {
                             await sock.sendPresenceUpdate('composing', convState.remote_jid);
                         } catch (pErr) {}
                     }
-                    await this.sleep(Math.min(waitSec, 10) * 1000);
+                    await this.sleep(Math.min(Math.max(0, isNaN(waitSec) ? 2 : waitSec), 10) * 1000);
                     if (sock) {
                         try {
                             await sock.sendPresenceUpdate('paused', convState.remote_jid);
@@ -853,12 +1036,12 @@ class FlowEngine {
                     }
                     currentPoint = this.resolveNextPoint(nodes, edges, parentGroup, block, '', convState.variables);
                 }
-                // 8. Pulo / Redirecionamento (Jump)
+                // 8. Pulo / Redirecionamento (Jump) com guarda anti-loop
                 else if (flowType === 'jump') {
                     const targetGroupId = block.target_group_id || block.target_node_id || block.data?.targetGroupId;
                     let targetPoint = null;
 
-                    if (targetGroupId) {
+                    if (targetGroupId && targetGroupId !== parentGroup.id) {
                         const targetGroup = nodes.find(n => n.id === targetGroupId);
                         if (targetGroup) {
                             targetPoint = {
@@ -873,46 +1056,70 @@ class FlowEngine {
                         targetPoint = this.resolveNextPoint(nodes, edges, parentGroup, block, '', convState.variables);
                     }
 
-                    if (!targetPoint) {
-                        const start = this.findStartPoint(nodes, edges);
-                        if (start && start.groupId !== parentGroup.id) {
-                            targetPoint = start;
-                        }
-                    }
-
                     currentPoint = targetPoint;
                 }
-                // 9. Webhook / Integração Externa
+                // 9. Webhook / Integração Externa (GET/HEAD sem body + extração JSON path)
                 else if (flowType === 'webhook') {
-                    const url = block.url || block.webhookUrl;
+                    const { url, fetchOptions, responsePath } = buildWebhookFetchOptions(block, convState.variables, {
+                        remote_jid: convState.remote_jid,
+                        tenant_id: tenantId,
+                        timestamp: new Date().toISOString()
+                    });
                     if (url) {
                         try {
-                            const resp = await fetch(url, {
-                                method: block.method || 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                    variables: convState.variables,
-                                    remote_jid: convState.remote_jid,
-                                    tenant_id: tenantId,
-                                    timestamp: new Date().toISOString()
-                                })
-                            });
+                            const resp = await fetch(url, fetchOptions);
+                            const rawText = await resp.text();
+                            let parsedBody = rawText;
+                            try {
+                                parsedBody = JSON.parse(rawText);
+                            } catch {}
+
                             if (resp.ok && block.response_var_name) {
-                                const jsonResp = await resp.json().catch(() => ({}));
-                                convState.variables[block.response_var_name] = typeof jsonResp === 'object' ? JSON.stringify(jsonResp) : String(jsonResp);
-                                await supabase.from('conversation_states').update({ variables: convState.variables }).eq('id', convState.id);
+                                const extracted = responsePath && typeof parsedBody === 'object'
+                                    ? extractJsonPath(parsedBody, responsePath)
+                                    : parsedBody;
+                                convState.variables = convState.variables || {};
+                                convState.variables[block.response_var_name] = extracted !== undefined && extracted !== null
+                                    ? (typeof extracted === 'object' ? JSON.stringify(extracted) : String(extracted))
+                                    : '';
+                                await this.db.from('conversation_states').update({ variables: convState.variables }).eq('id', convState.id);
+                            } else if (!resp.ok) {
+                                await this.logExecution(convState.id, stateRef, 'WEBHOOK_HTTP_ERROR', `HTTP ${resp.status}`);
                             }
                         } catch (whErr) {
                             console.error('[FlowEngine] Falha ao executar Webhook:', whErr.message);
+                            await this.logExecution(convState.id, stateRef, 'WEBHOOK_ERROR', whErr.message);
                         }
                     }
                     currentPoint = this.resolveNextPoint(nodes, edges, parentGroup, block, '', convState.variables);
                 }
-                // 10. Subfluxo / Typebot Link
+                // 10. Subfluxo / Typebot Link / Redirecionar Link Externo
                 else if (flowType === 'typebot_link' || flowType === 'redirect') {
+                    const redirectUrl = block.url ? normalizeUrlsInText(this.parseVariables(block.url, convState.variables)).trim() : '';
                     const targetFlowId = block.target_flow_id || block.flow_id;
-                    if (targetFlowId) {
-                        const { data: subFlow } = await supabase
+
+                    if (flowType === 'redirect' && redirectUrl && !targetFlowId) {
+                        const caption = block.text ? this.parseVariables(block.text, convState.variables) : '🔗 Acesse o link abaixo:';
+                        const fullMsg = `${caption}\n${redirectUrl}`.trim();
+                        await this.sendFlowMessageResilient({
+                            tenantId,
+                            instanceId,
+                            conversationId,
+                            jid: convState.remote_jid,
+                            sock,
+                            payload: { text: fullMsg },
+                            textContent: fullMsg,
+                            messageType: 'text'
+                        });
+                        await this.sleep(800);
+                    } else if (targetFlowId) {
+                        if (visitedFlowIds.has(targetFlowId) || subflowDepth >= 5) {
+                            console.warn(`[FlowEngine] Anti-Loop Subfluxo bloqueou salto cíclico para flow ${targetFlowId} (depth=${subflowDepth}).`);
+                            await this.logExecution(convState.id, stateRef, 'SUBFLOW_LOOP_BLOCKED', targetFlowId);
+                            currentPoint = null;
+                            break;
+                        }
+                        const { data: subFlow } = await this.db
                             .from('flows')
                             .select(`id, name, active_version_id, flow_versions!fk_active_version(nodes, edges)`)
                             .eq('id', targetFlowId)
@@ -922,9 +1129,13 @@ class FlowEngine {
                             const subEdges = subFlow.flow_versions.edges || [];
                             const subStart = this.findStartPoint(subNodes, subEdges);
                             if (subStart) {
-                                await supabase.from('conversation_states').update({
+                                visitedFlowIds.add(targetFlowId);
+                                convState.variables = convState.variables || {};
+                                convState.variables.__flow_id = targetFlowId;
+                                await this.db.from('conversation_states').update({
                                     flow_version_id: subFlow.active_version_id,
-                                    current_node_id: subStart.blockId ? `${subStart.groupId}:${subStart.blockId}` : subStart.groupId
+                                    current_node_id: subStart.blockId ? `${subStart.groupId}:${subStart.blockId}` : subStart.groupId,
+                                    variables: convState.variables
                                 }).eq('id', convState.id);
                                 nodes = subNodes;
                                 edges = subEdges;
@@ -964,7 +1175,7 @@ class FlowEngine {
     }
 
     async finishState(stateId) {
-        await supabase.from('conversation_states').update({ status: 'FINISHED' }).eq('id', stateId);
+        await this.db.from('conversation_states').update({ status: 'FINISHED' }).eq('id', stateId);
         await this.logExecution(stateId, null, 'Fluxo finalizado');
     }
 
@@ -974,15 +1185,17 @@ class FlowEngine {
      * 2. Caso o socket oscile ou atinja TIMEOUT_BAILEYS_SOCKET_SEND / Connection Closed,
      *    delega imediatamente para o Outbox Resiliente (wa_outgoing_messages) sem quebrar o bloco do fluxo.
      */
-    async sendFlowMessageResilient({ tenantId, instanceId, conversationId, jid, sock, payload, textContent = '', messageType = 'text', mediaUrl = null }) {
+    async sendFlowMessageResilient({ tenantId, instanceId, conversationId, jid, sock, payload, textContent = '', messageType = 'text', mediaUrl = null, sendOptions = {} }) {
         let activeSock = sock;
-        try {
-            const { default: sManager } = await import('../session-manager/index.js');
-            const latestSock = sManager?.sessions?.get(instanceId)?.sock;
-            if (latestSock) {
-                activeSock = latestSock;
-            }
-        } catch (e) {}
+        if (!activeSock) {
+            try {
+                const { default: sManager } = await import('../session-manager/index.js');
+                const latestSock = sManager?.sessions?.get(instanceId)?.sock;
+                if (latestSock) {
+                    activeSock = latestSock;
+                }
+            } catch (e) {}
+        }
 
         const isSocketReady = activeSock && (!activeSock.ws || activeSock.ws.isOpen || activeSock.ws.readyState === 1 || activeSock.ws?.socket?.readyState === 1);
 
@@ -999,7 +1212,7 @@ class FlowEngine {
                         options: { isAutomation: true, isFallback: true, forceQueue: true, tenantId, mediaUrl }
                     });
                 } else {
-                    await supabase.from('wa_outgoing_messages').insert({
+                    await this.db.from('wa_outgoing_messages').insert({
                         tenant_id: tenantId,
                         instance_id: instanceId,
                         chat_jid: jid,
@@ -1027,7 +1240,7 @@ class FlowEngine {
         }
 
         try {
-            const msgResult = await activeSock.sendMessage(jid, payload, { isAutomation: true });
+            const msgResult = await activeSock.sendMessage(jid, payload, { ...sendOptions, isAutomation: true });
             await this.persistOutboundMessage(tenantId, instanceId, conversationId, jid, textContent, msgResult, messageType, mediaUrl, 'sent');
             return msgResult;
         } catch (sendErr) {
@@ -1060,7 +1273,7 @@ class FlowEngine {
         if (!msgResult || !msgResult.key) return;
         
         try {
-            const { data: savedMsg } = await supabase.from('messages').insert({
+            const { data: savedMsg } = await this.db.from('messages').insert({
                 tenant_id: tenantId,
                 instance_id: instanceId,
                 conversation_id: conversationId,
@@ -1078,7 +1291,7 @@ class FlowEngine {
             }).select('*').single();
 
             if (conversationId) {
-                await supabase.from('conversations').update({
+                await this.db.from('conversations').update({
                     updated_at: new Date().toISOString(),
                     last_message_at: new Date().toISOString(),
                     last_message_preview: (textContent || '').substring(0, 50)
@@ -1086,12 +1299,14 @@ class FlowEngine {
             }
 
             if (savedMsg) {
-                const { default: realtime } = await import('../realtime-publisher/index.js');
-                await realtime.publishInboxEvent(tenantId, 'message.new', {
-                    message: savedMsg,
-                    contact_phone: jid.split('@')[0],
-                    conversation_id: conversationId
-                });
+                try {
+                    const { default: realtime } = await import('../realtime-publisher/index.js');
+                    await realtime.publishInboxEvent(tenantId, 'message.new', {
+                        message: savedMsg,
+                        contact_phone: jid.split('@')[0],
+                        conversation_id: conversationId
+                    });
+                } catch {}
             }
         } catch(err) {
             console.error('[FlowEngine] Falha ao registrar envio no BD:', err);
@@ -1100,7 +1315,7 @@ class FlowEngine {
 
     async logExecution(stateId, nodeId, action, errorLine = null) {
         try {
-            await supabase.from('execution_logs').insert({
+            await this.db.from('execution_logs').insert({
                 conversation_state_id: stateId,
                 node_id: nodeId,
                 action_taken: action,

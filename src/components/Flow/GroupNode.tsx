@@ -10,10 +10,12 @@ import {
 } from 'lucide-react';
 import { parseTextToSegments, normalizeUrlsInText, extractUrlsFromText } from '../../utils/urlHelper';
 import { useFlowActions, getBlockTheme, BLOCK_THEMES } from '../../context/FlowActionsContext';
+import { createDefaultBlockForType } from '../../utils/flowBlocksCatalog.mjs';
 
 const icons: Record<string, any> = {
   // Bubbles
   send_message: MessageSquare,
+  text: MessageSquare,
   image: ImageIcon,
   video: Video,
   audio: Headphones,
@@ -21,6 +23,7 @@ const icons: Record<string, any> = {
   
   // Inputs
   ask: Type,
+  text_input: Type,
   number_input: Hash,
   email_input: Mail,
   website_input: Globe,
@@ -161,13 +164,7 @@ export default function GroupNode({ id, data, selected }: any) {
     const type = e.dataTransfer.getData('application/reactflow/type');
     const label = e.dataTransfer.getData('application/reactflow/label');
     if (type && actions?.onAddBlockToGroup) {
-      const newBlock = {
-        id: `${type}-${Math.random().toString(36).substring(2, 8)}`,
-        label: label || type,
-        text: type === 'send_message' || type === 'ask' ? 'Novo texto...' : '',
-        flowType: type,
-        var_name: ''
-      };
+      const newBlock = createDefaultBlockForType(type, label || undefined);
       actions.onAddBlockToGroup(id, newBlock, dragOverIndex ?? blocks.length);
     }
   };
@@ -344,8 +341,21 @@ export default function GroupNode({ id, data, selected }: any) {
                     </div>
 
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {actions?.onOpenBlockInstructions && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              actions.onOpenBlockInstructions?.(block.flowType);
+                            }}
+                            className="p-1 hover:bg-indigo-500/20 text-zinc-400 hover:text-indigo-300 rounded transition-colors"
+                            title="1-) Instruções de uso e Exemplo"
+                          >
+                            <HelpCircle className="w-3 h-3" />
+                          </button>
+                        )}
                         {/* Botão de edição rápida inline */}
-                        {['send_message', 'ask', 'email_input', 'number_input', 'website_input', 'phone_input'].includes(block.flowType) && (
+                        {['send_message', 'text', 'ask', 'text_input', 'email_input', 'number_input', 'website_input', 'phone_input', 'reply'].includes(block.flowType) && (
                           <button
                             type="button"
                             onClick={(e) => handleStartEditingBlock(index, block.text, e)}
@@ -497,18 +507,26 @@ export default function GroupNode({ id, data, selected }: any) {
                              </div>
                           )}
                           <div className="space-y-1 mt-1">
-                             {(block.options || ['Opção 1', 'Opção 2']).map((opt: string, i: number) => (
-                                 <div key={i} className="flex items-center gap-2 bg-[#18181b] hover:bg-[#202025] px-2 py-1.5 rounded-md border border-zinc-800 text-[11px] text-zinc-200 relative group/opt">
-                                     <CheckSquare className="w-3.5 h-3.5 text-orange-400 shrink-0" />
-                                     <span className="truncate">{opt}</span>
-                                     <Handle 
-                                        type="source" 
-                                        position={Position.Right} 
-                                        id={`${block.id}-opt-${i}`}
-                                        className="w-3.5 h-3.5 bg-zinc-900 border-2 border-[#e06c3a] rounded-full !right-[-20px] transition-transform hover:scale-125 z-20 ring-2 ring-[#e06c3a]/30" 
-                                     />
-                                 </div>
-                             ))}
+                             {(block.options || ['Opção 1', 'Opção 2']).map((opt: any, i: number) => {
+                                 const optLabel = typeof opt === 'string' ? opt : (opt?.label || opt?.title || `Opção ${i + 1}`);
+                                 const optImg = typeof opt === 'object' ? (opt?.imageUrl || opt?.url) : block.optionImages?.[i];
+                                 return (
+                                   <div key={i} className="flex items-center gap-2 bg-[#18181b] hover:bg-[#202025] px-2 py-1.5 rounded-md border border-zinc-800 text-[11px] text-zinc-200 relative group/opt">
+                                       {block.flowType === 'pic_choice' && optImg ? (
+                                         <img src={optImg} alt={optLabel} className="w-5 h-5 rounded object-cover border border-zinc-700 shrink-0" />
+                                       ) : (
+                                         <CheckSquare className="w-3.5 h-3.5 text-orange-400 shrink-0" />
+                                       )}
+                                       <span className="truncate">{optLabel}</span>
+                                       <Handle 
+                                          type="source" 
+                                          position={Position.Right} 
+                                          id={`${block.id}-opt-${i}`}
+                                          className="w-3.5 h-3.5 bg-zinc-900 border-2 border-[#e06c3a] rounded-full !right-[-20px] transition-transform hover:scale-125 z-20 ring-2 ring-[#e06c3a]/30" 
+                                       />
+                                   </div>
+                                 );
+                             })}
                           </div>
                        </div>
                     ) : 
@@ -579,6 +597,81 @@ export default function GroupNode({ id, data, selected }: any) {
                             <span className="bg-[#581c87]/80 text-purple-200 border border-purple-500/40 px-2.5 py-0.5 rounded-md text-[11px] font-mono font-medium shadow-sm">
                                {block.text || block.expression || block.value || 'System.Device type'}
                             </span>
+                        </div>
+                    ) :
+                    /* 7.1 Teste A/B */
+                    block.flowType === 'ab_test' ? (
+                        <div className="space-y-1.5 mt-1">
+                           {(() => {
+                             const pctA = Math.max(0, Math.min(100, Number(block.splitA ?? block.percentageA ?? 50)));
+                             const pctB = 100 - pctA;
+                             return (
+                               <>
+                                 <div className="flex items-center justify-between bg-[#18181b] px-2.5 py-1.5 rounded-md border border-purple-500/30 text-[11px] relative">
+                                     <span className="font-semibold text-purple-300">Ramo A ({pctA}%)</span>
+                                     <Handle
+                                       type="source"
+                                       position={Position.Right}
+                                       id={`${block.id}-a`}
+                                       className="w-3.5 h-3.5 bg-zinc-900 border-2 border-purple-500 rounded-full !right-[-20px] transition-transform hover:scale-125 z-20 ring-2 ring-purple-500/30"
+                                     />
+                                 </div>
+                                 <div className="flex items-center justify-between bg-[#18181b] px-2.5 py-1.5 rounded-md border border-zinc-800 text-[11px] relative">
+                                     <span className="font-semibold text-zinc-300">Ramo B ({pctB}%)</span>
+                                     <Handle
+                                       type="source"
+                                       position={Position.Right}
+                                       id={`${block.id}-b`}
+                                       className="w-3.5 h-3.5 bg-zinc-900 border-2 border-zinc-500 rounded-full !right-[-20px] transition-transform hover:scale-125 z-20"
+                                     />
+                                 </div>
+                               </>
+                             );
+                           })()}
+                        </div>
+                    ) :
+                    /* 7.2 Script JS em Sandbox */
+                    block.flowType === 'script' ? (
+                        <div className="bg-zinc-900/90 border border-purple-500/30 rounded-lg p-2 text-[10px] font-mono text-purple-200 space-y-1">
+                           <div className="flex items-center justify-between text-purple-400 font-semibold">
+                              <span>&lt;/&gt; Sandbox JS</span>
+                              <span>timeout 150ms</span>
+                           </div>
+                           <div className="truncate opacity-80">{(block.code || block.text || 'setVar("x", 1);').split('\n')[0]}</div>
+                        </div>
+                    ) :
+                    /* 7.3 Redirecionar Link / Subfluxo */
+                    (block.flowType === 'redirect' || block.flowType === 'typebot_link') ? (
+                        <div className="flex items-center gap-2 bg-zinc-900 border border-purple-500/30 rounded-lg px-2.5 py-2 text-[11px] text-purple-200">
+                           {block.flowType === 'redirect' ? <ExternalLink className="w-3.5 h-3.5 text-purple-400 shrink-0" /> : <Bot className="w-3.5 h-3.5 text-purple-400 shrink-0" />}
+                           <span className="truncate font-mono">
+                              {block.target_flow_id ? `Subfluxo: ${block.target_flow_id.slice(0, 8)}...` : (block.url || 'Configurar destino...')}
+                           </span>
+                        </div>
+                    ) :
+                    /* 7.4 Reply (Citação), Comando CRM, Handoff, Início */
+                    block.flowType === 'reply' ? (
+                        <div className="bg-sky-950/30 border border-sky-500/30 rounded-lg p-2 text-[11px] text-sky-100 space-y-1">
+                           <div className="text-[10px] text-sky-400 font-bold uppercase tracking-wide">↩ Citar mensagem recebida</div>
+                           <div className="line-clamp-2">{block.text || 'Mensagem de resposta...'}</div>
+                        </div>
+                    ) :
+                    block.flowType === 'command' ? (
+                        <div className="flex items-center gap-2 bg-sky-950/30 border border-sky-500/30 rounded-lg px-2.5 py-1.5 text-[11px] text-sky-200">
+                           <span className="px-1.5 py-0.5 bg-sky-500/20 rounded font-mono text-[10px]">{block.command_action || 'add_tag'}</span>
+                           <span className="truncate font-medium">{block.command_value || block.text || 'Automação CRM'}</span>
+                        </div>
+                    ) :
+                    block.flowType === 'handoff' ? (
+                        <div className="bg-emerald-950/30 border border-emerald-500/30 rounded-lg p-2 text-[11px] text-emerald-200 space-y-1">
+                           <div className="text-[10px] text-emerald-400 font-bold uppercase">👤 Transfere + Pausa IA</div>
+                           <div className="truncate opacity-85">{block.text || 'Transferindo para um atendente...'}</div>
+                        </div>
+                    ) :
+                    block.flowType === 'start' ? (
+                        <div className="flex items-center gap-2 bg-emerald-950/30 border border-emerald-500/30 rounded-lg px-2.5 py-1.5 text-[11px] text-emerald-300 font-semibold">
+                           <Play className="w-3.5 h-3.5 fill-current" />
+                           <span>Ponto de Entrada do Fluxo</span>
                         </div>
                     ) : 
                     /* 8. Input do Usuário (ask, input, email, etc.) */
@@ -710,7 +803,7 @@ export default function GroupNode({ id, data, selected }: any) {
                 </div>
 
                 {/* Handle de encadeamento na borda direita (estilo alaranjado Typebot da Imagem 1) */}
-                {(index === blocks.length - 1 && !['condition', 'buttons', 'pic_choice', 'cards', 'poll'].includes(block.flowType)) && (
+                {(index === blocks.length - 1 && !['condition', 'buttons', 'pic_choice', 'cards', 'poll', 'ab_test'].includes(block.flowType)) && (
                     <Handle 
                         type="source" 
                         position={Position.Right} 

@@ -13,7 +13,8 @@ import {
   Sparkles,
   Smartphone,
   ChevronDown,
-  ExternalLink
+  ExternalLink,
+  Variable
 } from 'lucide-react';
 import { Node, Edge } from '@xyflow/react';
 import { parseTextToSegments } from '../../utils/urlHelper';
@@ -70,8 +71,11 @@ export default function TestSimulator({ nodes, edges, onClose, startNodeId }: Te
   const [isRestarting, setIsRestarting] = useState(false);
   const [activeButtonOptions, setActiveButtonOptions] = useState<string[]>([]);
   const [simulatorTheme, setSimulatorTheme] = useState<'whatsapp' | 'typebot_web'>('whatsapp');
+  const [showVarsDrawer, setShowVarsDrawer] = useState(false);
 
   const endOfMessagesRef = useRef<HTMLDivElement>(null);
+  const autoStepsRef = useRef<number>(0);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Rola para a mensagem mais recente
   useEffect(() => {
@@ -155,124 +159,150 @@ export default function TestSimulator({ nodes, edges, onClose, startNodeId }: Te
   };
 
   // Encontra o próximo bloco seguindo o encadeamento interno ou arestas
-  const getNextBlock = (currBlockId: string, userInputOption?: string) => {
+  const getNextBlock = (
+    currBlockId: string,
+    userInputOption?: string,
+    overrideHandleIds?: string[],
+    varsOverride?: Record<string, string>
+  ) => {
+    const activeVars = varsOverride || variables;
     const parentGroup = nodes.find(n => n.data?.blocks?.some((b: any) => b.id === currBlockId) || n.id === currBlockId);
-    
-    // Se o bloco atual for um Jump
-    if (currentBlock?.flowType === 'jump') {
-      const targetId = currentBlock.target_group_id;
-      const targetName = currentBlock.target_group_name;
+    const currBlockObj = parentGroup?.data?.blocks?.find((b: any) => b.id === currBlockId) || currentBlock;
 
-      if (targetId) {
+    const toTargetFirstBlock = (edge: Edge | undefined) => {
+      if (!edge) return null;
+      const targetNode = nodes.find(n => n.id === edge.target);
+      if (targetNode && targetNode.data?.blocks?.length > 0) return targetNode.data.blocks[0];
+      return null;
+    };
+
+    if (overrideHandleIds && overrideHandleIds.length > 0) {
+      const matched = edges.find(e => e.source === parentGroup?.id && overrideHandleIds.includes(e.sourceHandle || ''));
+      const targetBlk = toTargetFirstBlock(matched);
+      if (targetBlk) return targetBlk;
+    }
+
+    // Se o bloco atual for um Jump
+    if (currBlockObj?.flowType === 'jump') {
+      const targetId = currBlockObj.target_group_id;
+      const targetName = currBlockObj.target_group_name;
+
+      if (targetId && targetId !== parentGroup?.id) {
         const targetNode = nodes.find(n => n.id === targetId);
         if (targetNode && targetNode.data?.blocks?.length > 0) return targetNode.data.blocks[0];
       }
       if (targetName) {
         const targetNode = nodes.find(n => (n.data?.label || n.data?.title || '')?.toLowerCase().includes(targetName.toLowerCase()));
-        if (targetNode && targetNode.data?.blocks?.length > 0) return targetNode.data.blocks[0];
+        if (targetNode && targetNode.data?.blocks?.length > 0 && targetNode.id !== parentGroup?.id) return targetNode.data.blocks[0];
       }
 
       const jumpEdge = edges.find(e => e.sourceHandle === currBlockId || (parentGroup && e.source === parentGroup.id));
-      if (jumpEdge) {
-        const targetNode = nodes.find(n => n.id === jumpEdge.target);
-        if (targetNode && targetNode.data?.blocks?.length > 0) return targetNode.data.blocks[0];
-      }
+      const jumpTarget = toTargetFirstBlock(jumpEdge);
+      if (jumpTarget) return jumpTarget;
 
       const start = findStartBlock();
-      if (start) return start;
+      if (start && start.id !== currBlockId) return start;
     }
 
     const evalComparison = (varValRaw: string, op: string, targetValRaw: string) => {
       const varVal = String(varValRaw ?? '').trim().toLowerCase();
       const targetVal = String(targetValRaw ?? '').trim().toLowerCase();
-      if (op === '=' || op === 'Equal to' || op === 'equals') return varVal === targetVal;
-      if (op === '≠' || op === 'Not equal' || op === 'not_equals') return varVal !== targetVal;
-      if (op === 'contains' || op === 'Contains' || op === 'Contém') return varVal.includes(targetVal);
-      if (op === 'starts_with' || op === 'Starts with') return varVal.startsWith(targetVal);
-      if (op === '>' || op === 'Greater than') return Number(varVal) > Number(targetVal);
-      if (op === '<' || op === 'Less than') return Number(varVal) < Number(targetVal);
-      if (op === 'exists' || op === 'Is set') return varVal.length > 0;
+      const normOp = String(op || '=').trim().toLowerCase();
+      if (['=', 'equal to', 'equals', 'equal', '==', 'is'].includes(normOp)) return varVal === targetVal;
+      if (['≠', '!=', 'not equal', 'not_equals', 'not_equal', 'is_not'].includes(normOp)) return varVal !== targetVal;
+      if (['contains', 'contém', 'contem'].includes(normOp)) return targetVal.length > 0 && varVal.includes(targetVal);
+      if (['not_contains', 'nao_contem'].includes(normOp)) return !targetVal.length || !varVal.includes(targetVal);
+      if (['starts_with', 'starts with'].includes(normOp)) return varVal.startsWith(targetVal);
+      if (['ends_with', 'ends with'].includes(normOp)) return varVal.endsWith(targetVal);
+      if (['>', 'greater than', 'greater'].includes(normOp)) return varVal !== '' && targetVal !== '' && Number(varVal) > Number(targetVal);
+      if (['<', 'less than', 'less'].includes(normOp)) return varVal !== '' && targetVal !== '' && Number(varVal) < Number(targetVal);
+      if (['exists', 'is set', 'is_set', 'not_empty'].includes(normOp)) return varVal.length > 0;
+      if (['is_empty', 'empty', 'not_exists'].includes(normOp)) return varVal.length === 0;
       return varVal === targetVal;
     };
 
     // Se o bloco atual for uma Condição com Itens (Typebot Pattern)
-    if (currentBlock?.flowType === 'condition') {
-      if (currentBlock.items && Array.isArray(currentBlock.items) && currentBlock.items.length > 0) {
-        for (const item of currentBlock.items) {
-          const candidateVal = item.varName && variables[item.varName] !== undefined
-            ? variables[item.varName]
-            : (userInputOption || lastUserInput || variables['NumeroMenu'] || '');
-          
-          if (evalComparison(candidateVal, item.operator || '=', item.value)) {
-            const matchedEdge = edges.find(e => e.sourceHandle === item.id);
-            if (matchedEdge) {
-              const targetNode = nodes.find(n => n.id === matchedEdge.target);
-              if (targetNode && targetNode.data?.blocks?.length > 0) return targetNode.data.blocks[0];
-            }
+    if (currBlockObj?.flowType === 'condition') {
+      if (currBlockObj.items && Array.isArray(currBlockObj.items) && currBlockObj.items.length > 0) {
+        for (let i = 0; i < currBlockObj.items.length; i++) {
+          const item = currBlockObj.items[i];
+          const itemVarKey = item.varName || item.variable || currBlockObj.var_name || currBlockObj.variable;
+          const candidateVal = itemVarKey && activeVars[itemVarKey] !== undefined
+            ? activeVars[itemVarKey]
+            : (userInputOption || lastUserInput || activeVars['NumeroMenu'] || '');
+
+          if (evalComparison(candidateVal, item.operator || '=', parseText(String(item.value ?? ''), activeVars))) {
+            const matchedEdge = edges.find(
+              e => e.source === parentGroup?.id && (e.sourceHandle === item.id || e.sourceHandle === `${currBlockId}-cond-${i}`)
+            );
+            const targetBlk = toTargetFirstBlock(matchedEdge);
+            if (targetBlk) return targetBlk;
           }
         }
-      } else if (currentBlock.variable || currentBlock.var_name || currentBlock.value) {
-        const varKey = currentBlock.variable || currentBlock.var_name;
-        const candidateVal = varKey && variables[varKey] !== undefined
-          ? variables[varKey]
+      } else if (currBlockObj.variable || currBlockObj.var_name || currBlockObj.value) {
+        const varKey = currBlockObj.variable || currBlockObj.var_name;
+        const candidateVal = varKey && activeVars[varKey] !== undefined
+          ? activeVars[varKey]
           : (userInputOption || lastUserInput || '');
-        if (evalComparison(candidateVal, currentBlock.operator || '=', currentBlock.value || '')) {
+        if (evalComparison(candidateVal, currBlockObj.operator || '=', parseText(String(currBlockObj.value || ''), activeVars))) {
           const trueEdge = edges.find(e => e.sourceHandle === currBlockId || e.sourceHandle === `${currBlockId}-true` || e.label?.toLowerCase().includes('verdadeiro'));
-          if (trueEdge) {
-            const targetNode = nodes.find(n => n.id === trueEdge.target);
-            if (targetNode && targetNode.data?.blocks?.length > 0) return targetNode.data.blocks[0];
-          }
+          const targetBlk = toTargetFirstBlock(trueEdge);
+          if (targetBlk) return targetBlk;
         }
       }
 
-      // Senão / Fallback
-      const elseEdge = edges.find(e => e.sourceHandle === `${currBlockId}-else` || (e.sourceHandle === currBlockId && !(currentBlock.items || []).some((i: any) => i.id === e.sourceHandle)));
-      if (elseEdge) {
-        const targetNode = nodes.find(n => n.id === elseEdge.target);
-        if (targetNode && targetNode.data?.blocks?.length > 0) return targetNode.data.blocks[0];
-      }
+      // Senão / Fallback (-else)
+      const elseEdge = edges.find(
+        e => e.source === parentGroup?.id && (
+          e.sourceHandle === `${currBlockId}-else` ||
+          e.sourceHandle === 'false' ||
+          (e.sourceHandle === currBlockId && !(currBlockObj.items || []).some((i: any) => i.id === e.sourceHandle))
+        )
+      );
+      const elseBlk = toTargetFirstBlock(elseEdge);
+      if (elseBlk) return elseBlk;
     }
 
-    // Se estiver em um menu / buttons / opções e o usuário escolheu algo
-    if (userInputOption) {
+    // Se estiver em um menu / buttons / enquete / seleção e o usuário escolheu algo
+    if (userInputOption && ['buttons', 'cards', 'pic_choice', 'poll'].includes(currBlockObj?.flowType)) {
       const cleanInput = userInputOption.trim().toLowerCase();
-      const numMatch = cleanInput.match(/^(\d+)/);
-      const optNum = numMatch ? numMatch[1] : cleanInput;
-      const optionIndex = parseInt(optNum, 10) - 1;
-
-      // 1. Tenta achar aresta com handle de opção específico
-      let matchingEdge = edges.find(e => 
-        (e.source === parentGroup?.id || e.sourceHandle === currBlockId || e.sourceHandle?.startsWith(currBlockId)) &&
-        (e.sourceHandle === `${currBlockId}-opt-${optionIndex}` || e.sourceHandle === `${currBlockId}-cond-${optionIndex}`)
-      );
-      
-      // 2. Tenta achar por label da aresta
-      if (!matchingEdge) {
-        matchingEdge = edges.find(e => {
-          if (!e.label) return false;
-          if (parentGroup && e.source !== parentGroup.id) return false;
-          const l = e.label.toLowerCase();
-          return l.includes(`numeromenu - ${optNum}`) || 
-                 l.startsWith(`${optNum} -`) || 
-                 l.startsWith(`${optNum}.`) || 
-                 l.startsWith(`${optNum} `) ||
-                 l.includes(cleanInput);
+      const numMatch = cleanInput.match(/^(\d+)(?:[\s.)-]|$)/);
+      const options = Array.isArray(currBlockObj?.options) ? currBlockObj.options : [];
+      let optionIndex = numMatch ? parseInt(numMatch[1], 10) - 1 : -1;
+      if (optionIndex < 0 || optionIndex >= options.length) {
+        optionIndex = options.findIndex((o: any) => {
+          const lbl = String(typeof o === 'string' ? o : (o?.label || o?.title || '')).trim().toLowerCase();
+          return lbl === cleanInput || lbl.startsWith(cleanInput) || lbl.includes(cleanInput);
         });
       }
+      const optNum = optionIndex >= 0 ? String(optionIndex + 1) : cleanInput;
 
-      // 3. Fallback: pega a N-ésima aresta saindo do bloco/grupo correspondente ao índice da opção
-      if (!matchingEdge && !isNaN(optionIndex) && optionIndex >= 0) {
-        const outgoingEdges = edges.filter(e => e.sourceHandle === currBlockId || (parentGroup && e.source === parentGroup.id));
-        if (outgoingEdges[optionIndex]) {
-          matchingEdge = outgoingEdges[optionIndex];
-        }
-      }
+      if (optionIndex >= 0) {
+        let matchingEdge = edges.find(e =>
+          (e.source === parentGroup?.id || e.sourceHandle === currBlockId || e.sourceHandle?.startsWith(currBlockId)) &&
+          (e.sourceHandle === `${currBlockId}-opt-${optionIndex}` || e.sourceHandle === `${currBlockId}-cond-${optionIndex}`)
+        );
 
-      if (matchingEdge) {
-        const targetNode = nodes.find(n => n.id === matchingEdge.target);
-        if (targetNode && targetNode.data?.blocks?.length > 0) {
-          return targetNode.data.blocks[0];
+        if (!matchingEdge) {
+          matchingEdge = edges.find(e => {
+            if (!e.label) return false;
+            if (parentGroup && e.source !== parentGroup.id) return false;
+            const l = e.label.toLowerCase();
+            return l.includes(`numeromenu - ${optNum}`) ||
+                   l.startsWith(`${optNum} -`) ||
+                   l.startsWith(`${optNum}.`) ||
+                   l.startsWith(`${optNum} `) ||
+                   l === cleanInput;
+          });
         }
+
+        if (!matchingEdge) {
+          const genericEdges = edges.filter(e => parentGroup && e.source === parentGroup.id && (!e.sourceHandle || !String(e.sourceHandle).includes('-opt-')));
+          if (genericEdges.length === 1) matchingEdge = genericEdges[0];
+        }
+
+        const targetBlk = toTargetFirstBlock(matchingEdge);
+        if (targetBlk) return targetBlk;
       }
     }
 
@@ -285,26 +315,35 @@ export default function TestSimulator({ nodes, edges, onClose, startNodeId }: Te
       }
     }
 
-    // Aresta saindo do bloco atual ou do grupo pai
+    // Aresta saindo do bloco atual ou do grupo pai (sem pegar handle de outra opção/condição)
     let outgoingEdge = edges.find(e => e.sourceHandle === currBlockId);
     if (!outgoingEdge && parentGroup) {
-      outgoingEdge = edges.find(e => e.source === parentGroup.id);
+      outgoingEdge = edges.find(e =>
+        e.source === parentGroup.id &&
+        (!e.sourceHandle || (!String(e.sourceHandle).includes('-opt-') && !String(e.sourceHandle).includes('-cond-') && !String(e.sourceHandle).endsWith('-else')))
+      );
     }
 
-    if (outgoingEdge) {
-      const targetGroupId = outgoingEdge.target;
-      const targetGroup = nodes.find(n => n.id === targetGroupId);
-      if (targetGroup && targetGroup.data?.blocks?.length > 0) {
-        return targetGroup.data.blocks[0];
-      }
-    }
-
-    return null;
+    return toTargetFirstBlock(outgoingEdge);
   };
 
-  const autoAdvance = (currBlockId: string, delay = 600, userInputOption?: string) => {
-    setTimeout(() => {
-      const next = getNextBlock(currBlockId, userInputOption);
+  const autoAdvance = (
+    currBlockId: string,
+    delay = 600,
+    userInputOption?: string,
+    overrideHandleIds?: string[],
+    varsOverride?: Record<string, string>
+  ) => {
+    autoStepsRef.current += 1;
+    if (autoStepsRef.current > 25) {
+      pushMessage('system', '🛡️ Anti-Loop do Simulador: mais de 25 blocos executados em sequência sem pausa de Input/Espera. Simulação interrompida para sua segurança.');
+      setCurrentBlock(null);
+      setIsAwaitingInput(false);
+      return;
+    }
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      const next = getNextBlock(currBlockId, userInputOption, overrideHandleIds, varsOverride);
       if (next) {
         setCurrentBlock(next);
       } else {
@@ -320,93 +359,217 @@ export default function TestSimulator({ nodes, edges, onClose, startNodeId }: Te
     const flowType = currentBlock.flowType;
     const blockMsg = currentBlock.text || currentBlock.content || '';
 
-    // 1. Mensagens de Texto & Mídias
-    if (['send_message', 'message', 'image', 'video', 'audio', 'embed'].includes(flowType)) {
-      const baseText = blockMsg 
-        ? blockMsg 
-        : currentBlock.url 
+    // 1. Mensagens de Texto & Mídias (inclui "text"!)
+    if (['send_message', 'message', 'text', 'image', 'video', 'audio', 'embed'].includes(flowType)) {
+      const baseText = blockMsg
+        ? blockMsg
+        : currentBlock.url
           ? `[Mídia ${flowType.toUpperCase()}: ${currentBlock.url}]${currentBlock.caption ? `\n${currentBlock.caption}` : ''}`
           : `[Mídia: ${flowType}]`;
       const text = parseText(baseText, variables);
       pushMessage('bot', text);
-      autoAdvance(currentBlock.id, 700);
-    } 
-    // 2. Inputs de Texto e Formulários
-    else if (['ask', 'input', 'number_input', 'email_input', 'website_input', 'phone_input', 'date_input', 'time_input', 'payment', 'rating', 'file_input'].includes(flowType)) {
+      autoAdvance(currentBlock.id, 650);
+    }
+    // 2. Reply (Citação simulada)
+    else if (flowType === 'reply') {
+      const quotedPreview = lastUserInput ? `↩ Respondendo a "${lastUserInput}":\n` : '↩ [Resposta Citada]\n';
+      pushMessage('bot', `${quotedPreview}${parseText(blockMsg || 'Recebido!', variables)}`);
+      autoAdvance(currentBlock.id, 600);
+    }
+    // 3. Cobrança Pix formatada
+    else if (flowType === 'payment') {
+      const valor = parseText(currentBlock.amount || currentBlock.valor || '0,00', variables);
+      const pixKey = parseText(currentBlock.pix_key || currentBlock.chave_pix || '', variables);
+      const pixCode = parseText(currentBlock.pix_copia_e_cola || currentBlock.pix_code || '', variables);
+      const payLink = parseText(currentBlock.payment_link || currentBlock.url || '', variables);
+      const formatted = blockMsg
+        ? parseText(blockMsg, variables)
+        : `💳 PAGAMENTO VIA PIX\n💰 Valor: R$ ${valor}${pixKey ? `\n🔑 Chave: ${pixKey}` : ''}${pixCode ? `\n📋 Código: ${pixCode}` : ''}${payLink ? `\n🔗 Link: ${payLink}` : ''}`;
+      pushMessage('bot', formatted);
+      autoAdvance(currentBlock.id, 600);
+    }
+    // 4. Inputs de Texto, Arquivos e Avaliação (inclui "text_input"!)
+    else if (['ask', 'input', 'text_input', 'number_input', 'email_input', 'website_input', 'phone_input', 'date_input', 'time_input', 'rating', 'file_input'].includes(flowType)) {
       const baseText = blockMsg || `Digite seu ${currentBlock.label || flowType}:`;
       const text = parseText(baseText, variables);
       pushMessage('bot', text);
 
-      // Verifica se o próximo bloco é uma Condition com items para sugerir botões interativos
-      const parentGroup = nodes.find(n => n.data?.blocks?.some((b: any) => b.id === currentBlock.id));
-      if (parentGroup) {
-        const blocks = parentGroup.data.blocks;
-        const idx = blocks.findIndex((b: any) => b.id === currentBlock.id);
-        const nextInGroup = blocks[idx + 1];
-        if (nextInGroup && nextInGroup.flowType === 'condition' && nextInGroup.items) {
-          const suggestedOpts = nextInGroup.items.map((it: any) => `${it.value} - Opção ${it.value}`);
-          setActiveButtonOptions(suggestedOpts);
+      if (flowType === 'rating') {
+        setActiveButtonOptions(['1 - 😡 Péssimo', '2 - 🙁 Ruim', '3 - 😐 Regular', '4 - 😊 Bom', '5 - 🤩 Excelente']);
+      } else if (flowType === 'file_input') {
+        setActiveButtonOptions(['📎 Enviar Arquivo Simulado (comprovante.pdf)']);
+      } else {
+        const parentGroup = nodes.find(n => n.data?.blocks?.some((b: any) => b.id === currentBlock.id));
+        if (parentGroup) {
+          const blocks = parentGroup.data.blocks;
+          const idx = blocks.findIndex((b: any) => b.id === currentBlock.id);
+          const nextInGroup = blocks[idx + 1];
+          if (nextInGroup && nextInGroup.flowType === 'condition' && nextInGroup.items) {
+            const suggestedOpts = nextInGroup.items.map((it: any) => `${it.value} - Opção ${it.value}`);
+            setActiveButtonOptions(suggestedOpts);
+          } else {
+            setActiveButtonOptions([]);
+          }
         } else {
           setActiveButtonOptions([]);
         }
-      } else {
-        setActiveButtonOptions([]);
       }
 
       setIsAwaitingInput(true);
     }
-    // 3. Botões e Menus de Opções
-    else if (['buttons', 'pic_choice', 'cards'].includes(flowType)) {
-      if (blockMsg) {
-        pushMessage('bot', parseText(blockMsg, variables));
-      }
-      const opts = currentBlock.options || ['1 - Opção 1', '2 - Opção 2'];
-      setActiveButtonOptions(opts);
+    // 5. Botões, Menus de Opções, Seleção de Imagens e Enquete Nativa
+    else if (['buttons', 'pic_choice', 'cards', 'poll'].includes(flowType)) {
+      const prefix = flowType === 'poll' ? '📊 Enquete: ' : '';
+      const prompt = parseText(blockMsg || currentBlock.label || 'Escolha uma opção:', variables);
+      pushMessage('bot', `${prefix}${prompt}`);
+      const rawOpts = Array.isArray(currentBlock.options) && currentBlock.options.length > 0
+        ? currentBlock.options
+        : ['Opção 1', 'Opção 2'];
+      const formattedOpts = rawOpts.map((opt: any, idx: number) => {
+        const lbl = typeof opt === 'string' ? opt : (opt?.label || opt?.title || `Opção ${idx + 1}`);
+        return `${idx + 1} - ${parseText(lbl, variables)}`;
+      });
+      setActiveButtonOptions(formattedOpts);
       setIsAwaitingInput(true);
     }
-    // 4. Set Variable
+    // 6. Set Variable
     else if (flowType === 'set_variable') {
       const varKey = currentBlock.var_name || currentBlock.variable;
       const valExpr = currentBlock.text || currentBlock.value || currentBlock.expression || '';
-      if (varKey && valExpr) {
-        setVariables(prev => ({ ...prev, [varKey as string]: parseText(valExpr, prev) }));
+      if (varKey) {
+        const resolved = parseText(valExpr, variables);
+        const nextVars = { ...variables, [varKey as string]: resolved };
+        setVariables(nextVars);
+        autoAdvance(currentBlock.id, 100, undefined, undefined, nextVars);
+        return;
       }
-      autoAdvance(currentBlock.id, 80);
+      autoAdvance(currentBlock.id, 100);
     }
-    // 5. Jump (Retorno ao Menu ou Outro Grupo)
+    // 7. Script JS Sandbox
+    else if (flowType === 'script') {
+      const rawCode = currentBlock.code || currentBlock.text || '';
+      let nextVars = { ...variables };
+      try {
+        const runner = new Function(
+          'variables',
+          'setVar',
+          'getVar',
+          `${rawCode}\nreturn variables;`
+        );
+        const updated = runner(
+          nextVars,
+          (k: string, v: any) => { if (k) nextVars[String(k)] = String(v ?? ''); },
+          (k: string) => nextVars[String(k)]
+        );
+        if (updated && typeof updated === 'object') {
+          Object.keys(updated).forEach((k) => { nextVars[k] = String(updated[k] ?? ''); });
+        }
+        setVariables(nextVars);
+        pushMessage('system', '📜 Script executado em sandbox com sucesso.');
+      } catch (err: any) {
+        pushMessage('system', `⚠️ Erro no Script: ${err?.message || 'Sintaxe inválida'}`);
+      }
+      autoAdvance(currentBlock.id, 200, undefined, undefined, nextVars);
+    }
+    // 8. Teste A/B
+    else if (flowType === 'ab_test') {
+      const pctA = Math.max(0, Math.min(100, Number(currentBlock.splitA ?? currentBlock.percentageA ?? 50)));
+      const variant = Math.random() * 100 < pctA ? 'a' : 'b';
+      const handleIds = variant === 'a'
+        ? [`${currentBlock.id}-a`, 'a', `${currentBlock.id}-opt-0`]
+        : [`${currentBlock.id}-b`, 'b', `${currentBlock.id}-opt-1`];
+      const nextVars = { ...variables, __ab_variant: variant.toUpperCase() };
+      setVariables(nextVars);
+      pushMessage('system', `🔀 Teste A/B sorteou: Ramo ${variant.toUpperCase()} (${pctA}% A / ${100 - pctA}% B)`);
+      autoAdvance(currentBlock.id, 300, undefined, handleIds, nextVars);
+    }
+    // 9. Jump (Retorno ao Menu ou Outro Grupo)
     else if (flowType === 'jump') {
-      pushMessage('system', `↪️ Retornando para ${currentBlock.target_group_name || 'Menu'}...`);
-      autoAdvance(currentBlock.id, 500);
+      pushMessage('system', `↪️ Saltando para ${currentBlock.target_group_name || currentBlock.target_group_id || 'próximo grupo'}...`);
+      autoAdvance(currentBlock.id, 400);
     }
-    // 6. Condicionais
+    // 10. Condicionais
     else if (flowType === 'condition') {
       autoAdvance(currentBlock.id, 200, lastUserInput || variables['NumeroMenu']);
     }
-    // 7. Espera / Delay
+    // 11. Espera / Delay
     else if (flowType === 'wait' || flowType === 'delay') {
       const waitTime = currentBlock.wait_time || currentBlock.delay ? Number(currentBlock.wait_time || currentBlock.delay) : 2;
-      pushMessage('system', `⏳ Aguardando ${waitTime}s...`);
-      autoAdvance(currentBlock.id, Math.min(waitTime * 1000, 3000));
+      pushMessage('system', `⏳ Aguardando ${waitTime}s (no WhatsApp exibe "digitando...")...`);
+      autoAdvance(currentBlock.id, Math.min(waitTime * 1000, 2500));
     }
-    // 8. Webhook / GET
+    // 12. Webhook (tenta chamada GET/POST real com fallback amigável se CORS bloquear)
     else if (flowType === 'webhook') {
       const respVar = currentBlock.response_var_name || 'AbertoFechado';
-      const webhookUrl = currentBlock.url || currentBlock.webhookUrl || 'API';
-      const method = currentBlock.method || 'GET';
-      setVariables(prev => ({ ...prev, [respVar]: 'true' }));
-      pushMessage('system', `⚡ Webhook ${method}: ${webhookUrl} (200 OK) -> ${respVar} = true`);
+      const rawUrl = parseText(currentBlock.url || currentBlock.webhookUrl || '', variables).trim();
+      const method = String(currentBlock.method || 'GET').toUpperCase();
+
+      if (!rawUrl || !/^https?:\/\//i.test(rawUrl)) {
+        const nextVars = { ...variables, [respVar]: 'mock_ok' };
+        setVariables(nextVars);
+        pushMessage('system', `⚡ Webhook simulado (${method}) -> ${respVar} = mock_ok`);
+        autoAdvance(currentBlock.id, 300, undefined, undefined, nextVars);
+        return;
+      }
+
+      pushMessage('system', `⚡ Chamando Webhook ${method}: ${rawUrl}...`);
+      (async () => {
+        let finalVal = 'true';
+        try {
+          const opts: RequestInit = { method };
+          if (method !== 'GET' && method !== 'HEAD') {
+            opts.headers = { 'Content-Type': 'application/json' };
+            opts.body = parseText(currentBlock.body || JSON.stringify({ variables }), variables);
+          }
+          const res = await fetch(rawUrl, opts);
+          const txt = await res.text();
+          let data: any = txt;
+          try { data = JSON.parse(txt); } catch {}
+          const rPath = currentBlock.response_path?.trim();
+          if (rPath && data && typeof data === 'object') {
+            let cur = data;
+            for (const p of rPath.split('.')) { cur = cur?.[p]; }
+            finalVal = cur !== undefined && cur !== null ? String(typeof cur === 'object' ? JSON.stringify(cur) : cur) : '';
+          } else {
+            finalVal = typeof data === 'object' ? JSON.stringify(data) : String(data);
+          }
+          pushMessage('system', `✅ Webhook HTTP ${res.status} -> ${respVar} = ${finalVal.slice(0, 80)}`);
+        } catch {
+          finalVal = 'simulated_cors_ok';
+          pushMessage('system', `ℹ️ CORS/Rede no navegador; simulando retorno -> ${respVar} = ${finalVal}`);
+        }
+        const nextVars = { ...variables, [respVar]: finalVal };
+        setVariables(nextVars);
+        autoAdvance(currentBlock.id, 300, undefined, undefined, nextVars);
+      })();
+    }
+    // 13. Redirect / Subfluxo Typebot Link
+    else if (flowType === 'redirect' || flowType === 'typebot_link') {
+      if (flowType === 'redirect' && currentBlock.url) {
+        const link = parseText(currentBlock.url, variables);
+        pushMessage('bot', `${parseText(blockMsg || '🔗 Acesse o link abaixo:', variables)}\n${link}`);
+      } else {
+        pushMessage('system', `🔗 Subfluxo referenciado: ${currentBlock.target_flow_id || 'Configurar ID do fluxo destino'}`);
+      }
       autoAdvance(currentBlock.id, 400);
     }
-    // 9. Start Block
-    else if (flowType === 'start') {
-      autoAdvance(currentBlock.id, 200);
+    // 14. Comando CRM
+    else if (flowType === 'command') {
+      const action = currentBlock.command_action || 'add_tag';
+      const val = parseText(currentBlock.command_value || blockMsg || '', variables);
+      pushMessage('system', `⌘ Comando CRM simulado: ${action}${val ? ` (${val})` : ''}`);
+      autoAdvance(currentBlock.id, 300);
     }
-    // 10. Handoff
+    // 15. Start Block
+    else if (flowType === 'start') {
+      autoAdvance(currentBlock.id, 150);
+    }
+    // 16. Handoff
     else if (flowType === 'handoff') {
       if (blockMsg) {
         pushMessage('bot', parseText(blockMsg, variables));
       }
-      pushMessage('system', '👤 Atendimento transferido para atendente humano.');
+      pushMessage('system', '👤 Atendimento transferido para humano e I.A. pausada.');
       setCurrentBlock(null);
     }
     // Padrão Fallback
@@ -418,6 +581,8 @@ export default function TestSimulator({ nodes, edges, onClose, startNodeId }: Te
   }, [currentBlock]);
 
   const handleRestart = () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    autoStepsRef.current = 0;
     setIsRestarting(true);
     setMessages([]);
     setVariables(getInitialSimulatorVars());
@@ -436,19 +601,33 @@ export default function TestSimulator({ nodes, edges, onClose, startNodeId }: Te
       } else {
         pushMessage('system', 'Nenhum nó de entrada encontrado no fluxo.');
       }
-    }, 400);
+    }, 300);
   };
 
   useEffect(() => {
     handleRestart();
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleSelectOption = (optionText: string) => {
     if (!currentBlock) return;
-    
-    const match = optionText.match(/^(\d+)/);
-    const selectedValue = match ? match[1] : optionText;
+    autoStepsRef.current = 0;
+
+    let selectedValue = optionText;
+    if (currentBlock.flowType === 'file_input') {
+      selectedValue = 'https://exemplo.com/comprovante-teste.pdf';
+    } else {
+      const match = optionText.match(/^(\d+)\s*-\s*(.+)$/);
+      if (match && ['buttons', 'cards', 'pic_choice', 'poll', 'rating'].includes(currentBlock.flowType)) {
+        selectedValue = match[1];
+      } else {
+        const prefixNum = optionText.match(/^(\d+)/);
+        selectedValue = prefixNum ? prefixNum[1] : optionText;
+      }
+    }
 
     pushMessage('user', optionText);
     setActiveButtonOptions([]);
@@ -456,16 +635,43 @@ export default function TestSimulator({ nodes, edges, onClose, startNodeId }: Te
     setLastUserInput(selectedValue);
 
     const varName = currentBlock.var_name || currentBlock.variable || 'NumeroMenu';
-    setVariables(prev => ({ ...prev, [varName]: selectedValue, NumeroMenu: selectedValue }));
+    const nextVars = { ...variables, [varName]: selectedValue, NumeroMenu: selectedValue };
+    setVariables(nextVars);
 
-    autoAdvance(currentBlock.id, 400, selectedValue);
+    autoAdvance(currentBlock.id, 300, selectedValue, undefined, nextVars);
   };
 
   const handleSend = (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!inputValue.trim() || !isAwaitingInput || !currentBlock) return;
+    autoStepsRef.current = 0;
 
-    const text = inputValue.trim();
+    let text = inputValue.trim();
+    const flowType = currentBlock.flowType;
+    const shouldValidate = currentBlock.validate !== false;
+
+    // Validação fiel ao servidor antes de avançar
+    if (shouldValidate && flowType === 'number_input') {
+      const num = Number(text.replace(',', '.'));
+      if (Number.isNaN(num)) {
+        pushMessage('user', text);
+        setInputValue('');
+        pushMessage('bot', '⚠️ Por favor, digite apenas um número válido (ex: 10 ou 25.50).');
+        return;
+      }
+      text = String(num);
+    } else if (shouldValidate && flowType === 'email_input' && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(text)) {
+      pushMessage('user', text);
+      setInputValue('');
+      pushMessage('bot', '⚠️ Por favor, digite um e-mail válido (ex: nome@empresa.com).');
+      return;
+    } else if (shouldValidate && flowType === 'date_input' && !/^(\d{1,2}[/-]\d{1,2}[/-]\d{4}|\d{4}-\d{1,2}-\d{1,2})$/.test(text)) {
+      pushMessage('user', text);
+      setInputValue('');
+      pushMessage('bot', '⚠️ Por favor, informe uma data válida no formato DD/MM/AAAA.');
+      return;
+    }
+
     pushMessage('user', text);
     setInputValue('');
     setActiveButtonOptions([]);
@@ -473,9 +679,10 @@ export default function TestSimulator({ nodes, edges, onClose, startNodeId }: Te
     setLastUserInput(text);
 
     const varName = currentBlock.var_name || currentBlock.variable || 'NumeroMenu';
-    setVariables(prev => ({ ...prev, [varName]: text, NumeroMenu: text }));
+    const nextVars = { ...variables, [varName]: text, NumeroMenu: text };
+    setVariables(nextVars);
 
-    autoAdvance(currentBlock.id, 400, text);
+    autoAdvance(currentBlock.id, 300, text, undefined, nextVars);
   };
 
   return (
@@ -518,6 +725,19 @@ export default function TestSimulator({ nodes, edges, onClose, startNodeId }: Te
              </div>
 
              <div className="flex items-center gap-1">
+                 <button
+                    onClick={() => setShowVarsDrawer(v => !v)}
+                    className={`px-2 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all border ${
+                      showVarsDrawer
+                        ? 'bg-purple-600/30 text-purple-200 border-purple-500/40'
+                        : 'bg-zinc-800 text-zinc-300 hover:text-white border-zinc-700'
+                    }`}
+                    title="Inspecionar Variáveis Atuais em Tempo Real"
+                 >
+                    <Variable className="w-3.5 h-3.5" />
+                    <span>Vars</span>
+                 </button>
+
                  {/* Alternador de Tema: WhatsApp x Typebot Web (Imagem 4) */}
                  <button
                     onClick={() => setSimulatorTheme(t => t === 'whatsapp' ? 'typebot_web' : 'whatsapp')}
@@ -548,6 +768,24 @@ export default function TestSimulator({ nodes, edges, onClose, startNodeId }: Te
                  </button>
              </div>
           </div>
+
+          {showVarsDrawer && (
+            <div className="bg-[#121216] border-b border-zinc-800 px-3 py-2.5 max-h-40 overflow-y-auto text-[11px] space-y-1 shrink-0 custom-scrollbar">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-purple-400 mb-1">
+                Variáveis em Memória ({Object.keys(variables).length})
+              </div>
+              <div className="grid grid-cols-1 gap-1">
+                {Object.entries(variables)
+                  .filter(([, val]) => val !== '')
+                  .map(([key, val]) => (
+                    <div key={key} className="flex items-center justify-between gap-2 bg-zinc-900/90 px-2 py-1 rounded border border-zinc-800">
+                      <span className="font-mono text-purple-300 truncate">{key}</span>
+                      <span className="font-mono text-zinc-300 truncate max-w-[180px]">{String(val)}</span>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
 
           {/* Área do Chat */}
           <div className={`flex-1 overflow-y-auto p-4 space-y-3 relative ${

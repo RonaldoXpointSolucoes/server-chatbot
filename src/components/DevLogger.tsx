@@ -10,6 +10,7 @@ import { runPreventiveAudit, runControlledCaptureProbe, fetchRecentRealLogs, get
 import { DevLoggerModalShell } from './devlogger/DevLoggerModalShell';
 import { DevLoggerMetaModals } from './devlogger/DevLoggerMetaModals';
 import { DevLoggerGastrofoodTab } from './devlogger/DevLoggerGastrofoodTab';
+import { isDevHmrNoise } from '../utils/errorLogger';
 
 export default function DevLogger() {
   const navigate = useNavigate();
@@ -1233,8 +1234,13 @@ export default function DevLogger() {
     let lastSupabaseErrorTime = 0;
 
     console.error = (...args: any[]) => {
-      // Evitar spam do vite-plugin-react
-      if (typeof args[0] === 'string' && args[0].includes('vite-plugin-react')) return;
+      const firstMsg = typeof args[0] === 'string' ? args[0] : (args[0]?.message || '');
+      const joinedArgs = args.map(a => (typeof a === 'string' ? a : (a?.message || a?.stack || ''))).join(' ');
+      // Evitar spam de HMR do Vite dev server e falhas esperadas de Push em WebViews/headless
+      if (isDevHmrNoise(firstMsg, joinedArgs)) {
+        originalConsoleError.apply(console, args);
+        return;
+      }
       // Evitar spam do wacalls
       if (typeof args[0] === 'string' && (args[0].includes('[useWaCallsStore') || args[0].includes('wacalls') || args[0].includes('WaCalls'))) return;
       // Evitar spam de lock do Supabase gotrue-js
@@ -1442,6 +1448,9 @@ export default function DevLogger() {
 
     const handleWindowError = (event: ErrorEvent) => {
       if (event.message === 'Script error.') return;
+      if (isDevHmrNoise(String(event.message || ''), `${event.filename || ''} ${event.error?.stack || ''}`)) {
+        return;
+      }
       addLog({
         type: 'error',
         message: String(event.message),
@@ -1451,9 +1460,14 @@ export default function DevLogger() {
     };
 
     const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      const reasonMsg = event.reason?.message || String(event.reason || '');
+      const reasonStack = event.reason?.stack || '';
+      if (isDevHmrNoise(reasonMsg, reasonStack)) {
+        return;
+      }
       addLog({
         type: 'error',
-        message: event.reason?.message || String(event.reason) || 'Unhandled Promise Rejection',
+        message: reasonMsg || 'Unhandled Promise Rejection',
         source: 'Promise Rejection',
         details: { stack: event.reason?.stack }
       });

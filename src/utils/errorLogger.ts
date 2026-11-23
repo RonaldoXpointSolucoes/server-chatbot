@@ -12,6 +12,21 @@ interface ErrorContext {
 }
 
 /**
+ * Identifica ruídos transitórios exclusivos do servidor dev do Vite (HMR WebSocket quando o dev server é reiniciado ou em WebViews).
+ */
+export const isDevHmrNoise = (message: string = '', stackOrSource: string = ''): boolean => {
+  const m = String(message || '').toLowerCase();
+  const s = String(stackOrSource || '').toLowerCase();
+  return (
+    m.includes('[vite] failed to connect to websocket') ||
+    m.includes('vite-plugin-react') ||
+    m.includes('push service not available') ||
+    s.includes('/@vite/client') ||
+    (m.includes("failed to construct 'websocket'") && (m.includes('localhost:undefined') || s.includes('@vite')))
+  );
+};
+
+/**
  * Utilitário centralizado de captura e persistência de erros do Frontend
  */
 export const reportError = async (
@@ -22,6 +37,9 @@ export const reportError = async (
   try {
     const message = error instanceof Error ? error.message : String(error);
     const stack = error instanceof Error ? error.stack : undefined;
+    if (isDevHmrNoise(message, `${stack || ''} ${context?.filename || ''}`)) {
+      return;
+    }
     const currentUrl = typeof window !== 'undefined' ? window.location.href : '';
     const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : '';
     const tenantId = typeof localStorage !== 'undefined' 

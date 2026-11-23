@@ -50,7 +50,14 @@ import {
     UserCheck,
     RefreshCw,
     CheckCircle2,
-    Tag
+    Tag,
+    BookOpen,
+    ShieldCheck,
+    ShieldAlert,
+    AlertTriangle,
+    FlaskConical,
+    ChevronRight,
+    Terminal
 } from 'lucide-react';
 import {
     ReactFlow,
@@ -73,9 +80,17 @@ import CustomNode from '../components/Flow/CustomNode';
 import GroupNode from '../components/Flow/GroupNode';
 import TestSimulator from '../components/Flow/TestSimulator';
 import FlowHelpModal from '../components/Flow/FlowHelpModal';
+import BlockHelpDrawer from '../components/Flow/BlockHelpDrawer';
+import FlowHealthModal from '../components/Flow/FlowHealthModal';
 import { parseTypebotToFlow } from '../utils/typebotParser';
 import { normalizeUrlsInText, extractUrlsFromText } from '../utils/urlHelper';
 import { FlowActionsContext, getBlockTheme } from '../context/FlowActionsContext';
+import {
+    createDefaultBlockForType,
+    buildBlockExampleFlow,
+    analyzeFlowHealth,
+    type FlowHealthIssue
+} from '../utils/flowBlocksCatalog.mjs';
 
 const initialNodes: Node[] = [];
 const initialEdges: Edge[] = [];
@@ -145,8 +160,21 @@ function FlowBuilderContent() {
     const [loadingResults, setLoadingResults] = useState(false);
     const [configFlowName, setConfigFlowName] = useState('');
     const [configTriggers, setConfigTriggers] = useState<{ type: string; value: string }[]>([]);
+    const [allowedInstanceIds, setAllowedInstanceIds] = useState<string[]>([]);
+    const [companyInstances, setCompanyInstances] = useState<any[]>([]);
+    const [paletteSubmenu, setPaletteSubmenu] = useState<{ type: string; label: string; top: number; left: number } | null>(null);
+    const [helpBlockType, setHelpBlockType] = useState<string | null>(null);
+    const [isHealthOpen, setIsHealthOpen] = useState(false);
+    const [builderNotice, setBuilderNotice] = useState<{ title: string; detail: string; focusGroupId?: string } | null>(null);
+    const [inspectorTestResult, setInspectorTestResult] = useState<Record<string, string>>({});
 
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const paletteSidebarRef = useRef<HTMLDivElement>(null);
+
+    const flowHealthIssues: FlowHealthIssue[] = useMemo(
+        () => analyzeFlowHealth(nodes, edges, { currentFlowId: id, triggerRules: configTriggers }),
+        [nodes, edges, id, configTriggers]
+    );
 
     // Callbacks do FlowActionsContext para interação de Painéis e Itens Internos
     const handleDuplicateGroup = useCallback((groupId: string) => {
@@ -331,6 +359,75 @@ function FlowBuilderContent() {
         }, 150);
     };
 
+    const handleAddSingleBlock = useCallback((blockType: string, labelOverride?: string) => {
+        const newBlock = createDefaultBlockForType(blockType, labelOverride);
+        const targetGroup = selectedNode?.type === 'typebot_group' ? selectedNode : null;
+        if (targetGroup) {
+            handleAddBlockToGroup(targetGroup.id, newBlock);
+            setSelectedBlockId(newBlock.id);
+        } else {
+            const maxY = nodes.length > 0 ? Math.max(...nodes.map(n => Number(n.position?.y || 0))) + 240 : 120;
+            const groupId = `group-${uuidv4().substring(0, 6)}`;
+            const newGroupNode: Node = {
+                id: groupId,
+                type: 'typebot_group',
+                selected: true,
+                position: { x: 180, y: maxY },
+                data: {
+                    id: groupId,
+                    label: newBlock.label || 'Novo Grupo',
+                    blocks: [newBlock],
+                },
+            };
+            setNodes(nds => nds.map(n => ({ ...n, selected: false })).concat(newGroupNode));
+            setSelectedNode(newGroupNode);
+            setSelectedBlockId(newBlock.id);
+            setTimeout(() => {
+                fitView({ nodes: [{ id: groupId }], duration: 450, padding: 0.4 });
+            }, 120);
+        }
+        setPaletteSubmenu(null);
+    }, [selectedNode, handleAddBlockToGroup, nodes, setNodes, fitView]);
+
+    const handleGenerateBlockExample = useCallback((blockType: string, openSimulatorAfter = false) => {
+        const example = buildBlockExampleFlow(blockType, {
+            existingNodes: nodes,
+            companyName: tenantInfo?.name || 'Nossa Empresa',
+        });
+
+        setNodes((nds) => nds.map(n => ({ ...n, selected: false })).concat(example.nodes as Node[]));
+        setEdges((eds) => eds.concat(example.edges as Edge[]));
+
+        const focusNode = (example.nodes as Node[]).find(n => n.id === example.focusGroupId) || example.nodes[0];
+        if (focusNode) {
+            setSelectedNode(focusNode as Node);
+            const firstBlk = (focusNode as any).data?.blocks?.[0];
+            if (firstBlk?.id) setSelectedBlockId(firstBlk.id);
+        }
+
+        setPaletteSubmenu(null);
+        setBuilderNotice({
+            title: example.title,
+            detail: `${example.description} (Dica de gatilho WhatsApp: ${example.triggerSuggestion})`,
+            focusGroupId: example.focusGroupId,
+        });
+
+        setTimeout(() => {
+            fitView({
+                nodes: example.nodes.map((n: any) => ({ id: n.id })),
+                duration: 500,
+                padding: 0.25,
+            });
+        }, 120);
+
+        if (openSimulatorAfter && example.focusGroupId) {
+            setTimeout(() => {
+                setFocusedStartNodeId(example.focusGroupId);
+                setIsTesting(true);
+            }, 250);
+        }
+    }, [nodes, tenantInfo, setNodes, setEdges, fitView]);
+
     const nodeTypes = useMemo(() => ({
         custom: CustomNode,
         typebot_group: GroupNode,
@@ -346,16 +443,38 @@ function FlowBuilderContent() {
     useEffect(() => {
         async function fetchAvailableFlows() {
             if (!tenant_id) return;
-            const { data } = await supabase
-                .from('flows')
-                .select('id, name')
-                .eq('tenant_id', tenant_id)
-                .neq('id', id || '')
-                .order('name', { ascending: true });
+            const [{ data }, { data: insts }] = await Promise.all([
+                supabase
+                    .from('flows')
+                    .select('id, name')
+                    .eq('tenant_id', tenant_id)
+                    .neq('id', id || '')
+                    .order('name', { ascending: true }),
+                supabase
+                    .from('whatsapp_instances')
+                    .select('id, display_name, phone_number, status')
+                    .eq('tenant_id', tenant_id)
+                    .order('display_name', { ascending: true })
+            ]);
             if (data) setAvailableFlows(data);
+            if (insts) setCompanyInstances(insts);
         }
         fetchAvailableFlows();
     }, [tenant_id, id]);
+
+    useEffect(() => {
+        if (!paletteSubmenu) return;
+        const closeOnKey = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') setPaletteSubmenu(null);
+        };
+        const closeOnOutside = () => setPaletteSubmenu(null);
+        window.addEventListener('keydown', closeOnKey);
+        window.addEventListener('click', closeOnOutside);
+        return () => {
+            window.removeEventListener('keydown', closeOnKey);
+            window.removeEventListener('click', closeOnOutside);
+        };
+    }, [paletteSubmenu]);
 
     const fetchConversationStates = async () => {
         if (!id) return;
@@ -407,7 +526,14 @@ function FlowBuilderContent() {
             const parsedRules = typeof flow.trigger_rules === 'string'
                 ? JSON.parse(flow.trigger_rules || '[]')
                 : (flow.trigger_rules || []);
-            setConfigTriggers(parsedRules.length > 0 ? parsedRules : [{ type: 'EXACT', value: 'oi' }]);
+            const metaRule = Array.isArray(parsedRules)
+                ? parsedRules.find((r: any) => r && (r.type === '__META__' || r.keyword === '__META__'))
+                : null;
+            setAllowedInstanceIds(Array.isArray(metaRule?.allowedInstanceIds) ? metaRule.allowedInstanceIds : []);
+            const userTriggers = Array.isArray(parsedRules)
+                ? parsedRules.filter((r: any) => r && r.type !== '__META__' && r.keyword !== '__META__')
+                : [];
+            setConfigTriggers(userTriggers.length > 0 ? userTriggers : [{ type: 'EXACT', value: 'oi' }]);
 
             let version = flow.flow_versions;
 
@@ -608,14 +734,7 @@ function FlowBuilderContent() {
 
             if (!type) return;
 
-            const blockId = `${type}-${uuidv4().substring(0, 6)}`;
-            const newBlock = {
-                id: blockId,
-                label,
-                text: type === 'send_message' || type === 'ask' ? 'Novo texto...' : '',
-                flowType: type,
-                var_name: ''
-            };
+            const newBlock = createDefaultBlockForType(type, label || undefined);
 
             if (targetGroupId) {
                 // Append to target group
@@ -652,6 +771,21 @@ function FlowBuilderContent() {
 
     const saveFlow = async (activateInProduction = true) => {
         if (!versionData || !flowData) return;
+
+        // Validador anti-loop antes de publicar em produção
+        if (activateInProduction) {
+            const loopErrors = flowHealthIssues.filter((i) => i.code === 'UNPAUSED_CYCLE' || i.code === 'SELF_SUBFLOW');
+            if (loopErrors.length > 0) {
+                const proceed = window.confirm(
+                    `⚠️ ALERTA ANTI-LOOP (${loopErrors.length} risco(s) crítico(s)):\n\n${loopErrors[0].message}\n\nSugestão: ${loopErrors[0].suggestion}\n\nDeseja abrir o Auditor de Saúde antes de publicar? Clique em "Cancelar" para revisar agora.`
+                );
+                if (!proceed) {
+                    setIsHealthOpen(true);
+                    return;
+                }
+            }
+        }
+
         setSaving(true);
 
         // Identifica e normaliza URLs em todos os blocos e nós para compatibilidade com WhatsApp API
@@ -747,7 +881,10 @@ function FlowBuilderContent() {
             status: 'PUBLISHED'
         }).eq('id', versionData.id);
 
-        const cleanTriggers = configTriggers.filter(t => t.type === 'ALL' || t.value.trim() !== '');
+        const baseTriggers = configTriggers.filter(t => t.type !== '__META__' && (t.type === 'ALL' || (t.value || '').trim() !== ''));
+        const cleanTriggers: any[] = allowedInstanceIds.length > 0
+            ? [...baseTriggers, { type: '__META__', value: '', allowedInstanceIds }]
+            : baseTriggers;
         const nextActiveVerId = activateInProduction ? versionData.id : flowData.active_version_id;
 
         await supabase.from('flows').update({
@@ -928,30 +1065,32 @@ function FlowBuilderContent() {
                 onMoveBlockBetweenGroups: handleMoveBlockBetweenGroups,
                 onAddBlockToGroup: handleAddBlockToGroup,
                 selectedBlockId,
-                setSelectedBlockId
+                setSelectedBlockId,
+                onOpenBlockInstructions: (fType: string) => setHelpBlockType(fType),
+                onGenerateBlockExample: (fType: string) => handleGenerateBlockExample(fType, false),
             }}
         >
             <div className="flex flex-col h-full bg-[#0e0e11] text-zinc-200 select-none">
-                {/* Header Estilo Typebot */}
-                <header className="h-14 px-4 bg-[#18181b] border-b border-zinc-800/80 flex justify-between items-center z-20 shrink-0">
+                {/* Header Estilo Typebot (responsivo sem encavalamento ou quebra de texto) */}
+                <header className="min-h-14 py-1.5 px-3 bg-[#18181b] border-b border-zinc-800/80 flex flex-wrap items-center justify-between gap-2 z-20 shrink-0">
                 {/* Esquerda: Logo + Título + Ajuda */}
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 min-w-0 shrink-0">
                     <button
                         onClick={() => navigate('/settings/bots?tab=typebot')}
-                        className="p-1.5 hover:bg-zinc-800 rounded-lg transition-colors flex items-center gap-1.5 text-zinc-400 hover:text-white cursor-pointer"
+                        className="p-1.5 hover:bg-zinc-800 rounded-lg transition-colors flex items-center gap-1.5 text-zinc-400 hover:text-white cursor-pointer shrink-0"
                         title="Voltar para Fluxos de Bot (Robôs)"
                     >
                         <ArrowLeft className="w-4 h-4" />
                     </button>
                     
-                    <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 bg-indigo-600/30 border border-indigo-500/40 rounded-lg flex items-center justify-center text-indigo-400 font-black text-xs">
+                    <div className="flex items-center gap-2 min-w-0">
+                        <div className="w-7 h-7 bg-indigo-600/30 border border-indigo-500/40 rounded-lg flex items-center justify-center text-indigo-400 font-black text-xs shrink-0">
                             ⚡
                         </div>
-                        <h1 className="text-sm font-semibold text-zinc-100 max-w-[220px] truncate" title={flowData?.name}>
+                        <h1 className="text-sm font-semibold text-zinc-100 max-w-[160px] xl:max-w-[220px] truncate" title={flowData?.name}>
                             {flowData?.name || 'Construtor de Fluxo'}
                         </h1>
-                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider border ${
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider border whitespace-nowrap shrink-0 ${
                             flowData?.active_version_id
                                 ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
                                 : 'bg-zinc-800 text-zinc-400 border-zinc-700'
@@ -962,31 +1101,31 @@ function FlowBuilderContent() {
 
                     <button 
                         onClick={() => setIsHelpOpen(true)}
-                        className="flex items-center gap-1.5 text-xs text-zinc-300 hover:text-white px-2.5 py-1.5 rounded-lg hover:bg-zinc-800 transition-colors ml-1 border border-zinc-800/80 bg-[#202024] active:scale-95 shadow-sm cursor-pointer"
+                        className="flex items-center gap-1.5 text-xs text-zinc-300 hover:text-white px-2.5 py-1.5 rounded-lg hover:bg-zinc-800 transition-colors border border-zinc-800/80 bg-[#202024] active:scale-95 shadow-sm cursor-pointer whitespace-nowrap shrink-0"
                         title="Abrir Central de Ajuda e Modelos Prontos"
                     >
-                        <HelpCircle className="w-3.5 h-3.5 text-indigo-400" />
+                        <HelpCircle className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
                         <span>Ajuda</span>
                     </button>
                 </div>
 
                 {/* Centro: Abas do Typebot */}
-                <div className="flex items-center bg-[#202024] p-1 rounded-xl border border-zinc-800 text-xs font-medium">
+                <div className="flex items-center bg-[#202024] p-1 rounded-xl border border-zinc-800 text-xs font-medium overflow-x-auto max-w-full shrink-0">
                     <button
                         onClick={() => setActiveTab('fluxo')}
-                        className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${activeTab === 'fluxo' || activeTab === 'share' ? 'bg-[#2b2b31] text-white shadow-sm font-semibold' : 'text-zinc-400 hover:text-zinc-200'}`}
+                        className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer whitespace-nowrap shrink-0 ${activeTab === 'fluxo' || activeTab === 'share' ? 'bg-[#2b2b31] text-white shadow-sm font-semibold' : 'text-zinc-400 hover:text-zinc-200'}`}
                     >
                         Fluxo
                     </button>
                     <button
                         onClick={() => setActiveTab('tema')}
-                        className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${activeTab === 'tema' ? 'bg-[#2b2b31] text-white shadow-sm font-semibold' : 'text-zinc-400 hover:text-zinc-200'}`}
+                        className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer whitespace-nowrap shrink-0 ${activeTab === 'tema' ? 'bg-[#2b2b31] text-white shadow-sm font-semibold' : 'text-zinc-400 hover:text-zinc-200'}`}
                     >
                         Tema & Variáveis
                     </button>
                     <button
                         onClick={() => setActiveTab('config')}
-                        className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${activeTab === 'config' ? 'bg-[#2b2b31] text-white shadow-sm font-semibold' : 'text-zinc-400 hover:text-zinc-200'}`}
+                        className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer whitespace-nowrap shrink-0 ${activeTab === 'config' ? 'bg-[#2b2b31] text-white shadow-sm font-semibold' : 'text-zinc-400 hover:text-zinc-200'}`}
                     >
                         Configurações
                     </button>
@@ -995,14 +1134,14 @@ function FlowBuilderContent() {
                             setActiveTab('results');
                             fetchConversationStates();
                         }}
-                        className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${activeTab === 'results' ? 'bg-[#2b2b31] text-white shadow-sm font-semibold' : 'text-zinc-400 hover:text-zinc-200'}`}
+                        className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer whitespace-nowrap shrink-0 ${activeTab === 'results' ? 'bg-[#2b2b31] text-white shadow-sm font-semibold' : 'text-zinc-400 hover:text-zinc-200'}`}
                     >
                         Resultados
                     </button>
                 </div>
 
-                {/* Direita: Compartilhar + Visualizar + Salvar + Publicar */}
-                <div className="flex items-center gap-2">
+                {/* Direita: Importar + Exportar + Saúde + Visualizar + Salvar + Publicar */}
+                <div className="flex items-center flex-wrap gap-1.5 max-w-full">
                     <input
                         type="file"
                         ref={fileInputRef}
@@ -1012,60 +1151,85 @@ function FlowBuilderContent() {
                     />
                     <button
                         onClick={() => fileInputRef.current?.click()}
-                        className="bg-[#202024] hover:bg-zinc-800 text-zinc-300 hover:text-white px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all border border-zinc-800 shadow-sm active:scale-95 cursor-pointer"
+                        className="bg-[#202024] hover:bg-zinc-800 text-zinc-300 hover:text-white px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all border border-zinc-800 shadow-sm active:scale-95 cursor-pointer whitespace-nowrap shrink-0"
                         title="Importar fluxo a partir de arquivo .json (ChatBoot ou Typebot)"
                     >
-                        <UploadCloud className="w-3.5 h-3.5" />
-                        Importar
+                        <UploadCloud className="w-3.5 h-3.5 shrink-0" />
+                        <span>Importar</span>
                     </button>
                     
                     <button
                         onClick={handleExportBackup}
-                        className="bg-[#202024] hover:bg-zinc-800 text-zinc-300 hover:text-white px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all border border-zinc-800 shadow-sm active:scale-95 cursor-pointer"
+                        className="bg-[#202024] hover:bg-zinc-800 text-zinc-300 hover:text-white px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all border border-zinc-800 shadow-sm active:scale-95 cursor-pointer whitespace-nowrap shrink-0"
                         title="Salvar arquivo .json com todo este fluxo para backup"
                     >
-                        <Share2 className="w-3.5 h-3.5" />
-                        Exportar
+                        <Share2 className="w-3.5 h-3.5 shrink-0" />
+                        <span>Exportar</span>
+                    </button>
+
+                    <button
+                        onClick={() => setIsHealthOpen(true)}
+                        className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all border shadow-sm active:scale-95 cursor-pointer whitespace-nowrap shrink-0 ${
+                            flowHealthIssues.some(i => i.severity === 'error')
+                                ? 'bg-red-500/15 hover:bg-red-500/25 text-red-300 border-red-500/40'
+                                : flowHealthIssues.some(i => i.severity === 'warning')
+                                    ? 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border-amber-500/40'
+                                    : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                        }`}
+                        title="Auditoria Anti-Loop e Integridade do Fluxo"
+                    >
+                        {flowHealthIssues.some(i => i.severity === 'error') ? (
+                            <ShieldAlert className="w-3.5 h-3.5 text-red-400 shrink-0" />
+                        ) : flowHealthIssues.some(i => i.severity === 'warning') ? (
+                            <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                        ) : (
+                            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        )}
+                        <span className="whitespace-nowrap">
+                            {flowHealthIssues.length > 0
+                                ? `Saúde (${flowHealthIssues.length})`
+                                : 'Anti-Loop ✓'}
+                        </span>
                     </button>
 
                     <button
                         onClick={() => setIsTesting(true)}
-                        className="bg-[#202024] hover:bg-zinc-800 text-zinc-300 hover:text-white px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all border border-zinc-800 shadow-sm active:scale-95 cursor-pointer"
+                        className="bg-[#202024] hover:bg-zinc-800 text-zinc-300 hover:text-white px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all border border-zinc-800 shadow-sm active:scale-95 cursor-pointer whitespace-nowrap shrink-0"
                         title="Abrir chat de teste em tempo real"
                     >
-                        <Play className="w-3.5 h-3.5 text-emerald-400 fill-emerald-400" />
-                        Testar
+                        <Play className="w-3.5 h-3.5 text-emerald-400 fill-emerald-400 shrink-0" />
+                        <span>Testar</span>
                     </button>
 
                     <button
                         onClick={() => saveFlow(false)}
                         disabled={saving}
-                        className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all border border-zinc-700 shadow-sm active:scale-95 cursor-pointer"
+                        className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all border border-zinc-700 shadow-sm active:scale-95 cursor-pointer whitespace-nowrap shrink-0"
                         title="Salvar alterações mantendo o status atual (Ativo ou Pausado)"
                     >
-                        <Save className="w-3.5 h-3.5 text-indigo-400" />
-                        Salvar
+                        <Save className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                        <span>Salvar</span>
                     </button>
 
                     {flowData?.active_version_id ? (
                         <button
                             onClick={handleTogglePauseFlow}
-                            className="bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/40 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm active:scale-95 cursor-pointer"
+                            className="bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/40 px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm active:scale-95 cursor-pointer whitespace-nowrap shrink-0"
                             title="Pausar este fluxo para que ele não responda no WhatsApp"
                         >
-                            <Pause className="w-3.5 h-3.5 text-amber-400" />
-                            Pausar
+                            <Pause className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                            <span>Pausar</span>
                         </button>
                     ) : null}
 
                     <button
                         onClick={() => saveFlow(true)}
                         disabled={saving}
-                        className="bg-[#ff5722] hover:bg-[#f4511e] text-white px-4 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all shadow-md active:scale-95 border border-orange-500/30 cursor-pointer"
+                        className="bg-[#ff5722] hover:bg-[#f4511e] text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all shadow-md active:scale-95 border border-orange-500/30 cursor-pointer whitespace-nowrap shrink-0"
                         title="Salvar e Ativar este fluxo em Produção no WhatsApp"
                     >
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        {saving ? 'Publicando...' : 'Publicar no Ar'}
+                        <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                        <span>{saving ? 'Publicando...' : 'Publicar no Ar'}</span>
                     </button>
                 </div>
             </header>
@@ -1150,6 +1314,75 @@ function FlowBuilderContent() {
                                     </div>
                                 ))}
                             </div>
+                        </div>
+
+                        {/* Escopo de Caixas WhatsApp (Segurança para Testes em FoodNext vs Produção) */}
+                        <div className="space-y-3 pt-4 border-t border-zinc-800">
+                            <div className="flex items-center justify-between gap-2">
+                                <div>
+                                    <label className="text-xs font-bold uppercase tracking-wider text-zinc-300 flex items-center gap-1.5">
+                                        <ShieldCheck className="w-4 h-4 text-indigo-400" />
+                                        Escopo de Caixas (Instâncias WhatsApp)
+                                    </label>
+                                    <p className="text-[11px] text-zinc-400 mt-0.5">
+                                        Restrinja este fluxo a uma caixa específica (ex: <strong className="text-emerald-300">FoodNext</strong> para homologação) ou deixe em branco para rodar em todas as caixas da empresa.
+                                    </p>
+                                </div>
+                                {allowedInstanceIds.length > 0 && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setAllowedInstanceIds([])}
+                                        className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-zinc-800 hover:bg-zinc-700 text-zinc-300 cursor-pointer shrink-0"
+                                    >
+                                        Liberar Todas
+                                    </button>
+                                )}
+                            </div>
+
+                            {companyInstances.length === 0 ? (
+                                <p className="text-xs text-zinc-500 italic">Carregando caixas da empresa...</p>
+                            ) : (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                    {companyInstances.map((inst) => {
+                                        const isSelected = allowedInstanceIds.includes(inst.id);
+                                        return (
+                                            <label
+                                                key={inst.id}
+                                                className={`flex items-center gap-2.5 p-2.5 rounded-xl border text-xs cursor-pointer transition-colors ${
+                                                    isSelected
+                                                        ? 'bg-indigo-600/15 border-indigo-500/50 text-white'
+                                                        : 'bg-[#121215] border-zinc-800 text-zinc-300 hover:border-zinc-700'
+                                                }`}
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    checked={isSelected}
+                                                    onChange={(e) => {
+                                                        if (e.target.checked) {
+                                                            setAllowedInstanceIds((prev) => Array.from(new Set([...prev, inst.id])));
+                                                        } else {
+                                                            setAllowedInstanceIds((prev) => prev.filter((x) => x !== inst.id));
+                                                        }
+                                                    }}
+                                                    className="w-3.5 h-3.5 rounded border-zinc-700 text-indigo-500 bg-zinc-900"
+                                                />
+                                                <div className="min-w-0 flex-1">
+                                                    <div className="font-semibold truncate flex items-center gap-1.5">
+                                                        <span className={`w-1.5 h-1.5 rounded-full ${inst.status === 'connected' ? 'bg-emerald-400' : 'bg-zinc-500'}`} />
+                                                        <span className="truncate">{inst.display_name || inst.phone_number || inst.id.slice(0, 8)}</span>
+                                                    </div>
+                                                    <div className="text-[10px] font-mono text-zinc-500 truncate">{inst.phone_number || inst.id.slice(0, 8)}</div>
+                                                </div>
+                                            </label>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                            <p className="text-[10px] text-amber-300/80">
+                                {allowedInstanceIds.length === 0
+                                    ? 'Modo atual: Todas as caixas conectadas desta empresa respondem a este fluxo.'
+                                    : `Modo isolado: Somente ${allowedInstanceIds.length} caixa(s) selecionada(s) dispara(m) este fluxo (produção protegida).`}
+                            </p>
                         </div>
 
                         <div className="flex justify-end gap-3 pt-4 border-t border-zinc-800">
@@ -1287,7 +1520,7 @@ function FlowBuilderContent() {
             ) : (
             <div className="flex-1 flex overflow-hidden">
                 {/* Sidebar Esquerda (Toolbox Drag & Drop Estilo Typebot) */}
-                <div className="w-64 bg-[#121215] border-r border-zinc-800/80 flex flex-col z-10 shrink-0 overflow-y-auto">
+                <div ref={paletteSidebarRef} className="w-64 bg-[#121215] border-r border-zinc-800/80 flex flex-col z-10 shrink-0 overflow-y-auto">
                     {/* Campo de Busca com Cadeado */}
                     <div className="p-3 border-b border-zinc-800/60">
                         <div className="relative flex items-center">
@@ -1302,25 +1535,55 @@ function FlowBuilderContent() {
                         </div>
                     </div>
 
-                    {/* Categorias e Blocos */}
+                    {/* Categorias e Blocos (cada botão com submenu de Instruções e Exemplo Funcional) */}
                     <div className="p-3 flex flex-col gap-4">
+                        <div className="px-2 py-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-[10px] text-indigo-200 leading-snug">
+                            💡 <strong>Clique</strong> em qualquer bloco para abrir <span className="text-white font-semibold">Instruções & Exemplo</span>, ou <strong>arraste</strong> ao canvas.
+                        </div>
                         {categories.map((category) => (
                             <div key={category}>
                                 <h3 className="text-xs font-semibold text-zinc-400 mb-2">{category}</h3>
                                 <div className="grid grid-cols-2 gap-1.5">
                                     {filteredNodeTypes.filter(n => n.category === category).map((nt) => {
                                         const theme = getBlockTheme(nt.type);
+                                        const isSubmenuOpen = paletteSubmenu?.type === nt.type;
                                         return (
-                                            <div
+                                            <button
                                                 key={nt.type}
-                                                onDragStart={(event) => onDragStart(event, nt.type, nt.label)}
+                                                type="button"
+                                                onDragStart={(event) => {
+                                                    setPaletteSubmenu(null);
+                                                    onDragStart(event, nt.type, nt.label);
+                                                }}
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                                    const sidebarRight = paletteSidebarRef.current?.getBoundingClientRect().right ?? rect.right;
+                                                    setPaletteSubmenu((prev) =>
+                                                        prev?.type === nt.type
+                                                            ? null
+                                                            : {
+                                                                  type: nt.type,
+                                                                  label: nt.label,
+                                                                  top: Math.max(72, Math.min(rect.top, window.innerHeight - 235)),
+                                                                  left: Math.min(sidebarRight + 8, window.innerWidth - 268),
+                                                              }
+                                                    );
+                                                }}
                                                 draggable
-                                                className="flex items-center gap-2 p-2 bg-[#1c1c21] border border-zinc-800/80 rounded-lg cursor-grab hover:bg-[#25252b] hover:border-zinc-700 transition-all text-left group"
+                                                title={`${nt.label} — Clique para abrir 1-) Instruções de uso e 2-) Exemplo (ou arraste ao canvas)`}
+                                                className={`flex items-center justify-between gap-1.5 p-2 rounded-lg cursor-pointer transition-all text-left group border ${
+                                                    isSubmenuOpen
+                                                        ? 'bg-indigo-600/20 border-indigo-500/60 ring-1 ring-indigo-500/40'
+                                                        : 'bg-[#1c1c21] border-zinc-800/80 hover:bg-[#25252b] hover:border-zinc-700'
+                                                }`}
                                             >
-                                                {/* Cores fiéis da categoria: Laranja para Bubbles/Inputs, Roxo para Condicionais, Esmeralda para Eventos */}
-                                                <nt.icon className={`w-4 h-4 ${theme.iconColor} shrink-0 group-hover:scale-110 transition-transform`} />
-                                                <span className="text-[11px] font-medium text-zinc-300 truncate">{nt.label}</span>
-                                            </div>
+                                                <div className="flex items-center gap-1.5 min-w-0">
+                                                    <nt.icon className={`w-3.5 h-3.5 ${theme.iconColor} shrink-0 group-hover:scale-110 transition-transform`} />
+                                                    <span className="text-[11px] font-medium text-zinc-200 truncate">{nt.label}</span>
+                                                </div>
+                                                <ChevronRight className={`w-3 h-3 shrink-0 transition-opacity ${isSubmenuOpen ? 'text-indigo-300 opacity-100' : 'text-zinc-500 opacity-0 group-hover:opacity-100'}`} />
+                                            </button>
                                         );
                                     })}
                                 </div>
@@ -1329,8 +1592,94 @@ function FlowBuilderContent() {
                     </div>
                 </div>
 
+                {/* Submenu Flutuante Ancorado FORA da sidebar (zero sobreposição sobre outros botões) */}
+                {paletteSubmenu && (
+                    <div
+                        style={{ top: paletteSubmenu.top, left: paletteSubmenu.left }}
+                        onClick={(e) => e.stopPropagation()}
+                        className="fixed z-[130] w-64 bg-[#181820] border border-zinc-700 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.85)] p-2.5 space-y-1.5"
+                    >
+                        <div className="px-2 py-1.5 border-b border-zinc-800 flex items-center justify-between gap-2">
+                            <span className="text-xs font-bold text-white truncate">{paletteSubmenu.label}</span>
+                            <span className="text-[9px] font-mono text-zinc-400 bg-zinc-900 px-1.5 py-0.5 rounded border border-zinc-800 shrink-0">{paletteSubmenu.type}</span>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                const targetType = paletteSubmenu.type;
+                                setPaletteSubmenu(null);
+                                setHelpBlockType(targetType);
+                            }}
+                            className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-xs font-medium text-zinc-100 hover:bg-indigo-600/20 hover:text-indigo-200 transition-colors cursor-pointer text-left"
+                        >
+                            <BookOpen className="w-3.5 h-3.5 text-orange-400 shrink-0" />
+                            <div>
+                                <div className="font-semibold">1-) Instruções de uso</div>
+                                <div className="text-[10px] text-zinc-400">Guia técnico, variáveis & anti-loop</div>
+                            </div>
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => handleGenerateBlockExample(paletteSubmenu.type, false)}
+                            className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-xs font-medium text-zinc-100 hover:bg-amber-500/20 hover:text-amber-200 transition-colors cursor-pointer text-left"
+                        >
+                            <FlaskConical className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                            <div>
+                                <div className="font-semibold">2-) Exemplo</div>
+                                <div className="text-[10px] text-zinc-400">Gera exemplo funcional conectado</div>
+                            </div>
+                        </button>
+                        <div className="pt-1 border-t border-zinc-800/80 grid grid-cols-2 gap-1">
+                            <button
+                                type="button"
+                                onClick={() => handleGenerateBlockExample(paletteSubmenu.type, true)}
+                                className="px-2 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/35 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer"
+                            >
+                                <Play className="w-3 h-3 fill-current" /> Exemplo+Chat
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => handleAddSingleBlock(paletteSubmenu.type, paletteSubmenu.label)}
+                                className="px-2 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-[10px] font-semibold flex items-center justify-center gap-1 cursor-pointer"
+                            >
+                                <Plus className="w-3 h-3" /> Só Bloco
+                            </button>
+                        </div>
+                    </div>
+                )}
+
                 {/* Editor Graph Canvas */}
                 <div className="flex-1 relative bg-[#0e0e11]" ref={reactFlowWrapper}>
+                    {builderNotice && (
+                        <div className="absolute top-4 left-4 z-20 max-w-md bg-[#181820]/95 border border-indigo-500/40 rounded-2xl px-4 py-3 shadow-2xl backdrop-blur flex items-start gap-3">
+                            <FlaskConical className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+                            <div className="flex-1 min-w-0 text-xs">
+                                <div className="font-bold text-white truncate">{builderNotice.title}</div>
+                                <p className="text-[11px] text-zinc-300 mt-0.5 leading-snug">{builderNotice.detail}</p>
+                                <div className="flex items-center gap-2 mt-2">
+                                    {builderNotice.focusGroupId && (
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setFocusedStartNodeId(builderNotice.focusGroupId);
+                                                setIsTesting(true);
+                                            }}
+                                            className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                                        >
+                                            <Play className="w-3 h-3 fill-current" /> Testar no Simulador
+                                        </button>
+                                    )}
+                                    <button
+                                        type="button"
+                                        onClick={() => setBuilderNotice(null)}
+                                        className="px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[10px] cursor-pointer"
+                                    >
+                                        Dispensar
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                     {/* Botões Flutuantes Superiores Direitos Estilo Typebot ({}, ..., +, -) */}
                     <div className="absolute top-4 right-4 z-10 flex items-center gap-1.5 bg-[#18181b]/90 border border-zinc-800 p-1 rounded-lg backdrop-blur shadow-xl">
                         <button 
@@ -1460,12 +1809,22 @@ function FlowBuilderContent() {
 
                                         return (
                                             <div key={block.id || idx} className="bg-slate-800/80 p-3 rounded-xl border border-slate-700/50 space-y-3">
-                                                <div className="flex items-center gap-2 mb-1">
-                                                    <div className="w-2 h-2 rounded-full bg-indigo-500"></div>
-                                                    <span className="text-xs font-semibold text-slate-200">{block.label || 'Bloco'}</span>
+                                                <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-700/70">
+                                                    <div className="flex items-center gap-2 min-w-0">
+                                                        <span className="w-2 h-2 rounded-full bg-indigo-400 shrink-0"></span>
+                                                        <span className="text-xs font-semibold text-slate-200 truncate">{block.label || 'Bloco'}</span>
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setHelpBlockType(block.flowType)}
+                                                        className="px-2 py-0.5 rounded bg-indigo-500/15 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/30 text-[10px] font-semibold flex items-center gap-1 cursor-pointer shrink-0"
+                                                        title="Abrir Instruções de Uso deste Bloco"
+                                                    >
+                                                        <BookOpen className="w-3 h-3" /> Instruções
+                                                    </button>
                                                 </div>
 
-                                                {['send_message', 'ask', 'buttons', 'poll', 'pic_choice', 'handoff', 'set_variable', 'email_input', 'number_input', 'phone_input', 'website_input', 'date_input', 'time_input', 'payment', 'rating', 'file_input'].includes(block.flowType) && (
+                                                {['send_message', 'text', 'ask', 'text_input', 'buttons', 'poll', 'pic_choice', 'handoff', 'set_variable', 'email_input', 'number_input', 'phone_input', 'website_input', 'date_input', 'time_input', 'payment', 'rating', 'file_input', 'reply', 'redirect'].includes(block.flowType) && (
                                                     <div className="space-y-2">
                                                         <div className="flex items-center justify-between">
                                                             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Texto / Pergunta</label>
@@ -1643,6 +2002,23 @@ function FlowBuilderContent() {
                                                                 className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2 rounded-lg text-xs focus:ring-1 focus:ring-indigo-500 outline-none resize-none transition-all"
                                                             />
                                                         </div>
+                                                        {block.flowType === 'pic_choice' && (
+                                                            <div className="space-y-1.5 p-2.5 bg-orange-950/20 border border-orange-500/30 rounded-xl">
+                                                                <label className="text-[10px] font-bold text-orange-300 uppercase tracking-wider block">
+                                                                    URLs das Imagens por Opção (1 por linha, na mesma ordem)
+                                                                </label>
+                                                                <textarea
+                                                                    rows={3}
+                                                                    value={(block.optionImages || []).join('\n')}
+                                                                    onChange={(e) => {
+                                                                        const imgs = e.target.value.split('\n').map(s => s.trim());
+                                                                        updateBlock('optionImages', imgs as any);
+                                                                    }}
+                                                                    placeholder="https://.../foto-1.jpg&#10;https://.../foto-2.jpg"
+                                                                    className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-2.5 py-1.5 rounded-lg text-[11px] font-mono outline-none focus:ring-1 focus:ring-orange-500"
+                                                                />
+                                                            </div>
+                                                        )}
                                                         {block.flowType === 'poll' && (
                                                             <div className="p-2.5 bg-emerald-950/30 border border-emerald-500/30 rounded-xl space-y-1.5">
                                                                 <label className="text-[10px] font-bold text-emerald-300 uppercase tracking-wider block">
@@ -1866,6 +2242,179 @@ function FlowBuilderContent() {
                                                     </div>
                                                 )}
 
+                                                {['number_input', 'email_input', 'website_input', 'phone_input', 'date_input', 'rating', 'buttons', 'poll', 'pic_choice'].includes(block.flowType) && (
+                                                    <div className="p-2.5 bg-slate-900/60 border border-slate-700/70 rounded-xl space-y-2">
+                                                        <div className="flex items-center justify-between">
+                                                            <label className="text-[10px] font-bold text-slate-300 uppercase tracking-wider">Validar Resposta & Retentativas</label>
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={block.validate !== false}
+                                                                onChange={(e) => updateBlock('validate', e.target.checked as any)}
+                                                                className="w-3.5 h-3.5 rounded border-slate-700 text-indigo-500 bg-slate-900"
+                                                            />
+                                                        </div>
+                                                        <div className="flex items-center justify-between gap-2">
+                                                            <span className="text-[10px] text-slate-400">Máx. erros antes de encerrar (anti-loop):</span>
+                                                            <input
+                                                                type="number"
+                                                                min={1}
+                                                                max={10}
+                                                                value={block.max_retries ?? 3}
+                                                                onChange={(e) => updateBlock('max_retries', Math.max(1, Number(e.target.value) || 3) as any)}
+                                                                className="w-16 bg-slate-950 border border-slate-700 text-slate-200 px-2 py-1 rounded text-xs font-mono text-center"
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {block.flowType === 'script' && (
+                                                    <div className="space-y-2.5 p-3 bg-purple-950/20 border border-purple-500/30 rounded-xl">
+                                                        <div className="flex items-center justify-between">
+                                                            <label className="text-[10px] font-bold text-purple-300 uppercase tracking-wider">Código JavaScript (Sandbox Segura)</label>
+                                                            <span className="text-[9px] font-mono text-purple-400">timeout 150ms</span>
+                                                        </div>
+                                                        <div className="flex flex-wrap gap-1">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => updateBlock('code', 'const total = Number(variables.quantidade || 1) * 49.90;\nsetVar("total_formatado", total.toFixed(2).replace(".", ","));')}
+                                                                className="text-[9px] px-1.5 py-0.5 rounded bg-purple-900/50 hover:bg-purple-800 text-purple-200 border border-purple-500/30 cursor-pointer"
+                                                            >
+                                                                Preset: Calcular Total
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => updateBlock('code', 'const limpo = String(variables.nome_cliente || "").trim().toUpperCase();\nsetVar("nome_maiusculo", limpo);')}
+                                                                className="text-[9px] px-1.5 py-0.5 rounded bg-purple-900/50 hover:bg-purple-800 text-purple-200 border border-purple-500/30 cursor-pointer"
+                                                            >
+                                                                Preset: Maiúsculas
+                                                            </button>
+                                                        </div>
+                                                        <textarea
+                                                            rows={5}
+                                                            value={block.code || block.text || ''}
+                                                            onChange={(e) => updateBlock('code', e.target.value)}
+                                                            placeholder={'setVar("total", Number(variables.qtd || 1) * 10);'}
+                                                            className="w-full bg-slate-950 border border-slate-700 text-purple-200 px-3 py-2 rounded-lg text-[11px] font-mono outline-none focus:ring-1 focus:ring-purple-500"
+                                                        />
+                                                        <div className="flex items-center justify-between gap-2">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    try {
+                                                                        const sampleVars: Record<string, any> = { pushName: 'Ronaldo Teste', nome_cliente: 'Ronaldo', quantidade: '2', NumeroMenu: '1' };
+                                                                        const fn = new Function('variables', 'setVar', `${block.code || block.text || ''}\nreturn variables;`);
+                                                                        const out = fn(sampleVars, (k: string, v: any) => { sampleVars[k] = v; });
+                                                                        setInspectorTestResult(prev => ({ ...prev, [block.id]: `✅ OK: ${JSON.stringify(out)}` }));
+                                                                    } catch (err: any) {
+                                                                        setInspectorTestResult(prev => ({ ...prev, [block.id]: `❌ Erro: ${err?.message}` }));
+                                                                    }
+                                                                }}
+                                                                className="px-2.5 py-1 rounded-lg bg-purple-600/30 hover:bg-purple-600/50 text-purple-200 border border-purple-500/40 text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                                                            >
+                                                                <Play className="w-3 h-3" /> Testar Script
+                                                            </button>
+                                                        </div>
+                                                        {inspectorTestResult[block.id] && (
+                                                            <div className="p-2 rounded bg-slate-950 border border-slate-800 text-[10px] font-mono text-zinc-200 break-all">
+                                                                {inspectorTestResult[block.id]}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
+
+                                                {block.flowType === 'ab_test' && (
+                                                    <div className="space-y-2 p-3 bg-purple-950/20 border border-purple-500/30 rounded-xl">
+                                                        <div className="flex items-center justify-between">
+                                                            <label className="text-[10px] font-bold text-purple-300 uppercase tracking-wider">Distribuição Teste A/B</label>
+                                                            <span className="text-xs font-mono font-bold text-white">
+                                                                A: {block.splitA ?? 50}% / B: {100 - (block.splitA ?? 50)}%
+                                                            </span>
+                                                        </div>
+                                                        <input
+                                                            type="range"
+                                                            min={0}
+                                                            max={100}
+                                                            step={5}
+                                                            value={block.splitA ?? 50}
+                                                            onChange={(e) => updateBlock('splitA', Number(e.target.value) as any)}
+                                                            className="w-full accent-purple-500"
+                                                        />
+                                                        <p className="text-[10px] text-slate-400">
+                                                            Conecte a porta roxa <strong>Ramo A</strong> e a porta <strong>Ramo B</strong> do bloco para comparar resultados.
+                                                        </p>
+                                                    </div>
+                                                )}
+
+                                                {block.flowType === 'redirect' && (
+                                                    <div className="space-y-2.5 p-3 bg-purple-950/20 border border-purple-500/30 rounded-xl">
+                                                        <label className="text-[10px] font-bold text-purple-300 uppercase tracking-wider block">URL de Redirecionamento Externo</label>
+                                                        <input
+                                                            type="url"
+                                                            value={block.url || ''}
+                                                            onChange={(e) => updateBlock('url', e.target.value)}
+                                                            placeholder="https://xpointsolucoes.com.br/..."
+                                                            className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2 rounded-lg text-xs font-mono"
+                                                        />
+                                                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block pt-1">Ou Chamar Outro Fluxo (Opcional)</label>
+                                                        <select
+                                                            value={block.target_flow_id || ''}
+                                                            onChange={(e) => updateBlock('target_flow_id', e.target.value)}
+                                                            className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2 rounded-lg text-xs"
+                                                        >
+                                                            <option value="">Usar apenas URL externa acima</option>
+                                                            {availableFlows.map(f => (
+                                                                <option key={f.id} value={f.id}>{f.name}</option>
+                                                            ))}
+                                                        </select>
+                                                    </div>
+                                                )}
+
+                                                {block.flowType === 'reply' && (
+                                                    <div className="flex items-center justify-between bg-sky-950/30 p-2.5 rounded-xl border border-sky-500/30">
+                                                        <div>
+                                                            <label className="text-[10px] font-bold text-sky-300 uppercase tracking-wider block">Citar Mensagem do Cliente</label>
+                                                            <span className="text-[10px] text-slate-400">Responde marcando (quote) no WhatsApp</span>
+                                                        </div>
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={block.quote_message !== false}
+                                                            onChange={(e) => updateBlock('quote_message', e.target.checked as any)}
+                                                            className="w-4 h-4 rounded border-slate-700 text-sky-500 bg-slate-900"
+                                                        />
+                                                    </div>
+                                                )}
+
+                                                {block.flowType === 'command' && (
+                                                    <div className="space-y-2.5 p-3 bg-sky-950/20 border border-sky-500/30 rounded-xl">
+                                                        <label className="text-[10px] font-bold text-sky-300 uppercase tracking-wider block">Ação de Controle CRM</label>
+                                                        <select
+                                                            value={block.command_action || 'add_tag'}
+                                                            onChange={(e) => updateBlock('command_action', e.target.value)}
+                                                            className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2 rounded-lg text-xs"
+                                                        >
+                                                            <option value="add_tag">Adicionar Etiqueta (Tag) no Ticket</option>
+                                                            <option value="remove_tag">Remover Etiqueta (Tag) do Ticket</option>
+                                                            <option value="update_contact_name">Atualizar Nome do Contato</option>
+                                                            <option value="pause_ai">Pausar Robô I.A. na Conversa</option>
+                                                            <option value="resume_ai">Reativar Robô I.A. na Conversa</option>
+                                                            <option value="close_ticket">Finalizar / Fechar Ticket no CRM</option>
+                                                            <option value="clear_variables">Limpar Variáveis Temporárias</option>
+                                                        </select>
+                                                        {!['pause_ai', 'resume_ai', 'close_ticket', 'clear_variables'].includes(block.command_action || 'add_tag') && (
+                                                            <div>
+                                                                <label className="text-[10px] font-bold text-slate-400 block mb-1">Valor / Parâmetro</label>
+                                                                <input
+                                                                    type="text"
+                                                                    value={block.command_value || ''}
+                                                                    onChange={(e) => updateBlock('command_value', e.target.value)}
+                                                                    placeholder="Ex: lead-quente ou {{nome_cliente}}"
+                                                                    className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2 rounded-lg text-xs font-mono"
+                                                                />
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
+
                                                 {block.flowType === 'webhook' && (
                                                     <div className="space-y-3 p-3 bg-emerald-950/20 border border-emerald-500/30 rounded-xl">
                                                         <div className="grid grid-cols-3 gap-2">
@@ -1903,10 +2452,68 @@ function FlowBuilderContent() {
                                                                     newBlocks[idx] = { ...block, url: e.target.value, webhookUrl: e.target.value };
                                                                     handleDataChange('blocks', newBlocks as any);
                                                                 }}
-                                                                placeholder="https://api.exemplo.com/webhook"
+                                                                placeholder="https://viacep.com.br/ws/{{cep}}/json/"
                                                                 className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2 rounded-lg text-xs focus:ring-1 focus:ring-indigo-500 outline-none transition-all font-mono"
                                                             />
                                                         </div>
+                                                        <div className="grid grid-cols-2 gap-2">
+                                                            <div>
+                                                                <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">JSON Path (Opcional)</label>
+                                                                <input
+                                                                    type="text"
+                                                                    value={block.response_path || ''}
+                                                                    onChange={(e) => updateBlock('response_path', e.target.value)}
+                                                                    placeholder="Ex: localidade ou data.id"
+                                                                    className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-2.5 py-1.5 rounded-lg text-[11px] font-mono"
+                                                                />
+                                                            </div>
+                                                            <div className="flex items-end">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={async () => {
+                                                                        const rawUrl = String(block.url || block.webhookUrl || '').replace(/\{\{cep\}\}/gi, '01001000').trim();
+                                                                        const mtd = String(block.method || 'GET').toUpperCase();
+                                                                        if (!rawUrl) {
+                                                                            setInspectorTestResult(prev => ({ ...prev, [block.id]: '⚠️ Preencha a URL antes de testar.' }));
+                                                                            return;
+                                                                        }
+                                                                        setInspectorTestResult(prev => ({ ...prev, [block.id]: '⏳ Testando requisição...' }));
+                                                                        try {
+                                                                            const opts: RequestInit = { method: mtd };
+                                                                            if (mtd !== 'GET' && mtd !== 'HEAD' && block.body) {
+                                                                                opts.headers = { 'Content-Type': 'application/json' };
+                                                                                opts.body = block.body;
+                                                                            }
+                                                                            const res = await fetch(rawUrl, opts);
+                                                                            const txt = await res.text();
+                                                                            setInspectorTestResult(prev => ({ ...prev, [block.id]: `✅ HTTP ${res.status}: ${txt.slice(0, 140)}` }));
+                                                                        } catch (err: any) {
+                                                                            setInspectorTestResult(prev => ({ ...prev, [block.id]: `⚠️ ${err?.message || 'Falha/CORS no navegador (no servidor Node funciona sem CORS)'}` }));
+                                                                        }
+                                                                    }}
+                                                                    className="w-full px-2.5 py-1.5 rounded-lg bg-emerald-600/25 hover:bg-emerald-600/40 text-emerald-300 border border-emerald-500/40 text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer"
+                                                                >
+                                                                    <FlaskConical className="w-3 h-3" /> Testar API
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                        {String(block.method || 'GET').toUpperCase() !== 'GET' && (
+                                                            <div>
+                                                                <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Body JSON (POST/PUT)</label>
+                                                                <textarea
+                                                                    rows={3}
+                                                                    value={block.body || ''}
+                                                                    onChange={(e) => updateBlock('body', e.target.value)}
+                                                                    placeholder={'{"nome": "{{nome_cliente}}"}'}
+                                                                    className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-2.5 py-1.5 rounded-lg text-[11px] font-mono"
+                                                                />
+                                                            </div>
+                                                        )}
+                                                        {inspectorTestResult[block.id] && (
+                                                            <div className="p-2 rounded bg-slate-950 border border-slate-800 text-[10px] font-mono text-zinc-200 break-all">
+                                                                {inspectorTestResult[block.id]}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 )}
 
@@ -1971,6 +2578,29 @@ function FlowBuilderContent() {
                 isOpen={isHelpOpen}
                 onClose={() => setIsHelpOpen(false)}
                 onLoadTemplate={handleLoadTemplate}
+                onOpenBlockInstructions={(fType) => setHelpBlockType(fType)}
+                onGenerateBlockExample={(fType, openSim) => handleGenerateBlockExample(fType, openSim)}
+            />
+
+            <BlockHelpDrawer
+                flowType={helpBlockType}
+                onClose={() => setHelpBlockType(null)}
+                onGenerateExample={(fType, openSim) => handleGenerateBlockExample(fType, openSim)}
+                onAddSingleBlock={(fType) => handleAddSingleBlock(fType)}
+            />
+
+            <FlowHealthModal
+                isOpen={isHealthOpen}
+                onClose={() => setIsHealthOpen(false)}
+                issues={flowHealthIssues}
+                onFocusNode={(nodeId, blockId) => {
+                    const target = nodes.find((n) => n.id === nodeId);
+                    if (target) setSelectedNode(target);
+                    if (blockId) setSelectedBlockId(blockId);
+                    setTimeout(() => {
+                        fitView({ nodes: [{ id: nodeId }], duration: 500, padding: 0.4 });
+                    }, 80);
+                }}
             />
         </div>
         </FlowActionsContext.Provider>

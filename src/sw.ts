@@ -46,9 +46,13 @@ try {
   console.warn('[SW] Falha ao registrar NavigationRoute fallback:', e);
 }
 
-// 2. Cache dinâmico de Estilos e Scripts
+// 2. Cache dinâmico de Estilos e Scripts (nunca interceptar rotas HMR / Vite dev ou localhost)
 registerRoute(
-  ({ request }) => request.destination === 'script' || request.destination === 'style',
+  ({ request, url }) => {
+    if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') return false;
+    if (url.pathname.startsWith('/src/') || url.pathname.startsWith('/@') || url.pathname.startsWith('/node_modules/')) return false;
+    return request.destination === 'script' || request.destination === 'style';
+  },
   new StaleWhileRevalidate({
     cacheName: 'static-resources',
     plugins: [

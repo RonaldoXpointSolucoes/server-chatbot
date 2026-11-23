@@ -88,6 +88,11 @@ function localApiGeminiPlugin() {
 export default defineConfig({
   server: {
     port: 5173,
+    hmr: {
+      host: 'localhost',
+      port: 5173,
+      clientPort: 5173,
+    },
   },
   define: {
     'import.meta.env.PACKAGE_VERSION': JSON.stringify(packageJson.version),
@@ -158,7 +163,7 @@ export default defineConfig({
         'apple-touch-icon.png'
       ],
       devOptions: {
-        enabled: true,
+        enabled: false,
         type: 'module',
         navigateFallback: 'index.html',
       },

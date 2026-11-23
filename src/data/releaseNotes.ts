@@ -712,6 +712,95 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.4.1',
+    date: '2026-11-23',
+    summary: 'Construtor Visual Typebot 30/30 Completo: Submenu Técnico (Instruções + Exemplo Funcional) em Todos os Botões, Auditor Anti-Loop, Escopo por Caixa e Motor FlowEngine Blindado',
+    notes: [
+      {
+        id: 'feat-flowbuilder-30-submenu-examples-841',
+        category: 'features',
+        title: 'Submenu Interativo nos 30 Blocos (1-) Instruções de Uso & 2-) Exemplo Funcional)',
+        description: 'Todos os 30 botões da paleta lateral do Construtor de Fluxos (Bubbles, Inputs, Condicionais e Eventos) agora oferecem um submenu flutuante sem sobreposição com guia técnico completo (comportamento real WhatsApp, variáveis e anti-loop), geração instantânea de mini-fluxos de exemplo conectados no canvas e botão de teste imediato no simulador.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+        guide: {
+          moduleGroup: 'typebot-flow',
+          moduleLabel: 'Fluxos de Bot (Typebot) • Paleta dos 30 Blocos & Submenu',
+          purpose: 'Permitir que qualquer técnico entenda rapidamente como configurar cada um dos 30 blocos no WhatsApp real e gere um exemplo funcional conectado com 1 clique para testar sem risco.',
+          whereToAccess: [
+            '1. Menu Lateral ➔ Robôs / Fluxos de Bot (/settings/bots?tab=typebot) ➔ Abrir no Builder',
+            '2. Na paleta esquerda de blocos (30 botões em Bubbles, Inputs, Condicionais e Eventos), clique em qualquer bloco',
+            '3. Escolha "1-) Instruções de uso" (gaveta completa) ou "2-) Exemplo" / "Exemplo+Chat"'
+          ],
+          howToTest: [
+            '1. Abra um fluxo no Construtor Visual e clique no bloco "Botão" ou "Webhook" na barra esquerda.',
+            '2. Clique em "1-) Instruções de uso" para abrir o guia técnico com roteiro prático FoodNext ↔ Ronaldo.',
+            '3. Clique em "Gerar Exemplo + Testar Agora" e confira o fluxo já montado rodando no Simulador com a gaveta "Vars".'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Tela: Construtor de Fluxo (/flows/:id/edit) ➔ Paleta Esquerda + Submenu',
+            contextElements: ['💬 Texto', '🔘 Botão', '🔀 Condição', '🪝 Webhook', '🛡️ Anti-Loop ✓'],
+            targetButtonLabel: '1-) Instruções de uso / 2-) Exemplo',
+            targetButtonPosition: 'Ao clicar em qualquer um dos 30 blocos da barra lateral esquerda',
+            visualPreviewVariant: 'typebot-poll'
+          },
+          quickAction: {
+            label: 'Abrir Fluxos de Bot (Typebot)',
+            route: '/settings/bots?tab=typebot'
+          }
+        }
+      },
+      {
+        id: 'feat-flow-antiloop-scope-841',
+        category: 'features',
+        title: 'Auditor de Saúde Anti-Loop & Escopo Isolado por Caixa (Instância WhatsApp)',
+        description: 'Novo botão "Anti-Loop ✓ / Saúde" no cabeçalho analisa ciclos sem pausa, subfluxos recursivos e gatilhos abertos antes de publicar em produção. Na aba Configurações, agora é possível restringir um fluxo a caixas específicas (ex.: apenas FoodNext para homologação).',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30',
+        guide: {
+          moduleGroup: 'typebot-flow',
+          moduleLabel: 'Fluxos de Bot • Segurança Anti-Loop & Escopo por Caixa',
+          purpose: 'Impedir loops infinitos em atendimento real no WhatsApp e proteger linhas comerciais de produção permitindo homologar fluxos isolados somente em caixas de teste como a FoodNext.',
+          whereToAccess: [
+            '• Auditoria: Cabeçalho do Construtor de Fluxos ➔ Botão "Anti-Loop ✓ / Saúde"',
+            '• Escopo por Caixa: Aba "Configurações" no topo do builder ➔ "Escopo de Caixas (Instâncias WhatsApp)"'
+          ],
+          howToTest: [
+            '1. Clique em "Anti-Loop ✓" no topo do FlowBuilder para inspecionar alertas e pular direto para o bloco indicado.',
+            '2. Acesse a aba "Configurações" e marque somente a caixa desejada (ex.: FoodNext) antes de publicar.'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Tela: Construtor de Fluxo ➔ Barra Superior & Configurações',
+            contextElements: ['Importar', 'Exportar', '🛡️ Anti-Loop ✓', '▶ Testar', 'Publicar no Ar'],
+            targetButtonLabel: '🛡️ Anti-Loop ✓ / Escopo de Caixas',
+            targetButtonPosition: 'Topo direito do cabeçalho e aba Configurações do fluxo',
+            visualPreviewVariant: 'typebot-poll'
+          },
+          quickAction: {
+            label: 'Abrir Gerenciador de Fluxos',
+            route: '/settings/bots?tab=typebot'
+          }
+        }
+      },
+      {
+        id: 'imp-flow-inspector-simulator-841',
+        category: 'improvements',
+        title: 'Inspetor de Propriedades e Simulador Completo com Variáveis em Tempo Real',
+        description: 'Adicionados editores dedicados para Script (com teste inline), Teste A/B, Reply citado, Comando CRM, URLs de Seleção de Imagem, validação/retentativas em inputs tipados e Webhook com JSON Path + botão "Testar API". O Simulador agora executa todos os 30 blocos e inclui inspetor ao vivo "Vars".',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-sky-500/20 text-sky-300 border-sky-500/30'
+      },
+      {
+        id: 'fix-flowengine-runtime-and-ui-841',
+        category: 'fixes',
+        title: 'Correção de Webhook GET, Condições Multi-Regra, text_input, file_input, Handoff e Cache Dev/WS',
+        description: 'Corrigidos no motor backend (FlowEngine + EventProcessor) falha ao enviar body em Webhook GET, avaliação de condition.items[] e saída -else, handles -opt- em botões/enquetes, pausa em text_input, aceitação de anexos sem legenda em file_input, envio de aviso + pausa de IA no Handoff, guarda anti-loop síncrono e limpeza automática de cache SW/HMR em desenvolvimento e erro HTTP 400 na listagem de caixas.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      }
+    ]
+  },
+  {
     version: '8.4.0',
     date: '2026-11-23',
     summary: 'Dashboard Executivo de Conferência de Caixa, Exclusão de Fechamentos, Envio WhatsApp (FoodNext), Relatório PDF A4 e Memória Adaptativa de Bancos (Itaú + C6)',

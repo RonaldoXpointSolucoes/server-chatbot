@@ -6,16 +6,26 @@ import {
 } from 'lucide-react';
 import { OFFICIAL_FLOW_TEMPLATES, FlowTemplate } from '../../data/flowTemplates';
 import { parseTypebotToFlow } from '../../utils/typebotParser';
+import { FLOW_BLOCK_PALETTE } from '../../utils/flowBlocksCatalog.mjs';
 
 interface FlowHelpModalProps {
   isOpen: boolean;
   onClose: () => void;
   onLoadTemplate: (nodes: any[], edges: any[], templateName: string) => void;
+  onOpenBlockInstructions?: (flowType: string) => void;
+  onGenerateBlockExample?: (flowType: string, openSimulator?: boolean) => void;
 }
 
-export default function FlowHelpModal({ isOpen, onClose, onLoadTemplate }: FlowHelpModalProps) {
+export default function FlowHelpModal({
+  isOpen,
+  onClose,
+  onLoadTemplate,
+  onOpenBlockInstructions,
+  onGenerateBlockExample,
+}: FlowHelpModalProps) {
   const [activeTab, setActiveTab] = useState<'templates' | 'conditions' | 'webhooks' | 'variables' | 'blocks'>('templates');
   const [copiedVar, setCopiedVar] = useState<string | null>(null);
+  const [blockSearch, setBlockSearch] = useState('');
 
   if (!isOpen) return null;
 
@@ -327,46 +337,73 @@ export default function FlowHelpModal({ isOpen, onClose, onLoadTemplate }: FlowH
             </div>
           )}
 
-          {/* ABA 5: CATÁLOGO DE BLOCOS */}
+          {/* ABA 5: CATÁLOGO DE BLOCOS (Todos os 30 Blocos) */}
           {activeTab === 'blocks' && (
             <div className="space-y-4">
-              <div>
-                <h3 className="text-sm font-bold text-zinc-100">Catálogo de Blocos Disponíveis</h3>
-                <p className="text-xs text-zinc-400 mt-1">Conheça cada um dos blocos que você pode arrastar para construir fluxos.</p>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-bold text-zinc-100">
+                    Catálogo Completo ({FLOW_BLOCK_PALETTE.length} Blocos)
+                  </h3>
+                  <p className="text-xs text-zinc-400 mt-0.5">
+                    Consulte instruções técnicas ou gere exemplos prontos para testar cada bloco.
+                  </p>
+                </div>
+                <input
+                  type="text"
+                  value={blockSearch}
+                  onChange={(e) => setBlockSearch(e.target.value)}
+                  placeholder="Filtrar bloco..."
+                  className="bg-[#1c1c21] border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-indigo-500 w-full sm:w-56"
+                />
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-                <div className="bg-[#1c1c21] p-4 rounded-xl border border-zinc-800 space-y-1">
-                  <div className="flex items-center gap-2 font-bold text-zinc-200">
-                    <MessageSquare className="w-4 h-4 text-indigo-400" />
-                    <span>Mensagem (Texto)</span>
+                {FLOW_BLOCK_PALETTE.filter(
+                  (spec) =>
+                    !blockSearch.trim() ||
+                    spec.label.toLowerCase().includes(blockSearch.toLowerCase()) ||
+                    spec.type.toLowerCase().includes(blockSearch.toLowerCase()) ||
+                    spec.category.toLowerCase().includes(blockSearch.toLowerCase())
+                ).map((spec) => (
+                  <div key={spec.type} className="bg-[#1c1c21] p-3.5 rounded-xl border border-zinc-800 space-y-2 flex flex-col justify-between">
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-bold text-zinc-100">{spec.label}</span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-700 text-zinc-400 font-mono">
+                          {spec.category}
+                        </span>
+                      </div>
+                      <p className="text-zinc-400 text-[11px] leading-relaxed">{spec.instructions.summary}</p>
+                    </div>
+                    <div className="flex items-center gap-1.5 pt-2 border-t border-zinc-800/80">
+                      {onOpenBlockInstructions && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onClose();
+                            onOpenBlockInstructions(spec.type);
+                          }}
+                          className="flex-1 px-2.5 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-700 text-[11px] font-medium cursor-pointer transition-colors"
+                        >
+                          1-) Instruções
+                        </button>
+                      )}
+                      {onGenerateBlockExample && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onClose();
+                            onGenerateBlockExample(spec.type, false);
+                          }}
+                          className="flex-1 px-2.5 py-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/35 text-indigo-300 border border-indigo-500/30 text-[11px] font-semibold cursor-pointer transition-colors"
+                        >
+                          2-) Gerar Exemplo
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <p className="text-zinc-400">Envia mensagem de texto com suporte a formatação WhatsApp (*negrito*, _itálico_) e variáveis.</p>
-                </div>
-
-                <div className="bg-[#1c1c21] p-4 rounded-xl border border-zinc-800 space-y-1">
-                  <div className="flex items-center gap-2 font-bold text-zinc-200">
-                    <Filter className="w-4 h-4 text-indigo-400" />
-                    <span>Condição (If / Else)</span>
-                  </div>
-                  <p className="text-zinc-400">Avalia comparações lógicas (SE x = y) e direciona para diferentes grupos com portas dedicadas.</p>
-                </div>
-
-                <div className="bg-[#1c1c21] p-4 rounded-xl border border-zinc-800 space-y-1">
-                  <div className="flex items-center gap-2 font-bold text-zinc-200">
-                    <Webhook className="w-4 h-4 text-emerald-400" />
-                    <span>Webhook (API REST)</span>
-                  </div>
-                  <p className="text-zinc-400">Faz requisições GET ou POST para sistemas ERP ou serviços na nuvem e armazena os retornos.</p>
-                </div>
-
-                <div className="bg-[#1c1c21] p-4 rounded-xl border border-zinc-800 space-y-1">
-                  <div className="flex items-center gap-2 font-bold text-zinc-200">
-                    <FastForward className="w-4 h-4 text-amber-400" />
-                    <span>Pular Nó (Jump)</span>
-                  </div>
-                  <p className="text-zinc-400">Salta diretamente para o primeiro bloco de outro grupo (ex: retornar ao Menu).</p>
-                </div>
+                ))}
               </div>
             </div>
           )}
