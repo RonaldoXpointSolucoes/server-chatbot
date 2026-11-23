@@ -33,3 +33,5 @@ chatboot-engine/.env
 .vercel
 server/data/
 scratch/
+.worktrees/
+.superpowers/
