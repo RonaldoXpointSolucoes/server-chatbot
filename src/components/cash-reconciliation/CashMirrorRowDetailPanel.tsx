@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   CheckCircle2,
   XCircle,
@@ -152,16 +153,16 @@ export function CashMirrorRowDetailPanel({
   const targetChoicesForCategory = (cat: string): CashSystemCategoryTarget[] =>
     (['dinheiro', 'cartao', 'pix', 'pendente'] as CashSystemCategoryTarget[]).filter((c) => c !== cat);
 
-  return (
+  const modalContent = (
     <div
-      className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-sm sm:p-4 lg:p-6 flex items-stretch justify-center"
+      className="fixed inset-0 z-[9999] bg-slate-950/80 backdrop-blur-sm sm:p-3 lg:p-4 flex items-stretch justify-center"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
       aria-label={`Conciliação Detalhada — ${row.label}`}
     >
       <div
-        className="w-full h-full max-w-[1440px] rounded-none sm:rounded-3xl border border-slate-200 dark:border-[#2a3942] bg-white dark:bg-[#0b141a] shadow-2xl flex flex-col overflow-hidden"
+        className="w-full h-full rounded-none sm:rounded-2xl border border-slate-200 dark:border-[#2a3942] bg-white dark:bg-[#0b141a] shadow-2xl flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Cabeçalho Sticky Full-Screen */}
@@ -625,4 +626,6 @@ export function CashMirrorRowDetailPanel({
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : modalContent;
 }

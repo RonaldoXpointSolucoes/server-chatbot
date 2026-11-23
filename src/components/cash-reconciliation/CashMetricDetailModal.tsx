@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import {
   X,
   Percent,
@@ -78,9 +79,9 @@ export function CashMetricDetailModal({ metricKey, result, onClose }: CashMetric
 
   const meta = METRIC_META[metricKey];
 
-  return (
+  const modalContent = (
     <div
-      className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-sm p-3 sm:p-6 flex items-center justify-center"
+      className="fixed inset-0 z-[9999] bg-slate-950/80 backdrop-blur-sm p-3 sm:p-6 flex items-center justify-center"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
@@ -315,4 +316,6 @@ export function CashMetricDetailModal({ metricKey, result, onClose }: CashMetric
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : modalContent;
 }
