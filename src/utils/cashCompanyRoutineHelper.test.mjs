@@ -10,6 +10,7 @@ import {
   saveRoutineProfileToStorage,
   learnRoutineFromParsedFiles,
   bootstrapRoutineFromSessions,
+  mergeRoutineProfiles,
   toggleRoutineBankExpected,
   toggleRoutineReportExpected
 } from './cashCompanyRoutineHelper.mjs';
@@ -246,4 +247,148 @@ test('parseRoutineProfileFromRules e storage mantêm isolamento estrito por tena
   assert.equal(saveRoutineProfileToStorage(storage, 'tenant-a', profileA), true);
   assert.ok(loadRoutineProfileFromStorage(storage, 'tenant-a')?.banks.banco_336);
   assert.equal(loadRoutineProfileFromStorage(storage, 'tenant-b'), null);
+});
+
+
+test('bootstrapRoutineFromSessions usa created_at quando reference_date está ausente e sintetiza arquivos via reportCompleteness', () => {
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const legacySessions = [
+    {
+      id: 'legacy-1',
+      created_at: '2026-11-18T22:10:00Z',
+      reconciled_summary: {
+        reportCompleteness: {
+          system: {
+            present: [{ fileType: 'pdv_vendas', present: true }, { fileType: 'rel_conferencia', present: true }]
+          },
+          bank: {
+            present: [
+              {
+                fileType: 'extrato_ofx',
+                bankKey: 'banco_336',
+                bankCode: '336',
+                bankLabel: 'Banco C6',
+                acctLast4: '0726',
+                present: true
+              },
+              {
+                fileType: 'extrato_ofx',
+                bankKey: 'banco_341',
+                bankCode: '341',
+                bankLabel: 'Banco Itaú',
+                acctLast4: '8812',
+                present: true
+              },
+              { fileType: 'adquirente_rede', present: true }
+            ]
+          }
+        }
+      }
+    }
+  ];
+
+  const bootstrapped = bootstrapRoutineFromSessions(createEmptyRoutineProfile(), legacySessions);
+  assert.equal(bootstrapped.changed, true);
+  assert.equal(bootstrapped.profile.banks.banco_336.lastSeenDate, '2026-11-18');
+  assert.notEqual(bootstrapped.profile.banks.banco_336.lastSeenDate, todayIso);
+  assert.equal(bootstrapped.profile.banks.banco_336.seenCount, 1);
+  assert.equal(bootstrapped.profile.banks.banco_341.lastSeenDate, '2026-11-18');
+  assert.equal(bootstrapped.profile.banks.banco_341.bankLabel, 'Banco Itaú');
+  assert.equal(bootstrapped.profile.reports.pdv_vendas.lastSeenDate, '2026-11-18');
+  assert.equal(bootstrapped.profile.reports.rel_conferencia.seenCount, 1);
+  assert.equal(bootstrapped.profile.reports.adquirente_rede.seenCount, 1);
+
+  // Novo upload na data de hoje incrementa normalmente sem colapsar com a sessão legada
+  const todayUpload = learnRoutineFromParsedFiles(
+    bootstrapped.profile,
+    [
+      {
+        fileType: 'extrato_ofx',
+        status: 'ok',
+        summary: { bankKey: 'banco_336', bankCode: '336', bankLabel: 'Banco C6' }
+      }
+    ],
+    todayIso
+  );
+  assert.equal(todayUpload.changed, true);
+  assert.equal(todayUpload.profile.banks.banco_336.seenCount, 2);
+  assert.equal(todayUpload.profile.banks.banco_336.lastSeenDate, todayIso);
+});
+
+test('mergeRoutineProfiles respeita precedência de enabled pelo updatedAt mais recente e mescla contadores e entradas', () => {
+  const localOlder = {
+    version: 1,
+    updatedAt: '2026-11-19T10:00:00Z',
+    banks: {
+      banco_336: {
+        bankKey: 'banco_336',
+        bankCode: '336',
+        bankLabel: 'Banco C6',
+        acctLast4: '0726',
+        seenCount: 4,
+        lastSeenDate: '2026-11-19',
+        enabled: true
+      },
+      banco_001: {
+        bankKey: 'banco_001',
+        bankCode: '001',
+        bankLabel: 'Banco do Brasil',
+        seenCount: 1,
+        lastSeenDate: '2026-11-17',
+        enabled: true
+      }
+    },
+    reports: {
+      pdv_vendas: { fileType: 'pdv_vendas', seenCount: 4, lastSeenDate: '2026-11-19', enabled: true }
+    }
+  };
+
+  const remoteNewer = {
+    version: 1,
+    updatedAt: '2026-11-20T15:00:00Z',
+    banks: {
+      banco_336: {
+        bankKey: 'banco_336',
+        bankCode: '336',
+        bankLabel: 'Banco C6',
+        acctLast4: '',
+        seenCount: 2,
+        lastSeenDate: '2026-11-20',
+        enabled: false
+      },
+      banco_341: {
+        bankKey: 'banco_341',
+        bankCode: '341',
+        bankLabel: 'Banco Itaú',
+        seenCount: 2,
+        lastSeenDate: '2026-11-20',
+        enabled: true
+      }
+    },
+    reports: {
+      pdv_vendas: { fileType: 'pdv_vendas', seenCount: 2, lastSeenDate: '2026-11-20', enabled: true },
+      pdv_cancelamentos: { fileType: 'pdv_cancelamentos', seenCount: 1, lastSeenDate: '2026-11-20', enabled: false }
+    }
+  };
+
+  const merged = mergeRoutineProfiles(localOlder, remoteNewer);
+  assert.equal(merged.updatedAt, '2026-11-20T15:00:00Z');
+  // Remoto mais recente prevalece em enabled=false e preserva maior seenCount/lastSeenDate e acctLast4 do local
+  assert.equal(merged.banks.banco_336.enabled, false);
+  assert.equal(merged.banks.banco_336.seenCount, 4);
+  assert.equal(merged.banks.banco_336.lastSeenDate, '2026-11-20');
+  assert.equal(merged.banks.banco_336.acctLast4, '0726');
+  // Bancos exclusivos de cada lado são preservados
+  assert.equal(merged.banks.banco_001.bankLabel, 'Banco do Brasil');
+  assert.equal(merged.banks.banco_341.bankLabel, 'Banco Itaú');
+  // Relatórios mesclados corretamente
+  assert.equal(merged.reports.pdv_vendas.seenCount, 4);
+  assert.equal(merged.reports.pdv_vendas.lastSeenDate, '2026-11-20');
+  assert.equal(merged.reports.pdv_cancelamentos.enabled, false);
+
+  // Ordem inversa de argumentos (primeiro argumento mais recente) mantém mesma precedência por updatedAt
+  const mergedReversed = mergeRoutineProfiles(remoteNewer, localOlder);
+  assert.equal(mergedReversed.banks.banco_336.enabled, false);
+  assert.equal(mergedReversed.banks.banco_336.seenCount, 4);
+  assert.equal(mergedReversed.banks.banco_336.acctLast4, '0726');
 });

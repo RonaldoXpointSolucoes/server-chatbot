@@ -401,8 +401,8 @@ export function bootstrapRoutineFromSessions(profile, sessions = []) {
   const sorted = [...sessions]
     .filter(Boolean)
     .sort((a, b) => {
-      const da = normalizeIsoDate(a.reference_date || a.referenceDate);
-      const db = normalizeIsoDate(b.reference_date || b.referenceDate);
+      const da = normalizeIsoDate(a.reference_date || a.referenceDate || a.created_at || a.createdAt);
+      const db = normalizeIsoDate(b.reference_date || b.referenceDate || b.created_at || b.createdAt);
       if (da !== db) return da.localeCompare(db);
       const ca = String(a.created_at || a.createdAt || '');
       const cb = String(b.created_at || b.createdAt || '');
@@ -411,7 +411,9 @@ export function bootstrapRoutineFromSessions(profile, sessions = []) {
 
   let anyChanged = false;
   for (const session of sorted) {
-    const refDate = normalizeIsoDate(session.reference_date || session.referenceDate);
+    const refDate = normalizeIsoDate(
+      session.reference_date || session.referenceDate || session.created_at || session.createdAt
+    );
     const files = buildFilesFromSession(session);
     if (files.length === 0) continue;
     const res = learnRoutineFromParsedFiles(current, files, refDate);
