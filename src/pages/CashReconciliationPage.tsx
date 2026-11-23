@@ -9,24 +9,41 @@ import {
   Copy,
   Database,
   History,
-  FileCheck2
+  FileCheck2,
+  ArrowLeft,
+  MessageCircle,
+  FileText,
+  Trash2,
+  Loader2
 } from 'lucide-react';
 import { useChatStore } from '../store/chatStore';
 import { parseUploadedCashFile } from '../utils/cashFileParsers.mjs';
-import { logCashFileParseResult, logCashUnexpectedError } from '../utils/cashDevLogger';
+import {
+  logCashFileParseResult,
+  logCashReconciliationEvent,
+  logCashUnexpectedError
+} from '../utils/cashDevLogger';
 import { mergeCompanyFormulaRules } from '../utils/cashFormulaRules.mjs';
 import { runCashReconciliation } from '../utils/cashReconciliationEngine.mjs';
 import { assessCashReportCompleteness } from '../utils/cashReportCompleteness.mjs';
 import { buildCashReconciliationMigrationSql } from '../utils/cashReconciliationSchema.mjs';
+import {
+  bootstrapRoutineFromSessions,
+  learnRoutineFromParsedFiles,
+  mergeRoutineProfiles,
+  toggleRoutineBankExpected,
+  toggleRoutineReportExpected
+} from '../utils/cashCompanyRoutineHelper.mjs';
+import {
+  buildCashPdfReportHtml,
+  buildCashWhatsappSummaryMessage
+} from '../utils/cashReportExportHelper.mjs';
 import {
   computeHistoricalHealthStats,
   extractCashErrorMessage,
   loadActiveCashDraftFromStorage,
   saveActiveCashDraftToStorage,
   clearActiveCashDraftFromStorage,
-  isDraftAutoResumeDismissed,
-  setDraftAutoResumeDismissed,
-  pickMostRecentOpenDraftSession,
   formatDateBr
 } from '../utils/cashReconciliationServiceHelper.mjs';
 import { geminiService } from '../services/geminiService';
@@ -36,13 +53,19 @@ import {
   listCashReconciliationSessions,
   loadCashReconciliationSession,
   saveCashReconciliationSession,
+  deleteCashReconciliationSession,
   listCashFormulaRules,
   saveCashFormulaRule,
   toggleCashFormulaRule,
   deleteCashFormulaRule,
   getMergedSavedFilePasswords,
   upsertCashSavedFilePassword,
-  deleteCashSavedFilePassword
+  deleteCashSavedFilePassword,
+  getSavedCashWhatsappNumber,
+  upsertCashWhatsappNumber,
+  getCompanyCashRoutine,
+  saveCompanyCashRoutine,
+  sendCashSummaryViaFoodNext
 } from '../services/cashReconciliationService';
 import {
   extractSavedPasswordsFromRules,
@@ -53,15 +76,40 @@ import { CashUploadDropzone, UploadedCashFileItem } from '../components/cash-rec
 import { CashPasswordPromptModal } from '../components/cash-reconciliation/CashPasswordPromptModal';
 import { CashHealthDashboard, CashHealthHistoryCard } from '../components/cash-reconciliation/CashHealthDashboard';
 import { CashReconciliationWorkbench } from '../components/cash-reconciliation/CashReconciliationWorkbench';
+import { CashDashboardOverview } from '../components/cash-reconciliation/CashDashboardOverview';
+import { CashWhatsappSendModal } from '../components/cash-reconciliation/CashWhatsappSendModal';
+import { CashDeleteConfirmModal } from '../components/cash-reconciliation/CashDeleteConfirmModal';
 import {
   CashAiAnalysis,
   CashManualInputs,
   CashReconciliationResult,
+  CashReportCompleteness,
   CashResolutionAction,
+  CompanyCashRoutineProfile,
   ParsedCashFileResult,
   SavedCashFilePassword,
   formatCents
 } from '../types/cashReconciliation';
+
+type CashViewMode = 'dashboard' | 'workspace';
+
+interface WhatsappModalState {
+  targetLabel: string;
+  summaryText: string;
+  storeName: string;
+  sessionId: string | null;
+  allowEditNumber: boolean;
+}
+
+interface ResolvedExportPayload {
+  session: CashSessionRow | null;
+  result: CashReconciliationResult | null;
+  storeName: string;
+  manualInputs: CashManualInputs;
+  referenceDate: string;
+  operatorName: string;
+  shiftLabel: string;
+}
 
 function notifyToast(message: string, type: 'success' | 'info' | 'warning' | 'error' = 'info') {
   window.dispatchEvent(new CustomEvent('toast', { detail: { message, type, duration: 4000 } }));
@@ -70,9 +118,13 @@ function notifyToast(message: string, type: 'success' | 'info' | 'warning' | 'er
 export default function CashReconciliationPage() {
   const outlet = (useOutletContext() as { showMainSidebar?: boolean; setShowMainSidebar?: (v: boolean) => void }) || {};
   const storeTenantId = useChatStore((s) => s.tenantInfo?.id);
+  const storeTenantName = useChatStore((s) => s.tenantInfo?.name);
   const storeTenantSettings = useChatStore((s) => s.tenantInfo?.settings);
   const currentUserEmail = useChatStore((s) => s.currentUserEmail);
   const tenantId = storeTenantId || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id') || '';
+
+  const [viewMode, setViewMode] = useState<CashViewMode>('dashboard');
+  const [hydratedTenantId, setHydratedTenantId] = useState<string>('');
 
   const [files, setFiles] = useState<UploadedCashFileItem[]>([]);
   const [isProcessingFiles, setIsProcessingFiles] = useState(false);
@@ -80,8 +132,11 @@ export default function CashReconciliationPage() {
 
   const [sessions, setSessions] = useState<CashSessionRow[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [isCleanClosedView, setIsCleanClosedView] = useState(false);
   const [rules, setRules] = useState<CashRuleRow[]>([]);
   const [localSavedPasswords, setLocalSavedPasswords] = useState<SavedCashFilePassword[]>([]);
+  const [localRoutineOverride, setLocalRoutineOverride] = useState<CompanyCashRoutineProfile | null>(null);
+  const [localSavedWhatsapp, setLocalSavedWhatsapp] = useState<string>('');
   const [schemaMissing, setSchemaMissing] = useState(false);
 
   const [manualInputs, setManualInputs] = useState<CashManualInputs>({});
@@ -90,12 +145,21 @@ export default function CashReconciliationPage() {
   const [aiAnalysis, setAiAnalysis] = useState<CashAiAnalysis | null>(null);
   const [isAnalyzingAi, setIsAnalyzingAi] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [busySessionId, setBusySessionId] = useState<string | null>(null);
+  const [isSendingWhatsapp, setIsSendingWhatsapp] = useState(false);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [whatsappModalState, setWhatsappModalState] = useState<WhatsappModalState | null>(null);
+  const [deleteTargetSession, setDeleteTargetSession] = useState<CashSessionRow | null>(null);
+  const [isDeletingSession, setIsDeletingSession] = useState(false);
   const [selectedMirrorKey, setSelectedMirrorKey] = useState<string | null>(null);
   const [workbenchResetKey, setWorkbenchResetKey] = useState(0);
 
-  const hydratedTenantRef = useRef<string>('');
+  const activeTenantRef = useRef<string>('');
+  activeTenantRef.current = tenantId;
   const filesRef = useRef<UploadedCashFileItem[]>([]);
   filesRef.current = files;
+  const rulesRef = useRef<CashRuleRow[]>([]);
+  rulesRef.current = rules;
 
   const rulesConfig = useMemo(() => mergeCompanyFormulaRules(rules), [rules]);
   const savedFilePasswords = useMemo(
@@ -103,21 +167,87 @@ export default function CashReconciliationPage() {
     [localSavedPasswords, rules]
   );
 
-  // Hidrata senhas fixas salvas no cache local imediatamente por tenant
+  const routineProfile = useMemo<CompanyCashRoutineProfile>(() => {
+    const baseProfile = getCompanyCashRoutine(tenantId, rules);
+    if (!localRoutineOverride) return baseProfile;
+    return mergeRoutineProfiles(localRoutineOverride, baseProfile) as CompanyCashRoutineProfile;
+  }, [tenantId, rules, localRoutineOverride]);
+
+  const savedWhatsappPhone = useMemo(
+    () => localSavedWhatsapp || getSavedCashWhatsappNumber(tenantId, rules),
+    [tenantId, rules, localSavedWhatsapp]
+  );
+
+  const reconciliationResult = useMemo<CashReconciliationResult | null>(() => {
+    const validParsed = files.map(f => f.parsed).filter(p => p && p.status === 'ok');
+    if (validParsed.length === 0) return null;
+    return runCashReconciliation({
+      parsedFiles: validParsed,
+      rulesConfig,
+      manualInputs,
+      manualResolutions,
+      companyRoutineProfile: routineProfile
+    }) as CashReconciliationResult;
+  }, [files, rulesConfig, manualInputs, manualResolutions, routineProfile]);
+
+  const historicalStats = useMemo(() => computeHistoricalHealthStats(sessions), [sessions]);
+
+  const activeSessionRow = useMemo(
+    () => (activeSessionId ? sessions.find((s) => s.id === activeSessionId) || null : null),
+    [sessions, activeSessionId]
+  );
+
+  const activeDraftDate = useMemo(
+    () =>
+      reconciliationResult?.referenceDate ||
+      files.find((f) => f.parsed?.periodStart)?.parsed?.periodStart ||
+      '',
+    [reconciliationResult?.referenceDate, files]
+  );
+
+  const reportCompleteness = useMemo<CashReportCompleteness | null>(() => {
+    if (reconciliationResult?.reportCompleteness) {
+      return reconciliationResult.reportCompleteness;
+    }
+    if (files.length > 0) {
+      return assessCashReportCompleteness(files, routineProfile) as CashReportCompleteness;
+    }
+    return null;
+  }, [reconciliationResult?.reportCompleteness, files, routineProfile]);
+
+  const routineProfileRef = useRef<CompanyCashRoutineProfile>(routineProfile);
+  routineProfileRef.current = routineProfile;
+  const rulesConfigRef = useRef(rulesConfig);
+  rulesConfigRef.current = rulesConfig;
+
+  // Ao trocar de empresa: reseta para Dashboard, limpa modais transitórios e hidrata rascunho/senhas locais sem auto-abrir workspace
   useEffect(() => {
+    setViewMode('dashboard');
     setPasswordModalFileId(null);
+    setWhatsappModalState(null);
+    setDeleteTargetSession(null);
+    setBusySessionId(null);
+    setLocalRoutineOverride(null);
+    setLocalSavedWhatsapp('');
+    setSessions([]);
+    setRules([]);
+    setSchemaMissing(false);
+    setSelectedMirrorKey(null);
+    setIsCleanClosedView(false);
+
     if (!tenantId || typeof window === 'undefined') {
       setLocalSavedPasswords([]);
+      setFiles([]);
+      setActiveSessionId(null);
+      setManualInputs({});
+      setManualResolutions([]);
+      setAiAnalysis(null);
+      setWorkbenchResetKey((k) => k + 1);
+      setHydratedTenantId(tenantId);
       return;
     }
-    setLocalSavedPasswords(loadSavedFilePasswordsFromStorage(window.localStorage, tenantId) as SavedCashFilePassword[]);
-  }, [tenantId]);
 
-  // Hidrata rascunho em andamento imediatamente ao abrir a tela (preserva navegação entre abas do CRM)
-  useEffect(() => {
-    if (!tenantId || typeof window === 'undefined') return;
-    if (hydratedTenantRef.current === tenantId) return;
-    hydratedTenantRef.current = tenantId;
+    setLocalSavedPasswords(loadSavedFilePasswordsFromStorage(window.localStorage, tenantId) as SavedCashFilePassword[]);
 
     const draft = loadActiveCashDraftFromStorage(window.localStorage, tenantId);
     if (draft && Array.isArray(draft.files) && draft.files.length > 0) {
@@ -126,13 +256,22 @@ export default function CashReconciliationPage() {
       setManualInputs(draft.manualInputs || {});
       setManualResolutions(draft.manualResolutions || []);
       setAiAnalysis(draft.aiAnalysis || null);
+    } else {
+      setFiles([]);
+      setActiveSessionId(null);
+      setManualInputs({});
+      setManualResolutions([]);
+      setAiAnalysis(null);
     }
+    setWorkbenchResetKey((k) => k + 1);
+    setHydratedTenantId(tenantId);
   }, [tenantId]);
 
-  // Auto-salva rascunho local sempre que arquivos, inputs ou ajustes mudam
+  // Auto-salva rascunho local sempre que arquivos, inputs ou ajustes mudam (sem gravar visualização limpa de sessão fechada)
   useEffect(() => {
     if (!tenantId || typeof window === 'undefined') return;
-    if (hydratedTenantRef.current !== tenantId) return;
+    if (hydratedTenantId !== tenantId) return;
+    if (isCleanClosedView) return;
     saveActiveCashDraftToStorage(window.localStorage, tenantId, {
       activeSessionId,
       files,
@@ -140,10 +279,11 @@ export default function CashReconciliationPage() {
       manualResolutions,
       aiAnalysis
     });
-  }, [tenantId, activeSessionId, files, manualInputs, manualResolutions, aiAnalysis]);
+  }, [tenantId, hydratedTenantId, isCleanClosedView, activeSessionId, files, manualInputs, manualResolutions, aiAnalysis]);
 
   const applyLoadedSession = useCallback((session: CashSessionRow) => {
     setActiveSessionId(session.id);
+    setIsCleanClosedView(Boolean(session.closed_at));
     const snap = session.reconciled_summary || {};
     const restoredFiles: UploadedCashFileItem[] = (snap.parsedFilesSnapshot || []).map((pf: ParsedCashFileResult, idx: number) => ({
       id: `saved_${session.id}_${idx}`,
@@ -161,54 +301,128 @@ export default function CashReconciliationPage() {
 
   const loadTenantData = useCallback(async () => {
     if (!tenantId) return;
+    const requestedTenantId = tenantId;
     try {
-      const sessRes = await listCashReconciliationSessions(tenantId, 30);
-      const rulesRes = await listCashFormulaRules(tenantId, sessRes.schemaMissing);
+      const sessRes = await listCashReconciliationSessions(requestedTenantId, 30);
+      const rulesRes = await listCashFormulaRules(requestedTenantId, sessRes.schemaMissing);
+      if (activeTenantRef.current !== requestedTenantId) return;
+
       setSessions(sessRes.sessions);
       setRules(rulesRes.rules);
       setSchemaMissing(sessRes.schemaMissing || rulesRes.schemaMissing);
 
-      // Se não há arquivos carregados em cache local e o usuário não clicou em "Nova Conferência", retoma o último rascunho aberto do Supabase
-      const localDraftDismissed = typeof window !== 'undefined' && isDraftAutoResumeDismissed(window.localStorage, tenantId);
-      if (filesRef.current.length === 0 && !localDraftDismissed) {
-        const openDraft = pickMostRecentOpenDraftSession(sessRes.sessions);
-        if (openDraft) {
-          const fullDraft = await loadCashReconciliationSession(tenantId, openDraft.id);
-          if (fullDraft && filesRef.current.length === 0) {
-            applyLoadedSession(fullDraft);
+      // Aprende rotina inicial a partir de até 4 sessões recentes quando a empresa ainda não possui bancos aprendidos
+      const loadedProfile = getCompanyCashRoutine(requestedTenantId, rulesRes.rules);
+      if (Object.keys(loadedProfile.banks).length === 0 && sessRes.sessions.length > 0) {
+        try {
+          const recentTargets = sessRes.sessions.slice(0, 4);
+          const loadedFull = await Promise.all(
+            recentTargets.map((s) =>
+              loadCashReconciliationSession(requestedTenantId, s.id).catch(() => null)
+            )
+          );
+          if (activeTenantRef.current !== requestedTenantId) return;
+          const validFullSessions = loadedFull.filter((s): s is CashSessionRow => Boolean(s));
+          if (validFullSessions.length > 0) {
+            const { profile: bootstrapped, changed } = bootstrapRoutineFromSessions(
+              loadedProfile,
+              validFullSessions
+            ) as { profile: CompanyCashRoutineProfile; changed: boolean };
+
+            if (changed) {
+              setLocalRoutineOverride(bootstrapped);
+              const savedRoutine = await saveCompanyCashRoutine(requestedTenantId, bootstrapped);
+              if (activeTenantRef.current !== requestedTenantId) return;
+              if (savedRoutine.rule) {
+                setRules((prev) => [
+                  savedRoutine.rule!,
+                  ...prev.filter((r) => r.id !== savedRoutine.rule!.id)
+                ]);
+              }
+              const learnedNames = Object.values(bootstrapped.banks || {}).map((b) => b.bankLabel);
+              if (learnedNames.length > 0) {
+                logCashReconciliationEvent({
+                  level: 'info',
+                  message: `Rotina bancária aprendida do histórico: ${learnedNames.join(', ')}`,
+                  tenantId: requestedTenantId,
+                  requiresAction: false,
+                  details: {
+                    action: 'routine_bootstrap',
+                    banks: Object.keys(bootstrapped.banks),
+                    sessionsInspected: validFullSessions.length
+                  }
+                });
+              }
+            }
           }
+        } catch (bootstrapErr) {
+          console.warn('[Conferência Caixa] Falha ao inicializar rotina bancária do histórico:', bootstrapErr);
         }
       }
     } catch (err: unknown) {
       logCashUnexpectedError({
         action: 'carregar histórico',
         err,
-        tenantId
+        tenantId: requestedTenantId
       });
     }
-  }, [tenantId, applyLoadedSession]);
+  }, [tenantId]);
 
   useEffect(() => {
-    loadTenantData();
+    void loadTenantData();
   }, [loadTenantData]);
 
-  const reconciliationResult = useMemo<CashReconciliationResult | null>(() => {
-    const validParsed = files.map(f => f.parsed).filter(p => p && p.status === 'ok');
-    if (validParsed.length === 0) return null;
-    return runCashReconciliation({
-      parsedFiles: validParsed,
-      rulesConfig,
-      manualInputs,
-      manualResolutions
-    }) as CashReconciliationResult;
-  }, [files, rulesConfig, manualInputs, manualResolutions]);
+  const applyRoutineLearning = useCallback(
+    async (validParsedFiles: ParsedCashFileResult[], inferredDate = '') => {
+      if (!tenantId || validParsedFiles.length === 0) return;
+      const currentProfile = routineProfileRef.current || getCompanyCashRoutine(tenantId, rulesRef.current);
+      const prevBankKeys = new Set(Object.keys(currentProfile.banks || {}));
 
-  const historicalStats = useMemo(() => computeHistoricalHealthStats(sessions), [sessions]);
+      const { profile: nextProfile, changed } = learnRoutineFromParsedFiles(
+        currentProfile,
+        validParsedFiles,
+        inferredDate
+      ) as { profile: CompanyCashRoutineProfile; changed: boolean };
+
+      if (!changed) return;
+
+      const newlyLearnedBanks = Object.values(nextProfile.banks || {}).filter(
+        (b) => b && !prevBankKeys.has(b.bankKey)
+      );
+
+      setLocalRoutineOverride(nextProfile);
+      const savedRes = await saveCompanyCashRoutine(tenantId, nextProfile);
+      if (activeTenantRef.current !== tenantId) return;
+
+      if (savedRes.rule) {
+        setRules((prev) => [
+          savedRes.rule!,
+          ...prev.filter((r) => r.id !== savedRes.rule!.id)
+        ]);
+      }
+
+      if (newlyLearnedBanks.length > 0) {
+        logCashReconciliationEvent({
+          level: 'info',
+          message: `Novo(s) banco(s) aprendido(s) na rotina da empresa: ${newlyLearnedBanks.map((b) => b.bankLabel).join(', ')}`,
+          tenantId,
+          requiresAction: false,
+          details: {
+            action: 'routine_learn_bank',
+            banks: newlyLearnedBanks.map((b) => ({
+              bankKey: b.bankKey,
+              bankLabel: b.bankLabel,
+              acctLast4: b.acctLast4 || ''
+            }))
+          }
+        });
+      }
+    },
+    [tenantId]
+  );
 
   const handleAddFiles = async (fileList: FileList | File[]) => {
-    if (tenantId && typeof window !== 'undefined') {
-      setDraftAutoResumeDismissed(window.localStorage, tenantId, false);
-    }
+    setIsCleanClosedView(false);
     setIsProcessingFiles(true);
     try {
       const incoming = Array.from(fileList);
@@ -288,6 +502,14 @@ export default function CashReconciliationPage() {
         return Array.from(byType.values());
       });
 
+      const okParsed = parsedItems.map(it => it.parsed).filter(p => p && p.status === 'ok');
+      if (okParsed.length > 0) {
+        const inferredDate = okParsed.map(p => p.periodStart || p.periodEnd).find(Boolean) || '';
+        void applyRoutineLearning(okParsed, inferredDate).catch((learnErr) => {
+          console.warn('[Conferência Caixa] Falha ao atualizar rotina no upload:', learnErr);
+        });
+      }
+
       const firstLocked = parsedItems.find(it => it.parsed?.status === 'password_required');
       if (firstLocked) {
         setPasswordModalFileId(firstLocked.id);
@@ -318,6 +540,7 @@ export default function CashReconciliationPage() {
   const handleUnlockPasswordFile = async (fileId: string, password: string, saveFixed = true): Promise<boolean> => {
     const target = filesRef.current.find(f => f.id === fileId);
     if (!target) return false;
+    setIsCleanClosedView(false);
     setIsProcessingFiles(true);
     try {
       let matchedPassword = '';
@@ -400,6 +623,12 @@ export default function CashReconciliationPage() {
       });
       setPasswordModalFileId(nextRemainingLockedId);
 
+      const unlockedList = Array.from(unlockedPeers.values());
+      const inferredDate = unlockedList.map(p => p.periodStart || p.periodEnd).find(Boolean) || '';
+      void applyRoutineLearning(unlockedList, inferredDate).catch((learnErr) => {
+        console.warn('[Conferência Caixa] Falha ao atualizar rotina após desbloqueio:', learnErr);
+      });
+
       notifyToast(
         saveFixed
           ? `Arquivo "${target.fileName}" desbloqueado e senha fixa salva para os próximos envios!`
@@ -422,15 +651,16 @@ export default function CashReconciliationPage() {
   };
 
   const handleRemoveFile = (fileId: string) => {
+    setIsCleanClosedView(false);
     setFiles(prev => prev.filter(f => f.id !== fileId));
   };
 
   const handleResetNew = () => {
     if (tenantId && typeof window !== 'undefined') {
       clearActiveCashDraftFromStorage(window.localStorage, tenantId);
-      setDraftAutoResumeDismissed(window.localStorage, tenantId, true);
     }
     setActiveSessionId(null);
+    setIsCleanClosedView(false);
     setFiles([]);
     setManualInputs({});
     setManualResolutions([]);
@@ -441,14 +671,13 @@ export default function CashReconciliationPage() {
 
   const handleLoadSession = async (sessionId: string) => {
     if (!tenantId) return;
-    if (typeof window !== 'undefined') {
-      setDraftAutoResumeDismissed(window.localStorage, tenantId, false);
-    }
+    setBusySessionId(sessionId);
     try {
       const fullSession = await loadCashReconciliationSession(tenantId, sessionId);
       const session = fullSession || sessions.find(s => s.id === sessionId);
       if (!session) return;
       applyLoadedSession(session);
+      setViewMode('workspace');
     } catch (err: unknown) {
       logCashUnexpectedError({
         action: 'abrir sessão salva',
@@ -457,6 +686,8 @@ export default function CashReconciliationPage() {
         context: { sessionId }
       });
       notifyToast(extractCashErrorMessage(err, 'Erro ao abrir sessão salva.'), 'error');
+    } finally {
+      setBusySessionId((prev) => (prev === sessionId ? null : prev));
     }
   };
 
@@ -464,6 +695,7 @@ export default function CashReconciliationPage() {
     if (!tenantId || !reconciliationResult) return;
     setIsSaving(true);
     try {
+      const validParsed = files.map(f => f.parsed).filter(p => p && p.status === 'ok');
       const res = await saveCashReconciliationSession({
         tenantId,
         userEmail: currentUserEmail || '',
@@ -475,14 +707,13 @@ export default function CashReconciliationPage() {
         aiAnalysis,
         markClosed
       });
+      setIsCleanClosedView(markClosed);
       setActiveSessionId(res.sessionId);
       setSchemaMissing(res.schemaMissing);
       if (typeof window !== 'undefined') {
         if (markClosed) {
           clearActiveCashDraftFromStorage(window.localStorage, tenantId);
-          setDraftAutoResumeDismissed(window.localStorage, tenantId, true);
         } else {
-          setDraftAutoResumeDismissed(window.localStorage, tenantId, false);
           saveActiveCashDraftToStorage(window.localStorage, tenantId, {
             activeSessionId: res.sessionId,
             files,
@@ -492,6 +723,7 @@ export default function CashReconciliationPage() {
           });
         }
       }
+      await applyRoutineLearning(validParsed, reconciliationResult.referenceDate || '');
       await loadTenantData();
       notifyToast(
         markClosed
@@ -511,6 +743,392 @@ export default function CashReconciliationPage() {
       notifyToast(`Erro ao salvar: ${extractCashErrorMessage(err)}`, 'error');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleToggleRoutineBank = async (bankKey: string, enabled: boolean) => {
+    if (!tenantId) return;
+    const nextProfile = toggleRoutineBankExpected(routineProfile, bankKey, enabled) as CompanyCashRoutineProfile;
+    setLocalRoutineOverride(nextProfile);
+    try {
+      const savedRes = await saveCompanyCashRoutine(tenantId, nextProfile);
+      if (savedRes.rule) {
+        setRules((prev) => [savedRes.rule!, ...prev.filter((r) => r.id !== savedRes.rule!.id)]);
+      }
+      notifyToast('Rotina da empresa atualizada!', 'success');
+    } catch (err: unknown) {
+      logCashUnexpectedError({
+        action: 'atualizar rotina bancária da empresa',
+        err,
+        tenantId,
+        context: { bankKey, enabled }
+      });
+      notifyToast(extractCashErrorMessage(err, 'Erro ao atualizar rotina da empresa.'), 'error');
+    }
+  };
+
+  const handleToggleRoutineReport = async (fileType: string, enabled: boolean) => {
+    if (!tenantId) return;
+    const nextProfile = toggleRoutineReportExpected(routineProfile, fileType, enabled) as CompanyCashRoutineProfile;
+    setLocalRoutineOverride(nextProfile);
+    try {
+      const savedRes = await saveCompanyCashRoutine(tenantId, nextProfile);
+      if (savedRes.rule) {
+        setRules((prev) => [savedRes.rule!, ...prev.filter((r) => r.id !== savedRes.rule!.id)]);
+      }
+      notifyToast('Rotina da empresa atualizada!', 'success');
+    } catch (err: unknown) {
+      logCashUnexpectedError({
+        action: 'atualizar rotina de relatórios da empresa',
+        err,
+        tenantId,
+        context: { fileType, enabled }
+      });
+      notifyToast(extractCashErrorMessage(err, 'Erro ao atualizar rotina da empresa.'), 'error');
+    }
+  };
+
+  const handleConfirmDeleteSession = async (sessionId: string) => {
+    if (!tenantId) return;
+    setIsDeletingSession(true);
+    try {
+      await deleteCashReconciliationSession(tenantId, sessionId);
+      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+      if (activeSessionId === sessionId) {
+        handleResetNew();
+        setViewMode('dashboard');
+      }
+      setDeleteTargetSession(null);
+      logCashReconciliationEvent({
+        level: 'info',
+        message: 'Fechamento de caixa removido pela interface.',
+        tenantId,
+        requiresAction: false,
+        details: { action: 'ui_delete_session', sessionId }
+      });
+      notifyToast('Fechamento excluído com sucesso!', 'success');
+    } catch (err: unknown) {
+      logCashUnexpectedError({
+        action: 'excluir fechamento de caixa',
+        err,
+        tenantId,
+        context: { sessionId }
+      });
+      notifyToast(extractCashErrorMessage(err, 'Erro ao excluir fechamento.'), 'error');
+    } finally {
+      setIsDeletingSession(false);
+    }
+  };
+
+  const buildWorkspaceSessionRow = (): CashSessionRow | null => {
+    if (!activeSessionId) return null;
+    if (activeSessionRow) return activeSessionRow;
+    if (!reconciliationResult) return null;
+    return {
+      id: activeSessionId,
+      tenant_id: tenantId,
+      reference_date: reconciliationResult.referenceDate || new Date().toISOString().slice(0, 10),
+      shift_label: manualInputs.shiftLabel || 'Diário',
+      store_name: reconciliationResult.storeName || storeTenantName || null,
+      operator_name: reconciliationResult.operatorName || null,
+      status: reconciliationResult.status || 'draft',
+      health_score: reconciliationResult.healthScore ?? 0,
+      system_total_cents: reconciliationResult.systemTotalCents ?? 0,
+      real_total_cents: reconciliationResult.realTotalCents ?? 0,
+      diff_cents: reconciliationResult.diffTotalCents ?? 0,
+      cash_drawer_counted_cents: manualInputs.cashCountedCents ?? null,
+      cash_sangria_cents: reconciliationResult.cashDrawerSummary?.sangriaCents ?? 0,
+      cash_notes: manualInputs.notes || null,
+      reconciled_summary: {},
+      closed_at: isCleanClosedView ? new Date().toISOString() : null
+    };
+  };
+
+  const resolveExportPayload = async (sessionRow?: CashSessionRow | null): Promise<ResolvedExportPayload | null> => {
+    if (!sessionRow || (sessionRow.id === activeSessionId && reconciliationResult)) {
+      if (!reconciliationResult) {
+        notifyToast('Carregue os arquivos da conferência antes de exportar.', 'warning');
+        return null;
+      }
+      const effectiveSession = activeSessionRow || sessionRow || null;
+      const effectiveStoreName =
+        reconciliationResult.storeName || effectiveSession?.store_name || storeTenantName || 'Empresa';
+      return {
+        session: effectiveSession,
+        result: reconciliationResult,
+        storeName: effectiveStoreName,
+        manualInputs,
+        referenceDate: reconciliationResult.referenceDate || effectiveSession?.reference_date || '',
+        operatorName: reconciliationResult.operatorName || effectiveSession?.operator_name || '',
+        shiftLabel: manualInputs.shiftLabel || effectiveSession?.shift_label || 'Diário'
+      };
+    }
+
+    if (!tenantId) return null;
+    setBusySessionId(sessionRow.id);
+    try {
+      const fullSession = await loadCashReconciliationSession(tenantId, sessionRow.id);
+      if (!fullSession) {
+        notifyToast('Não foi possível carregar os detalhes completos deste fechamento.', 'error');
+        return null;
+      }
+      const snap = fullSession.reconciled_summary || {};
+      const snapManualInputs: CashManualInputs = snap.manualInputs || {
+        cashCountedCents: fullSession.cash_drawer_counted_cents,
+        notes: fullSession.cash_notes || '',
+        shiftLabel: fullSession.shift_label || 'Diário'
+      };
+      const snapResolutions: CashResolutionAction[] = Array.isArray(snap.manualResolutions)
+        ? snap.manualResolutions
+        : [];
+      const validSnapshotFiles = Array.isArray(snap.parsedFilesSnapshot)
+        ? snap.parsedFilesSnapshot.filter((pf) => pf && pf.status === 'ok')
+        : [];
+
+      const reconstructedResult =
+        validSnapshotFiles.length > 0
+          ? (runCashReconciliation({
+              parsedFiles: validSnapshotFiles,
+              rulesConfig: rulesConfigRef.current,
+              manualInputs: snapManualInputs,
+              manualResolutions: snapResolutions,
+              companyRoutineProfile: routineProfileRef.current
+            }) as CashReconciliationResult)
+          : null;
+
+      const effectiveStoreName =
+        reconstructedResult?.storeName || fullSession.store_name || storeTenantName || 'Empresa';
+
+      return {
+        session: fullSession,
+        result: reconstructedResult,
+        storeName: effectiveStoreName,
+        manualInputs: snapManualInputs,
+        referenceDate: reconstructedResult?.referenceDate || fullSession.reference_date || '',
+        operatorName: reconstructedResult?.operatorName || fullSession.operator_name || '',
+        shiftLabel: snapManualInputs.shiftLabel || fullSession.shift_label || 'Diário'
+      };
+    } catch (err: unknown) {
+      logCashUnexpectedError({
+        action: 'carregar dados para exportação',
+        err,
+        tenantId,
+        context: { sessionId: sessionRow.id }
+      });
+      notifyToast(extractCashErrorMessage(err, 'Erro ao carregar dados do fechamento.'), 'error');
+      return null;
+    } finally {
+      setBusySessionId((prev) => (prev === sessionRow.id ? null : prev));
+    }
+  };
+
+  const handleTriggerWhatsappSend = async (sessionRow?: CashSessionRow | null, forceEditNumber = false) => {
+    if (!tenantId) return;
+    const payload = await resolveExportPayload(sessionRow);
+    if (!payload) return;
+
+    const summaryText = buildCashWhatsappSummaryMessage({
+      result: payload.result,
+      session: payload.session,
+      storeName: payload.storeName,
+      manualInputs: payload.manualInputs
+    }) as string;
+
+    const dateBr = formatDateBr(payload.referenceDate) || 'Fechamento';
+    const targetLabel = [dateBr, payload.operatorName, payload.shiftLabel].filter(Boolean).join(' • ');
+
+    if (savedWhatsappPhone && !forceEditNumber) {
+      setIsSendingWhatsapp(true);
+      if (sessionRow?.id) setBusySessionId(sessionRow.id);
+      try {
+        const sent = await sendCashSummaryViaFoodNext({
+          tenantId,
+          recipientPhone: savedWhatsappPhone,
+          summaryText,
+          storeName: payload.storeName
+        });
+        notifyToast(`Resumo enviado por WhatsApp (FoodNext) para ${sent.sentTo}!`, 'success');
+      } catch (err: unknown) {
+        notifyToast(extractCashErrorMessage(err, 'Erro ao enviar resumo pelo WhatsApp FoodNext.'), 'error');
+      } finally {
+        setIsSendingWhatsapp(false);
+        if (sessionRow?.id) setBusySessionId((prev) => (prev === sessionRow.id ? null : prev));
+      }
+      return;
+    }
+
+    setWhatsappModalState({
+      targetLabel,
+      summaryText,
+      storeName: payload.storeName,
+      sessionId: payload.session?.id || activeSessionId || null,
+      allowEditNumber: true
+    });
+  };
+
+  const handleOpenWhatsappNumberEditor = async () => {
+    if (!tenantId) return;
+    if (sessions.length > 0) {
+      await handleTriggerWhatsappSend(sessions[0], true);
+      return;
+    }
+    if (reconciliationResult) {
+      await handleTriggerWhatsappSend(null, true);
+      return;
+    }
+    setWhatsappModalState({
+      targetLabel: 'Definir número padrão de WhatsApp da empresa',
+      summaryText: '',
+      storeName: storeTenantName || 'Empresa',
+      sessionId: null,
+      allowEditNumber: true
+    });
+  };
+
+  const handleSubmitWhatsappModal = async (phone: string, saveFixed: boolean) => {
+    if (!tenantId || !whatsappModalState) return;
+    setIsSendingWhatsapp(true);
+    try {
+      if (!whatsappModalState.summaryText.trim()) {
+        const saved = await upsertCashWhatsappNumber(tenantId, phone);
+        setLocalSavedWhatsapp(saved.phone);
+        if (saved.rule) {
+          setRules((prev) => [saved.rule!, ...prev.filter((r) => r.id !== saved.rule!.id)]);
+        }
+        logCashReconciliationEvent({
+          level: 'info',
+          message: 'Número padrão de WhatsApp salvo para futuros envios de fechamento.',
+          tenantId,
+          requiresAction: false,
+          details: { action: 'whatsapp_number_saved' }
+        });
+        setWhatsappModalState(null);
+        notifyToast('Número padrão de WhatsApp salvo com sucesso!', 'success');
+        return;
+      }
+
+      const sent = await sendCashSummaryViaFoodNext({
+        tenantId,
+        recipientPhone: phone,
+        summaryText: whatsappModalState.summaryText,
+        storeName: whatsappModalState.storeName
+      });
+
+      if (saveFixed) {
+        const saved = await upsertCashWhatsappNumber(tenantId, phone);
+        setLocalSavedWhatsapp(saved.phone);
+        if (saved.rule) {
+          setRules((prev) => [saved.rule!, ...prev.filter((r) => r.id !== saved.rule!.id)]);
+        }
+      }
+
+      setWhatsappModalState(null);
+      notifyToast(
+        saveFixed
+          ? `Resumo enviado por WhatsApp (FoodNext) para ${sent.sentTo} e número salvo!`
+          : `Resumo enviado por WhatsApp (FoodNext) para ${sent.sentTo}!`,
+        'success'
+      );
+    } catch (err: unknown) {
+      notifyToast(extractCashErrorMessage(err, 'Erro ao enviar resumo pelo WhatsApp FoodNext.'), 'error');
+    } finally {
+      setIsSendingWhatsapp(false);
+    }
+  };
+
+  const handleExportPdf = async (sessionRow?: CashSessionRow | null) => {
+    if (typeof document === 'undefined') return;
+    setIsExportingPdf(true);
+    try {
+      const payload = await resolveExportPayload(sessionRow);
+      if (!payload) return;
+
+      const html = buildCashPdfReportHtml({
+        result: payload.result,
+        session: payload.session,
+        storeName: payload.storeName,
+        manualInputs: payload.manualInputs
+      }) as string;
+
+      const iframe = document.createElement('iframe');
+      iframe.setAttribute('aria-hidden', 'true');
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = '0';
+      iframe.style.opacity = '0';
+      iframe.style.pointerEvents = 'none';
+
+      let cleaned = false;
+      let fallbackTimer = 0;
+      const cleanup = () => {
+        if (cleaned) return;
+        cleaned = true;
+        window.clearTimeout(fallbackTimer);
+        iframe.remove();
+      };
+      fallbackTimer = window.setTimeout(cleanup, 60_000);
+
+      iframe.onload = () => {
+        try {
+          const win = iframe.contentWindow;
+          if (!win) {
+            cleanup();
+            return;
+          }
+          win.addEventListener('afterprint', cleanup, { once: true });
+          window.setTimeout(() => {
+            try {
+              win.focus();
+              win.print();
+            } catch (printErr: unknown) {
+              logCashUnexpectedError({
+                action: 'imprimir relatório PDF A4',
+                err: printErr,
+                tenantId,
+                context: { sessionId: payload.session?.id || activeSessionId || null }
+              });
+              notifyToast('Não foi possível abrir a janela de impressão do PDF.', 'error');
+              cleanup();
+            }
+          }, 120);
+        } catch (onloadErr: unknown) {
+          logCashUnexpectedError({
+            action: 'preparar impressão do relatório PDF A4',
+            err: onloadErr,
+            tenantId,
+            context: { sessionId: payload.session?.id || activeSessionId || null }
+          });
+          cleanup();
+        }
+      };
+
+      iframe.srcdoc = html;
+      document.body.appendChild(iframe);
+
+      logCashReconciliationEvent({
+        level: 'info',
+        message: `Relatório PDF A4 preparado para impressão (${formatDateBr(payload.referenceDate) || 'atual'}).`,
+        tenantId,
+        requiresAction: false,
+        details: {
+          action: 'export_pdf',
+          sessionId: payload.session?.id || activeSessionId || null,
+          referenceDate: payload.referenceDate || null
+        }
+      });
+    } catch (err: unknown) {
+      logCashUnexpectedError({
+        action: 'gerar relatório PDF A4',
+        err,
+        tenantId,
+        context: { sessionId: sessionRow?.id || activeSessionId || null }
+      });
+      notifyToast(extractCashErrorMessage(err, 'Erro ao gerar relatório PDF.'), 'error');
+    } finally {
+      setIsExportingPdf(false);
     }
   };
 
@@ -540,6 +1158,8 @@ export default function CashReconciliationPage() {
     }
   };
 
+  const hasActiveDraft = files.length > 0 && !isCleanClosedView;
+
   return (
     <div className="flex-1 h-full overflow-y-auto overflow-x-hidden bg-[#f0f2f5] dark:bg-[#111b21] text-slate-900 dark:text-[#e9edef]">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-6 space-y-5">
@@ -556,10 +1176,10 @@ export default function CashReconciliationPage() {
                 <Menu size={18} />
               </button>
             )}
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-[#00a884] to-emerald-600 text-white flex items-center justify-center shadow-md">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-[#00a884] to-emerald-600 text-white flex items-center justify-center shadow-md shrink-0">
               <Scale size={20} />
             </div>
-            <div>
+            <div className="min-w-0">
               <h1 className="text-lg sm:text-xl font-black tracking-tight">Conferência Caixa</h1>
               <p className="text-xs text-slate-500 dark:text-[#8696a0]">
                 Conciliação automática PDV × Bancos × Maquininhas com Fórmula 1 e Auditor IA
@@ -568,16 +1188,27 @@ export default function CashReconciliationPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {viewMode === 'workspace' && (
+              <button
+                type="button"
+                onClick={() => setViewMode('dashboard')}
+                className="px-3 py-2 min-h-[38px] rounded-xl bg-white dark:bg-[#202c33] border border-slate-200 dark:border-[#2a3942] hover:border-[#00a884] text-xs font-bold flex items-center gap-1.5 active:scale-95 transition-all"
+                title="Voltar ao Painel Executivo"
+              >
+                <ArrowLeft size={14} /> Dashboard
+              </button>
+            )}
+
             {sessions.length > 0 && (
               <div className="flex items-center gap-1.5 bg-white dark:bg-[#202c33] border border-slate-200 dark:border-[#2a3942] rounded-xl px-2.5 py-1.5">
-                <History size={14} className="text-[#00a884]" />
+                <History size={14} className="text-[#00a884] shrink-0" />
                 <select
                   value={activeSessionId || ''}
                   onChange={(e) => {
-                    if (e.target.value) handleLoadSession(e.target.value);
+                    if (e.target.value) void handleLoadSession(e.target.value);
                     else handleResetNew();
                   }}
-                  className="bg-transparent text-xs font-semibold text-slate-700 dark:text-[#e9edef] focus:outline-none"
+                  className="bg-transparent text-xs font-semibold text-slate-700 dark:text-[#e9edef] focus:outline-none max-w-[230px]"
                 >
                   <option value="" className="dark:bg-[#202c33]">Histórico ({sessions.length})...</option>
                   {sessions.map((s) => (
@@ -589,32 +1220,71 @@ export default function CashReconciliationPage() {
               </div>
             )}
 
-            <button
-              type="button"
-              onClick={handleResetNew}
-              className="px-3 py-2 min-h-[38px] rounded-xl bg-white dark:bg-[#202c33] border border-slate-200 dark:border-[#2a3942] hover:border-[#00a884] text-xs font-bold flex items-center gap-1.5 active:scale-95 transition-all"
-            >
-              <PlusCircle size={14} /> Nova Conferência
-            </button>
+            {viewMode === 'workspace' && (
+              <button
+                type="button"
+                onClick={() => {
+                  handleResetNew();
+                  setViewMode('workspace');
+                }}
+                className="px-3 py-2 min-h-[38px] rounded-xl bg-white dark:bg-[#202c33] border border-slate-200 dark:border-[#2a3942] hover:border-[#00a884] text-xs font-bold flex items-center gap-1.5 active:scale-95 transition-all"
+              >
+                <PlusCircle size={14} /> Nova Conferência
+              </button>
+            )}
 
-            {reconciliationResult && (
+            {viewMode === 'workspace' && reconciliationResult && (
               <>
                 <button
                   type="button"
                   disabled={isSaving}
-                  onClick={() => handleSaveSession(false)}
-                  className="px-3 py-2 min-h-[38px] rounded-xl bg-slate-800 dark:bg-[#2a3942] hover:opacity-90 text-white text-xs font-bold flex items-center gap-1.5 active:scale-95 transition-all"
+                  onClick={() => void handleSaveSession(false)}
+                  className="px-3 py-2 min-h-[38px] rounded-xl bg-slate-800 dark:bg-[#2a3942] hover:opacity-90 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 active:scale-95 transition-all"
                 >
                   <Save size={14} /> Salvar
                 </button>
                 <button
                   type="button"
                   disabled={isSaving}
-                  onClick={() => handleSaveSession(true)}
-                  className="px-3.5 py-2 min-h-[38px] rounded-xl bg-[#00a884] hover:bg-[#008f6f] text-white text-xs font-bold flex items-center gap-1.5 shadow-sm active:scale-95 transition-all"
+                  onClick={() => void handleSaveSession(true)}
+                  className="px-3.5 py-2 min-h-[38px] rounded-xl bg-[#00a884] hover:bg-[#008f6f] disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm active:scale-95 transition-all"
                 >
                   <CheckCheck size={14} /> Fechar Caixa
                 </button>
+                <button
+                  type="button"
+                  disabled={isSendingWhatsapp || isSaving}
+                  onClick={() => void handleTriggerWhatsappSend(activeSessionRow)}
+                  title={savedWhatsappPhone ? 'Enviar resumo em 1 clique via FoodNext' : 'Informar número e enviar resumo via FoodNext'}
+                  className="px-3 py-2 min-h-[38px] rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm active:scale-95 transition-all"
+                >
+                  {isSendingWhatsapp ? <Loader2 size={14} className="animate-spin" /> : <MessageCircle size={14} />}
+                  WhatsApp
+                </button>
+                <button
+                  type="button"
+                  disabled={isExportingPdf}
+                  onClick={() => void handleExportPdf(activeSessionRow)}
+                  title="Gerar e imprimir relatório executivo A4 em PDF"
+                  className="px-3 py-2 min-h-[38px] rounded-xl border border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20 disabled:opacity-50 text-indigo-700 dark:text-indigo-300 text-xs font-bold flex items-center gap-1.5 active:scale-95 transition-all"
+                >
+                  {isExportingPdf ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
+                  PDF
+                </button>
+                {activeSessionId && (
+                  <button
+                    type="button"
+                    disabled={isDeletingSession || isSaving}
+                    onClick={() => {
+                      const target = buildWorkspaceSessionRow();
+                      if (target) setDeleteTargetSession(target);
+                    }}
+                    title="Excluir este fechamento"
+                    className="px-3 py-2 min-h-[38px] rounded-xl border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 disabled:opacity-50 text-rose-700 dark:text-rose-300 text-xs font-bold flex items-center gap-1.5 active:scale-95 transition-all"
+                  >
+                    <Trash2 size={14} /> Excluir
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -642,132 +1312,174 @@ export default function CashReconciliationPage() {
           </div>
         )}
 
-        {/* Área de Upload */}
-        <CashUploadDropzone
-          files={files}
-          isProcessing={isProcessingFiles}
-          savedPasswordsCount={savedFilePasswords.length}
-          reportCompleteness={
-            reconciliationResult?.reportCompleteness ||
-            (files.length > 0 ? assessCashReportCompleteness(files) : null)
-          }
-          onAddFiles={handleAddFiles}
-          onUnlockPasswordFile={handleUnlockPasswordFile}
-          onOpenPasswordModal={(id) => setPasswordModalFileId(id)}
-          onRemoveFile={(id) => {
-            if (passwordModalFileId === id) setPasswordModalFileId(null);
-            handleRemoveFile(id);
-          }}
-        />
-
-        {/* Conteúdo Principal vs Empty State */}
-        {!reconciliationResult ? (
-          <div className="space-y-5">
-            <div className="rounded-3xl border border-slate-200/80 dark:border-[#2a3942] bg-white/80 dark:bg-[#202c33]/80 backdrop-blur-md p-6 sm:p-10 text-center space-y-4">
-              <div className="w-16 h-16 mx-auto rounded-3xl bg-[#00a884]/10 border border-[#00a884]/25 text-[#00a884] flex items-center justify-center">
-                <FileCheck2 size={30} />
-              </div>
-              <div className="max-w-lg mx-auto space-y-1.5">
-                <h2 className="text-base sm:text-lg font-black text-slate-800 dark:text-white">
-                  Suba os arquivos do dia para iniciar a auditoria automática
-                </h2>
-                <p className="text-xs sm:text-sm text-slate-500 dark:text-[#8696a0]">
-                  Carregue juntos a <strong>PlanilhaRecebimento</strong>, a <strong>RelConferencia</strong>, o <strong>Fechamento .txt</strong>, os extratos <strong>OFX (C6 / Itaú)</strong> e os relatórios da <strong>Rede</strong> e <strong>C6 Pay</strong>. O sistema cruza tudo em segundos e mostra exatamente o que bateu, faltou ou sobrou.
-                </p>
-              </div>
-            </div>
-
-            {historicalStats.totalSessions > 0 && (
-              <CashHealthHistoryCard
-                historicalStats={historicalStats}
-                sessions={sessions}
-                onSelectSession={handleLoadSession}
-              />
-            )}
-          </div>
+        {viewMode === 'dashboard' ? (
+          <CashDashboardOverview
+            sessions={sessions}
+            historicalStats={historicalStats}
+            routineProfile={routineProfile}
+            savedWhatsappPhone={savedWhatsappPhone}
+            hasActiveDraft={hasActiveDraft}
+            activeDraftFilesCount={files.length}
+            activeDraftDate={activeDraftDate}
+            busySessionId={busySessionId}
+            onNewConference={() => {
+              handleResetNew();
+              setViewMode('workspace');
+            }}
+            onContinueDraft={() => setViewMode('workspace')}
+            onDiscardDraft={() => {
+              handleResetNew();
+              setViewMode('dashboard');
+            }}
+            onOpenSession={(sessionId) => void handleLoadSession(sessionId)}
+            onSendWhatsapp={(session) => void handleTriggerWhatsappSend(session, false)}
+            onChangeWhatsappNumber={() => void handleOpenWhatsappNumberEditor()}
+            onExportPdf={(session) => void handleExportPdf(session)}
+            onDeleteSession={(session) => setDeleteTargetSession(session)}
+            onToggleRoutineBank={(bankKey, enabled) => void handleToggleRoutineBank(bankKey, enabled)}
+            onToggleRoutineReport={(fileType, enabled) => void handleToggleRoutineReport(fileType, enabled)}
+          />
         ) : (
-          <div className="space-y-5">
-            <CashHealthDashboard
-              result={reconciliationResult}
-              historicalStats={historicalStats}
-              onSelectSession={handleLoadSession}
-              onOpenMirrorCategory={(mirrorKey) => setSelectedMirrorKey(mirrorKey)}
+          <>
+            {/* Área de Upload */}
+            <CashUploadDropzone
+              files={files}
+              isProcessing={isProcessingFiles}
+              savedPasswordsCount={savedFilePasswords.length}
+              reportCompleteness={reportCompleteness}
+              routineProfile={routineProfile}
+              onAddFiles={handleAddFiles}
+              onUnlockPasswordFile={handleUnlockPasswordFile}
+              onOpenPasswordModal={(id) => setPasswordModalFileId(id)}
+              onRemoveFile={(id) => {
+                if (passwordModalFileId === id) setPasswordModalFileId(null);
+                handleRemoveFile(id);
+              }}
+              onToggleRoutineBank={(bankKey, enabled) => void handleToggleRoutineBank(bankKey, enabled)}
+              onToggleRoutineReport={(fileType, enabled) => void handleToggleRoutineReport(fileType, enabled)}
             />
 
-            <CashReconciliationWorkbench
-              key={workbenchResetKey}
-              result={reconciliationResult}
-              manualInputs={manualInputs}
-              selectedMirrorKey={selectedMirrorKey}
-              onSelectMirrorKey={setSelectedMirrorKey}
-              onUpdateManualInputs={(patch) => setManualInputs(prev => ({ ...prev, ...patch }))}
-              onConfirmSuggestion={(suggestionId) =>
-                setManualResolutions(prev => [...prev, { action: 'confirm_suggestion', suggestionId }])
-              }
-              onRejectSuggestion={(suggestionId) =>
-                setManualResolutions(prev => [...prev, { action: 'reject_suggestion', suggestionId }])
-              }
-              onManualLink={(systemIds, realIds) =>
-                setManualResolutions(prev => [...prev, { action: 'manual_link', systemIds, realIds }])
-              }
-              onIgnoreItem={(side, id) =>
-                setManualResolutions(prev => [
-                  ...prev,
-                  {
-                    action: 'ignore_item',
-                    systemIds: side === 'system' ? [id] : [],
-                    realIds: side === 'real' ? [id] : []
-                  }
-                ])
-              }
-              onReclassifySystemItem={(systemId, targetCategory) =>
-                setManualResolutions((prev) => {
-                  const withoutPrior = prev.filter(
-                    (r) => !(r.action === 'reclassify_system' && r.systemIds?.includes(systemId))
-                  );
-                  if (!targetCategory) return withoutPrior;
-                  return [
-                    ...withoutPrior,
-                    { action: 'reclassify_system', systemIds: [systemId], targetCategory }
-                  ];
-                })
-              }
-              rules={rules}
-              savedPasswords={savedFilePasswords}
-              onDeleteSavedPassword={async (patternKey, ruleId) => {
-                if (!tenantId) return;
-                await deleteCashSavedFilePassword(tenantId, patternKey, ruleId);
-                if (typeof window !== 'undefined') {
-                  setLocalSavedPasswords(loadSavedFilePasswordsFromStorage(window.localStorage, tenantId) as SavedCashFilePassword[]);
-                }
-                if (ruleId) {
-                  setRules(prev => prev.filter(r => r.id !== ruleId));
-                } else {
-                  setRules(prev => prev.filter(r => r.pattern !== patternKey && r.pattern !== `file_password:${patternKey}`));
-                }
-                notifyToast('Senha fixa removida. Será solicitada no próximo envio protegido.', 'info');
-              }}
-              onCreateRule={async (rule) => {
-                if (!tenantId) return;
-                const saved = await saveCashFormulaRule(tenantId, rule);
-                setRules(prev => [saved.rule, ...prev]);
-                notifyToast('Regra salva na Fórmula 1 e aplicada!', 'success');
-              }}
-              onToggleRule={async (ruleId, isActive) => {
-                if (!tenantId) return;
-                await toggleCashFormulaRule(tenantId, ruleId, isActive);
-                setRules(prev => prev.map(r => (r.id === ruleId ? { ...r, is_active: isActive } : r)));
-              }}
-              onDeleteRule={async (ruleId) => {
-                if (!tenantId) return;
-                await deleteCashFormulaRule(tenantId, ruleId);
-                setRules(prev => prev.filter(r => r.id !== ruleId));
-              }}
-              aiAnalysis={aiAnalysis}
-              isAnalyzingAi={isAnalyzingAi}
-              onRunAiAnalysis={handleRunAiAnalysis}
-            />
-          </div>
+            {/* Conteúdo Principal vs Empty State */}
+            {!reconciliationResult ? (
+              <div className="space-y-5">
+                <div className="rounded-3xl border border-slate-200/80 dark:border-[#2a3942] bg-white/80 dark:bg-[#202c33]/80 backdrop-blur-md p-6 sm:p-10 text-center space-y-4">
+                  <div className="w-16 h-16 mx-auto rounded-3xl bg-[#00a884]/10 border border-[#00a884]/25 text-[#00a884] flex items-center justify-center">
+                    <FileCheck2 size={30} />
+                  </div>
+                  <div className="max-w-lg mx-auto space-y-1.5">
+                    <h2 className="text-base sm:text-lg font-black text-slate-800 dark:text-white">
+                      Suba os arquivos do dia para iniciar a auditoria automática
+                    </h2>
+                    <p className="text-xs sm:text-sm text-slate-500 dark:text-[#8696a0]">
+                      Carregue juntos a <strong>PlanilhaRecebimento</strong>, a <strong>RelConferencia</strong>, o <strong>Fechamento .txt</strong>, os extratos <strong>OFX (C6 / Itaú)</strong> e os relatórios da <strong>Rede</strong> e <strong>C6 Pay</strong>. O sistema cruza tudo em segundos e mostra exatamente o que bateu, faltou ou sobrou.
+                    </p>
+                  </div>
+                </div>
+
+                {historicalStats.totalSessions > 0 && (
+                  <CashHealthHistoryCard
+                    historicalStats={historicalStats}
+                    sessions={sessions}
+                    onSelectSession={(sessionId) => void handleLoadSession(sessionId)}
+                    onDeleteSession={(session) => setDeleteTargetSession(session)}
+                  />
+                )}
+              </div>
+            ) : (
+              <div className="space-y-5">
+                <CashHealthDashboard
+                  result={reconciliationResult}
+                  historicalStats={historicalStats}
+                  sessions={sessions}
+                  onSelectSession={(sessionId) => void handleLoadSession(sessionId)}
+                  onDeleteSession={(session) => setDeleteTargetSession(session)}
+                  onOpenMirrorCategory={(mirrorKey) => setSelectedMirrorKey(mirrorKey)}
+                />
+
+                <CashReconciliationWorkbench
+                  key={workbenchResetKey}
+                  result={reconciliationResult}
+                  manualInputs={manualInputs}
+                  selectedMirrorKey={selectedMirrorKey}
+                  onSelectMirrorKey={setSelectedMirrorKey}
+                  onUpdateManualInputs={(patch) => {
+                    setIsCleanClosedView(false);
+                    setManualInputs(prev => ({ ...prev, ...patch }));
+                  }}
+                  onConfirmSuggestion={(suggestionId) => {
+                    setIsCleanClosedView(false);
+                    setManualResolutions(prev => [...prev, { action: 'confirm_suggestion', suggestionId }]);
+                  }}
+                  onRejectSuggestion={(suggestionId) => {
+                    setIsCleanClosedView(false);
+                    setManualResolutions(prev => [...prev, { action: 'reject_suggestion', suggestionId }]);
+                  }}
+                  onManualLink={(systemIds, realIds) => {
+                    setIsCleanClosedView(false);
+                    setManualResolutions(prev => [...prev, { action: 'manual_link', systemIds, realIds }]);
+                  }}
+                  onIgnoreItem={(side, id) => {
+                    setIsCleanClosedView(false);
+                    setManualResolutions(prev => [
+                      ...prev,
+                      {
+                        action: 'ignore_item',
+                        systemIds: side === 'system' ? [id] : [],
+                        realIds: side === 'real' ? [id] : []
+                      }
+                    ]);
+                  }}
+                  onReclassifySystemItem={(systemId, targetCategory) => {
+                    setIsCleanClosedView(false);
+                    setManualResolutions((prev) => {
+                      const withoutPrior = prev.filter(
+                        (r) => !(r.action === 'reclassify_system' && r.systemIds?.includes(systemId))
+                      );
+                      if (!targetCategory) return withoutPrior;
+                      return [
+                        ...withoutPrior,
+                        { action: 'reclassify_system', systemIds: [systemId], targetCategory }
+                      ];
+                    });
+                  }}
+                  rules={rules}
+                  savedPasswords={savedFilePasswords}
+                  onDeleteSavedPassword={async (patternKey, ruleId) => {
+                    if (!tenantId) return;
+                    await deleteCashSavedFilePassword(tenantId, patternKey, ruleId);
+                    if (typeof window !== 'undefined') {
+                      setLocalSavedPasswords(loadSavedFilePasswordsFromStorage(window.localStorage, tenantId) as SavedCashFilePassword[]);
+                    }
+                    if (ruleId) {
+                      setRules(prev => prev.filter(r => r.id !== ruleId));
+                    } else {
+                      setRules(prev => prev.filter(r => r.pattern !== patternKey && r.pattern !== `file_password:${patternKey}`));
+                    }
+                    notifyToast('Senha fixa removida. Será solicitada no próximo envio protegido.', 'info');
+                  }}
+                  onCreateRule={async (rule) => {
+                    if (!tenantId) return;
+                    const saved = await saveCashFormulaRule(tenantId, rule);
+                    setRules(prev => [saved.rule, ...prev]);
+                    notifyToast('Regra salva na Fórmula 1 e aplicada!', 'success');
+                  }}
+                  onToggleRule={async (ruleId, isActive) => {
+                    if (!tenantId) return;
+                    await toggleCashFormulaRule(tenantId, ruleId, isActive);
+                    setRules(prev => prev.map(r => (r.id === ruleId ? { ...r, is_active: isActive } : r)));
+                  }}
+                  onDeleteRule={async (ruleId) => {
+                    if (!tenantId) return;
+                    await deleteCashFormulaRule(tenantId, ruleId);
+                    setRules(prev => prev.filter(r => r.id !== ruleId));
+                  }}
+                  aiAnalysis={aiAnalysis}
+                  isAnalyzingAi={isAnalyzingAi}
+                  onRunAiAnalysis={handleRunAiAnalysis}
+                />
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -777,6 +1489,28 @@ export default function CashReconciliationPage() {
         isProcessing={isProcessingFiles}
         onUnlock={handleUnlockPasswordFile}
         onClose={() => setPasswordModalFileId(null)}
+      />
+
+      <CashWhatsappSendModal
+        isOpen={Boolean(whatsappModalState)}
+        targetLabel={whatsappModalState?.targetLabel || ''}
+        initialPhone={savedWhatsappPhone}
+        previewText={whatsappModalState?.summaryText || ''}
+        isSending={isSendingWhatsapp}
+        allowEditNumber={whatsappModalState?.allowEditNumber ?? true}
+        onSend={handleSubmitWhatsappModal}
+        onClose={() => {
+          if (!isSendingWhatsapp) setWhatsappModalState(null);
+        }}
+      />
+
+      <CashDeleteConfirmModal
+        session={deleteTargetSession}
+        isDeleting={isDeletingSession}
+        onConfirm={handleConfirmDeleteSession}
+        onClose={() => {
+          if (!isDeletingSession) setDeleteTargetSession(null);
+        }}
       />
     </div>
   );

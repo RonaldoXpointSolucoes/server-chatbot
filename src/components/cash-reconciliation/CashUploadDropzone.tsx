@@ -15,7 +15,8 @@ import {
 
 import {
   ParsedCashFileResult,
-  CashReportCompleteness
+  CashReportCompleteness,
+  CompanyCashRoutineProfile
 } from '../../types/cashReconciliation';
 import { formatDateBr } from '../../utils/cashReconciliationServiceHelper.mjs';
 import { CashReportCompletenessBanner } from './CashReportCompletenessBanner';
@@ -97,10 +98,13 @@ interface CashUploadDropzoneProps {
   isProcessing: boolean;
   savedPasswordsCount?: number;
   reportCompleteness?: CashReportCompleteness | null;
+  routineProfile?: CompanyCashRoutineProfile | null;
   onAddFiles: (fileList: FileList | File[]) => void;
   onUnlockPasswordFile: (fileId: string, password: string, saveFixed?: boolean) => Promise<boolean> | void;
   onOpenPasswordModal?: (fileId: string) => void;
   onRemoveFile: (fileId: string) => void;
+  onToggleRoutineBank?: (bankKey: string, enabled: boolean) => void;
+  onToggleRoutineReport?: (fileType: string, enabled: boolean) => void;
 }
 
 export function CashUploadDropzone({
@@ -108,10 +112,13 @@ export function CashUploadDropzone({
   isProcessing,
   savedPasswordsCount = 0,
   reportCompleteness = null,
+  routineProfile = null,
   onAddFiles,
   onUnlockPasswordFile,
   onOpenPasswordModal,
-  onRemoveFile
+  onRemoveFile,
+  onToggleRoutineBank,
+  onToggleRoutineReport
 }: CashUploadDropzoneProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -190,7 +197,12 @@ export function CashUploadDropzone({
       </div>
 
       {files.length > 0 && reportCompleteness && (
-        <CashReportCompletenessBanner completeness={reportCompleteness} />
+        <CashReportCompletenessBanner
+          completeness={reportCompleteness}
+          routineProfile={routineProfile}
+          onToggleRoutineBank={onToggleRoutineBank}
+          onToggleRoutineReport={onToggleRoutineReport}
+        />
       )}
 
       {files.length > 0 && (
