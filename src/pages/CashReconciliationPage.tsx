@@ -161,6 +161,7 @@ export default function CashReconciliationPage() {
   const rulesRef = useRef<CashRuleRow[]>([]);
   rulesRef.current = rules;
   const closedSessionIdsRef = useRef<Set<string>>(new Set());
+  const pdfCleanupRef = useRef<(() => void) | null>(null);
 
   const rulesConfig = useMemo(() => mergeCompanyFormulaRules(rules), [rules]);
   const savedFilePasswords = useMemo(
@@ -230,6 +231,12 @@ export default function CashReconciliationPage() {
   routineProfileRef.current = routineProfile;
   const rulesConfigRef = useRef(rulesConfig);
   rulesConfigRef.current = rulesConfig;
+
+  useEffect(() => {
+    return () => {
+      pdfCleanupRef.current?.();
+    };
+  }, []);
 
   // Ao trocar de empresa: reseta para Dashboard, limpa modais/flags transitórios e hidrata rascunho/senhas locais sem auto-abrir workspace
   useEffect(() => {
@@ -932,7 +939,8 @@ export default function CashReconciliationPage() {
         notifyToast('Carregue os arquivos da conferência antes de exportar.', 'warning');
         return null;
       }
-      const effectiveSession = activeSessionRow || sessionRow || null;
+      const effectiveSession =
+        activeSessionRow || sessionRow || (activeSessionId ? buildWorkspaceSessionRow() : null);
       const effectiveStoreName =
         reconciliationResult.storeName || effectiveSession?.store_name || storeTenantName || 'Empresa';
       return {
@@ -1146,6 +1154,8 @@ export default function CashReconciliationPage() {
         manualInputs: payload.manualInputs
       }) as string;
 
+      pdfCleanupRef.current?.();
+
       const iframe = document.createElement('iframe');
       iframe.setAttribute('aria-hidden', 'true');
       iframe.style.position = 'fixed';
@@ -1163,10 +1173,15 @@ export default function CashReconciliationPage() {
         if (cleaned) return;
         cleaned = true;
         window.clearTimeout(fallbackTimer);
+        if (pdfCleanupRef.current === cleanup) {
+          pdfCleanupRef.current = null;
+        }
         iframe.remove();
       };
+      pdfCleanupRef.current = cleanup;
       fallbackTimer = window.setTimeout(cleanup, 60_000);
 
+      iframe.onerror = cleanup;
       iframe.onload = () => {
         try {
           const win = iframe.contentWindow;
@@ -1303,7 +1318,7 @@ export default function CashReconciliationPage() {
                 className="px-3 py-2 min-h-[38px] rounded-xl bg-white dark:bg-[#202c33] border border-slate-200 dark:border-[#2a3942] hover:border-[#00a884] text-xs font-bold flex items-center gap-1.5 active:scale-95 transition-all"
                 title="Voltar ao Painel Executivo"
               >
-                <ArrowLeft size={14} /> Dashboard
+                <ArrowLeft size={14} /> Voltar ao Dashboard
               </button>
             )}
 
@@ -1608,6 +1623,7 @@ export default function CashReconciliationPage() {
         previewText={whatsappModalState?.summaryText || ''}
         isSending={isSendingWhatsapp}
         allowEditNumber={whatsappModalState?.allowEditNumber ?? true}
+        saveOnly={Boolean(whatsappModalState?.saveOnly)}
         onSend={handleSubmitWhatsappModal}
         onClose={() => {
           if (!isSendingWhatsapp) setWhatsappModalState(null);

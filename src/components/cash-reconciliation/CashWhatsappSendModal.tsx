@@ -29,6 +29,7 @@ export interface CashWhatsappSendModalProps {
   previewText?: string;
   isSending: boolean;
   allowEditNumber?: boolean;
+  saveOnly?: boolean;
   onSend: (phone: string, savePhone: boolean) => Promise<void> | void;
   onClose: () => void;
 }
@@ -40,6 +41,7 @@ export function CashWhatsappSendModal({
   previewText = '',
   isSending,
   allowEditNumber = true,
+  saveOnly = false,
   onSend,
   onClose
 }: CashWhatsappSendModalProps) {
@@ -71,8 +73,8 @@ export function CashWhatsappSendModal({
     setPhoneInput(initialNorm?.ok ? initialNorm.display : raw);
     setSavePhone(true);
     setTouched(false);
-    setShowPreview(Boolean(previewText && raw && initialNorm?.ok));
-  }, [isOpen, initialPhone, initialNorm, previewText]);
+    setShowPreview(Boolean(!saveOnly && previewText && raw && initialNorm?.ok));
+  }, [isOpen, initialPhone, initialNorm, previewText, saveOnly]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -120,7 +122,7 @@ export function CashWhatsappSendModal({
                 id="cash-whatsapp-modal-title"
                 className="text-sm sm:text-base font-black text-slate-900 dark:text-white truncate"
               >
-                Enviar Resumo via WhatsApp
+                {saveOnly ? 'WhatsApp Padrão da Empresa' : 'Enviar Resumo via WhatsApp'}
               </h3>
               <p className="text-[11px] text-slate-600 dark:text-[#aebac1] truncate">
                 {targetLabel}
@@ -145,7 +147,16 @@ export function CashWhatsappSendModal({
             <div className="rounded-xl border border-[#00a884]/25 bg-[#00a884]/10 px-3.5 py-2.5 text-[11px] text-slate-700 dark:text-[#d1d7db] flex items-start gap-2">
               <ShieldCheck size={15} className="text-[#00a884] shrink-0 mt-0.5" />
               <span>
-                Envio automático pela caixa oficial <strong>FoodNext</strong> com resumo executivo completo (PDV × Real, PIX por banco, cartões, gaveta e alertas).
+                {saveOnly ? (
+                  <>
+                    Defina o número de WhatsApp da empresa que receberá os fechamentos enviados pela caixa oficial{' '}
+                    <strong>FoodNext</strong> em 1 clique.
+                  </>
+                ) : (
+                  <>
+                    Envio automático pela caixa oficial <strong>FoodNext</strong> com resumo executivo completo (PDV × Real, PIX por banco, cartões, gaveta e alertas).
+                  </>
+                )}
               </span>
             </div>
 
@@ -211,7 +222,7 @@ export function CashWhatsappSendModal({
               )}
             </div>
 
-            {!isLockedNumber && (
+            {!isLockedNumber && !saveOnly && (
               <label className="flex items-start gap-2.5 p-3 rounded-xl border border-slate-200 dark:border-[#2a3942] bg-slate-50/80 dark:bg-[#202c33]/60 cursor-pointer select-none">
                 <input
                   type="checkbox"
@@ -226,7 +237,7 @@ export function CashWhatsappSendModal({
               </label>
             )}
 
-            {previewText.trim().length > 0 && (
+            {!saveOnly && previewText.trim().length > 0 && (
               <div className="rounded-xl border border-slate-200 dark:border-[#2a3942] bg-slate-50/80 dark:bg-[#202c33]/60 overflow-hidden">
                 <button
                   type="button"
@@ -268,8 +279,20 @@ export function CashWhatsappSendModal({
               disabled={!phoneValidation.ok || isSending}
               className="w-full sm:w-auto px-5 py-2.5 min-h-[44px] rounded-xl bg-[#00a884] hover:bg-[#008f6f] disabled:opacity-45 text-white text-xs font-black flex items-center justify-center gap-2 shadow-sm active:scale-95 transition-all"
             >
-              {isSending ? <Loader2 size={15} className="animate-spin" /> : <Send size={14} />}
-              {isSending ? 'Enviando via FoodNext...' : 'Enviar Agora'}
+              {isSending ? (
+                <Loader2 size={15} className="animate-spin" />
+              ) : saveOnly ? (
+                <CheckCircle2 size={14} />
+              ) : (
+                <Send size={14} />
+              )}
+              {isSending
+                ? saveOnly
+                  ? 'Salvando...'
+                  : 'Enviando via FoodNext...'
+                : saveOnly
+                  ? 'Salvar Número Padrão'
+                  : 'Enviar Agora'}
             </button>
           </div>
         </form>
