@@ -14,7 +14,9 @@ import {
   Percent,
   Users,
   Activity,
-  ChevronRight
+  ChevronRight,
+  Trash2,
+  User
 } from 'lucide-react';
 
 import {
@@ -26,7 +28,7 @@ import { formatDateBr, formatDateBrShort } from '../../utils/cashReconciliationS
 import { CashSessionRow } from '../../services/cashReconciliationService';
 import { CashMetricDetailModal, HealthMetricKey } from './CashMetricDetailModal';
 
-interface HistoricalStatsData {
+export interface HistoricalStatsData {
   totalSessions: number;
   balancedCount: number;
   balancedRatePct: number;
@@ -41,21 +43,58 @@ interface HistoricalStatsData {
     systemTotalCents: number;
     realTotalCents: number;
     diffCents: number;
+    shiftLabel?: string;
+    operatorName?: string | null;
+    createdAt?: string;
+    isDraft?: boolean;
   }>;
+}
+
+function formatCreatedTimeHm(rawTimestamp?: string | null): string {
+  if (!rawTimestamp) return '';
+  const str = String(rawTimestamp).trim();
+  if (!str) return '';
+  const parsed = new Date(str);
+  if (!Number.isNaN(parsed.getTime())) {
+    return `${String(parsed.getHours()).padStart(2, '0')}:${String(parsed.getMinutes()).padStart(2, '0')}`;
+  }
+  const match = str.match(/T(\d{2}:\d{2})/);
+  return match ? match[1] : '';
+}
+
+function getCompactOperatorTag(operatorName?: string | null, shiftLabel?: string): string {
+  const op = String(operatorName || '').trim();
+  if (op) return op.split(/\s+/)[0].slice(0, 10);
+  const shift = String(shiftLabel || '').trim();
+  if (shift && shift.toLowerCase() !== 'diário') return shift.slice(0, 10);
+  return '';
 }
 
 interface CashHealthHistoryCardProps {
   historicalStats: HistoricalStatsData;
   sessions?: CashSessionRow[];
   onSelectSession?: (sessionId: string) => void;
+  onDeleteSession?: (session: CashSessionRow) => void;
 }
 
 export function CashHealthHistoryCard({
   historicalStats,
   sessions = [],
-  onSelectSession
+  onSelectSession,
+  onDeleteSession
 }: CashHealthHistoryCardProps) {
   if (historicalStats.totalSessions <= 0) return null;
+
+  const visibleSeries = historicalStats.series.slice(-14);
+  const seriesDateCounts = new Map<string, number>();
+  for (const pt of visibleSeries) {
+    seriesDateCounts.set(pt.referenceDate, (seriesDateCounts.get(pt.referenceDate) || 0) + 1);
+  }
+
+  const sessionDateCounts = new Map<string, number>();
+  for (const s of sessions) {
+    sessionDateCounts.set(s.reference_date, (sessionDateCounts.get(s.reference_date) || 0) + 1);
+  }
 
   return (
     <div className="rounded-3xl border border-slate-200/80 dark:border-[#2a3942] bg-white/90 dark:bg-[#202c33]/90 backdrop-blur-xl p-4 sm:p-5 shadow-sm space-y-4">
@@ -88,7 +127,7 @@ export function CashHealthHistoryCard({
       </div>
 
       <div className="flex items-end gap-2.5 overflow-x-auto pb-1">
-        {historicalStats.series.slice(-14).map((pt) => {
+        {visibleSeries.map((pt) => {
           const barColor =
             pt.status === 'balanced'
               ? 'bg-emerald-500'
@@ -96,21 +135,41 @@ export function CashHealthHistoryCard({
                 ? 'bg-amber-500'
                 : pt.status === 'shortage'
                   ? 'bg-rose-500'
-                  : 'bg-indigo-500';
+                  : pt.status === 'draft'
+                    ? 'bg-slate-400 dark:bg-slate-500'
+                    : 'bg-indigo-500';
           const shortDate = formatDateBrShort(pt.referenceDate);
           const fullDate = formatDateBr(pt.referenceDate);
+          const timeHm = formatCreatedTimeHm(pt.createdAt);
+          const hasSameDaySiblings = (seriesDateCounts.get(pt.referenceDate) || 0) > 1;
+          const compactTag = hasSameDaySiblings
+            ? getCompactOperatorTag(pt.operatorName, pt.shiftLabel)
+            : '';
+          const tooltipParts = [
+            fullDate + (timeHm ? ` às ${timeHm}` : ''),
+            pt.operatorName ? `Op: ${pt.operatorName}` : '',
+            pt.shiftLabel ? `Turno: ${pt.shiftLabel}` : '',
+            pt.isDraft ? 'Rascunho' : 'Fechado',
+            `Saúde ${pt.healthScore}%`,
+            `Dif ${formatCents(pt.diffCents)}`
+          ].filter(Boolean);
+
           return (
             <button
               key={pt.id}
               type="button"
               onClick={() => onSelectSession?.(pt.id)}
-              title={`${fullDate} • Saúde ${pt.healthScore}% • Dif ${formatCents(pt.diffCents)}`}
-              className="flex flex-col items-center gap-1 min-w-[48px] group cursor-pointer active:scale-95 transition-transform"
+              title={tooltipParts.join(' • ')}
+              className="flex flex-col items-center gap-1 min-w-[52px] group cursor-pointer active:scale-95 transition-transform"
             >
               <span className="text-[10px] font-bold text-slate-500 dark:text-[#8696a0] group-hover:text-[#00a884] tabular-nums">
                 {pt.healthScore}%
               </span>
-              <div className="w-7 h-16 rounded-lg bg-slate-100 dark:bg-[#111b21] flex items-end overflow-hidden p-0.5">
+              <div
+                className={`relative w-7 h-16 rounded-lg bg-slate-100 dark:bg-[#111b21] flex items-end overflow-hidden p-0.5 ${
+                  pt.isDraft ? 'ring-1 ring-amber-400/60' : ''
+                }`}
+              >
                 <div
                   className={`w-full rounded-md ${barColor} transition-all group-hover:opacity-80`}
                   style={{ height: `${Math.max(12, Math.min(100, pt.healthScore))}%` }}
@@ -119,6 +178,22 @@ export function CashHealthHistoryCard({
               <span className="text-[10px] font-mono text-slate-500 dark:text-[#8696a0] whitespace-nowrap">
                 {shortDate}
               </span>
+              {(hasSameDaySiblings || timeHm) && (
+                <span
+                  className={`text-[9px] font-mono leading-none whitespace-nowrap max-w-[56px] truncate ${
+                    hasSameDaySiblings
+                      ? 'font-bold text-[#008f6f] dark:text-[#00a884]'
+                      : 'text-slate-400 dark:text-[#8696a0]'
+                  }`}
+                >
+                  {timeHm || compactTag || (pt.isDraft ? 'Rasc.' : '')}
+                </span>
+              )}
+              {hasSameDaySiblings && compactTag && timeHm && (
+                <span className="text-[8.5px] font-semibold text-slate-500 dark:text-[#aebac1] leading-none max-w-[56px] truncate">
+                  {compactTag}
+                </span>
+              )}
             </button>
           );
         })}
@@ -129,21 +204,82 @@ export function CashHealthHistoryCard({
           {sessions.slice(0, 6).map((s) => {
             const diff = Number(s.diff_cents || 0);
             const signedDiff = `${diff > 0 ? '+' : diff < 0 ? '-' : ''}${formatCents(Math.abs(diff))}`;
+            const timeHm = formatCreatedTimeHm(s.created_at);
+            const isSameDayDuplicate = (sessionDateCounts.get(s.reference_date) || 0) > 1;
+            const isDraft = !s.closed_at || s.status === 'draft';
+            const operatorLabel = s.operator_name?.trim() || '';
+            const shiftLabel = s.shift_label?.trim() || '';
+
             return (
-              <button
+              <div
                 key={s.id}
-                type="button"
+                role="button"
+                tabIndex={0}
                 onClick={() => onSelectSession?.(s.id)}
-                className="text-left rounded-2xl border border-slate-200/80 dark:border-[#2a3942] bg-slate-50/75 dark:bg-[#111b21]/80 hover:border-[#00a884]/60 p-3.5 space-y-2 transition-all cursor-pointer active:scale-[0.99] min-w-0 overflow-hidden"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onSelectSession?.(s.id);
+                  }
+                }}
+                className="text-left rounded-2xl border border-slate-200/80 dark:border-[#2a3942] bg-slate-50/75 dark:bg-[#111b21]/80 hover:border-[#00a884]/60 p-3.5 space-y-2 transition-all cursor-pointer active:scale-[0.99] min-w-0 overflow-hidden focus:outline-none focus:ring-2 focus:ring-[#00a884]/50"
               >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-black text-slate-900 dark:text-white whitespace-nowrap">
-                    {formatDateBr(s.reference_date)}
-                  </span>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#00a884]/15 text-[#00a884] whitespace-nowrap shrink-0">
-                    Saúde {s.health_score}%{!s.closed_at ? ' • Rascunho' : ''}
-                  </span>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex flex-wrap items-center gap-1.5">
+                    <span className="text-xs font-black text-slate-900 dark:text-white whitespace-nowrap">
+                      {formatDateBr(s.reference_date)}
+                    </span>
+                    {timeHm && (
+                      <span
+                        className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-mono font-bold whitespace-nowrap ${
+                          isSameDayDuplicate
+                            ? 'bg-[#00a884]/15 text-[#008f6f] dark:text-[#00a884]'
+                            : 'bg-slate-200/70 dark:bg-[#202c33] text-slate-600 dark:text-[#aebac1]'
+                        }`}
+                      >
+                        <Clock size={10} />
+                        {timeHm}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-1 shrink-0">
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#00a884]/15 text-[#00a884] whitespace-nowrap">
+                      Saúde {s.health_score}%{isDraft ? ' • Rascunho' : ''}
+                    </span>
+                    {onDeleteSession && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteSession(s);
+                        }}
+                        aria-label={`Excluir fechamento de ${formatDateBr(s.reference_date)}${timeHm ? ` às ${timeHm}` : ''}`}
+                        title="Excluir fechamento"
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-500/10 active:scale-95 transition-all"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                  </div>
                 </div>
+
+                {(operatorLabel || shiftLabel) && (
+                  <div className="flex flex-wrap items-center gap-1.5 text-[10.5px] text-slate-600 dark:text-[#aebac1] min-w-0">
+                    {operatorLabel && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/90 dark:bg-[#202c33] border border-slate-200/80 dark:border-[#2a3942] font-semibold truncate max-w-[160px]">
+                        <User size={10} className="text-slate-400 shrink-0" />
+                        <span className="truncate">{operatorLabel}</span>
+                      </span>
+                    )}
+                    {shiftLabel && (
+                      <span className="px-2 py-0.5 rounded-md bg-white/90 dark:bg-[#202c33] border border-slate-200/80 dark:border-[#2a3942] font-semibold whitespace-nowrap">
+                        Turno: {shiftLabel}
+                      </span>
+                    )}
+                  </div>
+                )}
+
                 <div className="grid grid-cols-3 gap-2 text-[11px] min-w-0">
                   <div className="min-w-0">
                     <p className="text-[9.5px] uppercase font-bold text-slate-400">Sistema</p>
@@ -166,7 +302,7 @@ export function CashHealthHistoryCard({
                     </p>
                   </div>
                 </div>
-              </button>
+              </div>
             );
           })}
         </div>
@@ -178,7 +314,9 @@ export function CashHealthHistoryCard({
 interface CashHealthDashboardProps {
   result: CashReconciliationResult;
   historicalStats: HistoricalStatsData;
+  sessions?: CashSessionRow[];
   onSelectSession?: (sessionId: string) => void;
+  onDeleteSession?: (session: CashSessionRow) => void;
   onOpenMirrorCategory?: (mirrorKey: string) => void;
 }
 
@@ -209,7 +347,14 @@ const STATUS_BADGE: Record<string, { label: string; badgeClass: string; barClass
   }
 };
 
-export function CashHealthDashboard({ result, historicalStats, onSelectSession, onOpenMirrorCategory }: CashHealthDashboardProps) {
+export function CashHealthDashboard({
+  result,
+  historicalStats,
+  sessions,
+  onSelectSession,
+  onDeleteSession,
+  onOpenMirrorCategory
+}: CashHealthDashboardProps) {
   const [activeMetricKey, setActiveMetricKey] = useState<HealthMetricKey | null>(null);
   const statusMeta = STATUS_BADGE[result.status] || STATUS_BADGE.attention;
   const getMirror = (key: string): CashMirrorRow =>
@@ -546,7 +691,12 @@ export function CashHealthDashboard({ result, historicalStats, onSelectSession, 
       )}
 
       {/* Histórico Multi-Dias de Saúde */}
-      <CashHealthHistoryCard historicalStats={historicalStats} onSelectSession={onSelectSession} />
+      <CashHealthHistoryCard
+        historicalStats={historicalStats}
+        sessions={sessions}
+        onSelectSession={onSelectSession}
+        onDeleteSession={onDeleteSession}
+      />
     </div>
   );
 }
