@@ -129,7 +129,8 @@ export function runCashReconciliation({
   parsedFiles = [],
   rulesConfig = DEFAULT_FORMULA_CONFIG,
   manualInputs = {},
-  manualResolutions = []
+  manualResolutions = [],
+  companyRoutineProfile = null
 }) {
   const cfg = { ...DEFAULT_FORMULA_CONFIG, ...(rulesConfig || {}) };
   const tol = Number.isFinite(cfg.amountToleranceCents) ? cfg.amountToleranceCents : 1;
@@ -726,7 +727,7 @@ export function runCashReconciliation({
     }
   }
 
-  const reportCompleteness = assessCashReportCompleteness(parsedFiles);
+  const reportCompleteness = assessCashReportCompleteness(parsedFiles, companyRoutineProfile);
   const auditInsights = buildAuditInsights({
     soldItemsFile,
     cancelledFile,

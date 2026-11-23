@@ -50,6 +50,30 @@ export interface CashOperationOrderDetail {
   items: CashOrderItemDetail[];
 }
 
+export interface LearnedBankRoutineEntry {
+  bankKey: string;
+  bankCode: string;
+  bankLabel: string;
+  acctLast4?: string;
+  seenCount: number;
+  lastSeenDate: string;
+  enabled: boolean;
+}
+
+export interface LearnedReportRoutineEntry {
+  fileType: string;
+  seenCount: number;
+  lastSeenDate: string;
+  enabled: boolean;
+}
+
+export interface CompanyCashRoutineProfile {
+  version: number;
+  updatedAt: string;
+  banks: Record<string, LearnedBankRoutineEntry>;
+  reports: Record<string, LearnedReportRoutineEntry>;
+}
+
 export interface CashReportSpecStatus {
   fileType: string;
   label: string;
@@ -57,6 +81,16 @@ export interface CashReportSpecStatus {
   priority: 'essential' | 'detail' | 'audit';
   hint: string;
   present: boolean;
+  acceptedTypes?: string[];
+  bankKey?: string;
+  bankCode?: string;
+  bankLabel?: string;
+  acctLast4?: string;
+  isLearnedBank?: boolean;
+  isHabitual?: boolean;
+  seenCount?: number;
+  lastSeenDate?: string;
+  enabled?: boolean;
 }
 
 export interface CashReportCompleteness {
@@ -65,6 +99,11 @@ export interface CashReportCompleteness {
   percent: number;
   isComplete: boolean;
   warnings: string[];
+  hasLearnedRoutine?: boolean;
+  habitualExpectedCount?: number;
+  habitualPresentCount?: number;
+  habitualMissingCount?: number;
+  learnedBanks?: LearnedBankRoutineEntry[];
   system: {
     totalExpected: number;
     presentCount: number;
