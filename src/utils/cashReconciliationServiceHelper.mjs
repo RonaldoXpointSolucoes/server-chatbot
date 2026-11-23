@@ -159,8 +159,22 @@ export function buildSessionPersistencePayload({
   return { sessionPayload, filePayloads, itemPayloads };
 }
 
+function compareTimestampsAsc(a, b) {
+  const sa = String(a || '').trim();
+  const sb = String(b || '').trim();
+  if (!sa && !sb) return 0;
+  if (!sa) return -1;
+  if (!sb) return 1;
+  const ta = Date.parse(sa);
+  const tb = Date.parse(sb);
+  if (Number.isFinite(ta) && Number.isFinite(tb) && ta !== tb) {
+    return ta - tb;
+  }
+  return sa.localeCompare(sb);
+}
+
 export function computeHistoricalHealthStats(sessions = []) {
-  const valid = Array.isArray(sessions) ? [...sessions] : [];
+  const valid = Array.isArray(sessions) ? sessions.filter(Boolean) : [];
   if (valid.length === 0) {
     return {
       totalSessions: 0,
@@ -187,16 +201,37 @@ export function computeHistoricalHealthStats(sessions = []) {
   }
 
   const series = valid
-    .map(s => ({
-      id: s.id,
-      referenceDate: s.reference_date,
-      status: s.status,
-      healthScore: Number(s.health_score || 0),
-      systemTotalCents: Number(s.system_total_cents || 0),
-      realTotalCents: Number(s.real_total_cents || 0),
-      diffCents: Number(s.diff_cents || 0)
-    }))
-    .sort((a, b) => String(a.referenceDate).localeCompare(String(b.referenceDate)));
+    .map((s) => {
+      const shiftRaw = String(s.shift_label ?? s.shiftLabel ?? '').trim();
+      const operatorRaw = s.operator_name ?? s.operatorName ?? null;
+      const operatorName =
+        typeof operatorRaw === 'string' && operatorRaw.trim().length > 0
+          ? operatorRaw.trim()
+          : null;
+      const createdAt = String(s.created_at || s.createdAt || '');
+      const isDraft = Boolean(s.status === 'draft' || !s.closed_at);
+
+      return {
+        id: s.id,
+        referenceDate: s.reference_date || s.referenceDate || '',
+        status: s.status,
+        healthScore: Number(s.health_score || 0),
+        systemTotalCents: Number(s.system_total_cents || 0),
+        realTotalCents: Number(s.real_total_cents || 0),
+        diffCents: Number(s.diff_cents || 0),
+        shiftLabel: shiftRaw || 'Diário',
+        operatorName,
+        createdAt,
+        isDraft
+      };
+    })
+    .sort((a, b) => {
+      const dateCmp = String(a.referenceDate || '').localeCompare(String(b.referenceDate || ''));
+      if (dateCmp !== 0) return dateCmp;
+      const timeCmp = compareTimestampsAsc(a.createdAt, b.createdAt);
+      if (timeCmp !== 0) return timeCmp;
+      return String(a.id || '').localeCompare(String(b.id || ''));
+    });
 
   return {
     totalSessions: valid.length,

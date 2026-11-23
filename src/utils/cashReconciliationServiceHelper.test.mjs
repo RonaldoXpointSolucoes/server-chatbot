@@ -87,6 +87,74 @@ test('computeHistoricalHealthStats aggregates balanced rate, shortage/surplus to
   assert.deepEqual(stats.series.map(s => s.referenceDate), ['2026-11-18', '2026-11-19', '2026-11-20']);
 });
 
+test('computeHistoricalHealthStats sorts multiple same-day sessions chronologically, exposes shift/operator/draft metadata, and recalculates after deletion', () => {
+  const sessions = [
+    {
+      id: 'sess-19-noite',
+      reference_date: '2026-11-19',
+      shift_label: 'Noite',
+      operator_name: 'Carlos',
+      status: 'shortage',
+      health_score: 80,
+      system_total_cents: 500000,
+      real_total_cents: 495000,
+      diff_cents: -5000,
+      closed_at: null,
+      created_at: '2026-11-19T23:10:00.000Z'
+    },
+    {
+      id: 'sess-19-manha',
+      reference_date: '2026-11-19',
+      shift_label: 'Manhã',
+      operator_name: 'Edilza',
+      status: 'balanced',
+      health_score: 100,
+      system_total_cents: 300000,
+      real_total_cents: 300000,
+      diff_cents: 0,
+      closed_at: '2026-11-19T14:35:00.000Z',
+      created_at: '2026-11-19T14:30:00.000Z'
+    },
+    {
+      id: 'sess-18',
+      reference_date: '2026-11-18',
+      shift_label: 'Diário',
+      operator_name: 'Edilza',
+      status: 'surplus',
+      health_score: 96,
+      system_total_cents: 200000,
+      real_total_cents: 201500,
+      diff_cents: 1500,
+      closed_at: '2026-11-18T22:00:00.000Z',
+      created_at: '2026-11-18T21:50:00.000Z'
+    }
+  ];
+
+  const stats = computeHistoricalHealthStats(sessions);
+
+  assert.equal(stats.totalSessions, 3);
+  assert.deepEqual(stats.series.map(s => s.id), ['sess-18', 'sess-19-manha', 'sess-19-noite']);
+  assert.equal(stats.series[1].shiftLabel, 'Manhã');
+  assert.equal(stats.series[1].operatorName, 'Edilza');
+  assert.equal(stats.series[1].createdAt, '2026-11-19T14:30:00.000Z');
+  assert.equal(stats.series[1].isDraft, false);
+
+  assert.equal(stats.series[2].shiftLabel, 'Noite');
+  assert.equal(stats.series[2].operatorName, 'Carlos');
+  assert.equal(stats.series[2].createdAt, '2026-11-19T23:10:00.000Z');
+  assert.equal(stats.series[2].isDraft, true);
+
+  // Simula exclusão exata de apenas um dos fechamentos de 19/11 pelo id
+  const afterDelete = computeHistoricalHealthStats(sessions.filter(s => s.id !== 'sess-19-noite'));
+  assert.equal(afterDelete.totalSessions, 2);
+  assert.equal(afterDelete.balancedCount, 1);
+  assert.equal(afterDelete.balancedRatePct, 50);
+  assert.equal(afterDelete.avgHealthScore, 98);
+  assert.equal(afterDelete.totalShortageCents, 0);
+  assert.equal(afterDelete.totalSurplusCents, 1500);
+  assert.deepEqual(afterDelete.series.map(s => s.id), ['sess-18', 'sess-19-manha']);
+});
+
 test('isMissingCashTableError detects PostgREST PGRST205 and Postgres 42P01 cleanly', () => {
   assert.equal(isMissingCashTableError({ code: 'PGRST205', message: 'Could not find the table public.cash_reconciliation_sessions' }), true);
   assert.equal(isMissingCashTableError({ code: '42P01', message: 'relation "cash_reconciliation_sessions" does not exist' }), true);
