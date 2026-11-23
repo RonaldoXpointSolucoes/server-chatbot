@@ -99,6 +99,7 @@ interface WhatsappModalState {
   storeName: string;
   sessionId: string | null;
   allowEditNumber: boolean;
+  saveOnly?: boolean;
 }
 
 interface ResolvedExportPayload {
@@ -132,7 +133,6 @@ export default function CashReconciliationPage() {
 
   const [sessions, setSessions] = useState<CashSessionRow[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [isCleanClosedView, setIsCleanClosedView] = useState(false);
   const [rules, setRules] = useState<CashRuleRow[]>([]);
   const [localSavedPasswords, setLocalSavedPasswords] = useState<SavedCashFilePassword[]>([]);
   const [localRoutineOverride, setLocalRoutineOverride] = useState<CompanyCashRoutineProfile | null>(null);
@@ -160,6 +160,7 @@ export default function CashReconciliationPage() {
   filesRef.current = files;
   const rulesRef = useRef<CashRuleRow[]>([]);
   rulesRef.current = rules;
+  const closedSessionIdsRef = useRef<Set<string>>(new Set());
 
   const rulesConfig = useMemo(() => mergeCompanyFormulaRules(rules), [rules]);
   const savedFilePasswords = useMemo(
@@ -197,6 +198,16 @@ export default function CashReconciliationPage() {
     [sessions, activeSessionId]
   );
 
+  const isActiveSessionClosed = useMemo(
+    () =>
+      Boolean(
+        activeSessionId &&
+          (closedSessionIdsRef.current.has(activeSessionId) ||
+            sessions.some((s) => s.id === activeSessionId && Boolean(s.closed_at)))
+      ),
+    [activeSessionId, sessions]
+  );
+
   const activeDraftDate = useMemo(
     () =>
       reconciliationResult?.referenceDate ||
@@ -220,20 +231,26 @@ export default function CashReconciliationPage() {
   const rulesConfigRef = useRef(rulesConfig);
   rulesConfigRef.current = rulesConfig;
 
-  // Ao trocar de empresa: reseta para Dashboard, limpa modais transitórios e hidrata rascunho/senhas locais sem auto-abrir workspace
+  // Ao trocar de empresa: reseta para Dashboard, limpa modais/flags transitórios e hidrata rascunho/senhas locais sem auto-abrir workspace
   useEffect(() => {
+    closedSessionIdsRef.current.clear();
     setViewMode('dashboard');
     setPasswordModalFileId(null);
     setWhatsappModalState(null);
     setDeleteTargetSession(null);
     setBusySessionId(null);
+    setIsProcessingFiles(false);
+    setIsSaving(false);
+    setIsSendingWhatsapp(false);
+    setIsExportingPdf(false);
+    setIsAnalyzingAi(false);
+    setIsDeletingSession(false);
     setLocalRoutineOverride(null);
     setLocalSavedWhatsapp('');
     setSessions([]);
     setRules([]);
     setSchemaMissing(false);
     setSelectedMirrorKey(null);
-    setIsCleanClosedView(false);
 
     if (!tenantId || typeof window === 'undefined') {
       setLocalSavedPasswords([]);
@@ -267,11 +284,14 @@ export default function CashReconciliationPage() {
     setHydratedTenantId(tenantId);
   }, [tenantId]);
 
-  // Auto-salva rascunho local sempre que arquivos, inputs ou ajustes mudam (sem gravar visualização limpa de sessão fechada)
+  // Auto-salva rascunho local sempre que arquivos, inputs ou ajustes mudam (nunca grava nem ressuscita sessão já fechada)
   useEffect(() => {
     if (!tenantId || typeof window === 'undefined') return;
     if (hydratedTenantId !== tenantId) return;
-    if (isCleanClosedView) return;
+    if (isActiveSessionClosed) {
+      clearActiveCashDraftFromStorage(window.localStorage, tenantId);
+      return;
+    }
     saveActiveCashDraftToStorage(window.localStorage, tenantId, {
       activeSessionId,
       files,
@@ -279,11 +299,15 @@ export default function CashReconciliationPage() {
       manualResolutions,
       aiAnalysis
     });
-  }, [tenantId, hydratedTenantId, isCleanClosedView, activeSessionId, files, manualInputs, manualResolutions, aiAnalysis]);
+  }, [tenantId, hydratedTenantId, isActiveSessionClosed, activeSessionId, files, manualInputs, manualResolutions, aiAnalysis]);
 
   const applyLoadedSession = useCallback((session: CashSessionRow) => {
+    if (session.closed_at) {
+      closedSessionIdsRef.current.add(session.id);
+    } else {
+      closedSessionIdsRef.current.delete(session.id);
+    }
     setActiveSessionId(session.id);
-    setIsCleanClosedView(Boolean(session.closed_at));
     const snap = session.reconciled_summary || {};
     const restoredFiles: UploadedCashFileItem[] = (snap.parsedFilesSnapshot || []).map((pf: ParsedCashFileResult, idx: number) => ({
       id: `saved_${session.id}_${idx}`,
@@ -301,27 +325,28 @@ export default function CashReconciliationPage() {
 
   const loadTenantData = useCallback(async () => {
     if (!tenantId) return;
-    const requestedTenantId = tenantId;
+    const reqTenantId = tenantId;
     try {
-      const sessRes = await listCashReconciliationSessions(requestedTenantId, 30);
-      const rulesRes = await listCashFormulaRules(requestedTenantId, sessRes.schemaMissing);
-      if (activeTenantRef.current !== requestedTenantId) return;
+      const sessRes = await listCashReconciliationSessions(reqTenantId, 30);
+      if (activeTenantRef.current !== reqTenantId) return;
+      const rulesRes = await listCashFormulaRules(reqTenantId, sessRes.schemaMissing);
+      if (activeTenantRef.current !== reqTenantId) return;
 
       setSessions(sessRes.sessions);
       setRules(rulesRes.rules);
       setSchemaMissing(sessRes.schemaMissing || rulesRes.schemaMissing);
 
       // Aprende rotina inicial a partir de até 4 sessões recentes quando a empresa ainda não possui bancos aprendidos
-      const loadedProfile = getCompanyCashRoutine(requestedTenantId, rulesRes.rules);
+      const loadedProfile = getCompanyCashRoutine(reqTenantId, rulesRes.rules);
       if (Object.keys(loadedProfile.banks).length === 0 && sessRes.sessions.length > 0) {
         try {
           const recentTargets = sessRes.sessions.slice(0, 4);
           const loadedFull = await Promise.all(
             recentTargets.map((s) =>
-              loadCashReconciliationSession(requestedTenantId, s.id).catch(() => null)
+              loadCashReconciliationSession(reqTenantId, s.id).catch(() => null)
             )
           );
-          if (activeTenantRef.current !== requestedTenantId) return;
+          if (activeTenantRef.current !== reqTenantId) return;
           const validFullSessions = loadedFull.filter((s): s is CashSessionRow => Boolean(s));
           if (validFullSessions.length > 0) {
             const { profile: bootstrapped, changed } = bootstrapRoutineFromSessions(
@@ -331,8 +356,8 @@ export default function CashReconciliationPage() {
 
             if (changed) {
               setLocalRoutineOverride(bootstrapped);
-              const savedRoutine = await saveCompanyCashRoutine(requestedTenantId, bootstrapped);
-              if (activeTenantRef.current !== requestedTenantId) return;
+              const savedRoutine = await saveCompanyCashRoutine(reqTenantId, bootstrapped);
+              if (activeTenantRef.current !== reqTenantId) return;
               if (savedRoutine.rule) {
                 setRules((prev) => [
                   savedRoutine.rule!,
@@ -344,7 +369,7 @@ export default function CashReconciliationPage() {
                 logCashReconciliationEvent({
                   level: 'info',
                   message: `Rotina bancária aprendida do histórico: ${learnedNames.join(', ')}`,
-                  tenantId: requestedTenantId,
+                  tenantId: reqTenantId,
                   requiresAction: false,
                   details: {
                     action: 'routine_bootstrap',
@@ -360,10 +385,11 @@ export default function CashReconciliationPage() {
         }
       }
     } catch (err: unknown) {
+      if (activeTenantRef.current !== reqTenantId) return;
       logCashUnexpectedError({
         action: 'carregar histórico',
         err,
-        tenantId: requestedTenantId
+        tenantId: reqTenantId
       });
     }
   }, [tenantId]);
@@ -373,9 +399,12 @@ export default function CashReconciliationPage() {
   }, [loadTenantData]);
 
   const applyRoutineLearning = useCallback(
-    async (validParsedFiles: ParsedCashFileResult[], inferredDate = '') => {
-      if (!tenantId || validParsedFiles.length === 0) return;
-      const currentProfile = routineProfileRef.current || getCompanyCashRoutine(tenantId, rulesRef.current);
+    async (validParsedFiles: ParsedCashFileResult[], inferredDate = '', targetTenantId = tenantId) => {
+      const reqTenantId = targetTenantId;
+      if (!reqTenantId || validParsedFiles.length === 0) return;
+      if (activeTenantRef.current !== reqTenantId) return;
+
+      const currentProfile = routineProfileRef.current || getCompanyCashRoutine(reqTenantId, rulesRef.current);
       const prevBankKeys = new Set(Object.keys(currentProfile.banks || {}));
 
       const { profile: nextProfile, changed } = learnRoutineFromParsedFiles(
@@ -391,8 +420,8 @@ export default function CashReconciliationPage() {
       );
 
       setLocalRoutineOverride(nextProfile);
-      const savedRes = await saveCompanyCashRoutine(tenantId, nextProfile);
-      if (activeTenantRef.current !== tenantId) return;
+      const savedRes = await saveCompanyCashRoutine(reqTenantId, nextProfile);
+      if (activeTenantRef.current !== reqTenantId) return;
 
       if (savedRes.rule) {
         setRules((prev) => [
@@ -405,7 +434,7 @@ export default function CashReconciliationPage() {
         logCashReconciliationEvent({
           level: 'info',
           message: `Novo(s) banco(s) aprendido(s) na rotina da empresa: ${newlyLearnedBanks.map((b) => b.bankLabel).join(', ')}`,
-          tenantId,
+          tenantId: reqTenantId,
           requiresAction: false,
           details: {
             action: 'routine_learn_bank',
@@ -422,16 +451,18 @@ export default function CashReconciliationPage() {
   );
 
   const handleAddFiles = async (fileList: FileList | File[]) => {
-    setIsCleanClosedView(false);
+    const reqTenantId = tenantId;
     setIsProcessingFiles(true);
     try {
       const incoming = Array.from(fileList);
       const parsedItems: UploadedCashFileItem[] = [];
-      const currentSavedPasswords = tenantId ? getMergedSavedFilePasswords(tenantId, rules) : savedFilePasswords;
+      const currentSavedPasswords = reqTenantId ? getMergedSavedFilePasswords(reqTenantId, rules) : savedFilePasswords;
       let autoUnlockedCount = 0;
 
       for (const file of incoming) {
         const arrayBuffer = await file.arrayBuffer();
+        if (activeTenantRef.current !== reqTenantId) return;
+
         let matchedAutoPassword = '';
         const parsed = await parseUploadedCashFile({
           fileName: file.name,
@@ -443,23 +474,26 @@ export default function CashReconciliationPage() {
             matchedAutoPassword = pwd;
           }
         });
+        if (activeTenantRef.current !== reqTenantId) return;
+
         logCashFileParseResult({
           stage: 'upload',
           fileName: file.name,
           fileSizeBytes: file.size,
           parsed,
-          tenantId
+          tenantId: reqTenantId
         });
         if (parsed.status === 'ok' && parsed.summary?.autoUnlocked) {
           autoUnlockedCount += 1;
-          if (tenantId && matchedAutoPassword && !currentSavedPasswords.some(sp => sp.password === matchedAutoPassword)) {
-            void upsertCashSavedFilePassword(tenantId, {
+          if (reqTenantId && matchedAutoPassword && !currentSavedPasswords.some(sp => sp.password === matchedAutoPassword)) {
+            void upsertCashSavedFilePassword(reqTenantId, {
               fileName: file.name,
               fileType: parsed.fileType,
               password: matchedAutoPassword
             }).then((savedRes) => {
+              if (activeTenantRef.current !== reqTenantId) return;
               if (typeof window !== 'undefined') {
-                setLocalSavedPasswords(loadSavedFilePasswordsFromStorage(window.localStorage, tenantId) as SavedCashFilePassword[]);
+                setLocalSavedPasswords(loadSavedFilePasswordsFromStorage(window.localStorage, reqTenantId) as SavedCashFilePassword[]);
               }
               if (savedRes.rule) {
                 setRules(prev => [savedRes.rule!, ...prev.filter(r => r.id !== savedRes.rule!.id)]);
@@ -475,6 +509,8 @@ export default function CashReconciliationPage() {
           parsed
         });
       }
+
+      if (activeTenantRef.current !== reqTenantId) return;
 
       setFiles((prev) => {
         const SINGLETON_SYSTEM_TYPES = new Set([
@@ -505,7 +541,7 @@ export default function CashReconciliationPage() {
       const okParsed = parsedItems.map(it => it.parsed).filter(p => p && p.status === 'ok');
       if (okParsed.length > 0) {
         const inferredDate = okParsed.map(p => p.periodStart || p.periodEnd).find(Boolean) || '';
-        void applyRoutineLearning(okParsed, inferredDate).catch((learnErr) => {
+        void applyRoutineLearning(okParsed, inferredDate, reqTenantId).catch((learnErr) => {
           console.warn('[Conferência Caixa] Falha ao atualizar rotina no upload:', learnErr);
         });
       }
@@ -526,21 +562,24 @@ export default function CashReconciliationPage() {
         );
       }
     } catch (err: unknown) {
+      if (activeTenantRef.current !== reqTenantId) return;
       logCashUnexpectedError({
         action: 'processar arquivos enviados',
         err,
-        tenantId
+        tenantId: reqTenantId
       });
       notifyToast(extractCashErrorMessage(err, 'Erro inesperado ao processar arquivo.'), 'error');
     } finally {
-      setIsProcessingFiles(false);
+      if (activeTenantRef.current === reqTenantId) {
+        setIsProcessingFiles(false);
+      }
     }
   };
 
   const handleUnlockPasswordFile = async (fileId: string, password: string, saveFixed = true): Promise<boolean> => {
+    const reqTenantId = tenantId;
     const target = filesRef.current.find(f => f.id === fileId);
     if (!target) return false;
-    setIsCleanClosedView(false);
     setIsProcessingFiles(true);
     try {
       let matchedPassword = '';
@@ -553,25 +592,27 @@ export default function CashReconciliationPage() {
           matchedPassword = pwd;
         }
       });
+      if (activeTenantRef.current !== reqTenantId) return false;
 
       logCashFileParseResult({
         stage: 'password_unlock',
         fileName: target.fileName,
         fileSizeBytes: target.fileSizeBytes,
         parsed,
-        tenantId,
+        tenantId: reqTenantId,
         passwordLength: password.trim().length
       });
 
       const effectivePassword = matchedPassword || (parsed.status !== 'password_required' ? password : '');
-      if (saveFixed && effectivePassword && tenantId && parsed.status !== 'password_required') {
-        const savedRes = await upsertCashSavedFilePassword(tenantId, {
+      if (saveFixed && effectivePassword && reqTenantId && parsed.status !== 'password_required') {
+        const savedRes = await upsertCashSavedFilePassword(reqTenantId, {
           fileName: target.fileName,
           fileType: parsed.fileType,
           password: effectivePassword
         });
+        if (activeTenantRef.current !== reqTenantId) return false;
         if (typeof window !== 'undefined') {
-          setLocalSavedPasswords(loadSavedFilePasswordsFromStorage(window.localStorage, tenantId) as SavedCashFilePassword[]);
+          setLocalSavedPasswords(loadSavedFilePasswordsFromStorage(window.localStorage, reqTenantId) as SavedCashFilePassword[]);
         }
         if (savedRes.rule) {
           setRules(prev => [savedRes.rule!, ...prev.filter(r => r.id !== savedRes.rule!.id)]);
@@ -602,12 +643,13 @@ export default function CashReconciliationPage() {
           password: effectivePassword,
           rulesConfig
         });
+        if (activeTenantRef.current !== reqTenantId) return false;
         logCashFileParseResult({
           stage: 'password_unlock',
           fileName: peer.fileName,
           fileSizeBytes: peer.fileSizeBytes,
           parsed: peerParsed,
-          tenantId,
+          tenantId: reqTenantId,
           passwordLength: effectivePassword.length
         });
         if (peerParsed.status === 'ok') {
@@ -625,7 +667,7 @@ export default function CashReconciliationPage() {
 
       const unlockedList = Array.from(unlockedPeers.values());
       const inferredDate = unlockedList.map(p => p.periodStart || p.periodEnd).find(Boolean) || '';
-      void applyRoutineLearning(unlockedList, inferredDate).catch((learnErr) => {
+      void applyRoutineLearning(unlockedList, inferredDate, reqTenantId).catch((learnErr) => {
         console.warn('[Conferência Caixa] Falha ao atualizar rotina após desbloqueio:', learnErr);
       });
 
@@ -637,21 +679,23 @@ export default function CashReconciliationPage() {
       );
       return true;
     } catch (err: unknown) {
+      if (activeTenantRef.current !== reqTenantId) return false;
       logCashUnexpectedError({
         action: 'desbloquear planilha protegida',
         err,
-        tenantId,
+        tenantId: reqTenantId,
         context: { fileId, fileName: target.fileName, fileSizeBytes: target.fileSizeBytes }
       });
       notifyToast(extractCashErrorMessage(err, 'Erro inesperado ao desbloquear planilha.'), 'error');
       return false;
     } finally {
-      setIsProcessingFiles(false);
+      if (activeTenantRef.current === reqTenantId) {
+        setIsProcessingFiles(false);
+      }
     }
   };
 
   const handleRemoveFile = (fileId: string) => {
-    setIsCleanClosedView(false);
     setFiles(prev => prev.filter(f => f.id !== fileId));
   };
 
@@ -659,8 +703,8 @@ export default function CashReconciliationPage() {
     if (tenantId && typeof window !== 'undefined') {
       clearActiveCashDraftFromStorage(window.localStorage, tenantId);
     }
+    setPasswordModalFileId(null);
     setActiveSessionId(null);
-    setIsCleanClosedView(false);
     setFiles([]);
     setManualInputs({});
     setManualResolutions([]);
@@ -670,34 +714,40 @@ export default function CashReconciliationPage() {
   };
 
   const handleLoadSession = async (sessionId: string) => {
-    if (!tenantId) return;
+    const reqTenantId = tenantId;
+    if (!reqTenantId) return;
     setBusySessionId(sessionId);
     try {
-      const fullSession = await loadCashReconciliationSession(tenantId, sessionId);
+      const fullSession = await loadCashReconciliationSession(reqTenantId, sessionId);
+      if (activeTenantRef.current !== reqTenantId) return;
       const session = fullSession || sessions.find(s => s.id === sessionId);
       if (!session) return;
       applyLoadedSession(session);
       setViewMode('workspace');
     } catch (err: unknown) {
+      if (activeTenantRef.current !== reqTenantId) return;
       logCashUnexpectedError({
         action: 'abrir sessão salva',
         err,
-        tenantId,
+        tenantId: reqTenantId,
         context: { sessionId }
       });
       notifyToast(extractCashErrorMessage(err, 'Erro ao abrir sessão salva.'), 'error');
     } finally {
-      setBusySessionId((prev) => (prev === sessionId ? null : prev));
+      if (activeTenantRef.current === reqTenantId) {
+        setBusySessionId((prev) => (prev === sessionId ? null : prev));
+      }
     }
   };
 
   const handleSaveSession = async (markClosed = false) => {
-    if (!tenantId || !reconciliationResult) return;
+    const reqTenantId = tenantId;
+    if (!reqTenantId || !reconciliationResult) return;
     setIsSaving(true);
     try {
       const validParsed = files.map(f => f.parsed).filter(p => p && p.status === 'ok');
       const res = await saveCashReconciliationSession({
-        tenantId,
+        tenantId: reqTenantId,
         userEmail: currentUserEmail || '',
         sessionId: activeSessionId,
         parsedFiles: files.map(f => ({ ...f.parsed, fileSizeBytes: f.fileSizeBytes })),
@@ -707,14 +757,27 @@ export default function CashReconciliationPage() {
         aiAnalysis,
         markClosed
       });
-      setIsCleanClosedView(markClosed);
+      if (activeTenantRef.current !== reqTenantId) return;
+
+      if (markClosed) {
+        closedSessionIdsRef.current.add(res.sessionId);
+        setSessions((prev) =>
+          prev.map((s) => (s.id === res.sessionId ? { ...s, closed_at: res.savedAt } : s))
+        );
+      } else {
+        closedSessionIdsRef.current.delete(res.sessionId);
+        setSessions((prev) =>
+          prev.map((s) => (s.id === res.sessionId ? { ...s, closed_at: null } : s))
+        );
+      }
+
       setActiveSessionId(res.sessionId);
       setSchemaMissing(res.schemaMissing);
       if (typeof window !== 'undefined') {
         if (markClosed) {
-          clearActiveCashDraftFromStorage(window.localStorage, tenantId);
+          clearActiveCashDraftFromStorage(window.localStorage, reqTenantId);
         } else {
-          saveActiveCashDraftToStorage(window.localStorage, tenantId, {
+          saveActiveCashDraftToStorage(window.localStorage, reqTenantId, {
             activeSessionId: res.sessionId,
             files,
             manualInputs,
@@ -723,8 +786,11 @@ export default function CashReconciliationPage() {
           });
         }
       }
-      await applyRoutineLearning(validParsed, reconciliationResult.referenceDate || '');
+      await applyRoutineLearning(validParsed, reconciliationResult.referenceDate || '', reqTenantId);
+      if (activeTenantRef.current !== reqTenantId) return;
       await loadTenantData();
+      if (activeTenantRef.current !== reqTenantId) return;
+
       notifyToast(
         markClosed
           ? 'Conferência fechada e salva no histórico!'
@@ -734,33 +800,39 @@ export default function CashReconciliationPage() {
         res.schemaMissing ? 'warning' : 'success'
       );
     } catch (err: unknown) {
+      if (activeTenantRef.current !== reqTenantId) return;
       logCashUnexpectedError({
         action: markClosed ? 'fechar caixa' : 'salvar rascunho',
         err,
-        tenantId,
+        tenantId: reqTenantId,
         context: { activeSessionId, filesCount: files.length }
       });
       notifyToast(`Erro ao salvar: ${extractCashErrorMessage(err)}`, 'error');
     } finally {
-      setIsSaving(false);
+      if (activeTenantRef.current === reqTenantId) {
+        setIsSaving(false);
+      }
     }
   };
 
   const handleToggleRoutineBank = async (bankKey: string, enabled: boolean) => {
-    if (!tenantId) return;
+    const reqTenantId = tenantId;
+    if (!reqTenantId) return;
     const nextProfile = toggleRoutineBankExpected(routineProfile, bankKey, enabled) as CompanyCashRoutineProfile;
     setLocalRoutineOverride(nextProfile);
     try {
-      const savedRes = await saveCompanyCashRoutine(tenantId, nextProfile);
+      const savedRes = await saveCompanyCashRoutine(reqTenantId, nextProfile);
+      if (activeTenantRef.current !== reqTenantId) return;
       if (savedRes.rule) {
         setRules((prev) => [savedRes.rule!, ...prev.filter((r) => r.id !== savedRes.rule!.id)]);
       }
       notifyToast('Rotina da empresa atualizada!', 'success');
     } catch (err: unknown) {
+      if (activeTenantRef.current !== reqTenantId) return;
       logCashUnexpectedError({
         action: 'atualizar rotina bancária da empresa',
         err,
-        tenantId,
+        tenantId: reqTenantId,
         context: { bankKey, enabled }
       });
       notifyToast(extractCashErrorMessage(err, 'Erro ao atualizar rotina da empresa.'), 'error');
@@ -768,20 +840,23 @@ export default function CashReconciliationPage() {
   };
 
   const handleToggleRoutineReport = async (fileType: string, enabled: boolean) => {
-    if (!tenantId) return;
+    const reqTenantId = tenantId;
+    if (!reqTenantId) return;
     const nextProfile = toggleRoutineReportExpected(routineProfile, fileType, enabled) as CompanyCashRoutineProfile;
     setLocalRoutineOverride(nextProfile);
     try {
-      const savedRes = await saveCompanyCashRoutine(tenantId, nextProfile);
+      const savedRes = await saveCompanyCashRoutine(reqTenantId, nextProfile);
+      if (activeTenantRef.current !== reqTenantId) return;
       if (savedRes.rule) {
         setRules((prev) => [savedRes.rule!, ...prev.filter((r) => r.id !== savedRes.rule!.id)]);
       }
       notifyToast('Rotina da empresa atualizada!', 'success');
     } catch (err: unknown) {
+      if (activeTenantRef.current !== reqTenantId) return;
       logCashUnexpectedError({
         action: 'atualizar rotina de relatórios da empresa',
         err,
-        tenantId,
+        tenantId: reqTenantId,
         context: { fileType, enabled }
       });
       notifyToast(extractCashErrorMessage(err, 'Erro ao atualizar rotina da empresa.'), 'error');
@@ -789,10 +864,13 @@ export default function CashReconciliationPage() {
   };
 
   const handleConfirmDeleteSession = async (sessionId: string) => {
-    if (!tenantId) return;
+    const reqTenantId = tenantId;
+    if (!reqTenantId) return;
     setIsDeletingSession(true);
     try {
-      await deleteCashReconciliationSession(tenantId, sessionId);
+      await deleteCashReconciliationSession(reqTenantId, sessionId);
+      if (activeTenantRef.current !== reqTenantId) return;
+      closedSessionIdsRef.current.delete(sessionId);
       setSessions((prev) => prev.filter((s) => s.id !== sessionId));
       if (activeSessionId === sessionId) {
         handleResetNew();
@@ -802,21 +880,24 @@ export default function CashReconciliationPage() {
       logCashReconciliationEvent({
         level: 'info',
         message: 'Fechamento de caixa removido pela interface.',
-        tenantId,
+        tenantId: reqTenantId,
         requiresAction: false,
         details: { action: 'ui_delete_session', sessionId }
       });
       notifyToast('Fechamento excluído com sucesso!', 'success');
     } catch (err: unknown) {
+      if (activeTenantRef.current !== reqTenantId) return;
       logCashUnexpectedError({
         action: 'excluir fechamento de caixa',
         err,
-        tenantId,
+        tenantId: reqTenantId,
         context: { sessionId }
       });
       notifyToast(extractCashErrorMessage(err, 'Erro ao excluir fechamento.'), 'error');
     } finally {
-      setIsDeletingSession(false);
+      if (activeTenantRef.current === reqTenantId) {
+        setIsDeletingSession(false);
+      }
     }
   };
 
@@ -840,11 +921,12 @@ export default function CashReconciliationPage() {
       cash_sangria_cents: reconciliationResult.cashDrawerSummary?.sangriaCents ?? 0,
       cash_notes: manualInputs.notes || null,
       reconciled_summary: {},
-      closed_at: isCleanClosedView ? new Date().toISOString() : null
+      closed_at: isActiveSessionClosed ? new Date().toISOString() : null
     };
   };
 
   const resolveExportPayload = async (sessionRow?: CashSessionRow | null): Promise<ResolvedExportPayload | null> => {
+    const reqTenantId = tenantId;
     if (!sessionRow || (sessionRow.id === activeSessionId && reconciliationResult)) {
       if (!reconciliationResult) {
         notifyToast('Carregue os arquivos da conferência antes de exportar.', 'warning');
@@ -864,10 +946,11 @@ export default function CashReconciliationPage() {
       };
     }
 
-    if (!tenantId) return null;
+    if (!reqTenantId) return null;
     setBusySessionId(sessionRow.id);
     try {
-      const fullSession = await loadCashReconciliationSession(tenantId, sessionRow.id);
+      const fullSession = await loadCashReconciliationSession(reqTenantId, sessionRow.id);
+      if (activeTenantRef.current !== reqTenantId) return null;
       if (!fullSession) {
         notifyToast('Não foi possível carregar os detalhes completos deste fechamento.', 'error');
         return null;
@@ -909,23 +992,37 @@ export default function CashReconciliationPage() {
         shiftLabel: snapManualInputs.shiftLabel || fullSession.shift_label || 'Diário'
       };
     } catch (err: unknown) {
+      if (activeTenantRef.current !== reqTenantId) return null;
       logCashUnexpectedError({
         action: 'carregar dados para exportação',
         err,
-        tenantId,
+        tenantId: reqTenantId,
         context: { sessionId: sessionRow.id }
       });
       notifyToast(extractCashErrorMessage(err, 'Erro ao carregar dados do fechamento.'), 'error');
       return null;
     } finally {
-      setBusySessionId((prev) => (prev === sessionRow.id ? null : prev));
+      if (activeTenantRef.current === reqTenantId) {
+        setBusySessionId((prev) => (prev === sessionRow.id ? null : prev));
+      }
     }
   };
 
+  const persistWhatsappPhoneIfRequested = async (reqTenantId: string, phone: string) => {
+    const saved = await upsertCashWhatsappNumber(reqTenantId, phone);
+    if (activeTenantRef.current !== reqTenantId) return saved;
+    setLocalSavedWhatsapp(saved.phone);
+    if (saved.rule) {
+      setRules((prev) => [saved.rule!, ...prev.filter((r) => r.id !== saved.rule!.id)]);
+    }
+    return saved;
+  };
+
   const handleTriggerWhatsappSend = async (sessionRow?: CashSessionRow | null, forceEditNumber = false) => {
-    if (!tenantId) return;
+    const reqTenantId = tenantId;
+    if (!reqTenantId) return;
     const payload = await resolveExportPayload(sessionRow);
-    if (!payload) return;
+    if (activeTenantRef.current !== reqTenantId || !payload) return;
 
     const summaryText = buildCashWhatsappSummaryMessage({
       result: payload.result,
@@ -942,17 +1039,21 @@ export default function CashReconciliationPage() {
       if (sessionRow?.id) setBusySessionId(sessionRow.id);
       try {
         const sent = await sendCashSummaryViaFoodNext({
-          tenantId,
+          tenantId: reqTenantId,
           recipientPhone: savedWhatsappPhone,
           summaryText,
           storeName: payload.storeName
         });
+        if (activeTenantRef.current !== reqTenantId) return;
         notifyToast(`Resumo enviado por WhatsApp (FoodNext) para ${sent.sentTo}!`, 'success');
       } catch (err: unknown) {
+        if (activeTenantRef.current !== reqTenantId) return;
         notifyToast(extractCashErrorMessage(err, 'Erro ao enviar resumo pelo WhatsApp FoodNext.'), 'error');
       } finally {
-        setIsSendingWhatsapp(false);
-        if (sessionRow?.id) setBusySessionId((prev) => (prev === sessionRow.id ? null : prev));
+        if (activeTenantRef.current === reqTenantId) {
+          setIsSendingWhatsapp(false);
+          if (sessionRow?.id) setBusySessionId((prev) => (prev === sessionRow.id ? null : prev));
+        }
       }
       return;
     }
@@ -962,45 +1063,38 @@ export default function CashReconciliationPage() {
       summaryText,
       storeName: payload.storeName,
       sessionId: payload.session?.id || activeSessionId || null,
-      allowEditNumber: true
+      allowEditNumber: true,
+      saveOnly: false
     });
   };
 
-  const handleOpenWhatsappNumberEditor = async () => {
+  const handleOpenWhatsappNumberEditor = () => {
     if (!tenantId) return;
-    if (sessions.length > 0) {
-      await handleTriggerWhatsappSend(sessions[0], true);
-      return;
-    }
-    if (reconciliationResult) {
-      await handleTriggerWhatsappSend(null, true);
-      return;
-    }
     setWhatsappModalState({
-      targetLabel: 'Definir número padrão de WhatsApp da empresa',
+      targetLabel: 'Número WhatsApp padrão desta empresa',
       summaryText: '',
       storeName: storeTenantName || 'Empresa',
       sessionId: null,
-      allowEditNumber: true
+      allowEditNumber: true,
+      saveOnly: true
     });
   };
 
   const handleSubmitWhatsappModal = async (phone: string, saveFixed: boolean) => {
-    if (!tenantId || !whatsappModalState) return;
+    const reqTenantId = tenantId;
+    const modalSnapshot = whatsappModalState;
+    if (!reqTenantId || !modalSnapshot) return;
     setIsSendingWhatsapp(true);
     try {
-      if (!whatsappModalState.summaryText.trim()) {
-        const saved = await upsertCashWhatsappNumber(tenantId, phone);
-        setLocalSavedWhatsapp(saved.phone);
-        if (saved.rule) {
-          setRules((prev) => [saved.rule!, ...prev.filter((r) => r.id !== saved.rule!.id)]);
-        }
+      if (modalSnapshot.saveOnly || !modalSnapshot.summaryText.trim()) {
+        const saved = await persistWhatsappPhoneIfRequested(reqTenantId, phone);
+        if (activeTenantRef.current !== reqTenantId) return;
         logCashReconciliationEvent({
           level: 'info',
           message: 'Número padrão de WhatsApp salvo para futuros envios de fechamento.',
-          tenantId,
+          tenantId: reqTenantId,
           requiresAction: false,
-          details: { action: 'whatsapp_number_saved' }
+          details: { action: 'whatsapp_number_saved', phone: saved.phone }
         });
         setWhatsappModalState(null);
         notifyToast('Número padrão de WhatsApp salvo com sucesso!', 'success');
@@ -1008,18 +1102,16 @@ export default function CashReconciliationPage() {
       }
 
       const sent = await sendCashSummaryViaFoodNext({
-        tenantId,
+        tenantId: reqTenantId,
         recipientPhone: phone,
-        summaryText: whatsappModalState.summaryText,
-        storeName: whatsappModalState.storeName
+        summaryText: modalSnapshot.summaryText,
+        storeName: modalSnapshot.storeName
       });
+      if (activeTenantRef.current !== reqTenantId) return;
 
       if (saveFixed) {
-        const saved = await upsertCashWhatsappNumber(tenantId, phone);
-        setLocalSavedWhatsapp(saved.phone);
-        if (saved.rule) {
-          setRules((prev) => [saved.rule!, ...prev.filter((r) => r.id !== saved.rule!.id)]);
-        }
+        await persistWhatsappPhoneIfRequested(reqTenantId, phone);
+        if (activeTenantRef.current !== reqTenantId) return;
       }
 
       setWhatsappModalState(null);
@@ -1030,18 +1122,22 @@ export default function CashReconciliationPage() {
         'success'
       );
     } catch (err: unknown) {
+      if (activeTenantRef.current !== reqTenantId) return;
       notifyToast(extractCashErrorMessage(err, 'Erro ao enviar resumo pelo WhatsApp FoodNext.'), 'error');
     } finally {
-      setIsSendingWhatsapp(false);
+      if (activeTenantRef.current === reqTenantId) {
+        setIsSendingWhatsapp(false);
+      }
     }
   };
 
   const handleExportPdf = async (sessionRow?: CashSessionRow | null) => {
     if (typeof document === 'undefined') return;
+    const reqTenantId = tenantId;
     setIsExportingPdf(true);
     try {
       const payload = await resolveExportPayload(sessionRow);
-      if (!payload) return;
+      if (activeTenantRef.current !== reqTenantId || !payload) return;
 
       const html = buildCashPdfReportHtml({
         result: payload.result,
@@ -1084,23 +1180,27 @@ export default function CashReconciliationPage() {
               win.focus();
               win.print();
             } catch (printErr: unknown) {
-              logCashUnexpectedError({
-                action: 'imprimir relatório PDF A4',
-                err: printErr,
-                tenantId,
-                context: { sessionId: payload.session?.id || activeSessionId || null }
-              });
-              notifyToast('Não foi possível abrir a janela de impressão do PDF.', 'error');
+              if (activeTenantRef.current === reqTenantId) {
+                logCashUnexpectedError({
+                  action: 'imprimir relatório PDF A4',
+                  err: printErr,
+                  tenantId: reqTenantId,
+                  context: { sessionId: payload.session?.id || activeSessionId || null }
+                });
+                notifyToast('Não foi possível abrir a janela de impressão do PDF.', 'error');
+              }
               cleanup();
             }
           }, 120);
         } catch (onloadErr: unknown) {
-          logCashUnexpectedError({
-            action: 'preparar impressão do relatório PDF A4',
-            err: onloadErr,
-            tenantId,
-            context: { sessionId: payload.session?.id || activeSessionId || null }
-          });
+          if (activeTenantRef.current === reqTenantId) {
+            logCashUnexpectedError({
+              action: 'preparar impressão do relatório PDF A4',
+              err: onloadErr,
+              tenantId: reqTenantId,
+              context: { sessionId: payload.session?.id || activeSessionId || null }
+            });
+          }
           cleanup();
         }
       };
@@ -1111,7 +1211,7 @@ export default function CashReconciliationPage() {
       logCashReconciliationEvent({
         level: 'info',
         message: `Relatório PDF A4 preparado para impressão (${formatDateBr(payload.referenceDate) || 'atual'}).`,
-        tenantId,
+        tenantId: reqTenantId,
         requiresAction: false,
         details: {
           action: 'export_pdf',
@@ -1120,19 +1220,23 @@ export default function CashReconciliationPage() {
         }
       });
     } catch (err: unknown) {
+      if (activeTenantRef.current !== reqTenantId) return;
       logCashUnexpectedError({
         action: 'gerar relatório PDF A4',
         err,
-        tenantId,
+        tenantId: reqTenantId,
         context: { sessionId: sessionRow?.id || activeSessionId || null }
       });
       notifyToast(extractCashErrorMessage(err, 'Erro ao gerar relatório PDF.'), 'error');
     } finally {
-      setIsExportingPdf(false);
+      if (activeTenantRef.current === reqTenantId) {
+        setIsExportingPdf(false);
+      }
     }
   };
 
   const handleRunAiAnalysis = async (question?: string) => {
+    const reqTenantId = tenantId;
     if (!reconciliationResult) return;
     setIsAnalyzingAi(true);
     try {
@@ -1143,22 +1247,26 @@ export default function CashReconciliationPage() {
         rulesConfig,
         userQuestion: question
       });
+      if (activeTenantRef.current !== reqTenantId) return;
       setAiAnalysis(analysis);
       notifyToast('Auditoria com IA concluída!', 'success');
     } catch (err: unknown) {
+      if (activeTenantRef.current !== reqTenantId) return;
       logCashUnexpectedError({
         action: 'consultar Auditor IA',
         err,
-        tenantId,
+        tenantId: reqTenantId,
         context: { questionLength: question?.length || 0 }
       });
       notifyToast(extractCashErrorMessage(err, 'Erro ao consultar IA.'), 'error');
     } finally {
-      setIsAnalyzingAi(false);
+      if (activeTenantRef.current === reqTenantId) {
+        setIsAnalyzingAi(false);
+      }
     }
   };
 
-  const hasActiveDraft = files.length > 0 && !isCleanClosedView;
+  const hasActiveDraft = files.length > 0 && !isActiveSessionClosed;
 
   return (
     <div className="flex-1 h-full overflow-y-auto overflow-x-hidden bg-[#f0f2f5] dark:bg-[#111b21] text-slate-900 dark:text-[#e9edef]">
@@ -1403,23 +1511,18 @@ export default function CashReconciliationPage() {
                   selectedMirrorKey={selectedMirrorKey}
                   onSelectMirrorKey={setSelectedMirrorKey}
                   onUpdateManualInputs={(patch) => {
-                    setIsCleanClosedView(false);
                     setManualInputs(prev => ({ ...prev, ...patch }));
                   }}
                   onConfirmSuggestion={(suggestionId) => {
-                    setIsCleanClosedView(false);
                     setManualResolutions(prev => [...prev, { action: 'confirm_suggestion', suggestionId }]);
                   }}
                   onRejectSuggestion={(suggestionId) => {
-                    setIsCleanClosedView(false);
                     setManualResolutions(prev => [...prev, { action: 'reject_suggestion', suggestionId }]);
                   }}
                   onManualLink={(systemIds, realIds) => {
-                    setIsCleanClosedView(false);
                     setManualResolutions(prev => [...prev, { action: 'manual_link', systemIds, realIds }]);
                   }}
                   onIgnoreItem={(side, id) => {
-                    setIsCleanClosedView(false);
                     setManualResolutions(prev => [
                       ...prev,
                       {
@@ -1430,7 +1533,6 @@ export default function CashReconciliationPage() {
                     ]);
                   }}
                   onReclassifySystemItem={(systemId, targetCategory) => {
-                    setIsCleanClosedView(false);
                     setManualResolutions((prev) => {
                       const withoutPrior = prev.filter(
                         (r) => !(r.action === 'reclassify_system' && r.systemIds?.includes(systemId))
@@ -1445,10 +1547,12 @@ export default function CashReconciliationPage() {
                   rules={rules}
                   savedPasswords={savedFilePasswords}
                   onDeleteSavedPassword={async (patternKey, ruleId) => {
-                    if (!tenantId) return;
-                    await deleteCashSavedFilePassword(tenantId, patternKey, ruleId);
+                    const reqTenantId = tenantId;
+                    if (!reqTenantId) return;
+                    await deleteCashSavedFilePassword(reqTenantId, patternKey, ruleId);
+                    if (activeTenantRef.current !== reqTenantId) return;
                     if (typeof window !== 'undefined') {
-                      setLocalSavedPasswords(loadSavedFilePasswordsFromStorage(window.localStorage, tenantId) as SavedCashFilePassword[]);
+                      setLocalSavedPasswords(loadSavedFilePasswordsFromStorage(window.localStorage, reqTenantId) as SavedCashFilePassword[]);
                     }
                     if (ruleId) {
                       setRules(prev => prev.filter(r => r.id !== ruleId));
@@ -1458,19 +1562,25 @@ export default function CashReconciliationPage() {
                     notifyToast('Senha fixa removida. Será solicitada no próximo envio protegido.', 'info');
                   }}
                   onCreateRule={async (rule) => {
-                    if (!tenantId) return;
-                    const saved = await saveCashFormulaRule(tenantId, rule);
+                    const reqTenantId = tenantId;
+                    if (!reqTenantId) return;
+                    const saved = await saveCashFormulaRule(reqTenantId, rule);
+                    if (activeTenantRef.current !== reqTenantId) return;
                     setRules(prev => [saved.rule, ...prev]);
                     notifyToast('Regra salva na Fórmula 1 e aplicada!', 'success');
                   }}
                   onToggleRule={async (ruleId, isActive) => {
-                    if (!tenantId) return;
-                    await toggleCashFormulaRule(tenantId, ruleId, isActive);
+                    const reqTenantId = tenantId;
+                    if (!reqTenantId) return;
+                    await toggleCashFormulaRule(reqTenantId, ruleId, isActive);
+                    if (activeTenantRef.current !== reqTenantId) return;
                     setRules(prev => prev.map(r => (r.id === ruleId ? { ...r, is_active: isActive } : r)));
                   }}
                   onDeleteRule={async (ruleId) => {
-                    if (!tenantId) return;
-                    await deleteCashFormulaRule(tenantId, ruleId);
+                    const reqTenantId = tenantId;
+                    if (!reqTenantId) return;
+                    await deleteCashFormulaRule(reqTenantId, ruleId);
+                    if (activeTenantRef.current !== reqTenantId) return;
                     setRules(prev => prev.filter(r => r.id !== ruleId));
                   }}
                   aiAnalysis={aiAnalysis}
