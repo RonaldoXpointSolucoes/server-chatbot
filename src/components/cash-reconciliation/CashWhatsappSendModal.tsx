@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   MessageCircle,
@@ -47,16 +47,32 @@ export function CashWhatsappSendModal({
   const [savePhone, setSavePhone] = useState(true);
   const [touched, setTouched] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const wasOpenRef = useRef(false);
+
+  const initialNorm = useMemo<NormalizedPhoneResult | null>(() => {
+    const raw = String(initialPhone || '').trim();
+    return raw ? (normalizeBrazilWhatsappNumber(raw) as NormalizedPhoneResult) : null;
+  }, [initialPhone]);
+
+  const isLockedNumber = !allowEditNumber && Boolean(initialNorm?.ok);
+  const effectivePhoneInput = isLockedNumber ? String(initialPhone || '').trim() : phoneInput;
+
+  const phoneValidation = useMemo<NormalizedPhoneResult>(
+    () => normalizeBrazilWhatsappNumber(effectivePhoneInput) as NormalizedPhoneResult,
+    [effectivePhoneInput]
+  );
 
   useEffect(() => {
-    if (!isOpen) return;
+    const wasOpen = wasOpenRef.current;
+    wasOpenRef.current = isOpen;
+    if (!isOpen || wasOpen) return;
+
     const raw = String(initialPhone || '').trim();
-    const norm = raw ? (normalizeBrazilWhatsappNumber(raw) as NormalizedPhoneResult) : null;
-    setPhoneInput(norm?.ok ? norm.display : raw);
+    setPhoneInput(initialNorm?.ok ? initialNorm.display : raw);
     setSavePhone(true);
     setTouched(false);
-    setShowPreview(Boolean(previewText && raw && norm?.ok));
-  }, [isOpen, initialPhone, previewText]);
+    setShowPreview(Boolean(previewText && raw && initialNorm?.ok));
+  }, [isOpen, initialPhone, initialNorm, previewText]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -67,19 +83,10 @@ export function CashWhatsappSendModal({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [isOpen, isSending, onClose]);
 
-  const phoneValidation = useMemo<NormalizedPhoneResult>(
-    () => normalizeBrazilWhatsappNumber(phoneInput) as NormalizedPhoneResult,
-    [phoneInput]
-  );
-
   if (!isOpen || typeof document === 'undefined') return null;
 
-  const initialNorm = initialPhone
-    ? (normalizeBrazilWhatsappNumber(initialPhone) as NormalizedPhoneResult)
-    : null;
-  const isLockedNumber = !allowEditNumber && Boolean(initialNorm?.ok);
-  const hasAnyDigits = phoneInput.replace(/\D/g, '').length > 0;
-  const showError = Boolean(!phoneValidation.ok && (touched || phoneInput.replace(/\D/g, '').length >= 10));
+  const hasAnyDigits = effectivePhoneInput.replace(/\D/g, '').length > 0;
+  const showError = Boolean(!isLockedNumber && !phoneValidation.ok && (touched || effectivePhoneInput.replace(/\D/g, '').length >= 10));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

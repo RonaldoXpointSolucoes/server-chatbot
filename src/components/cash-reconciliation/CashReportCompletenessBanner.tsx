@@ -231,46 +231,57 @@ export function CashReportCompletenessBanner({
               Sistema DataDivas ({system.presentCount} de {system.totalExpected})
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-              {system.items.map((item) => (
-                <div
-                  key={item.fileType}
-                  title={item.hint}
-                  className={`rounded-xl border px-2.5 py-2 flex items-start justify-between gap-2 ${
-                    item.present
-                      ? 'bg-white/90 dark:bg-[#111b21] border-emerald-500/30'
-                      : 'bg-amber-500/5 dark:bg-[#202c33]/80 border-amber-500/30'
-                  }`}
-                >
-                  <div className="flex items-start gap-2 min-w-0">
-                    {item.present ? (
-                      <CheckCircle2 size={13} className="text-emerald-500 shrink-0 mt-0.5" />
-                    ) : (
-                      <AlertTriangle size={13} className="text-amber-500 shrink-0 mt-0.5" />
-                    )}
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-1">
-                        <p className="text-[11px] font-bold text-slate-800 dark:text-[#e9edef] truncate">{item.shortLabel}</p>
-                        {item.isHabitual && (
-                          <span className="px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 text-[9px] font-bold">
-                            Habitual
-                          </span>
-                        )}
+              {system.items.map((item) => {
+                const isReportEnabled = item.enabled !== false;
+                return (
+                  <div
+                    key={item.fileType}
+                    title={item.hint}
+                    className={`rounded-xl border px-2.5 py-2 flex items-start justify-between gap-2 ${
+                      item.present
+                        ? 'bg-white/90 dark:bg-[#111b21] border-emerald-500/30'
+                        : 'bg-amber-500/5 dark:bg-[#202c33]/80 border-amber-500/30'
+                    }`}
+                  >
+                    <div className="flex items-start gap-2 min-w-0">
+                      {item.present ? (
+                        <CheckCircle2 size={13} className="text-emerald-500 shrink-0 mt-0.5" />
+                      ) : (
+                        <AlertTriangle size={13} className="text-amber-500 shrink-0 mt-0.5" />
+                      )}
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-1">
+                          <p className="text-[11px] font-bold text-slate-800 dark:text-[#e9edef] truncate">{item.shortLabel}</p>
+                          {item.isHabitual && (
+                            <span className="px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 text-[9px] font-bold">
+                              Habitual
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-slate-500 dark:text-[#8696a0] leading-snug">{item.hint}</p>
                       </div>
-                      <p className="text-[10px] text-slate-500 dark:text-[#8696a0] leading-snug">{item.hint}</p>
                     </div>
+                    {onToggleRoutineReport && (
+                      <button
+                        type="button"
+                        onClick={() => onToggleRoutineReport(item.fileType, !isReportEnabled)}
+                        className={`px-1.5 py-0.5 rounded-lg border text-[9.5px] font-semibold shrink-0 active:scale-95 transition-all ${
+                          isReportEnabled
+                            ? 'border-slate-200 dark:border-[#2a3942] bg-slate-50 dark:bg-[#202c33] hover:border-rose-400 hover:text-rose-600 dark:hover:text-rose-300 text-slate-500 dark:text-[#aebac1]'
+                            : 'border-[#00a884]/40 bg-[#00a884]/15 text-[#008f6f] dark:text-[#00a884] hover:bg-[#00a884]/25 font-bold'
+                        }`}
+                        title={
+                          isReportEnabled
+                            ? 'Dispensar este relatório da rotina esperada'
+                            : 'Reativar este relatório na rotina esperada'
+                        }
+                      >
+                        {isReportEnabled ? 'Sem mov. hoje' : 'Reativar na rotina'}
+                      </button>
+                    )}
                   </div>
-                  {onToggleRoutineReport && (
-                    <button
-                      type="button"
-                      onClick={() => onToggleRoutineReport(item.fileType, false)}
-                      className="px-1.5 py-0.5 rounded-lg border border-slate-200 dark:border-[#2a3942] bg-slate-50 dark:bg-[#202c33] hover:border-rose-400 hover:text-rose-600 dark:hover:text-rose-300 text-[9.5px] font-semibold text-slate-500 dark:text-[#aebac1] shrink-0 active:scale-95 transition-all"
-                      title="Dispensar este relatório da rotina esperada"
-                    >
-                      Sem mov. hoje
-                    </button>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             {dismissedSystemReports.length > 0 && onToggleRoutineReport && (
@@ -362,10 +373,14 @@ export function CashReportCompletenessBanner({
                     {canToggleAcquirer && onToggleRoutineReport && (
                       <button
                         type="button"
-                        onClick={() => onToggleRoutineReport(item.fileType, false)}
-                        className="px-2 py-1 rounded-lg border border-slate-200 dark:border-[#2a3942] bg-slate-50 dark:bg-[#202c33] hover:border-rose-400 hover:text-rose-600 dark:hover:text-rose-300 text-[10px] font-bold text-slate-600 dark:text-[#aebac1] shrink-0 active:scale-95 transition-all"
+                        onClick={() => onToggleRoutineReport(item.fileType, !isBankEnabled)}
+                        className={`px-2 py-1 rounded-lg border text-[10px] font-bold shrink-0 active:scale-95 transition-all ${
+                          isBankEnabled
+                            ? 'border-slate-200 dark:border-[#2a3942] bg-slate-50 dark:bg-[#202c33] text-slate-600 dark:text-[#aebac1] hover:border-rose-400 hover:text-rose-600 dark:hover:text-rose-300'
+                            : 'border-[#00a884]/40 bg-[#00a884]/15 text-[#008f6f] dark:text-[#00a884] hover:bg-[#00a884]/25'
+                        }`}
                       >
-                        Sem mov. hoje
+                        {isBankEnabled ? 'Sem mov. hoje' : 'Reativar na rotina'}
                       </button>
                     )}
                   </div>

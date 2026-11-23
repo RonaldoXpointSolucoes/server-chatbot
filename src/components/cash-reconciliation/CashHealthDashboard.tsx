@@ -217,6 +217,7 @@ export function CashHealthHistoryCard({
                 tabIndex={0}
                 onClick={() => onSelectSession?.(s.id)}
                 onKeyDown={(e) => {
+                  if (e.target !== e.currentTarget) return;
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
                     onSelectSession?.(s.id);
@@ -254,6 +255,7 @@ export function CashHealthHistoryCard({
                           e.stopPropagation();
                           onDeleteSession(s);
                         }}
+                        onKeyDown={(e) => e.stopPropagation()}
                         aria-label={`Excluir fechamento de ${formatDateBr(s.reference_date)}${timeHm ? ` às ${timeHm}` : ''}`}
                         title="Excluir fechamento"
                         className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-500/10 active:scale-95 transition-all"
