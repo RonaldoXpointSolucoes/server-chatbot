@@ -340,7 +340,7 @@ export function CashHealthDashboard({ result, historicalStats, onSelectSession, 
       </div>
 
       {/* 4 Cards por Canal */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-4 gap-3">
         {/* PIX */}
         <button
           type="button"
@@ -463,7 +463,7 @@ export function CashHealthDashboard({ result, historicalStats, onSelectSession, 
       </div>
 
       {/* Faixa de Custos, Taxas e Risco Operacional (todos clicáveis) */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2.5">
         {(
           [
             {

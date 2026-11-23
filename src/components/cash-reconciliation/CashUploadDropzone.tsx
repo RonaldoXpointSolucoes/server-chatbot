@@ -201,7 +201,7 @@ export function CashUploadDropzone({
 
                 {parsed.warnings?.length > 0 && (
                   <p className="text-[10.5px] text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-lg px-2 py-1">
-                    {parsed.warnings[0]}
+                    {String(parsed.warnings[0]).replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, '$3/$2/$1')}
                   </p>
                 )}
 

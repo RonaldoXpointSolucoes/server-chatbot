@@ -474,7 +474,11 @@ function parseC6PayMatrix(rawMatrix, fmtMatrix) {
   const datesSorted = [...dateCounts.entries()].sort((a, b) => b[1] - a[1]);
   const mainDate = datesSorted[0]?.[0] || '';
   if (datesSorted.length > 1) {
-    warnings.push(`C6 Pay contém lançamento(s) com data de virada (${datesSorted.slice(1).map(d => d[0]).join(', ')}), mantidos na conferência.`);
+    const extraDatesBr = datesSorted.slice(1).map(([iso]) => {
+      const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      return m ? `${m[3]}/${m[2]}/${m[1]}` : iso;
+    });
+    warnings.push(`C6 Pay contém lançamento(s) com data de virada (${extraDatesBr.join(', ')}), mantidos na conferência.`);
   }
 
   return {

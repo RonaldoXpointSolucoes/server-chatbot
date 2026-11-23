@@ -126,8 +126,8 @@ export function CashMetricDetailModal({ metricKey, result, onClose }: CashMetric
                   {bySource.map((src) => (
                     <div key={src.source} className="rounded-2xl bg-slate-50 dark:bg-[#202c33] border border-slate-200 dark:border-[#2a3942] p-3.5">
                       <p className="text-[10px] font-black uppercase text-slate-500">{src.source} ({src.count} venda(s))</p>
-                      <p className="text-base font-black text-slate-900 dark:text-white tabular-nums mt-0.5">
-                        -{formatCents(src.feeCents)}
+                      <p className="text-base font-black text-slate-900 dark:text-white tabular-nums whitespace-nowrap mt-0.5">
+                        {`-${formatCents(src.feeCents)}`}
                       </p>
                       <p className="text-[10.5px] text-slate-500">Bruto: {formatCents(src.grossCents)} • Líq: {formatCents(src.netCents)}</p>
                     </div>
@@ -147,7 +147,7 @@ export function CashMetricDetailModal({ metricKey, result, onClose }: CashMetric
                             <p className="text-[11px] text-slate-500">{formatDateBr(it.dateStr)} {it.timeStr} • Bruto: {formatCents(it.amountCents)}</p>
                           </div>
                           <div className="text-left sm:text-right tabular-nums">
-                            <span className="font-black text-rose-500">-{formatCents(it.feeCents)}</span>
+                            <span className="font-black text-rose-500 whitespace-nowrap">{`-${formatCents(it.feeCents)}`}</span>
                             <span className="text-[10.5px] text-slate-400 ml-1.5">({pct}%)</span>
                             <p className="text-[10.5px] text-emerald-600 dark:text-emerald-400 font-bold">
                               Líquido: {formatCents(it.netAmountCents ?? (it.amountCents - (it.feeCents || 0)))}
@@ -175,8 +175,8 @@ export function CashMetricDetailModal({ metricKey, result, onClose }: CashMetric
                   </div>
                   <div className="rounded-2xl bg-rose-500/10 border border-rose-500/20 p-4">
                     <p className="text-[10px] font-black uppercase text-rose-500">Taxas Descontadas</p>
-                    <p className="text-xl font-black text-rose-600 dark:text-rose-400 tabular-nums mt-0.5">
-                      -{formatCents(Number(detail.totalFeeCents || 0))}
+                    <p className="text-xl font-black text-rose-600 dark:text-rose-400 tabular-nums whitespace-nowrap mt-0.5">
+                      {`-${formatCents(Number(detail.totalFeeCents || 0))}`}
                     </p>
                   </div>
                 </div>
@@ -192,7 +192,7 @@ export function CashMetricDetailModal({ metricKey, result, onClose }: CashMetric
                         </div>
                         <div className="text-right tabular-nums">
                           <p className="font-black text-emerald-600 dark:text-emerald-400">{formatCents(ch.netCents)}</p>
-                          {ch.feeCents > 0 && <p className="text-[10.5px] text-rose-500">Taxa: -{formatCents(ch.feeCents)}</p>}
+                          {ch.feeCents > 0 && <p className="text-[10.5px] text-rose-500 whitespace-nowrap">{`Taxa: -${formatCents(ch.feeCents)}`}</p>}
                         </div>
                       </div>
                     ))

@@ -234,25 +234,25 @@ export function CashReconciliationWorkbench({
                   Fechamento Físico da Gaveta
                 </h4>
                 <div className="space-y-2 text-xs text-slate-600 dark:text-[#aebac1]">
-                  <div className="flex justify-between">
+                  <div className="flex justify-between gap-2">
                     <span>Fundo de Caixa Manhã:</span>
-                    <strong className="tabular-nums">{formatCents(drawer.fundoManhaCents)}</strong>
+                    <strong className="tabular-nums whitespace-nowrap shrink-0">{formatCents(drawer.fundoManhaCents)}</strong>
                   </div>
-                  <div className="flex justify-between">
+                  <div className="flex justify-between gap-2">
                     <span>(+) Vendas em Dinheiro PDV:</span>
-                    <strong className="tabular-nums">{formatCents(drawer.vendaDinheiroCents)}</strong>
+                    <strong className="tabular-nums whitespace-nowrap shrink-0">{formatCents(drawer.vendaDinheiroCents)}</strong>
                   </div>
-                  <div className="flex justify-between">
+                  <div className="flex justify-between gap-2">
                     <span>(-) Saídas Pagamentos (Vales/Contas):</span>
-                    <strong className="tabular-nums text-rose-500">-{formatCents(drawer.saidasPagamentosCents)}</strong>
+                    <strong className="tabular-nums text-rose-500 whitespace-nowrap shrink-0">{`-${formatCents(drawer.saidasPagamentosCents)}`}</strong>
                   </div>
-                  <div className="flex justify-between">
+                  <div className="flex justify-between gap-2">
                     <span>(-) Sangria do Turno:</span>
-                    <strong className="tabular-nums text-rose-500">-{formatCents(drawer.sangriaCents)}</strong>
+                    <strong className="tabular-nums text-rose-500 whitespace-nowrap shrink-0">{`-${formatCents(drawer.sangriaCents)}`}</strong>
                   </div>
-                  <div className="pt-1.5 border-t border-emerald-500/20 flex justify-between font-bold text-slate-900 dark:text-white">
+                  <div className="pt-1.5 border-t border-emerald-500/20 flex justify-between gap-2 font-bold text-slate-900 dark:text-white">
                     <span>Esperado na Gaveta:</span>
-                    <span className="tabular-nums">{formatCents(drawer.expectedAfterSangriaCents)}</span>
+                    <span className="tabular-nums whitespace-nowrap shrink-0">{formatCents(drawer.expectedAfterSangriaCents)}</span>
                   </div>
                 </div>
 

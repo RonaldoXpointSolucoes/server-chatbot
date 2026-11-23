@@ -556,7 +556,7 @@ export function CashMirrorRowDetailPanel({
                   {saidasDetalhadas.map((s, idx) => (
                     <div key={idx} className="flex items-center justify-between px-3 py-2 rounded-xl bg-slate-50 dark:bg-[#111b21]">
                       <span className="text-slate-700 dark:text-[#d1d7db] truncate pr-2">{s.label}</span>
-                      <strong className="text-rose-500 tabular-nums shrink-0">-{formatCents(s.amountCents)}</strong>
+                      <strong className="text-rose-500 tabular-nums shrink-0 whitespace-nowrap">{`-${formatCents(s.amountCents)}`}</strong>
                     </div>
                   ))}
                 </div>
