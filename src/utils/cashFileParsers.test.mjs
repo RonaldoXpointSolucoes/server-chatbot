@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import {
   parseMoneyToCents,
   parseCashDateTime,
-  parseUploadedCashFile
+  parseUploadedCashFile,
+  identifyBankInstitution
 } from './cashFileParsers.mjs';
 
 const UPLOAD_DIR = 'C:/Users/NOTE-(FORM)02JUL26/.gemini/antigravity/brain/15c2c45d-2e4f-4867-9efb-2507905522dd/.user_uploaded';
@@ -346,4 +347,99 @@ test('parseUploadedCashFile scans multiple sheets and attaches diagnostics on un
   assert.ok(unknownRes.diagnostics);
   assert.deepEqual(unknownRes.diagnostics.sheetNames, ['AbaEstranha']);
   assert.equal(unknownRes.diagnostics.sheets[0].detectedKind, 'unknown');
+});
+
+test('identifyBankInstitution resolves canonical Brazilian banks and normalizes fallback slugs', () => {
+  assert.deepEqual(
+    identifyBankInstitution({ bankId: '336', acctId: '372910726', bankName: 'BANCO C6 S.A.' }),
+    { bankKey: 'banco_336', bankCode: '336', bankLabel: 'Banco C6', acctLast4: '0726' }
+  );
+  assert.deepEqual(
+    identifyBankInstitution({ bankId: '341', bankName: 'ITAU UNIBANCO S.A.' }),
+    { bankKey: 'banco_341', bankCode: '341', bankLabel: 'Banco Itaú', acctLast4: '' }
+  );
+  assert.equal(identifyBankInstitution({ bankId: '1' }).bankLabel, 'Banco do Brasil');
+  assert.equal(identifyBankInstitution({ bankId: '033' }).bankLabel, 'Santander');
+  assert.equal(identifyBankInstitution({ bankId: '237' }).bankLabel, 'Bradesco');
+  assert.equal(identifyBankInstitution({ bankId: '077' }).bankLabel, 'Banco Inter');
+  assert.equal(identifyBankInstitution({ bankId: '260' }).bankLabel, 'Nubank');
+  assert.equal(identifyBankInstitution({ bankId: '104' }).bankLabel, 'Caixa Econômica');
+  assert.equal(identifyBankInstitution({ bankId: '756' }).bankLabel, 'Sicoob');
+  assert.equal(identifyBankInstitution({ bankId: '748' }).bankLabel, 'Sicredi');
+
+  const safraByCode = identifyBankInstitution({ bankId: '422', bankName: 'Banco Safra S.A.', acctId: '98765-4' });
+  assert.deepEqual(safraByCode, {
+    bankKey: 'banco_422',
+    bankCode: '422',
+    bankLabel: 'Banco Safra S.A.',
+    acctLast4: '7654'
+  });
+
+  const slugFallback = identifyBankInstitution({ fileName: 'Extrato_Stone_19_11.xlsx' });
+  assert.equal(slugFallback.bankKey, 'banco_extrato_stone_19_11');
+  assert.equal(slugFallback.bankCode, '');
+});
+
+test('parseUploadedCashFile enriches OFX and generic bank spreadsheets with canonical bankKey, bankCode, bankLabel and acctLast4', async () => {
+  // 1. C6 OFX real (BANKID 336, ACCTID 372910726)
+  const c6OfxText = fs.readFileSync(`${UPLOAD_DIR}/media_1795378631614_64afeb10.ofx`, 'utf8');
+  const c6Res = await parseUploadedCashFile({ fileName: 'Extrato_C6.ofx', textContent: c6OfxText });
+  assert.equal(c6Res.summary.bankKey, 'banco_336');
+  assert.equal(c6Res.summary.bankCode, '336');
+  assert.equal(c6Res.summary.bankLabel, 'Banco C6');
+  assert.equal(c6Res.summary.acctLast4, '0726');
+  assert.equal(c6Res.rows[0].bankKey, 'banco_336');
+  assert.equal(c6Res.rows[0].bankLabel, 'Banco C6');
+  assert.equal(c6Res.rows[0].acctLast4, '0726');
+
+  // 2. Itaú OFX (BANKID 341, ORG ITAU UNIBANCO S.A.)
+  const itauOfxText = `<OFX>
+    <SIGNONMSGSRSV1><SONRS><FI><ORG>ITAU UNIBANCO S.A.</ORG><FID>341</FID></FI></SONRS></SIGNONMSGSRSV1>
+    <BANKMSGSRSV1><STMTTRNRS><STMTRS>
+      <BANKACCTFROM><BANKID>341</BANKID><ACCTID>99881-2</ACCTID></BANKACCTFROM>
+      <BANKTRANLIST>
+        <DTSTART>20261119000000</DTSTART><DTEND>20261119235959</DTEND>
+        <STMTTRN><FITID>101</FITID><TRNAMT>50.00</TRNAMT><DTPOSTED>20261119120000</DTPOSTED><TRNTYPE>CREDIT</TRNTYPE><MEMO>PIX RECEBIDO CLIENTE</MEMO></STMTTRN>
+      </BANKTRANLIST>
+    </STMTRS></STMTTRNRS></BANKMSGSRSV1>
+  </OFX>`;
+  const itauOfxRes = await parseUploadedCashFile({ fileName: 'itau.ofx', textContent: itauOfxText });
+  assert.equal(itauOfxRes.summary.bankKey, 'banco_341');
+  assert.equal(itauOfxRes.summary.bankCode, '341');
+  assert.equal(itauOfxRes.summary.bankLabel, 'Banco Itaú');
+  assert.equal(itauOfxRes.summary.acctLast4, '98812'.slice(-4));
+  assert.equal(itauOfxRes.rows[0].bankKey, 'banco_341');
+
+  // 3. Planilha genérica Excel identificada pelo nome do arquivo (Extrato_Itau_19_11.xlsx)
+  const XLSX = await import('xlsx');
+  const XLSXLib = XLSX.utils ? XLSX : XLSX.default || XLSX;
+  const wb = XLSXLib.utils.book_new();
+  const ws = XLSXLib.utils.aoa_to_sheet([
+    ['Data', 'Descrição', 'Valor'],
+    ['19/11/2026', 'PIX RECEBIDO JOAO', 120.5]
+  ]);
+  XLSXLib.utils.book_append_sheet(wb, ws, 'Extrato');
+  const itauXlsxBuf = XLSXLib.write(wb, { type: 'array', bookType: 'xlsx' });
+  const itauXlsxRes = await parseUploadedCashFile({
+    fileName: 'Extrato_Itau_19_11.xlsx',
+    arrayBuffer: itauXlsxBuf
+  });
+  assert.equal(itauXlsxRes.status, 'ok');
+  assert.equal(itauXlsxRes.fileType, 'extrato_generico');
+  assert.equal(itauXlsxRes.summary.bankKey, 'banco_341');
+  assert.equal(itauXlsxRes.summary.bankCode, '341');
+  assert.equal(itauXlsxRes.summary.bankLabel, 'Banco Itaú');
+  assert.equal(itauXlsxRes.rows[0].bankKey, 'banco_341');
+
+  // 4. Planilha genérica CSV identificada pelo cabeçalho
+  const bbCsv = 'Banco do Brasil - Extrato Conta Corrente\nData;Historico;Valor\n19/11/2026;PIX RECEBIDO MARIA;75,00\n';
+  const bbCsvRes = await parseUploadedCashFile({
+    fileName: 'extrato.csv',
+    textContent: bbCsv
+  });
+  assert.equal(bbCsvRes.status, 'ok');
+  assert.equal(bbCsvRes.fileType, 'extrato_generico');
+  assert.equal(bbCsvRes.summary.bankKey, 'banco_001');
+  assert.equal(bbCsvRes.summary.bankCode, '001');
+  assert.equal(bbCsvRes.summary.bankLabel, 'Banco do Brasil');
 });

@@ -208,7 +208,13 @@ export function runCashReconciliation({
   const debitAuditItems = [];
 
   for (const f of ofxFiles) {
+    const fileSum = f.summary || {};
     for (const row of (f.rows || [])) {
+      const bankKey = row.bankKey || fileSum.bankKey || '';
+      const bankCode = row.bankCode || fileSum.bankCode || '';
+      const bankLabel = row.bankLabel || fileSum.bankLabel || row.bankName || 'Banco OFX';
+      const acctLast4 = row.acctLast4 || fileSum.acctLast4 || '';
+      const terminalName = acctLast4 ? `${bankLabel} ••••${acctLast4}` : bankLabel;
       const base = {
         id: nextId('real_ofx', [row.source || 'ofx', row.fitid || row.refnum, row.dateStr, row.timeStr, row.amountCents, row.memo]),
         side: 'real',
@@ -223,9 +229,18 @@ export function runCashReconciliation({
         secondsOfDay: row.secondsOfDay,
         referenceCode: row.refnum || row.fitid || '',
         description: row.memo || 'Lançamento OFX',
-        terminalName: row.bankName || 'Banco OFX',
+        terminalName,
         operatorName: '',
-        metadata: { fitid: row.fitid, bankId: row.bankId, acctId: row.acctId, ofxClass: row.ofxClass }
+        metadata: {
+          fitid: row.fitid,
+          bankId: row.bankId,
+          acctId: row.acctId,
+          ofxClass: row.ofxClass,
+          bankKey,
+          bankCode,
+          bankLabel,
+          acctLast4
+        }
       };
       if (row.ofxClass === 'pix_cliente') ofxPixItems.push(base);
       else if (row.ofxClass === 'debito_saida') debitAuditItems.push({ ...base, side: 'audit', matchStatus: 'audit_only' });

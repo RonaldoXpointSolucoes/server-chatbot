@@ -379,3 +379,42 @@ test('runCashReconciliation integrates all 7 DataDivas reports of 20/11 and link
   assert.ok(result.auditInsights.feeRemovals.length > 0);
   assert.ok(result.auditInsights.topProducts.length > 0);
 });
+
+test('runCashReconciliation propagates bankKey, bankCode, bankLabel and acctLast4 into OFX realItems terminalName and metadata', () => {
+  const result = runCashReconciliation({
+    parsedFiles: [
+      {
+        fileType: 'extrato_ofx',
+        status: 'ok',
+        periodStart: '2026-11-19',
+        periodEnd: '2026-11-19',
+        summary: {
+          bankKey: 'banco_341',
+          bankCode: '341',
+          bankLabel: 'Banco Itaú',
+          acctLast4: '8812'
+        },
+        rows: [
+          {
+            source: 'ofx',
+            ofxClass: 'pix_cliente',
+            category: 'pix',
+            amountCents: 4200,
+            dateStr: '2026-11-19',
+            timeStr: '12:00:10',
+            secondsOfDay: 43210,
+            memo: 'PIX RECEBIDO'
+          }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(result.realItems.length, 1);
+  const item = result.realItems[0];
+  assert.equal(item.terminalName, 'Banco Itaú ••••8812');
+  assert.equal(item.metadata.bankKey, 'banco_341');
+  assert.equal(item.metadata.bankCode, '341');
+  assert.equal(item.metadata.bankLabel, 'Banco Itaú');
+  assert.equal(item.metadata.acctLast4, '8812');
+});

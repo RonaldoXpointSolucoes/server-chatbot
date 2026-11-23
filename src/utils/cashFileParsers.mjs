@@ -500,10 +500,112 @@ function parseC6PayMatrix(rawMatrix, fmtMatrix) {
   };
 }
 
-function parseOfxText(text, rulesConfig) {
-  const bankName = (text.match(/<ORG>([^<\r\n]+)/i) || [])[1]?.trim() || 'Banco OFX';
-  const bankId = (text.match(/<BANKID>([^<\r\n]+)/i) || [])[1]?.trim() || '';
+const CANONICAL_BRAZILIAN_BANKS = [
+  { code: '336', label: 'Banco C6', patterns: [/\bC6\b/, /\bC6BANK\b/, /BANCO C6/] },
+  { code: '341', label: 'Banco Itaú', patterns: [/\bITAU/, /UNIBANCO/] },
+  { code: '001', label: 'Banco do Brasil', patterns: [/BANCO DO BRASIL/, /\bBB\b/] },
+  { code: '033', label: 'Santander', patterns: [/SANTANDER/] },
+  { code: '237', label: 'Bradesco', patterns: [/BRADESCO/] },
+  { code: '077', label: 'Banco Inter', patterns: [/BANCO INTER/, /INTERMEDIUM/, /\bINTER\b/] },
+  { code: '260', label: 'Nubank', patterns: [/NUBANK/, /NU PAGAMENTOS/] },
+  { code: '104', label: 'Caixa Econômica', patterns: [/CAIXA ECONOMICA/, /\bCEF\b/, /\bCAIXA\b/] },
+  { code: '756', label: 'Sicoob', patterns: [/SICOOB/, /BANCOOB/] },
+  { code: '748', label: 'Sicredi', patterns: [/SICREDI/] }
+];
+
+function toBankSearchTokens(value) {
+  return normalizeAsciiUpper(String(value || '').replace(/[_./\\-]+/g, ' '));
+}
+
+function slugifyBankToken(value) {
+  return normalizeAsciiUpper(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .replace(/^banco_+/, '');
+}
+
+/**
+ * Identifica de forma canônica a instituição bancária brasileira a partir de metadados OFX,
+ * nome do arquivo ou texto de cabeçalho de planilhas.
+ */
+export function identifyBankInstitution({
+  bankName = '',
+  bankId = '',
+  acctId = '',
+  fileName = '',
+  headerText = ''
+} = {}) {
+  const cleanAcct = String(acctId || '').trim().replace(/[^a-zA-Z0-9]/g, '');
+  const acctLast4 = cleanAcct ? cleanAcct.slice(-4) : '';
+
+  const rawCodeDigits = String(bankId || '').replace(/\D/g, '');
+  const numericBankId = rawCodeDigits ? Number.parseInt(rawCodeDigits, 10) : NaN;
+
+  const rawBankName = String(bankName || '').trim();
+  const isGenericOfxName = /^BANCO\s*OFX$/i.test(rawBankName);
+  const meaningfulBankName = isGenericOfxName ? '' : rawBankName;
+
+  if (Number.isFinite(numericBankId)) {
+    const byCode = CANONICAL_BRAZILIAN_BANKS.find(
+      (b) => Number.parseInt(b.code, 10) === numericBankId
+    );
+    if (byCode) {
+      return {
+        bankKey: `banco_${byCode.code}`,
+        bankCode: byCode.code,
+        bankLabel: byCode.label,
+        acctLast4
+      };
+    }
+  }
+
+  const fileNameBase = String(fileName || '').replace(/\.[^.]+$/, '').trim();
+  const searchCandidates = [meaningfulBankName, fileNameBase, headerText];
+  for (const candidate of searchCandidates) {
+    const tokens = toBankSearchTokens(candidate);
+    if (!tokens) continue;
+    const byPattern = CANONICAL_BRAZILIAN_BANKS.find((b) =>
+      b.patterns.some((rx) => rx.test(tokens))
+    );
+    if (byPattern) {
+      return {
+        bankKey: `banco_${byPattern.code}`,
+        bankCode: byPattern.code,
+        bankLabel: byPattern.label,
+        acctLast4
+      };
+    }
+  }
+
+  if (rawCodeDigits) {
+    return {
+      bankKey: `banco_${rawCodeDigits}`,
+      bankCode: rawCodeDigits,
+      bankLabel: meaningfulBankName || `Banco ${rawCodeDigits}`,
+      acctLast4
+    };
+  }
+
+  const fallbackSource = meaningfulBankName || fileNameBase;
+  const slug = slugifyBankToken(fallbackSource);
+  return {
+    bankKey: slug ? `banco_${slug}` : 'banco_ofx',
+    bankCode: '',
+    bankLabel: meaningfulBankName || fileNameBase || 'Banco OFX',
+    acctLast4
+  };
+}
+
+function parseOfxText(text, rulesConfig, fileName = '') {
+  const orgName = (text.match(/<ORG>([^<\r\n]+)/i) || [])[1]?.trim() || '';
+  const bankId =
+    (text.match(/<BANKID>([^<\r\n]+)/i) || [])[1]?.trim() ||
+    (text.match(/<FID>([^<\r\n]+)/i) || [])[1]?.trim() ||
+    '';
   const acctId = (text.match(/<ACCTID>([^<\r\n]+)/i) || [])[1]?.trim() || '';
+  const bankInfo = identifyBankInstitution({ bankName: orgName, bankId, acctId, fileName });
+  const bankName = orgName || bankInfo.bankLabel || 'Banco OFX';
   const dtStartRaw = (text.match(/<DTSTART>([^<\r\n]+)/i) || [])[1]?.trim() || '';
   const dtEndRaw = (text.match(/<DTEND>([^<\r\n]+)/i) || [])[1]?.trim() || '';
 
@@ -535,6 +637,10 @@ function parseOfxText(text, rulesConfig) {
       bankName,
       bankId,
       acctId,
+      bankKey: bankInfo.bankKey,
+      bankCode: bankInfo.bankCode,
+      bankLabel: bankInfo.bankLabel,
+      acctLast4: bankInfo.acctLast4,
       fitid,
       refnum,
       memo,
@@ -563,6 +669,10 @@ function parseOfxText(text, rulesConfig) {
       bankName,
       bankId,
       acctId,
+      bankKey: bankInfo.bankKey,
+      bankCode: bankInfo.bankCode,
+      bankLabel: bankInfo.bankLabel,
+      acctLast4: bankInfo.acctLast4,
       dtStartTime: startDt.timeStr,
       dtEndTime: endDt.timeStr,
       dtEndSeconds: endDt.secondsOfDay,
@@ -1022,7 +1132,7 @@ function detectSpreadsheetKind(matrix) {
   return 'unknown';
 }
 
-function parseGenericBankMatrix(rawMatrix, fmtMatrix, rulesConfig) {
+function parseGenericBankMatrix(rawMatrix, fmtMatrix, rulesConfig, fileName = '') {
   const headerIdx = findHeaderRowIndex(rawMatrix, ['DATA', 'VALOR']);
   if (headerIdx === -1) {
     return {
@@ -1034,6 +1144,13 @@ function parseGenericBankMatrix(rawMatrix, fmtMatrix, rulesConfig) {
       summary: {}
     };
   }
+  const headerText = rawMatrix
+    .slice(0, headerIdx + 1)
+    .flat()
+    .map(c => String(c ?? '').trim())
+    .filter(Boolean)
+    .join(' ');
+  const bankInfo = identifyBankInstitution({ fileName, headerText });
   const colMap = buildColumnMap(rawMatrix[headerIdx]);
   const rows = [];
   for (let i = headerIdx + 1; i < rawMatrix.length; i++) {
@@ -1047,6 +1164,11 @@ function parseGenericBankMatrix(rawMatrix, fmtMatrix, rulesConfig) {
     const ofxClass = classifyOfxCredit(memo, '', amountCents, rulesConfig);
     rows.push({
       source: 'extrato_generico',
+      bankName: bankInfo.bankLabel,
+      bankKey: bankInfo.bankKey,
+      bankCode: bankInfo.bankCode,
+      bankLabel: bankInfo.bankLabel,
+      acctLast4: bankInfo.acctLast4,
       memo,
       ofxClass,
       category: ofxClass === 'pix_cliente' ? 'pix' : 'nao_pdv',
@@ -1063,7 +1185,13 @@ function parseGenericBankMatrix(rawMatrix, fmtMatrix, rulesConfig) {
     periodEnd: rows[rows.length - 1]?.dateStr || '',
     warnings: ['Extrato importado pelo mapeador genérico de colunas (Data/Descrição/Valor).'],
     rows,
-    summary: { totalRows: rows.length }
+    summary: {
+      totalRows: rows.length,
+      bankKey: bankInfo.bankKey,
+      bankCode: bankInfo.bankCode,
+      bankLabel: bankInfo.bankLabel,
+      acctLast4: bankInfo.acctLast4
+    }
   };
 }
 
@@ -1137,7 +1265,7 @@ function toByteSignatureHex(bytes, len = 12) {
     .join(' ');
 }
 
-function parseBinaryWorkbookAcrossSheets(workingBytes, rulesConfig, baseDiag) {
+function parseBinaryWorkbookAcrossSheets(workingBytes, rulesConfig, baseDiag, fileName = '') {
   const safeBytes =
     workingBytes.byteOffset === 0 && workingBytes.byteLength === workingBytes.buffer.byteLength
       ? workingBytes
@@ -1179,7 +1307,7 @@ function parseBinaryWorkbookAcrossSheets(workingBytes, rulesConfig, baseDiag) {
       };
     }
 
-    const generic = parseGenericBankMatrix(rawMatrix, fmtMatrix, rulesConfig);
+    const generic = parseGenericBankMatrix(rawMatrix, fmtMatrix, rulesConfig, fileName);
     if (generic.status === 'ok' && !firstGenericOk) {
       firstGenericOk = { parsed: generic, matchedSheet: sheetName };
     } else if (!lastGenericErr) {
@@ -1312,7 +1440,7 @@ export async function parseUploadedCashFile({
     };
 
     if (isBinaryExcel) {
-      const { parsed, diagnostics } = parseBinaryWorkbookAcrossSheets(workingBytes, rulesConfig, baseDiag);
+      const { parsed, diagnostics } = parseBinaryWorkbookAcrossSheets(workingBytes, rulesConfig, baseDiag, fileName);
       return withAutoUnlockMeta(parsed, diagnostics);
     }
 
@@ -1320,7 +1448,7 @@ export async function parseUploadedCashFile({
     const trimmed = text.trim();
 
     if (/<OFX>/i.test(trimmed) || /<STMTTRN>/i.test(trimmed) || /OFXHEADER:/i.test(trimmed)) {
-      return withAutoUnlockMeta(parseOfxText(trimmed, rulesConfig), baseDiag);
+      return withAutoUnlockMeta(parseOfxText(trimmed, rulesConfig, fileName), baseDiag);
     }
 
     if (/FECHAMENTO DE CAIXA/i.test(trimmed) && (/FATURAMENTO LIQUIDO/i.test(trimmed) || /CAIXA \/ DESCONTOS/i.test(trimmed))) {
@@ -1337,7 +1465,7 @@ export async function parseUploadedCashFile({
       return withAutoUnlockMeta(MATRIX_PARSER_BY_KIND[kind](csvMatrix, csvMatrix, rulesConfig), baseDiag);
     }
     return withAutoUnlockMeta(
-      parseGenericBankMatrix(csvMatrix, csvMatrix, rulesConfig),
+      parseGenericBankMatrix(csvMatrix, csvMatrix, rulesConfig, fileName),
       {
         ...baseDiag,
         textLength: trimmed.length,
