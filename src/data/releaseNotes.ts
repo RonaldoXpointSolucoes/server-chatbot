@@ -712,6 +712,64 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.3.9',
+    date: '2026-11-22',
+    summary: 'Checklist Inteligente 7 DataDivas + 3 Banco, Drill-Down em 2 Níveis (Cartões/PIX ➔ Operações ➔ Itens), Correção C6 Pay com Senha e DevLogger em system_logs',
+    notes: [
+      {
+        id: 'feat-cash-7-plus-3-and-drilldown-839',
+        category: 'features',
+        title: 'Checklist 7 DataDivas + 3 Banco & Drill-Down em 2 Níveis (Operações ➔ Itens da Comanda)',
+        description: 'Nova verificação automática dos 10 relatórios recomendados (7 do PDV DataDivas: PlanilhaRecebimento, ProdutosVendidos, ProdutosCancelados, QuantidadeDescontos, RelConferencia, Fita Mov.Caixa .txt e Resumo Fechamento .txt + 3 Bancos/Maquininhas: OFX, Rede e C6 Pay), com banner visual de arquivos faltantes e navegação em 2 níveis: clique em PIX/Cartões para ver as operações e clique em qualquer operação para abrir todos os itens consumidos, combos, descontos, taxa removida, mesas reabertas, CMV de consumo interno e ranking por garçom/módulo.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+        guide: {
+          moduleGroup: 'system',
+          moduleLabel: 'Conferência Caixa • Checklist 7+3 & Auditoria por Operação',
+          purpose: 'Garantir conciliação completa avisando imediatamente quando faltar algum dos 7 relatórios do DataDivas ou 3 relatórios bancários/adquirentes, permitindo investigar cada diferença até o nível dos itens vendidos na mesa/comanda.',
+          whereToAccess: [
+            '1. Menu Lateral Esquerdo ➔ Conferência Caixa (/conferencia-caixa)',
+            '2. Envie os relatórios do dia pelo botão "Carregar Arquivos" — o banner "Completude dos Relatórios (7 Sistema + 3 Banco)" indica o que já entrou e o que falta',
+            '3. Clique nos cartões "PIX" ou "Cartões" (ou em qualquer linha do Espelho Financeiro) para detalhar as operações do período',
+            '4. Clique em qualquer número de pedido/mesa com ícone de lupinha para abrir o modal de Itens da Operação, cancelamentos, descontos e alertas de taxa removida/reabertura'
+          ],
+          howToTest: [
+            '1. Abra Conferência Caixa (/conferencia-caixa) e envie parte dos relatórios (ex.: apenas PlanilhaRecebimento + OFX): confira o alerta destacando exatamente os relatórios pendentes entre os 7 DataDivas e 3 Bancos.',
+            '2. Envie ProdutosVendidos.xlsx, ProdutosCancelados.xlsx, QuantidadeDescontos.xlsx e o Resumo Fechamento.txt junto.',
+            '3. Clique em "Cartões" ou "PIX" para listar as operações e clique em uma operação para visualizar os itens da comanda e os indicadores de Auditoria Avançada.'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Tela: Conferência Caixa (/conferencia-caixa) ➔ Completude 7+3 & Drill-Down',
+            contextElements: ['📋 7 Sistema + 3 Banco', '💳 Cartões / PIX', '🔍 Detalhe Operações & Itens'],
+            targetButtonLabel: '🔍 Ver Itens da Operação',
+            targetButtonPosition: 'Banner de Completude abaixo do upload e cards/tabelas clicáveis no Espelho Financeiro e Cruzamento',
+            visualPreviewVariant: 'chat-history-sync'
+          },
+          quickAction: {
+            label: 'Abrir Conferência Caixa',
+            route: '/conferencia-caixa'
+          }
+        }
+      },
+      {
+        id: 'fix-cash-encrypted-c6-ref-and-modal-839',
+        category: 'fixes',
+        title: 'Correção de Leitura da Planilha C6 Pay com Senha (Cabeçalhos Fora do !ref) & Modal de Senha',
+        description: 'Planilhas oficiais da C6 Pay criptografadas exportadas com dimensionamento deslocado (!ref="A6:AJ62" acima do cabeçalho A4:AJ4) agora têm o range expandido automaticamente em todas as abas após o desbloqueio, eliminando o erro "Formato de planilha não reconhecido automaticamente pela Fórmula 1." e destravando o modal corretamente após falhas.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      },
+      {
+        id: 'imp-cash-devlogger-system-logs-839',
+        category: 'improvements',
+        title: 'Telemetria Estruturada no Antigravity DevLogger, Console & Supabase system_logs',
+        description: 'Falhas de importação/leitura, tentativas de senha incorreta, desbloqueios e erros ao salvar/fechar ou consultar a IA agora registram diagnósticos ricos (abas detectadas, amostras de cabeçalho, stack e código de erro sem expor senhas) diretamente no Antigravity DevLogger, no Console e com persistência JSONB válida em system_logs.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
+      }
+    ]
+  },
+  {
     version: '8.3.8',
     date: '2026-11-22',
     summary: 'Correção Definitiva de Salvamento Multiempresa (RLS allowed_companies + HTTP 406) na Conferência de Caixa',

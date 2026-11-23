@@ -705,8 +705,313 @@ function parseFechamentoTxt(text) {
   };
 }
 
+function parseFechamentoResumoTxt(text) {
+  const lines = text.split(/\r?\n/);
+  let storeName = '';
+  let operatorName = '';
+  let periodDate = '';
+  let section = '';
+
+  const summary = {
+    storeName: '',
+    operatorName: '',
+    faturamentoBrutoCents: 0,
+    descontosCents: 0,
+    pendentesCents: 0,
+    consumoInternoCents: 0,
+    consumoInternoCustoCents: 0,
+    faturamentoLiquidoCents: 0,
+    suprimentoCaixaCents: 0,
+    receitaCents: 0,
+    pagamentoFornecedoresCents: 0,
+    saldoFinalCents: 0,
+    caixaDescontos: [],
+    controleRows: [],
+    mesasTransferidas: []
+  };
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    if (!storeName && !line.startsWith('=')) storeName = line;
+    const upper = normalizeAsciiUpper(line);
+
+    if (upper.startsWith('FECHAMENTO DE CAIXA')) {
+      const m = line.match(/(\d{2}[./]\d{2}[./]\d{4})/);
+      if (m) periodDate = parseCashDateTime(m[1].replace(/\./g, '/')).dateStr;
+    } else if (upper.startsWith('DATA:') && !periodDate) {
+      const m = line.match(/(\d{2}\/\d{2}\/\d{4})/);
+      if (m) periodDate = parseCashDateTime(m[1]).dateStr;
+    } else if (upper.startsWith('OPERADOR:')) {
+      operatorName = line.split(':').slice(1).join(':').trim();
+    }
+
+    if (upper === 'CAIXA / DESCONTOS') { section = 'DESCONTOS'; continue; }
+    if (upper === 'CONTROLE') { section = 'CONTROLE'; continue; }
+    if (upper === 'CANCELAMENTO') { section = 'CANCELAMENTO'; continue; }
+    if (upper.startsWith('MESAS TRANSFERIDAS')) { section = 'MESAS_TRANSFERIDAS'; continue; }
+    if (upper.startsWith('OUTROS DETALHES')) { section = 'OUTROS_DETALHES'; continue; }
+
+    if (upper.includes('CONSUMO INTERNO CUSTO')) {
+      const m = line.match(/(-?[\d.]+,\d{2})/);
+      if (m) summary.consumoInternoCustoCents = Math.abs(parseMoneyToCents(m[1]));
+      continue;
+    }
+
+    if (section === 'DESCONTOS') {
+      const m = line.match(/^(\d+)\s+([A-Z0-9]+)\s+(\d{2}:\d{2}:\d{2})\s+([\d.,]+)$/i);
+      if (m) {
+        summary.caixaDescontos.push({
+          pedido: m[1],
+          mod: m[2],
+          hora: m[3],
+          discountCents: parseMoneyToCents(m[4])
+        });
+      }
+      continue;
+    }
+
+    if (section === 'CONTROLE') {
+      const m = line.match(/^([A-Z.\s]+?)\s+([\d.]+,\d{2})\s+([\d.]+,\d{2})\*?\s+([\d.]+,\d{2}-?)/i);
+      if (m && !upper.startsWith('TOTAL') && !upper.startsWith('F.PAGTO')) {
+        const rawDiff = m[4].endsWith('-') ? `-${m[4].slice(0, -1)}` : m[4];
+        summary.controleRows.push({
+          method: m[1].replace(/\.+$/, '').trim(),
+          sistemaCents: parseMoneyToCents(m[2]),
+          informadoCents: parseMoneyToCents(m[3]),
+          diffCents: parseMoneyToCents(rawDiff)
+        });
+      }
+      continue;
+    }
+
+    if (section === 'MESAS_TRANSFERIDAS') {
+      if (!line.startsWith('-') && !line.startsWith('=')) {
+        const mesaMatch = line.match(/Mesa\s+(\d+)/i);
+        const codMatch = line.match(/C[oó]digo:\s*(\d+)/i);
+        summary.mesasTransferidas.push({
+          rawText: line,
+          table: mesaMatch ? mesaMatch[1] : '',
+          orderNumber: codMatch ? codMatch[1] : ''
+        });
+      }
+      continue;
+    }
+
+    const numMatch = line.match(/(-?[\d.]+,\d{2})\s*$/);
+    if (!numMatch) continue;
+    const cents = parseMoneyToCents(numMatch[1]);
+    if (upper.includes('FATURAMENTO BRUTO')) summary.faturamentoBrutoCents = Math.abs(cents);
+    else if (upper.includes('DESCONTOS.')) summary.descontosCents = Math.abs(cents);
+    else if (upper.includes('PENDENTES') && !section) summary.pendentesCents = Math.abs(cents);
+    else if (upper.includes('CONSUMO INTERNO') && !upper.includes('CUSTO')) summary.consumoInternoCents = Math.abs(cents);
+    else if (upper.includes('FATURAMENTO LIQUIDO')) summary.faturamentoLiquidoCents = Math.abs(cents);
+    else if (upper.includes('SUPRIMENTO DE CAIXA')) summary.suprimentoCaixaCents = Math.abs(cents);
+    else if (upper.includes('4. RECEITA') || upper.startsWith('RECEITA.')) summary.receitaCents = Math.abs(cents);
+    else if (upper.includes('PAGAMENTO A FORNECEDORES')) summary.pagamentoFornecedoresCents = Math.abs(cents);
+    else if (upper.includes('SALDO FINAL')) summary.saldoFinalCents = Math.abs(cents);
+  }
+
+  summary.storeName = storeName;
+  summary.operatorName = operatorName;
+
+  return {
+    fileType: 'fechamento_resumo_txt',
+    status: 'ok',
+    periodStart: periodDate,
+    periodEnd: periodDate,
+    warnings: [],
+    rows: [],
+    summary
+  };
+}
+
+function parsePdvItensVendidosMatrix(rawMatrix, fmtMatrix) {
+  const headerIdx = findHeaderRowIndex(rawMatrix, ['CODIGO', 'PRODUTO', 'QTD', 'TOTAL']);
+  const colMap = buildColumnMap(rawMatrix[headerIdx]);
+  const rows = [];
+  let minDate = '';
+  let maxDate = '';
+
+  for (let i = headerIdx + 1; i < rawMatrix.length; i++) {
+    const raw = rawMatrix[i];
+    const fmt = fmtMatrix[i] || raw;
+    if (isRowEmpty(raw)) continue;
+
+    const code = String(getCell(fmt, colMap, 'CODIGO') ?? '').trim();
+    const product = String(getCell(fmt, colMap, 'PRODUTO') ?? '').trim();
+    if (!product) continue;
+
+    const qtyRaw = Number(String(getCell(raw, colMap, 'QTD') ?? 0).replace(',', '.'));
+    const unitCents = parseMoneyToCents(getCell(raw, colMap, 'UNITARIO'));
+    const totalCents = parseMoneyToCents(getCell(raw, colMap, 'TOTAL'));
+    const bonusCents = parseMoneyToCents(getCell(raw, colMap, 'BONUS (R$)'));
+    const serviceFeeCents = parseMoneyToCents(getCell(raw, colMap, 'TAXA SERVICO'));
+    const discountCents = parseMoneyToCents(getCell(raw, colMap, 'DESCONTO'));
+    const orderNumber = String(getCell(fmt, colMap, 'NUMERO') ?? '').trim();
+    const module = String(getCell(fmt, colMap, 'MODULO') ?? '').trim();
+    const origin = String(getCell(fmt, colMap, 'ORIGEM') ?? '').trim();
+    const dt = parseCashDateTime(getCell(raw, colMap, 'DATA'), getCell(raw, colMap, 'HORA'));
+    const isAggregateRow = code === '000000' || (!orderNumber && !dt.dateStr && qtyRaw === 0);
+
+    if (dt.dateStr && !isAggregateRow) {
+      if (!minDate || dt.dateStr < minDate) minDate = dt.dateStr;
+      if (!maxDate || dt.dateStr > maxDate) maxDate = dt.dateStr;
+    }
+
+    rows.push({
+      code,
+      product,
+      unit: String(getCell(fmt, colMap, 'UN') ?? '').trim(),
+      qty: Number.isFinite(qtyRaw) && qtyRaw > 0 ? qtyRaw : (isAggregateRow ? 0 : 1),
+      unitCents,
+      totalCents,
+      bonusCents,
+      serviceFeeCents,
+      discountCents,
+      group: String(getCell(fmt, colMap, 'GRUPO') ?? '').trim(),
+      subGroup: String(getCell(fmt, colMap, 'SUB-GRUPO') ?? '').trim(),
+      orderNumber,
+      module,
+      origin,
+      dateStr: dt.dateStr,
+      timeStr: dt.timeStr,
+      secondsOfDay: dt.secondsOfDay,
+      waiter: String(getCell(fmt, colMap, 'GARCON') ?? '').trim(),
+      operator: String(getCell(fmt, colMap, 'OPERADOR') ?? '').trim(),
+      machineName: String(getCell(fmt, colMap, 'NOME MAQUINA') ?? '').trim(),
+      turn: String(getCell(fmt, colMap, 'TURNO') ?? '1').trim(),
+      feeRemovalReason: String(getCell(fmt, colMap, 'MOTIVO REMOCAO TAXA') ?? '').trim(),
+      feeRemovalDetails: String(getCell(fmt, colMap, 'DETALHES REMOCAO TAXA') ?? '').trim(),
+      feeRemovalOperator: String(getCell(fmt, colMap, 'OPERADOR REMOCAO TAXA') ?? '').trim(),
+      discountReason: String(getCell(fmt, colMap, 'MOTIVO APLICACAO DESCONTO') ?? '').trim(),
+      discountDetails: String(getCell(fmt, colMap, 'DETALHES APLICACAO DESCONTO') ?? '').trim(),
+      discountOperator: String(getCell(fmt, colMap, 'OPERADOR APLICACAO DESCONTO') ?? '').trim(),
+      isAggregateRow
+    });
+  }
+
+  return {
+    fileType: 'pdv_itens_vendidos',
+    status: 'ok',
+    periodStart: minDate,
+    periodEnd: maxDate,
+    warnings: [],
+    rows,
+    summary: {
+      totalRows: rows.filter((r) => !r.isAggregateRow).length,
+      complementsCents: rows.filter((r) => r.isAggregateRow).reduce((s, r) => s + r.totalCents, 0),
+      feeRemovalsCount: rows.filter((r) => Boolean(r.feeRemovalReason || r.feeRemovalDetails)).length
+    }
+  };
+}
+
+function parsePdvCancelamentosMatrix(rawMatrix, fmtMatrix) {
+  const headerIdx = findHeaderRowIndex(rawMatrix, ['CODIGO', 'PRODUTO', 'TOTAL', 'MOTIVO']);
+  const colMap = buildColumnMap(rawMatrix[headerIdx]);
+  const rows = [];
+  let minDate = '';
+  let maxDate = '';
+
+  for (let i = headerIdx + 1; i < rawMatrix.length; i++) {
+    const raw = rawMatrix[i];
+    const fmt = fmtMatrix[i] || raw;
+    if (isRowEmpty(raw)) continue;
+    const product = String(getCell(fmt, colMap, 'PRODUTO') ?? '').trim();
+    if (!product) continue;
+
+    const dt = parseCashDateTime(getCell(raw, colMap, 'DATA'), getCell(raw, colMap, 'HORA'));
+    if (dt.dateStr) {
+      if (!minDate || dt.dateStr < minDate) minDate = dt.dateStr;
+      if (!maxDate || dt.dateStr > maxDate) maxDate = dt.dateStr;
+    }
+
+    const qtyRaw = Number(String(getCell(raw, colMap, 'QTD') ?? 1).replace(',', '.'));
+    rows.push({
+      code: String(getCell(fmt, colMap, 'CODIGO') ?? '').trim(),
+      product,
+      qty: Number.isFinite(qtyRaw) && qtyRaw > 0 ? qtyRaw : 1,
+      totalCents: parseMoneyToCents(getCell(raw, colMap, 'TOTAL')),
+      group: String(getCell(fmt, colMap, 'GRUPO') ?? '').trim(),
+      subGroup: String(getCell(fmt, colMap, 'SUB-GRUPO') ?? '').trim(),
+      orderNumber: String(getCell(fmt, colMap, 'NUMERO') ?? '').trim(),
+      dateStr: dt.dateStr,
+      timeStr: dt.timeStr,
+      secondsOfDay: dt.secondsOfDay,
+      waiter: String(getCell(fmt, colMap, 'GARCON') ?? '').trim(),
+      operator: String(getCell(fmt, colMap, 'OPERADOR') ?? '').trim(),
+      machineName: String(getCell(fmt, colMap, 'NOME MAQUINA') ?? '').trim(),
+      turn: String(getCell(fmt, colMap, 'TURNO') ?? '1').trim(),
+      reason: String(getCell(fmt, colMap, 'MOTIVO') ?? '').trim(),
+      reasonDetails: String(getCell(fmt, colMap, 'DETALHES DO MOTIVO') ?? '').trim()
+    });
+  }
+
+  return {
+    fileType: 'pdv_cancelamentos',
+    status: 'ok',
+    periodStart: minDate,
+    periodEnd: maxDate,
+    warnings: [],
+    rows,
+    summary: {
+      totalRows: rows.length,
+      totalCancelledCents: rows.reduce((s, r) => s + r.totalCents, 0)
+    }
+  };
+}
+
+function parsePdvDescontosMatrix(rawMatrix, fmtMatrix) {
+  const headerIdx = findHeaderRowIndex(rawMatrix, ['MOTIVO', 'DESCONTO', 'NUMERO', 'FUNCIONARIO']);
+  const colMap = buildColumnMap(rawMatrix[headerIdx]);
+  const rows = [];
+  let minDate = '';
+  let maxDate = '';
+
+  for (let i = headerIdx + 1; i < rawMatrix.length; i++) {
+    const raw = rawMatrix[i];
+    const fmt = fmtMatrix[i] || raw;
+    if (isRowEmpty(raw)) continue;
+
+    const dt = parseCashDateTime(getCell(raw, colMap, 'DATA'), getCell(raw, colMap, 'HORA'));
+    if (dt.dateStr) {
+      if (!minDate || dt.dateStr < minDate) minDate = dt.dateStr;
+      if (!maxDate || dt.dateStr > maxDate) maxDate = dt.dateStr;
+    }
+
+    rows.push({
+      reason: String(getCell(fmt, colMap, 'MOTIVO') ?? '').trim(),
+      discountCents: parseMoneyToCents(getCell(raw, colMap, 'DESCONTO')),
+      orderNumber: String(getCell(fmt, colMap, 'NUMERO') ?? '').trim(),
+      dateStr: dt.dateStr,
+      timeStr: dt.timeStr,
+      secondsOfDay: dt.secondsOfDay,
+      employee: String(getCell(fmt, colMap, 'FUNCIONARIO') ?? '').trim(),
+      turn: String(getCell(fmt, colMap, 'TURNO') ?? '1').trim(),
+      origin: String(getCell(fmt, colMap, 'ORIGEM') ?? '').trim(),
+      details: String(getCell(fmt, colMap, 'DETALHES MOTIVO') ?? '').trim()
+    });
+  }
+
+  return {
+    fileType: 'pdv_descontos',
+    status: 'ok',
+    periodStart: minDate,
+    periodEnd: maxDate,
+    warnings: [],
+    rows,
+    summary: {
+      totalRows: rows.length,
+      totalDiscountCents: rows.reduce((s, r) => s + r.discountCents, 0)
+    }
+  };
+}
+
 function detectSpreadsheetKind(matrix) {
   if (findHeaderRowIndex(matrix, ['VALOR', 'FORMA PAGTO', 'ADMINISTRADORA']) !== -1) return 'pdv_vendas';
+  if (findHeaderRowIndex(matrix, ['CODIGO', 'PRODUTO', 'TOTAL', 'MODULO']) !== -1 || findHeaderRowIndex(matrix, ['CODIGO', 'PRODUTO', 'UNITARIO', 'TAXA SERVICO']) !== -1) return 'pdv_itens_vendidos';
+  if (findHeaderRowIndex(matrix, ['CODIGO', 'PRODUTO', 'TOTAL', 'MOTIVO']) !== -1) return 'pdv_cancelamentos';
+  if (findHeaderRowIndex(matrix, ['MOTIVO', 'DESCONTO', 'NUMERO', 'FUNCIONARIO']) !== -1) return 'pdv_descontos';
   if (findHeaderRowIndex(matrix, ['DATA DA VENDA', 'HORA DA VENDA', 'STATUS DA VENDA', 'VALOR DA VENDA ATUALIZADO']) !== -1) return 'adquirente_rede';
   if (findHeaderRowIndex(matrix, ['DATA DA VENDA', 'HORA DA VENDA', 'VALOR DA VENDA BRUTA']) !== -1) return 'adquirente_c6pay';
 
@@ -762,6 +1067,147 @@ function parseGenericBankMatrix(rawMatrix, fmtMatrix, rulesConfig) {
   };
 }
 
+const MATRIX_PARSER_BY_KIND = {
+  pdv_vendas: (raw, fmt, rulesConfig) => parsePdvVendasMatrix(raw, fmt, rulesConfig),
+  pdv_itens_vendidos: (raw, fmt) => parsePdvItensVendidosMatrix(raw, fmt),
+  pdv_cancelamentos: (raw, fmt) => parsePdvCancelamentosMatrix(raw, fmt),
+  pdv_descontos: (raw, fmt) => parsePdvDescontosMatrix(raw, fmt),
+  rel_conferencia: (raw) => parseRelConferenciaMatrix(raw),
+  adquirente_rede: (raw, fmt) => parseRedeMatrix(raw, fmt),
+  adquirente_c6pay: (raw, fmt) => parseC6PayMatrix(raw, fmt)
+};
+
+/**
+ * Calcula o range real da aba incluindo células de cabeçalho fora do `!ref`
+ * (ex: planilhas da C6 Pay exportadas com `!ref="A6:AJ62"` e cabeçalhos na linha A4:AJ4).
+ */
+function computeExpandedSheetRange(sheet) {
+  if (!sheet || typeof sheet !== 'object') return undefined;
+  let minR = Number.POSITIVE_INFINITY;
+  let minC = Number.POSITIVE_INFINITY;
+  let maxR = -1;
+  let maxC = -1;
+
+  if (sheet['!ref']) {
+    const refRange = XLSXLib.utils.decode_range(sheet['!ref']);
+    minR = refRange.s.r;
+    minC = refRange.s.c;
+    maxR = refRange.e.r;
+    maxC = refRange.e.c;
+  }
+
+  for (const key of Object.keys(sheet)) {
+    if (key.startsWith('!')) continue;
+    const cell = XLSXLib.utils.decode_cell(key);
+    if (!Number.isFinite(cell.r) || !Number.isFinite(cell.c)) continue;
+    if (cell.r < minR) minR = cell.r;
+    if (cell.c < minC) minC = cell.c;
+    if (cell.r > maxR) maxR = cell.r;
+    if (cell.c > maxC) maxC = cell.c;
+  }
+
+  if (maxR < 0 || maxC < 0 || !Number.isFinite(minR) || !Number.isFinite(minC)) {
+    return undefined;
+  }
+
+  return XLSXLib.utils.encode_range({
+    s: { r: minR <= 50 ? 0 : minR, c: minC <= 10 ? 0 : minC },
+    e: { r: maxR, c: maxC }
+  });
+}
+
+function extractSheetPreviewSample(matrix, maxRows = 6, maxCols = 8) {
+  if (!Array.isArray(matrix)) return [];
+  const sample = [];
+  for (let r = 0; r < matrix.length && sample.length < maxRows; r++) {
+    const row = Array.isArray(matrix[r]) ? matrix[r] : [];
+    const nonEmpty = row.some((v) => String(v ?? '').trim() !== '');
+    if (!nonEmpty) continue;
+    sample.push(
+      row.slice(0, maxCols).map((v) => String(v ?? '').trim().slice(0, 60))
+    );
+  }
+  return sample;
+}
+
+function toByteSignatureHex(bytes, len = 12) {
+  if (!bytes || !bytes.length) return '';
+  return Array.from(bytes.slice(0, len))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join(' ');
+}
+
+function parseBinaryWorkbookAcrossSheets(workingBytes, rulesConfig, baseDiag) {
+  const safeBytes =
+    workingBytes.byteOffset === 0 && workingBytes.byteLength === workingBytes.buffer.byteLength
+      ? workingBytes
+      : workingBytes.slice();
+
+  const wb = XLSXLib.read(safeBytes, { type: 'array' });
+  const sheetInfos = [];
+  let firstGenericOk = null;
+  let lastGenericErr = null;
+
+  for (const sheetName of wb.SheetNames || []) {
+    const sheet = wb.Sheets[sheetName];
+    if (!sheet) continue;
+    const expandedRange = computeExpandedSheetRange(sheet);
+    const sheetOpts = expandedRange ? { header: 1, defval: '', range: expandedRange } : { header: 1, defval: '' };
+    const rawMatrix = XLSXLib.utils.sheet_to_json(sheet, { ...sheetOpts, raw: true });
+    const fmtMatrix = XLSXLib.utils.sheet_to_json(sheet, { ...sheetOpts, raw: false });
+
+    let kind = detectSpreadsheetKind(rawMatrix);
+    if (kind === 'unknown') {
+      kind = detectSpreadsheetKind(fmtMatrix);
+    }
+
+    sheetInfos.push({
+      sheetName,
+      originalRef: sheet['!ref'] || '',
+      expandedRange: expandedRange || '',
+      rowsCount: rawMatrix.length,
+      detectedKind: kind,
+      headerSample: extractSheetPreviewSample(rawMatrix, 5, 8)
+    });
+
+    if (kind !== 'unknown' && MATRIX_PARSER_BY_KIND[kind]) {
+      const parsed = MATRIX_PARSER_BY_KIND[kind](rawMatrix, fmtMatrix, rulesConfig);
+      return {
+        parsed,
+        matchedSheet: sheetName,
+        diagnostics: { ...baseDiag, matchedSheet: sheetName, sheetNames: wb.SheetNames, sheets: sheetInfos }
+      };
+    }
+
+    const generic = parseGenericBankMatrix(rawMatrix, fmtMatrix, rulesConfig);
+    if (generic.status === 'ok' && !firstGenericOk) {
+      firstGenericOk = { parsed: generic, matchedSheet: sheetName };
+    } else if (!lastGenericErr) {
+      lastGenericErr = generic;
+    }
+  }
+
+  if (firstGenericOk) {
+    return {
+      ...firstGenericOk,
+      diagnostics: { ...baseDiag, matchedSheet: firstGenericOk.matchedSheet, sheetNames: wb.SheetNames, sheets: sheetInfos }
+    };
+  }
+
+  return {
+    parsed: lastGenericErr || {
+      fileType: 'unknown',
+      status: 'error',
+      errorMessage: 'Formato de planilha não reconhecido automaticamente pela Fórmula 1.',
+      warnings: [],
+      rows: [],
+      summary: {}
+    },
+    matchedSheet: null,
+    diagnostics: { ...baseDiag, sheetNames: wb.SheetNames, sheets: sheetInfos }
+  };
+}
+
 /**
  * Ponto único de leitura e detecção automática de todos os relatórios de conferência.
  */
@@ -775,11 +1221,14 @@ export async function parseUploadedCashFile({
   rulesConfig = DEFAULT_FORMULA_CONFIG,
   onPasswordMatched
 }) {
+  let wasEncrypted = false;
+  let originalByteLength = arrayBuffer ? (arrayBuffer.byteLength || arrayBuffer.length || 0) : 0;
   try {
     let workingBytes = arrayBuffer ? (arrayBuffer instanceof Uint8Array ? arrayBuffer : new Uint8Array(arrayBuffer)) : null;
     let unlockedBySavedOrAuto = false;
 
     if (workingBytes && isEncryptedOoxmlBuffer(workingBytes)) {
+      wasEncrypted = true;
       const candidatePasswords = buildPasswordCandidates({
         fileName,
         customPassword: password,
@@ -817,7 +1266,13 @@ export async function parseUploadedCashFile({
           periodEnd: '',
           warnings: [],
           rows: [],
-          summary: {}
+          summary: {},
+          diagnostics: {
+            stage: password ? 'password_verify' : 'password_required',
+            wasEncrypted: true,
+            originalByteLength,
+            triedCandidatesCount: candidatePasswords.length
+          }
         };
       }
       if (typeof onPasswordMatched === 'function' && matchedPassword !== null && matchedPassword !== '') {
@@ -829,10 +1284,16 @@ export async function parseUploadedCashFile({
       workingBytes = unlocked;
     }
 
-    const withAutoUnlockMeta = (parsedObj) => {
+    const withAutoUnlockMeta = (parsedObj, extraDiag = undefined) => {
       const result = { fileName, ...parsedObj };
       if (unlockedBySavedOrAuto) {
         result.summary = { ...(result.summary || {}), autoUnlocked: true };
+      }
+      if (wasEncrypted) {
+        result.summary = { ...(result.summary || {}), wasEncrypted: true };
+      }
+      if (extraDiag && (result.status !== 'ok' || wasEncrypted)) {
+        result.diagnostics = extraDiag;
       }
       return result;
     };
@@ -842,39 +1303,47 @@ export async function parseUploadedCashFile({
       (workingBytes[0] === 0xd0 && workingBytes[1] === 0xcf)
     );
 
-    if (isBinaryExcel) {
-      const wb = XLSXLib.read(workingBytes, { type: 'array' });
-      const sheetName = wb.SheetNames[0];
-      const sheet = wb.Sheets[sheetName];
-      const rawMatrix = XLSXLib.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: '' });
-      const fmtMatrix = XLSXLib.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
+    const baseDiag = {
+      wasEncrypted,
+      originalByteLength,
+      workingByteLength: workingBytes?.length || 0,
+      byteSignatureHex: toByteSignatureHex(workingBytes),
+      isBinaryExcel: Boolean(isBinaryExcel)
+    };
 
-      const kind = detectSpreadsheetKind(rawMatrix);
-      if (kind === 'pdv_vendas') return withAutoUnlockMeta(parsePdvVendasMatrix(rawMatrix, fmtMatrix, rulesConfig));
-      if (kind === 'rel_conferencia') return withAutoUnlockMeta(parseRelConferenciaMatrix(rawMatrix));
-      if (kind === 'adquirente_rede') return withAutoUnlockMeta(parseRedeMatrix(rawMatrix, fmtMatrix));
-      if (kind === 'adquirente_c6pay') return withAutoUnlockMeta(parseC6PayMatrix(rawMatrix, fmtMatrix));
-      return withAutoUnlockMeta(parseGenericBankMatrix(rawMatrix, fmtMatrix, rulesConfig));
+    if (isBinaryExcel) {
+      const { parsed, diagnostics } = parseBinaryWorkbookAcrossSheets(workingBytes, rulesConfig, baseDiag);
+      return withAutoUnlockMeta(parsed, diagnostics);
     }
 
     const text = textContent !== undefined ? String(textContent) : decodeTextBuffer(workingBytes || new Uint8Array());
     const trimmed = text.trim();
 
     if (/<OFX>/i.test(trimmed) || /<STMTTRN>/i.test(trimmed) || /OFXHEADER:/i.test(trimmed)) {
-      return withAutoUnlockMeta(parseOfxText(trimmed, rulesConfig));
+      return withAutoUnlockMeta(parseOfxText(trimmed, rulesConfig), baseDiag);
+    }
+
+    if (/FECHAMENTO DE CAIXA/i.test(trimmed) && (/FATURAMENTO LIQUIDO/i.test(trimmed) || /CAIXA \/ DESCONTOS/i.test(trimmed))) {
+      return withAutoUnlockMeta(parseFechamentoResumoTxt(trimmed), baseDiag);
     }
 
     if (/MOVIMENTO FECHADO:/i.test(trimmed) || (/ENTRADAS NO TOTAL/i.test(trimmed) && /SAIDAS NO TOTAL/i.test(trimmed))) {
-      return withAutoUnlockMeta(parseFechamentoTxt(trimmed));
+      return withAutoUnlockMeta(parseFechamentoTxt(trimmed), baseDiag);
     }
 
     const csvMatrix = parseCsvToMatrix(trimmed);
     const kind = detectSpreadsheetKind(csvMatrix);
-    if (kind === 'pdv_vendas') return withAutoUnlockMeta(parsePdvVendasMatrix(csvMatrix, csvMatrix, rulesConfig));
-    if (kind === 'rel_conferencia') return withAutoUnlockMeta(parseRelConferenciaMatrix(csvMatrix));
-    if (kind === 'adquirente_rede') return withAutoUnlockMeta(parseRedeMatrix(csvMatrix, csvMatrix));
-    if (kind === 'adquirente_c6pay') return withAutoUnlockMeta(parseC6PayMatrix(csvMatrix, csvMatrix));
-    return withAutoUnlockMeta(parseGenericBankMatrix(csvMatrix, csvMatrix, rulesConfig));
+    if (kind !== 'unknown' && MATRIX_PARSER_BY_KIND[kind]) {
+      return withAutoUnlockMeta(MATRIX_PARSER_BY_KIND[kind](csvMatrix, csvMatrix, rulesConfig), baseDiag);
+    }
+    return withAutoUnlockMeta(
+      parseGenericBankMatrix(csvMatrix, csvMatrix, rulesConfig),
+      {
+        ...baseDiag,
+        textLength: trimmed.length,
+        csvPreview: extractSheetPreviewSample(csvMatrix, 5, 8)
+      }
+    );
   } catch (err) {
     return {
       fileName,
@@ -885,7 +1354,14 @@ export async function parseUploadedCashFile({
       periodEnd: '',
       warnings: [],
       rows: [],
-      summary: {}
+      summary: {},
+      diagnostics: {
+        stage: 'exception',
+        wasEncrypted,
+        originalByteLength,
+        errorName: err?.name || 'Error',
+        errorStack: String(err?.stack || '').slice(0, 800)
+      }
     };
   }
 }

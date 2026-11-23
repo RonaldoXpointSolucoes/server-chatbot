@@ -9,6 +9,133 @@ export interface CashMirrorRow {
   sourceNote: string;
 }
 
+export interface CashOrderItemDetail {
+  code?: string;
+  product: string;
+  displayName: string;
+  comboParts?: string[];
+  qty: number;
+  unitCents: number;
+  totalCents: number;
+  serviceFeeCents?: number;
+  discountCents?: number;
+  bonusCents?: number;
+  group?: string;
+  subGroup?: string;
+  timeStr?: string;
+  waiter?: string;
+  operator?: string;
+  feeRemovalReason?: string;
+  feeRemovalDetails?: string;
+  feeRemovalOperator?: string;
+  discountReason?: string;
+  discountDetails?: string;
+  discountOperator?: string;
+}
+
+export interface CashOperationOrderDetail {
+  scopeKey: string;
+  orderNumber: string;
+  module: string;
+  origin?: string;
+  waiters: string[];
+  operators: string[];
+  splitCount: number;
+  totalPaidCents: number;
+  itemsSubtotalCents: number;
+  serviceFeeCents: number;
+  itemDiscountsCents: number;
+  hasFeeRemoval?: boolean;
+  hasDiscount?: boolean;
+  items: CashOrderItemDetail[];
+}
+
+export interface CashReportSpecStatus {
+  fileType: string;
+  label: string;
+  shortLabel: string;
+  priority: 'essential' | 'detail' | 'audit';
+  hint: string;
+  present: boolean;
+}
+
+export interface CashReportCompleteness {
+  totalExpected: number;
+  totalPresent: number;
+  percent: number;
+  isComplete: boolean;
+  warnings: string[];
+  system: {
+    totalExpected: number;
+    presentCount: number;
+    items: CashReportSpecStatus[];
+    present: CashReportSpecStatus[];
+    missing: CashReportSpecStatus[];
+  };
+  bank: {
+    totalExpected: number;
+    presentCount: number;
+    items: CashReportSpecStatus[];
+    present: CashReportSpecStatus[];
+    missing: CashReportSpecStatus[];
+  };
+}
+
+export interface CashAuditInsights {
+  totalSoldItemsCount: number;
+  complementsCents: number;
+  internalConsumptionCostCents: number;
+  cancelledDetails: Array<{
+    code?: string;
+    product: string;
+    qty: number;
+    totalCents: number;
+    table: string;
+    timeStr?: string;
+    waiter?: string;
+    operator?: string;
+    reason?: string;
+    reasonDetails?: string;
+    group?: string;
+  }>;
+  discountDetails: Array<{
+    source: string;
+    orderNumber: string;
+    module?: string;
+    timeStr?: string;
+    amountCents: number;
+    reason?: string;
+    details?: string;
+    employee?: string;
+  }>;
+  feeRemovals: Array<{
+    orderNumber: string;
+    module?: string;
+    product: string;
+    totalCents: number;
+    timeStr?: string;
+    waiter?: string;
+    reason?: string;
+    details?: string;
+    operator?: string;
+  }>;
+  reopenedTables: Array<{
+    rawText: string;
+    table?: string;
+    orderNumber?: string;
+  }>;
+  zeroPdvReceipts: Array<{
+    rawText: string;
+    table?: string;
+    timeStr?: string;
+    operatorName?: string;
+  }>;
+  topProducts: Array<{ name: string; qty: number; totalCents: number; category?: string }>;
+  byWaiter: Array<{ name: string; itemsCount: number; totalCents: number; feeRemovalsCount: number }>;
+  byModule: Array<{ module: string; itemsCount: number; totalCents: number }>;
+  bySubGroup: Array<{ name: string; qty: number; totalCents: number }>;
+}
+
 export interface CashReconciliationItem {
   id: string;
   side: 'system' | 'real' | 'audit';
@@ -31,6 +158,7 @@ export interface CashReconciliationItem {
   metadata?: {
     recebidoEmBranco?: boolean;
     changeCents?: number;
+    orderDetail?: CashOperationOrderDetail;
     [key: string]: unknown;
   };
 }
@@ -110,6 +238,8 @@ export interface CashReconciliationResult {
   deduplicatedItems?: CashReconciliationItem[];
   debitAuditItems?: CashReconciliationItem[];
   financialMetrics: CashFinancialMetrics;
+  reportCompleteness?: CashReportCompleteness;
+  auditInsights?: CashAuditInsights;
 }
 
 export interface SavedCashFilePassword {
@@ -132,6 +262,7 @@ export interface ParsedCashFileResult {
   warnings: string[];
   rows: unknown[];
   summary: Record<string, unknown>;
+  diagnostics?: Record<string, unknown>;
   fileSizeBytes?: number;
 }
 

@@ -169,102 +169,125 @@ export const useDevStore = create<DevStore>()(
           requiresAction: isActionRequired,
           severity: finalSeverity
         };
-        
+
         const state = get();
         if (state.isEnabled && !skipPersist) {
-            const tenantId = extractedTenant || localStorage.getItem('tenantId');
-            
-            // Evitar loops recursivos e duplicação: não envia ao banco erros gerados pelo próprio Supabase, DevLogger ou rotas de diagnóstico
-            const isExcludedCall = 
-              (log.source && (
-                log.source.toLowerCase().includes('supabase') || 
-                log.source.toLowerCase().includes('devlogger') ||
-                log.source.toLowerCase().includes('servidor node.js')
-              )) ||
-              (log.message && (
-                log.message.toLowerCase().includes('supabase.co') || 
-                log.message.toLowerCase().includes('analyze-logs') ||
-                log.message.includes('received error in ack') ||
-                log.message.includes('Closing session')
-              ));
+          const rawTenantId = extractedTenant || localStorage.getItem('tenantId');
+          const isValidUuid = typeof rawTenantId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawTenantId);
+          const tenantId = isValidUuid ? rawTenantId : null;
 
-            if (!isExcludedCall) {
-              // Background async save to db com payload seguro
-              let safePayload: string | null = null;
-              if (sanitizedDetails) {
-                try {
-                  const serialized = JSON.stringify({
-                    ...sanitizedDetails,
+          // Evitar loops recursivos e duplicação: não envia ao banco erros gerados pelo próprio Supabase, DevLogger ou rotas de diagnóstico
+          const isExcludedCall =
+            (log.source && (
+              log.source.toLowerCase().includes('supabase') ||
+              log.source.toLowerCase().includes('devlogger') ||
+              log.source.toLowerCase().includes('servidor node.js')
+            )) ||
+            (log.message && (
+              log.message.toLowerCase().includes('supabase.co') ||
+              log.message.toLowerCase().includes('analyze-logs') ||
+              log.message.includes('received error in ack') ||
+              log.message.includes('Closing session')
+            ));
+
+          if (!isExcludedCall) {
+            // Background async save to db com objeto JSONB válido e limitado (nunca string truncada inválida)
+            let safePayload: Record<string, unknown> | null = null;
+            try {
+              const basePayload: Record<string, unknown> = {
+                source: 'frontend',
+                log_source: log.source || 'Frontend',
+                requires_action: isActionRequired,
+                severity: finalSeverity,
+                instance_id: extractedInstance || null
+              };
+              if (sanitizedDetails && typeof sanitizedDetails === 'object' && !Array.isArray(sanitizedDetails)) {
+                for (const [k, v] of Object.entries(sanitizedDetails)) {
+                  const serializedVal = typeof v === 'string' ? v : JSON.stringify(v);
+                  if (serializedVal && serializedVal.length > 600) {
+                    basePayload[k] = typeof v === 'string' ? v.slice(0, 600) + '...' : serializedVal.slice(0, 600) + '...';
+                  } else if (v !== undefined) {
+                    basePayload[k] = v;
+                  }
+                }
+              } else if (sanitizedDetails !== undefined) {
+                basePayload.raw_details = String(sanitizedDetails).slice(0, 800);
+              }
+              const checkLen = JSON.stringify(basePayload).length;
+              safePayload = checkLen <= 3500
+                ? basePayload
+                : {
+                    source: 'frontend',
+                    log_source: log.source || 'Frontend',
                     requires_action: isActionRequired,
                     severity: finalSeverity,
-                    instance_id: extractedInstance
-                  });
-                  safePayload = serialized.length > 2000 ? serialized.substring(0, 2000) + '...' : serialized;
-                } catch {
-                  safePayload = null;
-                }
-              }
-
-              supabase.from('system_logs').insert([{
-                 type: log.source || 'Frontend',
-                 message: (log.message || '').substring(0, 1000),
-                 level: finalType,
-                 payload: safePayload,
-                 company_id: tenantId || null,
-                 tenant_id: tenantId || null,
-              }]).then(({ error }) => {
-                 if (error && log.source !== 'Fetch API: undefined') {
-                     // Ignore to prevent loop
-                 }
-              }).catch(() => {
-                  // Ignore silent network errors
-              });
+                    instance_id: extractedInstance || null,
+                    summary: JSON.stringify(basePayload).slice(0, 1800) + '...'
+                  };
+            } catch {
+              safePayload = null;
             }
+
+            supabase.from('system_logs').insert([{
+              type: log.source || 'Frontend',
+              message: (log.message || '').substring(0, 1000),
+              level: finalType,
+              payload: safePayload,
+              company_id: tenantId,
+              tenant_id: tenantId,
+            }]).then(({ error }) => {
+              if (error && log.source !== 'Fetch API: undefined') {
+                // Ignore to prevent loop
+              }
+            }).catch(() => {
+              // Ignore silent network errors
+            });
+          }
         }
-        
+
         set((state) => ({ logs: [newLog, ...state.logs].slice(0, 200) }));
       },
-      addBreadcrumb: (stepIndex, totalSteps, title, source = 'WhatsApp Flow', details, status = 'active') => {
-        const isTimeout = status === 'timeout' || title.toLowerCase().includes('timeout');
-        const isError = status === 'error' || isTimeout;
-        const emoji = isTimeout ? '⏰❌' : isError ? '❌' : status === 'success' ? '✅' : '📍';
-        const message = `[MIGALHA ${stepIndex}/${totalSteps}] ${emoji} ${title}`;
+          addBreadcrumb: (stepIndex, totalSteps, title, source = 'WhatsApp Flow', details, status = 'active') => {
+            const isTimeout = status === 'timeout' || title.toLowerCase().includes('timeout');
+            const isError = status === 'error' || isTimeout;
+            const emoji = isTimeout ? '⏰❌' : isError ? '❌' : status === 'success' ? '✅' : '📍';
+            const message = `[MIGALHA ${stepIndex}/${totalSteps}] ${emoji} ${title}`;
 
-        const extractedTenant = details?.tenantId || details?.company_id || undefined;
-        const extractedInstance = details?.instanceId || details?.instance_id || undefined;
+            const extractedTenant = details?.tenantId || details?.company_id || undefined;
+            const extractedInstance = details?.instanceId || details?.instance_id || undefined;
 
-        get().addLog({
-          type: isTimeout ? 'error' : isError ? 'error' : status === 'success' ? 'success' : 'info',
-          message,
-          source,
-          details: {
-            ...details,
-            breadcrumb: { stepIndex, totalSteps, title, status }
+            get().addLog({
+              type: isTimeout ? 'error' : isError ? 'error' : status === 'success' ? 'success' : 'info',
+              message,
+              source,
+              details: {
+                ...details,
+                breadcrumb: { stepIndex, totalSteps, title, status }
+              },
+              tenantId: extractedTenant,
+              instanceId: extractedInstance,
+              requiresAction: isTimeout || isError,
+              severity: isTimeout ? 'critical' : isError ? 'high' : 'low',
+              step: { current: stepIndex, total: totalSteps, title, status }
+            });
           },
-          tenantId: extractedTenant,
-          instanceId: extractedInstance,
-          requiresAction: isTimeout || isError,
-          severity: isTimeout ? 'critical' : isError ? 'high' : 'low',
-          step: { current: stepIndex, total: totalSteps, title, status }
-        });
-      },
-      log: (type, message, details, source = 'Sistema') => {
-        get().addLog({
-          type,
-          message,
-          source,
-          details
-        });
-      },
-      showServerLogs: false,
-      clearLogs: () => set({ logs: [] }),
-      toggleVisibility: () => set((state) => ({ isVisible: !state.isVisible })),
-      toggleEnabled: () => set((state) => ({ isEnabled: !state.isEnabled })),
-      setShowServerLogs: (val) => set({ showServerLogs: val })
-    }),
+            log: (type, message, details, source = 'Sistema') => {
+              get().addLog({
+                type,
+                message,
+                source,
+                details
+              });
+            },
+              showServerLogs: false,
+                clearLogs: () => set({ logs: [] }),
+                  toggleVisibility: () => set((state) => ({ isVisible: !state.isVisible })),
+                    toggleEnabled: () => set((state) => ({ isEnabled: !state.isEnabled })),
+                      setShowServerLogs: (val) => set({ showServerLogs: val })
+        }),
     {
       name: 'dev-logger-config',
-      partialize: (state) => ({ isEnabled: state.isEnabled }), 
+      partialize: (state) => ({ isEnabled: state.isEnabled }),
     }
   )
 );

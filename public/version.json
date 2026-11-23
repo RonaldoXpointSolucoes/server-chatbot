@@ -1,5 +1,5 @@
 {
-  "version": "8.3.8",
-  "buildDate": "2026-11-23T02:04:16.920Z",
-  "summary": "Correção Definitiva de Salvamento Multiempresa (RLS allowed_companies + HTTP 406) na Conferência de Caixa"
+  "version": "8.3.9",
+  "buildDate": "2026-11-23T02:47:11.361Z",
+  "summary": "Checklist Inteligente 7 DataDivas + 3 Banco, Drill-Down em 2 Níveis (Cartões/PIX ➔ Operações ➔ Itens), Correção C6 Pay com Senha e DevLogger em system_logs"
 }

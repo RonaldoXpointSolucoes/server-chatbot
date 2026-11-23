@@ -10,6 +10,7 @@ import {
   ChevronUp,
   EyeOff,
   Search,
+  ShoppingBag,
   X
 } from 'lucide-react';
 import {
@@ -20,6 +21,7 @@ import {
   formatCents
 } from '../../types/cashReconciliation';
 import { buildMirrorRowDetails } from '../../utils/cashReconciliationServiceHelper.mjs';
+import { CashOperationDetailModal } from './CashOperationDetailModal';
 
 export type CashSystemCategoryTarget = 'dinheiro' | 'cartao' | 'pix' | 'pendente';
 
@@ -68,14 +70,18 @@ export function CashMirrorRowDetailPanel({
   const [linkingRealId, setLinkingRealId] = useState<string>('');
   const [linkingExtraId, setLinkingExtraId] = useState<string | null>(null);
   const [linkingExtraSysId, setLinkingExtraSysId] = useState<string>('');
+  const [inspectedOp, setInspectedOp] = useState<{
+    item: CashReconciliationItem;
+    paired: CashReconciliationItem[];
+  } | null>(null);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape' && !inspectedOp) onClose();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onClose]);
+  }, [onClose, inspectedOp]);
 
   const details = useMemo(() => buildMirrorRowDetails(result, row.key), [result, row.key]);
 
@@ -100,6 +106,17 @@ export function CashMirrorRowDetailPanel({
     pendingDebtors: Array<{ debtor: string; amountCents: number }>;
     saidasDetalhadas: Array<{ label: string; amountCents: number; isSangria: boolean }>;
   };
+
+  const pairedByItemId = useMemo(() => {
+    const map = new Map<string, CashReconciliationItem[]>();
+    for (const pair of matchedPairs) {
+      const combined = [...(pair.systemItems || []), ...(pair.realItems || [])];
+      for (const item of combined) {
+        map.set(item.id, combined);
+      }
+    }
+    return map;
+  }, [matchedPairs]);
 
   const matchedIds = useMemo(() => {
     const ids = new Set<string>();
@@ -311,7 +328,21 @@ export function CashMirrorRowDetailPanel({
                             </span>
                           </div>
                           <p className="text-xs font-semibold text-slate-800 dark:text-[#e9edef]">{it.description}</p>
+                          {it.metadata?.orderDetail && (
+                            <p className="text-[11px] text-indigo-600 dark:text-indigo-300 font-medium truncate">
+                              {it.metadata.orderDetail.items.length} item(ns):{' '}
+                              {it.metadata.orderDetail.items.slice(0, 2).map((x) => `${x.qty}x ${x.displayName}`).join(', ')}
+                            </p>
+                          )}
                           <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => setInspectedOp({ item: it, paired: pairedByItemId.get(it.id) || [] })}
+                              className="px-2.5 py-1 rounded-lg bg-[#00a884]/15 text-[#00a884] text-[11px] font-bold flex items-center gap-1"
+                            >
+                              <ShoppingBag size={11} />
+                              {it.metadata?.orderDetail ? `Ver Itens (${it.metadata.orderDetail.items.length})` : 'Detalhes'}
+                            </button>
                             {targetChoicesForCategory(it.category).map((targetCat) => (
                               <button
                                 key={targetCat}
@@ -470,17 +501,41 @@ export function CashMirrorRowDetailPanel({
                   {sortedSystemItems.map((it) => {
                     const isMatched = matchedIds.has(it.id);
                     const reclassifiedFrom = typeof it.metadata?.reclassifiedFrom === 'string' ? it.metadata.reclassifiedFrom : '';
+                    const orderDetail = it.metadata?.orderDetail;
                     return (
                       <div key={it.id} className="py-2.5 flex flex-col md:flex-row md:items-center justify-between gap-2 text-xs">
-                        <div className="space-y-0.5">
+                        <div className="space-y-0.5 min-w-0 flex-1">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-sm font-black text-slate-900 dark:text-white tabular-nums">
-                              {formatCents(it.amountCents)}
-                            </span>
-                            <span className="font-semibold text-slate-800 dark:text-[#e9edef]">{it.description}</span>
+                            <button
+                              type="button"
+                              onClick={() => setInspectedOp({ item: it, paired: pairedByItemId.get(it.id) || [] })}
+                              className="text-left group flex items-center gap-2 flex-wrap hover:text-[#00a884] transition-colors"
+                              title="Clique para detalhar a operação e os itens consumidos"
+                            >
+                              <span className="text-sm font-black text-slate-900 dark:text-white group-hover:text-[#00a884] tabular-nums">
+                                {formatCents(it.amountCents)}
+                              </span>
+                              <span className="font-semibold text-slate-800 dark:text-[#e9edef] group-hover:underline">
+                                {it.description}
+                              </span>
+                            </button>
+                            {orderDetail && (
+                              <button
+                                type="button"
+                                onClick={() => setInspectedOp({ item: it, paired: pairedByItemId.get(it.id) || [] })}
+                                className="px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 text-[10px] font-bold inline-flex items-center gap-1 hover:bg-indigo-500/25"
+                              >
+                                <ShoppingBag size={10} /> {orderDetail.items.length} item(ns)
+                              </button>
+                            )}
                             {isMatched && (
                               <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 text-[10px] font-bold">
                                 Conciliado
+                              </span>
+                            )}
+                            {orderDetail?.hasFeeRemoval && (
+                              <span className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[10px] font-bold">
+                                Taxa removida
                               </span>
                             )}
                             {reclassifiedFrom && (
@@ -491,6 +546,12 @@ export function CashMirrorRowDetailPanel({
                           </div>
                           <p className="text-[11px] text-slate-500 dark:text-[#8696a0]">
                             {it.timeStr} • Operador: {it.operatorName || '-'} • {it.terminalName || '-'}
+                            {orderDetail?.items?.length ? (
+                              <span className="ml-1.5 text-slate-600 dark:text-[#aebac1]">
+                                • {orderDetail.items.slice(0, 2).map((x) => `${x.qty}x ${x.displayName}`).join(', ')}
+                                {orderDetail.items.length > 2 ? ` (+${orderDetail.items.length - 2})` : ''}
+                              </span>
+                            ) : null}
                           </p>
                         </div>
 
@@ -594,18 +655,35 @@ export function CashMirrorRowDetailPanel({
                 </button>
                 {showMatched && (
                   <div className="mt-3 divide-y divide-emerald-500/15 text-xs">
-                    {matchedPairs.map((pair) => (
-                      <div key={pair.id} className="py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                        <div className="text-slate-700 dark:text-[#d1d7db]">
-                          <strong className="text-emerald-700 dark:text-emerald-400 tabular-nums">
-                            {formatCents(pair.amountCents)}
-                          </strong>{' '}
-                          • PDV: {(pair.systemItems || []).map((s) => `${s.timeStr} ${s.description}`).join(' + ')} ↔ Real:{' '}
-                          {(pair.realItems || []).map((r) => `${r.timeStr} ${r.description}`).join(' + ')}
+                    {matchedPairs.map((pair) => {
+                      const primaryOp = (pair.systemItems || [])[0] || (pair.realItems || [])[0];
+                      const pairedList = [...(pair.systemItems || []), ...(pair.realItems || [])];
+                      const itemsCount = (pair.systemItems || []).reduce((acc, s) => acc + (s.metadata?.orderDetail?.items?.length || 0), 0);
+                      return (
+                        <div key={pair.id} className="py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                          <div className="text-slate-700 dark:text-[#d1d7db] min-w-0">
+                            <strong className="text-emerald-700 dark:text-emerald-400 tabular-nums">
+                              {formatCents(pair.amountCents)}
+                            </strong>{' '}
+                            • PDV: {(pair.systemItems || []).map((s) => `${s.timeStr} ${s.description}`).join(' + ')} ↔ Real:{' '}
+                            {(pair.realItems || []).map((r) => `${r.timeStr} ${r.description}`).join(' + ')}
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className="text-[11px] text-slate-500">{pair.reasonText}</span>
+                            {primaryOp && (
+                              <button
+                                type="button"
+                                onClick={() => setInspectedOp({ item: primaryOp, paired: pairedList })}
+                                className="px-2.5 py-1 rounded-lg bg-white dark:bg-[#111b21] border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-[11px] font-bold flex items-center gap-1 hover:border-[#00a884]"
+                              >
+                                <ShoppingBag size={11} />
+                                {itemsCount > 0 ? `Ver Itens (${itemsCount})` : 'Ver Detalhes'}
+                              </button>
+                            )}
+                          </div>
                         </div>
-                        <span className="text-[11px] text-slate-500 shrink-0">{pair.reasonText}</span>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -624,6 +702,13 @@ export function CashMirrorRowDetailPanel({
           </div>
         </div>
       </div>
+
+      <CashOperationDetailModal
+        operationItem={inspectedOp?.item || null}
+        pairedItems={inspectedOp?.paired || []}
+        result={result}
+        onClose={() => setInspectedOp(null)}
+      />
     </div>
   );
 

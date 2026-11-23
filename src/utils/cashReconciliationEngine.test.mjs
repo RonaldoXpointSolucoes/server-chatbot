@@ -326,3 +326,56 @@ test('runCashReconciliation supports reclassify_system (Dinheiro->Cartao) and sa
   assert.equal(adjustedItem.category, 'cartao');
   assert.equal(adjustedItem.metadata.reclassifiedFrom, 'dinheiro');
 });
+
+test('runCashReconciliation integrates all 7 DataDivas reports of 20/11 and links items to operations', async () => {
+  const parsedFiles = [
+    await parseUploadedCashFile({
+      fileName: 'PlanilhaRecebimento_20_11.xlsx',
+      arrayBuffer: fs.readFileSync(`${UPLOAD_DIR}/media_1795399920235_e1d6e50f.xlsx`)
+    }),
+    await parseUploadedCashFile({
+      fileName: 'RelConferencia_20_11.xlsx',
+      arrayBuffer: fs.readFileSync(`${UPLOAD_DIR}/media_1795399920234_13d9ee40.xlsx`)
+    }),
+    await parseUploadedCashFile({
+      fileName: 'MovCaixa_20_11.txt',
+      textContent: fs.readFileSync(`${UPLOAD_DIR}/media_1795399920234_f94b9187.txt`, 'latin1')
+    }),
+    await parseUploadedCashFile({
+      fileName: 'Fechamento_Resumo_20_11.txt',
+      textContent: fs.readFileSync(`${UPLOAD_DIR}/media_1795399920234_cf61cab7.txt`, 'latin1')
+    }),
+    await parseUploadedCashFile({
+      fileName: 'ItensVendidos_20_11.xlsx',
+      arrayBuffer: fs.readFileSync(`${UPLOAD_DIR}/media_1795399840914_32008acd.xlsx`)
+    }),
+    await parseUploadedCashFile({
+      fileName: 'Cancelamentos_20_11.xlsx',
+      arrayBuffer: fs.readFileSync(`${UPLOAD_DIR}/media_1795399840914_2d8e87b4.xlsx`)
+    }),
+    await parseUploadedCashFile({
+      fileName: 'Descontos_20_11.xlsx',
+      arrayBuffer: fs.readFileSync(`${UPLOAD_DIR}/media_1795399840914_dc0c6dc9.xlsx`)
+    })
+  ];
+
+  const result = runCashReconciliation({ parsedFiles });
+  assert.equal(result.reportCompleteness.system.presentCount, 7);
+  assert.equal(result.reportCompleteness.system.totalExpected, 7);
+  assert.equal(result.reportCompleteness.bank.presentCount, 0);
+  assert.equal(result.reportCompleteness.warnings.length, 1);
+
+  const mesa2Credit = result.systemItems.find(
+    (s) => s.referenceCode === '002' && s.amountCents === 4800 && s.timeStr === '12:23:05'
+  );
+  assert.ok(mesa2Credit?.metadata?.orderDetail);
+  assert.equal(mesa2Credit.metadata.orderDetail.items.length, 2);
+  assert.equal(mesa2Credit.metadata.orderDetail.itemsSubtotalCents, 4800);
+
+  assert.equal(result.auditInsights.complementsCents, 57400);
+  assert.equal(result.auditInsights.internalConsumptionCostCents, 8809);
+  assert.equal(result.auditInsights.reopenedTables.length, 2);
+  assert.equal(result.auditInsights.cancelledDetails.length, 2);
+  assert.ok(result.auditInsights.feeRemovals.length > 0);
+  assert.ok(result.auditInsights.topProducts.length > 0);
+});

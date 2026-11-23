@@ -252,3 +252,98 @@ test('parseUploadedCashFile solicita senha na 1ª vez e abre C6 Pay automaticame
   assert.equal(autoUnlockedAttempt.summary.autoUnlocked, true);
   assert.equal(JSON.stringify(autoUnlockedAttempt).includes('220593'), false);
 });
+
+test('parseUploadedCashFile detects and parses all 7 DataDivas reports from 20/11 sample files accurately', async () => {
+  const soldBuf = fs.readFileSync(`${UPLOAD_DIR}/media_1795399840914_32008acd.xlsx`);
+  const soldRes = await parseUploadedCashFile({ fileName: 'ItensVendidos_20_11.xlsx', arrayBuffer: soldBuf });
+  assert.equal(soldRes.status, 'ok');
+  assert.equal(soldRes.fileType, 'pdv_itens_vendidos');
+  assert.equal(soldRes.summary.totalRows, 199);
+  assert.equal(soldRes.summary.complementsCents, 57400);
+  assert.ok(soldRes.summary.feeRemovalsCount > 0);
+
+  const cancBuf = fs.readFileSync(`${UPLOAD_DIR}/media_1795399840914_2d8e87b4.xlsx`);
+  const cancRes = await parseUploadedCashFile({ fileName: 'Cancelamentos_20_11.xlsx', arrayBuffer: cancBuf });
+  assert.equal(cancRes.status, 'ok');
+  assert.equal(cancRes.fileType, 'pdv_cancelamentos');
+  assert.equal(cancRes.rows.length, 2);
+  assert.equal(cancRes.summary.totalCancelledCents, 5500);
+  assert.equal(cancRes.rows[0].reasonDetails, 'era a marmita da cida');
+
+  const discBuf = fs.readFileSync(`${UPLOAD_DIR}/media_1795399840914_dc0c6dc9.xlsx`);
+  const discRes = await parseUploadedCashFile({ fileName: 'Descontos_20_11.xlsx', arrayBuffer: discBuf });
+  assert.equal(discRes.status, 'ok');
+  assert.equal(discRes.fileType, 'pdv_descontos');
+  assert.equal(discRes.rows.length, 0);
+
+  const resumoTxt = fs.readFileSync(`${UPLOAD_DIR}/media_1795399920234_cf61cab7.txt`, 'latin1');
+  const resumoRes = await parseUploadedCashFile({ fileName: 'Fechamento_Resumo.txt', textContent: resumoTxt });
+  assert.equal(resumoRes.status, 'ok');
+  assert.equal(resumoRes.fileType, 'fechamento_resumo_txt');
+  assert.equal(resumoRes.periodStart, '2026-11-20');
+  assert.equal(resumoRes.summary.consumoInternoCustoCents, 8809);
+  assert.equal(resumoRes.summary.caixaDescontos.length, 12);
+  assert.equal(resumoRes.summary.mesasTransferidas.length, 2);
+});
+
+test('parseUploadedCashFile unlocks real encrypted C6 Pay file even with headers above worksheet !ref', async () => {
+  const encryptedBuf = fs.readFileSync(
+    'C:/Users/NOTE-(FORM)02JUL26/.gemini/antigravity/brain/15c2c45d-2e4f-4867-9efb-2507905522dd/.user_uploaded/media_1795378790616_7c37f118.xlsx'
+  );
+
+  const locked = await parseUploadedCashFile({
+    fileName: 'Relatorio-Vendas-C6Pay_Detalhado.xlsx',
+    arrayBuffer: encryptedBuf
+  });
+  assert.equal(locked.status, 'password_required');
+  assert.equal(locked.fileType, 'adquirente_c6pay');
+
+  const unlocked = await parseUploadedCashFile({
+    fileName: 'Relatorio-Vendas-C6Pay_Detalhado.xlsx',
+    arrayBuffer: encryptedBuf,
+    password: '590758'
+  });
+  assert.equal(unlocked.status, 'ok');
+  assert.equal(unlocked.fileType, 'adquirente_c6pay');
+  assert.equal(unlocked.rows.length, 57);
+  assert.equal(unlocked.periodStart, '2026-11-19');
+});
+
+test('parseUploadedCashFile scans multiple sheets and attaches diagnostics on unrecognized workbooks', async () => {
+  const XLSX = await import('xlsx');
+  const XLSXLib = XLSX.utils ? XLSX : XLSX.default || XLSX;
+
+  const wb = XLSXLib.utils.book_new();
+  const coverSheet = XLSXLib.utils.aoa_to_sheet([['Resumo Gerencial'], ['Emitido em 20/11/2026']]);
+  const dataSheet = XLSXLib.utils.aoa_to_sheet([
+    ['Motivo', 'Desconto', 'Numero', 'Data', 'Hora', 'Funcionario', 'Turno', 'Origem'],
+    ['CORTESIA', 12.5, '010', '20/11/2026', '19:00', 'JOAO', '1', 'MESA']
+  ]);
+  XLSXLib.utils.book_append_sheet(wb, coverSheet, 'Resumo');
+  XLSXLib.utils.book_append_sheet(wb, dataSheet, 'Descontos');
+  const multiBuf = XLSXLib.write(wb, { type: 'array', bookType: 'xlsx' });
+
+  const multiRes = await parseUploadedCashFile({
+    fileName: 'multi_abas.xlsx',
+    arrayBuffer: multiBuf
+  });
+  assert.equal(multiRes.status, 'ok');
+  assert.equal(multiRes.fileType, 'pdv_descontos');
+  assert.equal(multiRes.rows.length, 1);
+
+  const unknownWb = XLSXLib.utils.book_new();
+  XLSXLib.utils.book_append_sheet(
+    unknownWb,
+    XLSXLib.utils.aoa_to_sheet([['Coluna A', 'Coluna B'], ['foo', 'bar']]),
+    'AbaEstranha'
+  );
+  const unknownBuf = XLSXLib.write(unknownWb, { type: 'array', bookType: 'xlsx' });
+  const unknownRes = await parseUploadedCashFile({
+    fileName: 'desconhecida.xlsx',
+    arrayBuffer: unknownBuf
+  });
+  assert.equal(unknownRes.status, 'error');
+  assert.ok(unknownRes.diagnostics);
+  assert.deepEqual(unknownRes.diagnostics.sheetNames, ['AbaEstranha']);
+  assert.equal(unknownRes.diagnostics.sheets[0].detectedKind, 'unknown');
+});

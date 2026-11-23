@@ -378,8 +378,12 @@ export async function decryptOoxmlPackage(buffer, password) {
   const major = readU16(infoBytes, 0);
   const minor = readU16(infoBytes, 2);
 
-  if (major === 4 && minor === 4) {
-    return decryptAgileEncryption(infoBytes, pkgBytes, String(password ?? ''));
-  }
-  return decryptStandardEncryption(infoBytes, pkgBytes, String(password ?? ''));
+  const decrypted =
+    major === 4 && minor === 4
+      ? await decryptAgileEncryption(infoBytes, pkgBytes, String(password ?? ''))
+      : await decryptStandardEncryption(infoBytes, pkgBytes, String(password ?? ''));
+
+  return decrypted.byteOffset === 0 && decrypted.byteLength === decrypted.buffer.byteLength
+    ? decrypted
+    : decrypted.slice();
 }

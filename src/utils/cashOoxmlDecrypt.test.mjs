@@ -104,3 +104,14 @@ test('decryptOoxmlPackage roundtrips Agile 4.4 4096-byte segment ending in 0x01 
   assert.equal(decrypted.length, plain.length);
   assert.equal(decrypted[4095], 0x01);
 });
+
+test('decryptOoxmlPackage unlocks real Standard 4.2 encrypted C6 Pay workbook into valid OOXML zip', async () => {
+  const realEncrypted = fs.readFileSync(
+    'C:/Users/NOTE-(FORM)02JUL26/.gemini/antigravity/brain/15c2c45d-2e4f-4867-9efb-2507905522dd/.user_uploaded/media_1795378790616_7c37f118.xlsx'
+  );
+  const decrypted = await decryptOoxmlPackage(realEncrypted, '590758');
+  assert.equal(decrypted.length, 26920);
+  assert.deepEqual(Array.from(decrypted.slice(0, 4)), [0x50, 0x4b, 0x03, 0x04]);
+  assert.equal(decrypted.byteOffset, 0);
+  assert.equal(decrypted.byteLength, decrypted.buffer.byteLength);
+});

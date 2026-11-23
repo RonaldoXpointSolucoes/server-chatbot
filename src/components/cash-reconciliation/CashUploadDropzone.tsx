@@ -13,8 +13,12 @@ import {
   Loader2
 } from 'lucide-react';
 
-import { ParsedCashFileResult } from '../../types/cashReconciliation';
+import {
+  ParsedCashFileResult,
+  CashReportCompleteness
+} from '../../types/cashReconciliation';
 import { formatDateBr } from '../../utils/cashReconciliationServiceHelper.mjs';
+import { CashReportCompletenessBanner } from './CashReportCompletenessBanner';
 
 export interface UploadedCashFileItem {
   id: string;
@@ -27,8 +31,23 @@ export interface UploadedCashFileItem {
 
 const FILE_TYPE_META: Record<string, { label: string; colorClass: string; icon: React.ReactNode }> = {
   pdv_vendas: {
-    label: 'PDV Vendas (DataDivas)',
+    label: 'PDV Vendas (Recebimentos)',
     colorClass: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20',
+    icon: <FileSpreadsheet size={15} />
+  },
+  pdv_itens_vendidos: {
+    label: 'PDV Itens Vendidos',
+    colorClass: 'bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/20',
+    icon: <FileSpreadsheet size={15} />
+  },
+  pdv_cancelamentos: {
+    label: 'PDV Cancelamentos',
+    colorClass: 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20',
+    icon: <FileSpreadsheet size={15} />
+  },
+  pdv_descontos: {
+    label: 'PDV Descontos',
+    colorClass: 'bg-pink-500/10 text-pink-600 dark:text-pink-400 border-pink-500/20',
     icon: <FileSpreadsheet size={15} />
   },
   rel_conferencia: {
@@ -37,7 +56,12 @@ const FILE_TYPE_META: Record<string, { label: string; colorClass: string; icon: 
     icon: <FileSpreadsheet size={15} />
   },
   fechamento_txt: {
-    label: 'Fechamento PDV (.txt)',
+    label: 'Fita Mov.Caixa (.txt)',
+    colorClass: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20',
+    icon: <FileText size={15} />
+  },
+  fechamento_resumo_txt: {
+    label: 'Fita Fechamento & Controle (.txt)',
     colorClass: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20',
     icon: <FileText size={15} />
   },
@@ -72,6 +96,7 @@ interface CashUploadDropzoneProps {
   files: UploadedCashFileItem[];
   isProcessing: boolean;
   savedPasswordsCount?: number;
+  reportCompleteness?: CashReportCompleteness | null;
   onAddFiles: (fileList: FileList | File[]) => void;
   onUnlockPasswordFile: (fileId: string, password: string, saveFixed?: boolean) => Promise<boolean> | void;
   onOpenPasswordModal?: (fileId: string) => void;
@@ -82,6 +107,7 @@ export function CashUploadDropzone({
   files,
   isProcessing,
   savedPasswordsCount = 0,
+  reportCompleteness = null,
   onAddFiles,
   onUnlockPasswordFile,
   onOpenPasswordModal,
@@ -162,6 +188,10 @@ export function CashUploadDropzone({
           </button>
         </div>
       </div>
+
+      {files.length > 0 && reportCompleteness && (
+        <CashReportCompletenessBanner completeness={reportCompleteness} />
+      )}
 
       {files.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">

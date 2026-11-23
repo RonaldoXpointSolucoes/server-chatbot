@@ -13,8 +13,10 @@ import {
 } from 'lucide-react';
 import { useChatStore } from '../store/chatStore';
 import { parseUploadedCashFile } from '../utils/cashFileParsers.mjs';
+import { logCashFileParseResult, logCashUnexpectedError } from '../utils/cashDevLogger';
 import { mergeCompanyFormulaRules } from '../utils/cashFormulaRules.mjs';
 import { runCashReconciliation } from '../utils/cashReconciliationEngine.mjs';
+import { assessCashReportCompleteness } from '../utils/cashReportCompleteness.mjs';
 import { buildCashReconciliationMigrationSql } from '../utils/cashReconciliationSchema.mjs';
 import {
   computeHistoricalHealthStats,
@@ -178,7 +180,11 @@ export default function CashReconciliationPage() {
         }
       }
     } catch (err: unknown) {
-      console.error('[Conferência Caixa] Erro ao carregar histórico:', err);
+      logCashUnexpectedError({
+        action: 'carregar histórico',
+        err,
+        tenantId
+      });
     }
   }, [tenantId, applyLoadedSession]);
 
@@ -223,6 +229,13 @@ export default function CashReconciliationPage() {
             matchedAutoPassword = pwd;
           }
         });
+        logCashFileParseResult({
+          stage: 'upload',
+          fileName: file.name,
+          fileSizeBytes: file.size,
+          parsed,
+          tenantId
+        });
         if (parsed.status === 'ok' && parsed.summary?.autoUnlocked) {
           autoUnlockedCount += 1;
           if (tenantId && matchedAutoPassword && !currentSavedPasswords.some(sp => sp.password === matchedAutoPassword)) {
@@ -250,15 +263,24 @@ export default function CashReconciliationPage() {
       }
 
       setFiles((prev) => {
+        const SINGLETON_SYSTEM_TYPES = new Set([
+          'pdv_vendas',
+          'pdv_itens_vendidos',
+          'pdv_cancelamentos',
+          'pdv_descontos',
+          'rel_conferencia',
+          'fechamento_txt',
+          'fechamento_resumo_txt'
+        ]);
         const byType = new Map<string, UploadedCashFileItem>();
         for (const existing of prev) {
-          const key = existing.parsed?.fileType && ['pdv_vendas', 'rel_conferencia', 'fechamento_txt'].includes(existing.parsed.fileType)
+          const key = existing.parsed?.fileType && SINGLETON_SYSTEM_TYPES.has(existing.parsed.fileType)
             ? existing.parsed.fileType
             : existing.id;
           byType.set(key, existing);
         }
         for (const item of parsedItems) {
-          const key = item.parsed?.fileType && ['pdv_vendas', 'rel_conferencia', 'fechamento_txt'].includes(item.parsed.fileType)
+          const key = item.parsed?.fileType && SINGLETON_SYSTEM_TYPES.has(item.parsed.fileType)
             ? item.parsed.fileType
             : item.id;
           byType.set(key, item);
@@ -270,12 +292,24 @@ export default function CashReconciliationPage() {
       if (firstLocked) {
         setPasswordModalFileId(firstLocked.id);
       }
+      const failedCount = parsedItems.filter(it => it.parsed?.status === 'error').length;
+      if (failedCount > 0) {
+        const firstErr = parsedItems.find(it => it.parsed?.status === 'error');
+        notifyToast(firstErr?.parsed?.errorMessage || 'Alguns arquivos não foram reconhecidos.', 'error');
+      }
       if (autoUnlockedCount > 0) {
         notifyToast(
           `${autoUnlockedCount} planilha(s) protegida(s) aberta(s) automaticamente com a senha fixa salva!`,
           'success'
         );
       }
+    } catch (err: unknown) {
+      logCashUnexpectedError({
+        action: 'processar arquivos enviados',
+        err,
+        tenantId
+      });
+      notifyToast(extractCashErrorMessage(err, 'Erro inesperado ao processar arquivo.'), 'error');
     } finally {
       setIsProcessingFiles(false);
     }
@@ -297,13 +331,44 @@ export default function CashReconciliationPage() {
         }
       });
 
+      logCashFileParseResult({
+        stage: 'password_unlock',
+        fileName: target.fileName,
+        fileSizeBytes: target.fileSizeBytes,
+        parsed,
+        tenantId,
+        passwordLength: password.trim().length
+      });
+
+      const effectivePassword = matchedPassword || (parsed.status !== 'password_required' ? password : '');
+      if (saveFixed && effectivePassword && tenantId && parsed.status !== 'password_required') {
+        const savedRes = await upsertCashSavedFilePassword(tenantId, {
+          fileName: target.fileName,
+          fileType: parsed.fileType,
+          password: effectivePassword
+        });
+        if (typeof window !== 'undefined') {
+          setLocalSavedPasswords(loadSavedFilePasswordsFromStorage(window.localStorage, tenantId) as SavedCashFilePassword[]);
+        }
+        if (savedRes.rule) {
+          setRules(prev => [savedRes.rule!, ...prev.filter(r => r.id !== savedRes.rule!.id)]);
+        }
+      }
+
       if (parsed.status !== 'ok') {
-        setFiles(prev => prev.map(f => (f.id === fileId ? { ...f, parsed } : f)));
+        let nextRemainingLockedId: string | null = parsed.status === 'password_required' ? fileId : null;
+        setFiles(prev => {
+          const nextFiles = prev.map(f => (f.id === fileId ? { ...f, parsed } : f));
+          if (parsed.status !== 'password_required') {
+            nextRemainingLockedId = nextFiles.find(f => f.parsed?.status === 'password_required')?.id || null;
+          }
+          return nextFiles;
+        });
+        setPasswordModalFileId(nextRemainingLockedId);
         notifyToast(parsed.errorMessage || 'Senha inválida.', 'error');
         return false;
       }
 
-      const effectivePassword = matchedPassword || password;
       const unlockedPeers = new Map<string, ParsedCashFileResult>([[fileId, parsed]]);
 
       for (const peer of filesRef.current) {
@@ -313,6 +378,14 @@ export default function CashReconciliationPage() {
           arrayBuffer: peer.arrayBuffer,
           password: effectivePassword,
           rulesConfig
+        });
+        logCashFileParseResult({
+          stage: 'password_unlock',
+          fileName: peer.fileName,
+          fileSizeBytes: peer.fileSizeBytes,
+          parsed: peerParsed,
+          tenantId,
+          passwordLength: effectivePassword.length
         });
         if (peerParsed.status === 'ok') {
           unlockedPeers.set(peer.id, peerParsed);
@@ -327,20 +400,6 @@ export default function CashReconciliationPage() {
       });
       setPasswordModalFileId(nextRemainingLockedId);
 
-      if (saveFixed && effectivePassword && tenantId) {
-        const savedRes = await upsertCashSavedFilePassword(tenantId, {
-          fileName: target.fileName,
-          fileType: parsed.fileType,
-          password: effectivePassword
-        });
-        if (typeof window !== 'undefined') {
-          setLocalSavedPasswords(loadSavedFilePasswordsFromStorage(window.localStorage, tenantId) as SavedCashFilePassword[]);
-        }
-        if (savedRes.rule) {
-          setRules(prev => [savedRes.rule!, ...prev.filter(r => r.id !== savedRes.rule!.id)]);
-        }
-      }
-
       notifyToast(
         saveFixed
           ? `Arquivo "${target.fileName}" desbloqueado e senha fixa salva para os próximos envios!`
@@ -348,6 +407,15 @@ export default function CashReconciliationPage() {
         'success'
       );
       return true;
+    } catch (err: unknown) {
+      logCashUnexpectedError({
+        action: 'desbloquear planilha protegida',
+        err,
+        tenantId,
+        context: { fileId, fileName: target.fileName, fileSizeBytes: target.fileSizeBytes }
+      });
+      notifyToast(extractCashErrorMessage(err, 'Erro inesperado ao desbloquear planilha.'), 'error');
+      return false;
     } finally {
       setIsProcessingFiles(false);
     }
@@ -382,6 +450,12 @@ export default function CashReconciliationPage() {
       if (!session) return;
       applyLoadedSession(session);
     } catch (err: unknown) {
+      logCashUnexpectedError({
+        action: 'abrir sessão salva',
+        err,
+        tenantId,
+        context: { sessionId }
+      });
       notifyToast(extractCashErrorMessage(err, 'Erro ao abrir sessão salva.'), 'error');
     }
   };
@@ -428,6 +502,12 @@ export default function CashReconciliationPage() {
         res.schemaMissing ? 'warning' : 'success'
       );
     } catch (err: unknown) {
+      logCashUnexpectedError({
+        action: markClosed ? 'fechar caixa' : 'salvar rascunho',
+        err,
+        tenantId,
+        context: { activeSessionId, filesCount: files.length }
+      });
       notifyToast(`Erro ao salvar: ${extractCashErrorMessage(err)}`, 'error');
     } finally {
       setIsSaving(false);
@@ -448,6 +528,12 @@ export default function CashReconciliationPage() {
       setAiAnalysis(analysis);
       notifyToast('Auditoria com IA concluída!', 'success');
     } catch (err: unknown) {
+      logCashUnexpectedError({
+        action: 'consultar Auditor IA',
+        err,
+        tenantId,
+        context: { questionLength: question?.length || 0 }
+      });
       notifyToast(extractCashErrorMessage(err, 'Erro ao consultar IA.'), 'error');
     } finally {
       setIsAnalyzingAi(false);
@@ -561,6 +647,10 @@ export default function CashReconciliationPage() {
           files={files}
           isProcessing={isProcessingFiles}
           savedPasswordsCount={savedFilePasswords.length}
+          reportCompleteness={
+            reconciliationResult?.reportCompleteness ||
+            (files.length > 0 ? assessCashReportCompleteness(files) : null)
+          }
           onAddFiles={handleAddFiles}
           onUnlockPasswordFile={handleUnlockPasswordFile}
           onOpenPasswordModal={(id) => setPasswordModalFileId(id)}

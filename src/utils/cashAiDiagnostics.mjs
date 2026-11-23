@@ -12,6 +12,9 @@ export function buildCashAiAnalysisPrompt({
   rulesConfig = {},
   userQuestion = ''
 }) {
+  const audit = reconciliation?.auditInsights || {};
+  const completeness = reconciliation?.reportCompleteness;
+
   const missingList = (reconciliation?.missingInBank || []).slice(0, 40).map(item => ({
     id: item.id,
     valor: formatCentsBrl(item.amountCents),
@@ -85,6 +88,12 @@ ${JSON.stringify(errorsCompact, null, 2)}
 
 REGRAS ATUAIS DA FÓRMULA 1:
 ${JSON.stringify(activeRulesCompact, null, 2)}
+
+AUDITORIA DOS 7 RELATÓRIOS DATADIVAS + 3 BANCO:
+- Relatórios faltantes: ${JSON.stringify(completeness?.warnings || [])}
+- Mesas reabertas / recebimentos excluídos: ${JSON.stringify((audit.reopenedTables || []).slice(0, 10))}
+- Remoções de taxa de serviço (10%): ${JSON.stringify((audit.feeRemovals || []).slice(0, 15).map((r) => ({ pedido: r.orderNumber, prod: r.product, motivo: r.reason, detalhe: r.details, op: r.operator })))}
+- Cancelamentos detalhados: ${JSON.stringify((audit.cancelledDetails || []).slice(0, 15).map((c) => ({ pedido: c.table, prod: c.product, valor: formatCentsBrl(c.totalCents), motivo: c.reason, detalhe: c.reasonDetails, op: c.operator })))}
 
 RESPONDA APENAS COM UM OBJETO JSON CONTENDO:
 {

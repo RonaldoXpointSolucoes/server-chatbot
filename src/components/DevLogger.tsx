@@ -1239,6 +1239,11 @@ export default function DevLogger() {
       if (typeof args[0] === 'string' && (args[0].includes('[useWaCallsStore') || args[0].includes('wacalls') || args[0].includes('WaCalls'))) return;
       // Evitar spam de lock do Supabase gotrue-js
       if (typeof args[0] === 'string' && (args[0].includes('@supabase/gotrue-js') || args[0].includes('auth-token') || args[0].includes('orphaned lock') || args[0].includes('lock:sb-'))) return;
+      // Conferência Caixa já grava log estruturado diretamente em useDevStore; manter saída no console do navegador sem duplicar no DevLogger
+      if (typeof args[0] === 'string' && args[0].includes('[Conferência Caixa]')) {
+        originalConsoleError.apply(console, args);
+        return;
+      }
 
       const serializedArgs = args.map(arg => {
         if (arg instanceof Error) {
@@ -1267,6 +1272,11 @@ export default function DevLogger() {
       if (typeof args[0] === 'string' && (args[0].includes('[History Sync]') || args[0].includes('socket zumbi'))) return;
       // Evitar que o próprio DevLogger capture avisos internos de polling de telemetria
       if (typeof args[0] === 'string' && (args[0].includes('[DevLogger]') || args[0].includes('Telemetria temporariamente') || args[0].includes('Telemetria em espera'))) return;
+      // Conferência Caixa já grava log estruturado diretamente em useDevStore; manter saída no console sem duplicar
+      if (typeof args[0] === 'string' && args[0].includes('[Conferência Caixa]')) {
+        originalConsoleWarn.apply(console, args);
+        return;
+      }
       
       addLog({
         type: 'warn',

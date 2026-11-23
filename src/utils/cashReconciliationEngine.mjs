@@ -1,9 +1,15 @@
 import { DEFAULT_FORMULA_CONFIG } from './cashFormulaRules.mjs';
+import { assessCashReportCompleteness } from './cashReportCompleteness.mjs';
+import { buildAuditInsights, linkSoldItemsToPdvOperations } from './cashOperationItemsHelper.mjs';
 
 function buildNormalizedInputs(parsedFiles) {
   let pdvFile = null;
   let relConfFile = null;
   let txtFile = null;
+  let summaryTxtFile = null;
+  let soldItemsFile = null;
+  let cancelledFile = null;
+  let discountsFile = null;
   const ofxFiles = [];
   const redeFiles = [];
   const c6PayFiles = [];
@@ -13,12 +19,27 @@ function buildNormalizedInputs(parsedFiles) {
     if (f.fileType === 'pdv_vendas') pdvFile = f;
     else if (f.fileType === 'rel_conferencia') relConfFile = f;
     else if (f.fileType === 'fechamento_txt') txtFile = f;
+    else if (f.fileType === 'fechamento_resumo_txt') summaryTxtFile = f;
+    else if (f.fileType === 'pdv_itens_vendidos') soldItemsFile = f;
+    else if (f.fileType === 'pdv_cancelamentos') cancelledFile = f;
+    else if (f.fileType === 'pdv_descontos') discountsFile = f;
     else if (f.fileType === 'extrato_ofx' || f.fileType === 'extrato_generico') ofxFiles.push(f);
     else if (f.fileType === 'adquirente_rede') redeFiles.push(f);
     else if (f.fileType === 'adquirente_c6pay') c6PayFiles.push(f);
   }
 
-  return { pdvFile, relConfFile, txtFile, ofxFiles, redeFiles, c6PayFiles };
+  return {
+    pdvFile,
+    relConfFile,
+    txtFile,
+    summaryTxtFile,
+    soldItemsFile,
+    cancelledFile,
+    discountsFile,
+    ofxFiles,
+    redeFiles,
+    c6PayFiles
+  };
 }
 
 function shortHash(str) {
@@ -112,7 +133,18 @@ export function runCashReconciliation({
 }) {
   const cfg = { ...DEFAULT_FORMULA_CONFIG, ...(rulesConfig || {}) };
   const tol = Number.isFinite(cfg.amountToleranceCents) ? cfg.amountToleranceCents : 1;
-  const { pdvFile, relConfFile, txtFile, ofxFiles, redeFiles, c6PayFiles } = buildNormalizedInputs(parsedFiles);
+  const {
+    pdvFile,
+    relConfFile,
+    txtFile,
+    summaryTxtFile,
+    soldItemsFile,
+    cancelledFile,
+    discountsFile,
+    ofxFiles,
+    redeFiles,
+    c6PayFiles
+  } = buildNormalizedInputs(parsedFiles);
   const nextId = createIdGenerator();
 
   // 1. Itens de Sistema (PDV)
@@ -666,12 +698,53 @@ export function runCashReconciliation({
   const totalMdrFeeCents = activeRealItems.reduce((s, r) => s + (r.feeCents || 0), 0);
   const totalNetDigitalCents = activeRealItems.reduce((s, r) => s + (r.netAmountCents ?? r.amountCents), 0);
 
-  const referenceDate = pdvFile?.periodStart || txtFile?.periodStart || redeFiles[0]?.periodStart || c6PayFiles[0]?.periodStart || ofxFiles[0]?.periodStart || new Date().toISOString().slice(0, 10);
+  // Correlação Operação (Mesa/Balcão/Delivery) -> Itens Vendidos + Auditoria Completa (7 DataDivas + 3 Banco)
+  if (soldItemsFile?.rows?.length) {
+    const orderDetailsBySystemId = linkSoldItemsToPdvOperations({
+      systemItems,
+      soldItems: soldItemsFile.rows
+    });
+    for (const sys of systemItems) {
+      if (orderDetailsBySystemId[sys.id]) {
+        sys.metadata = { ...(sys.metadata || {}), orderDetail: orderDetailsBySystemId[sys.id] };
+      }
+    }
+  }
+
+  const reportCompleteness = assessCashReportCompleteness(parsedFiles);
+  const auditInsights = buildAuditInsights({
+    soldItemsFile,
+    cancelledFile,
+    discountsFile,
+    txtFile,
+    summaryTxtFile,
+    pdvFile
+  });
+
+  const referenceDate =
+    pdvFile?.periodStart ||
+    txtFile?.periodStart ||
+    summaryTxtFile?.periodStart ||
+    soldItemsFile?.periodStart ||
+    redeFiles[0]?.periodStart ||
+    c6PayFiles[0]?.periodStart ||
+    ofxFiles[0]?.periodStart ||
+    new Date().toISOString().slice(0, 10);
+
+  const effectiveCancelledCount =
+    auditInsights.cancelledDetails.length > 0 ? auditInsights.cancelledDetails.length : (txtSum.canceladosQty || 0);
+  const effectiveCancelledCents =
+    cancelledFile?.summary?.totalCancelledCents || txtSum.canceladosCents || 0;
+  const effectiveDiscountsCents =
+    txtSum.descontosCents ||
+    summaryTxtFile?.summary?.descontosCents ||
+    discountsFile?.summary?.totalDiscountCents ||
+    0;
 
   return {
     referenceDate,
-    storeName: txtSum.storeName || '',
-    operatorName: txtSum.operatorName || '',
+    storeName: txtSum.storeName || summaryTxtFile?.summary?.storeName || '',
+    operatorName: txtSum.operatorName || summaryTxtFile?.summary?.operatorName || '',
     status,
     healthScore: rawScore,
     systemTotalCents,
@@ -679,6 +752,8 @@ export function runCashReconciliation({
     diffTotalCents,
     digitalDiffCents,
     mirrorRows,
+    reportCompleteness,
+    auditInsights,
     cashDrawerSummary: {
       fundoManhaCents,
       vendaDinheiroCents,
@@ -707,11 +782,11 @@ export function runCashReconciliation({
     financialMetrics: {
       totalMdrFeeCents,
       totalNetDigitalCents,
-      cancelledCount: txtSum.canceladosQty || 0,
-      cancelledCents: txtSum.canceladosCents || 0,
+      cancelledCount: effectiveCancelledCount,
+      cancelledCents: effectiveCancelledCents,
       cancelledItems: txtSum.cancelledItems || [],
-      internalConsumptionCents: txtSum.consumoInternoCents || pdvTotals.consumoInterno,
-      discountsCents: txtSum.descontosCents || 0,
+      internalConsumptionCents: txtSum.consumoInternoCents || summaryTxtFile?.summary?.consumoInternoCents || pdvTotals.consumoInterno,
+      discountsCents: effectiveDiscountsCents,
       deliveryFeeCents: txtSum.taxaEntregaCents || 0,
       serviceFeeCents: txtSum.taxaCasaCents || 0,
       pendingDebtors: txtSum.pendingDebtors || [],

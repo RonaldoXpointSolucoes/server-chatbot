@@ -94,6 +94,8 @@ export function buildSessionPersistencePayload({
       mirrorRows: result.mirrorRows || [],
       cashDrawerSummary: result.cashDrawerSummary || {},
       financialMetrics: result.financialMetrics || {},
+      reportCompleteness: result.reportCompleteness || null,
+      auditInsights: result.auditInsights || null,
       manualInputs,
       manualResolutions,
       parsedFilesSnapshot
@@ -377,6 +379,7 @@ export function pickMostRecentOpenDraftSession(sessions = []) {
 
 export function buildHealthMetricDetail(result = {}, metricKey = '') {
   const metrics = result.financialMetrics || {};
+  const audit = result.auditInsights || {};
   const realItems = Array.isArray(result.realItems) ? result.realItems : [];
   const drawer = result.cashDrawerSummary || {};
   const getMirror = (k) => (result.mirrorRows || []).find(r => r.key === k) || { systemCents: 0, realCents: 0, diffCents: 0 };
@@ -424,11 +427,13 @@ export function buildHealthMetricDetail(result = {}, metricKey = '') {
   }
 
   if (metricKey === 'cancelled') {
+    const detailed = Array.isArray(audit.cancelledDetails) ? audit.cancelledDetails : [];
     return {
       metricKey,
-      cancelledCount: Number(metrics.cancelledCount || 0),
+      cancelledCount: Number(metrics.cancelledCount || detailed.length || 0),
       cancelledCents: Number(metrics.cancelledCents || 0),
-      items: Array.isArray(metrics.cancelledItems) ? metrics.cancelledItems : []
+      items: Array.isArray(metrics.cancelledItems) ? metrics.cancelledItems : [],
+      detailedItems: detailed
     };
   }
 
@@ -437,7 +442,9 @@ export function buildHealthMetricDetail(result = {}, metricKey = '') {
       metricKey,
       discountsCents: Number(metrics.discountsCents || 0),
       internalConsumptionCents: Number(metrics.internalConsumptionCents || 0),
-      systemTotalCents: Number(result.systemTotalCents || 0)
+      internalConsumptionCostCents: Number(audit.internalConsumptionCostCents || 0),
+      systemTotalCents: Number(result.systemTotalCents || 0),
+      discountDetails: Array.isArray(audit.discountDetails) ? audit.discountDetails : []
     };
   }
 
@@ -448,7 +455,8 @@ export function buildHealthMetricDetail(result = {}, metricKey = '') {
       metricKey,
       deliveryFeeCents,
       serviceFeeCents,
-      totalCents: deliveryFeeCents + serviceFeeCents
+      totalCents: deliveryFeeCents + serviceFeeCents,
+      feeRemovals: Array.isArray(audit.feeRemovals) ? audit.feeRemovals : []
     };
   }
 
@@ -463,7 +471,11 @@ export function buildHealthMetricDetail(result = {}, metricKey = '') {
     revenueConsideredCents: pixSys + cardSys + cashSys,
     pendingCount: Array.isArray(metrics.pendingDebtors) ? metrics.pendingDebtors.length : 0,
     pendingCents: pendSys,
-    internalConsumptionCents: Number(metrics.internalConsumptionCents || 0)
+    internalConsumptionCents: Number(metrics.internalConsumptionCents || 0),
+    topProducts: Array.isArray(audit.topProducts) ? audit.topProducts : [],
+    byWaiter: Array.isArray(audit.byWaiter) ? audit.byWaiter : [],
+    byModule: Array.isArray(audit.byModule) ? audit.byModule : [],
+    complementsCents: Number(audit.complementsCents || 0)
   };
 }
 

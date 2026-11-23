@@ -18,11 +18,13 @@ import {
 } from '../utils/cashFilePasswordHelper.mjs';
 import {
   CashAiAnalysis,
+  CashAuditInsights,
   CashManualInputs,
   CashMirrorRow,
   CashDrawerSummary,
   CashFinancialMetrics,
   CashReconciliationResult,
+  CashReportCompleteness,
   CashResolutionAction,
   ParsedCashFileResult,
   SavedCashFilePassword
@@ -32,6 +34,8 @@ export interface ReconciledSummarySnapshot {
   mirrorRows?: CashMirrorRow[];
   cashDrawerSummary?: CashDrawerSummary;
   financialMetrics?: CashFinancialMetrics;
+  reportCompleteness?: CashReportCompleteness;
+  auditInsights?: CashAuditInsights;
   manualInputs?: CashManualInputs;
   manualResolutions?: CashResolutionAction[];
   parsedFilesSnapshot?: ParsedCashFileResult[];

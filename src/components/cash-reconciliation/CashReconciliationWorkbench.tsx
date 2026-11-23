@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import {
   CashAiAnalysis,
+  CashAuditInsights,
   CashManualInputs,
   CashMirrorRow,
   CashReconciliationItem,
@@ -798,6 +799,10 @@ export function CashReconciliationWorkbench({
                 <p className="text-slate-400">Nenhuma duplicidade detectada.</p>
               )}
             </div>
+
+            {result.auditInsights && (
+              <CashAuditInsightsSection insights={result.auditInsights} />
+            )}
           </div>
         )}
 
@@ -1102,6 +1107,104 @@ function SavedFilePasswordsCard({
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function CashAuditInsightsSection({ insights }: { insights: CashAuditInsights }) {
+  return (
+    <div className="space-y-4">
+      {(insights.reopenedTables.length > 0 || insights.feeRemovals.length > 0 || insights.zeroPdvReceipts.length > 0) && (
+        <div className="rounded-2xl border border-rose-500/25 bg-rose-500/5 p-4 space-y-3">
+          <h4 className="font-black uppercase text-[11px] text-rose-600 dark:text-rose-400">
+            Superpoderes de Auditoria — Alertas de Caixa & Risco Operacional
+          </h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+            {insights.reopenedTables.length > 0 && (
+              <div className="rounded-xl bg-white dark:bg-[#111b21] border border-rose-500/20 p-3 space-y-1.5">
+                <p className="font-black text-rose-600 dark:text-rose-400 text-[11px] uppercase">
+                  Mesas Reabertas / Recebimentos Excluídos ({insights.reopenedTables.length})
+                </p>
+                {insights.reopenedTables.map((r, i) => (
+                  <p key={i} className="text-slate-700 dark:text-[#d1d7db] text-[11px]">• {r.rawText}</p>
+                ))}
+              </div>
+            )}
+            {insights.zeroPdvReceipts.length > 0 && (
+              <div className="rounded-xl bg-white dark:bg-[#111b21] border border-amber-500/20 p-3 space-y-1.5">
+                <p className="font-black text-amber-600 dark:text-amber-400 text-[11px] uppercase">
+                  Recebimentos Zerados R$ 0,00 ({insights.zeroPdvReceipts.length})
+                </p>
+                {insights.zeroPdvReceipts.map((z, i) => (
+                  <p key={i} className="text-slate-700 dark:text-[#d1d7db] text-[11px]">• {z.rawText}</p>
+                ))}
+              </div>
+            )}
+          </div>
+          {insights.feeRemovals.length > 0 && (
+            <div className="rounded-xl bg-white dark:bg-[#111b21] border border-amber-500/20 p-3 space-y-1.5">
+              <p className="font-black text-amber-600 dark:text-amber-400 text-[11px] uppercase">
+                Remoções de Taxa de Serviço 10% ({insights.feeRemovals.length} item(ns))
+              </p>
+              <div className="divide-y divide-slate-100 dark:divide-[#2a3942] max-h-48 overflow-y-auto">
+                {insights.feeRemovals.slice(0, 12).map((fr, i) => (
+                  <div key={i} className="py-1 flex items-center justify-between gap-2 text-[11px]">
+                    <span className="truncate">
+                      <strong>{fr.module || 'MESA'} {fr.orderNumber}</strong> • {fr.product} ({fr.reason || '-'})
+                    </span>
+                    <span className="text-slate-500 shrink-0">Op: {fr.operator || '-'}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {(insights.byModule.length > 0 || insights.byWaiter.length > 0 || insights.topProducts.length > 0) && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {insights.topProducts.length > 0 && (
+            <div className="rounded-2xl border border-slate-200 dark:border-[#2a3942] p-4 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <h4 className="font-black uppercase text-[11px] text-slate-600 dark:text-[#aebac1]">
+                  Top Produtos Vendidos ({insights.totalSoldItemsCount} itens)
+                </h4>
+                {insights.complementsCents > 0 && (
+                  <span className="text-[10.5px] font-bold text-indigo-500">
+                    + Complementos: {formatCents(insights.complementsCents)}
+                  </span>
+                )}
+              </div>
+              <div className="divide-y divide-slate-100 dark:divide-[#2a3942]">
+                {insights.topProducts.slice(0, 8).map((p, i) => (
+                  <div key={i} className="py-1.5 flex items-center justify-between gap-2 text-xs">
+                    <span className="truncate text-slate-700 dark:text-[#d1d7db]">{p.qty}x {p.name}</span>
+                    <strong className="tabular-nums text-emerald-600 dark:text-emerald-400 shrink-0">{formatCents(p.totalCents)}</strong>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {insights.byWaiter.length > 0 && (
+            <div className="rounded-2xl border border-slate-200 dark:border-[#2a3942] p-4 space-y-2">
+              <h4 className="font-black uppercase text-[11px] text-slate-600 dark:text-[#aebac1]">
+                Vendas por Garçom & Canal ({insights.byModule.map((m) => `${m.module}: ${formatCents(m.totalCents)}`).join(' • ')})
+              </h4>
+              <div className="divide-y divide-slate-100 dark:divide-[#2a3942]">
+                {insights.byWaiter.slice(0, 8).map((w, i) => (
+                  <div key={i} className="py-1.5 flex items-center justify-between gap-2 text-xs">
+                    <span className="truncate text-slate-700 dark:text-[#d1d7db]">
+                      {w.name} <span className="text-[10.5px] text-slate-400">({w.itemsCount} itens{w.feeRemovalsCount > 0 ? ` • ${w.feeRemovalsCount} sem taxa` : ''})</span>
+                    </span>
+                    <strong className="tabular-nums text-slate-900 dark:text-white shrink-0">{formatCents(w.totalCents)}</strong>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

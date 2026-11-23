@@ -203,7 +203,18 @@ export function CashMetricDetailModal({ metricKey, result, onClose }: CashMetric
           })()}
 
           {metricKey === 'cancelled' && (() => {
-            const items = (detail.items as Array<{ table: string; item: string; qty: number }>) || [];
+            const detailed = (detail.detailedItems as Array<{
+              product: string;
+              qty: number;
+              totalCents: number;
+              table: string;
+              timeStr?: string;
+              waiter?: string;
+              operator?: string;
+              reason?: string;
+              reasonDetails?: string;
+            }>) || [];
+            const fallbackItems = (detail.items as Array<{ table: string; item: string; qty: number }>) || [];
             return (
               <>
                 <div className="rounded-2xl bg-slate-50 dark:bg-[#202c33] border border-slate-200 dark:border-[#2a3942] p-4 flex items-center justify-between">
@@ -216,11 +227,35 @@ export function CashMetricDetailModal({ metricKey, result, onClose }: CashMetric
                     <p className="text-lg font-black text-rose-500 tabular-nums">{formatCents(Number(detail.cancelledCents || 0))}</p>
                   </div>
                 </div>
-                {items.length === 0 ? (
-                  <p className="text-slate-500 py-4 text-center">Nenhum item cancelado discriminado no fechamento .txt.</p>
+                {detailed.length > 0 ? (
+                  <div className="rounded-2xl border border-slate-200 dark:border-[#2a3942] divide-y divide-slate-100 dark:divide-[#2a3942]">
+                    {detailed.map((it, idx) => (
+                      <div key={idx} className="px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div className="space-y-0.5">
+                          <p className="font-bold text-slate-900 dark:text-white">
+                            {it.qty}x {it.product} <span className="text-slate-400 font-semibold">• Pedido/Mesa {it.table || '-'}</span>
+                          </p>
+                          {(it.reason || it.reasonDetails || it.waiter || it.operator) && (
+                            <p className="text-[11px] text-rose-600 dark:text-rose-300">
+                              Motivo: <strong>{it.reason || '-'}</strong>
+                              {it.reasonDetails ? ` ("${it.reasonDetails}")` : ''} • Garçom: {it.waiter || '-'} • Op: {it.operator || '-'}
+                            </p>
+                          )}
+                        </div>
+                        <div className="text-left sm:text-right shrink-0 tabular-nums">
+                          {it.totalCents > 0 && (
+                            <p className="font-black text-rose-500">{formatCents(it.totalCents)}</p>
+                          )}
+                          {it.timeStr && <p className="text-[10.5px] text-slate-400">{it.timeStr}</p>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : fallbackItems.length === 0 ? (
+                  <p className="text-slate-500 py-4 text-center">Nenhum item cancelado discriminado no fechamento.</p>
                 ) : (
                   <div className="rounded-2xl border border-slate-200 dark:border-[#2a3942] divide-y divide-slate-100 dark:divide-[#2a3942]">
-                    {items.map((it, idx) => (
+                    {fallbackItems.map((it, idx) => (
                       <div key={idx} className="px-4 py-2.5 flex items-center justify-between">
                         <div>
                           <p className="font-bold text-slate-900 dark:text-white">{it.item}</p>
@@ -237,81 +272,180 @@ export function CashMetricDetailModal({ metricKey, result, onClose }: CashMetric
             );
           })()}
 
-          {metricKey === 'discounts' && (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="rounded-2xl bg-slate-50 dark:bg-[#202c33] border border-slate-200 dark:border-[#2a3942] p-4">
-                <p className="text-[10px] font-black uppercase text-slate-500">Descontos (10%)</p>
-                <p className="text-lg font-black text-slate-900 dark:text-white tabular-nums mt-0.5">
-                  {formatCents(Number(detail.discountsCents || 0))}
-                </p>
-              </div>
-              <div className="rounded-2xl bg-slate-50 dark:bg-[#202c33] border border-slate-200 dark:border-[#2a3942] p-4">
-                <p className="text-[10px] font-black uppercase text-slate-500">Consumo Interno</p>
-                <p className="text-lg font-black text-amber-600 dark:text-amber-400 tabular-nums mt-0.5">
-                  {formatCents(Number(detail.internalConsumptionCents || 0))}
-                </p>
-                <p className="text-[10.5px] text-slate-500 mt-1">Não soma no faturamento de vendas.</p>
-              </div>
-              <div className="rounded-2xl bg-slate-50 dark:bg-[#202c33] border border-slate-200 dark:border-[#2a3942] p-4">
-                <p className="text-[10px] font-black uppercase text-slate-500">Total Sistema PDV</p>
-                <p className="text-lg font-black text-slate-900 dark:text-white tabular-nums mt-0.5">
-                  {formatCents(Number(detail.systemTotalCents || 0))}
-                </p>
-              </div>
-            </div>
-          )}
+          {metricKey === 'discounts' && (() => {
+            const discountDetails = (detail.discountDetails as Array<{
+              source: string;
+              orderNumber: string;
+              module?: string;
+              timeStr?: string;
+              amountCents: number;
+              reason?: string;
+              details?: string;
+              employee?: string;
+            }>) || [];
+            const costCents = Number(detail.internalConsumptionCostCents || 0);
+            return (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="rounded-2xl bg-slate-50 dark:bg-[#202c33] border border-slate-200 dark:border-[#2a3942] p-4">
+                    <p className="text-[10px] font-black uppercase text-slate-500">Descontos (10%)</p>
+                    <p className="text-lg font-black text-slate-900 dark:text-white tabular-nums mt-0.5">
+                      {formatCents(Number(detail.discountsCents || 0))}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 dark:bg-[#202c33] border border-slate-200 dark:border-[#2a3942] p-4">
+                    <p className="text-[10px] font-black uppercase text-slate-500">Consumo Interno</p>
+                    <p className="text-lg font-black text-amber-600 dark:text-amber-400 tabular-nums mt-0.5">
+                      {formatCents(Number(detail.internalConsumptionCents || 0))}
+                    </p>
+                    <p className="text-[10.5px] text-slate-500 mt-1">
+                      {costCents > 0 ? `Custo real (CMV): ${formatCents(costCents)}` : 'Não soma no faturamento de vendas.'}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 dark:bg-[#202c33] border border-slate-200 dark:border-[#2a3942] p-4">
+                    <p className="text-[10px] font-black uppercase text-slate-500">Total Sistema PDV</p>
+                    <p className="text-lg font-black text-slate-900 dark:text-white tabular-nums mt-0.5">
+                      {formatCents(Number(detail.systemTotalCents || 0))}
+                    </p>
+                  </div>
+                </div>
 
-          {metricKey === 'delivery_house_fees' && (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="rounded-2xl bg-slate-50 dark:bg-[#202c33] border border-slate-200 dark:border-[#2a3942] p-4">
-                <p className="text-[10px] font-black uppercase text-slate-500">Taxa Entrega Delivery</p>
-                <p className="text-lg font-black text-slate-900 dark:text-white tabular-nums mt-0.5">
-                  {formatCents(Number(detail.deliveryFeeCents || 0))}
-                </p>
+                {discountDetails.length > 0 && (
+                  <div className="rounded-2xl border border-slate-200 dark:border-[#2a3942] divide-y divide-slate-100 dark:divide-[#2a3942]">
+                    {discountDetails.map((d, idx) => (
+                      <div key={idx} className="px-4 py-2.5 flex items-center justify-between gap-2">
+                        <div>
+                          <p className="font-bold text-slate-900 dark:text-white">
+                            Pedido {d.orderNumber || '-'} {d.module ? `(${d.module})` : ''} • {d.reason || d.source}
+                          </p>
+                          <p className="text-[11px] text-slate-500">
+                            {d.timeStr || '-'} • Origem: {d.source} {d.employee ? `• Func: ${d.employee}` : ''} {d.details ? `• ${d.details}` : ''}
+                          </p>
+                        </div>
+                        <strong className="text-amber-600 dark:text-amber-400 tabular-nums shrink-0">{formatCents(d.amountCents)}</strong>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-              <div className="rounded-2xl bg-slate-50 dark:bg-[#202c33] border border-slate-200 dark:border-[#2a3942] p-4">
-                <p className="text-[10px] font-black uppercase text-slate-500">Taxa Serviço Casa (S. Casa)</p>
-                <p className="text-lg font-black text-slate-900 dark:text-white tabular-nums mt-0.5">
-                  {formatCents(Number(detail.serviceFeeCents || 0))}
-                </p>
-              </div>
-              <div className="rounded-2xl bg-indigo-500/10 border border-indigo-500/25 p-4">
-                <p className="text-[10px] font-black uppercase text-indigo-500">Soma das Taxas</p>
-                <p className="text-lg font-black text-indigo-600 dark:text-indigo-400 tabular-nums mt-0.5">
-                  {formatCents(Number(detail.totalCents || 0))}
-                </p>
-              </div>
-            </div>
-          )}
+            );
+          })()}
 
-          {metricKey === 'guests' && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="rounded-2xl bg-slate-50 dark:bg-[#202c33] border border-slate-200 dark:border-[#2a3942] p-4">
-                <p className="text-[10px] font-black uppercase text-slate-500">Pessoas Atendidas em Mesa</p>
-                <p className="text-xl font-black text-slate-900 dark:text-white mt-0.5">
-                  {Number(detail.guestCount || 0)} pessoas
-                </p>
+          {metricKey === 'delivery_house_fees' && (() => {
+            const feeRemovals = (detail.feeRemovals as Array<{
+              orderNumber: string;
+              module?: string;
+              product: string;
+              timeStr?: string;
+              waiter?: string;
+              reason?: string;
+              details?: string;
+              operator?: string;
+            }>) || [];
+            return (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="rounded-2xl bg-slate-50 dark:bg-[#202c33] border border-slate-200 dark:border-[#2a3942] p-4">
+                    <p className="text-[10px] font-black uppercase text-slate-500">Taxa Entrega Delivery</p>
+                    <p className="text-lg font-black text-slate-900 dark:text-white tabular-nums mt-0.5">
+                      {formatCents(Number(detail.deliveryFeeCents || 0))}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 dark:bg-[#202c33] border border-slate-200 dark:border-[#2a3942] p-4">
+                    <p className="text-[10px] font-black uppercase text-slate-500">Taxa Serviço Casa (S. Casa)</p>
+                    <p className="text-lg font-black text-slate-900 dark:text-white tabular-nums mt-0.5">
+                      {formatCents(Number(detail.serviceFeeCents || 0))}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl bg-indigo-500/10 border border-indigo-500/25 p-4">
+                    <p className="text-[10px] font-black uppercase text-indigo-500">Soma das Taxas</p>
+                    <p className="text-lg font-black text-indigo-600 dark:text-indigo-400 tabular-nums mt-0.5">
+                      {formatCents(Number(detail.totalCents || 0))}
+                    </p>
+                  </div>
+                </div>
+
+                {feeRemovals.length > 0 && (
+                  <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
+                    <p className="text-[11px] font-black uppercase text-amber-700 dark:text-amber-300">
+                      Remoções de Taxa de Serviço Registradas ({feeRemovals.length})
+                    </p>
+                    <div className="divide-y divide-amber-500/15">
+                      {feeRemovals.map((fr, i) => (
+                        <div key={i} className="py-1.5 flex items-center justify-between gap-2 text-[11px]">
+                          <span>
+                            <strong>{fr.module || 'MESA'} {fr.orderNumber}</strong> • {fr.product} ({fr.reason || '-'} {fr.details ? `— ${fr.details}` : ''})
+                          </span>
+                          <span className="text-slate-500 shrink-0">Op: {fr.operator || '-'} • {fr.timeStr || '-'}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-              <div className="rounded-2xl bg-cyan-500/10 border border-cyan-500/25 p-4">
-                <p className="text-[10px] font-black uppercase text-cyan-600 dark:text-cyan-400">Ticket Médio por Pessoa</p>
-                <p className="text-xl font-black text-cyan-600 dark:text-cyan-400 tabular-nums mt-0.5">
-                  {formatCents(Number(detail.averageTicketCents || 0))}/pessoa
-                </p>
+            );
+          })()}
+
+          {metricKey === 'guests' && (() => {
+            const topProducts = (detail.topProducts as Array<{ name: string; qty: number; totalCents: number }>) || [];
+            const byModule = (detail.byModule as Array<{ module: string; itemsCount: number; totalCents: number }>) || [];
+            return (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="rounded-2xl bg-slate-50 dark:bg-[#202c33] border border-slate-200 dark:border-[#2a3942] p-4">
+                    <p className="text-[10px] font-black uppercase text-slate-500">Pessoas Atendidas em Mesa</p>
+                    <p className="text-xl font-black text-slate-900 dark:text-white mt-0.5">
+                      {Number(detail.guestCount || 0)} pessoas
+                    </p>
+                  </div>
+                  <div className="rounded-2xl bg-cyan-500/10 border border-cyan-500/25 p-4">
+                    <p className="text-[10px] font-black uppercase text-cyan-600 dark:text-cyan-400">Ticket Médio por Pessoa</p>
+                    <p className="text-xl font-black text-cyan-600 dark:text-cyan-400 tabular-nums mt-0.5">
+                      {formatCents(Number(detail.averageTicketCents || 0))}/pessoa
+                    </p>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 dark:bg-[#202c33] border border-slate-200 dark:border-[#2a3942] p-4">
+                    <p className="text-[10px] font-black uppercase text-slate-500">Faturamento Base (Pix + Cartão + Dinheiro)</p>
+                    <p className="text-lg font-black text-slate-900 dark:text-white tabular-nums mt-0.5">
+                      {formatCents(Number(detail.revenueConsideredCents || 0))}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 dark:bg-[#202c33] border border-slate-200 dark:border-[#2a3942] p-4">
+                    <p className="text-[10px] font-black uppercase text-slate-500">Notas Pendentes ({Number(detail.pendingCount || 0)} devedor(es))</p>
+                    <p className="text-lg font-black text-amber-600 dark:text-amber-400 tabular-nums mt-0.5">
+                      {formatCents(Number(detail.pendingCents || 0))}
+                    </p>
+                  </div>
+                </div>
+
+                {byModule.length > 0 && (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    {byModule.map((mod) => (
+                      <div key={mod.module} className="rounded-xl border border-slate-200 dark:border-[#2a3942] p-3 bg-slate-50/70 dark:bg-[#202c33]/70">
+                        <p className="text-[10px] font-black uppercase text-slate-500">{mod.module}</p>
+                        <p className="text-sm font-black text-slate-900 dark:text-white tabular-nums">{formatCents(mod.totalCents)}</p>
+                        <p className="text-[10px] text-slate-400">{mod.itemsCount} item(ns)</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {topProducts.length > 0 && (
+                  <div className="rounded-2xl border border-slate-200 dark:border-[#2a3942] p-3 space-y-2">
+                    <p className="text-[11px] font-black uppercase text-slate-600 dark:text-[#aebac1]">Top Produtos do Dia</p>
+                    <div className="divide-y divide-slate-100 dark:divide-[#2a3942]">
+                      {topProducts.slice(0, 8).map((prod, i) => (
+                        <div key={i} className="py-1.5 flex items-center justify-between gap-2 text-[11px]">
+                          <span className="truncate font-semibold text-slate-800 dark:text-[#e9edef]">{prod.qty}x {prod.name}</span>
+                          <strong className="tabular-nums text-emerald-600 dark:text-emerald-400 shrink-0">{formatCents(prod.totalCents)}</strong>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-              <div className="rounded-2xl bg-slate-50 dark:bg-[#202c33] border border-slate-200 dark:border-[#2a3942] p-4">
-                <p className="text-[10px] font-black uppercase text-slate-500">Faturamento Base (Pix + Cartão + Dinheiro)</p>
-                <p className="text-lg font-black text-slate-900 dark:text-white tabular-nums mt-0.5">
-                  {formatCents(Number(detail.revenueConsideredCents || 0))}
-                </p>
-              </div>
-              <div className="rounded-2xl bg-slate-50 dark:bg-[#202c33] border border-slate-200 dark:border-[#2a3942] p-4">
-                <p className="text-[10px] font-black uppercase text-slate-500">Notas Pendentes ({Number(detail.pendingCount || 0)} devedor(es))</p>
-                <p className="text-lg font-black text-amber-600 dark:text-amber-400 tabular-nums mt-0.5">
-                  {formatCents(Number(detail.pendingCents || 0))}
-                </p>
-              </div>
-            </div>
-          )}
+            );
+          })()}
         </div>
       </div>
     </div>
