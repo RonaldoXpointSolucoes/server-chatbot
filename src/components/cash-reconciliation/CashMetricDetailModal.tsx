@@ -14,7 +14,7 @@ import {
   CashReconciliationResult,
   formatCents
 } from '../../types/cashReconciliation';
-import { buildHealthMetricDetail } from '../../utils/cashReconciliationServiceHelper.mjs';
+import { buildHealthMetricDetail, formatDateBr } from '../../utils/cashReconciliationServiceHelper.mjs';
 
 export type HealthMetricKey =
   | 'fees'
@@ -144,7 +144,7 @@ export function CashMetricDetailModal({ metricKey, result, onClose }: CashMetric
                         <div key={it.id} className="px-3.5 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-1">
                           <div>
                             <p className="font-bold text-slate-800 dark:text-[#e9edef]">{it.description}</p>
-                            <p className="text-[11px] text-slate-500">{it.dateStr} {it.timeStr} • Bruto: {formatCents(it.amountCents)}</p>
+                            <p className="text-[11px] text-slate-500">{formatDateBr(it.dateStr)} {it.timeStr} • Bruto: {formatCents(it.amountCents)}</p>
                           </div>
                           <div className="text-left sm:text-right tabular-nums">
                             <span className="font-black text-rose-500">-{formatCents(it.feeCents)}</span>

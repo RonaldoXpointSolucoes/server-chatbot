@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 
 import { ParsedCashFileResult } from '../../types/cashReconciliation';
+import { formatDateBr } from '../../utils/cashReconciliationServiceHelper.mjs';
 
 export interface UploadedCashFileItem {
   id: string;
@@ -183,7 +184,7 @@ export function CashUploadDropzone({
                     </p>
                     <p className="text-[11px] text-slate-500 dark:text-[#8696a0] mt-0.5">
                       {parsed.status === 'ok'
-                        ? `${parsed.rows?.length || 0} registro(s)${parsed.periodStart ? ` • ${parsed.periodStart}` : ''}`
+                        ? `${parsed.rows?.length || 0} registro(s)${parsed.periodStart ? ` • ${formatDateBr(parsed.periodStart)}` : ''}`
                         : parsed.errorMessage || 'Aguardando leitura'}
                     </p>
                   </div>

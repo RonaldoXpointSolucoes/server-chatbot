@@ -466,3 +466,23 @@ export function buildHealthMetricDetail(result = {}, metricKey = '') {
     internalConsumptionCents: Number(metrics.internalConsumptionCents || 0)
   };
 }
+
+export function formatDateBr(rawDate) {
+  if (!rawDate) return '';
+  const str = String(rawDate).trim();
+  const iso = str.match(/^(\d{4})-(\d{2})-(\d{2})(?:T.*)?$/);
+  if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`;
+  const br = str.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (br) return `${br[1]}/${br[2]}/${br[3]}`;
+  return str;
+}
+
+export function formatDateBrShort(rawDate) {
+  if (!rawDate) return '';
+  const str = String(rawDate).trim();
+  const iso = str.match(/^(\d{4})-(\d{2})-(\d{2})(?:T.*)?$/);
+  if (iso) return `${iso[3]}/${iso[2]}`;
+  const br = str.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (br) return `${br[1]}/${br[2]}`;
+  return str;
+}

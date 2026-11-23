@@ -23,7 +23,8 @@ import {
   clearActiveCashDraftFromStorage,
   isDraftAutoResumeDismissed,
   setDraftAutoResumeDismissed,
-  pickMostRecentOpenDraftSession
+  pickMostRecentOpenDraftSession,
+  formatDateBr
 } from '../utils/cashReconciliationServiceHelper.mjs';
 import { geminiService } from '../services/geminiService';
 import {
@@ -38,7 +39,7 @@ import {
   deleteCashFormulaRule
 } from '../services/cashReconciliationService';
 import { CashUploadDropzone, UploadedCashFileItem } from '../components/cash-reconciliation/CashUploadDropzone';
-import { CashHealthDashboard } from '../components/cash-reconciliation/CashHealthDashboard';
+import { CashHealthDashboard, CashHealthHistoryCard } from '../components/cash-reconciliation/CashHealthDashboard';
 import { CashReconciliationWorkbench } from '../components/cash-reconciliation/CashReconciliationWorkbench';
 import {
   CashAiAnalysis,
@@ -384,7 +385,7 @@ export default function CashReconciliationPage() {
                   <option value="" className="dark:bg-[#202c33]">Histórico ({sessions.length})...</option>
                   {sessions.map((s) => (
                     <option key={s.id} value={s.id} className="dark:bg-[#202c33]">
-                      {s.reference_date} • {s.health_score}% • {formatCents(s.diff_cents)}{!s.closed_at ? ' (Rascunho)' : ''}
+                      {formatDateBr(s.reference_date)} • {s.health_score}% • {formatCents(s.diff_cents)}{!s.closed_at ? ' (Rascunho)' : ''}
                     </option>
                   ))}
                 </select>
@@ -455,36 +456,27 @@ export default function CashReconciliationPage() {
 
         {/* Conteúdo Principal vs Empty State */}
         {!reconciliationResult ? (
-          <div className="rounded-3xl border border-slate-200/80 dark:border-[#2a3942] bg-white/80 dark:bg-[#202c33]/80 backdrop-blur-md p-8 sm:p-12 text-center space-y-4">
-            <div className="w-16 h-16 mx-auto rounded-3xl bg-[#00a884]/10 border border-[#00a884]/25 text-[#00a884] flex items-center justify-center">
-              <FileCheck2 size={30} />
-            </div>
-            <div className="max-w-lg mx-auto space-y-1.5">
-              <h2 className="text-base sm:text-lg font-black text-slate-800 dark:text-white">
-                Suba os arquivos do dia para iniciar a auditoria automática
-              </h2>
-              <p className="text-xs sm:text-sm text-slate-500 dark:text-[#8696a0]">
-                Carregue juntos a <strong>PlanilhaRecebimento</strong>, a <strong>RelConferencia</strong>, o <strong>Fechamento .txt</strong>, os extratos <strong>OFX (C6 / Itaú)</strong> e os relatórios da <strong>Rede</strong> e <strong>C6 Pay</strong>. O sistema cruza tudo em segundos e mostra exatamente o que bateu, faltou ou sobrou.
-              </p>
-            </div>
-            {historicalStats.totalSessions > 0 && (
-              <div className="pt-4 max-w-3xl mx-auto text-left">
-                <CashHealthDashboard
-                  result={{
-                    referenceDate: sessions[0]?.reference_date || '',
-                    status: sessions[0]?.status || 'balanced',
-                    healthScore: sessions[0]?.health_score || 0,
-                    systemTotalCents: sessions[0]?.system_total_cents || 0,
-                    realTotalCents: sessions[0]?.real_total_cents || 0,
-                    diffTotalCents: sessions[0]?.diff_cents || 0,
-                    mirrorRows: sessions[0]?.reconciled_summary?.mirrorRows || [],
-                    cashDrawerSummary: sessions[0]?.reconciled_summary?.cashDrawerSummary || {},
-                    financialMetrics: sessions[0]?.reconciled_summary?.financialMetrics || {}
-                  }}
-                  historicalStats={historicalStats}
-                  onSelectSession={handleLoadSession}
-                />
+          <div className="space-y-5">
+            <div className="rounded-3xl border border-slate-200/80 dark:border-[#2a3942] bg-white/80 dark:bg-[#202c33]/80 backdrop-blur-md p-6 sm:p-10 text-center space-y-4">
+              <div className="w-16 h-16 mx-auto rounded-3xl bg-[#00a884]/10 border border-[#00a884]/25 text-[#00a884] flex items-center justify-center">
+                <FileCheck2 size={30} />
               </div>
+              <div className="max-w-lg mx-auto space-y-1.5">
+                <h2 className="text-base sm:text-lg font-black text-slate-800 dark:text-white">
+                  Suba os arquivos do dia para iniciar a auditoria automática
+                </h2>
+                <p className="text-xs sm:text-sm text-slate-500 dark:text-[#8696a0]">
+                  Carregue juntos a <strong>PlanilhaRecebimento</strong>, a <strong>RelConferencia</strong>, o <strong>Fechamento .txt</strong>, os extratos <strong>OFX (C6 / Itaú)</strong> e os relatórios da <strong>Rede</strong> e <strong>C6 Pay</strong>. O sistema cruza tudo em segundos e mostra exatamente o que bateu, faltou ou sobrou.
+                </p>
+              </div>
+            </div>
+
+            {historicalStats.totalSessions > 0 && (
+              <CashHealthHistoryCard
+                historicalStats={historicalStats}
+                sessions={sessions}
+                onSelectSession={handleLoadSession}
+              />
             )}
           </div>
         ) : (

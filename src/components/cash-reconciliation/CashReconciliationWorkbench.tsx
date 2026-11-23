@@ -25,6 +25,7 @@ import {
 import { CashRuleRow } from '../../services/cashReconciliationService';
 import {
   filterVisibleMirrorRows,
+  formatDateBr,
   parseUiMoneyInputToCents
 } from '../../utils/cashReconciliationServiceHelper.mjs';
 import {
@@ -674,7 +675,7 @@ export function CashReconciliationWorkbench({
                         </span>
                       </div>
                       <p className="text-[11px] text-slate-500 dark:text-[#8696a0]">
-                        {it.dateStr} {it.timeStr} • Ref: {it.referenceCode || '-'} • Terminal: {it.terminalName || '-'}
+                        {formatDateBr(it.dateStr)} {it.timeStr} • Ref: {it.referenceCode || '-'} • Terminal: {it.terminalName || '-'}
                       </p>
                     </div>
                     <button

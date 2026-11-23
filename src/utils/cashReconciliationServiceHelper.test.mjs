@@ -104,7 +104,9 @@ import {
   isDraftAutoResumeDismissed,
   setDraftAutoResumeDismissed,
   pickMostRecentOpenDraftSession,
-  buildHealthMetricDetail
+  buildHealthMetricDetail,
+  formatDateBr,
+  formatDateBrShort
 } from './cashReconciliationServiceHelper.mjs';
 
 test('parseUiMoneyInputToCents handles pt-BR thousand separators and empty inputs accurately', () => {
@@ -279,4 +281,17 @@ test('buildHealthMetricDetail extracts itemized breakdowns for all 6 operational
   assert.equal(buildHealthMetricDetail(mockResult, 'discounts').discountsCents, 5480);
   assert.equal(buildHealthMetricDetail(mockResult, 'delivery_house_fees').totalCents, 17135);
   assert.equal(buildHealthMetricDetail(mockResult, 'guests').guestCount, 62);
+});
+
+test('formatDateBr and formatDateBrShort convert YYYY-MM-DD and ISO timestamps to Brazilian DD/MM(/YYYY) format', () => {
+  assert.equal(formatDateBr('2026-11-19'), '19/11/2026');
+  assert.equal(formatDateBr('2026-11-19T03:00:00.000Z'), '19/11/2026');
+  assert.equal(formatDateBr('19/11/2026'), '19/11/2026');
+  assert.equal(formatDateBr('19 Nov'), '19 Nov');
+  assert.equal(formatDateBr(''), '');
+
+  assert.equal(formatDateBrShort('2026-11-19'), '19/11');
+  assert.equal(formatDateBrShort('2026-11-19T03:00:00.000Z'), '19/11');
+  assert.equal(formatDateBrShort('19/11/2026'), '19/11');
+  assert.equal(formatDateBrShort('19 Nov'), '19 Nov');
 });
