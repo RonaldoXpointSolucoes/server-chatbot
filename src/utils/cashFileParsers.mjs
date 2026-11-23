@@ -508,7 +508,7 @@ const CANONICAL_BRAZILIAN_BANKS = [
   { code: '237', label: 'Bradesco', patterns: [/BRADESCO/] },
   { code: '077', label: 'Banco Inter', patterns: [/BANCO INTER/, /INTERMEDIUM/, /\bINTER\b/] },
   { code: '260', label: 'Nubank', patterns: [/NUBANK/, /NU PAGAMENTOS/] },
-  { code: '104', label: 'Caixa Econômica', patterns: [/CAIXA ECONOMICA/, /\bCEF\b/, /\bCAIXA\b/] },
+  { code: '104', label: 'Caixa Econômica', patterns: [/CAIXA ECONOMICA/, /\bCEF\b/, /BANCO CAIXA/, /CAIXA FEDERAL/], bankNameOnlyPatterns: [/\bCAIXA\b/] },
   { code: '756', label: 'Sicoob', patterns: [/SICOOB/, /BANCOOB/] },
   { code: '748', label: 'Sicredi', patterns: [/SICREDI/] }
 ];
@@ -561,12 +561,17 @@ export function identifyBankInstitution({
   }
 
   const fileNameBase = String(fileName || '').replace(/\.[^.]+$/, '').trim();
-  const searchCandidates = [meaningfulBankName, fileNameBase, headerText];
-  for (const candidate of searchCandidates) {
-    const tokens = toBankSearchTokens(candidate);
+  const searchCandidates = [
+    { text: meaningfulBankName, isBankName: true },
+    { text: fileNameBase, isBankName: false },
+    { text: headerText, isBankName: false }
+  ];
+  for (const { text, isBankName } of searchCandidates) {
+    const tokens = toBankSearchTokens(text);
     if (!tokens) continue;
     const byPattern = CANONICAL_BRAZILIAN_BANKS.find((b) =>
-      b.patterns.some((rx) => rx.test(tokens))
+      b.patterns.some((rx) => rx.test(tokens)) ||
+      (isBankName && b.bankNameOnlyPatterns?.some((rx) => rx.test(tokens)))
     );
     if (byPattern) {
       return {

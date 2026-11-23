@@ -378,6 +378,31 @@ test('identifyBankInstitution resolves canonical Brazilian banks and normalizes 
   const slugFallback = identifyBankInstitution({ fileName: 'Extrato_Stone_19_11.xlsx' });
   assert.equal(slugFallback.bankKey, 'banco_extrato_stone_19_11');
   assert.equal(slugFallback.bankCode, '');
+
+  // Regression: generic "Caixa" in fileName or headerText must not misclassify as Caixa Econômica (104)
+  const caixaSicoob = identifyBankInstitution({
+    fileName: 'Caixa_Sicoob.xlsx',
+    headerText: 'Movimento de Caixa Data Descricao Valor'
+  });
+  assert.deepEqual(caixaSicoob, {
+    bankKey: 'banco_756',
+    bankCode: '756',
+    bankLabel: 'Sicoob',
+    acctLast4: ''
+  });
+
+  const genericCaixa = identifyBankInstitution({
+    fileName: 'Extrato_Caixa_19_11.xlsx',
+    headerText: 'Movimento de Caixa Data Descricao Valor'
+  });
+  assert.notEqual(genericCaixa.bankKey, 'banco_104');
+  assert.equal(genericCaixa.bankCode, '');
+  assert.equal(genericCaixa.bankKey, 'banco_extrato_caixa_19_11');
+
+  // Unambiguous Caixa Econômica identifiers still resolve to 104
+  assert.equal(identifyBankInstitution({ bankName: 'CAIXA' }).bankKey, 'banco_104');
+  assert.equal(identifyBankInstitution({ fileName: 'Extrato_CEF_19_11.xlsx' }).bankKey, 'banco_104');
+  assert.equal(identifyBankInstitution({ fileName: 'Extrato_Caixa_Economica.xlsx' }).bankKey, 'banco_104');
 });
 
 test('parseUploadedCashFile enriches OFX and generic bank spreadsheets with canonical bankKey, bankCode, bankLabel and acctLast4', async () => {
