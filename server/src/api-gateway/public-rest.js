@@ -1,7 +1,19 @@
 import express from 'express';
-import { supabase, resolveTargetJid, NODE_ID } from '../supabase.js';
-import sessionManager, { isInstanceAllowedForNode } from '../session-manager/index.js';
+import { supabase as defaultSupabase, resolveTargetJid as defaultResolveTargetJid, NODE_ID } from '../supabase.js';
+import defaultSessionManager, { isInstanceAllowedForNode, isSocketOpen as defaultIsSocketOpen } from '../session-manager/index.js';
+import defaultQueueProcessor from '../session-manager/queue-processor.js';
+import { buildWhatsAppMessage } from '../session-manager/message-builder.js';
 import { createExternalMessageRouting } from './external-message-routing.js';
+import {
+    extractPublicApiKey,
+    extractSendTextPayload,
+    extractTargetNumber,
+    isSafeExternalMediaUrl,
+    matchesInstanceIdentifier,
+    normalizeAudioUploadMeta,
+    normalizeInstanceSlug,
+    parseCoordinate
+} from './public-rest-helpers.js';
 import multer from 'multer';
 import crypto from 'crypto';
 import fs from 'fs';
@@ -9,18 +21,28 @@ import path from 'path';
 import os from 'os';
 import ffmpeg from 'fluent-ffmpeg';
 
-const router = express.Router();
-const routeExternalMessage = createExternalMessageRouting({ nodeId: NODE_ID, isInstanceAllowed: isInstanceAllowedForNode, alphaUrl: process.env.BAILEYS_ALPHA_API_URL || process.env.ALPHA_API_URL });
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 500 * 1024 * 1024 } }); // 500MB
+
+export function createPublicRestRouter({
+    supabase = defaultSupabase,
+    sessionManager = defaultSessionManager,
+    queueProcessor = defaultQueueProcessor,
+    resolveTargetJid = defaultResolveTargetJid,
+    nodeId = NODE_ID,
+    isInstanceAllowed = isInstanceAllowedForNode,
+    alphaUrl = process.env.BAILEYS_ALPHA_API_URL || process.env.ALPHA_API_URL,
+    isSocketOpenFn = defaultIsSocketOpen
+} = {}) {
+const router = express.Router();
+const routeExternalMessage = createExternalMessageRouting({ nodeId, isInstanceAllowed, alphaUrl });
 
 // Helper de obtenção de socket com retry, auto-reconnect e backoff inteligente
 async function getSocketWithRetry(tenantId, instanceId, maxRetries = 1) {
     // 1. Fast-Path: Verifica se o socket já está ativo e autenticado na RAM (latência < 1ms, zero queries no DB)
-    const { isSocketOpen } = await import('../session-manager/index.js');
     const localSession = sessionManager.sessions.get(instanceId);
     const localSock = localSession?.sock;
     const hasCreds = Boolean(localSock?.authState?.creds?.me?.id || localSock?.user?.id);
-    if (localSock && isSocketOpen(localSock) && hasCreds) {
+    if (localSock && isSocketOpenFn(localSock) && hasCreds) {
         return localSock;
     }
 
@@ -58,7 +80,7 @@ async function getSocketWithRetry(tenantId, instanceId, maxRetries = 1) {
             setTimeout(() => reject(new Error('TIMEOUT_SOCKET_WAKE_FASTFAIL')), 4000)
         );
         const sock = await Promise.race([wakePromise, timeoutPromise]);
-        if (sock && isSocketOpen(sock)) return sock;
+        if (sock && isSocketOpenFn(sock)) return sock;
     } catch (e) {
         console.log(`[API Gateway] getSocketOrWake rápido para ${instanceId}: ${e.message}. Delegando para outbox resiliente.`);
     }
@@ -70,21 +92,20 @@ async function getSocketWithRetry(tenantId, instanceId, maxRetries = 1) {
 const instanceResolutionCache = new Map();
 const INSTANCE_CACHE_TTL_MS = 60000;
 
-function normalizeInstanceSlug(str) {
-    if (!str || typeof str !== 'string') return '';
-    return str
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '') // remove acentos
-        .replace(/[-_\s]+/g, '')          // remove hífens, underscores e espaços
-        .replace(/0+(\d+)/g, '$1')        // normaliza zeros à esquerda em números (ex: Comercial-02 -> comercial2)
-        .trim();
+async function markAutomationSent(instanceId, msgResult) {
+    try {
+        const { EventProcessor } = await import('../event-processor/index.js');
+        if (EventProcessor?.automationMessagesCache && msgResult?.key?.id) {
+            EventProcessor.automationMessagesCache.set(`${instanceId}_${msgResult.key.id}`, true);
+            setTimeout(() => EventProcessor.automationMessagesCache?.delete(`${instanceId}_${msgResult.key.id}`), 60000);
+        }
+    } catch (e) {}
 }
 
-async function resolveInstanceSmart(instanceName) {
+async function resolveInstanceSmart(instanceName, preferredTenantId = null) {
     if (!instanceName || typeof instanceName !== 'string') return null;
     const cleanParam = instanceName.trim();
-    const cacheKey = cleanParam.toLowerCase();
+    const cacheKey = `${preferredTenantId || 'any'}:${cleanParam.toLowerCase()}`;
     
     // 1. Checa cache em memória
     const cached = instanceResolutionCache.get(cacheKey);
@@ -94,10 +115,11 @@ async function resolveInstanceSmart(instanceName) {
 
     const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(cleanParam);
     const selectFields = 'id, tenant_id, display_name, phone_number, status, api_key';
+    const applyTenant = (q) => (preferredTenantId ? q.eq('tenant_id', preferredTenantId) : q);
 
     // 2. Se for UUID, busca direta por id
     if (isUuid) {
-        const { data } = await supabase.from('whatsapp_instances').select(selectFields).eq('id', cleanParam).maybeSingle();
+        const { data } = await applyTenant(supabase.from('whatsapp_instances').select(selectFields).eq('id', cleanParam)).maybeSingle();
         if (data) {
             instanceResolutionCache.set(cacheKey, { data, timestamp: Date.now() });
             return data;
@@ -105,14 +127,14 @@ async function resolveInstanceSmart(instanceName) {
     }
 
     // 3. Busca exata por display_name
-    let { data } = await supabase.from('whatsapp_instances').select(selectFields).eq('display_name', cleanParam).maybeSingle();
+    let { data } = await applyTenant(supabase.from('whatsapp_instances').select(selectFields).eq('display_name', cleanParam)).maybeSingle();
     if (data) {
         instanceResolutionCache.set(cacheKey, { data, timestamp: Date.now() });
         return data;
     }
 
     // 4. Busca case-insensitive por display_name (ilike)
-    const { data: ilikeMatches } = await supabase.from('whatsapp_instances').select(selectFields).ilike('display_name', cleanParam).limit(1);
+    const { data: ilikeMatches } = await applyTenant(supabase.from('whatsapp_instances').select(selectFields).ilike('display_name', cleanParam)).limit(1);
     if (ilikeMatches && ilikeMatches.length > 0) {
         data = ilikeMatches[0];
         instanceResolutionCache.set(cacheKey, { data, timestamp: Date.now() });
@@ -122,7 +144,7 @@ async function resolveInstanceSmart(instanceName) {
     // 5. Busca por telefone se cleanParam contiver dígitos de telefone
     const digitsOnly = cleanParam.replace(/\D/g, '');
     if (digitsOnly.length >= 8) {
-        const { data: phoneMatches } = await supabase.from('whatsapp_instances').select(selectFields)
+        const { data: phoneMatches } = await applyTenant(supabase.from('whatsapp_instances').select(selectFields))
             .or(`phone_number.eq.${digitsOnly},phone_number.eq.55${digitsOnly}`)
             .limit(1);
         if (phoneMatches && phoneMatches.length > 0) {
@@ -133,15 +155,11 @@ async function resolveInstanceSmart(instanceName) {
     }
 
     // 6. Resolução por Slug Inteligente (Fuzzy / Normalized Matching)
-    // Permite mapear "Comercial-02" -> "Comercial 2", "comercial_02" -> "Comercial 2", etc.
     const targetSlug = normalizeInstanceSlug(cleanParam);
     if (targetSlug) {
-        const { data: allInstances } = await supabase.from('whatsapp_instances').select(selectFields).limit(150);
+        const { data: allInstances } = await applyTenant(supabase.from('whatsapp_instances').select(selectFields)).limit(150);
         if (allInstances && allInstances.length > 0) {
-            const matched = allInstances.find(inst => {
-                const instSlug = normalizeInstanceSlug(inst.display_name);
-                return instSlug === targetSlug;
-            });
+            const matched = allInstances.find(inst => normalizeInstanceSlug(inst.display_name) === targetSlug);
             if (matched) {
                 console.log(`[API Gateway] [Auth] 🎯 Instância resolvida via matching inteligente de slug: "${cleanParam}" ➔ "${matched.display_name}" (${matched.id})`);
                 instanceResolutionCache.set(cacheKey, { data: matched, timestamp: Date.now() });
@@ -155,9 +173,7 @@ async function resolveInstanceSmart(instanceName) {
 
 // Middleware de autenticação genérica para rotas de instância já existente
 const requireApiKey = async (req, res, next) => {
-    const authHeader = String(req.headers['authorization'] || '');
-    const bearerKey = authHeader.toLowerCase().startsWith('bearer ') ? authHeader.slice(7).trim() : null;
-    const apiKey = req.headers['apikey'] || req.headers['globalapikey'] || req.headers['x-api-key'] || bearerKey || req.query?.apikey;
+    const apiKey = extractPublicApiKey(req.headers, req.query);
     const originIp = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || req.ip || 'N/A';
 
     if (!apiKey) {
@@ -188,44 +204,53 @@ const requireApiKey = async (req, res, next) => {
         return next();
     }
 
-    // Nas rotas Evolution-like, a identificação é pelo :name ou :instance no path, ou "instance" no body
     const instanceName = req.params.instance || req.params.name || req.body?.instance;
-    let data;
-    if (!instanceName) {
-        const apiKeyCacheKey = `apikey:${apiKey}`;
-        const cachedByKey = instanceResolutionCache.get(apiKeyCacheKey);
-        if (cachedByKey && (Date.now() - cachedByKey.timestamp < INSTANCE_CACHE_TTL_MS)) {
-            data = cachedByKey.data;
-        } else {
-            // Multipart fields are unavailable before multer. An instance key uniquely
-            // identifies its inbox, so authenticate before accepting the upload.
-            const keyed = await supabase.from('whatsapp_instances')
-                .select('id, tenant_id, display_name, phone_number, status, api_key')
-                .eq('api_key', apiKey).maybeSingle();
-            data = keyed.data;
-            if (data) {
-                instanceResolutionCache.set(apiKeyCacheKey, { data, timestamp: Date.now() });
-            }
+    const apiKeyCacheKey = `apikey:${apiKey}`;
+    let keyedInstance = instanceResolutionCache.get(apiKeyCacheKey)?.data || null;
+    if (!keyedInstance) {
+        const { data: foundByKey } = await supabase
+            .from('whatsapp_instances')
+            .select('id, tenant_id, display_name, phone_number, status, api_key')
+            .eq('api_key', apiKey)
+            .maybeSingle();
+        if (foundByKey) {
+            keyedInstance = foundByKey;
+            instanceResolutionCache.set(apiKeyCacheKey, { data: foundByKey, timestamp: Date.now() });
         }
+    }
+
+    let data = null;
+    if (!instanceName) {
+        data = keyedInstance;
         if (!data && String(req.headers['content-type'] || '').startsWith('multipart/form-data') && !req.readableEnded) {
             const { data: company } = await supabase.from('companies')
                 .select('id').eq('global_api_key', apiKey).maybeSingle();
             if (company) {
-                // The global key is authenticated now; requireApiKey runs again
-                // after parsing to verify that the chosen inbox belongs to it.
                 req.authenticatedGlobalTenant = company.id;
                 return next();
             }
             return res.status(401).json({ error: 'Unauthorized ApiKey.' });
         }
+    } else if (keyedInstance && matchesInstanceIdentifier(keyedInstance, instanceName)) {
+        // Evita colisão quando duas empresas usam o mesmo display_name (ex: "Comercial").
+        data = keyedInstance;
     }
+
     if (!instanceName && !data) {
         console.info(`[API Gateway] [Auth] Falha 400: Nome da instância ausente no path ou body ("instance") | Rota: ${req.method} ${req.originalUrl} | IP: ${originIp}`);
         return res.status(400).json({ error: 'Instance name is missing in URL path or body ("instance").' });
     }
 
-    // Validação resiliente no Banco com busca inteligente por Nome, Slug Normalizado, Telefone ou UUID
-    data = data || await resolveInstanceSmart(instanceName);
+    let globalTenantScope = req.authenticatedGlobalTenant || null;
+    if (!data && !keyedInstance && !globalTenantScope) {
+        const { data: compByKey } = await supabase.from('companies').select('id').eq('global_api_key', apiKey).maybeSingle();
+        if (compByKey?.id) globalTenantScope = compByKey.id;
+    }
+
+    data = data || await resolveInstanceSmart(instanceName, globalTenantScope);
+    if (!data && globalTenantScope) {
+        data = await resolveInstanceSmart(instanceName, null);
+    }
 
     if (!data) {
         const targetSlug = normalizeInstanceSlug(instanceName);
@@ -242,6 +267,11 @@ const requireApiKey = async (req, res, next) => {
         req.apiKeyMasked = apiKey ? `${apiKey.slice(0, 6)}...${apiKey.slice(-4)}` : 'N/A';
         req.originIp = originIp;
         return next();
+    }
+
+    if (req.authenticatedGlobalTenant && data.tenant_id !== req.authenticatedGlobalTenant) {
+        console.warn(`[API Gateway] [Auth] ❌ Falha 401: Global ApiKey de outro tenant para instância ${data.id} ("${instanceName}") | IP: ${originIp}`);
+        return res.status(401).json({ error: 'Unauthorized ApiKey.' });
     }
 
     // Busca a Global Api Key da empresa associada a esta instância específica
@@ -263,7 +293,7 @@ const requireApiKey = async (req, res, next) => {
         return res.status(401).json({ error: 'Unauthorized ApiKey.' });
     }
 
-    req.instanceData = data; // { id, tenant_id, display_name, phone_number, status }
+    req.instanceData = data;
     req.apiKeyMasked = apiKey ? `${apiKey.slice(0, 6)}...${apiKey.slice(-4)}` : 'N/A';
     req.originIp = originIp;
     next();
@@ -523,8 +553,7 @@ router.post([
     '/api/message/sendText',
     '/api/message/sendText/:instance'
 ], requireApiKey, routeExternalMessage, async (req, res) => {
-    const number = req.body?.number || req.body?.phone || req.body?.to || req.body?.remoteJid;
-    const text = req.body?.text ?? req.body?.textMessage?.text ?? req.body?.message ?? req.body?.body;
+    const { number, text } = extractSendTextPayload(req.body);
     const { id, tenant_id, display_name } = req.instanceData;
     const originIp = req.originIp || 'N/A';
 
@@ -552,21 +581,28 @@ router.post([
             throw sockErr;
         }
 
-        const { isSocketOpen } = await import('../session-manager/index.js');
         const hasCredsMe = Boolean(sock?.authState?.creds?.me?.id || sock?.user?.id);
-        const isHealthy = sock && isSocketOpen(sock) && hasCredsMe;
+        const isHealthy = sock && isSocketOpenFn(sock) && hasCredsMe;
 
         if (!isHealthy) {
             console.log(`[API Gateway] [sendText] 🔄 Socket em reconexão na RAM para ${id} ("${display_name}"). Enfileirando no outbox resiliente (wa_outgoing_messages)...`);
             try {
-                const { default: sessionManager } = await import('../session-manager/index.js');
                 const targetJid = await resolveTargetJid(null, number, tenant_id);
                 const queued = await sessionManager.enqueueMessage(id, {
                     targetJid,
                     type: 'text',
                     content: { text },
-                    options: { isAutomation: false }
+                    options: { isAutomation: true, senderType: 'automation', isFallback: true, forceQueue: true, tenantId: tenant_id }
                 });
+                if (queued?.key?.id) {
+                    await markAutomationSent(id, queued);
+                    return res.json({
+                        key: queued.key,
+                        message: queued.message,
+                        messageTimestamp: queued.messageTimestamp,
+                        status: 'PENDING'
+                    });
+                }
                 return res.status(202).json({
                     message: "Mensagem enfileirada no outbox resiliente com sucesso (socket em reconexão).",
                     code: 'MESSAGE_QUEUED',
@@ -589,13 +625,7 @@ router.post([
         const remoteJid = await resolveTargetJid(sock, number, tenant_id);
         const msgResult = await sock.sendMessage(remoteJid, { text }, { isAutomation: true, skipDelay: true });
 
-        try {
-            const { EventProcessor } = await import('../event-processor/index.js');
-            if (EventProcessor?.automationMessagesCache && msgResult?.key?.id) {
-                EventProcessor.automationMessagesCache.set(`${id}_${msgResult.key.id}`, true);
-                setTimeout(() => EventProcessor.automationMessagesCache.delete(`${id}_${msgResult.key.id}`), 60000);
-            }
-        } catch(e) {}
+        await markAutomationSent(id, msgResult);
 
         console.log(`[API Gateway] [sendText] ✅ Sucesso no Envio | Instância: ${id} ("${display_name}") | Destino: ${remoteJid} | MsgID: ${msgResult?.key?.id}`);
 
@@ -635,14 +665,13 @@ router.post([
         // Sempre que id, number e text existirem, preserva o envio no outbox resiliente em vez de perder a mensagem com erro 500
         if ((isConnClosed || !e?.isDefinitive) && id && number && text) {
             try {
-                const { default: sessionManager } = await import('../session-manager/index.js');
                 const targetJid = await resolveTargetJid(null, number, tenant_id);
                 console.log(`[API Gateway] [sendText] 🔄 Enfileirando mensagem via outbox resiliente após oscilação de socket (${errMessage.substring(0, 60)}) | Instância: ${id} | Destino: ${targetJid}...`);
                 const queued = await sessionManager.enqueueMessage(id, {
                     targetJid,
                     type: 'text',
                     content: { text },
-                    options: { isAutomation: false, forceQueue: true, isFallback: true }
+                    options: { isAutomation: true, senderType: 'automation', forceQueue: true, isFallback: true, tenantId: tenant_id }
                 });
                 return res.status(202).json({
                     message: "Conexão com WhatsApp oscilou durante o envio. A mensagem foi salva no outbox resiliente e será disparada automaticamente assim que a reconexão for restabelecida.",
@@ -662,10 +691,12 @@ router.post([
                         chat_jid: targetJid,
                         message_type: 'text',
                         body: text,
+                        options: { isAutomation: true, senderType: 'automation', isFallback: true },
                         status: 'pending',
-                        priority: 1
+                        priority: 2
                     }).select('id').maybeSingle();
                     if (directSaved?.id) {
+                        queueProcessor?.trigger?.(tenant_id, id);
                         return res.status(202).json({
                             message: "Conexão com WhatsApp oscilou. Mensagem preservada com sucesso no outbox resiliente.",
                             code: 'MESSAGE_QUEUED_RECONNECTING',
@@ -735,19 +766,77 @@ router.post([
  *       500:
  *         description: Erros de armazenamento ou ffmpeg.
  */
-router.post(['/message/sendMedia', '/message/sendMedia/:instance'], requireApiKey, routeExternalMessage, upload.single('file'), requireApiKey, routeExternalMessage, async (req, res) => {
-    const { number, mediatype } = req.body;
-    const instance = req.params.instance || req.body.instance || req.instanceData?.display_name;
+const handleMediaUpload = (req, res, next) => {
+    if (!String(req.headers['content-type'] || '').startsWith('multipart/form-data')) {
+        return next();
+    }
+    upload.fields([{ name: 'file', maxCount: 1 }, { name: 'media', maxCount: 1 }])(req, res, (err) => {
+        if (err) {
+            return res.status(400).json({ error: err.message || 'Failed to parse multipart media upload' });
+        }
+        req.file = req.file || req.files?.file?.[0] || req.files?.media?.[0] || null;
+        next();
+    });
+};
+
+async function enqueueMediaOutbox(tenantId, instanceId, remoteJid, { mediatype, caption, mediaUrl, mimetype, fileName, ptt }) {
+    const { data: queuedMedia, error } = await supabase.from('wa_outgoing_messages').insert({
+        tenant_id: tenantId,
+        instance_id: instanceId,
+        chat_jid: remoteJid,
+        message_type: 'media',
+        body: caption || '',
+        media_url: mediaUrl,
+        options: {
+            isAutomation: true,
+            senderType: 'automation',
+            isFallback: true,
+            messageType: mediatype,
+            mimetype,
+            fileName,
+            ptt: Boolean(ptt),
+            responseType: 'STANDARD'
+        },
+        status: 'pending',
+        priority: 2
+    }).select('id').maybeSingle();
+    if (error) {
+        console.error('[API Gateway] [sendMedia] Erro ao enfileirar mídia no outbox:', error.message);
+    }
+    if (queuedMedia?.id) {
+        queueProcessor?.trigger?.(tenantId, instanceId);
+    }
+    return queuedMedia;
+}
+
+async function handleSendMedia(req, res, forcedMediatype = null) {
+    const number = extractTargetNumber(req.body);
+    const mediatype = forcedMediatype || req.body?.mediatype;
+    const rawMediaUrl = req.body?.media || req.body?.mediaUrl || req.body?.url || req.body?.audio;
+    const instance = req.params.instance || req.body?.instance || req.instanceData?.display_name || req.instanceData?.id;
     const { id, tenant_id, display_name } = req.instanceData;
     const file = req.file;
     const originIp = req.originIp || 'N/A';
 
-    console.log(`[API Gateway] [sendMedia] 📨 Disparo de Mídia Recebido | Instância: ${id} ("${display_name}") | Tipo: ${mediatype} | Destino: ${number} | Arquivo: ${file?.originalname || 'N/A'} | IP: ${originIp}`);
+    console.log(`[API Gateway] [sendMedia] 📨 Disparo de Mídia Recebido | Instância: ${id} ("${display_name}") | Tipo: ${mediatype} | Destino: ${number} | Arquivo: ${file?.originalname || rawMediaUrl || 'N/A'} | IP: ${originIp}`);
 
     try {
-        if (!file || !number || !mediatype || !instance) {
+        if ((!file && !rawMediaUrl) || !number || !mediatype || !instance) {
             console.warn(`[API Gateway] [sendMedia] ❌ Falha 400: Parâmetros obrigatórios ausentes | Instância: ${id} ("${display_name}") | IP: ${originIp}`);
-            return res.status(400).json({ error: 'Missing file, number, mediatype or instance' });
+            return res.status(400).json({ error: 'Missing file or media URL, number, mediatype or instance' });
+        }
+
+        if (!['image', 'video', 'audio', 'document'].includes(mediatype)) {
+            return res.status(400).json({ error: `Unsupported mediatype: ${mediatype}` });
+        }
+
+        let validatedExternalUrl = null;
+        if (!file && rawMediaUrl) {
+            const urlCheck = isSafeExternalMediaUrl(rawMediaUrl);
+            if (!urlCheck.ok) {
+                return res.status(400).json({ error: urlCheck.reason, code: 'INVALID_MEDIA_URL' });
+            }
+            validatedExternalUrl = urlCheck.url;
         }
 
         let sock;
@@ -766,88 +855,126 @@ router.post(['/message/sendMedia', '/message/sendMedia/:instance'], requireApiKe
             throw sockErr;
         }
 
-        if (!sock) {
-            console.error(`[API Gateway] [sendMedia] ❌ Falha 400: Socket Offline na RAM | Instância: ${id} ("${display_name}") | Destino: ${number}`);
-            return res.status(400).json({ error: 'Socket offline or not authenticated' });
-        }
-
-        const remoteJid = await resolveTargetJid(sock, number, tenant_id);
+        const isPtt = req.body?.ptt === true || req.body?.ptt === 'true' || mediatype === 'audio';
+        const caption = req.body?.caption || '';
         const timestamp = Date.now();
-        
-        // Conversão WEBM p/ AudioNativo se for Audio
-        if (mediatype === 'audio' && (file.mimetype.includes('webm') || file.originalname.endsWith('.webm'))) {
-            try {
-                const tempInput = path.join(os.tmpdir(), `in_${timestamp}.webm`);
-                const tempOutput = path.join(os.tmpdir(), `out_${timestamp}.ogg`);
-                fs.writeFileSync(tempInput, file.buffer);
-                
-                await new Promise((resolve, reject) => {
-                    ffmpeg(tempInput)
-                        .audioCodec('libopus')
-                        .audioChannels(1)
-                        .audioFrequency(16000)
-                        .outputOptions([
-                            '-avoid_negative_ts make_zero',
-                            '-map_metadata -1',
-                            '-b:a 24k',
-                            '-vbr on',
-                            '-compression_level 10',
-                            '-application voip'
-                        ])
-                        .format('ogg')
-                        .on('end', resolve)
-                        .on('error', reject)
-                        .save(tempOutput);
-                });
-                
-                file.buffer = fs.readFileSync(tempOutput);
-                file.mimetype = 'audio/ogg; codecs=opus';
-                
-                fs.unlinkSync(tempInput);
-                fs.unlinkSync(tempOutput);
-            } catch (e) {
-                console.error("[API Gateway] Erro na conversão de audio ffmpeg:", e);
-            }
-        }
-
-        // Upload do arquivo para o bucket do Supabase Storage
-        const fileExt = file.originalname ? file.originalname.split('.').pop() : (mediatype === 'audio' ? 'ogg' : 'bin');
-        const fileName = `${tenant_id}/${id}/${timestamp}_${crypto.randomBytes(4).toString('hex')}.${fileExt}`;
-        
-        const { error: uploadError } = await supabase.storage
-            .from('chat_media')
-            .upload(fileName, file.buffer, {
-                contentType: file.mimetype,
-                upsert: true
-            });
-
-        if (uploadError) {
-            console.error("[API Gateway] Erro no upload Supabase Storage:", uploadError);
-            return res.status(500).json({ error: 'Failed to upload media to storage', details: uploadError.message });
-        }
-
-        const { data: publicUrlData } = supabase.storage.from('chat_media').getPublicUrl(fileName);
-        const mediaUrl = publicUrlData.publicUrl;
-
-        // Disparo Baileys de acordo com o mediatype
+        let mediaUrl = validatedExternalUrl;
+        let finalMeta = {
+            ext: '',
+            fileName: req.body?.fileName || (mediatype === 'audio' ? 'audio.ogg' : 'document'),
+            mimetype: req.body?.mimetype || null
+        };
         let messagePayload = {};
-        const isPtt = req.body.ptt === true || req.body.ptt === 'true' || mediatype === 'audio';
 
-        if (mediatype === 'image') {
-            messagePayload = { image: file.buffer, caption: req.body.caption || '' };
-        } else if (mediatype === 'video') {
-            messagePayload = { video: file.buffer, caption: req.body.caption || '' };
-        } else if (mediatype === 'audio') {
-            messagePayload = { audio: file.buffer, mimetype: 'audio/ogg; codecs=opus', ptt: isPtt };
-        } else if (mediatype === 'document') {
-            messagePayload = { 
-                document: file.buffer, 
-                mimetype: file.mimetype || 'application/octet-stream', 
-                fileName: file.originalname || 'document',
-                caption: req.body.caption || '' 
-            };
+        if (file) {
+            let convertedToOgg = false;
+            if (mediatype === 'audio' && (file.mimetype?.includes('webm') || file.originalname?.endsWith('.webm'))) {
+                try {
+                    const tempInput = path.join(os.tmpdir(), `in_${timestamp}.webm`);
+                    const tempOutput = path.join(os.tmpdir(), `out_${timestamp}.ogg`);
+                    fs.writeFileSync(tempInput, file.buffer);
+
+                    await new Promise((resolve, reject) => {
+                        ffmpeg(tempInput)
+                            .audioCodec('libopus')
+                            .audioChannels(1)
+                            .audioFrequency(16000)
+                            .outputOptions([
+                                '-avoid_negative_ts make_zero',
+                                '-map_metadata -1',
+                                '-b:a 24k',
+                                '-vbr on',
+                                '-compression_level 10',
+                                '-application voip'
+                            ])
+                            .format('ogg')
+                            .on('end', resolve)
+                            .on('error', reject)
+                            .save(tempOutput);
+                    });
+
+                    file.buffer = fs.readFileSync(tempOutput);
+                    convertedToOgg = true;
+                    fs.unlinkSync(tempInput);
+                    fs.unlinkSync(tempOutput);
+                } catch (e) {
+                    console.error('[API Gateway] Erro na conversão de audio ffmpeg:', e);
+                }
+            }
+
+            finalMeta = normalizeAudioUploadMeta(file, mediatype, convertedToOgg);
+            const storageKey = `${tenant_id}/${id}/${timestamp}_${crypto.randomBytes(4).toString('hex')}.${finalMeta.ext}`;
+
+            const { error: uploadError } = await supabase.storage
+                .from('chat_media')
+                .upload(storageKey, file.buffer, {
+                    contentType: finalMeta.mimetype,
+                    upsert: true
+                });
+
+            if (uploadError) {
+                console.error('[API Gateway] Erro no upload Supabase Storage:', uploadError);
+                return res.status(500).json({ error: 'Failed to upload media to storage', details: uploadError.message });
+            }
+
+            const { data: publicUrlData } = supabase.storage.from('chat_media').getPublicUrl(storageKey);
+            mediaUrl = publicUrlData.publicUrl;
+
+            if (mediatype === 'image') {
+                messagePayload = { image: file.buffer, caption };
+            } else if (mediatype === 'video') {
+                messagePayload = { video: file.buffer, caption };
+            } else if (mediatype === 'audio') {
+                messagePayload = { audio: file.buffer, mimetype: 'audio/ogg; codecs=opus', ptt: isPtt };
+            } else {
+                messagePayload = {
+                    document: file.buffer,
+                    mimetype: finalMeta.mimetype || 'application/octet-stream',
+                    fileName: finalMeta.fileName || 'document',
+                    caption
+                };
+            }
         } else {
-            return res.status(400).json({ error: `Unsupported mediatype: ${mediatype}` });
+            messagePayload = buildWhatsAppMessage({
+                messageType: mediatype,
+                mediaUrl,
+                caption,
+                mimetype: finalMeta.mimetype,
+                fileName: finalMeta.fileName,
+                ptt: isPtt
+            });
+        }
+
+        const hasCredsMe = Boolean(sock?.authState?.creds?.me?.id || sock?.user?.id);
+        const isHealthy = sock && isSocketOpenFn(sock) && hasCredsMe;
+        const remoteJid = await resolveTargetJid(isHealthy ? sock : null, number, tenant_id);
+
+        if (!isHealthy) {
+            console.log(`[API Gateway] [sendMedia] 🔄 Socket em reconexão na RAM para ${id} ("${display_name}"). Enfileirando mídia no outbox resiliente...`);
+            const queuedMedia = await enqueueMediaOutbox(tenant_id, id, remoteJid, {
+                mediatype,
+                caption,
+                mediaUrl,
+                mimetype: finalMeta.mimetype,
+                fileName: finalMeta.fileName,
+                ptt: isPtt
+            });
+            if (queuedMedia?.id) {
+                return res.status(202).json({
+                    message: 'Mídia preservada com sucesso no outbox resiliente (socket em reconexão).',
+                    code: 'MEDIA_QUEUED_RECONNECTING',
+                    instance_id: id,
+                    mediaUrl,
+                    status: 'PENDING',
+                    queue_id: queuedMedia.id
+                });
+            }
+            return res.status(503).json({
+                error: 'WhatsApp socket offline or not authenticated for this instance.',
+                code: 'WHATSAPP_SOCKET_UNAVAILABLE',
+                instance_id: id,
+                status: 'offline'
+            });
         }
 
         let msgResult;
@@ -861,19 +988,17 @@ router.post(['/message/sendMedia', '/message/sendMedia/:instance'], requireApiKe
                     msgResult = await retrySock.sendMessage(remoteJid, messagePayload, { isAutomation: true });
                 } catch (retryErr) {
                     console.warn(`[API Gateway] [sendMedia] 🔄 Enfileirando mídia no Outbox Resiliente após oscilação (${retryErr.message})...`);
-                    const { data: queuedMedia } = await supabase.from('wa_outgoing_messages').insert({
-                        tenant_id,
-                        instance_id: id,
-                        chat_jid: remoteJid,
-                        message_type: mediatype,
-                        body: req.body.caption || file.originalname || '',
-                        media_url: mediaUrl,
-                        status: 'pending',
-                        priority: 1
-                    }).select('id').maybeSingle();
+                    const queuedMedia = await enqueueMediaOutbox(tenant_id, id, remoteJid, {
+                        mediatype,
+                        caption,
+                        mediaUrl,
+                        mimetype: finalMeta.mimetype,
+                        fileName: finalMeta.fileName,
+                        ptt: isPtt
+                    });
                     if (queuedMedia?.id) {
                         return res.status(202).json({
-                            message: "Conexão oscilou durante o envio da mídia. Preservada no outbox resiliente.",
+                            message: 'Conexão oscilou durante o envio da mídia. Preservada no outbox resiliente.',
                             code: 'MEDIA_QUEUED_RECONNECTING',
                             instance_id: id,
                             mediaUrl,
@@ -884,19 +1009,17 @@ router.post(['/message/sendMedia', '/message/sendMedia/:instance'], requireApiKe
                     throw retryErr;
                 }
             } else {
-                const { data: queuedMedia } = await supabase.from('wa_outgoing_messages').insert({
-                    tenant_id,
-                    instance_id: id,
-                    chat_jid: remoteJid,
-                    message_type: mediatype,
-                    body: req.body.caption || file.originalname || '',
-                    media_url: mediaUrl,
-                    status: 'pending',
-                    priority: 1
-                }).select('id').maybeSingle();
+                const queuedMedia = await enqueueMediaOutbox(tenant_id, id, remoteJid, {
+                    mediatype,
+                    caption,
+                    mediaUrl,
+                    mimetype: finalMeta.mimetype,
+                    fileName: finalMeta.fileName,
+                    ptt: isPtt
+                });
                 if (queuedMedia?.id) {
                     return res.status(202).json({
-                        message: "Conexão oscilou durante o envio da mídia. Preservada no outbox resiliente.",
+                        message: 'Conexão oscilou durante o envio da mídia. Preservada no outbox resiliente.',
                         code: 'MEDIA_QUEUED_RECONNECTING',
                         instance_id: id,
                         mediaUrl,
@@ -908,13 +1031,7 @@ router.post(['/message/sendMedia', '/message/sendMedia/:instance'], requireApiKe
             }
         }
 
-        try {
-            const { EventProcessor } = await import('../event-processor/index.js');
-            if (EventProcessor?.automationMessagesCache && msgResult?.key?.id) {
-                EventProcessor.automationMessagesCache.set(`${id}_${msgResult.key.id}`, true);
-                setTimeout(() => EventProcessor.automationMessagesCache.delete(`${id}_${msgResult.key.id}`), 60000);
-            }
-        } catch(e) {}
+        await markAutomationSent(id, msgResult);
 
         console.log(`[API Gateway] [sendMedia] ✅ Sucesso no Envio | Instância: ${id} ("${display_name}") | Destino: ${remoteJid} | MsgID: ${msgResult?.key?.id} | URL: ${mediaUrl}`);
 
@@ -922,13 +1039,31 @@ router.post(['/message/sendMedia', '/message/sendMedia/:instance'], requireApiKe
             key: msgResult.key,
             message: msgResult.message,
             messageTimestamp: msgResult.messageTimestamp,
-            mediaUrl: mediaUrl,
-            status: "PENDING"
+            mediaUrl,
+            status: 'PENDING'
         });
     } catch (e) {
         console.error(`[API Gateway] [sendMedia] ❌ Exceção 500: ${e.message} | Instância: ${id} ("${display_name}") | Destino: ${number}`);
         res.status(500).json({ error: e.message });
     }
+}
+
+router.post([
+    '/message/sendMedia',
+    '/message/sendMedia/:instance',
+    '/messages/sendMedia',
+    '/messages/sendMedia/:instance',
+    '/api/message/sendMedia',
+    '/api/message/sendMedia/:instance'
+], requireApiKey, routeExternalMessage, handleMediaUpload, requireApiKey, routeExternalMessage, (req, res) => {
+    return handleSendMedia(req, res, null);
+});
+
+router.post([
+    '/message/sendWhatsAppAudio',
+    '/message/sendWhatsAppAudio/:instance'
+], requireApiKey, routeExternalMessage, handleMediaUpload, requireApiKey, routeExternalMessage, (req, res) => {
+    return handleSendMedia(req, res, 'audio');
 });
 
 /**
@@ -966,15 +1101,18 @@ router.post(['/message/sendMedia', '/message/sendMedia/:instance'], requireApiKe
  *       200:
  *         description: Localização enviada com sucesso
  *  */
-router.post('/message/sendLocation', requireApiKey, routeExternalMessage, async (req, res) => {
-    const { number, latitude, longitude, name, address } = req.body;
+router.post(['/message/sendLocation', '/message/sendLocation/:instance'], requireApiKey, routeExternalMessage, async (req, res) => {
+    const number = extractTargetNumber(req.body);
+    const latitude = parseCoordinate(req.body?.latitude);
+    const longitude = parseCoordinate(req.body?.longitude);
+    const { name, address } = req.body;
     const { id, tenant_id, display_name } = req.instanceData;
     const originIp = req.originIp || 'N/A';
 
     console.log(`[API Gateway] [sendLocation] 📨 Disparo de Localização Recebido | Instância: ${id} ("${display_name}") | Destino: ${number} | IP: ${originIp}`);
 
     try {
-        if (!number || !latitude || !longitude) {
+        if (!number || latitude === null || longitude === null) {
             console.warn(`[API Gateway] [sendLocation] ❌ Falha 400: Parâmetros obrigatórios ausentes | Instância: ${id}`);
             return res.status(400).json({ error: 'number, latitude and longitude required' });
         }
@@ -996,8 +1134,13 @@ router.post('/message/sendLocation', requireApiKey, routeExternalMessage, async 
         }
 
         if (!sock) {
-            console.error(`[API Gateway] [sendLocation] ❌ Falha 400: Socket Offline na RAM | Instância: ${id} ("${display_name}") | Destino: ${number}`);
-            return res.status(400).json({ error: 'Socket offline or not authenticated' });
+            console.error(`[API Gateway] [sendLocation] ❌ Falha 503: Socket Offline/Reconectando na RAM | Instância: ${id} ("${display_name}") | Destino: ${number}`);
+            return res.status(503).json({
+                error: 'WhatsApp socket offline or reconnecting for this instance.',
+                code: 'WHATSAPP_SOCKET_UNAVAILABLE',
+                instance_id: id,
+                status: 'reconnecting'
+            });
         }
 
         const remoteJid = await resolveTargetJid(sock, number, tenant_id);
@@ -1005,13 +1148,7 @@ router.post('/message/sendLocation', requireApiKey, routeExternalMessage, async 
             location: { degreesLatitude: latitude, degreesLongitude: longitude, name, address }
         }, { isAutomation: true });
 
-        try {
-            const { EventProcessor } = await import('../event-processor/index.js');
-            if (EventProcessor?.automationMessagesCache && msgResult?.key?.id) {
-                EventProcessor.automationMessagesCache.set(`${id}_${msgResult.key.id}`, true);
-                setTimeout(() => EventProcessor.automationMessagesCache.delete(`${id}_${msgResult.key.id}`), 60000);
-            }
-        } catch(e) {}
+        await markAutomationSent(id, msgResult);
 
         console.log(`[API Gateway] [sendLocation] ✅ Sucesso no Envio | Instância: ${id} | Destino: ${remoteJid} | MsgID: ${msgResult?.key?.id}`);
 
@@ -1053,8 +1190,9 @@ router.post('/message/sendLocation', requireApiKey, routeExternalMessage, async 
  *       200:
  *         description: Contato enviado com sucesso
  *  */
-router.post('/message/sendContact', requireApiKey, routeExternalMessage, async (req, res) => {
-    const { number, contactName, contactNumber } = req.body;
+router.post(['/message/sendContact', '/message/sendContact/:instance'], requireApiKey, routeExternalMessage, async (req, res) => {
+    const number = extractTargetNumber(req.body);
+    const { contactName, contactNumber } = req.body;
     const { id, tenant_id, display_name } = req.instanceData;
     const originIp = req.originIp || 'N/A';
 
@@ -1083,14 +1221,19 @@ router.post('/message/sendContact', requireApiKey, routeExternalMessage, async (
         }
 
         if (!sock) {
-            console.error(`[API Gateway] [sendContact] ❌ Falha 400: Socket Offline na RAM | Instância: ${id} ("${display_name}") | Destino: ${number}`);
-            return res.status(400).json({ error: 'Socket offline or not authenticated' });
+            console.error(`[API Gateway] [sendContact] ❌ Falha 503: Socket Offline/Reconectando na RAM | Instância: ${id} ("${display_name}") | Destino: ${number}`);
+            return res.status(503).json({
+                error: 'WhatsApp socket offline or reconnecting for this instance.',
+                code: 'WHATSAPP_SOCKET_UNAVAILABLE',
+                instance_id: id,
+                status: 'reconnecting'
+            });
         }
 
         const remoteJid = await resolveTargetJid(sock, number, tenant_id);
         
         // Formatar o vCard no padrão WhatsApp
-        const formattedNumber = contactNumber.replace(/\D/g, '');
+        const formattedNumber = String(contactNumber).replace(/\D/g, '');
         const vcard = `BEGIN:VCARD\nVERSION:3.0\nFN:${contactName}\nTEL;type=CELL;type=VOICE;waid=${formattedNumber}:+${formattedNumber}\nEND:VCARD`;
         
         const msgResult = await sock.sendMessage(remoteJid, {
@@ -1100,13 +1243,7 @@ router.post('/message/sendContact', requireApiKey, routeExternalMessage, async (
             }
         }, { isAutomation: true });
 
-        try {
-            const { EventProcessor } = await import('../event-processor/index.js');
-            if (EventProcessor?.automationMessagesCache && msgResult?.key?.id) {
-                EventProcessor.automationMessagesCache.set(`${id}_${msgResult.key.id}`, true);
-                setTimeout(() => EventProcessor.automationMessagesCache.delete(`${id}_${msgResult.key.id}`), 60000);
-            }
-        } catch(e) {}
+        await markAutomationSent(id, msgResult);
 
         console.log(`[API Gateway] [sendContact] ✅ Sucesso no Envio | Instância: ${id} | Destino: ${remoteJid} | MsgID: ${msgResult?.key?.id}`);
 
@@ -1154,8 +1291,9 @@ router.post('/message/sendContact', requireApiKey, routeExternalMessage, async (
  *       200:
  *         description: Reação enviada com sucesso
  *  */
-router.post('/message/sendReaction', requireApiKey, routeExternalMessage, async (req, res) => {
-    const { number, messageId, reaction, fromMe = false } = req.body;
+router.post(['/message/sendReaction', '/message/sendReaction/:instance'], requireApiKey, routeExternalMessage, async (req, res) => {
+    const number = extractTargetNumber(req.body);
+    const { messageId, reaction, fromMe = false } = req.body;
     const { id, tenant_id, display_name } = req.instanceData;
     const originIp = req.originIp || 'N/A';
 
@@ -1184,8 +1322,13 @@ router.post('/message/sendReaction', requireApiKey, routeExternalMessage, async 
         }
 
         if (!sock) {
-            console.error(`[API Gateway] [sendReaction] ❌ Falha 400: Socket Offline na RAM | Instância: ${id} ("${display_name}") | Destino: ${number}`);
-            return res.status(400).json({ error: 'Socket offline or not authenticated' });
+            console.error(`[API Gateway] [sendReaction] ❌ Falha 503: Socket Offline/Reconectando na RAM | Instância: ${id} ("${display_name}") | Destino: ${number}`);
+            return res.status(503).json({
+                error: 'WhatsApp socket offline or reconnecting for this instance.',
+                code: 'WHATSAPP_SOCKET_UNAVAILABLE',
+                instance_id: id,
+                status: 'reconnecting'
+            });
         }
 
         const remoteJid = await resolveTargetJid(sock, number, tenant_id);
@@ -1197,13 +1340,7 @@ router.post('/message/sendReaction', requireApiKey, routeExternalMessage, async 
             }
         }, { isAutomation: true });
 
-        try {
-            const { EventProcessor } = await import('../event-processor/index.js');
-            if (EventProcessor?.automationMessagesCache && msgResult?.key?.id) {
-                EventProcessor.automationMessagesCache.set(`${id}_${msgResult.key.id}`, true);
-                setTimeout(() => EventProcessor.automationMessagesCache.delete(`${id}_${msgResult.key.id}`), 60000);
-            }
-        } catch(e) {}
+        await markAutomationSent(id, msgResult);
 
         console.log(`[API Gateway] [sendReaction] ✅ Sucesso no Envio | Instância: ${id} | Destino: ${remoteJid} | MsgID: ${msgResult?.key?.id}`);
 
@@ -1370,4 +1507,7 @@ router.all([
     res.status(200).json({ status: 'SUCCESS', message: 'Bot status handled successfully' });
 });
 
-export default router;
+return router;
+}
+
+export default createPublicRestRouter();

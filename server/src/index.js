@@ -116,6 +116,7 @@ app.use(cors({
         'x-tenant-id',
         'x-agent-id',
         'apikey',
+        'globalapikey',
         'x-trace-id',
         'x-asts-test',
         'X-Asts-Test',

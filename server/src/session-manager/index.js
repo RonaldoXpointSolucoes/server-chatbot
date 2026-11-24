@@ -15,6 +15,8 @@ import { supabase, NODE_ID, retryWithBackoff, resolveTargetJid } from '../supaba
 import { normalizeUrlsInText, ensureResilientUrlInfo } from '../flow-runtime/url-helper.js';
 import { connectionProgress, getConnectionDiagnostics, connectionNeedsProtection } from './connection-lifecycle.js';
 import { isTransportOpen, getSessionSocket } from './socket-state.js';
+import { sanitizeOutboxOptions } from '../api-gateway/public-rest-helpers.js';
+import { classifyOutboxMessage } from './outbox-classifier.js';
 
 export const HOMOLOG_ALLOWED_INSTANCES = [
     'cc4efe36-f391-4b3d-a24c-ddcd8a293cf6', // FoodNext (11 94775-8860) - Caixa de testes
@@ -2931,6 +2933,8 @@ class SessionManager {
                 }
             } catch (e) {}
 
+            const outboxOptions = sanitizeOutboxOptions(options);
+            const effectivePriority = options?.priority ?? (classifyOutboxMessage({ options: outboxOptions }).isAutomation ? 2 : 1);
             const isDefinitiveOffline = inst && ['offline', 'logged_out', 'blocked_12h', 'disconnected', 'paused', 'close', 'closed'].includes(inst.status);
             const bodyText = normalizeUrlsInText(typeof content === 'string' ? content : (content?.text || content?.caption || ''));
             const resolvedMediaUrl = options?.mediaUrl || content?.image?.url || content?.video?.url || content?.audio?.url || content?.document?.url || null;
@@ -2949,8 +2953,9 @@ class SessionManager {
                     message_type: resolvedMessageType,
                     ...(resolvedMediaUrl ? { media_url: resolvedMediaUrl } : {}),
                     body: bodyText,
+                    options: outboxOptions,
                     status: 'pending',
-                    priority: 1
+                    priority: effectivePriority
                 }).select().maybeSingle();
                 if (saveErr) {
                     console.error('[SessionManager] Erro ao gravar em wa_outgoing_messages:', saveErr.message);
@@ -2996,7 +3001,27 @@ class SessionManager {
                             }
                         })
                     };
-                    return await sendFn(targetJid, content, directOptions);
+                    const directResult = await sendFn(targetJid, content, directOptions);
+                    try {
+                        const { EventProcessor } = await import('../event-processor/index.js');
+                        if (directResult?.key?.id && EventProcessor) {
+                            const cacheKey = `${instanceId}_${directResult.key.id}`;
+                            const cls = classifyOutboxMessage({ priority: effectivePriority, options: outboxOptions });
+                            if (cls.isBot) {
+                                if (!EventProcessor.botMessagesCache) EventProcessor.botMessagesCache = new Map();
+                                EventProcessor.botMessagesCache.set(cacheKey, {
+                                    bot_name: outboxOptions.botName || 'Luna IA',
+                                    bot_id: outboxOptions.botId || null
+                                });
+                                setTimeout(() => EventProcessor.botMessagesCache?.delete(cacheKey), 60000);
+                            } else if (cls.isAutomation) {
+                                if (!EventProcessor.automationMessagesCache) EventProcessor.automationMessagesCache = new Map();
+                                EventProcessor.automationMessagesCache.set(cacheKey, true);
+                                setTimeout(() => EventProcessor.automationMessagesCache?.delete(cacheKey), 60000);
+                            }
+                        }
+                    } catch (e) {}
+                    return directResult;
                 } catch (sendErr) {
                     console.log(`[SessionManager] Falha no envio direto em enqueueMessage para ${instanceId} (${sendErr?.message || sendErr}). Redirecionando para wa_outgoing_messages...`);
                 }
@@ -3017,8 +3042,9 @@ class SessionManager {
                 message_type: resolvedMessageType,
                 ...(resolvedMediaUrl ? { media_url: resolvedMediaUrl } : {}),
                 body: bodyText,
+                options: outboxOptions,
                 status: 'pending',
-                priority: options?.priority || 1
+                priority: effectivePriority
             }).select().maybeSingle();
 
             if (saveErr) {

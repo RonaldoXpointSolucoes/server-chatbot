@@ -1,8 +1,10 @@
 import { supabase, NODE_ID, retryWithBackoff, resolveTargetJid, isTransientSupabaseError } from '../supabase.js';
 import { buildWhatsAppMessage } from './message-builder.js';
+import { classifyOutboxMessage, resolveOutboxMediaSpec } from './outbox-classifier.js';
 import { runOutgoingReconciliation } from './reconciler.js';
 import AutomationWorker from '../automation-worker/agent.js';
 import { pauseAiImmediatelyForHumanOperator } from '../automation-worker/human-pause.js';
+import { EventProcessor } from '../event-processor/index.js';
 
 const OUTBOX_TTL_MS = 10 * 60 * 1000; // TTL estrito de 10 minutos: mensagens mais antigas são descartadas da fila
 
@@ -12,6 +14,30 @@ class QueueProcessor {
         this.pendingTriggers = new Set();
         this.running = false;
         this.timer = null;
+    }
+
+    registerDispatchCache(instanceId, whatsappMessageId, classification, epClass = EventProcessor) {
+        if (!instanceId || !whatsappMessageId || !epClass) return;
+        const cacheKey = `${instanceId}_${whatsappMessageId}`;
+        if (classification?.isBot) {
+            if (!epClass.botMessagesCache) epClass.botMessagesCache = new Map();
+            const botMeta = {
+                bot_name: classification.options?.botName || 'Luna IA',
+                bot_id: classification.options?.botId || null
+            };
+            epClass.botMessagesCache.set(cacheKey, botMeta);
+            setTimeout(() => epClass.botMessagesCache?.delete(cacheKey), 60000);
+            return;
+        }
+        if (classification?.isAutomation) {
+            if (!epClass.automationMessagesCache) epClass.automationMessagesCache = new Map();
+            epClass.automationMessagesCache.set(cacheKey, true);
+            setTimeout(() => epClass.automationMessagesCache?.delete(cacheKey), 60000);
+            return;
+        }
+        if (!epClass.humanMessagesCache) epClass.humanMessagesCache = new Map();
+        epClass.humanMessagesCache.set(cacheKey, true);
+        setTimeout(() => epClass.humanMessagesCache?.delete(cacheKey), 60000);
     }
 
     start() {
@@ -361,7 +387,8 @@ class QueueProcessor {
                 } catch (wErr) {
                     console.warn(`[QueueProcessor] Timeout ou falha rápida ao obter socket para ${instanceId}:`, wErr.message);
                 }
-                const isOperator = (msg.priority || 1) < 5;
+                const outboxMeta = classifyOutboxMessage(msg);
+                const isOperator = outboxMeta.isOperator;
 
                 let isSocketReady = sock && (!sock.ws || sock.ws.readyState === 1 || sock.ws.isOpen);
                 let meId = sock?.user?.id || sock?.authState?.creds?.me?.id;
@@ -443,15 +470,13 @@ class QueueProcessor {
                 }
 
                 // 3. Rate Limit / Delay Anti-Ban:
-                // Previne detecção de comportamento automatizado e disparos em rajada (burst) para campanhas/automações.
-                // Se priority for >= 5 (campanhas/automação), aplicamos delay anti-ban de 3.5s a 6s.
-                // Se priority for < 5 (operador manual humano no chat ao vivo), envio imediato sem atrasos artificiais!
-                if (msg.priority >= 5) {
+                // Campanhas com priority >= 5 sofrem delay anti-ban (salvo skipDelay: true).
+                // Operadores humanos e disparos transacionais de API externa (priority < 5) saem imediatamente.
+                if (outboxMeta.shouldApplyAntiBanDelay) {
                     const delay = Math.floor(Math.random() * (6000 - 3500 + 1)) + 3500;
                     console.log(`[QueueProcessor] [Anti-Ban] Aplicando delay de automação de ${delay / 1000}s antes do envio...`);
                     await new Promise(resolve => setTimeout(resolve, delay));
                 } else {
-                    // Mensagem manual prioritária de operador humano: envio imediato com yield mínimo de event loop
                     await new Promise(resolve => setImmediate(resolve));
                 }
 
@@ -474,8 +499,8 @@ class QueueProcessor {
                 let result;
                 const responseType = msg.response_type || msg.options?.responseType || 'STANDARD';
 
-                const sendOptions = { priority: msg.priority, isAutomation: (msg.priority || 1) >= 5, skipDelay: true };
-                if (!sendOptions.isAutomation) {
+                const sendOptions = { priority: outboxMeta.priority, isAutomation: outboxMeta.isAutomation, skipDelay: true };
+                if (outboxMeta.shouldPauseAi) {
                     pauseAiImmediatelyForHumanOperator({
                         supabase,
                         AutomationWorker,
@@ -485,6 +510,7 @@ class QueueProcessor {
                         reason: 'envio_operador_outbox'
                     }).catch(() => {});
                 }
+                const mediaSpec = resolveOutboxMediaSpec(msg);
                 const sendTimeoutMs = msg.message_type === 'text' ? 15000 : 45000;
                 const sendWithTimeout = (jid, payload, opts) => {
                     let timer;
@@ -498,7 +524,7 @@ class QueueProcessor {
 
                 if (msg.message_type === 'text') {
                     result = await sendWithTimeout(targetJid, { text: msg.body }, sendOptions);
-                } else if (msg.message_type === 'media' && msg.media_url) {
+                } else if (mediaSpec.isMedia) {
                     // Se for TUTORIAL, garante validação estrita e envio com gifPlayback: true
                     if (responseType === 'TUTORIAL') {
                         console.log(`[QueueProcessor] Enviando resposta pronta TUTORIAL para ${targetJid} com gifPlayback: true`);
@@ -509,7 +535,7 @@ class QueueProcessor {
                             mimetype: msg.options?.mimetype || 'video/mp4',
                             responseType: 'TUTORIAL'
                         });
-                        result = await sendWithTimeout(targetJid, tutorialPayload);
+                        result = await sendWithTimeout(targetJid, tutorialPayload, sendOptions);
                     } else {
                         // Envio de mídia por URL convencional (STANDARD)
                         let pathname = '';
@@ -557,7 +583,7 @@ class QueueProcessor {
                         }
 
                         const mediaOptions = buildWhatsAppMessage({
-                            messageType: isImage ? 'image' : isVideo ? 'video' : isAudio ? 'audio' : 'document',
+                            messageType: mediaSpec.explicitMessageType || (isImage ? 'image' : isVideo ? 'video' : isAudio ? 'audio' : 'document'),
                             mediaUrl: msg.media_url,
                             caption: msg.body,
                             mimetype: msg.options?.mimetype,
@@ -569,7 +595,7 @@ class QueueProcessor {
                             forceDocument
                         });
 
-                        result = await sendWithTimeout(targetJid, mediaOptions);
+                        result = await sendWithTimeout(targetJid, mediaOptions, sendOptions);
                     }
                 } else {
                     throw new Error(`Tipo de mensagem não suportado: ${msg.message_type}`);
@@ -630,13 +656,7 @@ class QueueProcessor {
                     const epClass = EventProcessor || processor?.constructor;
 
                     if (processor && result && result.key) {
-                        if (msg.priority < 5 || (typeof isOperator !== 'undefined' && isOperator)) {
-                            if (epClass && !epClass.humanMessagesCache) epClass.humanMessagesCache = new Map();
-                            if (epClass && epClass.humanMessagesCache) {
-                                epClass.humanMessagesCache.set(`${instanceId}_${result.key.id}`, true);
-                                setTimeout(() => epClass.humanMessagesCache && epClass.humanMessagesCache.delete(`${instanceId}_${result.key.id}`), 60000);
-                            }
-                        }
+                        this.registerDispatchCache(instanceId, result.key.id, outboxMeta, epClass);
                         const mockUpsert = {
                             messages: [result],
                             type: 'notify'
@@ -703,7 +723,8 @@ class QueueProcessor {
                     const maxAttempts = 3;
                     const isExpired = (Date.now() - new Date(msg.created_at).getTime()) > OUTBOX_TTL_MS;
                     const newStatus = (newAttempts >= maxAttempts || isExpired) ? 'failed' : 'pending';
-                    const isOperator = (msg.priority || 1) < 5;
+                    const outboxMeta = classifyOutboxMessage(msg);
+                    const isOperator = outboxMeta.isOperator;
                     const retryDelayMs = isOperator ? (isCryptoErr ? 1000 : 1500) : 4000;
 
                     try {
@@ -768,7 +789,7 @@ class QueueProcessor {
                                     direction: 'outbound',
                                     message_type: msg.message_type || 'text',
                                     text_content: msg.body,
-                                    sender_type: 'human',
+                                    sender_type: classifyOutboxMessage(msg).senderType,
                                     status: 'error',
                                     whatsapp_message_id: mockId,
                                     raw_payload: {

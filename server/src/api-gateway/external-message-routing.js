@@ -1,5 +1,6 @@
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { extractPublicApiKey } from './public-rest-helpers.js';
 
 const ALPHA_INSTANCES = new Set([
     'cc4efe36-f391-4b3d-a24c-ddcd8a293cf6',
@@ -179,8 +180,9 @@ export function createExternalMessageRouting({ nodeId, isInstanceAllowed, alphaU
         const abort = () => controller.abort();
         req.once('aborted', abort);
         try {
+            const forwardedApiKey = extractPublicApiKey(req.headers, req.query);
             const headers = {
-                apikey: req.headers.apikey || req.headers.globalapikey,
+                ...(forwardedApiKey ? { apikey: forwardedApiKey } : {}),
                 'x-api-owner-hop': '1'
             };
             let body;
