@@ -71,6 +71,12 @@ import {
   writeCachedGlobalAiState,
   resolveHydratedGlobalAiState
 } from '../utils/globalAiPersistence.mjs';
+import {
+  haveInstanceListsChanged,
+  haveInstanceVisualFieldsChanged,
+  haveTenantFieldsChanged,
+  shouldFetchTenantOnAuthEvent
+} from '../utils/realtimeEditStability.mjs';
 import { supabase, masterSupabase } from '../services/supabase';
 import { createPortal } from 'react-dom';
 import { WorkspaceSwitcherPopover } from './WorkspaceSwitcherPopover';
@@ -220,6 +226,10 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
   const instancesStatus = useChatStore(state => state.instancesStatus);
   const crmBoards = useChatStore(state => state.crmBoards) || [];
   const [instances, setInstances] = useState<any[]>([]);
+  const instancesRef = React.useRef<any[]>([]);
+  instancesRef.current = instances;
+  const userCompaniesRef = React.useRef<any[]>([]);
+  const currentCompanyContextRef = React.useRef<any>(null);
 
   const currentAgent = agents.find(a => a.email && a.email.toLowerCase() === currentUserEmail?.toLowerCase());
 
@@ -294,6 +304,8 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
     }
     return null;
   });
+  userCompaniesRef.current = userCompanies;
+  currentCompanyContextRef.current = currentCompanyContext;
   const isRemoteAccessEnabled =
     isRemoteAccessEnabledBridge || resolveRemoteAccessEnabled(tenantInfo, currentCompanyContext);
   const globalAiEnabled = useChatStore(state => state.globalAiEnabled);
@@ -519,7 +531,9 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
 
              finalData = finalData.filter(d => hasUserAccessToInstance(d.id));
 
-             setInstances(finalData);
+             if (haveInstanceListsChanged(instancesRef.current, finalData)) {
+               setInstances(finalData);
+             }
 
              const { setInstanceStatus } = useChatStore.getState();
              data.forEach(inst => {
@@ -538,7 +552,9 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
     };
 
     const fetchCompanies = async (allowedOverride?: string[]) => {
-      setIsLoadingCompanies(true);
+      if (userCompaniesRef.current.length === 0) {
+        setIsLoadingCompanies(true);
+      }
       try {
         const storage = getActiveStorage();
         const allowedCompsStr = storage ? storage.getItem('allowed_companies') : null;
@@ -576,7 +592,9 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
             cachedState: readCachedGlobalAiState(currentCompany.id)
           });
           writeCachedGlobalAiState(currentCompany.id, resolvedActiveAi);
-          setCurrentCompanyContext(currentCompany);
+          if (haveTenantFieldsChanged(currentCompanyContextRef.current, currentCompany)) {
+            setCurrentCompanyContext(currentCompany);
+          }
           useChatStore.setState((s) =>
             s.tenantInfo && s.tenantInfo.id === currentCompany.id && !s.tenantInfo.settings
               ? { tenantInfo: currentCompany as any }
@@ -714,7 +732,14 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
     fetchAgentPermissionsAndData();
 
     const { data: authSub } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+      const storeTenantId = useChatStore.getState().tenantInfo?.id;
+      const decision = shouldFetchTenantOnAuthEvent({
+        event,
+        storedTenantId: tenantId,
+        currentStoreTenantId: storeTenantId,
+        hasCompaniesLoaded: userCompaniesRef.current.length > 0 && Boolean(currentCompanyContextRef.current?.id)
+      });
+      if (decision.refetchCompanies) {
         fetchCompanies();
       }
     });
@@ -734,11 +759,17 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
 
     const channel = supabase.channel(sidebarChannelName)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'whatsapp_instances', filter: `tenant_id=eq.${tenantId}` }, (payload: any) => {
-         if (payload?.eventType === 'UPDATE' && payload?.old && payload?.new) {
-           const oldRec = payload.old;
-           const newRec = payload.new;
-           if (oldRec.status === newRec.status && oldRec.display_name === newRec.display_name && oldRec.color === newRec.color) {
-             return; // Ignora batimentos de coração e leases rotineiros do servidor
+         if (payload?.eventType === 'UPDATE' && payload?.new) {
+           const cachedInst = instancesRef.current.find((i: any) => i.id === payload.new.id) || null;
+           if (
+             !haveInstanceVisualFieldsChanged({
+               eventType: 'UPDATE',
+               oldRecord: payload.old,
+               newRecord: payload.new,
+               cachedRecord: cachedInst
+             })
+           ) {
+             return; // Ignora batimentos de coração e leases rotineiros mesmo sem REPLICA IDENTITY FULL
            }
          }
          debouncedFetchInstances();
@@ -797,12 +828,16 @@ export function MainSidebar({ onClose }: { onClose?: () => void }) {
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'companies', filter: `id=eq.${tenantId}` }, (payload) => {
           console.log("Realtime event for company received:", payload);
           if (payload.new) {
-              setCurrentCompanyContext(payload.new);
-              useChatStore.setState((s) =>
-                s.tenantInfo && s.tenantInfo.id === payload.new.id
-                  ? { tenantInfo: { ...s.tenantInfo, ...(payload.new as any) } }
-                  : {}
-              );
+              if (haveTenantFieldsChanged(currentCompanyContextRef.current, payload.new)) {
+                setCurrentCompanyContext(payload.new);
+              }
+              useChatStore.setState((s) => {
+                if (!s.tenantInfo || s.tenantInfo.id !== payload.new.id) return {};
+                const mergedTenant = { ...s.tenantInfo, ...(payload.new as any) };
+                return haveTenantFieldsChanged(s.tenantInfo, mergedTenant)
+                  ? { tenantInfo: mergedTenant }
+                  : {};
+              });
               const resolvedRealtimeAi = resolveHydratedGlobalAiState({
                 dbCompany: payload.new,
                 cachedState: readCachedGlobalAiState(tenantId)

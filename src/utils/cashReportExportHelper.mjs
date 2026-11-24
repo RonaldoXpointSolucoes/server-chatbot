@@ -237,7 +237,26 @@ function resolveExportContext({ result = null, session = null, storeName = '', m
     0
   );
 
-  const { pixByBank, cardsByAcquirer } = groupDigitalChannels(realItems);
+  let { pixByBank, cardsByAcquirer } = groupDigitalChannels(realItems);
+  if (pixByBank.length === 0 && metrics.pixBreakdown) {
+    const pb = metrics.pixBreakdown;
+    const synthPix = [];
+    for (const b of pb.ofxByBank || []) {
+      if (safeInt(b.amountCents, 0) > 0) {
+        synthPix.push({ key: b.bankKey || b.bankLabel, label: b.bankLabel || 'Banco OFX', count: safeInt(b.count, 0), amountCents: safeInt(b.amountCents, 0) });
+      }
+    }
+    if (safeInt(pb.redePixCents, 0) > 0) synthPix.push({ key: 'rede_pix', label: 'Rede PIX', count: 0, amountCents: safeInt(pb.redePixCents, 0) });
+    if (safeInt(pb.c6PayPostCutoffCents, 0) > 0) synthPix.push({ key: 'c6pay_pix', label: 'C6 Pay PIX (pós-corte)', count: 0, amountCents: safeInt(pb.c6PayPostCutoffCents, 0) });
+    pixByBank = synthPix;
+  }
+  if (cardsByAcquirer.length === 0 && metrics.cardBreakdown) {
+    const cb = metrics.cardBreakdown;
+    const synthCards = [];
+    if (safeInt(cb.redeCardCents, 0) > 0) synthCards.push({ key: 'rede', label: 'Rede', count: 0, grossCents: safeInt(cb.redeCardCents, 0), feeCents: 0, netCents: safeInt(cb.redeCardCents, 0) });
+    if (safeInt(cb.c6PayCardCents, 0) > 0) synthCards.push({ key: 'c6pay', label: 'C6 Pay', count: 0, grossCents: safeInt(cb.c6PayCardCents, 0), feeCents: 0, netCents: safeInt(cb.c6PayCardCents, 0) });
+    cardsByAcquirer = synthCards;
+  }
   const notes = String(inputs.notes || sess?.cash_notes || '').trim();
 
   const getMirrorRow = (key) =>
@@ -250,6 +269,21 @@ function resolveExportContext({ result = null, session = null, storeName = '', m
       diffCents: 0,
       sourceNote: ''
     };
+
+  const rawManualAdjustments = Array.isArray(drawer.manualCashAdjustments)
+    ? drawer.manualCashAdjustments
+    : Array.isArray(inputs.manualCashAdjustments)
+      ? inputs.manualCashAdjustments
+      : [];
+  const manualCashAdjustments = rawManualAdjustments
+    .filter((entry) => entry && safeInt(entry.amountCents, 0) > 0)
+    .map((entry, idx) => ({
+      id: String(entry.id || `manual_adj_${idx}`),
+      direction: entry.direction === 'inflow' ? 'inflow' : 'outflow',
+      description: String(entry.description || '').trim() || 'Justificativa manual',
+      amountCents: safeInt(entry.amountCents, 0),
+      operator: String(entry.operator || '').trim()
+    }));
 
   return {
     storeName: effectiveStoreName,
@@ -276,6 +310,9 @@ function resolveExportContext({ result = null, session = null, storeName = '', m
       swappedToDigitalCents: safeInt(drawer.swappedToDigitalCents, 0),
       expectedCashCents,
       countedCents,
+      manualOutflowsCents: safeInt(drawer.manualOutflowsCents, 0),
+      manualInflowsCents: safeInt(drawer.manualInflowsCents, 0),
+      manualCashAdjustments,
       saidasDetalhadas: Array.isArray(drawer.saidasDetalhadas) ? drawer.saidasDetalhadas : []
     },
     metrics: {
@@ -363,6 +400,14 @@ export function buildCashWhatsappSummaryMessage(params = {}) {
     `• Esperado em Gaveta: ${formatCentsBr(ctx.drawer.expectedCashCents)}`,
     `• Contado na Gaveta: ${ctx.drawer.countedCents !== null ? formatCentsBr(ctx.drawer.countedCents) : 'Não informado'} (Espelho PDV: ${formatCentsBr(cashRow.systemCents)})`
   );
+  if (ctx.drawer.manualCashAdjustments.length > 0) {
+    lines.push(`  ↳ Justificativas manuais (${ctx.drawer.manualCashAdjustments.length}):`);
+    for (const adj of ctx.drawer.manualCashAdjustments) {
+      const sign = adj.direction === 'inflow' ? '(+)' : '(-)';
+      const opSuffix = adj.operator ? ` • ${adj.operator}` : '';
+      lines.push(`    • ${sign} ${adj.description}: ${formatCentsBr(adj.amountCents)}${opSuffix}`);
+    }
+  }
 
   lines.push('', '📌 *PENDÊNCIAS & AUDITORIA*');
   const pendTotal = safeInt(pendRow.systemCents, 0);
@@ -383,6 +428,13 @@ export function buildCashWhatsappSummaryMessage(params = {}) {
   const alertItems = [];
   if (ctx.suggestions.length > 0) alertItems.push(`${ctx.suggestions.length} sugestão(ões) de vínculo`);
   if (ctx.missingInBank.length > 0) alertItems.push(`${ctx.missingInBank.length} lançamento(s) PDV sem par no banco`);
+  for (const m of ctx.missingInBank) {
+    const alerts = Array.isArray(m?.metadata?.operationalAlerts) ? m.metadata.operationalAlerts : [];
+    for (const al of alerts.slice(0, 2)) {
+      const msg = `${m.description || m.category}: ${al.label}`;
+      if (!alertItems.includes(msg)) alertItems.push(msg);
+    }
+  }
   if (ctx.extraInBank.length > 0) alertItems.push(`${ctx.extraInBank.length} sobra(s) bancária(s)`);
   if (Array.isArray(ctx.completeness?.warnings) && ctx.completeness.warnings.length > 0) {
     for (const w of ctx.completeness.warnings.slice(0, 3)) {
@@ -414,9 +466,17 @@ function renderBadgeClass(tone) {
 export function buildCashPdfReportHtml(params = {}) {
   const ctx = resolveExportContext(params);
 
+  const visibleMirrorRows = ctx.mirrorRows.filter((row) => {
+    if (!row) return false;
+    const sysVal = safeInt(row.systemCents, 0);
+    const realVal = row.hasRealInput === false ? 0 : safeInt(row.realCents, 0);
+    const diffVal = safeInt(row.diffCents, 0);
+    return sysVal !== 0 || realVal !== 0 || diffVal !== 0;
+  });
+
   const mirrorBodyHtml =
-    ctx.mirrorRows.length > 0
-      ? ctx.mirrorRows
+    visibleMirrorRows.length > 0
+      ? visibleMirrorRows
           .map((row) => {
             const diff = safeInt(row.diffCents, 0);
             const diffClass = diff < 0 ? 'neg' : diff > 0 ? 'pos' : 'zero';
@@ -431,7 +491,7 @@ export function buildCashPdfReportHtml(params = {}) {
             </tr>`;
           })
           .join('')
-      : `<tr><td colspan="4" class="empty">Nenhuma linha do espelho registrada nesta sessão.</td></tr>`;
+      : `<tr><td colspan="4" class="empty">Nenhuma linha com movimentação registrada nesta sessão.</td></tr>`;
 
   const pixBanksHtml =
     ctx.pixByBank.length > 0
@@ -461,16 +521,35 @@ export function buildCashPdfReportHtml(params = {}) {
           .join('')
       : `<tr><td colspan="5" class="empty">Sem lançamentos individuais de maquininha carregados.</td></tr>`;
 
+  const nonManualSaidas = ctx.drawer.saidasDetalhadas.filter((s) => s && !s.isManualAdjustment);
   const saidasDetHtml =
-    ctx.drawer.saidasDetalhadas.length > 0
+    nonManualSaidas.length > 0
       ? `<div class="sublist">
           <strong>Saídas / Sangrias detalhadas:</strong>
           <ul>
-            ${ctx.drawer.saidasDetalhadas
+            ${nonManualSaidas
               .map(
                 (s) =>
                   `<li>${escapeHtml(s.label || 'Saída')}: <span class="num">${escapeHtml(formatCentsBr(s.amountCents))}</span></li>`
               )
+              .join('')}
+          </ul>
+        </div>`
+      : '';
+
+  const manualAdjHtml =
+    ctx.drawer.manualCashAdjustments.length > 0
+      ? `<div class="sublist">
+          <strong>Justificativas Manuais (${ctx.drawer.manualCashAdjustments.length}):</strong>
+          <ul>
+            ${ctx.drawer.manualCashAdjustments
+              .map((adj) => {
+                const isInflow = adj.direction === 'inflow';
+                const sign = isInflow ? '+' : '-';
+                const valClass = isInflow ? 'zero' : 'neg';
+                const opText = adj.operator ? ` <span class="row-note">(${escapeHtml(adj.operator)})</span>` : '';
+                return `<li>${escapeHtml(adj.description || 'Justificativa')}${opText}: <strong class="num ${valClass}">${sign}${escapeHtml(formatCentsBr(adj.amountCents))}</strong></li>`;
+              })
               .join('')}
           </ul>
         </div>`
@@ -562,7 +641,11 @@ export function buildCashPdfReportHtml(params = {}) {
     divergenceBlocks.push(
       `<li><strong>Faltas no banco (${ctx.missingInBank.length}):</strong> ${ctx.missingInBank
         .slice(0, 6)
-        .map((it) => `${escapeHtml(it.description || it.category || 'Item')} (${escapeHtml(formatCentsBr(it.amountCents))})`)
+        .map((it) => {
+          const alerts = Array.isArray(it?.metadata?.operationalAlerts) ? it.metadata.operationalAlerts : [];
+          const tag = alerts.length ? ` [${alerts.map((a) => a.label).join(', ')}]` : '';
+          return `${escapeHtml((it.description || it.category || 'Item') + tag)} (${escapeHtml(formatCentsBr(it.amountCents))})`;
+        })
         .join('; ')}</li>`
     );
   }
@@ -833,6 +916,7 @@ export function buildCashPdfReportHtml(params = {}) {
         <div class="kv-row"><span>Esperado em Gaveta</span><strong class="num">${escapeHtml(formatCentsBr(ctx.drawer.expectedCashCents))}</strong></div>
         <div class="kv-row"><span>Contado na Gaveta</span><strong class="num">${ctx.drawer.countedCents !== null ? escapeHtml(formatCentsBr(ctx.drawer.countedCents)) : 'Não informado'}</strong></div>
         ${saidasDetHtml}
+        ${manualAdjHtml}
       </div>
 
       <div class="card">

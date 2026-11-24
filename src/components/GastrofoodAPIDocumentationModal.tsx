@@ -92,7 +92,7 @@ export const GastrofoodAPIDocumentationModal: React.FC<GastrofoodAPIDocumentatio
       };
       fetchCounts();
     }
-  }, [isOpen, tenantInfo]);
+  }, [isOpen, tenantInfo?.id]);
 
   if (!isOpen) return null;
 

@@ -6,6 +6,7 @@ import {
   Square, MessageSquare, RefreshCw, Copy, Check, Info, ShieldAlert, 
   Calendar, Crown, FileText, UserCheck 
 } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import { useChatStore } from '../../store/chatStore';
 import { supabase } from '../../services/supabase';
 import { fetchEngineGroups, fetchEngineGroupMetadata } from '../../services/whatsappEngine';
@@ -39,7 +40,13 @@ export function ManageGroupsModal({
   instanceId,
   instanceName
 }: ManageGroupsModalProps) {
-  const { contacts, rawInstances, updateInstanceEnabledGroups, tenantInfo } = useChatStore();
+  const { rawInstances, updateInstanceEnabledGroups, tenantInfo } = useChatStore(
+    useShallow(s => ({
+      rawInstances: s.rawInstances,
+      updateInstanceEnabledGroups: s.updateInstanceEnabledGroups,
+      tenantInfo: s.tenantInfo
+    }))
+  );
   const [loading, setLoading] = useState(false);
   const [syncingLive, setSyncingLive] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -87,8 +94,9 @@ export function ManageGroupsModal({
 
       const groupContactsMap = new Map<string, GroupItem>();
 
-      // 2. Busca do cache do store (contatos em memória)
-      Object.values(contacts).forEach((c: any) => {
+      // 2. Busca do cache do store (contatos em memória) sem assinar atualizações constantes de chat
+      const storeContacts = useChatStore.getState().contacts || [];
+      Object.values(storeContacts).forEach((c: any) => {
         const jid = c.whatsapp_jid || c.phone || '';
         const isGroupJid = jid.endsWith('@g.us');
         const cInstId = c.instance_id || (c.id && c.id.includes('_') ? c.id.split('_')[1] : null);
@@ -222,7 +230,7 @@ export function ManageGroupsModal({
       setLoading(false);
       setSyncingLive(false);
     }
-  }, [instanceId, contacts, tenantInfo]);
+  }, [instanceId, tenantInfo?.id]);
 
   useEffect(() => {
     if (!isOpen || !instanceId) return;

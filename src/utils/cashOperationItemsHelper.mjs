@@ -31,6 +31,66 @@ export function buildOrderScopeKey(orderNumber, moduleName) {
 }
 
 /**
+ * Converte linhas brutas de auditoria do TXT DataDivas
+ * (ex: "Mesa 050 reaberta | Recebimento excluido 2.0 | Codigo: 277702")
+ * em rótulos e orientação prática em português.
+ */
+export function formatReopenedTableAudit(entry) {
+  const rawText = typeof entry === 'string' ? entry : String(entry?.rawText || '').trim();
+  const tableMatch = rawText.match(/Mesa\s+(\d+)/i);
+  const codeMatch = rawText.match(/C[oó]digo:\s*([A-Z0-9-]+)/i);
+  const exclMatch = rawText.match(/Recebimento\s+exclu[ií]do(?:\s+([\d.,]+))?/i);
+
+  const tableNum = String(entry?.table || (tableMatch ? tableMatch[1] : '')).trim();
+  const code = String(entry?.orderNumber || (codeMatch ? codeMatch[1] : '')).trim();
+  const exclRaw = exclMatch && exclMatch[1] ? exclMatch[1].trim() : '';
+
+  const isReopened = /reaberta/i.test(rawText);
+  const isTransferred = /transferida/i.test(rawText);
+  const hasExcludedReceipt = /recebimento\s+exclu[ií]do/i.test(rawText);
+
+  const tableLabel = tableNum ? `Mesa ${tableNum}` : 'Mesa / Comanda';
+  const actionTitle = isReopened
+    ? `${tableLabel} reaberta após fechamento`
+    : isTransferred
+      ? `${tableLabel} transferida no PDV`
+      : rawText || 'Alteração de mesa registrada no PDV';
+
+  let eventTag = isReopened ? 'Reabertura no PDV' : 'Auditoria PDV';
+  let eventDetail = '';
+  if (hasExcludedReceipt) {
+    eventTag = 'Recebimento excluído';
+    if (exclRaw && exclRaw.includes(',')) {
+      eventDetail = `Um lançamento anterior (${exclRaw.startsWith('R$') ? exclRaw : `R$ ${exclRaw}`}) foi removido no PDV ao reabrir a conta.`;
+    } else if (exclRaw) {
+      eventDetail = `Um recebimento anterior foi excluído no PDV ao reabrir a conta (ocorrência/reg. ${exclRaw}).`;
+    } else {
+      eventDetail = 'Um recebimento anterior foi excluído no PDV ao reabrir a conta.';
+    }
+  } else if (rawText) {
+    const cleanParts = rawText
+      .split('|')
+      .map((p) => p.trim())
+      .filter((p) => p && !/^C[oó]digo:/i.test(p) && !/^Mesa\s+\d+/i.test(p));
+    eventDetail = cleanParts.join(' • ');
+  }
+
+  const auditHint =
+    'Verifique se o cliente alterou a forma de pagamento ou dividiu a conta após a reabertura — esse evento costuma explicar divergências entre PDV e banco.';
+
+  return {
+    rawText,
+    table: tableNum,
+    orderNumber: code,
+    tableLabel,
+    actionTitle,
+    eventTag,
+    eventDetail,
+    auditHint
+  };
+}
+
+/**
  * Converte descrições pipe do DataDivas ("COMBO|(1,000)PLUS CHURRASCO|(1,000)BATATA...") em título + subitens legíveis.
  */
 export function formatSoldProductName(rawProduct) {
@@ -305,15 +365,23 @@ export function buildAuditInsights({
     }));
 
   // 4. Mesas reabertas / recebimentos excluídos (fechamento_resumo_txt + zeros em PlanilhaRecebimento)
-  const reopenedTables = [...(summaryTxtFile?.summary?.mesasTransferidas || [])];
+  const reopenedTables = (summaryTxtFile?.summary?.mesasTransferidas || []).map((entry) => ({
+    ...entry,
+    ...formatReopenedTableAudit(entry)
+  }));
   const zeroPdvReceipts = (pdvFile?.rows || [])
-    .filter((r) => Number(r.amountCents || 0) === 0 && r.orderNumber)
-    .map((r) => ({
-      rawText: `Lançamento R$ 0,00 em ${r.module || 'MESA'} ${r.orderNumber} (${r.timeStr || '-'}) • Op: ${r.operatorName || '-'}`,
-      table: r.orderNumber || '',
-      timeStr: r.timeStr || '',
-      operatorName: r.operatorName || ''
-    }));
+    .filter((r) => Number(r.amountCents || 0) === 0 && (r.orderNumber || r.numero))
+    .map((r) => {
+      const tableCode = r.orderNumber || r.numero || '';
+      const modName = r.module || r.modulo || 'MESA';
+      const opName = r.operatorName || r.operador || '-';
+      return {
+        rawText: `Lançamento R$ 0,00 em ${modName} ${tableCode} (${r.timeStr || '-'}) • Op: ${opName}`,
+        table: tableCode,
+        timeStr: r.timeStr || '',
+        operatorName: opName
+      };
+    });
 
   // 5. Ranking de Produtos, Garçons e Canais (a partir de pdv_itens_vendidos)
   const byProduct = new Map();
@@ -364,4 +432,94 @@ export function buildAuditInsights({
     byModule: Array.from(byModule.values()).sort((a, b) => b.totalCents - a.totalCents),
     bySubGroup: Array.from(bySubGroup.values()).sort((a, b) => b.totalCents - a.totalCents).slice(0, 12)
   };
+}
+
+/**
+ * Cruza faltas digitais (`missingInBank`) com eventos de mesa reaberta,
+ * recebimentos R$ 0,00 e lançamentos repetidos em poucos segundos no PDV.
+ */
+export function annotateMissingItemsWithOperationalHints({
+  missingItems = [],
+  reopenedTables = [],
+  zeroPdvReceipts = []
+} = {}) {
+  const list = Array.isArray(missingItems) ? missingItems : [];
+  if (list.length === 0) return list;
+
+  const reopenedByTable = new Map();
+  for (const entry of reopenedTables || []) {
+    const key = normalizeOrderNumber(entry?.table);
+    if (!key) continue;
+    const arr = reopenedByTable.get(key) || [];
+    arr.push(entry);
+    reopenedByTable.set(key, arr);
+  }
+
+  const zeroByTable = new Map();
+  for (const entry of zeroPdvReceipts || []) {
+    const key = normalizeOrderNumber(entry?.table);
+    if (!key) continue;
+    const arr = zeroByTable.get(key) || [];
+    arr.push(entry);
+    zeroByTable.set(key, arr);
+  }
+
+  return list.map((item) => {
+    const alerts = [];
+    const tableKey = normalizeOrderNumber(item?.referenceCode);
+    const mod = normalizeOrderModule(item?.metadata?.modulo || item?.metadata?.module || '');
+
+    if (tableKey) {
+      const reopened = reopenedByTable.get(tableKey) || [];
+      if (reopened.length > 0 && (!mod || mod === 'MESA' || mod === 'OUTRO')) {
+        const first = reopened[0];
+        alerts.push({
+          code: 'reopened_table',
+          severity: 'warning',
+          label: `Mesa ${first.table || tableKey} reaberta no PDV`,
+          detail: first.orderNumber
+            ? `Caixa Cego registrou ${first.eventTag || 'reabertura'} (Cód. ${first.orderNumber}) — verifique estorno/troca sem cobrança na máquina.`
+            : `Caixa Cego registrou ${first.eventTag || 'reabertura'} — verifique estorno/troca sem cobrança na máquina.`
+        });
+      }
+
+      const nearbyDupes = list.filter(
+        (other) =>
+          other.id !== item.id &&
+          normalizeOrderNumber(other.referenceCode) === tableKey &&
+          Number(other.amountCents || 0) === Number(item.amountCents || 0) &&
+          Math.abs(Number(other.secondsOfDay || 0) - Number(item.secondsOfDay || 0)) <= 60
+      );
+      if (nearbyDupes.length > 0) {
+        const minGapSec = Math.min(
+          ...nearbyDupes.map((o) => Math.abs(Number(o.secondsOfDay || 0) - Number(item.secondsOfDay || 0)))
+        );
+        alerts.push({
+          code: 'rapid_duplicate',
+          severity: 'warning',
+          label: `${nearbyDupes.length + 1}x mesmo valor em ${minGapSec}s`,
+          detail: `Lançamentos idênticos em ${minGapSec}s na mesma comanda (${item.referenceCode}) sem par na maquininha.`
+        });
+      }
+
+      const zeroRows = zeroByTable.get(tableKey) || [];
+      if (zeroRows.length > 0 && (!mod || mod === 'MESA' || mod === 'OUTRO')) {
+        alerts.push({
+          code: 'zero_receipt_on_table',
+          severity: 'info',
+          label: `Mesa ${tableKey} c/ lançamento R$ 0,00`,
+          detail: zeroRows[0].rawText || `Há lançamento R$ 0,00 registrado na Mesa ${tableKey}.`
+        });
+      }
+    }
+
+    if (alerts.length === 0) return item;
+    return {
+      ...item,
+      metadata: {
+        ...(item.metadata || {}),
+        operationalAlerts: alerts
+      }
+    };
+  });
 }

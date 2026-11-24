@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   CheckCircle2,
   AlertTriangle,
@@ -15,8 +15,11 @@ import {
   Users,
   Activity,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   Trash2,
-  User
+  User,
+  Filter
 } from 'lucide-react';
 
 import {
@@ -24,9 +27,10 @@ import {
   CashReconciliationResult,
   formatCents
 } from '../../types/cashReconciliation';
-import { formatDateBr, formatDateBrShort } from '../../utils/cashReconciliationServiceHelper.mjs';
+import { buildMirrorRowDetails, formatDateBr, formatDateBrShort } from '../../utils/cashReconciliationServiceHelper.mjs';
 import { CashSessionRow } from '../../services/cashReconciliationService';
 import { CashMetricDetailModal, HealthMetricKey } from './CashMetricDetailModal';
+import { GeneralDiffTabKey } from './CashGeneralDiffModal';
 
 export interface HistoricalStatsData {
   totalSessions: number;
@@ -320,6 +324,7 @@ interface CashHealthDashboardProps {
   onSelectSession?: (sessionId: string) => void;
   onDeleteSession?: (session: CashSessionRow) => void;
   onOpenMirrorCategory?: (mirrorKey: string) => void;
+  onOpenGeneralDiff?: (tab?: GeneralDiffTabKey) => void;
 }
 
 const STATUS_BADGE: Record<string, { label: string; badgeClass: string; barClass: string; icon: React.ReactNode }> = {
@@ -355,9 +360,11 @@ export function CashHealthDashboard({
   sessions,
   onSelectSession,
   onDeleteSession,
-  onOpenMirrorCategory
+  onOpenMirrorCategory,
+  onOpenGeneralDiff
 }: CashHealthDashboardProps) {
   const [activeMetricKey, setActiveMetricKey] = useState<HealthMetricKey | null>(null);
+  const [showAllValidationWarnings, setShowAllValidationWarnings] = useState(false);
   const statusMeta = STATUS_BADGE[result.status] || STATUS_BADGE.attention;
   const getMirror = (key: string): CashMirrorRow =>
     result.mirrorRows?.find((r) => r.key === key) || {
@@ -374,13 +381,99 @@ export function CashHealthDashboard({
   const pixRow = getMirror('pix');
   const cardRow = getMirror('cartao');
   const pendRow = getMirror('pendentes');
+  const pixBridge = useMemo(() => buildMirrorRowDetails(result, 'pix').reconciliationBridge, [result]);
+  const cardBridge = useMemo(() => buildMirrorRowDetails(result, 'cartao').reconciliationBridge, [result]);
+  const renderChannelBridgeNote = (bridge?: {
+    extraCents: number;
+    missingCents: number;
+    crossCategoryNetCents: number;
+  }) => {
+    if (!bridge || (bridge.extraCents === 0 && bridge.missingCents === 0 && bridge.crossCategoryNetCents === 0)) {
+      return null;
+    }
+    const cross = bridge.crossCategoryNetCents || 0;
+    return (
+      <p className="text-[10.5px] text-slate-500 dark:text-[#8696a0] mt-1.5 truncate">
+        Sobras <strong className="text-indigo-600 dark:text-indigo-400">{formatCents(bridge.extraCents)}</strong>
+        {' • '}
+        Faltas <strong className="text-rose-600 dark:text-rose-400">{formatCents(bridge.missingCents)}</strong>
+        {cross !== 0 ? (
+          <>
+            {' • '}
+            Trocas <strong className="text-emerald-600 dark:text-emerald-400">{cross > 0 ? '+' : '-'}{formatCents(Math.abs(cross))}</strong>
+          </>
+        ) : null}
+      </p>
+    );
+  };
   const drawer = result.cashDrawerSummary || {};
   const metrics = result.financialMetrics || {};
+  const periodDiag = result.periodDiagnostics;
+  const validationWarnings = periodDiag?.validationWarnings || [];
+  const hasMissingCardAcquirers = validationWarnings.some((w) => w.code === 'missing_card_acquirers');
+  const hasCriticalValidationError = validationWarnings.some((w) => w.severity === 'error');
+  const isValidationExpanded = showAllValidationWarnings || hasCriticalValidationError;
   const diffCents = Number(result.diffTotalCents || 0);
   const formattedDiff = `${diffCents > 0 ? '+' : diffCents < 0 ? '-' : ''}${formatCents(Math.abs(diffCents))}`;
+  const cashDrawerRow = (result.mirrorRows || []).find((r) => r.key === 'saldo_dinheiro');
+  const cashDrawerDiffCents = Number(cashDrawerRow?.diffCents || 0);
+  const hasDigitalPending = (result.missingInBank?.length || 0) + (result.extraInBank?.length || 0) > 0;
+  const formattedDrawerDiff = `${cashDrawerDiffCents > 0 ? '+' : cashDrawerDiffCents < 0 ? '-' : ''}${formatCents(Math.abs(cashDrawerDiffCents))}`;
 
   return (
     <div className="space-y-4">
+      {validationWarnings.length > 0 && (
+        <div
+          className={`rounded-2xl border px-3.5 py-2.5 text-xs transition-all ${
+            hasCriticalValidationError
+              ? 'border-rose-500/35 bg-rose-500/10 text-rose-800 dark:text-rose-200'
+              : validationWarnings.some((w) => w.severity === 'warning')
+                ? 'border-amber-500/35 bg-amber-500/10 text-amber-900 dark:text-amber-200'
+                : 'border-cyan-500/35 bg-cyan-500/10 text-cyan-900 dark:text-cyan-200'
+          }`}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0 flex-1 flex-wrap">
+              {validationWarnings.some((w) => w.code === 'multi_day_filtered') ? (
+                <Filter size={15} className="shrink-0" />
+              ) : (
+                <AlertTriangle size={15} className="shrink-0" />
+              )}
+              <span className="font-black">
+                {validationWarnings.length} alerta(s) de auditoria:
+              </span>
+              <span className="truncate opacity-90">
+                {validationWarnings.map((w) => w.title).join(' • ')}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowAllValidationWarnings((v) => !v)}
+              className="px-2.5 py-1 rounded-lg bg-white/80 dark:bg-[#111b21]/80 border border-current/20 text-[11px] font-bold flex items-center gap-1 shrink-0 active:scale-95 transition-all"
+            >
+              <span>{isValidationExpanded ? 'Ocultar Detalhes' : 'Ver Detalhes'}</span>
+              {isValidationExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+            </button>
+          </div>
+
+          {isValidationExpanded && (
+            <div className="mt-2.5 pt-2.5 border-t border-current/15 space-y-2">
+              {validationWarnings.map((warn, idx) => (
+                <div key={`${warn.code}_${idx}`} className="flex items-start gap-2">
+                  <span className="px-1.5 py-0.5 rounded bg-white/70 dark:bg-[#111b21]/70 text-[10px] font-black uppercase shrink-0">
+                    {warn.severity === 'error' ? 'Erro' : warn.severity === 'warning' ? 'Atenção' : 'Info'}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="font-bold leading-tight">{warn.title}</p>
+                    <p className="text-[11px] opacity-90 leading-snug mt-0.5">{warn.message}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Hero de Saúde do Controle */}
       <div className="rounded-3xl border border-slate-200/80 dark:border-[#2a3942] bg-white/90 dark:bg-[#202c33]/90 backdrop-blur-xl p-4 sm:p-6 shadow-[0_8px_30px_rgb(0,0,0,0.06)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.28)]">
         <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-5">
@@ -417,10 +510,20 @@ export function CashHealthDashboard({
                   {formatCents(result.realTotalCents)}
                 </p>
               </div>
-              <div className="min-w-0 overflow-hidden rounded-2xl bg-slate-50 dark:bg-[#111b21]/80 border border-slate-200/70 dark:border-[#2a3942] px-3.5 sm:px-4 py-3">
-                <p className="uppercase text-[10px] font-black tracking-wider text-slate-500 dark:text-[#8696a0] truncate">
-                  Diferença Geral
-                </p>
+              <button
+                type="button"
+                onClick={() => onOpenGeneralDiff?.(hasDigitalPending ? 'tabela' : 'canais')}
+                className="min-w-0 overflow-hidden text-left group rounded-2xl bg-slate-50 dark:bg-[#111b21]/80 border border-slate-200/80 dark:border-[#2a3942] hover:border-[#00a884]/70 hover:bg-white dark:hover:bg-[#111b21] px-3.5 sm:px-4 py-3 cursor-pointer active:scale-[0.98] transition-all"
+                title="Clique para abrir todos os valores que ainda não foram conciliados no banco, maquininha e gaveta"
+              >
+                <div className="flex items-center justify-between gap-1">
+                  <p className="uppercase text-[10px] font-black tracking-wider text-slate-500 dark:text-[#8696a0] truncate">
+                    Diferença Geral
+                  </p>
+                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-[#00a884]/15 text-[#008f6f] dark:text-[#00a884] text-[9.5px] font-black shrink-0 group-hover:bg-[#00a884] group-hover:text-white transition-colors">
+                    Clique aqui <ChevronRight size={10} />
+                  </span>
+                </div>
                 <p className={`text-lg sm:text-xl xl:text-[22px] font-black mt-0.5 tabular-nums whitespace-nowrap truncate ${
                   Math.abs(diffCents) <= 100
                     ? 'text-emerald-600 dark:text-emerald-400'
@@ -430,28 +533,67 @@ export function CashHealthDashboard({
                 }`}>
                   {formattedDiff}
                 </p>
-              </div>
+                <p className="text-[10px] text-slate-500 dark:text-[#8696a0] truncate mt-0.5">
+                  {hasDigitalPending
+                    ? cashDrawerDiffCents !== 0
+                      ? `${result.missingInBank?.length || 0} venda(s) PDV • Gaveta ${formattedDrawerDiff}`
+                      : `${result.missingInBank?.length || 0} venda(s) PDV • ${result.extraInBank?.length || 0} receb. banco`
+                    : cashDrawerDiffCents !== 0
+                      ? `Gaveta ${formattedDrawerDiff} • Ver resumo por canal`
+                      : 'Ver resumo por canal e conciliados'}
+                </p>
+              </button>
             </div>
 
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600 dark:text-[#aebac1] pt-1">
-              <span><strong>{result.matchedPairs?.length || 0}</strong> transações batidas</span>
+            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-slate-600 dark:text-[#aebac1] pt-1">
+              <button
+                type="button"
+                onClick={() => onOpenGeneralDiff?.('conciliados')}
+                className="hover:text-[#00a884] hover:underline transition-colors"
+                title="Ver todas as transações já conciliadas"
+              >
+                <strong>{result.matchedPairs?.length || 0}</strong> transações batidas
+              </button>
               <span>•</span>
-              <span className={result.suggestions?.length ? 'text-amber-600 dark:text-amber-400 font-bold' : ''}>
+              <button
+                type="button"
+                onClick={() => onOpenGeneralDiff?.('sugestoes')}
+                className={`hover:underline transition-colors ${result.suggestions?.length ? 'text-amber-600 dark:text-amber-400 font-bold' : ''}`}
+                title="Abrir dicas automáticas de vínculo"
+              >
                 <strong>{result.suggestions?.length || 0}</strong> sugestões de vínculo
-              </span>
+              </button>
               <span>•</span>
-              <span className={result.missingInBank?.length ? 'text-rose-600 dark:text-rose-400 font-bold' : ''}>
-                <strong>{result.missingInBank?.length || 0}</strong> faltam no banco
-              </span>
+              <button
+                type="button"
+                onClick={() => onOpenGeneralDiff?.('tabela')}
+                className={`hover:underline transition-colors ${result.missingInBank?.length ? 'text-rose-600 dark:text-rose-400 font-bold' : ''}`}
+                title="A venda está no PDV. Falta localizar o recebimento no banco."
+              >
+                <strong>{result.missingInBank?.length || 0}</strong> vendas s/ recebimento (PDV)
+              </button>
               <span>•</span>
-              <span className={result.extraInBank?.length ? 'text-indigo-600 dark:text-indigo-400 font-bold' : ''}>
-                <strong>{result.extraInBank?.length || 0}</strong> sobram no banco
-              </span>
+              <button
+                type="button"
+                onClick={() => onOpenGeneralDiff?.('tabela')}
+                className={`hover:underline transition-colors ${result.extraInBank?.length ? 'text-indigo-600 dark:text-indigo-400 font-bold' : ''}`}
+                title="O recebimento está no banco. Falta localizar a venda no PDV."
+              >
+                <strong>{result.extraInBank?.length || 0}</strong> recebimentos s/ venda (Banco)
+              </button>
               {result.deduplicatedItems?.length > 0 && (
                 <>
                   <span>•</span>
                   <span className="text-cyan-600 dark:text-cyan-400">
                     <strong>{result.deduplicatedItems.length}</strong> PIX C6 Pay deduplicados c/ OFX
+                  </span>
+                </>
+              )}
+              {(periodDiag?.totalOutOfPeriodCount || 0) > 0 && (
+                <>
+                  <span>•</span>
+                  <span className="text-cyan-600 dark:text-cyan-400 font-semibold">
+                    <strong>{periodDiag?.totalOutOfPeriodCount}</strong> fora da data (filtrados)
                   </span>
                 </>
               )}
@@ -476,11 +618,13 @@ export function CashHealthDashboard({
               />
             </div>
             <p className="text-[11px] text-slate-500 dark:text-[#8696a0] leading-snug">
-              {drawer.countedCents === null
-                ? 'Informe o Dinheiro Contado na gaveta na aba Espelho para finalizar o fechamento.'
-                : Math.abs(diffCents) <= 100 && !result.suggestions?.length
-                  ? 'Conferência conciliada dentro da tolerância.'
-                  : 'Revise as sugestões e itens pendentes nas abas abaixo.'}
+              {hasMissingCardAcquirers
+                ? 'Importe Rede e C6 Pay para conciliar os cartões do PDV.'
+                : drawer.countedCents === null
+                  ? 'Informe o Dinheiro Contado na gaveta na aba Espelho para finalizar o fechamento.'
+                  : Math.abs(diffCents) <= 100 && !result.suggestions?.length
+                    ? 'Conferência conciliada dentro da tolerância.'
+                    : 'Revise as sugestões e itens pendentes nas abas abaixo.'}
             </p>
           </div>
         </div>
@@ -515,6 +659,16 @@ export function CashHealthDashboard({
               <p className="text-xs sm:text-sm font-bold text-slate-600 dark:text-[#aebac1] tabular-nums whitespace-nowrap">{formatCents(pixRow.systemCents)}</p>
             </div>
           </div>
+          {renderChannelBridgeNote(pixBridge)}
+          {metrics.pixBreakdown && (metrics.pixBreakdown.ofxCents > 0 || metrics.pixBreakdown.redePixCents > 0 || metrics.pixBreakdown.c6PayPostCutoffCents > 0) && (
+            <p className="text-[10px] text-slate-500 dark:text-[#8696a0] mt-1 truncate">
+              {metrics.pixBreakdown.ofxByBank?.length
+                ? metrics.pixBreakdown.ofxByBank.map((b) => `${b.bankLabel} ${formatCents(b.amountCents)}`).join(' • ')
+                : `OFX ${formatCents(metrics.pixBreakdown.ofxCents)}`}
+              {metrics.pixBreakdown.redePixCents > 0 ? ` • Rede PIX ${formatCents(metrics.pixBreakdown.redePixCents)}` : ''}
+              {metrics.pixBreakdown.c6PayPostCutoffCents > 0 ? ` • C6 Pós ${formatCents(metrics.pixBreakdown.c6PayPostCutoffCents)}` : ''}
+            </p>
+          )}
         </button>
 
         {/* Cartões */}
@@ -544,6 +698,20 @@ export function CashHealthDashboard({
               <p className="text-xs sm:text-sm font-bold text-slate-600 dark:text-[#aebac1] tabular-nums whitespace-nowrap">{formatCents(cardRow.systemCents)}</p>
             </div>
           </div>
+          {hasMissingCardAcquirers ? (
+            <p className="text-[10.5px] font-semibold text-amber-600 dark:text-amber-400 mt-1.5 truncate">
+              Aguardando upload Rede / C6 Pay
+            </p>
+          ) : (
+            <>
+              {renderChannelBridgeNote(cardBridge)}
+              {metrics.cardBreakdown && (metrics.cardBreakdown.redeCardCents > 0 || metrics.cardBreakdown.c6PayCardCents > 0) && (
+                <p className="text-[10px] text-slate-500 dark:text-[#8696a0] mt-1 truncate">
+                  Rede {formatCents(metrics.cardBreakdown.redeCardCents)} • C6 Pay {formatCents(metrics.cardBreakdown.c6PayCardCents)}
+                </p>
+              )}
+            </>
+          )}
         </button>
 
         {/* Dinheiro */}
@@ -573,6 +741,11 @@ export function CashHealthDashboard({
               </p>
             </div>
           </div>
+          {(drawer.outrasSaidasCents || 0) > 0 && (
+            <p className="text-[10px] text-rose-500 dark:text-rose-400 mt-1 truncate">
+              Outras saídas descontadas: -{formatCents(drawer.outrasSaidasCents)}
+            </p>
+          )}
           {(drawer.swappedToDigitalCents || 0) > 0 && (
             <p className="text-[10.5px] text-amber-600 dark:text-amber-400 mt-1.5">
               Ajustado c/ trocas p/ digital ({formatCents(drawer.swappedToDigitalCents)}): esperado físico{' '}

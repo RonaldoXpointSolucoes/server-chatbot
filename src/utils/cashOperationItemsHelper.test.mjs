@@ -5,8 +5,10 @@ import {
   normalizeOrderModule,
   buildOrderScopeKey,
   formatSoldProductName,
+  formatReopenedTableAudit,
   linkSoldItemsToPdvOperations,
-  buildAuditInsights
+  buildAuditInsights,
+  annotateMissingItemsWithOperationalHints
 } from './cashOperationItemsHelper.mjs';
 
 test('formatSoldProductName parses pipe-delimited DataDivas combos into readable names', () => {
@@ -164,4 +166,71 @@ test('buildAuditInsights combines cancellations, discounts, fee removals, reopen
   assert.equal(insights.reopenedTables.length, 1);
   assert.equal(insights.topProducts[0].name, 'COSTELA PRIME 12H');
   assert.equal(insights.byWaiter[0].feeRemovalsCount, 1);
+  assert.equal(insights.reopenedTables[0].tableLabel, 'Mesa 075');
+  assert.equal(insights.reopenedTables[0].eventTag, 'Recebimento excluído');
+});
+
+test('formatReopenedTableAudit turns DataDivas pipe strings into clear pt-BR audit metadata', () => {
+  const formatted = formatReopenedTableAudit({
+    rawText: 'Mesa 050 reaberta | Recebimento excluido 2.0 | Codigo: 277702',
+    table: '050',
+    orderNumber: '277702'
+  });
+  assert.equal(formatted.tableLabel, 'Mesa 050');
+  assert.equal(formatted.orderNumber, '277702');
+  assert.equal(formatted.actionTitle, 'Mesa 050 reaberta após fechamento');
+  assert.equal(formatted.eventTag, 'Recebimento excluído');
+  assert.ok(formatted.eventDetail.includes('2.0'));
+  assert.ok(formatted.auditHint.includes('forma de pagamento'));
+});
+
+test('annotateMissingItemsWithOperationalHints correlates reopened tables, rapid duplicates and zero receipts', () => {
+  const missingItems = [
+    {
+      id: 'sys_m50_1',
+      referenceCode: '050',
+      category: 'cartao',
+      amountCents: 2500,
+      secondsOfDay: 12 * 3600 + 3 * 60 + 39,
+      timeStr: '12:03:39',
+      metadata: { modulo: 'MESA' }
+    },
+    {
+      id: 'sys_m50_2',
+      referenceCode: '050',
+      category: 'cartao',
+      amountCents: 2500,
+      secondsOfDay: 12 * 3600 + 3 * 60 + 43,
+      timeStr: '12:03:43',
+      metadata: { modulo: 'MESA' }
+    },
+    {
+      id: 'sys_m002',
+      referenceCode: '002',
+      category: 'cartao',
+      amountCents: 3465,
+      secondsOfDay: 21 * 3600 + 36 * 60 + 38,
+      timeStr: '21:36:38',
+      metadata: { modulo: 'MESA' }
+    }
+  ];
+
+  const annotated = annotateMissingItemsWithOperationalHints({
+    missingItems,
+    reopenedTables: [
+      { table: '050', orderNumber: '277702', actionTitle: 'Mesa 050 reaberta após fechamento', eventTag: 'Recebimento excluído' }
+    ],
+    zeroPdvReceipts: [
+      { table: '002', timeStr: '19:10:42', rawText: 'Lançamento R$ 0,00 em MESA 002' }
+    ]
+  });
+
+  const m50 = annotated[0];
+  assert.equal(m50.metadata.operationalAlerts.length, 2);
+  assert.ok(m50.metadata.operationalAlerts.some((a) => a.code === 'reopened_table' && /Mesa 050/i.test(a.label)));
+  assert.ok(m50.metadata.operationalAlerts.some((a) => a.code === 'rapid_duplicate' && /4s/.test(a.detail)));
+
+  const m002 = annotated[2];
+  assert.equal(m002.metadata.operationalAlerts.length, 1);
+  assert.equal(m002.metadata.operationalAlerts[0].code, 'zero_receipt_on_table');
 });

@@ -75,6 +75,18 @@ function pad2(n) {
   return String(n).padStart(2, '0');
 }
 
+export function addDaysIso(isoDate, deltaDays) {
+  const m = String(isoDate || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return '';
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + deltaDays));
+  return d.toISOString().slice(0, 10);
+}
+
+function formatIsoToBrShortDate(isoDate) {
+  const m = String(isoDate || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : String(isoDate || '');
+}
+
 /**
  * Normaliza datas/horas provenientes de seriais numéricos do Excel ou strings DD/MM/YYYY e YYYY-MM-DD.
  */
@@ -352,14 +364,20 @@ function parseRelConferenciaMatrix(rawMatrix) {
     }
   }
 
+  const parsedCategoryCount = Object.keys(systemRows).length;
+  const warnings = [];
+  if (parsedCategoryCount === 0) {
+    warnings.push('Planilha de Conferência lida sem linhas de receita ou totais reconhecidos.');
+  }
+
   return {
     fileType: 'rel_conferencia',
     status: 'ok',
     periodStart: headerLabel,
     periodEnd: headerLabel,
-    warnings: [],
+    warnings,
     rows: [],
-    summary: { headerLabel, cashBlock, systemRows, realRows }
+    summary: { headerLabel, parsedCategoryCount, cashBlock, systemRows, realRows }
   };
 }
 
@@ -367,6 +385,8 @@ function parseRedeMatrix(rawMatrix, fmtMatrix) {
   const headerIdx = findHeaderRowIndex(rawMatrix, ['DATA DA VENDA', 'HORA DA VENDA', 'STATUS DA VENDA']);
   const colMap = buildColumnMap(rawMatrix[headerIdx]);
   const rows = [];
+  const warnings = [];
+  const distinctDates = new Set();
   let minDate = '';
   let maxDate = '';
 
@@ -379,6 +399,7 @@ function parseRedeMatrix(rawMatrix, fmtMatrix) {
     const isApproved = status === 'aprovada' || status === 'pago';
     const dt = parseCashDateTime(getCell(raw, colMap, 'DATA DA VENDA'), getCell(raw, colMap, 'HORA DA VENDA'));
     if (dt.dateStr) {
+      distinctDates.add(dt.dateStr);
       if (!minDate || dt.dateStr < minDate) minDate = dt.dateStr;
       if (!maxDate || dt.dateStr > maxDate) maxDate = dt.dateStr;
     }
@@ -415,14 +436,24 @@ function parseRedeMatrix(rawMatrix, fmtMatrix) {
     });
   }
 
+  if (minDate && maxDate && minDate !== maxDate) {
+    warnings.push(
+      `Relatório Rede abrange múltiplos dias (${formatIsoToBrShortDate(minDate)} a ${formatIsoToBrShortDate(maxDate)} — ${distinctDates.size} dia(s)). Somente o dia de referência do caixa será contabilizado.`
+    );
+  }
+
   return {
     fileType: 'adquirente_rede',
     status: 'ok',
     periodStart: minDate,
     periodEnd: maxDate,
-    warnings: [],
+    warnings,
     rows,
-    summary: { totalRows: rows.length, approvedRows: rows.filter(r => r.isApproved).length }
+    summary: {
+      totalRows: rows.length,
+      approvedRows: rows.filter(r => r.isApproved).length,
+      distinctDatesCount: distinctDates.size
+    }
   };
 }
 
@@ -432,6 +463,8 @@ function parseC6PayMatrix(rawMatrix, fmtMatrix) {
   const rows = [];
   const warnings = [];
   const dateCounts = new Map();
+  let minDate = '';
+  let maxDate = '';
 
   for (let i = headerIdx + 1; i < rawMatrix.length; i++) {
     const raw = rawMatrix[i];
@@ -441,7 +474,11 @@ function parseC6PayMatrix(rawMatrix, fmtMatrix) {
     const status = String(getCell(fmt, colMap, 'STATUS DA VENDA') ?? '').trim();
     const isApproved = normalizeAsciiUpper(status) === 'APROVADA';
     const dt = parseCashDateTime(getCell(raw, colMap, 'DATA DA VENDA'), getCell(raw, colMap, 'HORA DA VENDA'));
-    if (dt.dateStr) dateCounts.set(dt.dateStr, (dateCounts.get(dt.dateStr) || 0) + 1);
+    if (dt.dateStr) {
+      dateCounts.set(dt.dateStr, (dateCounts.get(dt.dateStr) || 0) + 1);
+      if (!minDate || dt.dateStr < minDate) minDate = dt.dateStr;
+      if (!maxDate || dt.dateStr > maxDate) maxDate = dt.dateStr;
+    }
 
     const modalidadeRaw = String(getCell(fmt, colMap, 'MODALIDADE') ?? '').trim();
     const modUpper = normalizeAsciiUpper(modalidadeRaw);
@@ -477,25 +514,38 @@ function parseC6PayMatrix(rawMatrix, fmtMatrix) {
 
   const datesSorted = [...dateCounts.entries()].sort((a, b) => b[1] - a[1]);
   const mainDate = datesSorted[0]?.[0] || '';
+  const totalDatedRows = [...dateCounts.values()].reduce((s, c) => s + c, 0);
+  const expectedNextDay = mainDate ? addDaysIso(mainDate, 1) : '';
+  const isSingleDayVirada =
+    datesSorted.length <= 1 ||
+    (datesSorted.length === 2 &&
+      datesSorted[1][0] === expectedNextDay &&
+      datesSorted[1][1] <= Math.max(5, Math.floor(totalDatedRows * 0.25)));
+
   if (datesSorted.length > 1) {
-    const extraDatesBr = datesSorted.slice(1).map(([iso]) => {
-      const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})$/);
-      return m ? `${m[3]}/${m[2]}/${m[1]}` : iso;
-    });
-    warnings.push(`C6 Pay contém lançamento(s) com data de virada (${extraDatesBr.join(', ')}), mantidos na conferência.`);
+    if (isSingleDayVirada) {
+      const extraDatesBr = datesSorted.slice(1).map(([iso]) => formatIsoToBrShortDate(iso));
+      warnings.push(`C6 Pay contém lançamento(s) com data de virada (${extraDatesBr.join(', ')}), mantidos na conferência.`);
+    } else {
+      warnings.push(
+        `Relatório C6 Pay abrange múltiplos dias (${formatIsoToBrShortDate(minDate)} a ${formatIsoToBrShortDate(maxDate)} — ${dateCounts.size} dia(s)). Somente o dia de referência do caixa será contabilizado.`
+      );
+    }
   }
 
   return {
     fileType: 'adquirente_c6pay',
     status: 'ok',
-    periodStart: mainDate,
-    periodEnd: mainDate,
+    periodStart: isSingleDayVirada ? mainDate : minDate,
+    periodEnd: isSingleDayVirada ? mainDate : maxDate,
     warnings,
     rows,
     summary: {
       totalRows: rows.length,
       approvedRows: rows.filter(r => r.isApproved).length,
-      deniedRows: rows.filter(r => !r.isApproved).length
+      deniedRows: rows.filter(r => !r.isApproved).length,
+      distinctDatesCount: dateCounts.size,
+      isSingleDayVirada
     }
   };
 }
@@ -625,6 +675,9 @@ function parseOfxText(text, rulesConfig, fileName = '') {
   };
 
   const rows = [];
+  const distinctDates = new Set();
+  let txMinDate = '';
+  let txMaxDate = '';
   for (const match of text.matchAll(/<STMTTRN>([\s\S]*?)<\/STMTTRN>/gi)) {
     const block = match[1];
     const getTag = (tag) => (block.match(new RegExp(`<${tag}>([^<\\r\\n]+)`, 'i')) || [])[1]?.trim() || '';
@@ -634,8 +687,14 @@ function parseOfxText(text, rulesConfig, fileName = '') {
     const memo = getTag('MEMO');
     const refnum = getTag('REFNUM');
     const fitid = getTag('FITID');
-    const isCredit = trnType === 'CREDIT' || amountCents > 0;
+    const isCredit = amountCents > 0 && trnType !== 'DEBIT';
     const ofxClass = isCredit ? classifyOfxCredit(memo, refnum, amountCents, rulesConfig) : 'debito_saida';
+
+    if (dt.dateStr) {
+      distinctDates.add(dt.dateStr);
+      if (!txMinDate || dt.dateStr < txMinDate) txMinDate = dt.dateStr;
+      if (!txMaxDate || dt.dateStr > txMaxDate) txMaxDate = dt.dateStr;
+    }
 
     rows.push({
       source: 'ofx',
@@ -662,13 +721,21 @@ function parseOfxText(text, rulesConfig, fileName = '') {
 
   const startDt = formatOfxDate(dtStartRaw);
   const endDt = formatOfxDate(dtEndRaw);
+  const periodStart = [startDt.dateStr, txMinDate].filter(Boolean).sort()[0] || '';
+  const periodEnd = [endDt.dateStr, txMaxDate].filter(Boolean).sort().slice(-1)[0] || periodStart;
+  const warnings = [];
+  if (distinctDates.size > 1 || (periodStart && periodEnd && periodStart !== periodEnd)) {
+    warnings.push(
+      `Extrato bancário abrange múltiplos dias (${formatIsoToBrShortDate(periodStart)} a ${formatIsoToBrShortDate(periodEnd)} — ${distinctDates.size || 1} dia(s) c/ movimento). Somente os lançamentos do período do caixa serão contabilizados.`
+    );
+  }
 
   return {
     fileType: 'extrato_ofx',
     status: 'ok',
-    periodStart: startDt.dateStr,
-    periodEnd: endDt.dateStr,
-    warnings: [],
+    periodStart,
+    periodEnd,
+    warnings,
     rows,
     summary: {
       bankName,
@@ -681,7 +748,12 @@ function parseOfxText(text, rulesConfig, fileName = '') {
       dtStartTime: startDt.timeStr,
       dtEndTime: endDt.timeStr,
       dtEndSeconds: endDt.secondsOfDay,
-      pixCount: rows.filter(r => r.ofxClass === 'pix_cliente').length
+      distinctDatesCount: distinctDates.size,
+      txMinDate,
+      txMaxDate,
+      pixCount: rows.filter(r => r.ofxClass === 'pix_cliente').length,
+      nonPdvCount: rows.filter(r => r.isCredit && r.ofxClass !== 'pix_cliente').length,
+      debitCount: rows.filter(r => r.ofxClass === 'debito_saida').length
     }
   };
 }
@@ -691,6 +763,7 @@ function parseFechamentoTxt(text) {
   let storeName = '';
   let operatorName = '';
   let periodDate = '';
+  let endDate = '';
   let startTime = '';
   let endTime = '';
   let section = '';
@@ -732,8 +805,14 @@ function parseFechamentoTxt(text) {
         startTime = m[2];
       }
     } else if (upper.startsWith('FIM')) {
-      const m = line.match(/(\d{2}:\d{2}:\d{2})/);
-      if (m) endTime = m[1];
+      const mFull = line.match(/(\d{2}\/\d{2}\/\d{4})\s+(\d{2}:\d{2}:\d{2})/);
+      if (mFull) {
+        endDate = parseCashDateTime(mFull[1]).dateStr;
+        endTime = mFull[2];
+      } else {
+        const m = line.match(/(\d{2}:\d{2}:\d{2})/);
+        if (m) endTime = m[1];
+      }
     } else if (upper.startsWith('OPERADOR:')) {
       operatorName = line.split(':').slice(1).join(':').trim();
     }
@@ -806,15 +885,27 @@ function parseFechamentoTxt(text) {
 
   summary.storeName = storeName;
   summary.operatorName = operatorName;
+  summary.startDate = periodDate;
+  summary.endDate = endDate || periodDate;
   summary.startTime = startTime;
   summary.endTime = endTime;
+
+  const warnings = [];
+  if (
+    summary.vendasNoGeralCents === 0 &&
+    summary.fundoCaixaCents === 0 &&
+    summary.saidasTotalCents === 0 &&
+    summary.saldoDinheiroCents === 0
+  ) {
+    warnings.push('Fita Mov.Caixa (.txt) lida sem totais financeiros reconhecidos — verifique o layout do arquivo.');
+  }
 
   return {
     fileType: 'fechamento_txt',
     status: 'ok',
     periodStart: periodDate,
-    periodEnd: periodDate,
-    warnings: [],
+    periodEnd: endDate || periodDate,
+    warnings,
     rows: [],
     summary
   };
@@ -1158,6 +1249,9 @@ function parseGenericBankMatrix(rawMatrix, fmtMatrix, rulesConfig, fileName = ''
   const bankInfo = identifyBankInstitution({ fileName, headerText });
   const colMap = buildColumnMap(rawMatrix[headerIdx]);
   const rows = [];
+  const distinctDates = new Set();
+  let minDate = '';
+  let maxDate = '';
   for (let i = headerIdx + 1; i < rawMatrix.length; i++) {
     const raw = rawMatrix[i];
     const fmt = fmtMatrix[i] || raw;
@@ -1166,6 +1260,11 @@ function parseGenericBankMatrix(rawMatrix, fmtMatrix, rulesConfig, fileName = ''
     const memo = String(getCell(fmt, colMap, 'DESCRICAO', 'HISTORICO', 'LANCAMENTO') ?? '').trim();
     const amountCents = parseMoneyToCents(getCell(raw, colMap, 'VALOR', 'CREDITO'));
     if (amountCents <= 0) continue;
+    if (dt.dateStr) {
+      distinctDates.add(dt.dateStr);
+      if (!minDate || dt.dateStr < minDate) minDate = dt.dateStr;
+      if (!maxDate || dt.dateStr > maxDate) maxDate = dt.dateStr;
+    }
     const ofxClass = classifyOfxCredit(memo, '', amountCents, rulesConfig);
     rows.push({
       source: 'extrato_generico',
@@ -1183,15 +1282,22 @@ function parseGenericBankMatrix(rawMatrix, fmtMatrix, rulesConfig, fileName = ''
       secondsOfDay: dt.secondsOfDay
     });
   }
+  const warnings = ['Extrato importado pelo mapeador genérico de colunas (Data/Descrição/Valor).'];
+  if (distinctDates.size > 1 || (minDate && maxDate && minDate !== maxDate)) {
+    warnings.push(
+      `Extrato em planilha abrange múltiplos dias (${formatIsoToBrShortDate(minDate)} a ${formatIsoToBrShortDate(maxDate)} — ${distinctDates.size} dia(s)). Somente o dia de referência do caixa será contabilizado.`
+    );
+  }
   return {
     fileType: 'extrato_generico',
     status: 'ok',
-    periodStart: rows[0]?.dateStr || '',
-    periodEnd: rows[rows.length - 1]?.dateStr || '',
-    warnings: ['Extrato importado pelo mapeador genérico de colunas (Data/Descrição/Valor).'],
+    periodStart: minDate || rows[0]?.dateStr || '',
+    periodEnd: maxDate || rows[rows.length - 1]?.dateStr || '',
+    warnings,
     rows,
     summary: {
       totalRows: rows.length,
+      distinctDatesCount: distinctDates.size,
       bankKey: bankInfo.bankKey,
       bankCode: bankInfo.bankCode,
       bankLabel: bankInfo.bankLabel,

@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { UserPlus, XCircle, ChevronDown, Check, User } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import { useChatStore } from '../store/chatStore';
 
 interface ChatOmniMenuProps {
@@ -7,8 +8,13 @@ interface ChatOmniMenuProps {
 }
 
 export const ChatOmniMenu: React.FC<ChatOmniMenuProps> = ({ contactId }) => {
-  const { contacts, agents, updateConversationField } = useChatStore();
-  const contact = contacts.find(c => c.id === contactId);
+  const { contact, agents, updateConversationField } = useChatStore(
+    useShallow(s => ({
+      contact: s.contacts.find(c => c.id === contactId),
+      agents: s.agents,
+      updateConversationField: s.updateConversationField
+    }))
+  );
   
   const [menuOpen, setMenuOpen] = useState<'agent' | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);

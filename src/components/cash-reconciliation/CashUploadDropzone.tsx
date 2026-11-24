@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Upload,
   FileSpreadsheet,
@@ -10,16 +10,49 @@ import {
   X,
   KeyRound,
   CreditCard,
-  Loader2
+  Loader2,
+  ChevronDown,
+  ChevronUp,
+  FolderOpen
 } from 'lucide-react';
 
 import {
   ParsedCashFileResult,
   CashReportCompleteness,
-  CompanyCashRoutineProfile
+  CompanyCashRoutineProfile,
+  formatCents
 } from '../../types/cashReconciliation';
 import { formatDateBr } from '../../utils/cashReconciliationServiceHelper.mjs';
 import { CashReportCompletenessBanner } from './CashReportCompletenessBanner';
+
+function formatParsedFileSubtitle(parsed: Partial<ParsedCashFileResult>): string {
+  if (parsed.status !== 'ok') {
+    return parsed.errorMessage || 'Aguardando leitura';
+  }
+  const summary = (parsed.summary || {}) as Record<string, unknown>;
+  const pStart = parsed.periodStart ? formatDateBr(parsed.periodStart) : '';
+  const pEnd = parsed.periodEnd ? formatDateBr(parsed.periodEnd) : '';
+  const periodLabel = pStart && pEnd && pStart !== pEnd ? `${pStart} a ${pEnd}` : pStart;
+
+  let countLabel = `${parsed.rows?.length || 0} registro(s)`;
+  if (parsed.fileType === 'rel_conferencia') {
+    const sysRows = (summary.systemRows || {}) as Record<string, number>;
+    const catCount = Number(summary.parsedCategoryCount ?? Object.keys(sysRows).length);
+    const total = Number(sysRows.total || 0);
+    countLabel = total > 0
+      ? `Consolidado (${catCount} cat. • Sistema ${formatCents(total)})`
+      : `Consolidado (${catCount} categoria(s))`;
+  } else if (parsed.fileType === 'fechamento_txt') {
+    const sangria = Number(summary.sangriaCents || 0);
+    const saldo = Number(summary.saldoDinheiroCents || 0);
+    countLabel = `Resumo fita (Sangria ${formatCents(sangria)} • Saldo ${formatCents(saldo)})`;
+  } else if (parsed.fileType === 'fechamento_resumo_txt') {
+    const liq = Number(summary.faturamentoLiquidoCents || summary.faturamentoBrutoCents || 0);
+    countLabel = `Resumo gerencial (${formatCents(liq)})`;
+  }
+
+  return periodLabel ? `${countLabel} • ${periodLabel}` : countLabel;
+}
 
 export interface UploadedCashFileItem {
   id: string;
@@ -123,6 +156,31 @@ export function CashUploadDropzone({
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [passwordMap, setPasswordMap] = useState<Record<string, string>>({});
+  const [isFilesMenuOpen, setIsFilesMenuOpen] = useState<boolean>(false);
+
+  const pendingActionCount = useMemo(
+    () =>
+      files.filter(
+        (f) => f.parsed?.status === 'password_required' || f.parsed?.status === 'error'
+      ).length,
+    [files]
+  );
+
+  const multiDayFilesCount = useMemo(
+    () =>
+      files.filter(
+        (f) =>
+          f.parsed?.status === 'ok' &&
+          Boolean(f.parsed.periodStart && f.parsed.periodEnd && f.parsed.periodStart !== f.parsed.periodEnd)
+      ).length,
+    [files]
+  );
+
+  useEffect(() => {
+    if (pendingActionCount > 0) {
+      setIsFilesMenuOpen(true);
+    }
+  }, [pendingActionCount]);
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -133,7 +191,7 @@ export function CashUploadDropzone({
   };
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2.5">
       <div
         onDragOver={(e) => {
           e.preventDefault();
@@ -142,11 +200,13 @@ export function CashUploadDropzone({
         onDragLeave={() => setIsDragging(false)}
         onDrop={handleDrop}
         onClick={() => inputRef.current?.click()}
-        className={`relative group cursor-pointer rounded-2xl border-2 border-dashed p-5 sm:p-6 transition-all duration-200 ${
+        className={`relative group cursor-pointer rounded-2xl border border-dashed transition-all duration-200 backdrop-blur-md shadow-sm ${
+          files.length > 0 ? 'px-3.5 py-2.5 sm:px-4 sm:py-3' : 'p-5 sm:p-6 border-2'
+        } ${
           isDragging
-            ? 'border-[#00a884] bg-[#00a884]/10 scale-[1.005]'
-            : 'border-slate-300/80 dark:border-[#2a3942] bg-white/80 dark:bg-[#202c33]/80 hover:border-[#00a884]/60 hover:bg-white dark:hover:bg-[#202c33]'
-        } backdrop-blur-md shadow-sm`}
+            ? 'border-[#00a884] bg-[#00a884]/10 scale-[1.003]'
+            : 'border-slate-300/80 dark:border-[#2a3942] bg-white/85 dark:bg-[#202c33]/85 hover:border-[#00a884]/60 hover:bg-white dark:hover:bg-[#202c33]'
+        }`}
       >
         <input
           ref={inputRef}
@@ -162,52 +222,115 @@ export function CashUploadDropzone({
           }}
         />
 
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-4 text-center sm:text-left">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#00a884]/20 to-emerald-500/10 border border-[#00a884]/30 flex items-center justify-center text-[#00a884] shrink-0 group-hover:scale-105 transition-transform">
-              {isProcessing ? <Loader2 size={22} className="animate-spin" /> : <Upload size={22} />}
-            </div>
-            <div>
-              <p className="text-sm sm:text-base font-bold text-slate-800 dark:text-[#e9edef]">
-                Arraste ou selecione todos os arquivos de conferência do dia
-              </p>
-              <p className="text-xs text-slate-500 dark:text-[#8696a0] mt-0.5">
-                Aceita <span className="font-semibold text-slate-700 dark:text-[#d1d7db]">.xlsx, .xls, .csv, .ofx e .txt</span> juntos — identificação automática (DataDivas, C6 Bank, Itaú, Rede, C6 Pay e RelConferencia).
-              </p>
-              {savedPasswordsCount > 0 && (
-                <p className="inline-flex items-center gap-1.5 mt-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
-                  <KeyRound size={11} className="shrink-0" />
-                  {savedPasswordsCount} senha(s) fixa(s) memorizada(s) — planilhas protegidas (ex.: C6 Pay) abrem automaticamente
+        {files.length === 0 ? (
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-4 text-center sm:text-left">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#00a884]/20 to-emerald-500/10 border border-[#00a884]/30 flex items-center justify-center text-[#00a884] shrink-0 group-hover:scale-105 transition-transform">
+                {isProcessing ? <Loader2 size={22} className="animate-spin" /> : <Upload size={22} />}
+              </div>
+              <div>
+                <p className="text-sm sm:text-base font-bold text-slate-800 dark:text-[#e9edef]">
+                  Arraste ou selecione todos os arquivos de conferência do dia
                 </p>
-              )}
+                <p className="text-xs text-slate-500 dark:text-[#8696a0] mt-0.5">
+                  Aceita <span className="font-semibold text-slate-700 dark:text-[#d1d7db]">.xlsx, .xls, .csv, .ofx e .txt</span> juntos — identificação automática (DataDivas, C6 Bank, Itaú, Rede, C6 Pay e RelConferencia).
+                </p>
+                {savedPasswordsCount > 0 && (
+                  <p className="inline-flex items-center gap-1.5 mt-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
+                    <KeyRound size={11} className="shrink-0" />
+                    {savedPasswordsCount} senha(s) fixa(s) memorizada(s) — planilhas protegidas (ex.: C6 Pay) abrem automaticamente
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                inputRef.current?.click();
+              }}
+              className="w-full sm:w-auto px-4 py-2.5 min-h-[44px] rounded-xl bg-[#00a884] hover:bg-[#008f6f] active:scale-95 text-white text-xs font-bold shadow-sm transition-all shrink-0"
+            >
+              Carregar Arquivos
+            </button>
+          </div>
+        ) : (
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2.5 min-w-0 flex-wrap">
+              <div className="w-8 h-8 rounded-xl bg-[#00a884]/15 border border-[#00a884]/30 flex items-center justify-center text-[#00a884] shrink-0">
+                {isProcessing ? <Loader2 size={16} className="animate-spin" /> : <FolderOpen size={16} />}
+              </div>
+              <div className="min-w-0 flex items-center gap-2 flex-wrap">
+                <span className="text-xs sm:text-sm font-bold text-slate-800 dark:text-[#e9edef]">
+                  {files.length} arquivo(s) no fechamento
+                </span>
+                {reportCompleteness && (
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[11px] font-bold border ${
+                      reportCompleteness.isComplete
+                        ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+                        : 'bg-amber-500/15 border-amber-500/30 text-amber-700 dark:text-amber-300'
+                    }`}
+                  >
+                    Checklist {reportCompleteness.totalPresent}/{reportCompleteness.totalExpected} ({reportCompleteness.percent}%)
+                  </span>
+                )}
+                {multiDayFilesCount > 0 && (
+                  <span className="px-2 py-0.5 rounded-full bg-cyan-500/15 border border-cyan-500/30 text-[10.5px] font-bold text-cyan-700 dark:text-cyan-300">
+                    {multiDayFilesCount} multi-dias filtrado(s)
+                  </span>
+                )}
+                {pendingActionCount > 0 && (
+                  <span className="px-2 py-0.5 rounded-full bg-rose-500/15 border border-rose-500/30 text-[10.5px] font-bold text-rose-700 dark:text-rose-300">
+                    {pendingActionCount} requer ação/senha
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0 flex-wrap">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  inputRef.current?.click();
+                }}
+                className="px-3 py-2 min-h-[38px] rounded-xl bg-[#00a884] hover:bg-[#008f6f] active:scale-95 text-white text-xs font-bold shadow-sm transition-all flex items-center gap-1.5"
+              >
+                <Upload size={13} />
+                + Adicionar Arquivos
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsFilesMenuOpen((v) => !v);
+                }}
+                aria-expanded={isFilesMenuOpen}
+                className="px-3 py-2 min-h-[38px] rounded-xl border border-slate-300/80 dark:border-[#2a3942] bg-white/90 dark:bg-[#111b21] hover:border-[#00a884] text-slate-700 dark:text-[#e9edef] text-xs font-bold active:scale-95 transition-all flex items-center gap-1.5"
+              >
+                <span>{isFilesMenuOpen ? 'Ocultar Arquivos & Checklist' : 'Gerenciar Arquivos & Checklist'}</span>
+                {isFilesMenuOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              </button>
             </div>
           </div>
-
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              inputRef.current?.click();
-            }}
-            className="w-full sm:w-auto px-4 py-2.5 min-h-[44px] rounded-xl bg-[#00a884] hover:bg-[#008f6f] active:scale-95 text-white text-xs font-bold shadow-sm transition-all shrink-0"
-          >
-            Carregar Arquivos
-          </button>
-        </div>
+        )}
       </div>
 
-      {files.length > 0 && reportCompleteness && (
-        <CashReportCompletenessBanner
-          completeness={reportCompleteness}
-          routineProfile={routineProfile}
-          onToggleRoutineBank={onToggleRoutineBank}
-          onToggleRoutineReport={onToggleRoutineReport}
-        />
-      )}
+      {files.length > 0 && isFilesMenuOpen && (
+        <div className="rounded-2xl border border-slate-200/80 dark:border-[#2a3942] bg-white/60 dark:bg-[#111b21]/60 backdrop-blur-md p-3 sm:p-4 space-y-3 animate-in fade-in duration-150">
+          {reportCompleteness && (
+            <CashReportCompletenessBanner
+              completeness={reportCompleteness}
+              routineProfile={routineProfile}
+              onToggleRoutineBank={onToggleRoutineBank}
+              onToggleRoutineReport={onToggleRoutineReport}
+            />
+          )}
 
-      {files.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-          {files.map((item) => {
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+            {files.map((item) => {
             const parsed = item.parsed || {};
             const meta = FILE_TYPE_META[parsed.fileType || 'unknown'] || FILE_TYPE_META.unknown;
             const isPwd = parsed.status === 'password_required';
@@ -237,6 +360,14 @@ export function CashUploadDropzone({
                           Auto-desbloqueada
                         </span>
                       )}
+                      {parsed.status === 'ok' && Boolean(parsed.periodStart && parsed.periodEnd && parsed.periodStart !== parsed.periodEnd) && (
+                        <span
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-cyan-500/10 border border-cyan-500/25 text-[10px] font-bold text-cyan-700 dark:text-cyan-300"
+                          title="Arquivo abrange múltiplos dias — somente o período do caixa será contabilizado"
+                        >
+                          Multi-dias (filtrado)
+                        </span>
+                      )}
                       {isPwd && <Lock size={14} className="text-amber-500 shrink-0" />}
                       {isErr && <AlertTriangle size={14} className="text-rose-500 shrink-0" />}
                     </div>
@@ -244,9 +375,7 @@ export function CashUploadDropzone({
                       {item.fileName}
                     </p>
                     <p className="text-[11px] text-slate-500 dark:text-[#8696a0] mt-0.5">
-                      {parsed.status === 'ok'
-                        ? `${parsed.rows?.length || 0} registro(s)${parsed.periodStart ? ` • ${formatDateBr(parsed.periodStart)}` : ''}`
-                        : parsed.errorMessage || 'Aguardando leitura'}
+                      {formatParsedFileSubtitle(parsed)}
                     </p>
                   </div>
 
@@ -261,9 +390,16 @@ export function CashUploadDropzone({
                 </div>
 
                 {parsed.warnings?.length > 0 && (
-                  <p className="text-[10.5px] text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-lg px-2 py-1">
-                    {String(parsed.warnings[0]).replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, '$3/$2/$1')}
-                  </p>
+                  <div className="space-y-1">
+                    {parsed.warnings.slice(0, 2).map((w, wIdx) => (
+                      <p
+                        key={wIdx}
+                        className="text-[10.5px] text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-lg px-2 py-1"
+                      >
+                        {String(w).replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, '$3/$2/$1')}
+                      </p>
+                    ))}
+                  </div>
                 )}
 
                 {isPwd && (
@@ -307,6 +443,7 @@ export function CashUploadDropzone({
               </div>
             );
           })}
+          </div>
         </div>
       )}
     </div>

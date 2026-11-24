@@ -17,7 +17,7 @@ import {
   formatCents
 } from '../../types/cashReconciliation';
 import { formatDateBr } from '../../utils/cashReconciliationServiceHelper.mjs';
-import { normalizeOrderNumber } from '../../utils/cashOperationItemsHelper.mjs';
+import { formatReopenedTableAudit, normalizeOrderNumber } from '../../utils/cashOperationItemsHelper.mjs';
 
 interface CashOperationDetailModalProps {
   operationItem: CashReconciliationItem | null;
@@ -54,7 +54,11 @@ export function CashOperationDetailModal({
       ? [operationItem]
       : pairedItems.filter((p) => p.side === 'real');
 
-  const orderDetail = systemAnchor.metadata?.orderDetail;
+  const orderDetail =
+    systemAnchor.metadata?.orderDetail ||
+    (systemAnchor.side === 'system'
+      ? result.systemItems?.find((s) => s.id === systemAnchor.id)?.metadata?.orderDetail
+      : undefined);
   const normRef = normalizeOrderNumber(systemAnchor.referenceCode || orderDetail?.orderNumber || '');
 
   const audit = result.auditInsights;
@@ -163,11 +167,39 @@ export function CashOperationDetailModal({
               <p className="text-[11px] font-black uppercase tracking-wider text-amber-700 dark:text-amber-300 flex items-center gap-1.5">
                 <AlertTriangle size={14} /> Eventos de Auditoria neste Pedido / Mesa
               </p>
-              {linkedReopened.map((r, i) => (
-                <div key={`reop_${i}`} className="px-3 py-2 rounded-xl bg-rose-500/10 border border-rose-500/25 text-rose-700 dark:text-rose-300 font-semibold">
-                  Mesa reaberta / Recebimento excluído: {r.rawText}
-                </div>
-              ))}
+              {linkedReopened.map((r, i) => {
+                const info = formatReopenedTableAudit(r);
+                return (
+                  <div
+                    key={`reop_${i}`}
+                    className="px-3.5 py-2.5 rounded-xl bg-rose-500/10 border border-rose-500/25 space-y-1.5"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-bold text-rose-700 dark:text-rose-300 text-xs flex flex-wrap items-center gap-1.5">
+                        <span>{info.actionTitle}</span>
+                        {info.eventTag && (
+                          <span className="px-2 py-0.5 rounded-md bg-rose-500/15 border border-rose-500/30 text-[10px] font-black uppercase tracking-wide text-rose-700 dark:text-rose-200">
+                            {info.eventTag}
+                          </span>
+                        )}
+                      </span>
+                      {info.orderNumber && (
+                        <span className="px-2 py-0.5 rounded-md bg-white/80 dark:bg-[#111b21] border border-rose-500/25 text-[10.5px] font-mono font-bold text-rose-700 dark:text-rose-300">
+                          Cód. #{info.orderNumber}
+                        </span>
+                      )}
+                    </div>
+                    {info.eventDetail && (
+                      <p className="text-[11px] font-medium text-rose-800/90 dark:text-rose-200/90">
+                        {info.eventDetail}
+                      </p>
+                    )}
+                    <p className="text-[10.5px] text-slate-600 dark:text-[#8696a0]">
+                      {info.auditHint}
+                    </p>
+                  </div>
+                );
+              })}
               {linkedCancellations.map((c, i) => (
                 <div key={`canc_${i}`} className="px-3 py-2 rounded-xl bg-rose-500/10 border border-rose-500/25 flex items-center justify-between gap-2">
                   <div>

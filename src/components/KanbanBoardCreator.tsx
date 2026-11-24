@@ -32,7 +32,7 @@ interface CreatorProps {
 }
 
 export default function KanbanBoardCreator({ isOpen, onClose, onCreated }: CreatorProps) {
-  const { tenantInfo } = useChatStore();
+  const tenantInfo = useChatStore(s => s.tenantInfo);
   const tenantId = tenantInfo?.id || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
 
   // Estados locais

@@ -51,7 +51,8 @@ export function buildSessionPersistencePayload({
   manualInputs = {},
   manualResolutions = [],
   aiAnalysis = null,
-  markClosed = false
+  markClosed = false,
+  preservedClosedAt = null
 }) {
   if (!tenantId || !String(tenantId).trim()) {
     throw new Error('tenantId é obrigatório para persistir a conferência de caixa.');
@@ -95,6 +96,7 @@ export function buildSessionPersistencePayload({
       cashDrawerSummary: result.cashDrawerSummary || {},
       financialMetrics: result.financialMetrics || {},
       reportCompleteness: result.reportCompleteness || null,
+      periodDiagnostics: result.periodDiagnostics || null,
       auditInsights: result.auditInsights || null,
       manualInputs,
       manualResolutions,
@@ -102,7 +104,7 @@ export function buildSessionPersistencePayload({
     },
     ai_last_analysis: aiAnalysis || null,
     created_by_email: userEmail || null,
-    closed_at: markClosed ? nowIso : null
+    closed_at: markClosed ? (preservedClosedAt || nowIso) : null
   };
 
   const filePayloads = (parsedFiles || []).map(f => ({
@@ -296,6 +298,37 @@ export function buildMirrorRowDetails(result = {}, rowKey = '') {
   const pendingDebtors = rowKey === 'pendentes' ? (result.financialMetrics?.pendingDebtors || []) : [];
   const saidasDetalhadas = rowKey === 'saldo_dinheiro' ? (result.cashDrawerSummary?.saidasDetalhadas || []) : [];
 
+  const mirrorRow = (result.mirrorRows || []).find((r) => r.key === rowKey) || null;
+  const extraCents = extraItems.reduce((acc, item) => acc + Number(item?.amountCents || 0), 0);
+  const missingCents = missingItems.reduce((acc, item) => acc + Number(item?.amountCents || 0), 0);
+  const netPendingCents = extraCents - missingCents;
+
+  let crossCategoryRealInCents = 0;
+  let crossCategorySysOutCents = 0;
+  let sameCategoryDeltaCents = 0;
+  const crossCategoryPairs = [];
+
+  for (const pair of matchedPairs) {
+    const reals = Array.isArray(pair?.realItems) ? pair.realItems : [];
+    const syss = Array.isArray(pair?.systemItems) ? pair.systemItems : [];
+    const rIn = reals.filter((r) => catSet.has(r.category)).reduce((acc, r) => acc + Number(r.amountCents || 0), 0);
+    const sIn = syss.filter((s) => catSet.has(s.category)).reduce((acc, s) => acc + Number(s.amountCents || 0), 0);
+    const isPureSameCat =
+      reals.every((r) => catSet.has(r.category)) && syss.every((s) => catSet.has(s.category));
+    const pairNet = rIn - sIn;
+    if (!isPureSameCat) {
+      if (pairNet > 0) crossCategoryRealInCents += pairNet;
+      else if (pairNet < 0) crossCategorySysOutCents += Math.abs(pairNet);
+      if (pairNet !== 0) crossCategoryPairs.push(pair);
+    } else {
+      sameCategoryDeltaCents += pairNet;
+    }
+  }
+
+  const crossCategoryNetCents = crossCategoryRealInCents - crossCategorySysOutCents;
+  const mirrorDiffCents = mirrorRow ? Number(mirrorRow.diffCents || 0) : netPendingCents + crossCategoryNetCents;
+  const otherDeltaCents = mirrorDiffCents - (netPendingCents + crossCategoryNetCents);
+
   return {
     categories,
     matchedPairs,
@@ -305,8 +338,148 @@ export function buildMirrorRowDetails(result = {}, rowKey = '') {
     systemCategoryItems,
     reclassifiedOutItems,
     pendingDebtors,
-    saidasDetalhadas
+    saidasDetalhadas,
+    reconciliationBridge: {
+      extraCents,
+      missingCents,
+      netPendingCents,
+      crossCategoryRealInCents,
+      crossCategorySysOutCents,
+      crossCategoryNetCents,
+      sameCategoryDeltaCents,
+      otherDeltaCents,
+      mirrorDiffCents,
+      crossCategoryPairs
+    }
   };
+}
+
+/**
+ * Escolhe a aba inicial ideal no modal de conciliação detalhada com foco na discrepância real.
+ */
+export function resolveDetailPanelDefaultTab({
+  diffCents = 0,
+  extraCount = 0,
+  missingCount = 0,
+  suggestionsCount = 0,
+  matchedCount = 0
+} = {}) {
+  if (diffCents > 1 && extraCount > 0) return 'sobras';
+  if (suggestionsCount > 0) return 'sugestoes';
+  if (diffCents < -1 && missingCount > 0) return 'faltas';
+  if (extraCount > 0) return 'sobras';
+  if (missingCount > 0) return 'faltas';
+  if (matchedCount > 0) return 'conciliados';
+  return 'todos';
+}
+
+/**
+ * Sugere o candidato mais provável no PDV (faltas / dinheiro / pendente) para conciliar uma sobra em 1 clique.
+ */
+export function findBestCandidateForSobra(sobraItem, systemPool = [], maxToleranceCents = 200) {
+  if (!sobraItem || !Array.isArray(systemPool) || systemPool.length === 0) return null;
+  const target = Number(sobraItem.amountCents || 0);
+  if (target <= 0) return null;
+
+  let best = null;
+  let bestScore = Number.POSITIVE_INFINITY;
+  const sobraSec = Number(sobraItem.secondsOfDay || 0);
+  const isRedeAm = sobraItem.source === 'rede' && sobraSec < 12 * 3600;
+
+  for (const sys of systemPool) {
+    if (!sys) continue;
+    const amtDiff = Math.abs(Number(sys.amountCents || 0) - target);
+    if (amtDiff > maxToleranceCents) continue;
+
+    const sysSec = Number(sys.secondsOfDay || 0);
+    let timeDiff = Math.abs(sysSec - sobraSec);
+    if (isRedeAm && sysSec >= 12 * 3600) {
+      timeDiff = Math.min(timeDiff, Math.abs(sysSec - (sobraSec + 12 * 3600)));
+    }
+    const score = amtDiff * 100000 + timeDiff;
+    if (score < bestScore) {
+      bestScore = score;
+      best = {
+        item: sys,
+        amountDiffCents: amtDiff,
+        isExactAmount: amtDiff <= 1,
+        timeDiffSec: timeDiff
+      };
+    }
+  }
+  return best;
+}
+
+/**
+ * Filtra e ordena itens de Faltas/Sobras pelos critérios auxiliares do modal de conciliação.
+ */
+export function filterAndSortDetailItems(
+  items = [],
+  {
+    query = '',
+    sourceFilter = 'all',
+    sortBy = 'amount_desc',
+    onlyMadrugada = false,
+    onlyWithCandidate = false,
+    candidateMap = null
+  } = {}
+) {
+  const qLower = String(query || '').trim().toLowerCase();
+  const list = (Array.isArray(items) ? items : []).filter((it) => {
+    if (!it) return false;
+    if (sourceFilter && sourceFilter !== 'all') {
+      if (String(it.source || '').toLowerCase() !== String(sourceFilter).toLowerCase()) return false;
+    }
+    if (onlyMadrugada && Number(it.secondsOfDay || 0) >= 6 * 3600) return false;
+    if (onlyWithCandidate && candidateMap && !candidateMap.has(it.id)) return false;
+    if (qLower) {
+      const hay = `${it.description || ''} ${it.referenceCode || ''} ${it.operatorName || ''} ${it.terminalName || ''} ${it.source || ''} ${it.timeStr || ''} ${(Number(it.amountCents || 0) / 100).toFixed(2)} ${(Number(it.amountCents || 0) / 100).toFixed(2).replace('.', ',')}`.toLowerCase();
+      if (!hay.includes(qLower)) return false;
+    }
+    return true;
+  });
+
+  list.sort((a, b) => {
+    if (sortBy === 'amount_desc') return Number(b.amountCents || 0) - Number(a.amountCents || 0);
+    if (sortBy === 'amount_asc') return Number(a.amountCents || 0) - Number(b.amountCents || 0);
+    if (sortBy === 'time_desc') return Number(b.secondsOfDay || 0) - Number(a.secondsOfDay || 0);
+    return Number(a.secondsOfDay || 0) - Number(b.secondsOfDay || 0);
+  });
+
+  return list;
+}
+
+/**
+ * Filtra pares já conciliados automaticamente ou manualmente por busca e origem/regra.
+ */
+export function filterMatchedPairsForDetail(matchedPairs = [], { query = '', sourceFilter = 'all' } = {}) {
+  const qLower = String(query || '').trim().toLowerCase();
+  return (Array.isArray(matchedPairs) ? matchedPairs : []).filter((pair) => {
+    if (!pair) return false;
+    if (sourceFilter && sourceFilter !== 'all') {
+      const realSources = (pair.realItems || []).map((r) => String(r.source || '').toLowerCase());
+      if (sourceFilter === 'manual') {
+        if (pair.matchType !== 'matched_manual') return false;
+      } else if (sourceFilter === 'rede_12h') {
+        if (!String(pair.reasonText || '').includes('12h')) return false;
+      } else if (!realSources.includes(String(sourceFilter).toLowerCase())) {
+        return false;
+      }
+    }
+    if (qLower) {
+      const hay = [
+        pair.reasonText || '',
+        (Number(pair.amountCents || 0) / 100).toFixed(2),
+        (Number(pair.amountCents || 0) / 100).toFixed(2).replace('.', ','),
+        ...(pair.systemItems || []).map((s) => `${s.description || ''} ${s.timeStr || ''} ${s.referenceCode || ''} ${s.operatorName || ''}`),
+        ...(pair.realItems || []).map((r) => `${r.description || ''} ${r.timeStr || ''} ${r.source || ''} ${r.referenceCode || ''}`)
+      ]
+        .join(' ')
+        .toLowerCase();
+      if (!hay.includes(qLower)) return false;
+    }
+    return true;
+  });
 }
 
 export function buildActiveDraftStorageKey(tenantId) {
@@ -317,12 +490,18 @@ export function buildDraftDismissedStorageKey(tenantId) {
   return `cash_recon_draft_dismissed_${String(tenantId || '').trim()}`;
 }
 
+export function buildPendingClosedPatchStorageKey(tenantId, sessionId) {
+  return `cash_recon_closed_patch_${String(tenantId || '').trim()}_${String(sessionId || '').trim()}`;
+}
+
 export function serializeActiveCashDraft({
   activeSessionId = null,
   files = [],
   manualInputs = {},
   manualResolutions = [],
-  aiAnalysis = null
+  aiAnalysis = null,
+  pendingCloudSync = false,
+  compactedForQuota = false
 } = {}) {
   const safeFiles = (Array.isArray(files) ? files : [])
     .filter(f => f && f.parsed && f.parsed.status === 'ok')
@@ -336,6 +515,8 @@ export function serializeActiveCashDraft({
   return {
     version: 1,
     activeSessionId: activeSessionId || null,
+    pendingCloudSync: Boolean(pendingCloudSync),
+    compactedForQuota: Boolean(compactedForQuota),
     files: safeFiles,
     manualInputs: manualInputs || {},
     manualResolutions: Array.isArray(manualResolutions) ? manualResolutions : [],
@@ -344,31 +525,96 @@ export function serializeActiveCashDraft({
   };
 }
 
-export function saveActiveCashDraftToStorage(storage, tenantId, draft) {
-  if (!storage || !tenantId) return false;
-  const serialized = serializeActiveCashDraft(draft);
-  if (serialized.files.length === 0) {
-    storage.removeItem(buildActiveDraftStorageKey(tenantId));
-    return false;
-  }
-  try {
-    storage.setItem(buildActiveDraftStorageKey(tenantId), JSON.stringify(serialized));
-    return true;
-  } catch {
-    return false;
-  }
+function compactSerializedDraftForQuota(serialized, level = 1) {
+  const files = (serialized.files || []).map((f) => {
+    const parsed = f.parsed || {};
+    if (level === 1 && parsed.fileType !== 'pdv_itens_vendidos' && Array.isArray(parsed.rows) && parsed.rows.length <= 150) {
+      return f;
+    }
+    return {
+      ...f,
+      parsed: {
+        ...parsed,
+        rows: []
+      }
+    };
+  });
+  return {
+    ...serialized,
+    compactedForQuota: true,
+    aiAnalysis: level >= 2 ? null : serialized.aiAnalysis,
+    files
+  };
 }
 
-export function loadActiveCashDraftFromStorage(storage, tenantId) {
-  if (!storage || !tenantId) return null;
+function writeDraftWithQuotaFallback(storage, storageKey, draft) {
+  if (!storage || !storageKey) return false;
+  const serialized = serializeActiveCashDraft(draft);
+  if (serialized.files.length === 0) {
+    storage.removeItem(storageKey);
+    return false;
+  }
+
+  const candidates = [
+    serialized,
+    compactSerializedDraftForQuota(serialized, 1),
+    compactSerializedDraftForQuota(serialized, 2)
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      storage.setItem(storageKey, JSON.stringify(candidate));
+      return true;
+    } catch {
+      // Tenta versão mais compacta caso localStorage atinja QuotaExceededError
+    }
+  }
+  return false;
+}
+
+function readDraftFromStorage(storage, storageKey) {
+  if (!storage || !storageKey) return null;
   try {
-    const raw = storage.getItem(buildActiveDraftStorageKey(tenantId));
+    const raw = storage.getItem(storageKey);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || !Array.isArray(parsed.files) || parsed.files.length === 0) return null;
     return parsed;
   } catch {
     return null;
+  }
+}
+
+export function saveActiveCashDraftToStorage(storage, tenantId, draft) {
+  if (!storage || !tenantId) return false;
+  return writeDraftWithQuotaFallback(storage, buildActiveDraftStorageKey(tenantId), draft);
+}
+
+export function loadActiveCashDraftFromStorage(storage, tenantId) {
+  if (!storage || !tenantId) return null;
+  return readDraftFromStorage(storage, buildActiveDraftStorageKey(tenantId));
+}
+
+export function savePendingClosedPatchToStorage(storage, tenantId, sessionId, draft) {
+  if (!storage || !tenantId || !sessionId) return false;
+  return writeDraftWithQuotaFallback(
+    storage,
+    buildPendingClosedPatchStorageKey(tenantId, sessionId),
+    { ...draft, activeSessionId: sessionId, pendingCloudSync: true }
+  );
+}
+
+export function loadPendingClosedPatchFromStorage(storage, tenantId, sessionId) {
+  if (!storage || !tenantId || !sessionId) return null;
+  return readDraftFromStorage(storage, buildPendingClosedPatchStorageKey(tenantId, sessionId));
+}
+
+export function clearPendingClosedPatchFromStorage(storage, tenantId, sessionId) {
+  if (!storage || !tenantId || !sessionId) return;
+  try {
+    storage.removeItem(buildPendingClosedPatchStorageKey(tenantId, sessionId));
+  } catch {
+    // ignorar falha de acesso ao storage
   }
 }
 
@@ -577,4 +823,280 @@ export function shouldRetryWithMasterClient({ data, error, expectRow = false, fa
   if (expectRow && !data) return true;
   if (fallbackOnEmptyArray && Array.isArray(data) && data.length === 0) return true;
   return false;
+}
+
+export const RECONCILIATION_GLOSSARY = {
+  missing: {
+    title: 'Vendas sem recebimento',
+    shortLabel: 'Falta no banco',
+    explanation: 'A venda está no PDV. Falta localizar o recebimento no banco.',
+    actionHint: 'Verifique se caiu em outro canal (Cartão ↔ PIX), em Dinheiro ou se ficou Pendente.'
+  },
+  extra: {
+    title: 'Recebimentos sem venda',
+    shortLabel: 'Sobra no banco',
+    explanation: 'O recebimento está no banco. Falta localizar a venda no PDV.',
+    actionHint: 'Vincule a uma venda ao lado ou clique em Ignorar (Não-PDV) se for transferência/dia anterior.'
+  }
+};
+
+/**
+ * Monta o pool de vendas do PDV elegíveis para vínculo manual (faltas digitais + Dinheiro/Pendente em aberto).
+ */
+export function buildLinkableSystemPool(result = {}, manualResolutions = []) {
+  const missing = Array.isArray(result?.missingInBank) ? result.missingInBank : [];
+  const matchedSysIds = new Set();
+  for (const m of result?.matchedPairs || []) {
+    for (const s of m?.systemItems || []) {
+      if (s?.id) matchedSysIds.add(s.id);
+    }
+  }
+  const ignoredSysIds = new Set();
+  for (const res of manualResolutions || []) {
+    if (res?.action === 'ignore_item') {
+      for (const sid of res?.systemIds || []) ignoredSysIds.add(sid);
+    }
+  }
+
+  const dinheiroAndPendente = (result?.systemItems || []).filter(
+    (s) =>
+      s &&
+      !matchedSysIds.has(s.id) &&
+      !ignoredSysIds.has(s.id) &&
+      (s.category === 'dinheiro' || s.category === 'pendente')
+  );
+
+  const seen = new Set();
+  const combined = [];
+  for (const item of [...missing, ...dinheiroAndPendente]) {
+    if (item?.id && !seen.has(item.id)) {
+      seen.add(item.id);
+      combined.push(item);
+    }
+  }
+  return combined;
+}
+
+/**
+ * Resume todos os valores não conciliados e divergências por canal que explicam a Diferença Geral.
+ */
+export function buildGeneralDiffSummary(result = {}) {
+  const missingItems = Array.isArray(result?.missingInBank) ? result.missingInBank : [];
+  const extraItems = Array.isArray(result?.extraInBank) ? result.extraInBank : [];
+  const suggestions = Array.isArray(result?.suggestions) ? result.suggestions : [];
+  const mirrorRows = Array.isArray(result?.mirrorRows) ? result.mirrorRows : [];
+  const matchedPairs = Array.isArray(result?.matchedPairs) ? result.matchedPairs : [];
+
+  const sumAmounts = (list) => list.reduce((acc, it) => acc + Number(it?.amountCents || 0), 0);
+  const missingCents = sumAmounts(missingItems);
+  const extraCents = sumAmounts(extraItems);
+  const suggestionsCents = sumAmounts(suggestions);
+  const tableNetDigitalCents = extraCents - missingCents;
+
+  const divergentMirrorRows = mirrorRows.filter(
+    (r) => r && (Number(r.diffCents || 0) !== 0 || (r.hasRealInput === false && Number(r.systemCents || 0) > 0))
+  );
+  const uninformedMirrorRows = mirrorRows.filter(
+    (r) => r && r.hasRealInput === false && Number(r.systemCents || 0) > 0
+  );
+  const uninformedDiffCents = uninformedMirrorRows.reduce((acc, r) => acc + Number(r.diffCents || 0), 0);
+
+  const cashDrawerRow = mirrorRows.find((r) => r && r.key === 'saldo_dinheiro') || null;
+  const cashDrawerDiffCents = Number(cashDrawerRow?.diffCents || 0);
+  const cashDrawerHasRealInput = cashDrawerRow ? cashDrawerRow.hasRealInput !== false : true;
+
+  const otherNonDigitalRows = mirrorRows.filter(
+    (r) =>
+      r &&
+      r.key !== 'cartao' &&
+      r.key !== 'pix' &&
+      r.key !== 'saldo_dinheiro' &&
+      (Number(r.diffCents || 0) !== 0 || (r.hasRealInput === false && Number(r.systemCents || 0) > 0))
+  );
+  const otherChannelsDiffCents = otherNonDigitalRows.reduce((acc, r) => acc + Number(r.diffCents || 0), 0);
+
+  const digitalMirrorDiffCents = mirrorRows
+    .filter((r) => r && (r.key === 'cartao' || r.key === 'pix'))
+    .reduce((acc, r) => acc + Number(r.diffCents || 0), 0);
+
+  const matchedPairsWithDiff = [];
+  for (const pair of matchedPairs) {
+    if (!pair) continue;
+    const sysList = Array.isArray(pair.systemItems) ? pair.systemItems : [];
+    const realList = Array.isArray(pair.realItems) ? pair.realItems : [];
+    const touchesNonDigital =
+      sysList.some((s) => s && s.category !== 'pix' && s.category !== 'cartao') ||
+      realList.some((r) => r && r.category !== 'pix' && r.category !== 'cartao');
+    if (touchesNonDigital) continue;
+
+    const sysSumCents = sumAmounts(sysList);
+    const realSumCents = sumAmounts(realList);
+    const diffCents = realSumCents - sysSumCents;
+    if (diffCents !== 0) {
+      matchedPairsWithDiff.push({
+        id: pair.id || `pair_diff_${matchedPairsWithDiff.length}`,
+        reasonType: pair.reasonType || '',
+        reasonText: pair.reasonText || '',
+        sysSumCents,
+        realSumCents,
+        diffCents
+      });
+    }
+  }
+  const matchedPairsDiffCents = matchedPairsWithDiff.reduce((acc, p) => acc + p.diffCents, 0);
+  const digitalResidualDiffCents = digitalMirrorDiffCents - tableNetDigitalCents - matchedPairsDiffCents;
+
+  const diffTotalCents = Number.isFinite(Number(result?.diffTotalCents))
+    ? Number(result.diffTotalCents)
+    : digitalMirrorDiffCents + cashDrawerDiffCents + otherChannelsDiffCents;
+  const nonTableDiffCents = diffTotalCents - tableNetDigitalCents;
+  const explainedDiffTotalCents =
+    tableNetDigitalCents + matchedPairsDiffCents + digitalResidualDiffCents + cashDrawerDiffCents + otherChannelsDiffCents;
+
+  return {
+    missingItems,
+    extraItems,
+    suggestions,
+    missingCents,
+    extraCents,
+    suggestionsCents,
+    tableNetDigitalCents,
+    netDigitalPendingCents: tableNetDigitalCents,
+    cashDrawerRow,
+    cashDrawerDiffCents,
+    cashDrawerHasRealInput,
+    otherNonDigitalRows,
+    otherChannelsDiffCents,
+    matchedPairsWithDiff,
+    matchedPairsDiffCents,
+    digitalMirrorDiffCents,
+    digitalResidualDiffCents,
+    nonTableDiffCents,
+    explainedDiffTotalCents,
+    divergentMirrorRows,
+    uninformedMirrorRows,
+    uninformedDiffCents,
+    totalPendingCount: missingItems.length + extraItems.length + suggestions.length
+  };
+}
+
+/**
+ * Calcula saldo e status de compatibilidade da seleção atual na Tabela Lado a Lado.
+ */
+export function computeSelectionDiffMeta({ selectedSystemItems = [], selectedRealItems = [] } = {}) {
+  const sysList = Array.isArray(selectedSystemItems) ? selectedSystemItems : [];
+  const realList = Array.isArray(selectedRealItems) ? selectedRealItems : [];
+  const sysTotalCents = sysList.reduce((acc, it) => acc + Number(it?.amountCents || 0), 0);
+  const realTotalCents = realList.reduce((acc, it) => acc + Number(it?.amountCents || 0), 0);
+  const hasBothSides = sysList.length > 0 && realList.length > 0;
+  const diffCents = realTotalCents - sysTotalCents;
+  const absDiff = Math.abs(diffCents);
+
+  return {
+    sysCount: sysList.length,
+    realCount: realList.length,
+    sysTotalCents,
+    realTotalCents,
+    diffCents,
+    absDiffCents: absDiff,
+    isExactMatch: hasBothSides && absDiff <= 1,
+    isCloseMatch: hasBothSides && absDiff <= 200,
+    canLink: hasBothSides
+  };
+}
+
+/**
+ * Ordena itens do lado oposto destacando quem bate exatamente ou se aproxima do valor selecionado.
+ */
+export function sortItemsByTargetMatch(items = [], targetCents = 0, targetSecondsOfDay = null) {
+  const list = Array.isArray(items) ? items : [];
+  const target = Number(targetCents || 0);
+  if (target <= 0) {
+    return list.map((item) => ({ item, matchRank: 'none', amountDiffCents: 0 }));
+  }
+
+  const annotated = list.map((item, idx) => {
+    const amt = Number(item?.amountCents || 0);
+    const amountDiffCents = Math.abs(amt - target);
+    let timeDiffSec = Number.POSITIVE_INFINITY;
+    if (Number.isFinite(targetSecondsOfDay) && Number.isFinite(Number(item?.secondsOfDay))) {
+      const sec = Number(item.secondsOfDay);
+      timeDiffSec = Math.abs(sec - Number(targetSecondsOfDay));
+      if (item?.source === 'rede' && sec < 12 * 3600 && Number(targetSecondsOfDay) >= 12 * 3600) {
+        timeDiffSec = Math.min(timeDiffSec, Math.abs(sec + 12 * 3600 - Number(targetSecondsOfDay)));
+      }
+    }
+    const matchRank = amountDiffCents <= 1 ? 'exact' : amountDiffCents <= 200 ? 'close' : 'none';
+    const priority = matchRank === 'exact' ? 0 : matchRank === 'close' ? 1 : 2;
+    return { item, matchRank, amountDiffCents, timeDiffSec, priority, idx };
+  });
+
+  annotated.sort((a, b) => {
+    if (a.priority !== b.priority) return a.priority - b.priority;
+    if (a.priority < 2) {
+      if (a.amountDiffCents !== b.amountDiffCents) return a.amountDiffCents - b.amountDiffCents;
+      if (a.timeDiffSec !== b.timeDiffSec) return a.timeDiffSec - b.timeDiffSec;
+    }
+    return a.idx - b.idx;
+  });
+
+  return annotated.map(({ item, matchRank, amountDiffCents }) => ({ item, matchRank, amountDiffCents }));
+}
+
+function stableJsonSerialize(value) {
+  if (value === null || value === undefined) return 'null';
+  if (typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return `[${value.map((v) => stableJsonSerialize(v)).join(',')}]`;
+  }
+  const keys = Object.keys(value).sort();
+  return `{${keys
+    .filter((k) => value[k] !== undefined)
+    .map((k) => `${JSON.stringify(k)}:${stableJsonSerialize(value[k])}`)
+    .join(',')}}`;
+}
+
+/**
+ * Gera assinaturas determinísticas do estado da conferência para evitar gravar arquivos/itens em duplicidade durante o auto-save.
+ */
+export function buildCashDraftSyncSignature({
+  activeSessionId = null,
+  files = [],
+  manualInputs = {},
+  manualResolutions = [],
+  aiAnalysis = null
+} = {}) {
+  const validFiles = (Array.isArray(files) ? files : []).filter((f) => f && f.parsed && f.parsed.status === 'ok');
+  const filesSignature = validFiles
+    .map((f) => {
+      const p = f.parsed;
+      const rowsCount = Array.isArray(p.rows) ? p.rows.length : 0;
+      return `${f.fileName || p.fileName || ''}|${p.fileType || ''}|${p.periodStart || ''}|${p.periodEnd || ''}|${rowsCount}|${Number(f.fileSizeBytes || 0)}`;
+    })
+    .join(';;');
+
+  const resolutionsSignature = stableJsonSerialize(Array.isArray(manualResolutions) ? manualResolutions : []);
+  const inputsSignature = stableJsonSerialize(manualInputs || {});
+  const aiSignature = stableJsonSerialize(aiAnalysis || null);
+  const stateSignature = `${activeSessionId || ''}::${filesSignature}::${resolutionsSignature}::${inputsSignature}::${aiSignature}`;
+
+  return {
+    hasValidFiles: validFiles.length > 0,
+    filesSignature,
+    resolutionsSignature,
+    inputsSignature,
+    stateSignature
+  };
+}
+
+/**
+ * Decide se o rascunho local deve sobrepor o snapshot remoto ao reabrir uma sessão (ex.: fechado offline antes da nuvem responder).
+ */
+export function shouldPreferLocalDraftOverSession(localDraft, cloudSession) {
+  if (!localDraft || !cloudSession) return false;
+  if (!localDraft.activeSessionId || localDraft.activeSessionId !== cloudSession.id) return false;
+  if (localDraft.pendingCloudSync) return true;
+  const localTs = Date.parse(localDraft.updatedAt || '');
+  const cloudTs = Date.parse(cloudSession.updated_at || cloudSession.created_at || '');
+  return Number.isFinite(localTs) && (!Number.isFinite(cloudTs) || localTs > cloudTs);
 }

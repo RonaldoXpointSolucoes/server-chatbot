@@ -226,7 +226,10 @@ export async function saveCashReconciliationSession(params: {
   manualResolutions: CashResolutionAction[];
   aiAnalysis?: CashAiAnalysis | null;
   markClosed?: boolean;
-}): Promise<{ sessionId: string; schemaMissing: boolean; savedAt: string }> {
+  preservedClosedAt?: string | null;
+  skipFilesSync?: boolean;
+  skipItemsSync?: boolean;
+}): Promise<{ sessionId: string; schemaMissing: boolean; savedAt: string; closedAt: string | null }> {
   const { sessionPayload, filePayloads, itemPayloads } = buildSessionPersistencePayload(params);
   const nowIso = new Date().toISOString();
   const isRemoteUpdate = Boolean(params.sessionId && !params.sessionId.startsWith('local_'));
@@ -249,6 +252,7 @@ export async function saveCashReconciliationSession(params: {
   };
 
   let res = await runWithTenantClient<{ id: string }>(writeSession, { expectRow: true });
+  let createdFreshRow = !isRemoteUpdate;
 
   // Se o sessionId remoto não existir mais no banco (ex.: excluído), re-insere como nova sessão em vez de falhar
   if (isRemoteUpdate && !res.error && !res.data) {
@@ -256,6 +260,7 @@ export async function saveCashReconciliationSession(params: {
       (client) => client.from('cash_reconciliation_sessions').insert(sessionPayload).select('id').maybeSingle(),
       { expectRow: true }
     );
+    createdFreshRow = true;
   }
 
   if (res.error || !res.data) {
@@ -270,22 +275,27 @@ export async function saveCashReconciliationSession(params: {
       };
       const updated = [record, ...localList.filter(s => s.id !== localId)].slice(0, 15);
       writeLocalJson(localSessionsKey(params.tenantId), updated);
-      return { sessionId: localId, schemaMissing: true, savedAt: nowIso };
+      return { sessionId: localId, schemaMissing: true, savedAt: nowIso, closedAt: sessionPayload.closed_at || null };
     }
     throw new Error(extractCashErrorMessage(res.error, 'Falha ao salvar sessão de conferência.'));
   }
 
   const savedSessionId = res.data.id;
   const activeClient = res.usedFallback ? masterSupabase : supabase;
+  const updatingExistingRemote = isRemoteUpdate && !createdFreshRow && savedSessionId === params.sessionId;
+  const shouldSyncFiles = !updatingExistingRemote || !params.skipFilesSync;
+  const shouldSyncItems = !updatingExistingRemote || !params.skipItemsSync;
 
-  if (isRemoteUpdate && savedSessionId === params.sessionId) {
+  if (updatingExistingRemote && shouldSyncItems) {
     const { error: delItemsErr } = await activeClient
       .from('cash_reconciliation_items')
       .delete()
       .eq('session_id', savedSessionId)
       .eq('tenant_id', params.tenantId);
     if (delItemsErr) throw new Error(extractCashErrorMessage(delItemsErr, 'Erro ao limpar itens da sessão.'));
+  }
 
+  if (updatingExistingRemote && shouldSyncFiles) {
     const { error: delFilesErr } = await activeClient
       .from('cash_reconciliation_files')
       .delete()
@@ -294,14 +304,14 @@ export async function saveCashReconciliationSession(params: {
     if (delFilesErr) throw new Error(extractCashErrorMessage(delFilesErr, 'Erro ao limpar arquivos da sessão.'));
   }
 
-  if (filePayloads.length > 0) {
+  if (shouldSyncFiles && filePayloads.length > 0) {
     const { error: insFilesErr } = await activeClient
       .from('cash_reconciliation_files')
       .insert(filePayloads.map(f => ({ ...f, session_id: savedSessionId })));
     if (insFilesErr) throw new Error(extractCashErrorMessage(insFilesErr, 'Erro ao gravar arquivos da sessão.'));
   }
 
-  if (itemPayloads.length > 0) {
+  if (shouldSyncItems && itemPayloads.length > 0) {
     for (let i = 0; i < itemPayloads.length; i += 200) {
       const chunk = itemPayloads.slice(i, i + 200).map(it => ({ ...it, session_id: savedSessionId }));
       const { error: insItemsErr } = await activeClient.from('cash_reconciliation_items').insert(chunk);
@@ -309,7 +319,7 @@ export async function saveCashReconciliationSession(params: {
     }
   }
 
-  return { sessionId: savedSessionId, schemaMissing: false, savedAt: nowIso };
+  return { sessionId: savedSessionId, schemaMissing: false, savedAt: nowIso, closedAt: sessionPayload.closed_at || null };
 }
 
 export async function deleteCashReconciliationSession(

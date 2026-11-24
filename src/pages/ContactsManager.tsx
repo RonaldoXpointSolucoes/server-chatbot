@@ -11,6 +11,8 @@ import { RenameModal } from '../components/ChatModals';
 import { ContactGroupManager } from '../components/ContactGroupManager';
 import { formatDocumentNumber, formatPhoneNumber } from '../utils/format';
 
+const EMPTY_CONTACT_DATA: Partial<ContactRow> = {};
+
 export default function ContactsManager() {
   const navigate = useNavigate();
   const tenantIdFromStore = useChatStore(state => state.tenantInfo?.id);
@@ -1309,7 +1311,7 @@ export default function ContactsManager() {
       <RenameModal 
          isOpen={isModalOpen}
          onClose={handleCloseModal}
-         contactData={editingContact || {}}
+         contactData={editingContact || EMPTY_CONTACT_DATA}
          onSave={handleSaveFormFromModal}
       />
 

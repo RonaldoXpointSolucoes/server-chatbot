@@ -162,6 +162,11 @@ export interface CashAuditInsights {
     rawText: string;
     table?: string;
     orderNumber?: string;
+    tableLabel?: string;
+    actionTitle?: string;
+    eventTag?: string;
+    eventDetail?: string;
+    auditHint?: string;
   }>;
   zeroPdvReceipts: Array<{
     rawText: string;
@@ -198,15 +203,22 @@ export interface CashReconciliationItem {
     recebidoEmBranco?: boolean;
     changeCents?: number;
     orderDetail?: CashOperationOrderDetail;
+    operationalAlerts?: Array<{
+      code: 'reopened_table' | 'rapid_duplicate' | 'zero_receipt_on_table';
+      severity: 'warning' | 'info';
+      label: string;
+      detail: string;
+    }>;
     [key: string]: unknown;
   };
 }
 
 export interface CashSuggestion {
   id: string;
-  reasonType: 'swapped_method' | 'split_1_to_n' | 'grouped_n_to_1';
+  reasonType: 'swapped_method' | 'split_1_to_n' | 'grouped_n_to_1' | 'small_diff';
   reasonText: string;
   amountCents: number;
+  diffCents?: number;
   systemIds: string[];
   realIds: string[];
   systemItems: CashReconciliationItem[];
@@ -221,6 +233,17 @@ export interface CashMatchedPair {
   systemItems: CashReconciliationItem[];
   realItems: CashReconciliationItem[];
   amountCents: number;
+  diffCents?: number;
+  note?: string;
+}
+
+export interface CashManualCashAdjustment {
+  id: string;
+  direction: 'outflow' | 'inflow';
+  description: string;
+  amountCents: number;
+  operator?: string;
+  createdAt?: string;
 }
 
 export interface CashDrawerSummary {
@@ -236,7 +259,17 @@ export interface CashDrawerSummary {
   adjustedCashExpectedCents?: number;
   countedCents?: number | null;
   swappedToDigitalCents?: number;
-  saidasDetalhadas?: Array<{ label: string; amountCents: number; isSangria: boolean }>;
+  manualOutflowsCents?: number;
+  manualInflowsCents?: number;
+  manualCashAdjustments?: CashManualCashAdjustment[];
+  saidasDetalhadas?: Array<{
+    label: string;
+    amountCents: number;
+    isSangria: boolean;
+    isManualAdjustment?: boolean;
+    direction?: 'outflow' | 'inflow';
+    operator?: string;
+  }>;
 }
 
 export interface CashFinancialMetrics {
@@ -252,6 +285,73 @@ export interface CashFinancialMetrics {
   pendingDebtors?: Array<{ debtor: string; amountCents: number }>;
   guestCount?: number;
   averageTicketCents?: number;
+  pixBreakdown?: {
+    ofxCents: number;
+    ofxByBank: Array<{ bankKey: string; bankLabel: string; amountCents: number; count: number }>;
+    redePixCents: number;
+    c6PayPostCutoffCents: number;
+    deduplicatedC6PayCents: number;
+  };
+  cardBreakdown?: {
+    redeCardCents: number;
+    c6PayCardCents: number;
+  };
+}
+
+export interface CashValidationWarning {
+  code:
+    | 'multi_day_filtered'
+    | 'wrong_day_real_file'
+    | 'multi_day_no_anchor'
+    | 'missing_card_acquirers'
+    | 'cash_drawer_txt_hint'
+    | 'cash_drawer_uninformed'
+    | 'pending_unconfirmed'
+    | 'summary_file_warning';
+  severity: 'info' | 'warning' | 'error';
+  title: string;
+  message: string;
+}
+
+export interface CashSourcePeriodStat {
+  fileName: string;
+  fileType: string;
+  periodStart: string;
+  periodEnd: string;
+  totalRows: number;
+  keptRows: number;
+  ignoredRows: number;
+  ignoredPixCount: number;
+  ignoredPixCents: number;
+  ignoredCardCount: number;
+  ignoredCardCents: number;
+  ignoredOtherCount: number;
+}
+
+export interface CashPeriodDateBreakdown {
+  dateStr: string;
+  count: number;
+  pixCount: number;
+  pixCents: number;
+  cardCount: number;
+  cardCents: number;
+  otherCount: number;
+}
+
+export interface CashPeriodDiagnostics {
+  targetStartDate: string;
+  targetEndDate: string;
+  hasSystemPeriodAnchor: boolean;
+  anchorSourceType: string;
+  totalOutOfPeriodCount: number;
+  outOfPeriodPixCount: number;
+  outOfPeriodPixCents: number;
+  outOfPeriodCardCount: number;
+  outOfPeriodCardCents: number;
+  outOfPeriodOtherCount: number;
+  datesBreakdown: CashPeriodDateBreakdown[];
+  sourcePeriodStats: CashSourcePeriodStat[];
+  validationWarnings: CashValidationWarning[];
 }
 
 export interface CashReconciliationResult {
@@ -272,12 +372,14 @@ export interface CashReconciliationResult {
   suggestions?: CashSuggestion[];
   missingInBank?: CashReconciliationItem[];
   extraInBank?: CashReconciliationItem[];
+  outOfPeriodItems?: Array<CashReconciliationItem & { sourceFileName?: string }>;
   nonPdvItems?: CashReconciliationItem[];
   notAuthorizedItems?: CashReconciliationItem[];
   deduplicatedItems?: CashReconciliationItem[];
   debitAuditItems?: CashReconciliationItem[];
   financialMetrics: CashFinancialMetrics;
   reportCompleteness?: CashReportCompleteness;
+  periodDiagnostics?: CashPeriodDiagnostics;
   auditInsights?: CashAuditInsights;
 }
 
@@ -308,6 +410,12 @@ export interface ParsedCashFileResult {
 export interface CashManualInputs {
   cashCountedCents?: number | null;
   sangriaOverrideCents?: number | null;
+  fundoNoiteOverrideCents?: number | null;
+  outrasEntradasOverrideCents?: number | null;
+  saidasPagamentosOverrideCents?: number | null;
+  outrasSaidasOverrideCents?: number | null;
+  manualCashAdjustments?: CashManualCashAdjustment[];
+  cashDrawerZeroConfirmed?: boolean;
   notes?: string;
   shiftLabel?: string;
   categoryRealOverrides?: Record<string, number>;
@@ -319,6 +427,7 @@ export interface CashResolutionAction {
   systemIds?: string[];
   realIds?: string[];
   targetCategory?: 'dinheiro' | 'cartao' | 'pix' | 'pendente';
+  note?: string;
 }
 
 export interface CashAiAnalysis {

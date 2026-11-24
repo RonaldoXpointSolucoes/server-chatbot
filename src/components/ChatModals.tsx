@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { AlertCircle, AlertTriangle, Edit2, Trash2, X, User, Users, Phone, Mail, FileText, MapPin, Search, Loader2, ShieldAlert, UserMinus, CheckCircle2, Tag, Check, Clock, CalendarDays, MessageSquare, MessageSquarePlus, Building2, Copy, Building, CircleDollarSign, ExternalLink, CalendarClock, RefreshCw, Pencil, ChevronDown, ChevronUp, Plus, BrainCircuit, FolderCheck, Frown, Smile, Activity, TrendingUp, MoreVertical, Inbox, Ticket, Sparkles, CheckSquare, History, LayoutGrid } from 'lucide-react';
 import { useChatStore } from '../store/chatStore';
 import { cn } from '../lib/utils';
 import { formatDocumentNumber } from '../utils/format';
 import { geminiService, sanitizeChecklistItems } from '../services/geminiService';
 import { isContactDefinitivelyPaused, shouldPreserveHumanAiPauseOnResolve } from '../utils/aiPause.mjs';
+import { shouldResetModalForm } from '../utils/realtimeEditStability.mjs';
 
 interface BaseModalProps {
   isOpen: boolean;
@@ -59,8 +61,25 @@ export function RenameModal({ isOpen, onClose, contactData, onSave }: RenameModa
   const [isAdvancedLocationOpen, setIsAdvancedLocationOpen] = useState(false);
 
   const contactGroups = useChatStore(state => state.tenantInfo?.settings?.contactGroups) || [];
+  const wasOpenRef = useRef(false);
+  const lastTargetKeyRef = useRef<string | null>(null);
+  const contactTargetKey = contactData?.id || '__new__';
 
   React.useEffect(() => {
+    const shouldInit = shouldResetModalForm({
+      wasOpen: wasOpenRef.current,
+      isOpen,
+      prevTargetKey: lastTargetKeyRef.current,
+      nextTargetKey: contactTargetKey
+    });
+    wasOpenRef.current = isOpen;
+    if (!isOpen) {
+      lastTargetKeyRef.current = null;
+      return;
+    }
+    if (!shouldInit || !contactData) return;
+    lastTargetKeyRef.current = contactTargetKey;
+
     if (contactData && isOpen) {
       let initialAddresses = [] as any[];
       if (Array.isArray(contactData.addresses) && contactData.addresses.length > 0) {
@@ -1610,8 +1629,14 @@ export interface ContactLabelsModalProps {
 }
 
 export function ContactLabelsModal({ isOpen, onClose, contactId, contactName }: ContactLabelsModalProps) {
-  const { tenantLabels, contacts, assignLabelToConversation, removeLabelFromConversation } = useChatStore();
-  const contact = contacts.find(c => c.id === contactId);
+  const { tenantLabels, contact, assignLabelToConversation, removeLabelFromConversation } = useChatStore(
+    useShallow(s => ({
+      tenantLabels: s.tenantLabels,
+      contact: s.contacts.find(c => c.id === contactId),
+      assignLabelToConversation: s.assignLabelToConversation,
+      removeLabelFromConversation: s.removeLabelFromConversation
+    }))
+  );
   const contactLabels = contact?.conv_labels || [];
 
   const [activeLabels, setActiveLabels] = useState<string[]>([]);

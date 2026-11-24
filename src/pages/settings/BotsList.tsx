@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { shouldHydrateTenantForm } from '../../utils/realtimeEditStability.mjs';
 import { 
   Search, 
   ChevronRight, 
@@ -620,6 +621,8 @@ export default function BotsList() {
   const tenantId = tenantIdFromStore || (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
   const tenantInfo = useChatStore(state => state.tenantInfo);
   const updateTenantSettings = useChatStore(state => state.updateTenantSettings);
+  const hydratedProfileTenantIdRef = useRef<string | null>(null);
+  const isProfileDirtyRef = useRef<boolean>(false);
 
   // Estados dos Dados do Comércio (RAG)
   const [cnpj, setCnpj] = useState('');
@@ -739,6 +742,17 @@ export default function BotsList() {
   }, [tenantId]);
 
   useEffect(() => {
+    if (
+      !shouldHydrateTenantForm({
+        prevHydratedTenantId: hydratedProfileTenantIdRef.current,
+        nextTenant: tenantInfo,
+        isDirty: isProfileDirtyRef.current
+      })
+    ) {
+      return;
+    }
+    hydratedProfileTenantIdRef.current = tenantInfo!.id;
+    isProfileDirtyRef.current = false;
     if (tenantInfo?.settings) {
       setCnpj(tenantInfo.settings.cnpj || '');
       setCorporateName(tenantInfo.settings.corporateName || '');
@@ -779,7 +793,7 @@ export default function BotsList() {
       setShippingDeadlines(tenantInfo.settings.shippingDeadlines || '');
       setExchangePolicy(tenantInfo.settings.exchangePolicy || '');
     }
-  }, [tenantInfo]);
+  }, [tenantInfo?.id, tenantInfo?.settings]);
 
   const fetchOrCreateSimulatorContact = async () => {
     if (!tenantId) return;
@@ -1497,7 +1511,11 @@ Instruções importantes:
   };
 
   return (
-    <div className="flex-1 flex flex-col h-full min-h-0 bg-[#0f1013] overflow-hidden">
+    <div
+      className="flex-1 flex flex-col h-full min-h-0 bg-[#0f1013] overflow-hidden"
+      onInputCapture={() => { isProfileDirtyRef.current = true; }}
+      onChangeCapture={() => { isProfileDirtyRef.current = true; }}
+    >
       {/* Premium Header - Glassmorphism Extremo (shrink-0 garante que nunca seja esmagado) */}
       <div className="shrink-0 px-4 sm:px-8 pt-6 pb-5 bg-gradient-to-b from-[#18181b]/95 to-[#0f1013]/80 backdrop-blur-[40px] border-b border-white/5 relative overflow-hidden z-10 shadow-[0_10px_50px_-20px_rgba(0,0,0,0.8)]">
         

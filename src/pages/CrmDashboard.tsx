@@ -23,6 +23,7 @@ import {
   ShieldAlert,
   Edit2
 } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import { useChatStore } from '../store/chatStore';
 import { supabase } from '../services/supabase';
 import { format, isBefore, isAfter, parseISO, addDays } from 'date-fns';
@@ -36,9 +37,17 @@ function cn(...inputs: (string | undefined | null | false)[]) {
   return twMerge(clsx(inputs));
 }
 
+const EMPTY_CRM_CONTACTS: any[] = [];
+
 export default function CrmDashboard() {
   const navigate = useNavigate();
-  const { contacts, agents, tenantInfo, fetchTenantAgents } = useChatStore();
+  const { agents, tenantInfo, fetchTenantAgents } = useChatStore(
+    useShallow(s => ({
+      agents: s.agents,
+      tenantInfo: s.tenantInfo,
+      fetchTenantAgents: s.fetchTenantAgents
+    }))
+  );
 
   // Estados Locais
   const [tasks, setTasks] = useState<any[]>([]);
@@ -58,6 +67,7 @@ export default function CrmDashboard() {
 
   // Estados para o Modal de Nova Tarefa
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const contacts = useChatStore(s => (showCreateModal ? s.contacts : EMPTY_CRM_CONTACTS));
   const [newContactId, setNewContactId] = useState('');
   const [newAgentId, setNewAgentId] = useState('');
   const [newContent, setNewContent] = useState('');

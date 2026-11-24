@@ -1,12 +1,20 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, ChevronRight, Edit3, Trash2, Shield, User, Loader2, AlertTriangle, Building, Plus } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import { useChatStore } from '../../store/chatStore';
 import { AgentModal } from '../../components/modals/AgentModal';
 
 export default function AgentsList() {
   const navigate = useNavigate();
-  const { agents, fetchTenantAgents, deleteAgent, tenantInfo } = useChatStore();
+  const { agents, fetchTenantAgents, deleteAgent, tenantInfo } = useChatStore(
+    useShallow(s => ({
+      agents: s.agents,
+      fetchTenantAgents: s.fetchTenantAgents,
+      deleteAgent: s.deleteAgent,
+      tenantInfo: s.tenantInfo
+    }))
+  );
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [agentToEdit, setAgentToEdit] = useState<any>(null);

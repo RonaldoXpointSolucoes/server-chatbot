@@ -468,3 +468,39 @@ test('parseUploadedCashFile enriches OFX and generic bank spreadsheets with cano
   assert.equal(bbCsvRes.summary.bankCode, '001');
   assert.equal(bbCsvRes.summary.bankLabel, 'Banco do Brasil');
 });
+
+test('parseUploadedCashFile distinguishes true multi-day C6 Pay exports from D+1 midnight virada and guards negative OFX credits', async () => {
+  const XLSX = await import('xlsx');
+  const XLSXLib = XLSX.utils ? XLSX : XLSX.default || XLSX;
+
+  const wb = XLSXLib.utils.book_new();
+  const ws = XLSXLib.utils.aoa_to_sheet([
+    ['Data da Venda', 'Hora da Venda', 'Modalidade', 'Bandeira', 'Status da Venda', 'Valor da Venda Bruta', 'Valor Líquido da Venda', 'Taxas (R$)', 'NSU', 'Nº Série Maquininha'],
+    ['18/11/2026', '12:00:00', 'Crédito', 'Visa', 'Aprovada', '100,00', '98,00', '2,00', '1', 'C6'],
+    ['19/11/2026', '13:00:00', 'Crédito', 'Visa', 'Aprovada', '120,00', '118,00', '2,00', '2', 'C6'],
+    ['20/11/2026', '14:00:00', 'Crédito', 'Mastercard', 'Aprovada', '50,00', '49,00', '1,00', '3', 'C6']
+  ]);
+  XLSXLib.utils.book_append_sheet(wb, ws, 'Vendas');
+  const multiC6Res = await parseUploadedCashFile({
+    fileName: 'C6Pay_Multi.xlsx',
+    arrayBuffer: XLSXLib.write(wb, { type: 'array', bookType: 'xlsx' })
+  });
+  assert.equal(multiC6Res.status, 'ok');
+  assert.equal(multiC6Res.fileType, 'adquirente_c6pay');
+  assert.equal(multiC6Res.periodStart, '2026-11-18');
+  assert.equal(multiC6Res.periodEnd, '2026-11-20');
+  assert.equal(multiC6Res.summary.isSingleDayVirada, false);
+  assert.ok(multiC6Res.warnings.some((w) => /múltiplos dias/i.test(w)));
+
+  // OFX com lançamento negativo marcado erroneamente como CREDIT nunca deve entrar como pix_cliente
+  const strangeOfx = `<OFX><BANKMSGSRSV1><STMTTRNRS><STMTRS>
+    <BANKACCTFROM><BANKID>336</BANKID><ACCTID>372910726</ACCTID></BANKACCTFROM>
+    <BANKTRANLIST>
+      <STMTTRN><FITID>1</FITID><TRNAMT>-45.00</TRNAMT><DTPOSTED>20261120110000</DTPOSTED><TRNTYPE>CREDIT</TRNTYPE><MEMO>ESTORNO PIX</MEMO></STMTTRN>
+      <STMTTRN><FITID>2</FITID><TRNAMT>45.00</TRNAMT><DTPOSTED>20261120110500</DTPOSTED><TRNTYPE>CREDIT</TRNTYPE><MEMO>PIX RECEBIDO CLIENTE</MEMO></STMTTRN>
+    </BANKTRANLIST>
+  </STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>`;
+  const strangeRes = await parseUploadedCashFile({ fileName: 'strange.ofx', textContent: strangeOfx });
+  assert.equal(strangeRes.rows.filter((r) => r.ofxClass === 'pix_cliente').length, 1);
+  assert.equal(strangeRes.rows.find((r) => r.amountCents === -4500).ofxClass, 'debito_saida');
+});

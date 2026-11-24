@@ -1314,8 +1314,7 @@ export default function AccountSettings() {
   };
 
   useEffect(() => {
-    console.log("AccountSettings montou/atualizou. tenantInfo:", tenantInfo);
-    if (tenantInfo?.id && tenantInfo.id !== prevTenantIdRef.current) {
+    if (tenantInfo?.id && tenantInfo?.settings && tenantInfo.id !== prevTenantIdRef.current) {
       prevTenantIdRef.current = tenantInfo.id;
       const settings = tenantInfo.settings || {};
       setNomeIa(settings.nome_ia || '');

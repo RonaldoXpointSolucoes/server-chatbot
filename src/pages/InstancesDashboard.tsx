@@ -27,11 +27,14 @@ import { supabase } from '../services/supabase';
 import { createInstance, migrateInstanceHistory, getInstanceApiUrl } from '../services/whatsappEngine';
 import { BaileysInstanceHubModal } from '../components/modals/BaileysInstanceHubModal';
 import { InboxDeepAnalysisModal } from '../components/modals/InboxDeepAnalysisModal';
+import { haveInstanceVisualFieldsChanged } from '../utils/realtimeEditStability.mjs';
 
 const ENGINE_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
 
 export default function InstancesDashboard() {
   const [instances, setInstances] = useState<WhatsAppInstance[]>([]);
+  const instancesRef = React.useRef<WhatsAppInstance[]>([]);
+  instancesRef.current = instances;
   const [hubInstance, setHubInstance] = useState<WhatsAppInstance | null>(null);
   const [deepAnalysisInstance, setDeepAnalysisInstance] = useState<WhatsAppInstance | null>(null);
   const [stats, setStats] = useState<Record<string, { contacts: number, messages: number }>>({});
@@ -284,7 +287,13 @@ export default function InstancesDashboard() {
 
     const channel = supabase
       .channel(channelName)
-      .on('postgres_changes', channelFilter as any, () => {
+      .on('postgres_changes', channelFilter as any, (payload: any) => {
+        if (payload?.eventType === 'UPDATE' && payload?.new) {
+          const cachedInst = instancesRef.current.find(i => i.id === payload.new.id) || null;
+          if (!haveInstanceVisualFieldsChanged({ eventType: 'UPDATE', oldRecord: payload.old, newRecord: payload.new, cachedRecord: cachedInst })) {
+            return;
+          }
+        }
         debouncedFetchInstances();
       })
       .subscribe();

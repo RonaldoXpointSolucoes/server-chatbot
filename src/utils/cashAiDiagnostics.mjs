@@ -91,6 +91,8 @@ ${JSON.stringify(activeRulesCompact, null, 2)}
 
 AUDITORIA DOS 7 RELATÓRIOS DATADIVAS + 3 BANCO:
 - Relatórios faltantes: ${JSON.stringify(completeness?.warnings || [])}
+- Alertas de período / validação do motor: ${JSON.stringify(reconciliation?.periodDiagnostics?.validationWarnings || [])}
+- Itens filtrados por estarem fora da data (${reconciliation?.periodDiagnostics?.totalOutOfPeriodCount || 0}): PIX=${formatCentsBrl(reconciliation?.periodDiagnostics?.outOfPeriodPixCents || 0)} | Cartões=${formatCentsBrl(reconciliation?.periodDiagnostics?.outOfPeriodCardCents || 0)}
 - Mesas reabertas / recebimentos excluídos: ${JSON.stringify((audit.reopenedTables || []).slice(0, 10))}
 - Remoções de taxa de serviço (10%): ${JSON.stringify((audit.feeRemovals || []).slice(0, 15).map((r) => ({ pedido: r.orderNumber, prod: r.product, motivo: r.reason, detalhe: r.details, op: r.operator })))}
 - Cancelamentos detalhados: ${JSON.stringify((audit.cancelledDetails || []).slice(0, 15).map((c) => ({ pedido: c.table, prod: c.product, valor: formatCentsBrl(c.totalCents), motivo: c.reason, detalhe: c.reasonDetails, op: c.operator })))}

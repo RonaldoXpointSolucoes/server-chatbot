@@ -17,6 +17,11 @@ import {
   resolveHydratedGlobalAiState,
   isPostgrestUpdateConfirmed
 } from '../utils/globalAiPersistence.mjs';
+import {
+  haveTenantFieldsChanged,
+  haveInstanceVisualFieldsChanged,
+  haveInstanceListsChanged
+} from '../utils/realtimeEditStability.mjs';
 
 let isGlobalAiToggleInFlight = false;
 
@@ -1281,6 +1286,7 @@ function sanitizeContactName(targetName: string | null | undefined, fallbackPhon
 const instanceStatusTimeouts: Record<string, ReturnType<typeof setTimeout>> = {};
 let inFlightInitialDataPromise: Promise<void> | null = null;
 let inFlightInitialDataKey = '';
+let inFlightTenantConfigPromise: Promise<void> | null = null;
 let lastSupportFetchAt = 0;
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -1291,6 +1297,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   realtimeStatus: 'disconnected',
   hasRealtimeConnectedOnce: false,
   setInstanceStatus: (id, status) => {
+    const existingStatus = get().instancesStatus[id];
     if (status === 'connected' || status === 'connected_local') {
       if (instanceStatusTimeouts[id]) {
         clearTimeout(instanceStatusTimeouts[id]);
@@ -1300,9 +1307,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         clearInterval((window as any)[`_offline_checks_${id}`]);
         delete (window as any)[`_offline_checks_${id}`];
       }
+      if (existingStatus === status) return;
       set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: status } }));
     } else {
-      const currentState = get().instancesStatus[id];
+      const currentState = existingStatus;
       // Se a instância já estava conectada, não rebaixa visualmente de imediato (tolerância de 35s contra falsos positivos de oscilação transitória)
       if (currentState === 'connected' || currentState === 'connected_local') {
         if ((window as any)[`_offline_checks_${id}`] || instanceStatusTimeouts[id]) {
@@ -1320,14 +1328,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
             const dbStatus = data?.status || 'offline';
 
             if (dbStatus === 'connected' || dbStatus === 'connected_local') {
-              set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: dbStatus } }));
+              if (get().instancesStatus[id] !== dbStatus) {
+                set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: dbStatus } }));
+              }
               clearInterval(intervalId);
               delete (window as any)[`_offline_checks_${id}`];
               return;
             }
 
             if (checkCount >= maxChecks) {
-              set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: dbStatus } }));
+              if (get().instancesStatus[id] !== dbStatus) {
+                set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: dbStatus } }));
+              }
               clearInterval(intervalId);
               delete (window as any)[`_offline_checks_${id}`];
             }
@@ -1338,7 +1350,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
         (window as any)[`_offline_checks_${id}`] = intervalId;
       } else {
-        set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: status } }));
+        if (existingStatus !== status) {
+          set(state => ({ instancesStatus: { ...state.instancesStatus, [id]: status } }));
+        }
         // Se o status for transitório (connecting/reconnecting), agenda revalidação e timeout de segurança
         if (status === 'connecting' || status === 'reconnecting' || status === 'reconnecting_local') {
           if (instanceStatusTimeouts[id]) {
@@ -6974,36 +6988,51 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   fetchTenantConfig: async () => {
+    if (inFlightTenantConfigPromise) {
+      return inFlightTenantConfigPromise;
+    }
+
+    const runFetchTenantConfig = (async () => {
     try {
       let currentTenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id'));
 
-      // Dispara busca imediata da empresa ativa em background se tenantId já existe no storage
+      // Dispara busca imediata da empresa ativa em background apenas se tenantId ainda não foi hidratado no store
       if (currentTenantId && currentTenantId !== 'undefined' && currentTenantId !== 'null') {
+        const existingTenant = get().tenantInfo;
+        const needsEarlyHydration = !existingTenant || existingTenant.id !== currentTenantId || !existingTenant.settings;
         const cachedEarlyState = readCachedGlobalAiState(currentTenantId);
-        if (cachedEarlyState && (!get().tenantInfo || get().tenantInfo?.id !== currentTenantId)) {
+        if (cachedEarlyState && needsEarlyHydration) {
           set({
             globalAiEnabled: cachedEarlyState.enabled,
             globalAiAuditInfo: cachedEarlyState.audit
           });
         }
-        supabase.from('companies').select('*').eq('id', currentTenantId).maybeSingle().then(({ data: earlyTenantData }) => {
-          if (earlyTenantData) {
-            const resolvedEarly = resolveHydratedGlobalAiState({
-              dbCompany: earlyTenantData,
-              cachedState: readCachedGlobalAiState(earlyTenantData.id)
-            });
-            writeCachedGlobalAiState(earlyTenantData.id, resolvedEarly);
-            set({
-              tenantInfo: earlyTenantData,
-              connectedInstanceName: earlyTenantData.evolution_api_instance || null,
-              globalAiEnabled: resolvedEarly.enabled,
-              globalAiAuditInfo: resolvedEarly.audit
-            });
-            if (earlyTenantData.name && earlyTenantData.name !== 'Carregando...') {
-              localStorage.setItem('current_tenant_name', earlyTenantData.name);
+        if (needsEarlyHydration) {
+          supabase.from('companies').select('*').eq('id', currentTenantId).maybeSingle().then(({ data: earlyTenantData }) => {
+            if (earlyTenantData) {
+              const resolvedEarly = resolveHydratedGlobalAiState({
+                dbCompany: earlyTenantData,
+                cachedState: readCachedGlobalAiState(earlyTenantData.id)
+              });
+              writeCachedGlobalAiState(earlyTenantData.id, resolvedEarly);
+              const cur = get();
+              const patch: any = {};
+              if (haveTenantFieldsChanged(cur.tenantInfo, earlyTenantData)) {
+                patch.tenantInfo = earlyTenantData;
+              }
+              const nextConnectedInst = earlyTenantData.evolution_api_instance || null;
+              if (cur.connectedInstanceName !== nextConnectedInst) patch.connectedInstanceName = nextConnectedInst;
+              if (cur.globalAiEnabled !== resolvedEarly.enabled) patch.globalAiEnabled = resolvedEarly.enabled;
+              if (JSON.stringify(cur.globalAiAuditInfo || null) !== JSON.stringify(resolvedEarly.audit || null)) {
+                patch.globalAiAuditInfo = resolvedEarly.audit;
+              }
+              if (Object.keys(patch).length > 0) set(patch);
+              if (earlyTenantData.name && earlyTenantData.name !== 'Carregando...') {
+                localStorage.setItem('current_tenant_name', earlyTenantData.name);
+              }
             }
-          }
-        }).catch(() => {});
+          }).catch(() => {});
+        }
       }
 
       const { data: userData } = await supabase.auth.getUser();
@@ -7062,13 +7091,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
 
       if (tenantData) {
+        const previousTenantId = get().tenantInfo?.id;
+        const hadContactsLoaded = (get().contacts || []).length > 0;
         writeCachedGlobalAiState(tenantData.id, resolvedTenantAi);
-        set({
-          tenantInfo: tenantData,
-          connectedInstanceName: tenantData.evolution_api_instance || null,
-          globalAiEnabled: resolvedTenantAi.enabled,
-          globalAiAuditInfo: resolvedTenantAi.audit
-        });
+        const curState = get();
+        const tenantPatch: any = {};
+        if (haveTenantFieldsChanged(curState.tenantInfo, tenantData)) {
+          tenantPatch.tenantInfo = tenantData;
+        }
+        const nextConnectedName = tenantData.evolution_api_instance || null;
+        if (curState.connectedInstanceName !== nextConnectedName) {
+          tenantPatch.connectedInstanceName = nextConnectedName;
+        }
+        if (curState.globalAiEnabled !== resolvedTenantAi.enabled) {
+          tenantPatch.globalAiEnabled = resolvedTenantAi.enabled;
+        }
+        if (JSON.stringify(curState.globalAiAuditInfo || null) !== JSON.stringify(resolvedTenantAi.audit || null)) {
+          tenantPatch.globalAiAuditInfo = resolvedTenantAi.audit;
+        }
+        if (Object.keys(tenantPatch).length > 0) {
+          set(tenantPatch);
+        }
         if (tenantData.name && tenantData.name !== 'Carregando...') {
           localStorage.setItem('current_tenant_name', tenantData.name);
         }
@@ -7105,14 +7148,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 get().setInstanceStatus(inst.id, inst.status);
               }
             });
-            set(s => ({ rawInstances: instances, instancesStatus: { ...s.instancesStatus, ...statusUpdates } }));
+            set(s => {
+              const nextPatch: any = {};
+              if (haveInstanceListsChanged(s.rawInstances || [], instances)) {
+                nextPatch.rawInstances = instances;
+              }
+              const hasStatusDiff = Object.entries(statusUpdates).some(
+                ([instId, st]) => s.instancesStatus[instId] !== st
+              );
+              if (hasStatusDiff) {
+                nextPatch.instancesStatus = { ...s.instancesStatus, ...statusUpdates };
+              }
+              return Object.keys(nextPatch).length > 0 ? nextPatch : {};
+            });
 
             // Se a caixa primária (evolution_api_instance) estiver offline ou vazia, mas existir outra caixa conectada no tenant, promove-a automaticamente
             const primaryInst = instances.find(i => i.id === tenantData.evolution_api_instance);
             const anyConnectedInst = instances.find(i => i.status === 'connected');
             if (anyConnectedInst && (!primaryInst || primaryInst.status !== 'connected')) {
               tenantData.evolution_api_instance = anyConnectedInst.id;
-              set({ connectedInstanceName: anyConnectedInst.id });
+              if (get().connectedInstanceName !== anyConnectedInst.id) {
+                set({ connectedInstanceName: anyConnectedInst.id });
+              }
             }
 
             // Higienização multi-tenant: valida se activeChannelFilter ou selectedChannelFilters pertencem ao tenant ativo
@@ -7143,31 +7200,48 @@ export const useChatStore = create<ChatState>((set, get) => ({
             const isConnected = realSt === 'connected' || realSt === 'connected_local';
 
             if (isConnected) {
-              set({ evolutionConnected: true, modalReason: null, isOffline: false });
+              const wasConnected = get().evolutionConnected;
+              if (!wasConnected || get().modalReason !== null || get().isOffline) {
+                set({ evolutionConnected: true, modalReason: null, isOffline: false });
+              }
               get().setInstanceStatus(tenantData.evolution_api_instance, realSt);
-              get().fetchInitialData();
+              if (!hadContactsLoaded || previousTenantId !== tenantData.id || !wasConnected) {
+                get().fetchInitialData();
+              }
             } else if (realSt === 'connecting') {
-              set({ evolutionConnected: false, isOffline: false });
+              if (get().evolutionConnected || get().isOffline) {
+                set({ evolutionConnected: false, isOffline: false });
+              }
               get().setInstanceStatus(tenantData.evolution_api_instance, 'connecting');
             } else {
-              set({ evolutionConnected: false, isOffline: false });
+              if (get().evolutionConnected || get().isOffline) {
+                set({ evolutionConnected: false, isOffline: false });
+              }
               get().setInstanceStatus(tenantData.evolution_api_instance, 'offline');
             }
           } catch (e: any) {
             if (e.message === 'Failed to fetch' || e.message?.includes('network') || e.message?.includes('fetch') || (typeof navigator !== 'undefined' && !navigator.onLine)) {
-              set({ isOffline: true });
+              if (!get().isOffline) set({ isOffline: true });
             } else {
               set({ evolutionConnected: false, modalReason: 'Servidor Node Offline - A API principal não está respondendo. O serviço pode estar em manutenção ou reiniciando.' });
             }
           }
-        } else {
+        } else if (get().evolutionConnected) {
           set({ evolutionConnected: false });
         }
       }
     } catch (e) {
       console.error(e);
       set({ evolutionConnected: false, modalReason: 'Houve uma falha fatal na validação da sua empresa. Entre em contato com o suporte.' });
+    } finally {
+      if (inFlightTenantConfigPromise === runFetchTenantConfig) {
+        inFlightTenantConfigPromise = null;
+      }
     }
+    })();
+
+    inFlightTenantConfigPromise = runFetchTenantConfig;
+    return runFetchTenantConfig;
   },
 
   updateTenantSettings: async (newSettings: any) => {
@@ -9617,6 +9691,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
 
         const inst = payload.new as any;
+        const cachedRawInst = (get().rawInstances || []).find((r: any) => r.id === inst?.id) || null;
+        if (
+          payload.eventType === 'UPDATE' &&
+          !haveInstanceVisualFieldsChanged({
+            eventType: 'UPDATE',
+            oldRecord: payload.old,
+            newRecord: inst,
+            cachedRecord: cachedRawInst
+          })
+        ) {
+          return;
+        }
         if (inst.id) {
           instanceCache.set(
             inst.id,

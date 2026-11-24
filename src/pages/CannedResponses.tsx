@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useChatStore, CannedResponseType, QuickReplyCategory } from '../store/chatStore';
 import { 
   Plus, Search, Edit2, Trash2, MessageSquareText, Zap, ChevronLeft, Save, 
@@ -62,7 +63,19 @@ export function CannedResponses() {
     updateQuickReplyCategory, 
     deleteQuickReplyCategory, 
     tenantInfo 
-  } = useChatStore();
+  } = useChatStore(
+    useShallow(s => ({
+      quickReplies: s.quickReplies,
+      fetchQuickReplies: s.fetchQuickReplies,
+      addQuickReply: s.addQuickReply,
+      updateQuickReply: s.updateQuickReply,
+      deleteQuickReply: s.deleteQuickReply,
+      addQuickReplyCategory: s.addQuickReplyCategory,
+      updateQuickReplyCategory: s.updateQuickReplyCategory,
+      deleteQuickReplyCategory: s.deleteQuickReplyCategory,
+      tenantInfo: s.tenantInfo
+    }))
+  );
 
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -199,7 +212,7 @@ export function CannedResponses() {
     if (isModalOpen) {
       fetchRagDocs();
     }
-  }, [isModalOpen, tenantInfo]);
+  }, [isModalOpen, tenantInfo?.id]);
 
   // Efeito assíncrono para preview de link
   useEffect(() => {

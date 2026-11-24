@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X, User, Edit3, CheckCircle, Save, Bell, BellOff, Volume2, Smartphone, PhoneCall, AtSign, Ticket, CheckCircle2, Play, MessageSquare } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import { useChatStore } from '../store/chatStore';
 import { supabase } from '../services/supabase';
 import { NOTIFICATION_SOUNDS, playNotificationSound } from '../utils/AudioEngine';
@@ -40,7 +41,13 @@ export const AgentSettingsModal: React.FC<AgentSettingsModalProps> = ({
   const [instances, setInstances] = useState<any[]>([]);
   const [notifPrefs, setNotifPrefs] = useState<Record<string, UserInboxNotificationPreference>>({});
   
-  const { agents, updateAgentProfile, tenantInfo } = useChatStore();
+  const { agents, updateAgentProfile, tenantInfo } = useChatStore(
+    useShallow(s => ({
+      agents: s.agents,
+      updateAgentProfile: s.updateAgentProfile,
+      tenantInfo: s.tenantInfo
+    }))
+  );
   const tenantId = (localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id')) || tenantInfo?.id;
   const identity = getCurrentUserIdentity();
 

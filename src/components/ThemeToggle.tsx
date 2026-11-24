@@ -1,9 +1,10 @@
 import { Sun, Moon } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import { useChatStore } from '../store/chatStore';
 import { cn } from '../lib/utils';
 
 export default function ThemeToggle({ className, size = 18 }: { className?: string; size?: number }) {
-  const { theme, setTheme } = useChatStore();
+  const { theme, setTheme } = useChatStore(useShallow(s => ({ theme: s.theme, setTheme: s.setTheme })));
 
   return (
     <button

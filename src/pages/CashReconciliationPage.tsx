@@ -14,7 +14,10 @@ import {
   MessageCircle,
   FileText,
   Trash2,
-  Loader2
+  Loader2,
+  Cloud,
+  AlertCircle,
+  RefreshCw
 } from 'lucide-react';
 import { useChatStore } from '../store/chatStore';
 import { parseUploadedCashFile } from '../utils/cashFileParsers.mjs';
@@ -44,6 +47,11 @@ import {
   loadActiveCashDraftFromStorage,
   saveActiveCashDraftToStorage,
   clearActiveCashDraftFromStorage,
+  savePendingClosedPatchToStorage,
+  loadPendingClosedPatchFromStorage,
+  clearPendingClosedPatchFromStorage,
+  buildCashDraftSyncSignature,
+  shouldPreferLocalDraftOverSession,
   formatDateBr
 } from '../utils/cashReconciliationServiceHelper.mjs';
 import { geminiService } from '../services/geminiService';
@@ -75,6 +83,7 @@ import {
 import { CashUploadDropzone, UploadedCashFileItem } from '../components/cash-reconciliation/CashUploadDropzone';
 import { CashPasswordPromptModal } from '../components/cash-reconciliation/CashPasswordPromptModal';
 import { CashHealthDashboard, CashHealthHistoryCard } from '../components/cash-reconciliation/CashHealthDashboard';
+import { CashGeneralDiffModal, GeneralDiffTabKey } from '../components/cash-reconciliation/CashGeneralDiffModal';
 import { CashReconciliationWorkbench } from '../components/cash-reconciliation/CashReconciliationWorkbench';
 import { CashDashboardOverview } from '../components/cash-reconciliation/CashDashboardOverview';
 import { CashWhatsappSendModal } from '../components/cash-reconciliation/CashWhatsappSendModal';
@@ -165,16 +174,42 @@ export default function CashReconciliationPage() {
   const [deleteTargetSession, setDeleteTargetSession] = useState<CashSessionRow | null>(null);
   const [isDeletingSession, setIsDeletingSession] = useState(false);
   const [selectedMirrorKey, setSelectedMirrorKey] = useState<string | null>(null);
+  const [generalDiffTab, setGeneralDiffTab] = useState<GeneralDiffTabKey | null>(null);
   const [workbenchResetKey, setWorkbenchResetKey] = useState(0);
+  const [autoSaveState, setAutoSaveState] = useState<{
+    status: 'idle' | 'pending' | 'saving' | 'saved' | 'local_only' | 'error';
+    lastSavedAt?: string | null;
+    errorMessage?: string;
+  }>({ status: 'idle', lastSavedAt: null });
 
   const activeTenantRef = useRef<string>('');
   activeTenantRef.current = tenantId;
   const filesRef = useRef<UploadedCashFileItem[]>([]);
   filesRef.current = files;
+  const activeSessionIdRef = useRef<string | null>(null);
+  activeSessionIdRef.current = activeSessionId;
+  const manualInputsRef = useRef<CashManualInputs>({});
+  manualInputsRef.current = manualInputs;
+  const manualResolutionsRef = useRef<CashResolutionAction[]>([]);
+  manualResolutionsRef.current = manualResolutions;
+  const aiAnalysisRef = useRef<CashAiAnalysis | null>(null);
+  aiAnalysisRef.current = aiAnalysis;
+  const currentUserEmailRef = useRef<string>('');
+  currentUserEmailRef.current = currentUserEmail || '';
   const rulesRef = useRef<CashRuleRow[]>([]);
   rulesRef.current = rules;
   const closedSessionIdsRef = useRef<Set<string>>(new Set());
   const pdfCleanupRef = useRef<(() => void) | null>(null);
+  const lastSyncedCloudSigRef = useRef<{
+    sessionId: string | null;
+    filesSig: string;
+    resolutionsSig: string;
+    stateSig: string;
+  }>({ sessionId: null, filesSig: '', resolutionsSig: '', stateSig: '' });
+  const autoSaveTimerRef = useRef<number | null>(null);
+  const autoSaveInFlightRef = useRef<boolean>(false);
+  const autoSaveQueuedRef = useRef<boolean>(false);
+  const autoSaveDirtyRef = useRef<boolean>(false);
 
   const rulesConfig = useMemo(() => mergeCompanyFormulaRules(rules), [rules]);
   const savedFilePasswords = useMemo(
@@ -230,6 +265,13 @@ export default function CashReconciliationPage() {
     [activeSessionId, sessions]
   );
 
+  const reconciliationResultRef = useRef<CashReconciliationResult | null>(null);
+  reconciliationResultRef.current = reconciliationResult;
+  const isActiveSessionClosedRef = useRef<boolean>(false);
+  isActiveSessionClosedRef.current = isActiveSessionClosed;
+  const activeSessionClosedAtRef = useRef<string | null>(null);
+  activeSessionClosedAtRef.current = activeSessionRow?.closed_at || null;
+
   const activeDraftDate = useMemo(
     () =>
       reconciliationResult?.referenceDate ||
@@ -259,9 +301,229 @@ export default function CashReconciliationPage() {
     };
   }, []);
 
+  const resetAutoSaveTracking = useCallback(() => {
+    if (autoSaveTimerRef.current !== null && typeof window !== 'undefined') {
+      window.clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+    autoSaveQueuedRef.current = false;
+    autoSaveDirtyRef.current = false;
+    lastSyncedCloudSigRef.current = { sessionId: null, filesSig: '', resolutionsSig: '', stateSig: '' };
+  }, []);
+
+  const persistLocalSafetySnapshot = useCallback((pendingCloudSync: boolean) => {
+    const reqTenantId = activeTenantRef.current;
+    if (!reqTenantId || typeof window === 'undefined') return;
+    const payload = {
+      activeSessionId: activeSessionIdRef.current,
+      files: filesRef.current,
+      manualInputs: manualInputsRef.current,
+      manualResolutions: manualResolutionsRef.current,
+      aiAnalysis: aiAnalysisRef.current,
+      pendingCloudSync
+    };
+    if (isActiveSessionClosedRef.current && activeSessionIdRef.current) {
+      clearActiveCashDraftFromStorage(window.localStorage, reqTenantId);
+      if (pendingCloudSync) {
+        savePendingClosedPatchToStorage(window.localStorage, reqTenantId, activeSessionIdRef.current, payload);
+      } else {
+        clearPendingClosedPatchFromStorage(window.localStorage, reqTenantId, activeSessionIdRef.current);
+      }
+      return;
+    }
+    saveActiveCashDraftToStorage(window.localStorage, reqTenantId, payload);
+  }, []);
+
+  const buildSummaryRowFromResult = useCallback(
+    (
+      sessionId: string,
+      reqTenantId: string,
+      resObj: CashReconciliationResult,
+      inputsObj: CashManualInputs,
+      closedAt: string | null,
+      savedAt: string
+    ): CashSessionRow => ({
+      id: sessionId,
+      tenant_id: reqTenantId,
+      reference_date: resObj.referenceDate || new Date().toISOString().slice(0, 10),
+      shift_label: inputsObj.shiftLabel || 'Diário',
+      store_name: resObj.storeName || storeTenantName || null,
+      operator_name: resObj.operatorName || null,
+      status: resObj.status || 'draft',
+      health_score: Number(resObj.healthScore ?? 0),
+      system_total_cents: Math.round(Number(resObj.systemTotalCents || 0)),
+      real_total_cents: Math.round(Number(resObj.realTotalCents || 0)),
+      diff_cents: Math.round(Number(resObj.diffTotalCents || 0)),
+      cash_drawer_counted_cents: inputsObj.cashCountedCents ?? null,
+      cash_sangria_cents: Math.round(Number(resObj.cashDrawerSummary?.sangriaCents || 0)),
+      cash_notes: inputsObj.notes || null,
+      reconciled_summary: {},
+      closed_at: closedAt,
+      created_at: savedAt,
+      updated_at: savedAt
+    }),
+    [storeTenantName]
+  );
+
+  const runBackgroundCloudSync = useCallback(async () => {
+    if (autoSaveTimerRef.current !== null && typeof window !== 'undefined') {
+      window.clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+    if (autoSaveInFlightRef.current) {
+      autoSaveQueuedRef.current = true;
+      return;
+    }
+    autoSaveInFlightRef.current = true;
+    try {
+      do {
+        autoSaveQueuedRef.current = false;
+        const reqTenantId = activeTenantRef.current;
+        const currentResult = reconciliationResultRef.current;
+        const currentFiles = filesRef.current;
+        const currentInputs = manualInputsRef.current;
+        const currentResolutions = manualResolutionsRef.current;
+        const currentAi = aiAnalysisRef.current;
+        const targetSessionId = activeSessionIdRef.current;
+        const wasClosed = isActiveSessionClosedRef.current;
+        const preservedClosedAt = wasClosed ? (activeSessionClosedAtRef.current || new Date().toISOString()) : null;
+
+        if (!reqTenantId || !currentResult) {
+          autoSaveDirtyRef.current = false;
+          break;
+        }
+
+        const sig = buildCashDraftSyncSignature({
+          activeSessionId: targetSessionId,
+          files: currentFiles,
+          manualInputs: currentInputs,
+          manualResolutions: currentResolutions,
+          aiAnalysis: currentAi
+        });
+        if (!sig.hasValidFiles) {
+          autoSaveDirtyRef.current = false;
+          break;
+        }
+        if (
+          targetSessionId &&
+          lastSyncedCloudSigRef.current.sessionId === targetSessionId &&
+          lastSyncedCloudSigRef.current.stateSig === sig.stateSignature
+        ) {
+          autoSaveDirtyRef.current = false;
+          persistLocalSafetySnapshot(false);
+          break;
+        }
+
+        const canSkipFiles = Boolean(
+          targetSessionId &&
+            !targetSessionId.startsWith('local_') &&
+            lastSyncedCloudSigRef.current.sessionId === targetSessionId &&
+            lastSyncedCloudSigRef.current.filesSig === sig.filesSignature
+        );
+        const canSkipItems = Boolean(
+          canSkipFiles && lastSyncedCloudSigRef.current.resolutionsSig === sig.resolutionsSignature
+        );
+
+        setAutoSaveState((prev) => ({ ...prev, status: 'saving', errorMessage: undefined }));
+
+        const res = await saveCashReconciliationSession({
+          tenantId: reqTenantId,
+          userEmail: currentUserEmailRef.current || '',
+          sessionId: targetSessionId,
+          parsedFiles: currentFiles.map((f) => ({ ...f.parsed, fileSizeBytes: f.fileSizeBytes })),
+          result: currentResult,
+          manualInputs: currentInputs,
+          manualResolutions: currentResolutions,
+          aiAnalysis: currentAi,
+          markClosed: wasClosed,
+          preservedClosedAt,
+          skipFilesSync: canSkipFiles,
+          skipItemsSync: canSkipItems
+        });
+
+        if (activeTenantRef.current !== reqTenantId) break;
+
+        if (wasClosed) {
+          closedSessionIdsRef.current.add(res.sessionId);
+        } else {
+          closedSessionIdsRef.current.delete(res.sessionId);
+        }
+
+        const syncedSigForSavedState = buildCashDraftSyncSignature({
+          activeSessionId: res.sessionId,
+          files: currentFiles,
+          manualInputs: currentInputs,
+          manualResolutions: currentResolutions,
+          aiAnalysis: currentAi
+        });
+        const postSig = buildCashDraftSyncSignature({
+          activeSessionId: res.sessionId,
+          files: filesRef.current,
+          manualInputs: manualInputsRef.current,
+          manualResolutions: manualResolutionsRef.current,
+          aiAnalysis: aiAnalysisRef.current
+        });
+        lastSyncedCloudSigRef.current = {
+          sessionId: res.sessionId,
+          filesSig: sig.filesSignature,
+          resolutionsSig: sig.resolutionsSignature,
+          stateSig: syncedSigForSavedState.stateSignature
+        };
+
+        activeSessionIdRef.current = res.sessionId;
+        setActiveSessionId(res.sessionId);
+        setSchemaMissing(res.schemaMissing);
+
+        const summaryRow = buildSummaryRowFromResult(
+          res.sessionId,
+          reqTenantId,
+          currentResult,
+          currentInputs,
+          res.closedAt ?? null,
+          res.savedAt
+        );
+        setSessions((prev) => {
+          const existing = prev.find((s) => s.id === res.sessionId);
+          const merged = existing
+            ? { ...existing, ...summaryRow, created_at: existing.created_at || res.savedAt }
+            : summaryRow;
+          return [merged, ...prev.filter((s) => s.id !== res.sessionId)];
+        });
+
+        if (postSig.stateSignature === syncedSigForSavedState.stateSignature) {
+          autoSaveDirtyRef.current = false;
+          persistLocalSafetySnapshot(false);
+          setAutoSaveState({
+            status: res.schemaMissing ? 'local_only' : 'saved',
+            lastSavedAt: res.savedAt
+          });
+        } else {
+          autoSaveQueuedRef.current = true;
+        }
+      } while (autoSaveQueuedRef.current);
+    } catch (err: unknown) {
+      const errMsg = extractCashErrorMessage(err, 'Falha na sincronização automática.');
+      if (activeTenantRef.current) {
+        persistLocalSafetySnapshot(true);
+        setAutoSaveState((prev) => ({
+          status: 'error',
+          lastSavedAt: prev.lastSavedAt,
+          errorMessage: errMsg
+        }));
+      }
+    } finally {
+      autoSaveInFlightRef.current = false;
+      if (autoSaveQueuedRef.current) {
+        void runBackgroundCloudSync();
+      }
+    }
+  }, [buildSummaryRowFromResult, persistLocalSafetySnapshot]);
+
   // Ao trocar de empresa: reseta para Dashboard, limpa modais/flags transitórios e hidrata rascunho/senhas locais sem auto-abrir workspace
   useEffect(() => {
+    resetAutoSaveTracking();
     closedSessionIdsRef.current.clear();
+    setAutoSaveState({ status: 'idle', lastSavedAt: null });
     setViewMode('dashboard');
     setPasswordModalFileId(null);
     setWhatsappModalState(null);
@@ -279,6 +541,7 @@ export default function CashReconciliationPage() {
     setRules([]);
     setSchemaMissing(false);
     setSelectedMirrorKey(null);
+    setGeneralDiffTab(null);
 
     if (!tenantId || typeof window === 'undefined') {
       setLocalSavedPasswords([]);
@@ -301,6 +564,24 @@ export default function CashReconciliationPage() {
       setManualInputs(draft.manualInputs || {});
       setManualResolutions(draft.manualResolutions || []);
       setAiAnalysis(draft.aiAnalysis || null);
+      if (draft.activeSessionId && !draft.pendingCloudSync) {
+        const synced = buildCashDraftSyncSignature({
+          activeSessionId: draft.activeSessionId,
+          files: draft.files,
+          manualInputs: draft.manualInputs || {},
+          manualResolutions: draft.manualResolutions || [],
+          aiAnalysis: draft.aiAnalysis || null
+        });
+        lastSyncedCloudSigRef.current = {
+          sessionId: draft.activeSessionId,
+          filesSig: synced.filesSignature,
+          resolutionsSig: synced.resolutionsSignature,
+          stateSig: synced.stateSignature
+        };
+        setAutoSaveState({ status: 'saved', lastSavedAt: draft.updatedAt || null });
+      } else {
+        setAutoSaveState({ status: 'pending', lastSavedAt: draft.updatedAt || null });
+      }
     } else {
       setFiles([]);
       setActiveSessionId(null);
@@ -310,26 +591,113 @@ export default function CashReconciliationPage() {
     }
     setWorkbenchResetKey((k) => k + 1);
     setHydratedTenantId(tenantId);
-  }, [tenantId]);
+  }, [tenantId, resetAutoSaveTracking]);
 
-  // Auto-salva rascunho local sempre que arquivos, inputs ou ajustes mudam (nunca grava nem ressuscita sessão já fechada)
+  // Auto-save contínuo (local imediato com fallback + nuvem Supabase com debounce) sempre que qualquer dado muda
   useEffect(() => {
     if (!tenantId || typeof window === 'undefined') return;
     if (hydratedTenantId !== tenantId) return;
-    if (isActiveSessionClosed) {
-      clearActiveCashDraftFromStorage(window.localStorage, tenantId);
-      return;
-    }
-    saveActiveCashDraftToStorage(window.localStorage, tenantId, {
+
+    const sig = buildCashDraftSyncSignature({
       activeSessionId,
       files,
       manualInputs,
       manualResolutions,
       aiAnalysis
     });
-  }, [tenantId, hydratedTenantId, isActiveSessionClosed, activeSessionId, files, manualInputs, manualResolutions, aiAnalysis]);
+
+    if (!sig.hasValidFiles || !reconciliationResult) {
+      if (autoSaveTimerRef.current !== null) {
+        window.clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
+      }
+      autoSaveDirtyRef.current = false;
+      if (!isActiveSessionClosed) {
+        clearActiveCashDraftFromStorage(window.localStorage, tenantId);
+      }
+      setAutoSaveState((prev) => (prev.status === 'idle' ? prev : { status: 'idle', lastSavedAt: null }));
+      return;
+    }
+
+    const alreadySynced = Boolean(
+      activeSessionId &&
+        lastSyncedCloudSigRef.current.sessionId === activeSessionId &&
+        lastSyncedCloudSigRef.current.stateSig === sig.stateSignature
+    );
+
+    if (alreadySynced) {
+      autoSaveDirtyRef.current = false;
+      persistLocalSafetySnapshot(false);
+      return;
+    }
+
+    autoSaveDirtyRef.current = true;
+    persistLocalSafetySnapshot(true);
+    setAutoSaveState((prev) => (prev.status === 'saving' ? prev : { ...prev, status: 'pending' }));
+
+    if (autoSaveTimerRef.current !== null) {
+      window.clearTimeout(autoSaveTimerRef.current);
+    }
+    autoSaveTimerRef.current = window.setTimeout(() => {
+      autoSaveTimerRef.current = null;
+      void runBackgroundCloudSync();
+    }, 1100);
+  }, [
+    tenantId,
+    hydratedTenantId,
+    isActiveSessionClosed,
+    activeSessionId,
+    files,
+    manualInputs,
+    manualResolutions,
+    aiAnalysis,
+    reconciliationResult,
+    persistLocalSafetySnapshot,
+    runBackgroundCloudSync
+  ]);
+
+  // Garante flush local imediato e disparo na nuvem caso o usuário feche a aba, navegue ou alterne a janela
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+    const flushPendingChanges = () => {
+      if (!activeTenantRef.current || !reconciliationResultRef.current) return;
+      if (!autoSaveDirtyRef.current) return;
+      persistLocalSafetySnapshot(true);
+      if (!autoSaveInFlightRef.current) {
+        void runBackgroundCloudSync();
+      }
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') flushPendingChanges();
+    };
+    const handlePageHide = () => flushPendingChanges();
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!activeTenantRef.current || !reconciliationResultRef.current) return;
+      if (autoSaveDirtyRef.current) {
+        persistLocalSafetySnapshot(true);
+      }
+      if (autoSaveDirtyRef.current || autoSaveInFlightRef.current) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('pagehide', handlePageHide);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pagehide', handlePageHide);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [persistLocalSafetySnapshot, runBackgroundCloudSync]);
 
   const applyLoadedSession = useCallback((session: CashSessionRow) => {
+    if (autoSaveTimerRef.current !== null && typeof window !== 'undefined') {
+      window.clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+    autoSaveDirtyRef.current = false;
+
     if (session.closed_at) {
       closedSessionIdsRef.current.add(session.id);
     } else {
@@ -343,13 +711,69 @@ export default function CashReconciliationPage() {
       fileSizeBytes: 0,
       parsed: pf
     }));
-    setFiles(restoredFiles);
-    setManualInputs(snap.manualInputs || { cashCountedCents: session.cash_drawer_counted_cents, notes: session.cash_notes || '' });
-    setManualResolutions(snap.manualResolutions || []);
-    setAiAnalysis(session.ai_last_analysis || null);
+    const restoredInputs: CashManualInputs =
+      snap.manualInputs || { cashCountedCents: session.cash_drawer_counted_cents, notes: session.cash_notes || '' };
+    const restoredResolutions: CashResolutionAction[] = snap.manualResolutions || [];
+    const restoredAi: CashAiAnalysis | null = session.ai_last_analysis || null;
+
+    let effectiveFiles = restoredFiles;
+    let effectiveInputs = restoredInputs;
+    let effectiveResolutions = restoredResolutions;
+    let effectiveAi = restoredAi;
+    let recoveredPending = false;
+
+    if (typeof window !== 'undefined' && tenantId) {
+      const localActive = loadActiveCashDraftFromStorage(window.localStorage, tenantId);
+      const localClosedPatch = loadPendingClosedPatchFromStorage(window.localStorage, tenantId, session.id);
+      const recoveryCandidate = shouldPreferLocalDraftOverSession(localClosedPatch, session)
+        ? localClosedPatch
+        : shouldPreferLocalDraftOverSession(localActive, session)
+          ? localActive
+          : null;
+
+      if (recoveryCandidate) {
+        recoveredPending = true;
+        if (Array.isArray(recoveryCandidate.files) && recoveryCandidate.files.length > 0 && !recoveryCandidate.compactedForQuota) {
+          effectiveFiles = recoveryCandidate.files;
+        }
+        if (recoveryCandidate.manualInputs) effectiveInputs = recoveryCandidate.manualInputs;
+        if (Array.isArray(recoveryCandidate.manualResolutions)) effectiveResolutions = recoveryCandidate.manualResolutions;
+        if (recoveryCandidate.aiAnalysis !== undefined) effectiveAi = recoveryCandidate.aiAnalysis;
+      }
+    }
+
+    if (recoveredPending) {
+      lastSyncedCloudSigRef.current = { sessionId: null, filesSig: '', resolutionsSig: '', stateSig: '' };
+      setAutoSaveState({ status: 'pending', lastSavedAt: session.updated_at || session.closed_at || session.created_at || null });
+      notifyToast('Alterações locais pendentes desta conferência foram recuperadas e estão sincronizando.', 'info');
+    } else {
+      const synced = buildCashDraftSyncSignature({
+        activeSessionId: session.id,
+        files: effectiveFiles,
+        manualInputs: effectiveInputs,
+        manualResolutions: effectiveResolutions,
+        aiAnalysis: effectiveAi
+      });
+      lastSyncedCloudSigRef.current = {
+        sessionId: session.id,
+        filesSig: synced.filesSignature,
+        resolutionsSig: synced.resolutionsSignature,
+        stateSig: synced.stateSignature
+      };
+      setAutoSaveState({
+        status: 'saved',
+        lastSavedAt: session.updated_at || session.closed_at || session.created_at || null
+      });
+    }
+
+    setFiles(effectiveFiles);
+    setManualInputs(effectiveInputs);
+    setManualResolutions(effectiveResolutions);
+    setAiAnalysis(effectiveAi);
     setSelectedMirrorKey(null);
+    setGeneralDiffTab(null);
     setWorkbenchResetKey((k) => k + 1);
-  }, []);
+  }, [tenantId]);
 
   const loadTenantData = useCallback(async () => {
     if (!tenantId) return;
@@ -728,7 +1152,11 @@ export default function CashReconciliationPage() {
   };
 
   const handleResetNew = () => {
+    resetAutoSaveTracking();
     if (tenantId && typeof window !== 'undefined') {
+      if (activeSessionId) {
+        clearPendingClosedPatchFromStorage(window.localStorage, tenantId, activeSessionId);
+      }
       clearActiveCashDraftFromStorage(window.localStorage, tenantId);
     }
     setPasswordModalFileId(null);
@@ -738,6 +1166,8 @@ export default function CashReconciliationPage() {
     setManualResolutions([]);
     setAiAnalysis(null);
     setSelectedMirrorKey(null);
+    setGeneralDiffTab(null);
+    setAutoSaveState({ status: 'idle', lastSavedAt: null });
     setWorkbenchResetKey((k) => k + 1);
   };
 
@@ -773,6 +1203,10 @@ export default function CashReconciliationPage() {
   const handleSaveSession = async (markClosed = false) => {
     const reqTenantId = tenantId;
     if (!reqTenantId || !reconciliationResult) return;
+    if (autoSaveTimerRef.current !== null && typeof window !== 'undefined') {
+      window.clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
     setIsSaving(true);
     try {
       const validParsed = files.map(f => f.parsed).filter(p => p && p.status === 'ok');
@@ -801,9 +1235,29 @@ export default function CashReconciliationPage() {
         );
       }
 
+      const synced = buildCashDraftSyncSignature({
+        activeSessionId: res.sessionId,
+        files,
+        manualInputs,
+        manualResolutions,
+        aiAnalysis
+      });
+      lastSyncedCloudSigRef.current = {
+        sessionId: res.sessionId,
+        filesSig: synced.filesSignature,
+        resolutionsSig: synced.resolutionsSignature,
+        stateSig: synced.stateSignature
+      };
+      autoSaveDirtyRef.current = false;
+
       setActiveSessionId(res.sessionId);
       setSchemaMissing(res.schemaMissing);
+      setAutoSaveState({
+        status: res.schemaMissing ? 'local_only' : 'saved',
+        lastSavedAt: res.savedAt
+      });
       if (typeof window !== 'undefined') {
+        clearPendingClosedPatchFromStorage(window.localStorage, reqTenantId, res.sessionId);
         if (markClosed) {
           clearActiveCashDraftFromStorage(window.localStorage, reqTenantId);
         } else {
@@ -812,7 +1266,8 @@ export default function CashReconciliationPage() {
             files,
             manualInputs,
             manualResolutions,
-            aiAnalysis
+            aiAnalysis,
+            pendingCloudSync: false
           });
         }
       }
@@ -901,6 +1356,9 @@ export default function CashReconciliationPage() {
       await deleteCashReconciliationSession(reqTenantId, sessionId);
       if (activeTenantRef.current !== reqTenantId) return;
       closedSessionIdsRef.current.delete(sessionId);
+      if (typeof window !== 'undefined') {
+        clearPendingClosedPatchFromStorage(window.localStorage, reqTenantId, sessionId);
+      }
       setSessions((prev) => prev.filter((s) => s.id !== sessionId));
       if (activeSessionId === sessionId) {
         handleResetNew();
@@ -1394,13 +1852,72 @@ export default function CashReconciliationPage() {
 
             {viewMode === 'workspace' && reconciliationResult && (
               <>
+                <span
+                  className={`px-2.5 py-1 rounded-xl border text-[11px] font-bold ${
+                    !activeSessionId
+                      ? 'border-amber-500/35 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+                      : !isActiveSessionClosed
+                        ? 'border-cyan-500/35 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300'
+                        : 'border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                  }`}
+                  title={
+                    !activeSessionId
+                      ? 'Este rascunho já está protegido localmente e será enviado automaticamente para a nuvem'
+                      : !isActiveSessionClosed
+                        ? 'Sessão em rascunho sincronizada automaticamente no banco de dados'
+                        : 'Conferência fechada no banco de dados (ajustes também são salvos automaticamente)'
+                  }
+                >
+                  {!activeSessionId
+                    ? 'Rascunho Local'
+                    : !isActiveSessionClosed
+                      ? 'Rascunho na Nuvem'
+                      : 'Fechado'}
+                </span>
+                {autoSaveState.status === 'error' ? (
+                  <button
+                    type="button"
+                    onClick={() => void runBackgroundCloudSync()}
+                    title={autoSaveState.errorMessage || 'Falha ao enviar para a nuvem (dados protegidos localmente). Clique para tentar novamente.'}
+                    className="px-2.5 py-1 rounded-xl border border-rose-500/40 bg-rose-500/10 hover:bg-rose-500/20 text-rose-700 dark:text-rose-300 text-[11px] font-bold flex items-center gap-1.5 transition-all"
+                  >
+                    <AlertCircle size={12} />
+                    <span>Salvo Local • Reenviar</span>
+                    <RefreshCw size={11} />
+                  </button>
+                ) : autoSaveState.status === 'saving' || autoSaveState.status === 'pending' ? (
+                  <span
+                    className="px-2.5 py-1 rounded-xl border border-amber-500/35 bg-amber-500/10 text-amber-700 dark:text-amber-300 text-[11px] font-bold flex items-center gap-1.5"
+                    title="Suas alterações já estão gravadas localmente e sendo sincronizadas na nuvem automaticamente"
+                  >
+                    <Loader2 size={12} className="animate-spin" />
+                    Salvando automático...
+                  </span>
+                ) : autoSaveState.status === 'local_only' ? (
+                  <span
+                    className="px-2.5 py-1 rounded-xl border border-amber-500/35 bg-amber-500/10 text-amber-700 dark:text-amber-300 text-[11px] font-bold flex items-center gap-1.5"
+                    title="Auto-save ativo no armazenamento local"
+                  >
+                    <Cloud size={12} />
+                    Salvo local
+                  </span>
+                ) : autoSaveState.status === 'saved' ? (
+                  <span
+                    className="px-2.5 py-1 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 text-[11px] font-bold flex items-center gap-1.5"
+                    title="Sincronização automática ativa no navegador e na nuvem"
+                  >
+                    <Cloud size={12} />
+                    Salvo automático{formatCreatedTimeHm(autoSaveState.lastSavedAt) ? ` às ${formatCreatedTimeHm(autoSaveState.lastSavedAt)}` : ''}
+                  </span>
+                ) : null}
                 <button
                   type="button"
                   disabled={isSaving}
                   onClick={() => void handleSaveSession(false)}
+                  title="Salvar rascunho no banco de dados (Supabase)"
                   className="px-3 py-2 min-h-[38px] rounded-xl bg-slate-800 dark:bg-[#2a3942] hover:opacity-90 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 active:scale-95 transition-all"
                 >
-                  <Save size={14} /> Salvar
+                  <Save size={14} /> Salvar Rascunho
                 </button>
                 <button
                   type="button"
@@ -1547,35 +2064,25 @@ export default function CashReconciliationPage() {
               </div>
             ) : (
               <div className="space-y-5">
-                <CashHealthDashboard
-                  result={reconciliationResult}
-                  historicalStats={historicalStats}
-                  sessions={sessions}
-                  onSelectSession={(sessionId) => void handleLoadSession(sessionId)}
-                  onDeleteSession={(session) => setDeleteTargetSession(session)}
-                  onOpenMirrorCategory={(mirrorKey) => setSelectedMirrorKey(mirrorKey)}
-                />
-
-                <CashReconciliationWorkbench
-                  key={workbenchResetKey}
-                  result={reconciliationResult}
-                  manualInputs={manualInputs}
-                  selectedMirrorKey={selectedMirrorKey}
-                  onSelectMirrorKey={setSelectedMirrorKey}
-                  onUpdateManualInputs={(patch) => {
-                    setManualInputs(prev => ({ ...prev, ...patch }));
-                  }}
-                  onConfirmSuggestion={(suggestionId) => {
-                    setManualResolutions(prev => [...prev, { action: 'confirm_suggestion', suggestionId }]);
-                  }}
-                  onRejectSuggestion={(suggestionId) => {
-                    setManualResolutions(prev => [...prev, { action: 'reject_suggestion', suggestionId }]);
-                  }}
-                  onManualLink={(systemIds, realIds) => {
-                    setManualResolutions(prev => [...prev, { action: 'manual_link', systemIds, realIds }]);
-                  }}
-                  onIgnoreItem={(side, id) => {
-                    setManualResolutions(prev => [
+                {(() => {
+                  const onConfirmSuggestionAction = (suggestionId: string) => {
+                    setManualResolutions((prev) => [...prev, { action: 'confirm_suggestion', suggestionId }]);
+                    notifyToast('Dica confirmada! Transações e diferença atualizadas.', 'success');
+                  };
+                  const onRejectSuggestionAction = (suggestionId: string) => {
+                    setManualResolutions((prev) => [...prev, { action: 'reject_suggestion', suggestionId }]);
+                    notifyToast('Dica rejeitada e removida das sugestões.', 'info');
+                  };
+                  const onManualLinkAction = (systemIds: string[], realIds: string[], note?: string) => {
+                    const cleanNote = typeof note === 'string' && note.trim() ? note.trim() : undefined;
+                    setManualResolutions((prev) => [
+                      ...prev,
+                      { action: 'manual_link', systemIds, realIds, ...(cleanNote ? { note: cleanNote } : {}) }
+                    ]);
+                    notifyToast('Vínculo confirmado! Tela e saldo atualizados.', 'success');
+                  };
+                  const onIgnoreItemAction = (side: 'system' | 'real', id: string) => {
+                    setManualResolutions((prev) => [
                       ...prev,
                       {
                         action: 'ignore_item',
@@ -1583,8 +2090,15 @@ export default function CashReconciliationPage() {
                         realIds: side === 'real' ? [id] : []
                       }
                     ]);
-                  }}
-                  onReclassifySystemItem={(systemId, targetCategory) => {
+                    notifyToast(
+                      side === 'real' ? 'Recebimento marcado como Não-PDV. Totais atualizados.' : 'Venda justificada. Totais atualizados.',
+                      'info'
+                    );
+                  };
+                  const onReclassifySystemItemAction = (
+                    systemId: string,
+                    targetCategory: 'dinheiro' | 'cartao' | 'pix' | 'pendente' | null
+                  ) => {
                     setManualResolutions((prev) => {
                       const withoutPrior = prev.filter(
                         (r) => !(r.action === 'reclassify_system' && r.systemIds?.includes(systemId))
@@ -1595,7 +2109,47 @@ export default function CashReconciliationPage() {
                         { action: 'reclassify_system', systemIds: [systemId], targetCategory }
                       ];
                     });
-                  }}
+                    notifyToast(
+                      targetCategory ? `Forma ajustada para ${targetCategory.toUpperCase()}. Totais atualizados.` : 'Ajuste desfeito.',
+                      'success'
+                    );
+                  };
+                  const onUndoLastResolutionAction = () => {
+                    setManualResolutions((prev) => {
+                      if (prev.length === 0) return prev;
+                      notifyToast('Último ajuste desfeito! Tela restaurada.', 'info');
+                      return prev.slice(0, -1);
+                    });
+                  };
+
+                  return (
+                    <>
+                      <CashHealthDashboard
+                        result={reconciliationResult}
+                        historicalStats={historicalStats}
+                        sessions={sessions}
+                        onSelectSession={(sessionId) => void handleLoadSession(sessionId)}
+                        onDeleteSession={(session) => setDeleteTargetSession(session)}
+                        onOpenMirrorCategory={(mirrorKey) => setSelectedMirrorKey(mirrorKey)}
+                        onOpenGeneralDiff={(tab) => setGeneralDiffTab(tab || 'tabela')}
+                      />
+
+                      <CashReconciliationWorkbench
+                        key={workbenchResetKey}
+                        result={reconciliationResult}
+                        manualInputs={manualInputs}
+                        selectedMirrorKey={selectedMirrorKey}
+                        onSelectMirrorKey={setSelectedMirrorKey}
+                        onUpdateManualInputs={(patch) => {
+                          setManualInputs((prev) => ({ ...prev, ...patch }));
+                        }}
+                        onConfirmSuggestion={onConfirmSuggestionAction}
+                        onRejectSuggestion={onRejectSuggestionAction}
+                        onManualLink={onManualLinkAction}
+                        onIgnoreItem={onIgnoreItemAction}
+                        onReclassifySystemItem={onReclassifySystemItemAction}
+                        manualResolutionsCount={manualResolutions.length}
+                        onUndoLastResolution={onUndoLastResolutionAction}
                   rules={rules}
                   savedPasswords={savedFilePasswords}
                   onDeleteSavedPassword={async (patternKey, ruleId) => {
@@ -1639,6 +2193,24 @@ export default function CashReconciliationPage() {
                   isAnalyzingAi={isAnalyzingAi}
                   onRunAiAnalysis={handleRunAiAnalysis}
                 />
+
+                      {generalDiffTab !== null && (
+                        <CashGeneralDiffModal
+                          result={reconciliationResult}
+                          manualResolutions={manualResolutions}
+                          initialTab={generalDiffTab}
+                          onConfirmSuggestion={onConfirmSuggestionAction}
+                          onRejectSuggestion={onRejectSuggestionAction}
+                          onManualLink={onManualLinkAction}
+                          onIgnoreItem={onIgnoreItemAction}
+                          onUndoLastResolution={onUndoLastResolutionAction}
+                          onOpenMirrorCategory={(mirrorKey) => setSelectedMirrorKey(mirrorKey)}
+                          onClose={() => setGeneralDiffTab(null)}
+                        />
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             )}
           </>

@@ -712,6 +712,123 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.4.2',
+    date: '2026-11-24',
+    summary: 'Blindagem Anti-Piscadas & Perda de Edição em Tempo Real (Mantendo Chat Ao Vivo) + Evoluções de Precisão na Conferência de Caixa (D+1, Fundo Noite, Breakdown por Origem e Alertas PDV)',
+    notes: [
+      {
+        id: 'feat-cash-precision-d1-drawer-breakdowns-842',
+        category: 'features',
+        title: 'Conferência de Caixa 2.0: Recuperação D+1, Fundo Noite + Só Sangria e Detalhamento por Origem',
+        description: 'Motor de conciliação financeira evoluído com recuperação automática D+1 para pagamentos liquidados no dia seguinte, subtotais detalhados por banco/adquirente nos cartões de PIX e Cartões (Banco C6, Itaú, Rede, C6 Pay), tolerância inteligente de micro-diferenças (até R$ 5,00 / 30 min), recalibração da Saúde do Caixa, ajuste manual de Base PDV / Fundo Noite e atalho "Só Sangria (R$ 0,00)" no fechamento da gaveta.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+        guide: {
+          moduleGroup: 'system',
+          moduleLabel: 'Conferência Caixa • Motor D+1, Gaveta & Origens',
+          purpose: 'Eliminar falsas faltas causadas por virada de turno (D+1) ou arredondamentos pequenos, espelhar fielmente o modelo de fechamento manual da planilha (Fundo Noite / Só Sangria) e mostrar rapidamente quanto entrou em cada banco ou adquirente.',
+          whereToAccess: [
+            '1. Menu Lateral Esquerdo ➔ Conferência Caixa (/conferencia-caixa)',
+            '2. Abra uma conferência em rascunho ou clique em "+ Nova Conferência" e importe os arquivos',
+            '3. Nos cards "PIX (OFX + Maquininhas)" e "Cartões (Rede + C6 Pay)", confira a linha inferior com os valores separados por banco/adquirente',
+            '4. No card "Dinheiro em Gaveta", clique no campo contado/configuração para usar "Ajustes PDV Base / Fundo Noite" ou marcar "Só Sangria (R$ 0,00)"'
+          ],
+          howToTest: [
+            '1. Acesse Conferência Caixa (/conferencia-caixa) e abra o rascunho ou importe extratos com movimento de turno noturno/D+1.',
+            '2. Verifique nos cartões PIX e Cartões o detalhamento por origem (ex.: Banco C6, Rede, C6 Pay) abaixo das sobras/faltas.',
+            '3. Abra o card Dinheiro em Gaveta, ajuste o Fundo de Caixa Noite ou clique em "Só Sangria (R$ 0,00)" e observe o recálculo imediato na Saúde do Caixa.'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Tela: Conferência Caixa (/conferencia-caixa) ➔ Cards & Dinheiro em Gaveta',
+            contextElements: ['📊 Saúde do Caixa', '💠 PIX (por Origem)', '💳 Cartões (Rede / C6 Pay)', '💵 Dinheiro em Gaveta', '📝 Observações'],
+            targetButtonLabel: 'Ajustes PDV Base / Só Sangria (R$ 0,00)',
+            targetButtonPosition: 'Cartão "Dinheiro em Gaveta" e cabeçalho de métricas de PIX / Cartões',
+            visualPreviewVariant: 'chat-history-sync'
+          },
+          quickAction: {
+            label: 'Abrir Conferência Caixa',
+            route: '/conferencia-caixa'
+          }
+        }
+      },
+      {
+        id: 'feat-cash-operational-alerts-842',
+        category: 'features',
+        title: 'Alertas Operacionais Automáticos de Mesas Transferidas, Duplicidades e Comandas Zeradas',
+        description: 'A análise operacional da Conferência de Caixa agora detecta automaticamente mesas transferidas/reabertas entre turnos, lançamentos potencialmente duplicados em janela curta e comandas fechadas com valor zerado, facilitando a auditoria rápida do fechamento.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+        guide: {
+          moduleGroup: 'system',
+          moduleLabel: 'Conferência Caixa • Auditoria Operacional do PDV',
+          purpose: 'Apontar automaticamente anomalias operacionais comuns do salão e delivery (mesas transferidas, possíveis duplicidades e comandas zeradas) sem precisar revisar centenas de linhas manualmente.',
+          whereToAccess: [
+            '1. Menu Lateral Esquerdo ➔ Conferência Caixa (/conferencia-caixa)',
+            '2. Abra uma conferência com os arquivos do PDV importados',
+            '3. Acesse a aba de auditoria/itens operacionais ou clique no banner de alertas no topo do fechamento'
+          ],
+          howToTest: [
+            '1. Em Conferência Caixa, abra um fechamento com relatórios do PDV importados.',
+            '2. Clique na barra/aba de alertas operacionais para visualizar mesas transferidas, comandas zeradas e eventuais duplicidades destacadas.'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Tela: Conferência Caixa ➔ Alertas de Auditoria Operacional',
+            contextElements: ['⚠️ Alertas de Auditoria', '🍽️ Mesas Transferidas', '🔁 Duplicidades', '🧾 Comandas Zeradas'],
+            targetButtonLabel: 'Ver Detalhes / Itens Operacionais',
+            targetButtonPosition: 'Faixa superior de alertas e abas inferiores de detalhes na Conferência de Caixa',
+            visualPreviewVariant: 'chat-history-sync'
+          },
+          quickAction: {
+            label: 'Ver Alertas na Conferência',
+            route: '/conferencia-caixa'
+          }
+        }
+      },
+      {
+        id: 'fix-realtime-anti-flicker-edit-stability-842',
+        category: 'fixes',
+        title: 'Correção Definitiva de Piscadas e Perda de Digitação durante Edições (Mantendo Chat Ao Vivo)',
+        description: 'Eliminados ciclos invisíveis de re-renderização e resets de formulários causados por heartbeats de instâncias WhatsApp, eventos de renovação de token (TOKEN_REFRESHED) / foco de aba e seletores globais do Zustand. Formulários da Conferência de Caixa, CRM Kanban (edição otimista com debounce), Contatos, Robôs, Agentes e Configurações agora preservam foco e texto digitado intactos, mantendo 100% em tempo real a atualização de mensagens e conversas no Chat.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
+        guide: {
+          moduleGroup: 'system',
+          moduleLabel: 'Estabilidade Realtime & Formulários • Blindagem Global',
+          purpose: 'Impedir que a tela pisque, troque inputs ou zere o texto enquanto o usuário edita observações, cards do CRM, contatos ou configurações — sem perder nenhuma atualização instantânea de mensagens do WhatsApp.',
+          whereToAccess: [
+            '• Chat Ao Vivo (/chat): Atualização instantânea de mensagens e conversas preservada em tempo real',
+            '• Conferência Caixa (/conferencia-caixa): Campo Observações com buffer estável e zero recargas por heartbeat',
+            '• CRM Kanban (/crm), Contatos (/contacts) e Configurações (/settings): Edição fluida sem resets por eventos em segundo plano'
+          ],
+          howToTest: [
+            '1. Abra Conferência Caixa (/conferencia-caixa) ou um card do CRM (/crm) e comece a digitar no campo de Observações / notas.',
+            '2. Alterne de aba do navegador e volte após 20 segundos (simulando heartbeats e checagem de foco): o cursor e o texto digitado devem permanecer exatamente intactos, sem piscadas.',
+            '3. Com /chat aberto em paralelo ou na sequência, envie/receba uma mensagem via WhatsApp e confirme que a conversa continua atualizando ao vivo.'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Sistema Global ➔ Edição Estável + Chat Tempo Real Ativo',
+            contextElements: ['💬 Chat Realtime SUBSCRIBED', '📝 Edição Preservada', '🛡️ Anti-Heartbeat Churn', '⚡ Seletores useShallow'],
+            targetButtonLabel: 'Digitação Protegida sem Reset',
+            targetButtonPosition: 'Formulários, modais, CRM Kanban, Conferência Caixa e tela de Chat (/chat)',
+            visualPreviewVariant: 'chat-history-sync'
+          },
+          quickAction: {
+            label: 'Testar no Chat / Conferência',
+            route: '/chat'
+          }
+        }
+      },
+      {
+        id: 'imp-granular-store-selectors-singleflight-842',
+        category: 'improvements',
+        title: 'Seletores Granulares (useShallow) em 15 Telas & Deduplicação Single-Flight de Tenant',
+        description: 'Refatoração de performance em 15 componentes e páginas para assinarem apenas os campos necessários da store (evitando re-renders em cascata quando chegam mensagens) e proteção single-flight com igualdade estrutural no carregamento de configurações da empresa.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-sky-500/20 text-sky-300 border-sky-500/30'
+      }
+    ]
+  },
+  {
     version: '8.4.1',
     date: '2026-11-23',
     summary: 'Construtor Visual Typebot 30/30 Completo: Submenu Técnico (Instruções + Exemplo Funcional) em Todos os Botões, Auditor Anti-Loop, Escopo por Caixa e Motor FlowEngine Blindado',

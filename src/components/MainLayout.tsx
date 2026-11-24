@@ -8,6 +8,7 @@ import { useWaCallsStore } from '../store/useWaCallsStore';
 import WaCallsWidget from './WaCallsWidget';
 import XPointRemoteSidePanel from './XPointRemoteSidePanel';
 import { useXPointRemoteBridge } from '../hooks/useXPointRemoteBridge';
+import { shouldFetchTenantOnAuthEvent } from '../utils/realtimeEditStability.mjs';
 
 export function MainLayout() {
   const [showMainSidebar, setShowMainSidebar] = useState(() => window.innerWidth >= 1024);
@@ -42,9 +43,18 @@ export function MainLayout() {
     // essencial se o usuário der F5 diretamente em páginas como /settings/account ou /settings/logs
     useChatStore.getState().fetchTenantConfig();
 
-    // Re-sincroniza empresas e status do Robô I.A quando a sessão Supabase autentica ou renova o JWT no reabrir
+    // Re-sincroniza apenas se houver troca real de sessão ou tenant não hidratado; TOKEN_REFRESHED já atualiza JWT no Realtime sem recarregar UI
     const { data: authListener } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+      const storedTenantId =
+        localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
+      const currentStoreTenantId = useChatStore.getState().tenantInfo?.id;
+      const decision = shouldFetchTenantOnAuthEvent({
+        event,
+        storedTenantId,
+        currentStoreTenantId,
+        hasCompaniesLoaded: Boolean(currentStoreTenantId)
+      });
+      if (decision.refetchTenant) {
         useChatStore.getState().fetchTenantConfig();
       }
     });

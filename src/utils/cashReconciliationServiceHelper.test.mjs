@@ -380,3 +380,387 @@ test('extractCashErrorMessage and shouldRetryWithMasterClient handle PostgREST 4
   assert.equal(shouldRetryWithMasterClient({ data: null, error: { code: 'PGRST205', status: 404 } }), false);
   assert.equal(shouldRetryWithMasterClient({ data: { id: 'ok' }, error: null, expectRow: true }), false);
 });
+
+test('detail panel helpers choose default tab, match sobra candidates, filter/sort sobras and filter auto-matched pairs', async () => {
+  const {
+    resolveDetailPanelDefaultTab,
+    findBestCandidateForSobra,
+    filterAndSortDetailItems,
+    filterMatchedPairsForDetail
+  } = await import('./cashReconciliationServiceHelper.mjs');
+
+  assert.equal(resolveDetailPanelDefaultTab({ diffCents: 34790, extraCount: 9, missingCount: 6, suggestionsCount: 0, matchedCount: 14 }), 'sobras');
+  assert.equal(resolveDetailPanelDefaultTab({ diffCents: -1200, extraCount: 0, missingCount: 3, suggestionsCount: 0, matchedCount: 5 }), 'faltas');
+  assert.equal(resolveDetailPanelDefaultTab({ diffCents: 0, extraCount: 1, missingCount: 1, suggestionsCount: 2, matchedCount: 5 }), 'sugestoes');
+  assert.equal(resolveDetailPanelDefaultTab({ diffCents: 0, extraCount: 0, missingCount: 0, suggestionsCount: 0, matchedCount: 8 }), 'conciliados');
+  assert.equal(resolveDetailPanelDefaultTab({}), 'todos');
+
+  const pdvPool = [
+    { id: 'sys-1', numero: '002', origem: 'MESA 002', amountCents: 7755, timeStr: '20:45:52', secondsOfDay: 20 * 3600 + 45 * 60 + 52 },
+    { id: 'sys-2', numero: '050', origem: 'MESA 050', amountCents: 600, timeStr: '13:42:36', secondsOfDay: 13 * 3600 + 42 * 60 + 36 }
+  ];
+  const sobraRede = { id: 'real-1', source: 'rede', description: 'Rede PIX', amountCents: 7755, timeStr: '08:45:29', secondsOfDay: 8 * 3600 + 45 * 60 + 29 };
+  const sobraOfxMadrugada = { id: 'real-2', source: 'ofx', description: 'ANA CAROLINY', amountCents: 14740, timeStr: '04:42:10', secondsOfDay: 4 * 3600 + 42 * 60 + 10 };
+  const sobraSemPar = { id: 'real-3', source: 'c6pay', description: 'C6 PIX', amountCents: 5700, timeStr: '02:58:18', secondsOfDay: 2 * 3600 + 58 * 60 + 18 };
+
+  const cand1 = findBestCandidateForSobra(sobraRede, pdvPool, 200);
+  assert.ok(cand1);
+  assert.equal(cand1.item.id, 'sys-1');
+  assert.equal(cand1.amountDiffCents, 0);
+  assert.equal(cand1.isExactAmount, true);
+  assert.equal(findBestCandidateForSobra(sobraSemPar, pdvPool, 200), null);
+
+  const candidateMap = new Map([['real-1', cand1]]);
+  const sobras = [sobraRede, sobraOfxMadrugada, sobraSemPar];
+
+  assert.deepEqual(
+    filterAndSortDetailItems(sobras, { sortBy: 'amount_desc' }).map((i) => i.id),
+    ['real-2', 'real-1', 'real-3']
+  );
+  assert.deepEqual(
+    filterAndSortDetailItems(sobras, { sourceFilter: 'ofx', onlyMadrugada: true }).map((i) => i.id),
+    ['real-2']
+  );
+  assert.deepEqual(
+    filterAndSortDetailItems(sobras, { onlyWithCandidate: true, candidateMap }).map((i) => i.id),
+    ['real-1']
+  );
+  assert.deepEqual(
+    filterAndSortDetailItems(sobras, { query: 'caroliny' }).map((i) => i.id),
+    ['real-2']
+  );
+
+  const pairs = [
+    {
+      matchType: 'matched_exact',
+      amountCents: 7755,
+      reasonText: 'Bateu 1:1 (Rede formato 12h +12h • 23s)',
+      systemItems: [{ id: 's1', referenceCode: '002', description: 'MESA 002', amountCents: 7755, timeStr: '20:45:52' }],
+      realItems: [{ id: 'r1', source: 'rede', description: 'Rede PIX', amountCents: 7755, timeStr: '08:45:29' }]
+    },
+    {
+      matchType: 'matched_exact',
+      amountCents: 4500,
+      reasonText: 'Bateu 1:1 (14s)',
+      systemItems: [{ id: 's2', referenceCode: '009', description: 'DELIVERY', amountCents: 4500, timeStr: '19:10:00' }],
+      realItems: [{ id: 'r2', source: 'ofx', description: 'PIX JOAO', amountCents: 4500, timeStr: '19:10:14' }]
+    },
+    {
+      matchType: 'matched_manual',
+      amountCents: 3200,
+      reasonText: 'Vínculo manual',
+      systemItems: [{ id: 's3', referenceCode: '012', description: 'MESA 012', amountCents: 3200, timeStr: '21:00:00' }],
+      realItems: [{ id: 'r3', source: 'c6pay', description: 'C6 PIX', amountCents: 3200, timeStr: '21:01:00' }]
+    }
+  ];
+
+  assert.equal(filterMatchedPairsForDetail(pairs, { sourceFilter: 'all' }).length, 3);
+  assert.deepEqual(filterMatchedPairsForDetail(pairs, { sourceFilter: 'rede_12h' }).map((p) => p.realItems[0].id), ['r1']);
+  assert.deepEqual(filterMatchedPairsForDetail(pairs, { sourceFilter: 'ofx' }).map((p) => p.realItems[0].id), ['r2']);
+  assert.deepEqual(filterMatchedPairsForDetail(pairs, { sourceFilter: 'manual' }).map((p) => p.realItems[0].id), ['r3']);
+  assert.deepEqual(filterMatchedPairsForDetail(pairs, { query: 'joao' }).map((p) => p.realItems[0].id), ['r2']);
+});
+
+test('buildMirrorRowDetails computes exact reconciliationBridge explaining Sobras - Faltas + CrossCategory === mirror diff', async () => {
+  const { buildMirrorRowDetails } = await import('./cashReconciliationServiceHelper.mjs');
+  const mockResult = {
+    mirrorRows: [
+      { key: 'pix', label: 'Pix', systemCents: 133224, realCents: 151174, diffCents: 17950, hasRealInput: true, isAuto: true }
+    ],
+    matchedPairs: [
+      {
+        id: 'm1',
+        matchType: 'matched_exact',
+        systemItems: [{ id: 's1', category: 'pix', amountCents: 100325 }],
+        realItems: [{ id: 'r1', category: 'pix', amountCents: 100325 }],
+        amountCents: 100325
+      },
+      {
+        id: 'm_swap',
+        matchType: 'matched_manual',
+        reasonType: 'swapped_method',
+        systemItems: [{ id: 's_card', category: 'cartao', amountCents: 12350 }],
+        realItems: [{ id: 'r_pix_ofx', category: 'pix', amountCents: 12350 }],
+        amountCents: 12350
+      }
+    ],
+    suggestions: [],
+    missingInBank: [{ id: 's_miss', category: 'pix', amountCents: 9450 }],
+    extraInBank: [
+      { id: 'r_ex1', category: 'pix', amountCents: 9350 },
+      { id: 'r_ex2', category: 'pix', amountCents: 5700 }
+    ],
+    systemItems: []
+  };
+
+  const det = buildMirrorRowDetails(mockResult, 'pix');
+  assert.equal(det.reconciliationBridge.extraCents, 15050);
+  assert.equal(det.reconciliationBridge.missingCents, 9450);
+  assert.equal(det.reconciliationBridge.netPendingCents, 5600);
+  assert.equal(det.reconciliationBridge.crossCategoryRealInCents, 12350);
+  assert.equal(det.reconciliationBridge.crossCategorySysOutCents, 0);
+  assert.equal(det.reconciliationBridge.crossCategoryNetCents, 12350);
+  assert.equal(det.reconciliationBridge.otherDeltaCents, 0);
+  assert.equal(det.reconciliationBridge.mirrorDiffCents, 17950);
+  assert.equal(det.reconciliationBridge.crossCategoryPairs.length, 1);
+});
+
+test('general diff, glossary, selection diff and target-match sorting helpers behave accurately', async () => {
+  const {
+    RECONCILIATION_GLOSSARY,
+    buildLinkableSystemPool,
+    buildGeneralDiffSummary,
+    computeSelectionDiffMeta,
+    sortItemsByTargetMatch
+  } = await import('./cashReconciliationServiceHelper.mjs');
+
+  assert.match(RECONCILIATION_GLOSSARY.missing.explanation, /PDV.*banco/i);
+  assert.match(RECONCILIATION_GLOSSARY.extra.explanation, /banco.*PDV/i);
+
+  const mockResult = {
+    mirrorRows: [
+      { key: 'pix', systemCents: 133224, realCents: 151174, hasRealInput: true, diffCents: 17950 },
+      { key: 'saldo_dinheiro', systemCents: 81372, realCents: 75030, hasRealInput: true, diffCents: -6342 },
+      { key: 'ifood', systemCents: 0, realCents: 0, hasRealInput: true, diffCents: 0 }
+    ],
+    missingInBank: [
+      { id: 'm1', category: 'pix', amountCents: 9450, secondsOfDay: 49638 },
+      { id: 'm2', category: 'cartao', amountCents: 4500, secondsOfDay: 50000 }
+    ],
+    extraInBank: [
+      { id: 'e1', source: 'ofx', category: 'pix', amountCents: 9350, secondsOfDay: 48942 },
+      { id: 'e2', source: 'rede', category: 'pix', amountCents: 5700, secondsOfDay: 10698 },
+      { id: 'e3', source: 'rede', category: 'cartao', amountCents: 9450, secondsOfDay: 7200 }
+    ],
+    suggestions: [{ id: 'sug1', amountCents: 9450 }],
+    matchedPairs: [{ id: 'mp1', systemItems: [{ id: 's_matched' }], realItems: [{ id: 'r_matched' }] }],
+    systemItems: [
+      { id: 's_matched', category: 'dinheiro', amountCents: 1000 },
+      { id: 's_cash', category: 'dinheiro', amountCents: 5700 },
+      { id: 's_pend', category: 'pendente', amountCents: 3000 }
+    ]
+  };
+
+  const pool = buildLinkableSystemPool(mockResult, [{ action: 'ignore_item', systemIds: ['s_pend'] }]);
+  assert.deepEqual(pool.map((i) => i.id), ['m1', 'm2', 's_cash']);
+
+  const summary = buildGeneralDiffSummary(mockResult);
+  assert.equal(summary.missingCents, 13950);
+  assert.equal(summary.extraCents, 24500);
+  assert.equal(summary.suggestionsCents, 9450);
+  assert.equal(summary.divergentMirrorRows.length, 2);
+  assert.equal(summary.totalPendingCount, 6);
+
+  const exactMeta = computeSelectionDiffMeta({
+    selectedSystemItems: [{ amountCents: 9450 }],
+    selectedRealItems: [{ amountCents: 9450 }]
+  });
+  assert.equal(exactMeta.canLink, true);
+  assert.equal(exactMeta.isExactMatch, true);
+  assert.equal(exactMeta.diffCents, 0);
+
+  const groupedMeta = computeSelectionDiffMeta({
+    selectedSystemItems: [{ amountCents: 5000 }, { amountCents: 4450 }],
+    selectedRealItems: [{ amountCents: 9350 }]
+  });
+  assert.equal(groupedMeta.diffCents, -100);
+  assert.equal(groupedMeta.isCloseMatch, true);
+
+  const ranked = sortItemsByTargetMatch(mockResult.extraInBank, 9450, 49638);
+  assert.equal(ranked[0].item.id, 'e3');
+  assert.equal(ranked[0].matchRank, 'exact');
+  assert.equal(ranked[1].item.id, 'e1');
+  assert.equal(ranked[1].matchRank, 'close');
+  assert.equal(ranked[2].item.id, 'e2');
+  assert.equal(ranked[2].matchRank, 'none');
+});
+
+test('saveActiveCashDraftToStorage compacts oversized drafts cleanly on QuotaExceededError and preserves sync signatures & local recovery priority', async () => {
+  const {
+    saveActiveCashDraftToStorage,
+    loadActiveCashDraftFromStorage,
+    buildCashDraftSyncSignature,
+    shouldPreferLocalDraftOverSession
+  } = await import('./cashReconciliationServiceHelper.mjs');
+
+  const mem = new Map();
+  const quotaStorage = {
+    getItem: (k) => (mem.has(k) ? mem.get(k) : null),
+    setItem: (k, v) => {
+      if (String(v).length > 2200) {
+        const err = new Error('QuotaExceededError');
+        err.name = 'QuotaExceededError';
+        throw err;
+      }
+      mem.set(k, String(v));
+    },
+    removeItem: (k) => mem.delete(k)
+  };
+
+  const heavyRows = Array.from({ length: 120 }, (_, i) => ({
+    rowIndex: i,
+    product: `Hambúrguer Artesanal Super Duplo Especial Nro ${i}`,
+    qty: 2,
+    totalCents: 4500
+  }));
+
+  const saved = saveActiveCashDraftToStorage(quotaStorage, 't-quota', {
+    activeSessionId: 'sess-cloud-1',
+    pendingCloudSync: true,
+    files: [
+      {
+        id: 'f-core',
+        fileName: 'RelConferencia.xlsx',
+        fileSizeBytes: 500,
+        parsed: { fileType: 'rel_conferencia', status: 'ok', rows: [], summary: { total: 100 } }
+      },
+      {
+        id: 'f-heavy',
+        fileName: 'ProdutosVendidos.xls',
+        fileSizeBytes: 900000,
+        parsed: { fileType: 'pdv_itens_vendidos', status: 'ok', rows: heavyRows, summary: { topProducts: ['Burger'] } }
+      }
+    ],
+    manualInputs: {
+      cashCountedCents: 25000,
+      manualCashAdjustments: [
+        { id: 'adj1', direction: 'outflow', description: 'Bolo da Marcela', amountCents: 5500 }
+      ]
+    },
+    manualResolutions: [{ action: 'ignore_item', realIds: ['r1'] }],
+    aiAnalysis: null
+  });
+
+  assert.equal(saved, true);
+  const restored = loadActiveCashDraftFromStorage(quotaStorage, 't-quota');
+  assert.ok(restored, 'Rascunho compactado deve ser recuperado mesmo com limite de quota');
+  assert.equal(restored.activeSessionId, 'sess-cloud-1');
+  assert.equal(restored.pendingCloudSync, true);
+  assert.equal(restored.compactedForQuota, true);
+  assert.equal(restored.manualInputs.manualCashAdjustments[0].description, 'Bolo da Marcela');
+  assert.equal(restored.files.length, 2);
+
+  const sig1 = buildCashDraftSyncSignature({
+    activeSessionId: 'sess-1',
+    files: restored.files,
+    manualInputs: { cashCountedCents: 1000 },
+    manualResolutions: [],
+    aiAnalysis: null
+  });
+  const sig2 = buildCashDraftSyncSignature({
+    activeSessionId: 'sess-1',
+    files: restored.files,
+    manualInputs: { cashCountedCents: 2000 },
+    manualResolutions: [],
+    aiAnalysis: null
+  });
+  assert.equal(sig1.filesSignature, sig2.filesSignature);
+  assert.notEqual(sig1.stateSignature, sig2.stateSignature);
+  assert.equal(sig1.resolutionsSignature, sig2.resolutionsSignature);
+
+  assert.equal(
+    shouldPreferLocalDraftOverSession(
+      { activeSessionId: 'sess-1', pendingCloudSync: true, updatedAt: '2026-11-23T10:00:00Z' },
+      { id: 'sess-1', updated_at: '2026-11-23T12:00:00Z' }
+    ),
+    true
+  );
+  assert.equal(
+    shouldPreferLocalDraftOverSession(
+      { activeSessionId: 'sess-1', pendingCloudSync: false, updatedAt: '2026-11-23T13:00:00Z' },
+      { id: 'sess-1', updated_at: '2026-11-23T12:00:00Z' }
+    ),
+    true
+  );
+  assert.equal(
+    shouldPreferLocalDraftOverSession(
+      { activeSessionId: 'sess-1', pendingCloudSync: false, updatedAt: '2026-11-23T11:00:00Z' },
+      { id: 'sess-1', updated_at: '2026-11-23T12:00:00Z' }
+    ),
+    false
+  );
+
+  const {
+    savePendingClosedPatchToStorage,
+    loadPendingClosedPatchFromStorage,
+    clearPendingClosedPatchFromStorage,
+    buildSessionPersistencePayload: buildPayload
+  } = await import('./cashReconciliationServiceHelper.mjs');
+
+  const closedPatchSaved = savePendingClosedPatchToStorage(quotaStorage, 't-quota', 'sess-closed-1', {
+    files: restored.files,
+    manualInputs: { cashCountedCents: 19900, notes: 'Ajuste pós-fechamento' },
+    manualResolutions: [],
+    aiAnalysis: null
+  });
+  assert.equal(closedPatchSaved, true);
+  const loadedClosedPatch = loadPendingClosedPatchFromStorage(quotaStorage, 't-quota', 'sess-closed-1');
+  assert.equal(loadedClosedPatch.activeSessionId, 'sess-closed-1');
+  assert.equal(loadedClosedPatch.pendingCloudSync, true);
+  assert.equal(loadedClosedPatch.manualInputs.notes, 'Ajuste pós-fechamento');
+  clearPendingClosedPatchFromStorage(quotaStorage, 't-quota', 'sess-closed-1');
+  assert.equal(loadPendingClosedPatchFromStorage(quotaStorage, 't-quota', 'sess-closed-1'), null);
+
+  const preservedPayload = buildPayload({
+    tenantId: 't-quota',
+    parsedFiles: [],
+    result: { mirrorRows: [] },
+    manualInputs: {},
+    markClosed: true,
+    preservedClosedAt: '2026-11-20T22:15:00.000Z'
+  });
+  assert.equal(preservedPayload.sessionPayload.closed_at, '2026-11-20T22:15:00.000Z');
+});
+
+test('buildGeneralDiffSummary decomposes full diffTotalCents (-114,42) across table pending (-50,00), matched small_diff (-1,00) and cash drawer (-63,42)', async () => {
+  const { buildGeneralDiffSummary } = await import('./cashReconciliationServiceHelper.mjs');
+  const mockResult20Nov = {
+    diffTotalCents: -11442,
+    mirrorRows: [
+      { key: 'saldo_dinheiro', label: 'Saldo em Dinheiro', systemCents: 81372, realCents: 75030, hasRealInput: true, diffCents: -6342 },
+      { key: 'cartao', label: 'Crédito, Débito e Voucher', systemCents: 345335, realCents: 327985, hasRealInput: true, diffCents: -17350 },
+      { key: 'pix', label: 'Pix', systemCents: 133224, realCents: 145474, hasRealInput: true, diffCents: 12250 },
+      { key: 'pendentes', label: 'Pendentes', systemCents: 40550, realCents: 40550, hasRealInput: true, diffCents: 0 }
+    ],
+    missingInBank: [
+      { id: 'm1', category: 'cartao', amountCents: 2500, description: 'MESA 050 • CREDITO' },
+      { id: 'm2', category: 'cartao', amountCents: 2500, description: 'MESA 050 • CREDITO' }
+    ],
+    extraInBank: [],
+    suggestions: [],
+    matchedPairs: [
+      {
+        id: 'pair-swap',
+        matchType: 'matched_suggestion',
+        reasonType: 'swapped_method',
+        reasonText: 'Cartão PDV recebido como PIX no banco',
+        amountCents: 12350,
+        systemItems: [{ id: 's-swap', category: 'cartao', amountCents: 12350 }],
+        realItems: [{ id: 'r-swap', category: 'pix', amountCents: 12350 }]
+      },
+      {
+        id: 'pair-small-diff',
+        matchType: 'matched_suggestion',
+        reasonType: 'small_diff',
+        reasonText: 'Delivery 94,50 recebido como PIX 93,50 (-R$ 1,00)',
+        amountCents: 9350,
+        systemItems: [{ id: 's-sd', category: 'pix', amountCents: 9450, description: 'Delivery 94,50' }],
+        realItems: [{ id: 'r-sd', category: 'pix', amountCents: 9350, description: 'PIX Itaú 93,50' }]
+      }
+    ]
+  };
+
+  const summary = buildGeneralDiffSummary(mockResult20Nov);
+  assert.equal(summary.missingCents, 5000);
+  assert.equal(summary.extraCents, 0);
+  assert.equal(summary.tableNetDigitalCents, -5000);
+  assert.equal(summary.cashDrawerDiffCents, -6342);
+  assert.equal(summary.cashDrawerHasRealInput, true);
+  assert.equal(summary.matchedPairsDiffCents, -100);
+  assert.equal(summary.matchedPairsWithDiff.length, 1);
+  assert.equal(summary.matchedPairsWithDiff[0].diffCents, -100);
+  assert.equal(summary.otherChannelsDiffCents, 0);
+  assert.equal(summary.digitalResidualDiffCents, 0);
+  assert.equal(summary.nonTableDiffCents, -6442);
+  assert.equal(summary.explainedDiffTotalCents, -11442);
+});

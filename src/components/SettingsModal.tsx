@@ -6,7 +6,7 @@ import { useDevStore } from '../store/devStore';
 
 export const SettingsModal: React.FC<{ isOpen: boolean; onClose: () => void }> = ({ isOpen, onClose }) => {
   const { webhookEngine, setWebhookEngine } = useSettingsStore();
-  const { tenantInfo } = useChatStore();
+  const tenantInfo = useChatStore(s => s.tenantInfo);
   const { isEnabled: isDevLoggerEnabled, toggleEnabled: toggleDevLogger } = useDevStore();
   const [isSaving, setIsSaving] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');

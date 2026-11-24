@@ -58,7 +58,9 @@ import {
   Tag,
   BookOpen
 } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import { useChatStore, instanceCache } from '../store/chatStore';
+import { mergeLeadRealtimeSafely } from '../utils/realtimeEditStability.mjs';
 import { supabase } from '../services/supabase';
 import { geminiService } from '../services/geminiService';
 import KanbanBoardCreator from '../components/KanbanBoardCreator';
@@ -314,10 +316,20 @@ interface CRMLead {
   position?: number;
 }
 
+const EMPTY_CRM_CONTACTS: any[] = [];
+
 export default function CrmKanban() {
   const { id: boardId } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { tenantInfo, agents, contacts } = useChatStore();
+  const [isAddLeadOpen, setIsAddLeadOpen] = useState(false);
+  const { tenantInfo, agents } = useChatStore(
+    useShallow(s => ({
+      tenantInfo: s.tenantInfo,
+      agents: s.agents
+    }))
+  );
+  const contactsCount = useChatStore(s => s.contacts.length);
+  const contacts = useChatStore(s => (isAddLeadOpen ? s.contacts : EMPTY_CRM_CONTACTS));
   const tenantId = tenantInfo?.id || localStorage.getItem('current_tenant_id') || sessionStorage.getItem('current_tenant_id');
 
   // Estados
@@ -341,8 +353,13 @@ export default function CrmKanban() {
   const [isEditBoardOpen, setIsEditBoardOpen] = useState(false);
   const [isApiModalOpen, setIsApiModalOpen] = useState(false);
   const [isKnowledgeModalOpen, setIsKnowledgeModalOpen] = useState(false);
-  const [isAddLeadOpen, setIsAddLeadOpen] = useState(false);
   const [selectedLead, setSelectedLead] = useState<CRMLead | null>(null);
+  const isEditBoardOpenRef = React.useRef(false);
+  isEditBoardOpenRef.current = isEditBoardOpen;
+  const leadSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const leadSaveSeqRef = React.useRef(0);
+  const leadEditProtectedUntilRef = React.useRef<Record<string, number>>({});
+  const leadDirtyFieldsRef = React.useRef<Record<string, Set<string>>>({});
 
   // Permissões de Usuário & Administrador
   const currentUserEmail = typeof window !== 'undefined' ? (sessionStorage.getItem('current_user_email') || localStorage.getItem('current_user_email')) : null;
@@ -1019,10 +1036,17 @@ export default function CrmKanban() {
                 .sort((a, b) => (a.position || 0) - (b.position || 0));
             });
 
-            // Se o card atualizado estiver aberto no modal de detalhes, atualiza os dados em tempo real
+            // Se o card atualizado estiver aberto no modal de detalhes, mescla preservando campos editados localmente
             setSelectedLead(currentSelected => {
               if (currentSelected && currentSelected.id === updatedLead.id) {
-                return { ...currentSelected, ...updatedLead };
+                const isProtectedEditActive =
+                  (leadEditProtectedUntilRef.current[updatedLead.id] || 0) > Date.now();
+                return mergeLeadRealtimeSafely({
+                  currentSelected,
+                  incomingLead: updatedLead,
+                  isProtectedEditActive,
+                  dirtyFields: leadDirtyFieldsRef.current[updatedLead.id] || null
+                });
               }
               return currentSelected;
             });
@@ -1052,11 +1076,13 @@ export default function CrmKanban() {
           console.log('[Kanban Realtime] Quadro atualizado em tempo real:', payload.new);
           if (payload.new) {
             setBoard(payload.new as any);
-            setEditBoardForm({
-              name: payload.new.name,
-              description: payload.new.config?.description || '',
-              stages: payload.new.config?.stages || []
-            });
+            if (!isEditBoardOpenRef.current) {
+              setEditBoardForm({
+                name: payload.new.name,
+                description: payload.new.config?.description || '',
+                stages: payload.new.config?.stages || []
+              });
+            }
           }
         }
       )
@@ -1608,8 +1634,8 @@ export default function CrmKanban() {
     }
   };
 
-  // Salvar edições do Lead selecionado
-  const handleSaveLeadEdits = async (updatedLead: CRMLead) => {
+  // Salvar edições do Lead selecionado (otimista imediato + proteção contra eco atrasado / debounce em digitação)
+  const persistLeadEditsToDb = async (updatedLead: CRMLead, saveSeq: number) => {
     try {
       const updatePayload: any = {
         title: updatedLead.title,
@@ -1634,11 +1660,46 @@ export default function CrmKanban() {
         .eq('id', updatedLead.id);
 
       if (error) throw error;
-      setLeads(prev => prev.map(l => l.id === updatedLead.id ? updatedLead : l));
-      setSelectedLead(updatedLead);
+      if (saveSeq === leadSaveSeqRef.current) {
+        leadEditProtectedUntilRef.current[updatedLead.id] = Date.now() + 800;
+        delete leadDirtyFieldsRef.current[updatedLead.id];
+      }
     } catch (err) {
       console.error('Erro ao salvar edições do lead:', err);
     }
+  };
+
+  const handleSaveLeadEdits = async (
+    updatedLead: CRMLead,
+    options?: { debounceMs?: number; editedField?: string }
+  ) => {
+    const seq = ++leadSaveSeqRef.current;
+    leadEditProtectedUntilRef.current[updatedLead.id] = Date.now() + 2500;
+    if (options?.editedField) {
+      if (!leadDirtyFieldsRef.current[updatedLead.id]) {
+        leadDirtyFieldsRef.current[updatedLead.id] = new Set();
+      }
+      leadDirtyFieldsRef.current[updatedLead.id].add(options.editedField);
+    }
+
+    setLeads(prev => prev.map(l => l.id === updatedLead.id ? updatedLead : l));
+    setSelectedLead(updatedLead);
+
+    if (leadSaveTimerRef.current) {
+      clearTimeout(leadSaveTimerRef.current);
+      leadSaveTimerRef.current = null;
+    }
+
+    const delayMs = options?.debounceMs ?? 0;
+    if (delayMs > 0) {
+      leadSaveTimerRef.current = setTimeout(() => {
+        leadSaveTimerRef.current = null;
+        void persistLeadEditsToDb(updatedLead, seq);
+      }, delayMs);
+      return;
+    }
+
+    await persistLeadEditsToDb(updatedLead, seq);
   };
 
   // Upload de Mídia / Evidência para o Lead Selecionado
@@ -2206,7 +2267,8 @@ export default function CrmKanban() {
                       );
                     }
 
-                    const clientContact = contacts.find(c => c.id === lead.customer_id);
+                    void contactsCount;
+                    const clientContact = useChatStore.getState().contacts.find(c => c.id === lead.customer_id);
                     const agentObj = agents.find(a => a.id === lead.agent_id);
                     const isBeingDragged = draggedLeadId === lead.id;
 
@@ -3095,7 +3157,7 @@ export default function CrmKanban() {
                         <input 
                           type="text" 
                           value={selectedLead.title}
-                          onChange={e => handleSaveLeadEdits({ ...selectedLead, title: e.target.value })}
+                          onChange={e => void handleSaveLeadEdits({ ...selectedLead, title: e.target.value }, { debounceMs: 450, editedField: 'title' })}
                           className="w-full px-4 py-2.5 bg-slate-50 dark:bg-[#182229] border border-slate-200/80 dark:border-white/10 rounded-2xl text-xs font-extrabold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white transition-all shadow-xs"
                         />
                       </div>
@@ -3106,7 +3168,7 @@ export default function CrmKanban() {
                           <input 
                             type="number" 
                             value={selectedLead.estimated_revenue}
-                            onChange={e => handleSaveLeadEdits({ ...selectedLead, estimated_revenue: Number(e.target.value) })}
+                            onChange={e => void handleSaveLeadEdits({ ...selectedLead, estimated_revenue: Number(e.target.value) }, { debounceMs: 450, editedField: 'estimated_revenue' })}
                             className="w-full pl-9 pr-4 py-2.5 bg-slate-50 dark:bg-[#182229] border border-slate-200/80 dark:border-white/10 rounded-2xl text-xs font-extrabold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 text-slate-900 dark:text-white transition-all shadow-xs"
                           />
                         </div>
@@ -3197,7 +3259,7 @@ export default function CrmKanban() {
                           min="0" 
                           max="100" 
                           value={selectedLead.probability}
-                          onChange={e => handleSaveLeadEdits({ ...selectedLead, probability: Number(e.target.value) })}
+                          onChange={e => void handleSaveLeadEdits({ ...selectedLead, probability: Number(e.target.value) }, { debounceMs: 300, editedField: 'probability' })}
                           className="w-full mt-2 accent-indigo-600 cursor-pointer h-2 bg-slate-200 dark:bg-slate-700 rounded-lg"
                         />
                       </div>
@@ -3611,7 +3673,7 @@ export default function CrmKanban() {
 
                       <RichTextEditor
                         value={selectedLead.notes || ''}
-                        onChange={notes => handleSaveLeadEdits({ ...selectedLead, notes })}
+                        onChange={notes => void handleSaveLeadEdits({ ...selectedLead, notes }, { debounceMs: 450, editedField: 'notes' })}
                         cardTitle={selectedLead.title}
                         placeholder="Adicione observações importantes, escopo técnico, checklist ou use a I.A para estruturar..."
                         minHeight="220px"

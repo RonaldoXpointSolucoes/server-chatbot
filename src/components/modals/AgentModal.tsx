@@ -1,7 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, Loader2, Check, Eye, EyeOff } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import { useChatStore } from '../../store/chatStore';
 import { supabase } from '../../services/supabase';
+import { shouldResetModalForm } from '../../utils/realtimeEditStability.mjs';
 
 interface AgentModalProps {
   isOpen: boolean;
@@ -25,9 +27,32 @@ export const AgentModal: React.FC<AgentModalProps> = ({ isOpen, onClose, agentTo
   const [allInstances, setAllInstances] = useState<any[]>([]);
   const [allCompanies, setAllCompanies] = useState<any[]>([]);
 
-  const { createAgent, updateAgent, tenantInfo } = useChatStore();
+  const { createAgent, updateAgent, tenantInfo } = useChatStore(
+    useShallow(s => ({
+      createAgent: s.createAgent,
+      updateAgent: s.updateAgent,
+      tenantInfo: s.tenantInfo
+    }))
+  );
+  const wasOpenRef = useRef(false);
+  const lastTargetKeyRef = useRef<string | null>(null);
+  const agentTargetKey = agentToEdit?.id || '__new__';
 
   useEffect(() => {
+    const shouldInit = shouldResetModalForm({
+      wasOpen: wasOpenRef.current,
+      isOpen,
+      prevTargetKey: lastTargetKeyRef.current,
+      nextTargetKey: agentTargetKey
+    });
+    wasOpenRef.current = isOpen;
+    if (!isOpen) {
+      lastTargetKeyRef.current = null;
+      return;
+    }
+    if (!shouldInit) return;
+    lastTargetKeyRef.current = agentTargetKey;
+
     if (isOpen) {
       if (agentToEdit) {
         setFullName(agentToEdit.full_name || '');
@@ -95,7 +120,7 @@ export const AgentModal: React.FC<AgentModalProps> = ({ isOpen, onClose, agentTo
       
       fetchRBACData();
     }
-  }, [isOpen, agentToEdit, tenantInfo]);
+  }, [isOpen, agentToEdit?.id, tenantInfo?.id]);
 
   if (!isOpen) return null;
 

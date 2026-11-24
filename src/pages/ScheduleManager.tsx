@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useChatStore } from '../store/chatStore';
 import { 
   CalendarDays, 
@@ -48,7 +49,18 @@ export function ScheduleManager() {
     updateAppointment,
     deleteAppointment,
     fetchAppointments
-  } = useChatStore();
+  } = useChatStore(
+    useShallow(s => ({
+      contacts: s.contacts,
+      appointments: s.appointments,
+      updateConversationField: s.updateConversationField,
+      setActiveChat: s.setActiveChat,
+      createAppointment: s.createAppointment,
+      updateAppointment: s.updateAppointment,
+      deleteAppointment: s.deleteAppointment,
+      fetchAppointments: s.fetchAppointments
+    }))
+  );
 
   const navigate = useNavigate();
 

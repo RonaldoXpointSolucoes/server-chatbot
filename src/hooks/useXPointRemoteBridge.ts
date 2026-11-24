@@ -1232,9 +1232,12 @@ export function ensureGlobalXPointRemoteListener() {
     });
 
     supabase.auth.onAuthStateChange((event) => {
-      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+      if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
         if (isCurrentTenantRemoteAccessEnabled()) {
-          useXPointRemoteStore.getState().verifyGoogleSession();
+          const remoteState = useXPointRemoteStore.getState();
+          if (!remoteState.isGoogleAuthenticated || event === 'USER_UPDATED') {
+            remoteState.verifyGoogleSession();
+          }
         }
       } else if (event === 'SIGNED_OUT') {
         const activeTenantId = getActiveRemoteTenantId();

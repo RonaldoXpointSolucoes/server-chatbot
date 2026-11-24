@@ -1,6 +1,11 @@
 import { DEFAULT_FORMULA_CONFIG } from './cashFormulaRules.mjs';
+import { addDaysIso } from './cashFileParsers.mjs';
 import { assessCashReportCompleteness } from './cashReportCompleteness.mjs';
-import { buildAuditInsights, linkSoldItemsToPdvOperations } from './cashOperationItemsHelper.mjs';
+import {
+  annotateMissingItemsWithOperationalHints,
+  buildAuditInsights,
+  linkSoldItemsToPdvOperations
+} from './cashOperationItemsHelper.mjs';
 
 function buildNormalizedInputs(parsedFiles) {
   let pdvFile = null;
@@ -122,6 +127,580 @@ function findBestSubsetSums(targetCents, candidates, maxLen, tolCents, maxWindow
   return best;
 }
 
+function isIsoDateStr(val) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(val || '').trim());
+}
+
+function formatIsoBr(isoDate) {
+  const m = String(isoDate || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : String(isoDate || '');
+}
+
+function formatBrlDiagnostic(cents) {
+  const abs = Math.abs(Math.round(Number(cents || 0)));
+  const [intPart, decPart] = (abs / 100).toFixed(2).split('.');
+  return `R$ ${intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.')},${decPart}`;
+}
+
+function buildSmallDiffSuggestions({
+  systemItems,
+  realItems,
+  usedSys,
+  usedReal,
+  ignoredIds,
+  reservedSugSys,
+  reservedSugReal,
+  rejectedSuggestionIds,
+  confirmedSuggestionIds,
+  matchedPairs,
+  suggestions,
+  tol,
+  maxDiffCents = 500,
+  maxWindowSec = 30 * 60
+}) {
+  const candidates = [];
+  for (const sys of systemItems) {
+    if (usedSys.has(sys.id) || ignoredIds.has(sys.id) || reservedSugSys.has(sys.id)) continue;
+    if (sys.category !== 'pix' && sys.category !== 'cartao') continue;
+
+    for (const real of realItems) {
+      if (usedReal.has(real.id) || ignoredIds.has(real.id) || reservedSugReal.has(real.id)) continue;
+      if (sys.category !== real.category) continue;
+
+      const rawDiff = real.amountCents - sys.amountCents;
+      const absDiff = Math.abs(rawDiff);
+      if (absDiff <= tol || absDiff > maxDiffCents) continue;
+
+      let dt = getTimeDiffSec(sys, real);
+      if (
+        dt > maxWindowSec &&
+        real.source === 'rede' &&
+        (real.secondsOfDay || 0) < 12 * 3600 &&
+        (sys.secondsOfDay || 0) >= 12 * 3600
+      ) {
+        const dtPm = getTimeDiffSec(sys, { ...real, secondsOfDay: (real.secondsOfDay || 0) + 12 * 3600 });
+        if (dtPm <= maxWindowSec) dt = dtPm;
+      }
+      if (dt > maxWindowSec) continue;
+
+      candidates.push({ sys, real, rawDiff, absDiff, dt, score: absDiff * 100000 + dt });
+    }
+  }
+
+  candidates.sort((a, b) => a.score - b.score);
+  for (const cand of candidates) {
+    if (usedSys.has(cand.sys.id) || usedReal.has(cand.real.id)) continue;
+    if (reservedSugSys.has(cand.sys.id) || reservedSugReal.has(cand.real.id)) continue;
+
+    const sugId = `sug_diff_${cand.sys.id}_${cand.real.id}`;
+    if (rejectedSuggestionIds.has(sugId)) continue;
+
+    reservedSugSys.add(cand.sys.id);
+    reservedSugReal.add(cand.real.id);
+
+    const delayMin = Math.max(1, Math.round(cand.dt / 60));
+    const signedDiffStr = `${cand.rawDiff > 0 ? '+' : '-'}${formatBrlDiagnostic(cand.rawDiff)}`;
+    const suggestionObj = {
+      id: sugId,
+      reasonType: 'small_diff',
+      reasonText: `PDV ${formatBrlDiagnostic(cand.sys.amountCents)} (${cand.sys.timeStr}) vs ${cand.real.source.toUpperCase()} ${formatBrlDiagnostic(cand.real.amountCents)} (${cand.real.timeStr}) • dif. ${signedDiffStr} em ${delayMin} min`,
+      amountCents: cand.sys.amountCents,
+      diffCents: cand.rawDiff,
+      systemIds: [cand.sys.id],
+      realIds: [cand.real.id],
+      systemItems: [cand.sys],
+      realItems: [cand.real]
+    };
+
+    if (confirmedSuggestionIds.has(sugId)) {
+      usedSys.add(cand.sys.id);
+      usedReal.add(cand.real.id);
+      matchedPairs.push({
+        id: `match_conf_${sugId}`,
+        matchType: 'matched_manual',
+        reasonType: 'small_diff',
+        reasonText: suggestionObj.reasonText,
+        systemItems: [cand.sys],
+        realItems: [cand.real],
+        amountCents: cand.sys.amountCents,
+        diffCents: cand.rawDiff
+      });
+    } else {
+      suggestions.push(suggestionObj);
+    }
+  }
+}
+
+function buildDigitalChannelBreakdown(activeRealItems = [], deduplicatedItems = []) {
+  const ofxByBankMap = new Map();
+  let ofxCents = 0;
+  let redePixCents = 0;
+  let c6PayPostCutoffCents = 0;
+  let redeCardCents = 0;
+  let c6PayCardCents = 0;
+
+  for (const r of activeRealItems) {
+    const amt = Number(r?.amountCents || 0);
+    if (r.category === 'pix') {
+      if (r.source === 'ofx') {
+        ofxCents += amt;
+        const bankKey = r.metadata?.bankKey || 'banco_ofx';
+        const bankLabel = r.metadata?.bankLabel || 'Banco OFX';
+        const cur = ofxByBankMap.get(bankKey) || { bankKey, bankLabel, amountCents: 0, count: 0 };
+        cur.amountCents += amt;
+        cur.count += 1;
+        ofxByBankMap.set(bankKey, cur);
+      } else if (r.source === 'rede') {
+        redePixCents += amt;
+      } else if (r.source === 'c6pay') {
+        c6PayPostCutoffCents += amt;
+      }
+    } else if (r.category === 'cartao') {
+      if (r.source === 'rede') redeCardCents += amt;
+      else if (r.source === 'c6pay') c6PayCardCents += amt;
+    }
+  }
+
+  const deduplicatedC6PayCents = (deduplicatedItems || []).reduce((acc, it) => acc + Number(it?.amountCents || 0), 0);
+
+  return {
+    pixBreakdown: {
+      ofxCents,
+      ofxByBank: Array.from(ofxByBankMap.values()).sort((a, b) => b.amountCents - a.amountCents),
+      redePixCents,
+      c6PayPostCutoffCents,
+      deduplicatedC6PayCents
+    },
+    cardBreakdown: {
+      redeCardCents,
+      c6PayCardCents
+    }
+  };
+}
+
+function parseTimeToSec(str) {
+  const m = String(str || '').match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (!m) return 0;
+  return Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3] || 0);
+}
+
+function resolveTargetClosingPeriod({
+  pdvFile,
+  txtFile,
+  summaryTxtFile,
+  soldItemsFile,
+  cancelledFile,
+  discountsFile,
+  redeFiles,
+  c6PayFiles,
+  ofxFiles
+}) {
+  const systemAnchorCandidates = [pdvFile, txtFile, summaryTxtFile, soldItemsFile, cancelledFile, discountsFile].filter(
+    (f) => f && isIsoDateStr(f.periodStart)
+  );
+  let anchorFile = systemAnchorCandidates[0] || null;
+  const txtSingleAnchor = [txtFile, summaryTxtFile].find(
+    (f) => f && isIsoDateStr(f.periodStart) && (!f.periodEnd || f.periodEnd === f.periodStart || f.periodEnd === addDaysIso(f.periodStart, 1))
+  );
+  if (anchorFile === pdvFile && txtSingleAnchor && isIsoDateStr(pdvFile.periodEnd)) {
+    const dayAfterPdvStart2 = addDaysIso(pdvFile.periodStart, 2);
+    if (
+      pdvFile.periodEnd > dayAfterPdvStart2 &&
+      txtSingleAnchor.periodStart >= pdvFile.periodStart &&
+      txtSingleAnchor.periodStart <= pdvFile.periodEnd
+    ) {
+      anchorFile = txtSingleAnchor;
+    }
+  }
+
+  if (!anchorFile) {
+    const fallbackStart =
+      redeFiles[0]?.periodStart ||
+      c6PayFiles[0]?.periodStart ||
+      ofxFiles[0]?.periodStart ||
+      new Date().toISOString().slice(0, 10);
+    return {
+      hasSystemPeriodAnchor: false,
+      targetStartDate: fallbackStart,
+      targetEndDate: fallbackStart,
+      nextDayAfterEnd: addDaysIso(fallbackStart, 1),
+      earliestSystemSec: 0,
+      preOpeningCutoffSec: 0,
+      latestSystemSec: 23 * 3600,
+      endDateHasOnlyEarlyRollover: false,
+      allowMidnightRollover: false,
+      anchorSourceType: ''
+    };
+  }
+
+  const targetStartDate = anchorFile.periodStart;
+  const rawEnd = isIsoDateStr(anchorFile.periodEnd) ? anchorFile.periodEnd : targetStartDate;
+  const targetEndDate = rawEnd >= targetStartDate ? rawEnd : targetStartDate;
+  const nextDayAfterEnd = addDaysIso(targetEndDate, 1);
+
+  let earliestSystemSec = Number.POSITIVE_INFINITY;
+  for (const row of pdvFile?.rows || []) {
+    if (row?.dateStr === targetStartDate && Number.isFinite(row.secondsOfDay) && row.secondsOfDay > 0) {
+      if (row.secondsOfDay < earliestSystemSec) earliestSystemSec = row.secondsOfDay;
+    }
+  }
+  if (txtFile?.summary?.startTime && txtFile.periodStart === targetStartDate) {
+    const txtStartSec = parseTimeToSec(txtFile.summary.startTime);
+    if (txtStartSec > 0 && txtStartSec < earliestSystemSec) earliestSystemSec = txtStartSec;
+  }
+  if (!Number.isFinite(earliestSystemSec)) earliestSystemSec = 0;
+  // Se a operação do caixa iniciou pela manhã (>= 07h), lançamentos bancários OFX na madrugada (00:00..05:29) pertencem à virada do dia anterior
+  const preOpeningCutoffSec =
+    earliestSystemSec >= 7 * 3600
+      ? Math.min(Math.round(5.5 * 3600), earliestSystemSec - 2 * 3600)
+      : 0;
+
+  let latestSystemSec = 0;
+  for (const row of pdvFile?.rows || []) {
+    if (row?.dateStr === targetEndDate && Number.isFinite(row.secondsOfDay)) {
+      if (row.secondsOfDay > latestSystemSec) latestSystemSec = row.secondsOfDay;
+    }
+  }
+  if (txtFile?.summary?.endTime && (txtFile.periodEnd === targetEndDate || (!txtFile.periodEnd && txtFile.periodStart === targetEndDate))) {
+    const txtEndSec = parseTimeToSec(txtFile.summary.endTime);
+    if (txtEndSec > latestSystemSec) latestSystemSec = txtEndSec;
+  }
+  if (latestSystemSec === 0 && (txtFile || summaryTxtFile || soldItemsFile)) {
+    latestSystemSec = 23 * 3600;
+  }
+
+  const endDateHasOnlyEarlyRollover = targetEndDate > targetStartDate && latestSystemSec > 0 && latestSystemSec <= 6 * 3600;
+  const allowMidnightRollover =
+    targetEndDate > targetStartDate ? endDateHasOnlyEarlyRollover : latestSystemSec >= 18 * 3600;
+
+  return {
+    hasSystemPeriodAnchor: true,
+    targetStartDate,
+    targetEndDate,
+    nextDayAfterEnd,
+    earliestSystemSec,
+    preOpeningCutoffSec,
+    latestSystemSec,
+    endDateHasOnlyEarlyRollover,
+    allowMidnightRollover,
+    anchorSourceType: anchorFile.fileType || 'system'
+  };
+}
+
+function classifyRealIngestionDate(dateStr, secondsOfDay, periodSpec, rolloverWindowSec, sourceKind = '') {
+  if (!periodSpec.hasSystemPeriodAnchor || !isIsoDateStr(dateStr)) {
+    return 'in_period';
+  }
+  const {
+    targetStartDate,
+    targetEndDate,
+    nextDayAfterEnd,
+    preOpeningCutoffSec,
+    latestSystemSec,
+    endDateHasOnlyEarlyRollover,
+    allowMidnightRollover
+  } = periodSpec;
+  if (dateStr === targetStartDate) {
+    // OFX e C6 Pay usam relógio 24h: lançamentos de madrugada pré-abertura pertencem ao atraso bancário do caixa anterior
+    if (
+      (sourceKind === 'ofx' || sourceKind === 'c6pay') &&
+      preOpeningCutoffSec > 0 &&
+      (secondsOfDay || 0) < preOpeningCutoffSec
+    ) {
+      return 'out_of_period';
+    }
+    return 'in_period';
+  }
+  if (dateStr > targetStartDate && dateStr < targetEndDate) return 'in_period';
+  if (targetEndDate > targetStartDate && dateStr === targetEndDate) {
+    if (!endDateHasOnlyEarlyRollover) return 'in_period';
+    const endCutoff = Math.max(rolloverWindowSec, (latestSystemSec || 0) + 2 * 3600);
+    return (secondsOfDay || 0) <= endCutoff ? 'in_period' : 'out_of_period';
+  }
+  if (dateStr === nextDayAfterEnd && allowMidnightRollover) {
+    if ((secondsOfDay || 0) > rolloverWindowSec) return 'out_of_period';
+    return endDateHasOnlyEarlyRollover ? 'in_period' : 'deferred_rollover';
+  }
+  return 'out_of_period';
+}
+
+function isDateWithinClosingPeriod(dateStr, secondsOfDay, periodSpec, rolloverWindowSec, sourceKind = '') {
+  return classifyRealIngestionDate(dateStr, secondsOfDay, periodSpec, rolloverWindowSec, sourceKind) !== 'out_of_period';
+}
+
+function createSourcePeriodStat(f, fallbackType) {
+  return {
+    fileName: f?.fileName || fallbackType,
+    fileType: f?.fileType || fallbackType,
+    periodStart: f?.periodStart || '',
+    periodEnd: f?.periodEnd || '',
+    totalRows: 0,
+    keptRows: 0,
+    ignoredRows: 0,
+    ignoredPixCount: 0,
+    ignoredPixCents: 0,
+    ignoredCardCount: 0,
+    ignoredCardCents: 0,
+    ignoredOtherCount: 0
+  };
+}
+
+function recordOutOfPeriodItem(outOfPeriodItems, fileStat, baseItem) {
+  fileStat.ignoredRows += 1;
+  if (baseItem.category === 'pix') {
+    fileStat.ignoredPixCount += 1;
+    fileStat.ignoredPixCents += Math.max(0, Number(baseItem.amountCents || 0));
+  } else if (baseItem.category === 'cartao') {
+    fileStat.ignoredCardCount += 1;
+    fileStat.ignoredCardCents += Math.max(0, Number(baseItem.amountCents || 0));
+  } else {
+    fileStat.ignoredOtherCount += 1;
+  }
+  outOfPeriodItems.push({
+    ...baseItem,
+    side: 'audit',
+    matchStatus: 'out_of_period',
+    sourceFileName: fileStat.fileName
+  });
+}
+
+function buildPeriodDiagnostics({
+  periodSpec,
+  sourcePeriodStats,
+  outOfPeriodItems,
+  ofxFiles,
+  redeFiles,
+  c6PayFiles,
+  relConfFile,
+  txtFile,
+  txtSum,
+  countedCents,
+  cashDrawerZeroConfirmed = false,
+  expectedAfterSangriaCents,
+  sysSaldoDinheiro,
+  sysCartao,
+  cardSysCount,
+  sysPendentes,
+  overrides
+}) {
+  const datesMap = new Map();
+  let outOfPeriodPixCount = 0;
+  let outOfPeriodPixCents = 0;
+  let outOfPeriodCardCount = 0;
+  let outOfPeriodCardCents = 0;
+  let outOfPeriodOtherCount = 0;
+
+  for (const item of outOfPeriodItems) {
+    const dtKey = item.dateStr || 'sem-data';
+    const cur = datesMap.get(dtKey) || {
+      dateStr: dtKey,
+      count: 0,
+      pixCount: 0,
+      pixCents: 0,
+      cardCount: 0,
+      cardCents: 0,
+      otherCount: 0
+    };
+    cur.count += 1;
+    if (item.category === 'pix') {
+      cur.pixCount += 1;
+      cur.pixCents += Math.max(0, Number(item.amountCents || 0));
+      outOfPeriodPixCount += 1;
+      outOfPeriodPixCents += Math.max(0, Number(item.amountCents || 0));
+    } else if (item.category === 'cartao') {
+      cur.cardCount += 1;
+      cur.cardCents += Math.max(0, Number(item.amountCents || 0));
+      outOfPeriodCardCount += 1;
+      outOfPeriodCardCents += Math.max(0, Number(item.amountCents || 0));
+    } else {
+      cur.otherCount += 1;
+      outOfPeriodOtherCount += 1;
+    }
+    datesMap.set(dtKey, cur);
+  }
+
+  const datesBreakdown = Array.from(datesMap.values()).sort((a, b) => a.dateStr.localeCompare(b.dateStr));
+  const validationWarnings = [];
+  const refBr = formatIsoBr(periodSpec.targetStartDate);
+
+  if (outOfPeriodItems.length > 0) {
+    const affectedFiles = sourcePeriodStats.filter((s) => s.ignoredRows > 0);
+    const fileNames = affectedFiles.map((s) => s.fileName).join(', ');
+    const digitalSummaryParts = [];
+    if (outOfPeriodPixCount > 0) {
+      digitalSummaryParts.push(`${outOfPeriodPixCount} PIX (${formatBrlDiagnostic(outOfPeriodPixCents)})`);
+    }
+    if (outOfPeriodCardCount > 0) {
+      digitalSummaryParts.push(`${outOfPeriodCardCount} cartão(ões) (${formatBrlDiagnostic(outOfPeriodCardCents)})`);
+    }
+    if (outOfPeriodOtherCount > 0) {
+      digitalSummaryParts.push(`${outOfPeriodOtherCount} outros/débitos`);
+    }
+    validationWarnings.push({
+      code: 'multi_day_filtered',
+      severity: 'info',
+      title: `Filtro multi-dias ativo para ${refBr}`,
+      message: `${fileNames} continha ${outOfPeriodItems.length} lançamento(s) fora do dia ${refBr} (${digitalSummaryParts.join(' • ')}), que foram isolados automaticamente em "Fora do Período" para não inflar este caixa.`
+    });
+  }
+
+  for (const stat of sourcePeriodStats) {
+    if (stat.totalRows > 0 && stat.keptRows === 0 && stat.ignoredRows > 0) {
+      const rangeText = stat.periodStart
+        ? `${formatIsoBr(stat.periodStart)}${stat.periodEnd && stat.periodEnd !== stat.periodStart ? ` a ${formatIsoBr(stat.periodEnd)}` : ''}`
+        : 'outra data';
+      validationWarnings.push({
+        code: 'wrong_day_real_file',
+        severity: 'error',
+        title: `Arquivo de outra data (${stat.fileName})`,
+        message: `O arquivo "${stat.fileName}" (${rangeText}) possui ${stat.totalRows} lançamento(s), mas nenhum pertence a ${refBr}. Verifique se você anexou o relatório do dia errado.`
+      });
+    }
+  }
+
+  if (!periodSpec.hasSystemPeriodAnchor) {
+    const multiDayReal = [...ofxFiles, ...redeFiles, ...c6PayFiles].filter(
+      (f) => isIsoDateStr(f.periodStart) && isIsoDateStr(f.periodEnd) && f.periodStart !== f.periodEnd
+    );
+    if (multiDayReal.length > 0) {
+      validationWarnings.push({
+        code: 'multi_day_no_anchor',
+        severity: 'warning',
+        title: 'Extrato multi-dias sem relatório do PDV',
+        message: `Importe a PlanilhaRecebimento (.xlsx) ou a Fita Mov.Caixa (.txt) do dia para o sistema isolar automaticamente apenas a data do fechamento dentro de ${multiDayReal.map((f) => f.fileName).join(', ')}.`
+      });
+    }
+  }
+
+  if (sysCartao > 0 && redeFiles.length === 0 && c6PayFiles.length === 0) {
+    validationWarnings.push({
+      code: 'missing_card_acquirers',
+      severity: 'warning',
+      title: 'Maquininhas Rede / C6 Pay não importadas',
+      message: `O PDV registrou ${cardSysCount} venda(s) em cartão (${formatBrlDiagnostic(sysCartao)}), mas nenhum arquivo da Rede ou C6 Pay foi enviado. Esses ${formatBrlDiagnostic(sysCartao)} ficam como falta até você importar os relatórios das maquininhas.`
+    });
+  }
+
+  if (txtSum.saldoDinheiroCents > 0 && countedCents === 0 && !cashDrawerZeroConfirmed) {
+    validationWarnings.push({
+      code: 'cash_drawer_txt_hint',
+      severity: 'warning',
+      title: 'Saldo em dinheiro na gaveta zerado',
+      message: `A Fita Mov.Caixa (.txt) informa saldo esperado na gaveta de ${formatBrlDiagnostic(txtSum.saldoDinheiroCents)}, enquanto o campo "Dinheiro Contado" está com R$ 0,00 (gerando diferença de -${formatBrlDiagnostic(txtSum.saldoDinheiroCents)}). Confira a contagem física na aba Espelho.`
+    });
+  } else if (sysSaldoDinheiro > 0 && countedCents === null && relConfFile?.summary?.realRows?.saldo_dinheiro === undefined) {
+    validationWarnings.push({
+      code: 'cash_drawer_uninformed',
+      severity: 'info',
+      title: 'Falta informar o dinheiro contado na gaveta',
+      message: `Informe na aba Espelho quanto havia na gaveta após sangria (esperado pelo sistema: ${formatBrlDiagnostic(expectedAfterSangriaCents)}).`
+    });
+  }
+
+  if (sysPendentes > 0 && overrides.pendentes === undefined && relConfFile?.summary?.realRows?.pendentes === undefined) {
+    validationWarnings.push({
+      code: 'pending_unconfirmed',
+      severity: 'info',
+      title: 'Notas pendentes sem valor Real confirmado',
+      message: `O PDV possui ${formatBrlDiagnostic(sysPendentes)} em Notas Pendentes. Confirme ou ajuste o valor na aba Espelho RelConferencia.`
+    });
+  }
+
+  if (relConfFile && relConfFile.summary?.parsedCategoryCount === 0) {
+    validationWarnings.push({
+      code: 'summary_file_warning',
+      severity: 'warning',
+      title: 'RelConferencia sem categorias lidas',
+      message: `A planilha ${relConfFile.fileName || 'RelConferencia.xlsx'} foi reconhecida, mas não trouxe linhas de Receita válidas.`
+    });
+  }
+
+  if (
+    txtFile &&
+    (txtSum.vendasNoGeralCents || 0) === 0 &&
+    (txtSum.fundoCaixaCents || 0) === 0 &&
+    (txtSum.saidasTotalCents || 0) === 0 &&
+    (txtSum.saldoDinheiroCents || 0) === 0
+  ) {
+    validationWarnings.push({
+      code: 'summary_file_warning',
+      severity: 'warning',
+      title: 'Fita Mov.Caixa (.txt) sem totais financeiros',
+      message: `O arquivo ${txtFile.fileName || 'Mov.Caixa.txt'} não trouxe totais financeiros reconhecíveis.`
+    });
+  }
+
+  return {
+    targetStartDate: periodSpec.targetStartDate,
+    targetEndDate: periodSpec.targetEndDate,
+    hasSystemPeriodAnchor: periodSpec.hasSystemPeriodAnchor,
+    anchorSourceType: periodSpec.anchorSourceType,
+    totalOutOfPeriodCount: outOfPeriodItems.length,
+    outOfPeriodPixCount,
+    outOfPeriodPixCents,
+    outOfPeriodCardCount,
+    outOfPeriodCardCents,
+    outOfPeriodOtherCount,
+    datesBreakdown,
+    sourcePeriodStats,
+    validationWarnings
+  };
+}
+
+/**
+ * Consolida saídas e entradas manuais justificadas (ex.: compras/vales não lançados no PDV).
+ */
+export function summarizeManualCashAdjustments(manualInputs = {}) {
+  const rawList = Array.isArray(manualInputs?.manualCashAdjustments)
+    ? manualInputs.manualCashAdjustments
+    : [];
+  const adjustments = [];
+  const outflowDetails = [];
+  let manualOutflowsCents = 0;
+  let manualInflowsCents = 0;
+
+  for (let i = 0; i < rawList.length; i++) {
+    const entry = rawList[i];
+    if (!entry || typeof entry !== 'object') continue;
+    const amountCents = Math.round(Number(entry.amountCents || 0));
+    if (!Number.isFinite(amountCents) || amountCents <= 0) continue;
+
+    const direction = entry.direction === 'inflow' ? 'inflow' : 'outflow';
+    const description = String(entry.description || '').trim() || 'Justificativa manual';
+    const operator = String(entry.operator || '').trim();
+    const normalized = {
+      id: String(entry.id || `manual_adj_${i}`),
+      direction,
+      description,
+      amountCents,
+      ...(operator ? { operator } : {}),
+      ...(entry.createdAt ? { createdAt: String(entry.createdAt) } : {})
+    };
+    adjustments.push(normalized);
+
+    if (direction === 'inflow') {
+      manualInflowsCents += amountCents;
+    } else {
+      manualOutflowsCents += amountCents;
+      outflowDetails.push({
+        label: operator ? `${description} (${operator}) [Justificativa]` : `${description} [Justificativa]`,
+        amountCents,
+        isSangria: false,
+        isManualAdjustment: true,
+        direction: 'outflow',
+        ...(operator ? { operator } : {})
+      });
+    }
+  }
+
+  return {
+    adjustments,
+    manualOutflowsCents,
+    manualInflowsCents,
+    outflowDetails
+  };
+}
+
 /**
  * Motor determinístico "Fórmula 1" de conciliação financeira multi-arquivos em centavos inteiros.
  */
@@ -147,6 +726,25 @@ export function runCashReconciliation({
     c6PayFiles
   } = buildNormalizedInputs(parsedFiles);
   const nextId = createIdGenerator();
+  const periodSpec = resolveTargetClosingPeriod({
+    pdvFile,
+    txtFile,
+    summaryTxtFile,
+    soldItemsFile,
+    cancelledFile,
+    discountsFile,
+    redeFiles,
+    c6PayFiles,
+    ofxFiles
+  });
+  const rolloverWindowSec = Number.isFinite(cfg.midnightRolloverSec)
+    ? cfg.midnightRolloverSec
+    : Math.round(5.5 * 3600);
+  const lateEveningCutoffSec =
+    periodSpec.hasSystemPeriodAnchor && periodSpec.latestSystemSec >= 18 * 3600
+      ? Math.max(18 * 3600, periodSpec.latestSystemSec - 5 * 3600)
+      : 18 * 3600;
+  const postCloseDelayWindowSec = Math.max(cfg.exactMatchWindowSec, 6 * 3600);
 
   // 1. Itens de Sistema (PDV)
   const systemItems = [];
@@ -161,6 +759,7 @@ export function runCashReconciliation({
     semBandeira: 0,
     outros: 0
   };
+  let cardSysCount = 0;
 
   for (const [idx, row] of (pdvFile?.rows || []).entries()) {
     const cat = row.category || 'outros';
@@ -175,6 +774,7 @@ export function runCashReconciliation({
     else pdvTotals.outros += row.amountCents;
 
     if (row.amountCents > 0) {
+      if (cat === 'cartao') cardSysCount += 1;
       systemItems.push({
         id: nextId('sys', ['pdv', row.dateStr, row.timeStr, row.amountCents, row.numero, row.administradora || row.formaPagto]),
         side: 'system',
@@ -203,14 +803,33 @@ export function runCashReconciliation({
     }
   }
 
-  // 2. Itens Reais (OFX + Rede + C6Pay) com deduplicação C6Pay PIX × OFX C6
+  // Vincular itens vendidos aos lançamentos do PDV antes dos filtros/clones de faltas e vínculos
+  if (soldItemsFile?.rows?.length) {
+    const orderDetailsBySystemId = linkSoldItemsToPdvOperations({
+      systemItems,
+      soldItems: soldItemsFile.rows
+    });
+    for (const sys of systemItems) {
+      if (orderDetailsBySystemId[sys.id]) {
+        sys.metadata = { ...(sys.metadata || {}), orderDetail: orderDetailsBySystemId[sys.id] };
+      }
+    }
+  }
+
+  // 2. Itens Reais (OFX + Rede + C6Pay) filtrados estritamente ao período do caixa + deduplicação C6Pay PIX × OFX C6
   const ofxPixItems = [];
   const nonPdvItems = [];
   const debitAuditItems = [];
+  const outOfPeriodItems = [];
+  const deferredRolloverCandidates = [];
+  const sourcePeriodStats = [];
 
   for (const f of ofxFiles) {
     const fileSum = f.summary || {};
+    const fileStat = createSourcePeriodStat(f, 'extrato_ofx');
+    sourcePeriodStats.push(fileStat);
     for (const row of (f.rows || [])) {
+      fileStat.totalRows += 1;
       const bankKey = row.bankKey || fileSum.bankKey || '';
       const bankCode = row.bankCode || fileSum.bankCode || '';
       const bankLabel = row.bankLabel || fileSum.bankLabel || row.bankName || 'Banco OFX';
@@ -243,6 +862,20 @@ export function runCashReconciliation({
           acctLast4
         }
       };
+      const dateClass = classifyRealIngestionDate(row.dateStr, row.secondsOfDay, periodSpec, rolloverWindowSec, 'ofx');
+      if (dateClass === 'out_of_period') {
+        recordOutOfPeriodItem(outOfPeriodItems, fileStat, base);
+        continue;
+      }
+      if (dateClass === 'deferred_rollover') {
+        if (row.ofxClass === 'pix_cliente' && row.amountCents > 0) {
+          deferredRolloverCandidates.push({ item: base, fileStat, sourceKind: 'ofx', categoryBucket: 'ofx_pix' });
+        } else {
+          recordOutOfPeriodItem(outOfPeriodItems, fileStat, base);
+        }
+        continue;
+      }
+      fileStat.keptRows += 1;
       if (row.ofxClass === 'pix_cliente') ofxPixItems.push(base);
       else if (row.ofxClass === 'debito_saida') debitAuditItems.push({ ...base, side: 'audit', matchStatus: 'audit_only' });
       else nonPdvItems.push({ ...base, matchStatus: 'ignored_non_pdv' });
@@ -252,7 +885,10 @@ export function runCashReconciliation({
   const redeApproved = [];
   const notAuthorizedItems = [];
   for (const f of redeFiles) {
+    const fileStat = createSourcePeriodStat(f, 'adquirente_rede');
+    sourcePeriodStats.push(fileStat);
     for (const row of (f.rows || [])) {
+      fileStat.totalRows += 1;
       const item = {
         id: nextId('real_rede', ['rede', row.nsu || row.transactionId, row.dateStr, row.timeStr, row.amountCents, row.subType]),
         side: 'real',
@@ -271,6 +907,36 @@ export function runCashReconciliation({
         operatorName: '',
         metadata: { statusRaw: row.statusRaw, bandeira: row.bandeira }
       };
+      const dateClass = classifyRealIngestionDate(row.dateStr, row.secondsOfDay, periodSpec, rolloverWindowSec, 'rede');
+      if (dateClass === 'out_of_period') {
+        if (
+          periodSpec.hasSystemPeriodAnchor &&
+          row.isApproved &&
+          row.amountCents > 0 &&
+          row.dateStr === periodSpec.nextDayAfterEnd &&
+          (row.secondsOfDay || 0) >= lateEveningCutoffSec
+        ) {
+          deferredRolloverCandidates.push({
+            item,
+            fileStat,
+            sourceKind: 'rede',
+            categoryBucket: 'rede',
+            accountingDateShiftCandidate: true
+          });
+          continue;
+        }
+        recordOutOfPeriodItem(outOfPeriodItems, fileStat, item);
+        continue;
+      }
+      if (dateClass === 'deferred_rollover') {
+        if (row.isApproved && row.amountCents > 0) {
+          deferredRolloverCandidates.push({ item, fileStat, sourceKind: 'rede', categoryBucket: 'rede' });
+        } else {
+          recordOutOfPeriodItem(outOfPeriodItems, fileStat, item);
+        }
+        continue;
+      }
+      fileStat.keptRows += 1;
       if (row.isApproved && row.amountCents > 0) redeApproved.push(item);
       else notAuthorizedItems.push({ ...item, side: 'audit', matchStatus: 'not_authorized' });
     }
@@ -279,8 +945,14 @@ export function runCashReconciliation({
   const c6PayApprovedCards = [];
   const c6PayApprovedPix = [];
   for (const f of c6PayFiles) {
-    const reportSingleDay = f.periodStart && f.periodStart === f.periodEnd ? f.periodStart : '';
+    const fileStat = createSourcePeriodStat(f, 'adquirente_c6pay');
+    sourcePeriodStats.push(fileStat);
+    const reportSingleDay =
+      f.summary?.isSingleDayVirada !== false && f.periodStart && f.periodStart === f.periodEnd
+        ? f.periodStart
+        : '';
     for (const row of (f.rows || [])) {
+      fileStat.totalRows += 1;
       // Se um relatório diário da C6 Pay (ex.: 19/11) traz uma venda noturna carimbada no dia seguinte (ex.: 20/11 às 21:51), alinha com a data do relatório
       const effectiveDateStr =
         reportSingleDay && row.dateStr && row.dateStr !== reportSingleDay && row.secondsOfDay >= 6 * 3600
@@ -304,6 +976,41 @@ export function runCashReconciliation({
         operatorName: '',
         metadata: { statusRaw: row.statusRaw, bandeira: row.bandeira, idPdc: row.idPdc, rawDateStr: row.dateStr }
       };
+      const dateClass = classifyRealIngestionDate(effectiveDateStr, row.secondsOfDay, periodSpec, rolloverWindowSec, 'c6pay');
+      if (dateClass === 'out_of_period') {
+        if (
+          periodSpec.hasSystemPeriodAnchor &&
+          row.isApproved &&
+          row.amountCents > 0 &&
+          effectiveDateStr === periodSpec.nextDayAfterEnd &&
+          (row.secondsOfDay || 0) >= lateEveningCutoffSec
+        ) {
+          deferredRolloverCandidates.push({
+            item,
+            fileStat,
+            sourceKind: 'c6pay',
+            categoryBucket: row.category === 'pix' ? 'c6pay_pix' : 'c6pay_card',
+            accountingDateShiftCandidate: true
+          });
+          continue;
+        }
+        recordOutOfPeriodItem(outOfPeriodItems, fileStat, item);
+        continue;
+      }
+      if (dateClass === 'deferred_rollover') {
+        if (row.isApproved && row.amountCents > 0) {
+          deferredRolloverCandidates.push({
+            item,
+            fileStat,
+            sourceKind: 'c6pay',
+            categoryBucket: row.category === 'pix' ? 'c6pay_pix' : 'c6pay_card'
+          });
+        } else {
+          recordOutOfPeriodItem(outOfPeriodItems, fileStat, item);
+        }
+        continue;
+      }
+      fileStat.keptRows += 1;
       if (!row.isApproved) {
         notAuthorizedItems.push({ ...item, side: 'audit', matchStatus: 'not_authorized' });
       } else if (row.amountCents > 0) {
@@ -399,19 +1106,29 @@ export function runCashReconciliation({
     } else if (res.action === 'confirm_suggestion' && res.suggestionId) {
       confirmedSuggestionIds.add(res.suggestionId);
     } else if (res.action === 'manual_link' && res.systemIds?.length && res.realIds?.length) {
+      for (const cand of deferredRolloverCandidates) {
+        if (!cand.admitted && res.realIds.includes(cand.item.id)) {
+          cand.admitted = true;
+          cand.fileStat.keptRows += 1;
+          realItems.push(cand.item);
+        }
+      }
       const sysObjs = systemItems.filter(s => res.systemIds.includes(s.id) && !usedSys.has(s.id) && !ignoredIds.has(s.id));
       const realObjs = realItems.filter(r => res.realIds.includes(r.id) && !usedReal.has(r.id) && !ignoredIds.has(r.id));
       if (sysObjs.length === 0 || realObjs.length === 0) continue;
       sysObjs.forEach(s => usedSys.add(s.id));
       realObjs.forEach(r => usedReal.add(r.id));
+      const manualNote = typeof res.note === 'string' && res.note.trim() ? res.note.trim() : '';
       matchedPairs.push({
         id: `match_manual_${sysObjs.map(s => s.id).join('_')}`,
         matchType: 'matched_manual',
         reasonType: 'manual_link',
-        reasonText: 'Vínculo confirmado manualmente pelo conferente',
+        reasonText: manualNote ? `Vínculo manual (${manualNote})` : 'Vínculo confirmado manualmente pelo conferente',
         systemItems: sysObjs,
         realItems: realObjs,
-        amountCents: sysObjs.reduce((s, x) => s + x.amountCents, 0)
+        amountCents: sysObjs.reduce((s, x) => s + x.amountCents, 0),
+        diffCents: realObjs.reduce((s, x) => s + x.amountCents, 0) - sysObjs.reduce((s, x) => s + x.amountCents, 0),
+        ...(manualNote ? { note: manualNote } : {})
       });
     }
   }
@@ -452,6 +1169,219 @@ export function runCashReconciliation({
     });
   }
 
+  // 3B. Passe complementar Rede 12h AM/PM (relatórios Rede exportam ex: 02:19 / 08:45 para 14:19 / 20:45 sem AM/PM)
+  const redePmCandidates = [];
+  for (const sys of systemItems) {
+    if (usedSys.has(sys.id) || ignoredIds.has(sys.id)) continue;
+    if (sys.category !== 'pix' && sys.category !== 'cartao') continue;
+    if ((sys.secondsOfDay || 0) < 12 * 3600) continue;
+
+    for (const real of realItems) {
+      if (usedReal.has(real.id) || ignoredIds.has(real.id)) continue;
+      if (real.source !== 'rede' || sys.category !== real.category) continue;
+      if ((real.secondsOfDay || 0) >= 12 * 3600) continue;
+      const amtDiff = Math.abs(sys.amountCents - real.amountCents);
+      if (amtDiff > tol) continue;
+
+      const dtPm = getTimeDiffSec(sys, { ...real, secondsOfDay: (real.secondsOfDay || 0) + 12 * 3600 });
+      if (dtPm > cfg.exactMatchWindowSec) continue;
+
+      const penalty = getTerminalAffinityPenalty(sys, real);
+      redePmCandidates.push({ sys, real, dtPm, score: amtDiff * 100000 + penalty * 1800 + dtPm });
+    }
+  }
+  redePmCandidates.sort((a, b) => a.score - b.score);
+  for (const cand of redePmCandidates) {
+    if (usedSys.has(cand.sys.id) || usedReal.has(cand.real.id)) continue;
+    usedSys.add(cand.sys.id);
+    usedReal.add(cand.real.id);
+    matchedPairs.push({
+      id: `match_exact_pm_${cand.sys.id}_${cand.real.id}`,
+      matchType: 'matched_exact',
+      reasonType: 'exact_1_to_1',
+      reasonText: `Bateu 1:1 (Rede formato 12h +12h • ${cand.dtPm}s)`,
+      systemItems: [cand.sys],
+      realItems: [cand.real],
+      amountCents: cand.sys.amountCents
+    });
+  }
+
+  // 3C. Passe pós-expediente D -> D+1 (delay bancário de madrugada 00:00..05:30 para vendas do encerramento noturno)
+  // Evita falsos positivos (ex: transações Rede 12h da tarde de D+1): só admite item de D+1 se houver venda noturna pendente em D!
+  const swapEligiblePostCloseIds = new Set();
+  if (deferredRolloverCandidates.length > 0) {
+    // 3C.0 Deduplicar C6 Pay PIX de madrugada contra OFX PIX do fim de D ou da mesma madrugada de D+1
+    const deferredOfxPix = deferredRolloverCandidates.filter(c => !c.admitted && c.categoryBucket === 'ofx_pix');
+    const usedDeferredOfxForDedup = new Set();
+    const linkedC6pByOfxId = new Map();
+
+    for (const cand of deferredRolloverCandidates) {
+      if (cand.admitted || cand.categoryBucket !== 'c6pay_pix') continue;
+      // 1) Tenta deduplicar contra OFX já admitido no dia alvo (ex: 23:55 vs 00:01)
+      let bestInPeriod = null;
+      let bestDt = Infinity;
+      for (const ofx of ofxPixItems) {
+        if (usedOfxDedup.has(ofx.id)) continue;
+        if (Math.abs(cand.item.amountCents - ofx.amountCents) > tol) continue;
+        const dt = getTimeDiffSec(cand.item, ofx);
+        if (dt <= cfg.ofxPixDedupWindowSec && dt < bestDt) {
+          bestDt = dt;
+          bestInPeriod = ofx;
+        }
+      }
+      if (bestInPeriod) {
+        usedOfxDedup.add(bestInPeriod.id);
+        cand.admitted = true;
+        cand.fileStat.keptRows += 1;
+        bestInPeriod.metadata.linkedC6PayId = cand.item.id;
+        bestInPeriod.description = `${bestInPeriod.description} (Confirmado C6 Pay)`;
+        deduplicatedItems.push({
+          ...cand.item,
+          matchStatus: 'deduplicated_ofx',
+          linkedOfxId: bestInPeriod.id,
+          matchReason: `PIX C6 Pay já contabilizado no extrato OFX (${bestDt}s)`
+        });
+        continue;
+      }
+
+      // 2) Tenta parear com OFX da própria madrugada (só vira deduplicated se o OFX for admitido no Passe 3C.1/3C.2)
+      let bestDeferred = null;
+      let bestDefDt = Infinity;
+      for (const ofxCand of deferredOfxPix) {
+        if (usedDeferredOfxForDedup.has(ofxCand.item.id)) continue;
+        if (Math.abs(cand.item.amountCents - ofxCand.item.amountCents) > tol) continue;
+        const dt = getTimeDiffSec(cand.item, ofxCand.item);
+        if (dt <= cfg.ofxPixDedupWindowSec && dt < bestDefDt) {
+          bestDefDt = dt;
+          bestDeferred = ofxCand;
+        }
+      }
+      if (bestDeferred) {
+        usedDeferredOfxForDedup.add(bestDeferred.item.id);
+        cand.linkedDeferredOfx = bestDeferred;
+        cand.linkedDedupDt = bestDefDt;
+        const list = linkedC6pByOfxId.get(bestDeferred.item.id) || [];
+        list.push(cand);
+        linkedC6pByOfxId.set(bestDeferred.item.id, list);
+      }
+    }
+
+    const admitLinkedC6pForOfx = (ofxCand) => {
+      const linked = linkedC6pByOfxId.get(ofxCand.item.id) || [];
+      for (const c6Cand of linked) {
+        if (c6Cand.admitted) continue;
+        c6Cand.admitted = true;
+        c6Cand.fileStat.keptRows += 1;
+        ofxCand.item.metadata.linkedC6PayId = c6Cand.item.id;
+        ofxCand.item.description = `${ofxCand.item.description} (Confirmado C6 Pay)`;
+        deduplicatedItems.push({
+          ...c6Cand.item,
+          matchStatus: 'deduplicated_ofx',
+          linkedOfxId: ofxCand.item.id,
+          matchReason: `PIX C6 Pay já contabilizado no extrato OFX (${c6Cand.linkedDedupDt || 0}s)`
+        });
+      }
+    };
+
+    // 3C.1 Conciliação exata pós-expediente (venda noturna D -> madrugada D+1) + carimbo contábil D+1 na adquirente (mesmo horário)
+    const accountingShiftWindowSec = 15 * 60;
+    const postCloseExactCandidates = [];
+    for (const sys of systemItems) {
+      if (usedSys.has(sys.id) || ignoredIds.has(sys.id)) continue;
+      if (sys.dateStr !== periodSpec.targetEndDate) continue;
+      if ((sys.secondsOfDay || 0) < lateEveningCutoffSec) continue;
+      if (sys.category !== 'pix' && sys.category !== 'cartao') continue;
+
+      for (const cand of deferredRolloverCandidates) {
+        if (cand.admitted || cand.linkedDeferredOfx || ignoredIds.has(cand.item.id)) continue;
+        const real = cand.item;
+        if (sys.category !== real.category) continue;
+        const amtDiff = Math.abs(sys.amountCents - real.amountCents);
+        if (amtDiff > tol) continue;
+
+        let dt;
+        if (cand.accountingDateShiftCandidate) {
+          dt = Math.abs((sys.secondsOfDay || 0) - (real.secondsOfDay || 0));
+          if (dt > accountingShiftWindowSec) continue;
+        } else {
+          dt = getTimeDiffSec(sys, real);
+          const maxDt = real.source === 'rede' ? cfg.exactMatchWindowSec : postCloseDelayWindowSec;
+          if (real.source === 'rede' && (real.secondsOfDay || 0) > 4 * 3600) continue;
+          if (dt > maxDt) continue;
+        }
+
+        const penalty = getTerminalAffinityPenalty(sys, real);
+        postCloseExactCandidates.push({
+          sys,
+          cand,
+          dt,
+          isAccountingShift: Boolean(cand.accountingDateShiftCandidate),
+          score: amtDiff * 100000 + penalty * 1800 + dt
+        });
+      }
+    }
+
+    postCloseExactCandidates.sort((a, b) => a.score - b.score);
+    for (const match of postCloseExactCandidates) {
+      if (usedSys.has(match.sys.id) || match.cand.admitted) continue;
+      match.cand.admitted = true;
+      match.cand.fileStat.keptRows += 1;
+      realItems.push(match.cand.item);
+      admitLinkedC6pForOfx(match.cand);
+      usedSys.add(match.sys.id);
+      usedReal.add(match.cand.item.id);
+      const delayMin = Math.max(1, Math.round(match.dt / 60));
+      matchedPairs.push({
+        id: `match_postclose_${match.sys.id}_${match.cand.item.id}`,
+        matchType: 'matched_exact',
+        reasonType: 'exact_1_to_1',
+        reasonText: match.isAccountingShift
+          ? `Bateu 1:1 (Carimbo contábil D+1 na adquirente • mesmo horário ±${match.dt}s)`
+          : `Bateu 1:1 (Compensação pós-expediente D+1 • delay bancário de ${delayMin} min)`,
+        systemItems: [match.sys],
+        realItems: [match.cand.item],
+        amountCents: match.sys.amountCents
+      });
+    }
+
+    // 3C.2 Troca pós-expediente (apenas fontes 24h OFX / C6Pay da madrugada se houver venda noturna compatível em D)
+    for (const cand of deferredRolloverCandidates) {
+      if (cand.admitted || cand.linkedDeferredOfx || cand.accountingDateShiftCandidate || ignoredIds.has(cand.item.id)) continue;
+      const real = cand.item;
+      if (real.source === 'rede') continue;
+      const hasLateSwapMatch = systemItems.some((sys) => {
+        if (usedSys.has(sys.id) || ignoredIds.has(sys.id)) return false;
+        if (sys.dateStr !== periodSpec.targetEndDate) return false;
+        if ((sys.secondsOfDay || 0) < lateEveningCutoffSec) return false;
+        if (sys.category === 'outros') return false;
+        if (Math.abs(sys.amountCents - real.amountCents) > tol) return false;
+        return getTimeDiffSec(sys, real) <= postCloseDelayWindowSec;
+      });
+      if (hasLateSwapMatch) {
+        cand.admitted = true;
+        cand.fileStat.keptRows += 1;
+        realItems.push(real);
+        swapEligiblePostCloseIds.add(real.id);
+        admitLinkedC6pForOfx(cand);
+      }
+    }
+
+    // 3C.3 Isolar os demais candidatos de D+1 como fora do período (evita falsos positivos no caixa)
+    for (const cand of deferredRolloverCandidates) {
+      if (cand.admitted) continue;
+      recordOutOfPeriodItem(outOfPeriodItems, cand.fileStat, {
+        ...cand.item,
+        metadata: {
+          ...(cand.item.metadata || {}),
+          outOfPeriodReason:
+            cand.item.source === 'rede'
+              ? 'next_day_rede_12h_or_unmatched'
+              : 'next_day_rollover_unmatched'
+        }
+      });
+    }
+  }
+
   // 4. Passe 4 — Sugestões: Trocas de forma de pagamento & Split 1:N / N:1
   const suggestions = [];
   const swapCandidates = [];
@@ -463,8 +1393,20 @@ export function runCashReconciliation({
       if (usedReal.has(real.id) || ignoredIds.has(real.id)) continue;
       const amtDiff = Math.abs(sys.amountCents - real.amountCents);
       if (amtDiff > tol) continue;
-      const dt = getTimeDiffSec(sys, real);
-      if (dt > cfg.swapWindowSec) continue;
+      let dt = getTimeDiffSec(sys, real);
+      const maxSwapWindow = swapEligiblePostCloseIds.has(real.id)
+        ? postCloseDelayWindowSec
+        : cfg.swapWindowSec;
+      if (
+        dt > maxSwapWindow &&
+        real.source === 'rede' &&
+        (real.secondsOfDay || 0) < 12 * 3600 &&
+        (sys.secondsOfDay || 0) >= 12 * 3600
+      ) {
+        const dtPm = getTimeDiffSec(sys, { ...real, secondsOfDay: (real.secondsOfDay || 0) + 12 * 3600 });
+        if (dtPm <= cfg.swapWindowSec) dt = dtPm;
+      }
+      if (dt > maxSwapWindow) continue;
 
       const prio = (sys.category === 'dinheiro' || sys.category === 'pendente') ? 0 : 900;
       swapCandidates.push({ sys, real, dt, score: amtDiff * 100000 + prio + dt });
@@ -592,10 +1534,41 @@ export function runCashReconciliation({
     }
   }
 
-  // Faltas e Sobras após vínculos
-  const missingInBank = systemItems
+  // 4B. Sugestões de pequena diferença (<= R$ 5,00 em até 30 min — ex.: entrega paga a menor por troco)
+  buildSmallDiffSuggestions({
+    systemItems,
+    realItems,
+    usedSys,
+    usedReal,
+    ignoredIds,
+    reservedSugSys,
+    reservedSugReal,
+    rejectedSuggestionIds,
+    confirmedSuggestionIds,
+    matchedPairs,
+    suggestions,
+    tol
+  });
+
+  // Auditoria operacional consolidada para enriquecer alertas em Faltas sem recebimento
+  const auditInsights = buildAuditInsights({
+    soldItemsFile,
+    cancelledFile,
+    discountsFile,
+    txtFile,
+    summaryTxtFile,
+    pdvFile
+  });
+
+  // Faltas e Sobras após vínculos + correlação automática com reabertura/duplicidade rápida
+  const rawMissingInBank = systemItems
     .filter(s => !usedSys.has(s.id) && !ignoredIds.has(s.id) && (s.category === 'pix' || s.category === 'cartao'))
     .map(s => ({ ...s, matchStatus: 'unmatched_missing_in_bank' }));
+  const missingInBank = annotateMissingItemsWithOperationalHints({
+    missingItems: rawMissingInBank,
+    reopenedTables: auditInsights.reopenedTables,
+    zeroPdvReceipts: auditInsights.zeroPdvReceipts
+  });
   const extraInBank = realItems
     .filter(r => !usedReal.has(r.id) && !ignoredIds.has(r.id))
     .map(r => ({ ...r, matchStatus: 'unmatched_extra_in_bank' }));
@@ -605,14 +1578,32 @@ export function runCashReconciliation({
   const relCash = relConfFile?.summary?.cashBlock || {};
   const txtSum = txtFile?.summary || {};
 
+  const baseFundoNoiteCents = relCash.fundoNoiteCents ?? 0;
+  const baseOutrasEntradasCents = relCash.outrasEntradasCents ?? 0;
+  const baseSaidasPagamentosCents = relCash.saidasPagamentosCents ?? txtSum.saidasPagamentosCents ?? 0;
+  const baseOutrasSaidasCents = relCash.outrasSaidasCents ?? 0;
+
+  const {
+    adjustments: manualCashAdjustments,
+    manualOutflowsCents,
+    manualInflowsCents,
+    outflowDetails: manualOutflowDetails
+  } = summarizeManualCashAdjustments(manualInputs);
+
   const fundoManhaCents = relCash.fundoManhaCents ?? txtSum.fundoCaixaCents ?? 0;
   const vendaDinheiroCents = Math.max(0, (pdvFile ? pdvTotals.dinheiro : (relCash.vendaDinheiroCents ?? 0)) + reclassifiedDeltaByCat.dinheiro);
-  const fundoNoiteCents = relCash.fundoNoiteCents ?? 0;
-  const outrasEntradasCents = relCash.outrasEntradasCents ?? 0;
+  const fundoNoiteCents = manualInputs.fundoNoiteOverrideCents ?? baseFundoNoiteCents;
+  const outrasEntradasCents = (manualInputs.outrasEntradasOverrideCents ?? baseOutrasEntradasCents) + manualInflowsCents;
   const sangriaRelConfCents = (relCash.sangriaManhaCents || 0) + (relCash.sangriaNoiteCents || 0);
   const sangriaCents = manualInputs.sangriaOverrideCents ?? (sangriaRelConfCents > 0 ? sangriaRelConfCents : (txtSum.sangriaCents || 0));
-  const saidasPagamentosCents = relCash.saidasPagamentosCents ?? txtSum.saidasPagamentosCents ?? 0;
-  const outrasSaidasCents = relCash.outrasSaidasCents ?? 0;
+  const saidasPagamentosCents = manualInputs.saidasPagamentosOverrideCents ?? baseSaidasPagamentosCents;
+  const outrasSaidasCents = (manualInputs.outrasSaidasOverrideCents ?? baseOutrasSaidasCents) + manualOutflowsCents;
+
+  const drawerManualDeltaCents =
+    (fundoNoiteCents - baseFundoNoiteCents) +
+    (outrasEntradasCents - baseOutrasEntradasCents) -
+    (saidasPagamentosCents - baseSaidasPagamentosCents) -
+    (outrasSaidasCents - baseOutrasSaidasCents);
 
   const expectedTotalCents = fundoManhaCents + vendaDinheiroCents + fundoNoiteCents + outrasEntradasCents - sangriaRelConfCents - saidasPagamentosCents - outrasSaidasCents;
   const expectedAfterSangriaCents = fundoManhaCents + vendaDinheiroCents + fundoNoiteCents + outrasEntradasCents - sangriaCents - saidasPagamentosCents - outrasSaidasCents;
@@ -626,6 +1617,7 @@ export function runCashReconciliation({
   const activeRealItems = realItems.filter(r => !ignoredIds.has(r.id));
   const realPixCents = activeRealItems.filter(r => r.category === 'pix').reduce((s, r) => s + r.amountCents, 0);
   const realCartaoCents = activeRealItems.filter(r => r.category === 'cartao').reduce((s, r) => s + r.amountCents, 0);
+  const { pixBreakdown, cardBreakdown } = buildDigitalChannelBreakdown(activeRealItems, deduplicatedItems);
 
   const ignoredSysByCat = { pix: 0, cartao: 0 };
   for (const s of systemItems) {
@@ -634,9 +1626,12 @@ export function runCashReconciliation({
     }
   }
 
-  const countedCents = manualInputs.cashCountedCents !== undefined && manualInputs.cashCountedCents !== null
-    ? Number(manualInputs.cashCountedCents)
-    : null;
+  const cashDrawerZeroConfirmed = Boolean(manualInputs.cashDrawerZeroConfirmed);
+  const countedCents = cashDrawerZeroConfirmed
+    ? 0
+    : manualInputs.cashCountedCents !== undefined && manualInputs.cashCountedCents !== null
+      ? Number(manualInputs.cashCountedCents)
+      : null;
 
   // Para o espelho RelConferencia, dinheiro real = dinheiro contado + sangria adicional feita fora da RelConferencia (sem somar trocas digitais em duplicidade)
   const cashRealMirrorCents = countedCents !== null
@@ -644,7 +1639,12 @@ export function runCashReconciliation({
     : (relConfFile?.summary?.realRows?.saldo_dinheiro ?? null);
 
   const overrides = manualInputs.categoryRealOverrides || {};
-  const sysSaldoDinheiro = Math.max(0, (relSys.saldo_dinheiro !== undefined ? relSys.saldo_dinheiro + reclassifiedDeltaByCat.dinheiro : expectedTotalCents));
+  const sysSaldoDinheiro = Math.max(
+    0,
+    relSys.saldo_dinheiro !== undefined
+      ? relSys.saldo_dinheiro + reclassifiedDeltaByCat.dinheiro + drawerManualDeltaCents
+      : expectedTotalCents
+  );
   const sysCartao = Math.max(0, (relSys.cartao ?? pdvTotals.cartao) - ignoredSysByCat.cartao + reclassifiedDeltaByCat.cartao);
   const sysIfood = Math.max(0, (relSys.ifood ?? pdvTotals.ifood) + reclassifiedDeltaByCat.ifood);
   const sysPendentes = Math.max(0, (relSys.pendentes ?? (pdvFile ? pdvTotals.pendente : (txtSum.notaPendenteCents || 0))) + reclassifiedDeltaByCat.pendente);
@@ -672,7 +1672,16 @@ export function runCashReconciliation({
         ? `R$ ${(swappedToDigitalCents / 100).toFixed(2)} recebidos via Pix/Cartão (compensa no Total Geral)`
         : ''
     ),
-    makeMirrorRow('cartao', 'Crédito, Débito e Voucher', sysCartao, realCartaoCents, true, 'Rede + C6 Pay'),
+    makeMirrorRow(
+      'cartao',
+      'Crédito, Débito e Voucher',
+      sysCartao,
+      realCartaoCents,
+      true,
+      sysCartao > 0 && redeFiles.length === 0 && c6PayFiles.length === 0
+        ? 'Rede + C6 Pay (arquivos ainda não importados)'
+        : 'Rede + C6 Pay'
+    ),
     makeMirrorRow('ifood', 'iFood', sysIfood, relConfFile?.summary?.realRows?.ifood ?? (sysIfood === 0 ? 0 : null), false),
     makeMirrorRow('pendentes', 'Pendentes', sysPendentes, relConfFile?.summary?.realRows?.pendentes ?? (sysPendentes === 0 ? 0 : null), false),
     makeMirrorRow('pix', 'Pix', sysPix, realPixCents, true, 'OFX + Rede PIX + C6 Pay pós-corte'),
@@ -695,11 +1704,14 @@ export function runCashReconciliation({
 
   const hasCashRealInformed = countedCents !== null || overrides.saldo_dinheiro !== undefined;
 
-  // Score de saúde (0-100): mede qualidade da conciliação digital + diferença confirmada
+  // Score de saúde (0-100): reflete divergência proporcional + pendências abertas sem mascarar faltas
   const baseVolume = Math.max(digitalSystemTotal, systemTotalCents, 1);
   const absFocusDiff = hasCashRealInformed ? Math.abs(confirmedDiffCents) : Math.abs(digitalDiffCents);
   const diffRatio = Math.min(1, absFocusDiff / baseVolume);
-  const rawScore = Math.max(0, Math.min(100, Math.round((1 - diffRatio * 1.5) * 100 - suggestions.length * 2 - missingInBank.length * 1.5)));
+  const smallDiffSugCount = suggestions.filter((s) => s.reasonType === 'small_diff').length;
+  const structuralSugCount = suggestions.length - smallDiffSugCount;
+  const unmatchedPenalty = structuralSugCount * 2.5 + smallDiffSugCount * 1.5 + missingInBank.length * 3 + extraInBank.length * 2;
+  const rawScore = Math.max(0, Math.min(100, Math.round((1 - diffRatio * 2.5) * 100 - unmatchedPenalty)));
 
   let status = 'balanced';
   if (suggestions.length > 0 && absFocusDiff <= Math.max(tol, 100)) {
@@ -714,38 +1726,29 @@ export function runCashReconciliation({
   const totalMdrFeeCents = activeRealItems.reduce((s, r) => s + (r.feeCents || 0), 0);
   const totalNetDigitalCents = activeRealItems.reduce((s, r) => s + (r.netAmountCents ?? r.amountCents), 0);
 
-  // Correlação Operação (Mesa/Balcão/Delivery) -> Itens Vendidos + Auditoria Completa (7 DataDivas + 3 Banco)
-  if (soldItemsFile?.rows?.length) {
-    const orderDetailsBySystemId = linkSoldItemsToPdvOperations({
-      systemItems,
-      soldItems: soldItemsFile.rows
-    });
-    for (const sys of systemItems) {
-      if (orderDetailsBySystemId[sys.id]) {
-        sys.metadata = { ...(sys.metadata || {}), orderDetail: orderDetailsBySystemId[sys.id] };
-      }
-    }
-  }
-
+  // Correlação e Auditoria Completa (7 DataDivas + 3 Banco)
   const reportCompleteness = assessCashReportCompleteness(parsedFiles, companyRoutineProfile);
-  const auditInsights = buildAuditInsights({
-    soldItemsFile,
-    cancelledFile,
-    discountsFile,
-    txtFile,
-    summaryTxtFile,
-    pdvFile
-  });
 
-  const referenceDate =
-    pdvFile?.periodStart ||
-    txtFile?.periodStart ||
-    summaryTxtFile?.periodStart ||
-    soldItemsFile?.periodStart ||
-    redeFiles[0]?.periodStart ||
-    c6PayFiles[0]?.periodStart ||
-    ofxFiles[0]?.periodStart ||
-    new Date().toISOString().slice(0, 10);
+  const referenceDate = periodSpec.targetStartDate;
+  const periodDiagnostics = buildPeriodDiagnostics({
+    periodSpec,
+    sourcePeriodStats,
+    outOfPeriodItems,
+    ofxFiles,
+    redeFiles,
+    c6PayFiles,
+    relConfFile,
+    txtFile,
+    txtSum,
+    countedCents,
+    cashDrawerZeroConfirmed,
+    expectedAfterSangriaCents,
+    sysSaldoDinheiro,
+    sysCartao,
+    cardSysCount,
+    sysPendentes,
+    overrides
+  });
 
   const effectiveCancelledCount =
     auditInsights.cancelledDetails.length > 0 ? auditInsights.cancelledDetails.length : (txtSum.canceladosQty || 0);
@@ -769,6 +1772,7 @@ export function runCashReconciliation({
     digitalDiffCents,
     mirrorRows,
     reportCompleteness,
+    periodDiagnostics,
     auditInsights,
     cashDrawerSummary: {
       fundoManhaCents,
@@ -783,7 +1787,10 @@ export function runCashReconciliation({
       adjustedCashExpectedCents,
       countedCents,
       swappedToDigitalCents,
-      saidasDetalhadas: txtSum.saidasDetalhadas || []
+      manualOutflowsCents,
+      manualInflowsCents,
+      manualCashAdjustments,
+      saidasDetalhadas: [...(txtSum.saidasDetalhadas || []), ...manualOutflowDetails]
     },
     systemItems,
     realItems,
@@ -791,6 +1798,7 @@ export function runCashReconciliation({
     suggestions,
     missingInBank,
     extraInBank,
+    outOfPeriodItems,
     nonPdvItems,
     notAuthorizedItems,
     deduplicatedItems,
@@ -807,7 +1815,9 @@ export function runCashReconciliation({
       serviceFeeCents: txtSum.taxaCasaCents || 0,
       pendingDebtors: txtSum.pendingDebtors || [],
       guestCount: txtSum.guestCount || 0,
-      averageTicketCents: txtSum.guestCount > 0 ? Math.round((pdvTotals.pix + pdvTotals.cartao + pdvTotals.dinheiro) / txtSum.guestCount) : 0
+      averageTicketCents: txtSum.guestCount > 0 ? Math.round((pdvTotals.pix + pdvTotals.cartao + pdvTotals.dinheiro) / txtSum.guestCount) : 0,
+      pixBreakdown,
+      cardBreakdown
     }
   };
 }

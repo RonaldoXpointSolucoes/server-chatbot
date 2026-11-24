@@ -244,3 +244,89 @@ test('buildCashWhatsappSummaryMessage and buildCashPdfReportHtml handle historic
   assert.doesNotMatch(html, /<script>/i);
   assert.doesNotMatch(html, /NaN|undefined/);
 });
+
+test('buildCashPdfReportHtml hides mirror rows whose Sistema, Real and Diferença columns are all zero', () => {
+  const html = buildCashPdfReportHtml({
+    result: {
+      referenceDate: '2026-11-20',
+      storeName: 'Burguer Plus',
+      operatorName: 'RONALDO',
+      status: 'surplus',
+      healthScore: 95,
+      systemTotalCents: 600481,
+      realTotalCents: 610874,
+      diffTotalCents: 10393,
+      mirrorRows: [
+        { key: 'saldo_dinheiro', label: 'Saldo em Dinheiro', systemCents: 81372, realCents: 75030, hasRealInput: true, diffCents: -6342 },
+        { key: 'cartao', label: 'Crédito, Débito e Voucher', systemCents: 345335, realCents: 344120, hasRealInput: true, diffCents: -1215 },
+        { key: 'ifood', label: 'iFood', systemCents: 0, realCents: 0, hasRealInput: true, diffCents: 0 },
+        { key: 'pendentes', label: 'Pendentes', systemCents: 40550, realCents: 40550, hasRealInput: true, diffCents: 0 },
+        { key: 'pix', label: 'Pix', systemCents: 133224, realCents: 151174, hasRealInput: true, diffCents: 17950 },
+        { key: 'pago_online', label: 'Pago Online', systemCents: 0, realCents: 0, hasRealInput: true, diffCents: 0 },
+        { key: 'ticket', label: 'Ticket', systemCents: 0, realCents: 0, hasRealInput: true, diffCents: 0 },
+        { key: 'sem_bandeira', label: 'Sem Bandeira*', systemCents: 0, realCents: 0, hasRealInput: true, diffCents: 0 },
+        { key: 'outros', label: 'Outros', systemCents: 0, realCents: 0, hasRealInput: true, diffCents: 0 }
+      ]
+    }
+  });
+
+  assert.match(html, /Saldo em Dinheiro/);
+  assert.match(html, /Crédito, Débito e Voucher/);
+  assert.match(html, /Pendentes/);
+  assert.match(html, />Pix</);
+  assert.doesNotMatch(html, />iFood</);
+  assert.doesNotMatch(html, />Pago Online</);
+  assert.doesNotMatch(html, />Ticket</);
+  assert.doesNotMatch(html, /Sem Bandeira\*/);
+  assert.doesNotMatch(html, />Outros</);
+});
+
+test('buildCashWhatsappSummaryMessage and buildCashPdfReportHtml render manualCashAdjustments safely without XSS', () => {
+  const result = {
+    referenceDate: '2026-11-20',
+    storeName: 'Burguer Plus',
+    operatorName: 'EDILZA',
+    status: 'balanced',
+    healthScore: 99,
+    systemTotalCents: 75872,
+    realTotalCents: 75872,
+    diffTotalCents: 0,
+    mirrorRows: [
+      { key: 'saldo_dinheiro', label: 'Saldo em Dinheiro', systemCents: 75872, realCents: 75872, hasRealInput: true, diffCents: 0 }
+    ],
+    cashDrawerSummary: {
+      fundoManhaCents: 63080,
+      vendaDinheiroCents: 20830,
+      outrasEntradasCents: 2000,
+      sangriaCents: 75030,
+      saidasPagamentosCents: 2538,
+      outrasSaidasCents: 5500,
+      expectedAfterSangriaCents: 2842,
+      countedCents: 2842,
+      manualOutflowsCents: 5500,
+      manualInflowsCents: 2000,
+      manualCashAdjustments: [
+        { id: '1', direction: 'outflow', description: 'Bolo da Marcela <script>alert(1)</script>', amountCents: 5500, operator: 'Gerente <b>X</b>' },
+        { id: '2', direction: 'inflow', description: 'Troco extra', amountCents: 2000, operator: 'Caixa' }
+      ],
+      saidasDetalhadas: [
+        { label: 'Bolo da Marcela <script>alert(1)</script> (Gerente <b>X</b>) [Justificativa]', amountCents: 5500, isSangria: false, isManualAdjustment: true, direction: 'outflow' }
+      ]
+    }
+  };
+
+  const whatsapp = buildCashWhatsappSummaryMessage({ result });
+  assert.match(whatsapp, /Justificativas manuais/i);
+  assert.match(whatsapp, /Bolo da Marcela/);
+  assert.match(whatsapp, /55,00/);
+  assert.match(whatsapp, /Troco extra/);
+  assert.match(whatsapp, /20,00/);
+
+  const html = buildCashPdfReportHtml({ result });
+  assert.match(html, /Justificativas Manuais/i);
+  assert.match(html, /Bolo da Marcela &lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.match(html, /Gerente &lt;b&gt;X&lt;\/b&gt;/);
+  assert.match(html, /Troco extra/);
+  assert.doesNotMatch(html, /<script>/i);
+  assert.doesNotMatch(html, /NaN|undefined/);
+});

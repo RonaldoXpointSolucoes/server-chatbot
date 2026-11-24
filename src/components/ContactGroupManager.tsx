@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useChatStore, ContactGroup } from '../store/chatStore';
 import { X, Plus, Trash2, Check, Edit2, Building2, ChevronLeft, Search, Loader2 } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -17,7 +18,14 @@ const PRESET_COLORS = [
 ];
 
 export function ContactGroupManager({ isOpen, onClose }: Props) {
-  const { tenantInfo, addContactGroup, updateContactGroup, deleteContactGroup } = useChatStore();
+  const { tenantInfo, addContactGroup, updateContactGroup, deleteContactGroup } = useChatStore(
+    useShallow(s => ({
+      tenantInfo: s.tenantInfo,
+      addContactGroup: s.addContactGroup,
+      updateContactGroup: s.updateContactGroup,
+      deleteContactGroup: s.deleteContactGroup
+    }))
+  );
   const groups: ContactGroup[] = tenantInfo?.settings?.contactGroups || [];
 
   const [isAdding, setIsAdding] = useState(false);

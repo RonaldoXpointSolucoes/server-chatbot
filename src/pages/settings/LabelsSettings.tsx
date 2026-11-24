@@ -84,7 +84,7 @@ interface Label {
 }
 
 export default function LabelsSettings() {
-  const { tenantInfo } = useChatStore();
+  const tenantInfo = useChatStore(s => s.tenantInfo);
   const [searchParams, setSearchParams] = useSearchParams();
   const [labels, setLabels] = useState<Label[]>([]);
   const [isLoading, setIsLoading] = useState(true);
