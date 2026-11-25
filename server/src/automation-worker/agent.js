@@ -34,6 +34,10 @@ import {
   extractGastrofoodOrderMeta,
   dispatchAvisoImpressao
 } from './aviso-impressao-helper.js';
+import {
+  buildGastrofoodPixPayload,
+  classifyGastrofoodPixError
+} from './pix-payment-helper.js';
 
 const tenantStorage = new AsyncLocalStorage();
 
@@ -2933,6 +2937,7 @@ Responda APENAS com o ID exato do agente escolhido, sem markdown e sem aspas. Ex
                               `Siga RIGOROSAMENTE a ordem natural abaixo, fazendo UMA etapa por vez sem atropelar o cliente:\n` +
                               `• ETAPA 1 — ESCOLHA DOS ITENS, SUBITENS E PASSOS OBRIGATÓRIOS (SEMPRE PRIMEIRO!):\n` +
                               `  - Descubra e confirme quais itens o cliente deseja pedir usando "Consultar_produtos_cardapio" e verifique SEMPRE os passos/adicionais/cota grátis com "Consultar_adicionais_produto".\n` +
+                              `  - Preferências de preparo ou retirada de ingredientes (ex: "sem tomate", "sem cebola", "bem passado", "capricha no queijo", "deixar na portaria") DEVEM ser aceitas normalmente como observação para a cozinha no campo "complement" do item em "Enviar_pedido_gastrofood" (NUNCA diga que não é possível anotar observações de preparo!). Já inclusões de adicionais pagos ou acompanhamentos reais seguem rigorosamente as opções e "qtd_gratis" do passo.\n` +
                               `  - Antes de ir para a Etapa 2, confirme se todas as perguntas obrigatórias dos passos (ex: descartáveis, sabor do refrigerante, tamanho, ponto da carne) foram respondidas e esclareça caso falte algum acompanhamento grátis ou pago.\n` +
                               `  - REGRA CRÍTICA ANTI-PERDA DE CONTEXTO: É TERMINANTEMENTE PROIBIDO pedir CEP, rua, número da casa ou dados cadastrais se o cliente ainda NÃO escolheu pelo menos um item com suas opções obrigatórias definidas (a única exceção é se o próprio cliente perguntar quanto custa a taxa de entrega para o CEP dele).\n` +
                               `• ETAPA 2 — ENTREGA OU RETIRADA & ENDEREÇO ENXUTO (SOMENTE APÓS DEFINIR OS ITENS):\n` +
@@ -2941,9 +2946,10 @@ Responda APENAS com o ID exato do agente escolhido, sem markdown e sem aspas. Ex
                               `    * ${hasSavedAddress ? `O cliente JÁ POSSUI endereço salvo na ficha (${contactInfo.address_street}, Nº ${contactInfo.address_number} - CEP ${contactInfo.cep}). NÃO peça tudo de novo: apenas confirme com simpatia se a entrega será neste mesmo endereço!` : `Solicite de forma leve APENAS o CEP e o número da residência (NUNCA envie listas burocráticas pedindo rua, bairro, cidade e sobrenome de uma vez, pois com o CEP você consulta a rua automaticamente via "Consultar_cep"). Após obter CEP e número, pergunte apenas se há complemento/apartamento ou ponto de referência e salve via "Atualizar_endereco_contato".`}\n` +
                               `• ETAPA 3 — FORMA DE PAGAMENTO (OBRIGATÓRIA ANTES DO RESUMO):\n` +
                               `  - Pergunte a forma de pagamento (Pix, Cartão de Crédito, Cartão de Débito ou Dinheiro — se dinheiro, pergunte se precisa de troco).\n` +
-                              `• ETAPA 4 — RESUMO COMPLETO E CONFIRMAÇÃO EXPLÍCITA (E ENVIO ESTRUTURADO EM itemsCuston):\n` +
+                              `• ETAPA 4 — RESUMO COMPLETO, CONFIRMAÇÃO EXPLÍCITA E PAGAMENTO PIX (ENVIO ESTRUTURADO EM itemsCuston):\n` +
                               `  - Exiba o resumo organizado (Itens + Acompanhamentos/Sabores selecionados + Descartáveis, Endereço/Retirada, Forma de Pagamento, Taxa de Entrega e Total correto considerando "qtd_gratis") e aguarde o "sim/ok/pode confirmar" explícito antes de chamar "Enviar_pedido_gastrofood".\n` +
-                              `  - Ao chamar "Enviar_pedido_gastrofood", envie TODAS as opções de passos em "itemsCuston" com os códigos/passos retornados por "Consultar_adicionais_produto", mantendo em "complement" apenas observações livres (ex: "sem tomate, com bastante queijo, deixar na portaria").\n`;
+                              `  - Ao chamar "Enviar_pedido_gastrofood", envie TODAS as opções de passos em "itemsCuston" com os códigos/passos retornados por "Consultar_adicionais_produto", mantendo em "complement" apenas observações livres (ex: "sem tomate, com bastante queijo, deixar na portaria").\n` +
+                              `  - Ao gerar PIX automático com "Iniciar_transacao_pix", se a ferramenta retornar "precisa_cpf: true", peça educadamente o CPF do cliente (apenas dígitos) e acione "Iniciar_transacao_pix" novamente informando "cpf_pagador".\n`;
             }
 
             if (isFirstMessage) {
@@ -3279,7 +3285,7 @@ Responda APENAS com o ID exato do agente escolhido, sem markdown e sem aspas. Ex
                 },
                 {
                     name: "Iniciar_transacao_pix",
-                    description: "Gera e busca o QR Code e o copia e cola do PIX para o pagamento de um pedido no Gastrofood.",
+                    description: "Gera e busca o QR Code e o copia e cola do PIX para o pagamento de um pedido no Gastrofood. Requer CPF/CNPJ válido do pagador (fornecido no parâmetro cpf_pagador ou previamente salvo na ficha do cliente).",
                     parameters: {
                         type: "OBJECT",
                         properties: {
@@ -3290,6 +3296,18 @@ Responda APENAS com o ID exato do agente escolhido, sem markdown e sem aspas. Ex
                             id_estab: {
                                 type: "STRING",
                                 description: "O ID do estabelecimento/loja no formato UUID (opcional, usa o padrão se omitido)."
+                            },
+                            cpf_pagador: {
+                                type: "STRING",
+                                description: "CPF (11 dígitos) ou CNPJ (14 dígitos) válido do pagador exigido pelo gateway PIX quando o cliente ainda não possui documento salvo."
+                            },
+                            nome_pagador: {
+                                type: "STRING",
+                                description: "Nome do cliente pagador (opcional)."
+                            },
+                            email_pagador: {
+                                type: "STRING",
+                                description: "E-mail do cliente pagador (opcional)."
                             }
                         },
                         required: ["id_pedido"]
@@ -3348,6 +3366,11 @@ Responda APENAS com o ID exato do agente escolhido, sem markdown e sem aspas. Ex
 
             const toolExecutionHistory = [];
             const executedToolSignatures = new Set();
+            const sessionOrderContext = {
+                lastOrderCpf: null,
+                lastOrderCustomerName: null,
+                validatedGastrofoodCpf: null
+            };
 
             // Executa com Function Calling Loop
             while (keepLooping && loopCount < MAX_LOOPS) {
@@ -3787,6 +3810,10 @@ Responda APENAS com o ID exato do agente escolhido, sem markdown e sem aspas. Ex
                                         });
 
                                         const data = resData.data || resData;
+                                        const fetchedDoc = String(data?.CpfCnpj || data?.cpfCnpj || data?.cpf || '').replace(/\D/g, '');
+                                        if (fetchedDoc) {
+                                            sessionOrderContext.validatedGastrofoodCpf = fetchedDoc;
+                                        }
                                         functionResult = {
                                             cadastrado: data.cadastrado !== false && !data.erro && (!!data.id || !!data.IdUsuario || !!data.NomeRazao || !!data.nome || !!data.customer || data.status === 200),
                                             dados_cadastro: data
@@ -3923,6 +3950,12 @@ Responda APENAS com o ID exato do agente escolhido, sem markdown e sem aspas. Ex
                                             const sucessoLogico = (response.status === 200 || response.status === 201) && (resData && resData.result !== false);
 
                                             if (sucessoLogico) {
+                                                if (finalPayload?.jsOrder?.cpf) {
+                                                    sessionOrderContext.lastOrderCpf = finalPayload.jsOrder.cpf;
+                                                }
+                                                if (finalPayload?.jsOrder?.customer?.NomeRazao) {
+                                                    sessionOrderContext.lastOrderCustomerName = finalPayload.jsOrder.customer.NomeRazao;
+                                                }
                                                 const avisoImpressaoDisparado = this.triggerAvisoImpressaoPedidoIA({
                                                     tenantId,
                                                     conversationId,
@@ -4125,74 +4158,84 @@ Responda APENAS com o ID exato do agente escolhido, sem markdown e sem aspas. Ex
                                     const pixUrl = companySettings.pagamento_pix_json_url || PAGAMENTO_PIX_DEFAULT_URL;
                                     const pixToken = companySettings.pagamento_pix_json_token || GASTROFOOD_DEFAULT_TOKEN;
                                     const pixPayloadTemplate = companySettings.pagamento_pix_json_payload || DEFAULT_PAGAMENTO_PIX_PAYLOAD;
+                                    const effectiveStoreId = companySettings?.gfood_store_id || idEstab || "6D0187D9-E905-4479-AB15-B908F0222607";
 
-                                    let bodyObj = {
-                                        APaymentData: {},
-                                        AIdEstab: companySettings.gfood_store_id || idEstab || "6D0187D9-E905-4479-AB15-B908F0222607",
-                                        AIdPedido: idPedido
-                                    };
-
-                                    if (pixPayloadTemplate) {
-                                        try {
-                                            const parsed = typeof pixPayloadTemplate === 'string' ? JSON.parse(pixPayloadTemplate) : pixPayloadTemplate;
-                                            bodyObj = { ...parsed };
-                                            bodyObj.AIdPedido = idPedido;
-                                        } catch (e) {}
-                                    }
-                                    if (companySettings && companySettings.gfood_store_id) {
-                                        bodyObj = injectStoreId(bodyObj, companySettings.gfood_store_id);
-                                    } else if (idEstab) {
-                                        bodyObj = injectStoreId(bodyObj, idEstab);
-                                    }
-
-                                    const headers = { 'Content-Type': 'application/json' };
-                                    if (pixToken) {
-                                        headers['Authorization'] = pixToken.startsWith('Bearer ') ? pixToken : `Bearer ${pixToken}`;
-                                    }
-
-                                    console.log(`[AutomationWorker - Pagamento PIX] Iniciando transação PIX para pedido ${idPedido}...`);
-                                    logGastrofoodCall({
-                                        direction: 'request',
-                                        action: 'Iniciar Pix',
-                                        method: 'POST',
-                                        url: pixUrl,
-                                        payload: bodyObj
+                                    const builtPix = buildGastrofoodPixPayload({
+                                        idPedido,
+                                        storeId: effectiveStoreId,
+                                        cpfPagador: call.args.cpf_pagador,
+                                        nomePagador: call.args.nome_pagador || sessionOrderContext.lastOrderCustomerName,
+                                        emailPagador: call.args.email_pagador,
+                                        orderCpf: sessionOrderContext.lastOrderCpf,
+                                        validatedGastrofoodCpf: sessionOrderContext.validatedGastrofoodCpf,
+                                        contactInfo,
+                                        pixPayloadTemplate
                                     });
 
-                                    const response = await fetch(pixUrl, {
-                                        method: 'POST',
-                                        headers,
-                                        body: JSON.stringify(bodyObj)
-                                    });
-
-                                    if (response.ok) {
-                                        const resData = await response.json();
-                                        logGastrofoodCall({
-                                            direction: 'response',
-                                            action: 'Iniciar Pix',
-                                            method: 'POST',
-                                            url: pixUrl,
-                                            status: response.status,
-                                            response: resData
-                                        });
-
-                                        functionResult = {
-                                            sucesso: true,
-                                            status_http: response.status,
-                                            dados: resData.data || resData
-                                        };
+                                    if (!builtPix.ready) {
+                                        console.warn(`[AutomationWorker - Pagamento PIX] Pré-validação bloqueou chamada sem payer.identification (pedido ${idPedido}).`);
+                                        functionResult = builtPix.aiErrorResult;
                                     } else {
-                                        const errText = await response.text();
-                                        console.error(`[AutomationWorker - Pagamento PIX] Falha HTTP ao iniciar PIX (Status: ${response.status}). Detalhes: ${errText}`);
+                                        let bodyObj = injectStoreId(builtPix.bodyObj, effectiveStoreId);
+
+                                        if (contactInfo?.id && builtPix.cpfDigits && !contactInfo.document_number) {
+                                            contactInfo.document_number = builtPix.cpfDigits;
+                                            contactInfo.document_type = builtPix.docType;
+                                            supabase.from('contacts').update({
+                                                document_number: builtPix.cpfDigits,
+                                                document_type: builtPix.docType
+                                            }).eq('id', contactInfo.id).then(() => {}, () => {});
+                                        }
+
+                                        const headers = { 'Content-Type': 'application/json' };
+                                        if (pixToken) {
+                                            headers['Authorization'] = pixToken.startsWith('Bearer ') ? pixToken : `Bearer ${pixToken}`;
+                                        }
+
+                                        console.log(`[AutomationWorker - Pagamento PIX] Iniciando transação PIX para pedido ${idPedido}...`);
                                         logGastrofoodCall({
-                                            direction: 'error',
+                                            direction: 'request',
                                             action: 'Iniciar Pix',
                                             method: 'POST',
                                             url: pixUrl,
-                                            status: response.status,
-                                            error: errText
+                                            payload: bodyObj
                                         });
-                                        functionResult = { erro: `Erro ao iniciar transação PIX (Status: ${response.status})` };
+
+                                        const response = await fetch(pixUrl, {
+                                            method: 'POST',
+                                            headers,
+                                            body: JSON.stringify(bodyObj)
+                                        });
+
+                                        if (response.ok) {
+                                            const resData = await response.json();
+                                            logGastrofoodCall({
+                                                direction: 'response',
+                                                action: 'Iniciar Pix',
+                                                method: 'POST',
+                                                url: pixUrl,
+                                                status: response.status,
+                                                response: resData
+                                            });
+
+                                            functionResult = {
+                                                sucesso: true,
+                                                status_http: response.status,
+                                                dados: resData.data || resData
+                                            };
+                                        } else {
+                                            const errText = await response.text();
+                                            console.error(`[AutomationWorker - Pagamento PIX] Falha HTTP ao iniciar PIX (Status: ${response.status}). Detalhes: ${errText}`);
+                                            logGastrofoodCall({
+                                                direction: 'error',
+                                                action: 'Iniciar Pix',
+                                                method: 'POST',
+                                                url: pixUrl,
+                                                status: response.status,
+                                                error: errText
+                                            });
+                                            functionResult = classifyGastrofoodPixError(response.status, errText);
+                                        }
                                     }
                                 } catch (errPix) {
                                     console.error("[AutomationWorker - Pagamento PIX] Erro ao iniciar PIX:", errPix);
@@ -4200,7 +4243,7 @@ Responda APENAS com o ID exato do agente escolhido, sem markdown e sem aspas. Ex
                                         direction: 'error',
                                         action: 'Iniciar Pix',
                                         method: 'POST',
-                                        url: pixUrl,
+                                        url: companySettings.pagamento_pix_json_url || PAGAMENTO_PIX_DEFAULT_URL,
                                         error: errPix.message
                                     });
                                     functionResult = { erro: `Erro ao conectar-se ao serviço de pagamento PIX: ${errPix.message}` };
