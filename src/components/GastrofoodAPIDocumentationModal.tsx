@@ -34,6 +34,49 @@ const ZERO_VALUE_EXCEPTIONS = [
   'sachê', 'sache', 'canudo', 'talher', 'limão', 'limao', 'gelo', 'copo'
 ];
 
+function normalizeSearchTextFront(val?: string | null): string {
+  return String(val || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function getProductMinStepPrice(prodSteps: any[] = []): number {
+  let minOpt = 0;
+  for (const st of prodSteps) {
+    if (st?.ativo === false || !Array.isArray(st?.opcoes)) continue;
+    for (const op of st.opcoes) {
+      if (op?.ativo === false) continue;
+      const p = Number(op?.preco || 0);
+      if (p > 0 && (minOpt === 0 || p < minOpt)) {
+        minOpt = p;
+      }
+    }
+  }
+  return minOpt;
+}
+
+async function fetchAllTenantRowsClient(table: string, tenantId: string, onlyActive = false, orderCol?: string): Promise<any[]> {
+  const PAGE_SIZE = 1000;
+  const rows: any[] = [];
+  for (let from = 0; from < 20000; from += PAGE_SIZE) {
+    let query = supabase.from(table).select('*').eq('tenant_id', tenantId);
+    if (onlyActive) {
+      query = query.eq('ativo', true);
+    }
+    if (orderCol) {
+      query = query.order(orderCol, { ascending: true });
+    }
+    const { data, error } = await query.range(from, from + PAGE_SIZE - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    rows.push(...data);
+    if (data.length < PAGE_SIZE) break;
+  }
+  return rows;
+}
+
 function isLegitimateZeroValueItem(name: string, description?: string): boolean {
   const text = `${name || ''} ${description || ''}`.toLowerCase();
   return ZERO_VALUE_EXCEPTIONS.some(term => text.includes(term));
@@ -125,18 +168,13 @@ export const GastrofoodAPIDocumentationModal: React.FC<GastrofoodAPIDocumentatio
       const companyName = tenantInfo?.name || 'Nosso Restaurante';
       const linkCardapio = tenantInfo?.settings?.link_cardapio || 'https://cardapio.digital';
 
-      // 1. Buscar grupos, produtos, passos e opções no Supabase
-      const [gRes, pRes, passosRes, opRes] = await Promise.all([
-        supabase.from('cardapio_grupos').select('*').eq('tenant_id', tenantId).order('ordem', { ascending: true }),
-        supabase.from('cardapio_produtos').select('*').eq('tenant_id', tenantId),
-        supabase.from('cardapio_passos').select('*').eq('tenant_id', tenantId).eq('ativo', true),
-        supabase.from('cardapio_opcoes').select('*').eq('tenant_id', tenantId).eq('ativo', true)
+      // 1. Buscar grupos, produtos, passos e opções paginados no Supabase (evita corte padrão em 1000 linhas)
+      const [grupos, produtosRaw, passos, opcoes] = await Promise.all([
+        fetchAllTenantRowsClient('cardapio_grupos', tenantId, false, 'ordem'),
+        fetchAllTenantRowsClient('cardapio_produtos', tenantId, false),
+        fetchAllTenantRowsClient('cardapio_passos', tenantId, true),
+        fetchAllTenantRowsClient('cardapio_opcoes', tenantId, true)
       ]);
-
-      const grupos = gRes.data || [];
-      const produtosRaw = pRes.data || [];
-      const passos = passosRes.data || [];
-      const opcoes = opRes.data || [];
 
       // Mapeia opções por passo
       const opcoesByPasso = new Map<string, any[]>();
@@ -155,10 +193,13 @@ export const GastrofoodAPIDocumentationModal: React.FC<GastrofoodAPIDocumentatio
         });
       });
 
-      // Filtra produtos válidos (preço > 0 ou exceção legítima)
+      // Filtra produtos ativos e válidos (preço > 0, preço nos passos > 0 ou cortesia legítima)
       const validProdutos = produtosRaw.filter(p => {
+        if (p.ativo === false) return false;
         const price = Number(p.price || 0);
         if (price > 0) return true;
+        const minStepPrice = getProductMinStepPrice(passosByProduto.get(p.id) || []);
+        if (minStepPrice > 0) return true;
         return isLegitimateZeroValueItem(p.name, p.description);
       });
 
@@ -166,18 +207,27 @@ export const GastrofoodAPIDocumentationModal: React.FC<GastrofoodAPIDocumentatio
       let ragContext = `=== CARDÁPIO OFICIAL E PREÇOS: ${companyName.toUpperCase()} ===\n`;
       ragContext += `Link do Cardápio: ${linkCardapio}\n\n`;
 
+      const formatProdPriceLabel = (prod: any, prodSteps: any[]): string => {
+        const base = Number(prod.price || 0);
+        if (base > 0) return `R$ ${base.toFixed(2).replace('.', ',')}`;
+        const minStep = getProductMinStepPrice(prodSteps);
+        if (minStep > 0) return `A partir de R$ ${minStep.toFixed(2).replace('.', ',')}`;
+        return 'R$ 0,00';
+      };
+
       if (grupos.length > 0) {
         for (const grupo of grupos) {
           const catProds = validProdutos.filter(p => p.grupo_id === grupo.id);
           if (catProds.length === 0) continue;
 
-          ragContext += `[CATEGORIA: ${grupo.descricao.toUpperCase()}]\n`;
+          const grpTitle = String(grupo.descricao || grupo.name || 'Outros').toUpperCase();
+          ragContext += `[CATEGORIA: ${grpTitle}]\n`;
           for (const p of catProds) {
-            ragContext += `* PRODUTO: ${p.name.toUpperCase()} | R$ ${Number(p.price || 0).toFixed(2).replace('.', ',')}\n`;
+            const prodSteps = passosByProduto.get(p.id) || [];
+            ragContext += `* PRODUTO: ${String(p.name || '').toUpperCase()} | ${formatProdPriceLabel(p, prodSteps)}\n`;
             if (p.description) {
               ragContext += `  Descrição: ${p.description}\n`;
             }
-            const prodSteps = passosByProduto.get(p.id) || [];
             if (prodSteps.length > 0) {
               ragContext += `  Passos e Sabores/Opções:\n`;
               for (const st of prodSteps) {
@@ -196,13 +246,16 @@ export const GastrofoodAPIDocumentationModal: React.FC<GastrofoodAPIDocumentatio
       } else {
         ragContext += `[PRODUTOS]:\n`;
         for (const p of validProdutos) {
-          ragContext += `* PRODUTO: ${p.name.toUpperCase()} | R$ ${Number(p.price || 0).toFixed(2).replace('.', ',')}\n`;
-          if (p.description) ragContext += `  Descrição: ${p.description}\n`;
           const prodSteps = passosByProduto.get(p.id) || [];
+          ragContext += `* PRODUTO: ${String(p.name || '').toUpperCase()} | ${formatProdPriceLabel(p, prodSteps)}\n`;
+          if (p.description) ragContext += `  Descrição: ${p.description}\n`;
           if (prodSteps.length > 0) {
             for (const st of prodSteps) {
               if (st.opcoes && st.opcoes.length > 0) {
-                const optsText = st.opcoes.map((o: any) => `${o.descricao}`).join(', ');
+                const optsText = st.opcoes.map((o: any) => {
+                  const addP = Number(o.preco || 0);
+                  return `${o.descricao}${addP > 0 ? ` (+R$ ${addP.toFixed(2).replace('.', ',')})` : ''}`;
+                }).join(', ');
                 ragContext += `    - [${st.pergunta}]: ${optsText}\n`;
               }
             }
@@ -212,13 +265,13 @@ export const GastrofoodAPIDocumentationModal: React.FC<GastrofoodAPIDocumentatio
 
       setRagContextText(ragContext);
 
-      // 3. Identificar Itens com correspondência semântica/palavra-chave
-      const qLower = question.toLowerCase();
+      // 3. Identificar Itens com correspondência semântica/palavra-chave (accent-insensitive)
+      const qLower = normalizeSearchTextFront(question);
       const matches: any[] = [];
 
       validProdutos.forEach(p => {
-        const pName = (p.name || '').toLowerCase();
-        const pDesc = (p.description || '').toLowerCase();
+        const pName = normalizeSearchTextFront(p.name);
+        const pDesc = normalizeSearchTextFront(p.description);
         let isMatch = qLower.includes(pName) || pName.split(' ').some(w => w.length > 3 && qLower.includes(w));
         
         // Verifica se alguma opção/sabor do produto bate com a pergunta
@@ -226,7 +279,7 @@ export const GastrofoodAPIDocumentationModal: React.FC<GastrofoodAPIDocumentatio
         const matchedOptions: string[] = [];
         prodSteps.forEach(st => {
           st.opcoes?.forEach((o: any) => {
-            const opName = (o.descricao || '').toLowerCase();
+            const opName = normalizeSearchTextFront(o.descricao);
             if (qLower.includes(opName) || opName.split(' ').some((w: string) => w.length > 3 && qLower.includes(w))) {
               isMatch = true;
               matchedOptions.push(`${o.descricao} (Passo: ${st.pergunta})`);
@@ -234,11 +287,12 @@ export const GastrofoodAPIDocumentationModal: React.FC<GastrofoodAPIDocumentatio
           });
         });
 
-        if (isMatch || pDesc.includes(qLower)) {
+        if (isMatch || (qLower && pDesc.includes(qLower))) {
+          const displayPrice = Number(p.price || 0) > 0 ? Number(p.price) : getProductMinStepPrice(prodSteps);
           matches.push({
             id: p.id,
             name: p.name,
-            price: p.price,
+            price: displayPrice,
             description: p.description,
             matchedOptions: matchedOptions
           });

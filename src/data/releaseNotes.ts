@@ -712,6 +712,37 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.4.4',
+    date: '2026-11-25',
+    summary: 'Correção de PIX Automático (CPF/CNPJ do Pagador), Observações de Preparo GastroFood e Paginação Completa no Simulador do Cardápio',
+    notes: [
+      {
+        id: 'fix-gastrofood-pix-payer-identification-844',
+        category: 'fixes',
+        title: 'Correção do PIX Automático GastroFood (payer.identification / CPF do Pagador)',
+        description: 'Corrigida a integração Iniciar_transacao_pix no servidor para montar APaymentData.payer com validação de CPF/CNPJ, reaproveitamento automático do documento cadastrado, persistência em contacts e orientação clara à IA para solicitar o CPF quando ausente, eliminando falhas HTTP 500 ao gerar QR Code/Copia e Cola PIX.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      },
+      {
+        id: 'fix-gastrofood-doc-modal-pagination-844',
+        category: 'fixes',
+        title: 'Paginação Completa e Itens com Preço nos Passos no Simulador do Cardápio',
+        description: 'O modal de Documentação & Teste IA GastroFood agora pagina todas as opções do cardápio sem truncar no limite de 1.000 linhas do PostgREST, normaliza acentos na busca local e mantém produtos ativos cujo preço reside nos passos (ex: Refrigerante 600 ml, Refrigerante 2 L e Água 500 ml).',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      },
+      {
+        id: 'imp-ai-item-complement-prep-notes-844',
+        category: 'improvements',
+        title: 'Atendimento IA: Aceite Natural de Observações de Preparo no Campo complement',
+        description: 'Refinada a diretriz da Etapa 1 no motor de atendimento para confirmar naturalmente ajustes de preparo e retirada de ingredientes (ex: "sem tomate", "com bastante queijo") diretamente no campo complement do pedido GastroFood.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
+      }
+    ]
+  },
+  {
     version: '8.4.3',
     date: '2026-11-25',
     summary: 'Raio-X Clicável da Gaveta e Sangria Intermediária na Conferência de Caixa + Responsividade das Telas de Login + Aviso de Impressão nos Pedidos IA',

@@ -1,5 +1,5 @@
 {
-  "version": "8.4.3",
-  "buildDate": "2026-11-25T19:24:16.511Z",
-  "summary": "Raio-X Clicável da Gaveta e Sangria Intermediária na Conferência de Caixa + Responsividade das Telas de Login + Aviso de Impressão nos Pedidos IA"
+  "version": "8.4.4",
+  "buildDate": "2026-11-25T23:55:20.873Z",
+  "summary": "Correção de PIX Automático (CPF/CNPJ do Pagador), Observações de Preparo GastroFood e Paginação Completa no Simulador do Cardápio"
 }
