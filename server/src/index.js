@@ -676,15 +676,21 @@ async function runMigrations() {
             id text,
             tenant_id uuid NOT NULL,
             grupo_id text,
+            codigo text,
+            codigo_pdv text,
             name text NOT NULL,
             description text,
             price numeric(10,2) NOT NULL DEFAULT 0.00,
             image text,
             ativo boolean DEFAULT true,
+            tem_passos boolean DEFAULT false,
             created_at timestamp with time zone DEFAULT now(),
             PRIMARY KEY (tenant_id, id),
             FOREIGN KEY (tenant_id, grupo_id) REFERENCES cardapio_grupos(tenant_id, id) ON DELETE CASCADE
           );
+          ALTER TABLE cardapio_produtos ADD COLUMN IF NOT EXISTS codigo text;
+          ALTER TABLE cardapio_produtos ADD COLUMN IF NOT EXISTS codigo_pdv text;
+          ALTER TABLE cardapio_produtos ADD COLUMN IF NOT EXISTS tem_passos boolean DEFAULT false;
           ALTER TABLE cardapio_produtos ENABLE ROW LEVEL SECURITY;
           DROP POLICY IF EXISTS "Permitir tudo em cardapio_produtos" ON cardapio_produtos;
           CREATE POLICY "Permitir tudo em cardapio_produtos" ON cardapio_produtos FOR ALL USING (true) WITH CHECK (true);
@@ -697,12 +703,22 @@ async function runMigrations() {
             sub_titulo text,
             qtd_min integer DEFAULT 0,
             qtd_max integer DEFAULT 1,
+            qtd_free integer DEFAULT 0,
+            numero_passo integer DEFAULT 1,
+            tipo_calc_custom integer DEFAULT 0,
+            obrigatorio boolean DEFAULT false,
+            passo_adicionais boolean DEFAULT false,
             ordem integer DEFAULT 0,
             ativo boolean DEFAULT true,
             created_at timestamp with time zone DEFAULT now(),
             PRIMARY KEY (tenant_id, id),
             FOREIGN KEY (tenant_id, produto_id) REFERENCES cardapio_produtos(tenant_id, id) ON DELETE CASCADE
           );
+          ALTER TABLE cardapio_passos ADD COLUMN IF NOT EXISTS qtd_free integer DEFAULT 0;
+          ALTER TABLE cardapio_passos ADD COLUMN IF NOT EXISTS numero_passo integer DEFAULT 1;
+          ALTER TABLE cardapio_passos ADD COLUMN IF NOT EXISTS tipo_calc_custom integer DEFAULT 0;
+          ALTER TABLE cardapio_passos ADD COLUMN IF NOT EXISTS obrigatorio boolean DEFAULT false;
+          ALTER TABLE cardapio_passos ADD COLUMN IF NOT EXISTS passo_adicionais boolean DEFAULT false;
           ALTER TABLE cardapio_passos ENABLE ROW LEVEL SECURITY;
           DROP POLICY IF EXISTS "Permitir tudo em cardapio_passos" ON cardapio_passos;
           CREATE POLICY "Permitir tudo em cardapio_passos" ON cardapio_passos FOR ALL USING (true) WITH CHECK (true);
@@ -711,14 +727,22 @@ async function runMigrations() {
             id text,
             tenant_id uuid NOT NULL,
             passo_id text,
+            produto_opcao_id text,
+            codigo text,
+            codigo_pdv text,
             descricao text NOT NULL,
             preco numeric(10,2) NOT NULL DEFAULT 0.00,
             imagem text,
+            ordem integer DEFAULT 0,
             ativo boolean DEFAULT true,
             created_at timestamp with time zone DEFAULT now(),
             PRIMARY KEY (tenant_id, id),
             FOREIGN KEY (tenant_id, passo_id) REFERENCES cardapio_passos(tenant_id, id) ON DELETE CASCADE
           );
+          ALTER TABLE cardapio_opcoes ADD COLUMN IF NOT EXISTS produto_opcao_id text;
+          ALTER TABLE cardapio_opcoes ADD COLUMN IF NOT EXISTS codigo text;
+          ALTER TABLE cardapio_opcoes ADD COLUMN IF NOT EXISTS codigo_pdv text;
+          ALTER TABLE cardapio_opcoes ADD COLUMN IF NOT EXISTS ordem integer DEFAULT 0;
           ALTER TABLE cardapio_opcoes ENABLE ROW LEVEL SECURITY;
           DROP POLICY IF EXISTS "Permitir tudo em cardapio_opcoes" ON cardapio_opcoes;
           CREATE POLICY "Permitir tudo em cardapio_opcoes" ON cardapio_opcoes FOR ALL USING (true) WITH CHECK (true);

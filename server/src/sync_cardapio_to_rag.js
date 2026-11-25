@@ -1,13 +1,22 @@
 import { createClient } from '@supabase/supabase-js';
 import { pipeline } from './embeddings/pipeline.js';
+import {
+  shouldKeepCatalogProduct,
+  computeProductMinDisplayPrice
+} from './automation-worker/gastrofood-menu-helper.js';
 import fs from 'fs';
 import path from 'path';
 
-// Load env from parent directory
-const envPath = path.resolve('../.env');
-const env = fs.readFileSync(envPath, 'utf8');
-const supabaseUrl = env.match(/VITE_SUPABASE_URL=(.*)/)[1].trim().replace(/^"(.*)"$/, '$1');
-const serviceKey = env.match(/SUPABASE_SERVICE_ROLE_KEY=(.*)/)[1].trim().replace(/^"(.*)"$/, '$1');
+// Load env from workspace root or server root
+const envCandidates = [
+  path.resolve('../../.env'),
+  path.resolve('../.env'),
+  path.resolve('./.env')
+];
+const envPath = envCandidates.find(p => fs.existsSync(p));
+const env = envPath ? fs.readFileSync(envPath, 'utf8') : '';
+const supabaseUrl = process.env.VITE_SUPABASE_URL || env.match(/VITE_SUPABASE_URL=(.*)/)?.[1]?.trim().replace(/^"(.*)"$/, '$1');
+const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || env.match(/SUPABASE_SERVICE_ROLE_KEY=(.*)/)?.[1]?.trim().replace(/^"(.*)"$/, '$1');
 
 const supabase = createClient(supabaseUrl, serviceKey);
 
@@ -40,17 +49,6 @@ function splitTextIntoChunks(text, chunkSize = 150, overlap = 20) {
   return chunks;
 }
 
-const ZERO_VALUE_EXCEPTIONS = [
-  'catchup', 'ketchup', 'guardanapo', 'molho', 'maionese', 
-  'mostarda', 'barbecue', 'brinde', 'cortesia', 'adicional', 
-  'sachê', 'sache', 'canudo', 'talher', 'limão', 'limao', 'gelo', 'copo'
-];
-
-function isLegitimateZeroValueItem(name, description) {
-  const text = `${name || ''} ${description || ''}`.toLowerCase();
-  return ZERO_VALUE_EXCEPTIONS.some(term => text.includes(term));
-}
-
 async function run() {
   try {
     console.log("1. Fetching groups/categories, products, and steps from database...");
@@ -77,15 +75,24 @@ async function run() {
     // Fetch passos and opcoes
     const { data: dbPassos } = await supabase
       .from('cardapio_passos')
-      .select('id, produto_id, pergunta, sub_titulo')
+      .select('id, produto_id, pergunta, sub_titulo, qtd_min, qtd_max, qtd_free, obrigatorio, numero_passo, ativo')
       .eq('tenant_id', tenantId)
-      .eq('ativo', true);
+      .eq('ativo', true)
+      .range(0, 4999);
 
-    const { data: dbOpcoes } = await supabase
-      .from('cardapio_opcoes')
-      .select('id, passo_id, descricao, preco')
-      .eq('tenant_id', tenantId)
-      .eq('ativo', true);
+    const dbOpcoes = [];
+    for (let from = 0; from < 20000; from += 1000) {
+      const { data: chunkOpcoes, error: errOpChunk } = await supabase
+        .from('cardapio_opcoes')
+        .select('id, passo_id, descricao, preco, codigo, ativo')
+        .eq('tenant_id', tenantId)
+        .eq('ativo', true)
+        .range(from, from + 999);
+      if (errOpChunk) throw errOpChunk;
+      if (!chunkOpcoes || chunkOpcoes.length === 0) break;
+      dbOpcoes.push(...chunkOpcoes);
+      if (chunkOpcoes.length < 1000) break;
+    }
 
     const opcoesByPasso = new Map();
     if (dbOpcoes) {
@@ -106,12 +113,8 @@ async function run() {
       });
     }
 
-    // Filter zero price items
-    const validProducts = (products || []).filter(p => {
-      const price = Number(p.price || 0);
-      if (price > 0) return true;
-      return isLegitimateZeroValueItem(p.name, p.description);
-    });
+    // Filter zero price items ONLY when they also have zero steps & are not courtesy items
+    const validProducts = (products || []).filter(p => shouldKeepCatalogProduct(p, passosByProduto.get(p.id) || []));
 
     console.log(`Fetched ${categories.length} categories and ${validProducts.length} valid products.`);
 
@@ -119,21 +122,29 @@ async function run() {
     let cardapioText = `LINK DO CARDÁPIO DIGITAL: https://www.burguerplus.com.br\n\n=== MENU DE PRODUTOS COMPLETO BURGUER PLUS ===\n\n`;
 
     const formatProductRAG = (p) => {
+      const productSteps = passosByProduto.get(p.id) || [];
+      const minPrice = computeProductMinDisplayPrice(p, productSteps);
+      const basePrice = parseFloat(p.price || 0);
       let itemStr = `${p.name.toUpperCase()}\n`;
       if (p.description) {
         itemStr += `Descrição: ${p.description}\n`;
       }
-      itemStr += `Preço: R$ ${parseFloat(p.price || 0).toFixed(2).replace('.', ',')}\n`;
-      
-      const productSteps = passosByProduto.get(p.id) || [];
+      itemStr += basePrice === 0 && minPrice > 0
+        ? `Preço: A partir de R$ ${minPrice.toFixed(2).replace('.', ',')}\n`
+        : `Preço: R$ ${basePrice.toFixed(2).replace('.', ',')}\n`;
+
       if (productSteps.length > 0) {
         itemStr += `Opções, Sabores e Adicionais:\n`;
         for (const st of productSteps) {
           if (st.opcoes && st.opcoes.length > 0) {
+            const tags = [];
+            if (st.obrigatorio || (st.qtd_min || 0) > 0) tags.push('OBRIGATÓRIO');
+            if ((st.qtd_free || 0) > 0) tags.push(`${st.qtd_free} grátis`);
+            const tagSuffix = tags.length > 0 ? ` (${tags.join(', ')})` : '';
             for (const op of st.opcoes) {
               const addPrice = Number(op.preco || 0);
-              const priceTag = addPrice > 0 ? ` (+R$ ${addPrice.toFixed(2).replace('.', ',')})` : '';
-              itemStr += `  - [${st.pergunta}] ${op.descricao}${priceTag}\n`;
+              const priceTag = addPrice > 0 ? ` (${basePrice === 0 ? 'R$' : '+R$'} ${addPrice.toFixed(2).replace('.', ',')})` : '';
+              itemStr += `  - [${st.pergunta || st.sub_titulo}${tagSuffix}] ${op.descricao}${priceTag}\n`;
             }
           }
         }

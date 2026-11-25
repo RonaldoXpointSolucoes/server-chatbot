@@ -20,6 +20,20 @@ import {
   DEFAULT_HUMAN_CONVERSATION_WINDOW_MS,
   fetchRecentHumanConversationGuard
 } from './human-pause.js';
+import {
+  normalizeSearchText,
+  parseGastrofoodStepsResponse,
+  shouldKeepCatalogProduct,
+  computeProductMinDisplayPrice,
+  searchCatalogAndSubitems,
+  formatStepsForAITool,
+  resolveAndNormalizeGastrofoodOrder
+} from './gastrofood-menu-helper.js';
+import {
+  buildOrderReviewPrinterMessage,
+  extractGastrofoodOrderMeta,
+  dispatchAvisoImpressao
+} from './aviso-impressao-helper.js';
 
 const tenantStorage = new AsyncLocalStorage();
 
@@ -282,13 +296,25 @@ function injectStoreId(payloadObj, storeId) {
     return clone;
 }
 
-function normalizeGastrofoodPayload(payload, defaultStoreId) {
-    if (!payload || typeof payload !== 'object') return payload;
+function normalizeGastrofoodPayload(payload, defaultStoreId, catalog = null) {
+    return normalizeGastrofoodPayloadWithValidation(payload, defaultStoreId, catalog).payload;
+}
 
-    let jsOrder = payload.jsOrder;
+function normalizeGastrofoodPayloadWithValidation(payload, defaultStoreId, catalog = null) {
+    if (!payload || typeof payload !== 'object') return { payload, missingMandatoryWarnings: [] };
+
+    let resolvedSource = payload;
+    let missingMandatoryWarnings = [];
+    if (catalog && Array.isArray(catalog.produtos) && catalog.produtos.length > 0) {
+        const preResolved = resolveAndNormalizeGastrofoodOrder(payload, catalog, defaultStoreId);
+        resolvedSource = preResolved.payload || payload;
+        missingMandatoryWarnings = preResolved.missingMandatoryWarnings || [];
+    }
+
+    let jsOrder = resolvedSource.jsOrder;
     if (!jsOrder) {
-        if (payload.items || payload.subTotal || payload.total || payload.client) {
-            jsOrder = { ...payload };
+        if (resolvedSource.items || resolvedSource.subTotal || resolvedSource.total || resolvedSource.client) {
+            jsOrder = { ...resolvedSource };
         } else {
             jsOrder = {};
         }
@@ -304,7 +330,6 @@ function normalizeGastrofoodPayload(payload, defaultStoreId) {
     const normalizedItems = rawItems.map(item => {
         const price = Number(item.price || item.unitaryPrice || item.unitary || 0);
         const amount = Number(item.amount || item.quantity || item.qtd || 1);
-        calculatedSubTotal += price * amount;
 
         const rawCustom = item.itemsCuston || item.customItems || item.adicionais || [];
         const normalizedCustom = rawCustom.map(c => {
@@ -316,8 +341,8 @@ function normalizeGastrofoodPayload(payload, defaultStoreId) {
             const cleanFkPasso = rawFkPasso.includes('_') ? rawFkPasso.split('_')[0] : rawFkPasso;
 
             return {
-                code: String(cleanCode).slice(0, 20),
-                codePdv: String(c.codePdv || cleanCode || "C").slice(0, 20),
+                code: String(cleanCode).slice(0, 40),
+                codePdv: String(c.codePdv || cleanCode || "C").slice(0, 40),
                 name: String(c.name || "").slice(0, 60),
                 amount: Number(c.amount || c.quantity || 1),
                 price: Number(c.price || 0),
@@ -327,9 +352,12 @@ function normalizeGastrofoodPayload(payload, defaultStoreId) {
             };
         });
 
+        const customExtrasSum = normalizedCustom.reduce((sum, c) => sum + (Number(c.price || 0) * Number(c.amount || 1)), 0);
+        calculatedSubTotal += (price + customExtrasSum) * amount;
+
         return {
-            code: String(item.code || item.id || "1").slice(0, 20),
-            codePdv: String(item.codePdv || item.code || item.id || "001489").slice(0, 20),
+            code: String(item.code || item.id || "1").slice(0, 40),
+            codePdv: String(item.codePdv || item.code || item.id || "001489").slice(0, 40),
             name: String(item.name || "").slice(0, 100),
             amount: amount,
             unitary: String(item.unitary || "UN").slice(0, 10),
@@ -340,9 +368,9 @@ function normalizeGastrofoodPayload(payload, defaultStoreId) {
     });
 
     const txDelivery = Number(jsOrder.txDelivery !== undefined ? jsOrder.txDelivery : (jsOrder.deliveryTax !== undefined ? jsOrder.deliveryTax : 0));
-    const subTotal = Number(jsOrder.subTotal || calculatedSubTotal || 0);
+    const subTotal = catalog ? calculatedSubTotal : Number(jsOrder.subTotal || calculatedSubTotal || 0);
     const discount = Number(jsOrder.discount || 0);
-    const total = Number(jsOrder.total || (subTotal + txDelivery - discount));
+    const total = catalog ? Number(Math.max(0, subTotal + txDelivery - discount).toFixed(2)) : Number(jsOrder.total || (subTotal + txDelivery - discount));
     const received = Number(jsOrder.received || total || 0);
 
     const client = jsOrder.client || {};
@@ -407,25 +435,28 @@ function normalizeGastrofoodPayload(payload, defaultStoreId) {
     if (rawPagto.length > 30) rawPagto = rawPagto.slice(0, 30);
 
     return {
-        AGuidEstab: storeId,
-        AIdEstab: storeId,
-        jsOrder: {
-            module: Number(jsOrder.module !== undefined ? jsOrder.module : 1),
-            fkCustomer: normalizedCustomer.IdUsuario,
-            fkStore: storeId,
-            subTotal: subTotal,
-            received: received,
-            txDelivery: txDelivery,
-            discount: discount,
-            cpf: String(jsOrder.cpf || "").replace(/\D/g, '').slice(0, 14),
-            pagto: rawPagto,
-            address: normalizedAddress,
-            items: normalizedItems,
-            customer: normalizedCustomer,
-            custumer: normalizedCustomer,
-            origin: Number(jsOrder.origin !== undefined ? jsOrder.origin : 2),
-            estimatedDeliveryInMinutes: String(jsOrder.estimatedDeliveryInMinutes || "30 mins").slice(0, 20),
-            total: total
+        missingMandatoryWarnings,
+        payload: {
+            AGuidEstab: storeId,
+            AIdEstab: storeId,
+            jsOrder: {
+                module: Number(jsOrder.module !== undefined ? jsOrder.module : 1),
+                fkCustomer: normalizedCustomer.IdUsuario,
+                fkStore: storeId,
+                subTotal: Number(Number(subTotal).toFixed(2)),
+                received: Number(Number(received).toFixed(2)),
+                txDelivery: Number(Number(txDelivery).toFixed(2)),
+                discount: Number(Number(discount).toFixed(2)),
+                cpf: String(jsOrder.cpf || "").replace(/\D/g, '').slice(0, 14),
+                pagto: rawPagto,
+                address: normalizedAddress,
+                items: normalizedItems,
+                customer: normalizedCustomer,
+                custumer: normalizedCustomer,
+                origin: Number(jsOrder.origin !== undefined ? jsOrder.origin : 2),
+                estimatedDeliveryInMinutes: String(jsOrder.estimatedDeliveryInMinutes || "30 mins").slice(0, 20),
+                total: Number(Number(total).toFixed(2))
+            }
         }
     };
 }
@@ -566,6 +597,262 @@ function extractGastrofoodProductsAndGroups(parsed) {
     return { produtos, grupos };
 }
 
+function resolveGastrofoodStepsUrl(companySettings) {
+    const rawUrl = String(companySettings?.cardapio_json_url || CARDAPIO_DEFAULT_URL || '').trim();
+    if (!rawUrl) return `${GASTROFOOD_BASE_URL}/v6/server/nuvem/ProdutoCardapioService/ProdutoComPassos`;
+    if (rawUrl.includes('/ProdutoPdvService/GetCardapioCompleto')) {
+        return rawUrl.replace('/ProdutoPdvService/GetCardapioCompleto', '/ProdutoCardapioService/ProdutoComPassos');
+    }
+    try {
+        const urlObj = new URL(rawUrl);
+        urlObj.pathname = '/v6/server/nuvem/ProdutoCardapioService/ProdutoComPassos';
+        return urlObj.toString();
+    } catch (e) {
+        return rawUrl.replace(/\/v6\/server\/nuvem\/.*$/, '/v6/server/nuvem/ProdutoCardapioService/ProdutoComPassos');
+    }
+}
+
+async function fetchAllTenantRows(table, selectCols, tenantId, { onlyActive = false } = {}) {
+    const PAGE_SIZE = 1000;
+    const allRows = [];
+    for (let from = 0; from < 20000; from += PAGE_SIZE) {
+        let query = supabase
+            .from(table)
+            .select(selectCols)
+            .eq('tenant_id', tenantId);
+        if (onlyActive) {
+            query = query.or('ativo.eq.true,ativo.is.null');
+        }
+        const { data, error } = await query.range(from, from + PAGE_SIZE - 1);
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        allRows.push(...data);
+        if (data.length < PAGE_SIZE) break;
+    }
+    return allRows;
+}
+
+async function loadTenantPassosMap(tenantId) {
+    const passosMap = new Map();
+    try {
+        const [dbPassos, dbOpcoes] = await Promise.all([
+            fetchAllTenantRows('cardapio_passos', '*', tenantId, { onlyActive: true }),
+            fetchAllTenantRows('cardapio_opcoes', '*', tenantId, { onlyActive: true })
+        ]);
+
+        const opcoesByPasso = new Map();
+        for (const opt of dbOpcoes) {
+            if (opt.ativo === false) continue;
+            if (!opcoesByPasso.has(opt.passo_id)) opcoesByPasso.set(opt.passo_id, []);
+            opcoesByPasso.get(opt.passo_id).push(opt);
+        }
+
+        for (const list of opcoesByPasso.values()) {
+            list.sort((a, b) => (Number(a.ordem ?? 0) - Number(b.ordem ?? 0)) || String(a.descricao || '').localeCompare(String(b.descricao || '')));
+        }
+
+        for (const ps of dbPassos) {
+            if (ps.ativo === false || !ps.produto_id) continue;
+            if (!passosMap.has(ps.produto_id)) passosMap.set(ps.produto_id, []);
+            passosMap.get(ps.produto_id).push({
+                ...ps,
+                opcoes: opcoesByPasso.get(ps.id) || []
+            });
+        }
+
+        for (const list of passosMap.values()) {
+            list.sort((a, b) => (Number(a.numero_passo ?? a.ordem ?? 0) - Number(b.numero_passo ?? b.ordem ?? 0)));
+        }
+    } catch (err) {
+        console.warn(`[CardapioPassos] Aviso ao carregar mapa de passos/opções do tenant ${tenantId}:`, err.message);
+    }
+    return passosMap;
+}
+
+async function fetchAndPersistProductStepsJIT(tenantId, companySettings, product, cache = null, { logCalls = true } = {}) {
+    if (!product || !product.id || !companySettings?.cardapio_json_url) return [];
+    const stepsUrl = resolveGastrofoodStepsUrl(companySettings);
+    const cardapioToken = companySettings.cardapio_json_token || GASTROFOOD_DEFAULT_TOKEN;
+    const normId = gastrofoodCache.normalizeId(product.id);
+
+    let stepsPayload = { AIdProduto: product.id };
+    if (companySettings?.gfood_store_id) {
+        stepsPayload = injectStoreId(stepsPayload, companySettings.gfood_store_id);
+    }
+
+    if (logCalls) {
+        logGastrofoodCall({
+            direction: 'request',
+            action: 'Consultar Adicionais (JIT)',
+            method: 'POST',
+            url: stepsUrl,
+            payload: stepsPayload,
+            tenantId
+        });
+    }
+
+    const headers = { 'Content-Type': 'application/json' };
+    if (cardapioToken) {
+        headers['Authorization'] = cardapioToken.startsWith('Bearer ') ? cardapioToken : `Bearer ${cardapioToken}`;
+    }
+
+    const resSteps = await fetch(stepsUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(stepsPayload),
+        signal: AbortSignal.timeout(20000)
+    });
+
+    if (!resSteps.ok) {
+        const errText = await resSteps.text().catch(() => '');
+        if (logCalls) {
+            logGastrofoodCall({
+                direction: 'error',
+                action: 'Consultar Adicionais (JIT)',
+                method: 'POST',
+                url: stepsUrl,
+                status: resSteps.status,
+                error: errText,
+                tenantId
+            });
+        }
+        if ((resSteps.status === 404 || resSteps.status === 400) && normId) {
+            gastrofoodCache.markProductStepsSynced(tenantId, normId, false, 0);
+        }
+        return [];
+    }
+
+    const stepsData = await resSteps.json();
+    if (logCalls) {
+        logGastrofoodCall({
+            direction: 'response',
+            action: 'Consultar Adicionais (JIT)',
+            method: 'POST',
+            url: stepsUrl,
+            status: resSteps.status,
+            response: stepsData,
+            tenantId
+        });
+    }
+
+    const { productMeta, passos } = parseGastrofoodStepsResponse(stepsData, product.id);
+    const hasSteps = passos.length > 0;
+    const shouldKeep = shouldKeepCatalogProduct(product, passos);
+
+    const productUpsertRow = {
+        id: product.id,
+        tenant_id: tenantId,
+        grupo_id: product.grupo_id || null,
+        codigo: (productMeta?.codigo || product.codigo || '').trim() || null,
+        codigo_pdv: (productMeta?.codigo_pdv || product.codigo_pdv || '').trim() || null,
+        name: product.name || productMeta?.name || 'Produto',
+        description: product.description ?? null,
+        price: Number(product.price ?? productMeta?.price ?? 0),
+        image: product.image ?? null,
+        ativo: shouldKeep,
+        tem_passos: hasSteps
+    };
+
+    const { error: prodMetaErr } = await supabase
+        .from('cardapio_produtos')
+        .upsert([productUpsertRow], { onConflict: 'tenant_id,id' });
+    if (prodMetaErr) {
+        console.warn(`[Gastrofood/Sync] Aviso ao atualizar metadados do produto ${product.id}:`, prodMetaErr.message);
+    }
+
+    if (productMeta?.codigo && !product.codigo) product.codigo = productMeta.codigo;
+    if (productMeta?.codigo_pdv && !product.codigo_pdv) product.codigo_pdv = productMeta.codigo_pdv;
+    product.ativo = shouldKeep;
+    product.tem_passos = hasSteps;
+
+    if (hasSteps) {
+        if (normId) {
+            await supabase
+                .from('cardapio_passos')
+                .delete()
+                .eq('tenant_id', tenantId)
+                .eq('id', `no_steps_${normId}`)
+                .catch(() => {});
+        }
+
+        const passosToUpsert = passos.map((ps, idx) => ({
+            id: ps.id,
+            tenant_id: tenantId,
+            produto_id: product.id,
+            pergunta: ps.pergunta,
+            sub_titulo: ps.sub_titulo,
+            qtd_min: ps.qtd_min,
+            qtd_max: ps.qtd_max,
+            qtd_free: ps.qtd_free,
+            numero_passo: ps.numero_passo,
+            tipo_calc_custom: ps.tipo_calc_custom,
+            obrigatorio: ps.obrigatorio,
+            passo_adicionais: ps.passo_adicionais,
+            ordem: ps.ordem ?? idx,
+            ativo: true
+        }));
+
+        const { error: stepErr } = await supabase
+            .from('cardapio_passos')
+            .upsert(passosToUpsert, { onConflict: 'tenant_id,id' });
+        if (stepErr) {
+            console.error(`[Gastrofood/Sync] Erro ao gravar passos do produto ${product.id}:`, stepErr.message);
+        } else {
+            const opcoesToUpsert = [];
+            for (const ps of passos) {
+                for (const opt of ps.opcoes) {
+                    opcoesToUpsert.push({
+                        id: opt.id,
+                        tenant_id: tenantId,
+                        passo_id: ps.id,
+                        produto_opcao_id: opt.produto_opcao_id || null,
+                        codigo: opt.codigo || null,
+                        codigo_pdv: opt.codigo_pdv || null,
+                        descricao: opt.descricao,
+                        preco: opt.preco,
+                        imagem: opt.imagem || null,
+                        ordem: opt.ordem ?? 0,
+                        ativo: true
+                    });
+                }
+            }
+            if (opcoesToUpsert.length > 0) {
+                const { error: optErr } = await supabase
+                    .from('cardapio_opcoes')
+                    .upsert(opcoesToUpsert, { onConflict: 'tenant_id,id' });
+                if (optErr) {
+                    console.error(`[Gastrofood/Sync] Erro ao gravar opções do produto ${product.id}:`, optErr.message);
+                }
+            }
+            if (normId) gastrofoodCache.markProductStepsSynced(tenantId, normId, true, passos.length);
+            if (cache && cache.adicionais instanceof Map) {
+                cache.adicionais.set(product.id, passos);
+            }
+        }
+    } else {
+        if (normId) {
+            const { error: dummyErr } = await supabase
+                .from('cardapio_passos')
+                .upsert({
+                    id: `no_steps_${normId}`,
+                    tenant_id: tenantId,
+                    produto_id: product.id,
+                    pergunta: 'Nenhum Adicional',
+                    ativo: false
+                }, { onConflict: 'tenant_id,id' });
+            if (dummyErr) {
+                console.warn(`[Gastrofood/Sync] Aviso ao gravar dummyPasso do produto ${product.id}:`, dummyErr.message);
+            }
+            gastrofoodCache.markProductStepsSynced(tenantId, normId, false, 0);
+        }
+        if (cache && cache.adicionais instanceof Map) {
+            cache.adicionais.set(product.id, []);
+        }
+    }
+
+    return passos;
+}
+
 async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) {
     return tenantStorage.run(tenantId, async () => {
         const now = Date.now();
@@ -616,33 +903,36 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
 
     let apiAttempted = false;
 
-    // Se origem for 'supabase', tenta primeiro carregar do Supabase
+    // Se origem for 'supabase', tenta primeiro carregar do Supabase (incluindo passos e subitens pré-carregados)
     if (effectiveCardapioOrigem === 'supabase') {
         try {
             console.log(`[CardapioCache] Buscando do Supabase para o tenant ${tenantId}...`);
-            const { data: dbProdutos, error: errProd } = await supabase
-                .from('cardapio_produtos')
-                .select('*')
-                .eq('tenant_id', tenantId)
-                .or('ativo.eq.true,ativo.is.null');
+            const dbProdutos = await fetchAllTenantRows('cardapio_produtos', '*', tenantId, { onlyActive: true });
                 
-            if (errProd) throw errProd;
-            
             if (dbProdutos && dbProdutos.length > 0) {
-                const { data: dbGrupos } = await supabase
-                    .from('cardapio_grupos')
-                    .select('*')
-                    .eq('tenant_id', tenantId)
-                    .or('ativo.eq.true,ativo.is.null');
+                const [dbGrupos, passosMap] = await Promise.all([
+                    fetchAllTenantRows('cardapio_grupos', '*', tenantId, { onlyActive: true }),
+                    loadTenantPassosMap(tenantId)
+                ]);
                     
                 cache = {
                     produtos: dbProdutos,
                     grupos: dbGrupos || [],
-                    adicionais: new Map(), // produtoId -> passos
+                    adicionais: passosMap,
                     timestamp: now,
                     origem: 'supabase'
                 };
                 cardapioInMemoryCache.set(cacheKey, cache);
+
+                if (passosMap.size === 0 && companySettings?.cardapio_json_url) {
+                    autoHealAndIndexCardapio(tenantId, companySettings, {
+                        grupos: dbGrupos || [],
+                        produtos: dbProdutos
+                    }).catch(err => {
+                        console.error(`[CardapioCache - AutoHealing] Falha ao popular passos em background para ${tenantId}:`, err.message);
+                    });
+                }
+
                 return cache;
             }
         } catch (dbErr) {
@@ -708,7 +998,6 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
                                 break;
                             }
 
-                            // API retornou 200 OK com payload vazio (0 produtos configurados no ERP)
                             apiResponse = parsed;
                             logGastrofoodCall({
                                 direction: 'response',
@@ -719,7 +1008,6 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
                                 response: parsed
                             });
 
-                            // Se houver um identificador alternativo que não foi usado, tenta mais 1 vez com ele após 2s de delay
                             const altId = companySettings?.gfood_guid || companySettings?.gfood_store_id;
                             if (attempt === 1 && altId && bodyObj.AGuidEstab !== altId && bodyObj.AIdStore !== altId) {
                                 bodyObj = injectStoreId(bodyObj, altId);
@@ -760,6 +1048,8 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
                             id: String(p.id || p.code || p.Id || p.Code || p.codigo || ''),
                             tenant_id: tenantId,
                             grupo_id: p.groupId || p.grupo_id || p.GrupoId || p.grupoId || null,
+                            codigo: String(p.code || p.codigo || p.Codigo || '').trim() || null,
+                            codigo_pdv: String(p.externalCode || p.codigoPdv || p.CodigoPdv || '').trim() || null,
                             name: p.name || p.nome || p.Name || p.descricao || p.description || '',
                             description: p.description || p.descricao || p.Description || null,
                             price: Number(p.price || p.preco || p.Price || p.Preco || p.valor || 0),
@@ -774,17 +1064,18 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
                             ordem: idx,
                             ativo: g.active !== false && g.ativo !== false && g.Active !== false
                         }));
+
+                        const passosMap = await loadTenantPassosMap(tenantId);
                         
                         cache = {
                             produtos: mappedProdutos,
                             grupos: mappedGrupos,
-                            adicionais: new Map(),
+                            adicionais: passosMap,
                             timestamp: now,
                             origem: cardapioOrigem === 'api' ? 'api_direta' : 'api_fallback'
                         };
                         cardapioInMemoryCache.set(cacheKey, cache);
                         
-                        // Atualiza last_cardapio_sync_time no Supabase para persistir a consulta
                         const updatedSettings = {
                             ...companySettings,
                             last_cardapio_sync_time: new Date().toISOString()
@@ -803,15 +1094,12 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
                                 gastrofoodCache.markCardapioSynced(tenantId);
                             });
                         
-                        // Dispara Auto-Healing em background se a origem geral do tenant permitir ou for o fluxo fallback
-                        if (cardapioOrigem !== 'api') {
-                            autoHealAndIndexCardapio(tenantId, companySettings, {
-                                grupos: mappedGrupos,
-                                produtos: mappedProdutos
-                            }).catch(err => {
-                                console.error(`[CardapioCache - AutoHealing] Falha no background sync para o tenant ${tenantId}:`, err);
-                            });
-                        }
+                        autoHealAndIndexCardapio(tenantId, companySettings, {
+                            grupos: mappedGrupos,
+                            produtos: mappedProdutos
+                        }).catch(err => {
+                            console.error(`[CardapioCache - AutoHealing] Falha no background sync para o tenant ${tenantId}:`, err);
+                        });
                         
                         return cache;
                     }
@@ -831,7 +1119,6 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
 
     // Fallback de Resiliência: se a API foi consultada mas falhou ou retornou 0 produtos:
     if (apiAttempted && !cache) {
-        // 1. STALE-WHILE-REVALIDATE: Se já tínhamos um cardápio válido em cache antes, mantemos ele ativo!
         if (previousValidCache) {
             previousValidCache.timestamp = now;
             previousValidCache.origem = 'stale_while_revalidate';
@@ -843,23 +1130,18 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
         // 2. Fallback para o Supabase local
         try {
             console.log(`[CardapioCache - Fallback Resiliência] API não retornou produtos válidos. Tentando resgatar cardápio do Supabase local...`);
-            const { data: dbProdutos } = await supabase
-                .from('cardapio_produtos')
-                .select('*')
-                .eq('tenant_id', tenantId)
-                .or('ativo.eq.true,ativo.is.null');
+            const dbProdutos = await fetchAllTenantRows('cardapio_produtos', '*', tenantId, { onlyActive: true });
                 
             if (dbProdutos && dbProdutos.length > 0) {
-                const { data: dbGrupos } = await supabase
-                    .from('cardapio_grupos')
-                    .select('*')
-                    .eq('tenant_id', tenantId)
-                    .or('ativo.eq.true,ativo.is.null');
+                const [dbGrupos, passosMap] = await Promise.all([
+                    fetchAllTenantRows('cardapio_grupos', '*', tenantId, { onlyActive: true }),
+                    loadTenantPassosMap(tenantId)
+                ]);
                     
                 cache = {
                     produtos: dbProdutos,
                     grupos: dbGrupos || [],
-                    adicionais: new Map(),
+                    adicionais: passosMap,
                     timestamp: now,
                     origem: 'supabase_fallback'
                 };
@@ -873,7 +1155,6 @@ async function getOrUpdateCardapioCache(tenantId, companySettings, botSettings) 
         }
     }
     
-    // Se tudo falhar, armazena um cache vazio temporário (15 minutos) para proteger a API e evitar repetições contínuas
     const emptyCache = {
         produtos: [],
         grupos: [],
@@ -927,305 +1208,118 @@ async function autoHealAndIndexCardapio(tenantId, companySettings, data) {
         }
     }
     
-    // 2. Filtrar produtos com preço zero indevido e salvar no Supabase
-    let zeroValFilteredCount = 0;
-    let zeroValKeptCount = 0;
-    const validProdutos = produtos.filter(p => {
-        const price = Number(p.price || p.Preco || p.preco || 0);
-        if (price > 0) return true;
-        const isException = isLegitimateZeroValueItem(p.name || p.Descricao || p.descricao, p.description || p.Observacao || p.observacao);
-        if (isException) {
-            zeroValKeptCount++;
-            return true;
-        } else {
-            zeroValFilteredCount++;
-            return false;
-        }
-    });
+    // 2. Salvar produtos ativos no Supabase ANTES dos passos (preservando itens preço=0 que têm passos para evitar erro de Foreign Key)
+    const produtosUpsertRows = produtos.map(p => ({
+        id: String(p.id),
+        tenant_id: tenantId,
+        grupo_id: p.grupo_id || null,
+        codigo: p.codigo ? String(p.codigo).trim() : null,
+        codigo_pdv: p.codigo_pdv ? String(p.codigo_pdv).trim() : null,
+        name: p.name || 'Produto',
+        description: p.description ?? null,
+        price: Number(p.price || p.Preco || p.preco || 0),
+        image: p.image ?? null,
+        ativo: p.ativo !== false
+    }));
 
-    if (zeroValFilteredCount > 0) {
-        console.log(`[AutoHealing] 🛡️ Filtro Preço Zero: Descartados ${zeroValFilteredCount} produtos sem valor comercial. Mantidos ${zeroValKeptCount} itens de cortesia/adicionais.`);
-    }
-
-    console.log(`[AutoHealing] Salvando ${validProdutos.length} produtos válidos no Supabase...`);
+    console.log(`[AutoHealing] Salvando/atualizando ${produtosUpsertRows.length} produtos base no Supabase antes da sincronização de passos...`);
     const { error: errP } = await supabase
         .from('cardapio_produtos')
-        .upsert(validProdutos, { onConflict: 'tenant_id,id' });
+        .upsert(produtosUpsertRows, { onConflict: 'tenant_id,id' });
     if (errP) {
-        console.error(`[AutoHealing] Erro ao salvar produtos no Supabase:`, errP);
+        console.error(`[AutoHealing] Erro ao salvar produtos no Supabase:`, errP.message);
     }
     
     // 3. Sincronizar os adicionais (passos e opções) em background de forma suave
-    const cardapioUrl = companySettings.cardapio_json_url;
-    const cardapioToken = companySettings.cardapio_json_token;
+    const cardapioUrl = companySettings?.cardapio_json_url;
+    const cardapioToken = companySettings?.cardapio_json_token || GASTROFOOD_DEFAULT_TOKEN;
     
     if (cardapioUrl && cardapioToken) {
-        let stepsUrl = cardapioUrl;
-        if (stepsUrl.includes('/ProdutoPdvService/GetCardapioCompleto')) {
-            stepsUrl = stepsUrl.replace('/ProdutoPdvService/GetCardapioCompleto', '/ProdutoCardapioService/ProdutoComPassos');
-        } else {
-            try {
-                const urlObj = new URL(stepsUrl);
-                urlObj.pathname = '/v6/server/nuvem/ProdutoCardapioService/ProdutoComPassos';
-                stepsUrl = urlObj.toString();
-            } catch (e) {
-                stepsUrl = stepsUrl.replace(/\/v6\/server\/nuvem\/.*$/, '/v6/server/nuvem/ProdutoCardapioService/ProdutoComPassos');
-            }
-        }
-        
-        console.log(`[AutoHealing] Sincronizando adicionais para os produtos (com Deduplicação Total de Cache)...`);
+        console.log(`[AutoHealing] Sincronizando adicionais/passos para os produtos (Deduplicação BD + Cache)...`);
 
-        // 1. Inicializa o mapa de produtos já consultados a partir do banco e do disco
         await gastrofoodCache.initTenantFromDatabase(tenantId, supabase);
+        const existingPassoRows = await fetchAllTenantRows('cardapio_passos', 'id, produto_id, ativo', tenantId);
+        const produtosComRegistroPasso = new Set((existingPassoRows || []).map(r => r.produto_id).filter(Boolean));
 
-        // 2. Identifica produtos que REALMENTE ainda não foram consultados na história do sistema
         const productsToSync = [];
         for (const product of produtos) {
             const normId = gastrofoodCache.normalizeId(product.id);
             if (!normId) continue;
-            if (!gastrofoodCache.isProductStepsSynced(tenantId, normId)) {
+            const hasDbStepRecord = produtosComRegistroPasso.has(product.id);
+            if (!hasDbStepRecord || !gastrofoodCache.isProductStepsSynced(tenantId, normId)) {
                 productsToSync.push(product);
             }
         }
 
+        // Prioriza produtos de preço R$ 0,00 para decidir imediatamente quais possuem opções reais vs dummies
+        productsToSync.sort((a, b) => Number(a.price || 0) - Number(b.price || 0));
+
         if (productsToSync.length === 0) {
-            console.log(`[AutoHealing] 🛡️ Deduplicação Gastrofood: Todos os ${produtos.length} produtos do tenant ${tenantId} já foram consultados e estão guardados no banco/cache. ZERO chamadas externas necessárias.`);
+            console.log(`[AutoHealing] 🛡️ Deduplicação Gastrofood: Todos os ${produtos.length} produtos do tenant ${tenantId} já possuem passos verificados no BD/cache.`);
         } else {
-            // Limita a um lote seguro por ciclo (máximo 15 produtos) com intervalo seguro para JAMAIS sobrecarregar a API da Gastrofood
-            const MAX_NEW_PRODUCTS_PER_CYCLE = 15;
+            const MAX_NEW_PRODUCTS_PER_CYCLE = 60;
             const finalProductsToSync = productsToSync.slice(0, MAX_NEW_PRODUCTS_PER_CYCLE);
+            console.log(`[AutoHealing] Produtos totais: ${produtos.length}. Pendentes de passos no BD: ${productsToSync.length}. Processando lote seguro de ${finalProductsToSync.length} neste ciclo...`);
 
-            console.log(`[AutoHealing] Total de produtos do cardápio: ${produtos.length}. Novos a sincronizar: ${productsToSync.length}. Processando lote seguro de ${finalProductsToSync.length} produtos neste ciclo para preservar a infraestrutura Gastrofood.`);
-
+            let syncedPassosCount = 0;
             for (let i = 0; i < finalProductsToSync.length; i++) {
                 const product = finalProductsToSync[i];
-                const normId = gastrofoodCache.normalizeId(product.id);
-                
-                // Delay de 3.5 segundos para garantir espaçamento seguro entre requisições
-                await new Promise(resolve => setTimeout(resolve, 3500));
-                
+                if (i > 0) await new Promise(resolve => setTimeout(resolve, 600));
                 try {
-                    let stepsPayload = { AIdProduto: product.id };
-                    if (companySettings && companySettings.gfood_store_id) {
-                        stepsPayload = injectStoreId(stepsPayload, companySettings.gfood_store_id);
-                    }
-
-                    logGastrofoodCall({
-                        direction: 'request',
-                        action: 'Consultar Adicionais',
-                        method: 'POST',
-                        url: stepsUrl,
-                        payload: stepsPayload
-                    });
-
-                    const resSteps = await fetch(stepsUrl, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': cardapioToken.startsWith('Bearer ') ? cardapioToken : `Bearer ${cardapioToken}`
-                        },
-                        body: JSON.stringify(stepsPayload),
-                        signal: AbortSignal.timeout(20000)
-                    });
-                    
-                    if (resSteps.ok) {
-                        const stepsData = await resSteps.json();
-                        logGastrofoodCall({
-                            direction: 'response',
-                            action: 'Consultar Adicionais',
-                            method: 'POST',
-                            url: stepsUrl,
-                            status: resSteps.status,
-                            response: stepsData
-                        });
-
-                        // Check if response contains steps/passos at top level or wrapped in status/data
-                        const passosRaw = stepsData.passos || stepsData.Passos || (stepsData.data ? (stepsData.data.passos || stepsData.data.Passos) : null) || [];
-                        const passos = Array.isArray(passosRaw) ? passosRaw : [];
-
-                        if (passos.length > 0) {
-                            // Se o produto passou a ter passos reais, remove o registro dummy se existir
-                            try {
-                                await supabase.from('cardapio_passos').delete().eq('id', `no_steps_${normId}`);
-                            } catch (delErr) {}
-                            
-                            const passosToUpsert = passos.map((p, idx) => {
-                                const rawIdPasso = p.IdProdutoPassos || p.id || p.Id;
-                                const idPasso = `${rawIdPasso}_${product.id}`;
-                                const pergunta = p.Pergunta || p.pergunta || p.SubTitulo || p.subTitulo || 'Opções';
-                                const subTitulo = p.SubTitulo || p.subTitulo || null;
-                                const qtdMin = p.QtdMin !== undefined ? p.QtdMin : (p.qtdMin !== undefined ? p.qtdMin : 0);
-                                const qtdMax = p.QtdMax !== undefined ? p.QtdMax : (p.qtdMax !== undefined ? p.qtdMax : 1);
-                                const ativo = p.Ativo !== false && p.ativo !== false;
-                                return {
-                                    id: idPasso,
-                                    tenant_id: tenantId,
-                                    produto_id: product.id,
-                                    pergunta,
-                                    sub_titulo: subTitulo,
-                                    qtd_min: qtdMin,
-                                    qtd_max: qtdMax,
-                                    ordem: idx,
-                                    ativo
-                                };
-                            });
-                            
-                            try {
-                                await supabase.from('cardapio_passos').upsert(passosToUpsert, { onConflict: 'tenant_id,id' });
-                            } catch(stepErr) {
-                                console.warn(`[Gastrofood/Sync] Aviso ao gravar passos do produto ${product.id}:`, stepErr.message);
-                            }
-                            
-                            const opcoesToUpsert = [];
-                            passos.forEach(p => {
-                                const rawLista = p.ListaProdutos || p.listaProdutos || p.produtos || p.Produtos || [];
-                                const rawIdPasso = p.IdProdutoPassos || p.id || p.Id;
-                                const idPasso = `${rawIdPasso}_${product.id}`;
-                                if (Array.isArray(rawLista)) {
-                                    rawLista.forEach(opt => {
-                                        const precoList = opt.ListaPreco || opt.listaPreco || [];
-                                        const precoAdicional = precoList?.[0]?.Preco !== undefined 
-                                            ? precoList[0].Preco 
-                                            : (precoList?.[0]?.preco !== undefined 
-                                                ? precoList[0].preco 
-                                                : (opt.Preco !== undefined 
-                                                    ? opt.Preco 
-                                                    : (opt.preco !== undefined ? opt.preco : 0)));
-                                        const rawIdOpcao = opt.IdProduto || opt.id || opt.Id;
-                                        const idOpcao = `${rawIdOpcao}_${idPasso}`;
-                                        const descricao = opt.Descricao || opt.descricao || 'Opção';
-                                        const imagem = opt.Imagem || opt.imagem || opt.image || null;
-                                        const ativoOpcao = opt.Ativo !== false && opt.ativo !== false;
-                                        
-                                        opcoesToUpsert.push({
-                                            id: idOpcao,
-                                            tenant_id: tenantId,
-                                            passo_id: idPasso,
-                                            descricao,
-                                            preco: precoAdicional,
-                                            imagem,
-                                            ativo: ativoOpcao
-                                        });
-                                    });
-                                }
-                            });
-                            
-                            if (opcoesToUpsert.length > 0) {
-                                try {
-                                    await supabase.from('cardapio_opcoes').upsert(opcoesToUpsert, { onConflict: 'tenant_id,id' });
-                                } catch(optErr) {
-                                    console.warn(`[Gastrofood/Sync] Aviso ao gravar opções do produto ${product.id}:`, optErr.message);
-                                }
-                            }
-
-                            // Registra no cache persistente para NUNCA mais consultar na Gastrofood
-                            gastrofoodCache.markProductStepsSynced(tenantId, normId, true, passos.length);
-                        } else {
-                            // Se o produto NÃO possui passos (passos.length === 0), gravamos o registro "dummy" de controle
-                            const dummyPasso = {
-                                id: `no_steps_${normId}`,
-                                tenant_id: tenantId,
-                                produto_id: product.id,
-                                pergunta: 'Nenhum Adicional',
-                                ativo: false
-                            };
-                            try {
-                                await supabase.from('cardapio_passos').upsert(dummyPasso, { onConflict: 'tenant_id,id' });
-                            } catch(dummyErr) {
-                                console.warn(`[Gastrofood/Sync] Aviso ao gravar dummyPasso do produto ${product.id}:`, dummyErr.message);
-                            }
-
-                            // Registra no cache persistente para NUNCA mais consultar na Gastrofood
-                            gastrofoodCache.markProductStepsSynced(tenantId, normId, false, 0);
-                        }
-                    } else {
-                        const errText = await resSteps.text();
-                        logGastrofoodCall({
-                            direction: 'error',
-                            action: 'Consultar Adicionais',
-                            method: 'POST',
-                            url: stepsUrl,
-                            status: resSteps.status,
-                            error: errText
-                        });
-                        if (resSteps.status === 404 || resSteps.status === 400) {
-                            // Se o produto não existe mais no PDV, marca como sem passos para não ficar repetindo
-                            gastrofoodCache.markProductStepsSynced(tenantId, normId, false, 0);
-                        }
-                    }
+                    const passos = await fetchAndPersistProductStepsJIT(tenantId, companySettings, product, null, { logCalls: true });
+                    if (passos.length > 0) syncedPassosCount++;
                 } catch (stepErr) {
-                    if (stepErr.message?.includes('fetch failed') || stepErr.message?.includes('timeout') || stepErr.message?.includes('aborted') || stepErr.name === 'AbortError') {
-                        console.warn(`[AutoHealing] Sincronização de adicionais para o produto ${product.name} falhou temporariamente (rede):`, stepErr.message);
-                    } else {
-                        console.error(`[AutoHealing] Erro ao sincronizar adicionais para o produto ${product.name}:`, stepErr);
+                    console.warn(`[AutoHealing] Aviso ao sincronizar passos de ${product.name}:`, stepErr.message);
+                }
+            }
+
+            if (syncedPassosCount > 0) {
+                for (const key of cardapioInMemoryCache.keys()) {
+                    if (key.startsWith(`${tenantId}_`)) {
+                        cardapioInMemoryCache.delete(key);
                     }
-                    logGastrofoodCall({
-                        direction: 'error',
-                        action: 'Consultar Adicionais',
-                        method: 'POST',
-                        url: stepsUrl,
-                        error: stepErr.message
-                    });
                 }
             }
         }
     }
     
-    // 4. Sincronizar com RAG (Vetorização)
+    // 4. Sincronizar com RAG (Vetorização completa com passos, regras QtdFree e subitens)
     try {
-        console.log(`[AutoHealing - RAG] Vetorizando o cardápio para RAG...`);
+        console.log(`[AutoHealing - RAG] Vetorizando o cardápio completo para RAG...`);
         const docName = 'cardapio_digital_auto_healed.txt';
         
         let cardapioText = `LINK DO CARDÁPIO DIGITAL: ${companySettings.link_cardapio || 'https://www.burguerplus.com.br'}\n\n=== MENU DE PRODUTOS COMPLETO ===\n\n`;
         
-        // Busca passos e opções salvos no Supabase para incluir sabores, sub-itens e adicionais no RAG
-        const { data: dbPassos } = await supabase
-            .from('cardapio_passos')
-            .select('id, produto_id, pergunta, sub_titulo')
-            .eq('tenant_id', tenantId)
-            .eq('ativo', true);
-
-        const { data: dbOpcoes } = await supabase
-            .from('cardapio_opcoes')
-            .select('id, passo_id, descricao, preco')
-            .eq('tenant_id', tenantId)
-            .eq('ativo', true);
-
-        const opcoesByPasso = new Map();
-        if (dbOpcoes) {
-            dbOpcoes.forEach(opt => {
-                if (!opcoesByPasso.has(opt.passo_id)) opcoesByPasso.set(opt.passo_id, []);
-                opcoesByPasso.get(opt.passo_id).push(opt);
-            });
-        }
-
-        const passosByProduto = new Map();
-        if (dbPassos) {
-            dbPassos.forEach(pas => {
-                if (!passosByProduto.has(pas.produto_id)) passosByProduto.set(pas.produto_id, []);
-                passosByProduto.get(pas.produto_id).push({
-                    ...pas,
-                    opcoes: opcoesByPasso.get(pas.id) || []
-                });
-            });
-        }
+        const passosByProduto = await loadTenantPassosMap(tenantId);
+        const latestProdutos = await fetchAllTenantRows('cardapio_produtos', '*', tenantId, { onlyActive: true });
+        const sourceProdutos = latestProdutos.length > 0 ? latestProdutos : produtos;
+        const validProdutos = sourceProdutos.filter(p => shouldKeepCatalogProduct(p, passosByProduto.get(p.id) || []));
 
         const formatProductRAG = (p) => {
+            const productSteps = passosByProduto.get(p.id) || [];
+            const minDisplayPrice = computeProductMinDisplayPrice(p, productSteps);
+            const basePrice = parseFloat(p.price || 0);
+
             let itemStr = `${p.name.toUpperCase()}\n`;
             if (p.description) {
                 itemStr += `Descrição: ${p.description}\n`;
             }
-            itemStr += `Preço: R$ ${parseFloat(p.price || 0).toFixed(2).replace('.', ',')}\n`;
+            itemStr += basePrice === 0 && minDisplayPrice > 0
+                ? `Preço: A partir de R$ ${minDisplayPrice.toFixed(2).replace('.', ',')}\n`
+                : `Preço: R$ ${basePrice.toFixed(2).replace('.', ',')}\n`;
             
-            const productSteps = passosByProduto.get(p.id) || [];
             if (productSteps.length > 0) {
                 itemStr += `Opções, Sabores e Adicionais:\n`;
                 for (const st of productSteps) {
                     if (st.opcoes && st.opcoes.length > 0) {
+                        const ruleTags = [];
+                        if (st.obrigatorio || Number(st.qtd_min || 0) > 0) ruleTags.push('OBRIGATÓRIO');
+                        if (Number(st.qtd_free || 0) > 0) ruleTags.push(`${st.qtd_free} grátis`);
+                        const tagSuffix = ruleTags.length > 0 ? ` (${ruleTags.join(', ')})` : '';
                         for (const op of st.opcoes) {
                             const addPrice = Number(op.preco || 0);
-                            const priceTag = addPrice > 0 ? ` (+R$ ${addPrice.toFixed(2).replace('.', ',')})` : '';
-                            itemStr += `  - [${st.pergunta}] ${op.descricao}${priceTag}\n`;
+                            const priceTag = addPrice > 0 ? ` (${basePrice === 0 ? 'R$' : '+R$'} ${addPrice.toFixed(2).replace('.', ',')})` : '';
+                            itemStr += `  - [${st.pergunta || st.sub_titulo}${tagSuffix}] ${op.descricao}${priceTag}\n`;
                         }
                     }
                 }
@@ -1584,6 +1678,7 @@ class AutomationWorker {
 
     // Tracker para garantir disparo ÚNICO de aviso de impressão por conversa (evita repetições e loops)
     static avisoImpressaoSentTracker = new Map();
+    static avisoImpressaoOrderTracker = new Map();
 
     // Tracker anti-repetição para contingência inteligente quando a IA estiver offline
     static contingencyTracker = new Map();
@@ -1721,6 +1816,59 @@ class AutomationWorker {
         }
     }
 
+    triggerAvisoImpressaoPedidoIA({ tenantId, conversationId, contactInfo, companySettings, resData, finalPayload }) {
+        try {
+            const meta = extractGastrofoodOrderMeta(resData, finalPayload, contactInfo);
+            const fallbackSeed = `${conversationId || contactInfo?.phone || 'anon'}_${meta.total}_${Math.floor(Date.now() / 60000)}`;
+            const orderKey = `order_${tenantId || 'default'}_${meta.orderId || meta.orderNumber || fallbackSeed}`;
+
+            const now = Date.now();
+            // Limpa entradas expiradas (> 1 hora) para evitar crescimento indefinido
+            if (AutomationWorker.avisoImpressaoOrderTracker.size > 500) {
+                for (const [k, ts] of AutomationWorker.avisoImpressaoOrderTracker.entries()) {
+                    if (now - ts > 60 * 60 * 1000) AutomationWorker.avisoImpressaoOrderTracker.delete(k);
+                }
+            }
+
+            const lastPrinted = AutomationWorker.avisoImpressaoOrderTracker.get(orderKey);
+            if (lastPrinted && (now - lastPrinted < 30 * 60 * 1000)) {
+                console.log(`[AvisoImpressaoPedido] Recado do pedido ${orderKey} já enviado há ${Math.round((now - lastPrinted) / 1000)}s. Ignorando duplicidade.`);
+                return false;
+            }
+
+            const msgTexto = buildOrderReviewPrinterMessage({ resData, finalPayload, contactInfo });
+            const estab = String(companySettings?.aviso_impressao_estabelecimento || '').trim();
+            const impressora = String(companySettings?.aviso_impressao_impressora || '').trim();
+            if (!estab || !impressora || !msgTexto) {
+                return false;
+            }
+
+            AutomationWorker.avisoImpressaoOrderTracker.set(orderKey, now);
+
+            // Disparo não-bloqueante para não atrasar resposta do pedido nem pausar a IA (PIX/acompanhamento seguem ativos)
+            dispatchAvisoImpressao({
+                companySettings,
+                message: msgTexto,
+                action: 'Aviso Impressao Pedido IA',
+                tenantId,
+                logFn: logGastrofoodCall
+            }).then((res) => {
+                if (res.dispatched) {
+                    console.log(`[AvisoImpressaoPedido] Recado de revisão do pedido impresso em "${impressora}" (${estab}): "${msgTexto}"`);
+                } else {
+                    console.warn(`[AvisoImpressaoPedido] Não foi possível imprimir recado em "${impressora}" (${res.error || res.status || res.reason}).`);
+                }
+            }).catch((err) => {
+                console.warn(`[AvisoImpressaoPedido] Falha assíncrona no recado de revisão:`, err?.message || err);
+            });
+
+            return true;
+        } catch (err) {
+            console.error(`[AvisoImpressaoPedido] Erro inesperado ao montar recado de impressão:`, err?.message || err);
+            return false;
+        }
+    }
+
     async triggerAvisoImpressaoSeAtivo({ tenantId, conversationId, contactInfo, jid, companySettings, motivo, textMessage }) {
         try {
             const estab = (companySettings?.aviso_impressao_estabelecimento || '').trim();
@@ -1753,11 +1901,9 @@ class AutomationWorker {
             }
 
             // 3. Montar mensagem simples e ultra encurtada (bobina térmica física de 40 colunas)
-            // Formato solicitado: 'O cliente Carlos, do WhatsApp tal, quer tirar dúvida X'
             const rawName = (contactInfo?.name && contactInfo.name !== 'Cliente' && contactInfo.name !== 'Cliente Simulador')
                 ? contactInfo.name.trim().split(' ')[0]
                 : '';
-            const nomeStr = rawName ? `Carlos` : 'o cliente';
 
             let phoneFormatted = rawDigitsPhone;
             if (rawDigitsPhone.length === 11) {
@@ -1799,26 +1945,23 @@ class AutomationWorker {
                 msgTexto = msgTexto.substring(0, 72) + '...';
             }
 
-            const baseUrl = companySettings.aviso_impressao_url || 'https://service.xpointsolucoes.com.br:8443/v6/server/nuvem/GestorPedidosService/EnviarMensagemAtendente';
-            const cleanBaseUrl = baseUrl.split('?')[0];
-            const fullUrl = `${cleanBaseUrl}?e=${encodeURIComponent(estab)}&d=${encodeURIComponent(impressora)}&m=${encodeURIComponent(msgTexto)}`;
-
-            console.log(`[AvisoImpressao] Disparando aviso de impressão para PDV (impressora "${impressora}", loja "${estab}"): ${fullUrl}`);
-
-            // Disparo assíncrono não-bloqueante
-            fetch(fullUrl, {
-                method: 'GET',
-                headers: { 'Accept': 'application/json, text/plain, */*' },
-                signal: AbortSignal.timeout(7000)
-            })
-            .then((res) => {
-                console.log(`[AvisoImpressao] Sucesso ao disparar para impressora "${impressora}" da loja "${estab}". Status HTTP: ${res.status}`);
-            })
-            .catch((err) => {
-                console.warn(`[AvisoImpressao] Falha ao disparar para impressora "${impressora}" (PDV offline?):`, err.message);
+            dispatchAvisoImpressao({
+                companySettings,
+                message: msgTexto,
+                action: 'Aviso Impressao (Humano)',
+                tenantId,
+                logFn: logGastrofoodCall
+            }).then((res) => {
+                if (res.dispatched) {
+                    console.log(`[AvisoImpressao] Sucesso ao disparar para impressora "${impressora}" da loja "${estab}". Status HTTP: ${res.status}`);
+                } else {
+                    console.warn(`[AvisoImpressao] Falha ao disparar para impressora "${impressora}" (PDV offline?):`, res.error || res.status);
+                }
+            }).catch((err) => {
+                console.warn(`[AvisoImpressao] Falha ao disparar para impressora "${impressora}":`, err?.message || err);
             });
 
-            // Regra de Negócio: Pausar automaticamente a IA da conversa por 1 hora (60 minutos) após o disparo de impressão
+            // Regra de Negócio: Pausar automaticamente a IA da conversa por 1 hora (60 minutos) após transferência humana
             if (conversationId) {
                 const pauseUntil = new Date(now + 60 * 60 * 1000).toISOString();
                 console.log(`[AvisoImpressao] Pausando IA automaticamente por 60 minutos para a conversa ${conversationId} (até ${pauseUntil}) pós-disparo de impressão.`);
@@ -2753,14 +2896,21 @@ Responda APENAS com o ID exato do agente escolhido, sem markdown e sem aspas. Ex
 
             // Regras específicas de Cardápio/Produtos: injetadas SOMENTE em robôs de Menu, Pedido ou Unificado
             if (isMenuOrOrderRole) {
-                basePrompt += `\n\n### DIRETRIZES DE CARDÁPIO, REFEIÇÕES/MARMITAS, SALADAS E PREÇOS REAIS (ESTRITAS) ###\n` +
-                              `1. PERFIL GASTRONÔMICO E MARMITAS/REFEIÇÕES:\n` +
-                              `   - Quando o cliente perguntar sobre "marmita", "marmitex", "almoço", "prato feito", "PF" ou "refeição", chame "Consultar_produtos_cardapio" com termo_busca: "refeições" ou "marmita". Nunca diga que não temos marmitas/refeições se constarem na base (cada refeição dá direito a 3 acompanhamentos à escolha).\n` +
+                basePrompt += `\n\n### DIRETRIZES DE CARDÁPIO, SUBITENS, REGRAS DE PASSOS E PREÇOS REAIS (ESTRITAS) ###\n` +
+                              `1. PERFIL GASTRONÔMICO, MARMITAS/REFEIÇÕES E SALADAS:\n` +
+                              `   - Quando o cliente perguntar sobre "marmita", "marmitex", "almoço", "prato feito", "PF" ou "refeição", chame "Consultar_produtos_cardapio" com termo_busca: "refeições" ou "marmita". Nunca diga que não temos marmitas/refeições se constarem na base.\n` +
                               `   - Se o cliente pedir uma "salada" (prato leve), priorize saladas reais (ex: Salada Caesar / Salada de Frutas) antes de citar hambúrgueres que apenas levam salada.\n` +
-                              `2. REGRA DE OURO CONTRA ALUCINAÇÃO DE PRODUTOS E PREÇOS:\n` +
+                              `2. HIERARQUIA DE PRODUTOS PAI E SUBITENS ANINHADOS (CRÍTICO!):\n` +
+                              `   - Muitos itens pedidos pelo cliente NÃO aparecem soltos no 1º nível do cardápio, mas SIM dentro dos passos/opções de um Produto Pai (ex: "Coca-Cola" / "Guaraná" ficam dentro de "Refrigerante 350 ml", "Refrigerante 600 ml" ou "Refrigerante 2 L"; "Água com gás" em "Água 500 ml"; "Purê de batatas" é a opção "Purê" dentro das Refeições/Omelete).\n` +
+                              `   - Quando o cliente pedir um produto ou sabor (ex: "Coca-Cola", "Purê", "Suco de uva"), olhe obrigatoriamente os campos "encontrados_como_sabores_ou_adicionais" e "subitens_correspondentes" retornados por "Consultar_produtos_cardapio". NUNCA diga que o item não existe se ele constar lá! Caso exista em mais de um tamanho (ex: 350 ml R$ 7,00, 600 ml R$ 9,00, 2 L R$ 15,00), apresente os tamanhos e pergunte qual prefere.\n` +
+                              `3. OBRIGAÇÃO DE CONSULTAR PASSOS, COTA GRÁTIS (qtd_gratis) E PASSOS OBRIGATÓRIOS:\n` +
+                              `   - SEMPRE chame "Consultar_adicionais_produto" para o produto que o cliente quer pedir ANTES de calcular preço ou dizer que não tem adicionais cadastrados!\n` +
+                              `   - Quando o passo tiver "qtd_gratis > 0" (ex: Omelete permite escolher até 3 acompanhamentos grátis e extras além de 3 custam R$ 6,00 cada; Refrigerante 350 ml tem o 1º sabor já incluído nos R$ 7,00), explique a regra com clareza ao cliente, NÃO cobre os itens cobertos pela cota grátis nem some duas vezes com o preço base, mas cobre os itens excedentes caso ultrapasse "qtd_gratis".\n` +
+                              `   - Se o cliente escreveu o acompanhamento de forma aproximada (ex: "arroz" -> "Arroz Branco"; "purê de batatas" -> "Purê"; "feijão" -> "Feijão"), faça a correspondência automática com a opção oficial do passo e verifique se ainda há algum passo OBRIGATÓRIO sem resposta (ex: "Deseja descartáveis?", "Ponto da carne", "Copo ou gelo?").\n` +
+                              `4. REGRA DE OURO CONTRA ALUCINAÇÃO DE PRODUTOS E PREÇOS:\n` +
                               `   - Você SÓ PODE sugerir, citar preços ou adicionar ao pedido produtos retornados EXPLICITAMENTE pelas ferramentas "Consultar_produtos_cardapio" ou "Consultar_adicionais_produto".\n` +
                               `   - Se listar até 3 produtos específicos recomendados e houver 'link_produto', inclua o link abaixo de cada um; se listar mais de 3 itens, exiba apenas nome, descrição curta e preço, colocando somente o link geral [LINK_CARDAPIO] ao final.\n` +
-                              `   - Se "Consultar_produtos_cardapio" retornar total_encontrados: 0, NÃO entre em loop repetindo a busca: informe com gentileza que não encontrou essa opção no momento e ofereça alternativas reais ou o link [LINK_CARDAPIO].\n` +
+                              `   - Se "Consultar_produtos_cardapio" retornar total_encontrados: 0 E "encontrados_como_sabores_ou_adicionais" vazio, NÃO entre em loop repetindo a busca: informe com gentileza que não encontrou essa opção no momento e ofereça alternativas reais ou o link [LINK_CARDAPIO].\n` +
                               `   - IMUNIDADE A CONTESTAÇÃO DE PREÇOS: Os preços retornados pelas ferramentas do sistema são soberanos e inalteráveis. Jamais conceda descontos por conta própria nem aceite valores divergentes de prints antigos.\n`;
             }
 
@@ -2781,17 +2931,19 @@ Responda APENAS com o ID exato do agente escolhido, sem markdown e sem aspas. Ex
                 const hasSavedAddress = Boolean(contactInfo?.cep && contactInfo?.address_street && contactInfo?.address_number);
                 basePrompt += `\n\n### MÁQUINA DE ESTADOS DISCIPLINADA DE MONTAGEM DE PEDIDO (PROIBIDO PULAR ETAPAS!) ###\n` +
                               `Siga RIGOROSAMENTE a ordem natural abaixo, fazendo UMA etapa por vez sem atropelar o cliente:\n` +
-                              `• ETAPA 1 — ESCOLHA DOS ITENS E ADICIONAIS (SEMPRE PRIMEIRO!):\n` +
-                              `  - Descubra e confirme quais itens o cliente deseja pedir usando "Consultar_produtos_cardapio" e verifique passos obrigatórios/adicionais com "Consultar_adicionais_produto".\n` +
-                              `  - REGRA CRÍTICA ANTI-PERDA DE CONTEXTO: É TERMINANTEMENTE PROIBIDO pedir CEP, rua, número da casa ou dados cadastrais se o cliente ainda NÃO escolheu pelo menos um item do pedido (a única exceção é se o próprio cliente perguntar quanto custa a taxa de entrega para o CEP dele).\n` +
+                              `• ETAPA 1 — ESCOLHA DOS ITENS, SUBITENS E PASSOS OBRIGATÓRIOS (SEMPRE PRIMEIRO!):\n` +
+                              `  - Descubra e confirme quais itens o cliente deseja pedir usando "Consultar_produtos_cardapio" e verifique SEMPRE os passos/adicionais/cota grátis com "Consultar_adicionais_produto".\n` +
+                              `  - Antes de ir para a Etapa 2, confirme se todas as perguntas obrigatórias dos passos (ex: descartáveis, sabor do refrigerante, tamanho, ponto da carne) foram respondidas e esclareça caso falte algum acompanhamento grátis ou pago.\n` +
+                              `  - REGRA CRÍTICA ANTI-PERDA DE CONTEXTO: É TERMINANTEMENTE PROIBIDO pedir CEP, rua, número da casa ou dados cadastrais se o cliente ainda NÃO escolheu pelo menos um item com suas opções obrigatórias definidas (a única exceção é se o próprio cliente perguntar quanto custa a taxa de entrega para o CEP dele).\n` +
                               `• ETAPA 2 — ENTREGA OU RETIRADA & ENDEREÇO ENXUTO (SOMENTE APÓS DEFINIR OS ITENS):\n` +
                               `  - Pergunte se o pedido será para Entrega ou Retirada na loja.\n` +
                               `  - Se for Entrega:\n` +
                               `    * ${hasSavedAddress ? `O cliente JÁ POSSUI endereço salvo na ficha (${contactInfo.address_street}, Nº ${contactInfo.address_number} - CEP ${contactInfo.cep}). NÃO peça tudo de novo: apenas confirme com simpatia se a entrega será neste mesmo endereço!` : `Solicite de forma leve APENAS o CEP e o número da residência (NUNCA envie listas burocráticas pedindo rua, bairro, cidade e sobrenome de uma vez, pois com o CEP você consulta a rua automaticamente via "Consultar_cep"). Após obter CEP e número, pergunte apenas se há complemento/apartamento ou ponto de referência e salve via "Atualizar_endereco_contato".`}\n` +
                               `• ETAPA 3 — FORMA DE PAGAMENTO (OBRIGATÓRIA ANTES DO RESUMO):\n` +
                               `  - Pergunte a forma de pagamento (Pix, Cartão de Crédito, Cartão de Débito ou Dinheiro — se dinheiro, pergunte se precisa de troco).\n` +
-                              `• ETAPA 4 — RESUMO COMPLETO E CONFIRMAÇÃO EXPLÍCITA:\n` +
-                              `  - Exiba o resumo organizado (Itens + Adicionais, Endereço/Retirada, Forma de Pagamento, Taxa de Entrega e Total) e aguarde o "sim/ok/pode confirmar" explícito antes de chamar "Enviar_pedido_gastrofood".\n`;
+                              `• ETAPA 4 — RESUMO COMPLETO E CONFIRMAÇÃO EXPLÍCITA (E ENVIO ESTRUTURADO EM itemsCuston):\n` +
+                              `  - Exiba o resumo organizado (Itens + Acompanhamentos/Sabores selecionados + Descartáveis, Endereço/Retirada, Forma de Pagamento, Taxa de Entrega e Total correto considerando "qtd_gratis") e aguarde o "sim/ok/pode confirmar" explícito antes de chamar "Enviar_pedido_gastrofood".\n` +
+                              `  - Ao chamar "Enviar_pedido_gastrofood", envie TODAS as opções de passos em "itemsCuston" com os códigos/passos retornados por "Consultar_adicionais_produto", mantendo em "complement" apenas observações livres (ex: "sem tomate, com bastante queijo, deixar na portaria").\n`;
             }
 
             if (isFirstMessage) {
@@ -3054,26 +3206,30 @@ Responda APENAS com o ID exato do agente escolhido, sem markdown e sem aspas. Ex
                 },
                 {
                     name: "Consultar_produtos_cardapio",
-                    description: "Consulta a lista de produtos, preços, descrições e detalhes do cardápio digital completo da empresa.",
+                    description: "Consulta produtos, preços e também subitens/sabores/acompanhamentos aninhados (ex: 'Coca-Cola' dentro de 'Refrigerante 350 ml', 'Purê' dentro de 'OMELETE') no cardápio digital completo da empresa.",
                     parameters: {
                         type: "OBJECT",
                         properties: {
                             termo_busca: {
                                 type: "STRING",
-                                description: "Termo, palavra-chave ou nome do produto para pesquisar e filtrar na lista (opcional)."
+                                description: "Termo, palavra-chave, nome do produto OU sabor/subitem para pesquisar no cardápio (opcional)."
                             }
                         }
                     }
                 },
                 {
                     name: "Consultar_adicionais_produto",
-                    description: "Consulta as opções de adicionais, opcionais, preferences, passos obrigatórios ou grátis de um determinado produto do cardápio.",
+                    description: "Consulta todos os passos, acompanhamentos, sabores, regras de quantidade grátis (qtd_gratis) e passos obrigatórios de um produto no cardápio (com busca em tempo real no GastroFood se necessário).",
                     parameters: {
                         type: "OBJECT",
                         properties: {
                             nome_produto: {
                                 type: "STRING",
-                                description: "O nome completo ou termo de busca do produto (ex: Costela Burguer)."
+                                description: "O nome do produto pai (ex: Omelete, Refrigerante 350 ml, Plus Salada)."
+                            },
+                            produto_id: {
+                                type: "STRING",
+                                description: "ID UUID do produto retornado em Consultar_produtos_cardapio (opcional, preferencial quando disponível)."
                             }
                         },
                         required: ["nome_produto"]
@@ -3095,7 +3251,7 @@ Responda APENAS com o ID exato do agente escolhido, sem markdown e sem aspas. Ex
                 },
                 {
                     name: "Enviar_pedido_gastrofood",
-                    description: "Envia o pedido finalizado e confirmado do cliente para integração no sistema Gastrofood. Retorna o status da criação do pedido.",
+                    description: "Envia o pedido finalizado e confirmado do cliente para integração no sistema Gastrofood. Em cada item com adicionais/acompanhamentos/sabores/descartáveis, preencha 'itemsCuston' com as opções escolhidas (code, name, amount, price após cota qtd_gratis, fkPasso, numberPasso, typeCalc). Retorna o status da criação do pedido.",
                     parameters: {
                         type: "OBJECT",
                         properties: {
@@ -3187,7 +3343,7 @@ Responda APENAS com o ID exato do agente escolhido, sem markdown e sem aspas. Ex
             let keepLooping = true;
             let currentMessageText = textMessage;
             let loopCount = 0;
-            const MAX_LOOPS = 5;
+            const MAX_LOOPS = 8;
             let cardapioSearchCount = 0;
 
             const toolExecutionHistory = [];
@@ -3239,8 +3395,8 @@ Responda APENAS com o ID exato do agente escolhido, sem markdown e sem aspas. Ex
                             functionResult = {
                                 aviso: `Você já executou a ferramenta ${call.name} com exatamente estes mesmos parâmetros nesta interação. Use as informações já obtidas no histórico desta conversa para responder diretamente ao cliente sem repetir chamadas de ferramentas.`
                             };
-                        } else if (call.name === "Consultar_produtos_cardapio" && cardapioSearchCount > 2) {
-                            console.warn(`[AutomationWorker] Prevenção de loop de cardápio na conversa ${conversationId}: limite de 2 buscas por mensagem atingido.`);
+                        } else if (call.name === "Consultar_produtos_cardapio" && cardapioSearchCount > 4) {
+                            console.warn(`[AutomationWorker] Prevenção de loop de cardápio na conversa ${conversationId}: limite de 4 buscas por mensagem atingido.`);
                             functionResult = {
                                 total_encontrados: 0,
                                 produtos: [],
@@ -3698,78 +3854,120 @@ Responda APENAS com o ID exato do agente escolhido, sem markdown e sem aspas. Ex
                                             finalPayload = JSON.parse(finalPayload);
                                         } catch (e) {}
                                     }
-                                    
-                                    finalPayload = normalizeGastrofoodPayload(finalPayload, companySettings?.gfood_store_id);
-                                    
-                                    if (companySettings && companySettings.gfood_store_id) {
-                                        finalPayload = injectStoreId(finalPayload, companySettings.gfood_store_id);
+
+                                    const orderCache = await getOrUpdateCardapioCache(tenantId, companySettings, botSettings);
+                                    if (!(orderCache.adicionais instanceof Map) || orderCache.adicionais.size === 0) {
+                                        orderCache.adicionais = await loadTenantPassosMap(tenantId);
                                     }
 
-
-                                    console.log(`[AutomationWorker - Pedido] Enviando pedido para Gastrofood...`);
-                                    logGastrofoodCall({
-                                        direction: 'request',
-                                        action: 'Enviar Pedido',
-                                        method: 'POST',
-                                        url: pedidoUrl,
-                                        payload: finalPayload
-                                    });
-
-                                    const response = await fetch(pedidoUrl, {
-                                        method: 'POST',
-                                        headers,
-                                        body: JSON.stringify(finalPayload)
-                                    });
-
-                                    if (response.ok) {
-                                        const resData = await response.json();
-                                        logGastrofoodCall({
-                                            direction: 'response',
-                                            action: 'Enviar Pedido',
-                                            method: 'POST',
-                                            url: pedidoUrl,
-                                            status: response.status,
-                                            response: resData
-                                        });
-
-                                        const sucessoLogico = (response.status === 200 || response.status === 201) && (resData && resData.result !== false);
-
-                                        if (sucessoLogico) {
-                                            functionResult = {
-                                                sucesso: true,
-                                                status: response.status,
-                                                dados_resposta: resData
-                                            };
-                                        } else {
-                                            const aRetorno = resData?.ARetorno || '';
-                                            let mensagemErro = "O sistema Gastrofood rejeitou a criação do pedido.";
-                                            
-                                            if (aRetorno.includes('value too long') || aRetorno.includes('FireDAC') || aRetorno.includes('ERROR:') || aRetorno.includes('Cadeia de caracteres de classe')) {
-                                                mensagemErro = `Falha técnica no sistema do restaurante (Gastrofood: ${aRetorno}). NÃO TENTE ENVIAR NOVAMENTE. O pedido não pode ser processado de forma automática devido a essa incompatibilidade de campos. Peça desculpas ao cliente de forma muito atenciosa informando que o pedido já foi anotado e transferido com prioridade para a nossa equipe humana finalizar.`;
-                                            } else if (aRetorno) {
-                                                mensagemErro = `Erro retornado pelo Gastrofood: ${aRetorno}. Não tente re-enviar sem corrigir o problema reportado.`;
-                                            }
-
-                                            console.error(`[AutomationWorker - Pedido] Gastrofood recusou o pedido (Status: ${response.status}). Resposta:`, resData);
-                                            functionResult = {
-                                                sucesso: false,
-                                                status: response.status,
-                                                erro: mensagemErro,
-                                                dados_resposta: resData
-                                            };
+                                    // Garante passos carregados (JIT se faltarem) para os itens sendo pedidos
+                                    const rawOrderItems = finalPayload?.jsOrder?.items || finalPayload?.items || [];
+                                    for (const rawIt of rawOrderItems) {
+                                        const itNameNorm = normalizeSearchText(rawIt?.name || '');
+                                        const matchedProd = (orderCache.produtos || []).find(p =>
+                                            p.id === rawIt?.id || p.id === rawIt?.code || (p.codigo && p.codigo === String(rawIt?.code || '')) ||
+                                            (itNameNorm && normalizeSearchText(p.name) === itNameNorm)
+                                        );
+                                        if (matchedProd && !orderCache.adicionais.has(matchedProd.id) && companySettings?.cardapio_json_url) {
+                                            await fetchAndPersistProductStepsJIT(tenantId, companySettings, matchedProd, orderCache);
                                         }
+                                    }
+
+                                    const { payload: validatedPayload, missingMandatoryWarnings } = normalizeGastrofoodPayloadWithValidation(
+                                        finalPayload,
+                                        companySettings?.gfood_store_id,
+                                        { produtos: orderCache.produtos || [], passosByProduto: orderCache.adicionais }
+                                    );
+                                    finalPayload = validatedPayload;
+
+                                    if (missingMandatoryWarnings.length > 0) {
+                                        console.warn(`[AutomationWorker - Pedido] Bloqueio preventivo: passos obrigatórios pendentes:`, JSON.stringify(missingMandatoryWarnings));
+                                        functionResult = {
+                                            sucesso: false,
+                                            bloqueado_passo_obrigatorio: true,
+                                            passos_obrigatorios_faltantes: missingMandatoryWarnings,
+                                            orientacao: "ANTES de finalizar e enviar este pedido para a cozinha, pergunte educadamente ao cliente qual opção ele deseja nos passos obrigatórios faltantes acima (ex: descartáveis, sabor do refrigerante, ponto da carne). Assim que ele responder, confirme e chame Enviar_pedido_gastrofood novamente incluindo as escolhas em itemsCuston."
+                                        };
                                     } else {
-                                        const errText = await response.text();
-                                        console.error(`[AutomationWorker - Pedido] Falha HTTP ao enviar pedido (Status: ${response.status}). Detalhes: ${errText}`);
+                                        if (companySettings && companySettings.gfood_store_id) {
+                                            finalPayload = injectStoreId(finalPayload, companySettings.gfood_store_id);
+                                        }
+
+
+                                        console.log(`[AutomationWorker - Pedido] Enviando pedido para Gastrofood...`);
                                         logGastrofoodCall({
-                                            direction: 'error',
+                                            direction: 'request',
                                             action: 'Enviar Pedido',
                                             method: 'POST',
                                             url: pedidoUrl,
-                                            status: response.status,
-                                            error: errText
+                                            payload: finalPayload
                                         });
-                                        functionResult = { erro: `Erro ao enviar pedido para o Gastrofood (Status: ${response.status}). Detalhes: ${errText}` };
+
+                                        const response = await fetch(pedidoUrl, {
+                                            method: 'POST',
+                                            headers,
+                                            body: JSON.stringify(finalPayload)
+                                        });
+
+                                        if (response.ok) {
+                                            const resData = await response.json();
+                                            logGastrofoodCall({
+                                                direction: 'response',
+                                                action: 'Enviar Pedido',
+                                                method: 'POST',
+                                                url: pedidoUrl,
+                                                status: response.status,
+                                                response: resData
+                                            });
+
+                                            const sucessoLogico = (response.status === 200 || response.status === 201) && (resData && resData.result !== false);
+
+                                            if (sucessoLogico) {
+                                                const avisoImpressaoDisparado = this.triggerAvisoImpressaoPedidoIA({
+                                                    tenantId,
+                                                    conversationId,
+                                                    contactInfo,
+                                                    companySettings,
+                                                    resData,
+                                                    finalPayload
+                                                });
+                                                functionResult = {
+                                                    sucesso: true,
+                                                    status: response.status,
+                                                    aviso_impressao_disparado: avisoImpressaoDisparado,
+                                                    dados_resposta: resData
+                                                };
+                                            } else {
+                                                const aRetorno = resData?.ARetorno || '';
+                                                let mensagemErro = "O sistema Gastrofood rejeitou a criação do pedido.";
+                                                
+                                                if (aRetorno.includes('value too long') || aRetorno.includes('FireDAC') || aRetorno.includes('ERROR:') || aRetorno.includes('Cadeia de caracteres de classe')) {
+                                                    mensagemErro = `Falha técnica no sistema do restaurante (Gastrofood: ${aRetorno}). NÃO TENTE ENVIAR NOVAMENTE. O pedido não pode ser processado de forma automática devido a essa incompatibilidade de campos. Peça desculpas ao cliente de forma muito atenciosa informando que o pedido já foi anotado e transferido com prioridade para a nossa equipe humana finalizar.`;
+                                                } else if (aRetorno) {
+                                                    mensagemErro = `Erro retornado pelo Gastrofood: ${aRetorno}. Não tente re-enviar sem corrigir o problema reportado.`;
+                                                }
+
+                                                console.error(`[AutomationWorker - Pedido] Gastrofood recusou o pedido (Status: ${response.status}). Resposta:`, resData);
+                                                functionResult = {
+                                                    sucesso: false,
+                                                    status: response.status,
+                                                    erro: mensagemErro,
+                                                    dados_resposta: resData
+                                                };
+                                            }
+                                        } else {
+                                            const errText = await response.text();
+                                            console.error(`[AutomationWorker - Pedido] Falha HTTP ao enviar pedido (Status: ${response.status}). Detalhes: ${errText}`);
+                                            logGastrofoodCall({
+                                                direction: 'error',
+                                                action: 'Enviar Pedido',
+                                                method: 'POST',
+                                                url: pedidoUrl,
+                                                status: response.status,
+                                                error: errText
+                                            });
+                                            functionResult = { erro: `Erro ao enviar pedido para o Gastrofood (Status: ${response.status}). Detalhes: ${errText}` };
+                                        }
                                     }
                                 } catch (errPed) {
                                     console.error("[AutomationWorker - Pedido] Erro ao enviar pedido:", errPed);
@@ -4110,68 +4308,17 @@ Responda APENAS com o ID exato do agente escolhido, sem markdown e sem aspas. Ex
                                 console.log(`[AutomationWorker - Cardápio] Consultando produtos do tenant ${tenantId}...`);
                                 
                                 const cache = await getOrUpdateCardapioCache(tenantId, companySettings, botSettings);
+                                if (!(cache.adicionais instanceof Map) || cache.adicionais.size === 0) {
+                                    cache.adicionais = await loadTenantPassosMap(tenantId);
+                                }
                                 const productsList = cache.produtos || [];
                                 const groupsList = cache.grupos || [];
+                                const passosMap = cache.adicionais instanceof Map ? cache.adicionais : new Map();
                                 
                                 const gruposMap = {};
                                 groupsList.forEach(g => {
                                     gruposMap[g.id] = g.descricao;
                                 });
-
-                                let filteredProducts = productsList;
-                                const termo = call.args.termo_busca;
-                                if (termo && termo.trim() !== '') {
-                                    const normalizeStr = (str) => (str || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-                                    const searchNormalized = normalizeStr(termo);
-
-                                    // Dicionário de Sinônimos de Gastronomia e Delivery
-                                    const isMarmitaSearch = ['marmita', 'marmitas', 'marmitex', 'quentinha', 'quentinhas', 'almoco', 'almocos', 'refeicao', 'refeicoes', 'prato feito', 'pratos feitos', 'pf', 'comida', 'comida caseira', 'executivo', 'prato executivo', 'pratos', 'almocar'].some(syn => searchNormalized.includes(syn) || syn.includes(searchNormalized));
-
-                                    const isBurgerSearch = ['hamburguer', 'hamburgueres', 'burger', 'burgers', 'lanche', 'lanches', 'sanduiche', 'sanduiches', 'artesanal', 'combo', 'combos'].some(syn => searchNormalized.includes(syn) || syn.includes(searchNormalized));
-
-                                    const isDrinkSearch = ['bebida', 'bebidas', 'refrigerante', 'refrigerantes', 'refri', 'suco', 'sucos', 'cerveja', 'cervejas', 'agua', 'aguas', 'drink', 'drinks', 'chopp', 'coca', 'coca-cola', 'coca zero', 'guarana', 'fanta', 'sprite', 'pepsi', 'lata', 'litro', 'zero'].some(syn => searchNormalized.includes(syn) || syn.includes(searchNormalized));
-
-                                    const isDessertSearch = ['sobremesa', 'sobremesas', 'doce', 'doces', 'acai', 'acais', 'sorvete', 'sorvetes', 'milk-shake', 'milkshake', 'milkshakes'].some(syn => searchNormalized.includes(syn) || syn.includes(searchNormalized));
-
-                                    const isPortionSearch = ['porcao', 'porcoes', 'petisco', 'petiscos', 'batata', 'fritas', 'mandioca', 'salame', 'frango a passarinho'].some(syn => searchNormalized.includes(syn) || syn.includes(searchNormalized));
-
-                                    const searchWords = searchNormalized.split(/\s+/).filter(w => w.length >= 2);
-
-                                    filteredProducts = filteredProducts.filter(p => {
-                                        const pName = normalizeStr(p.name);
-                                        const pDesc = normalizeStr(p.description);
-                                        const pGrupo = normalizeStr(gruposMap[p.grupo_id]);
-
-                                        // 1. Match direto por nome, descrição ou grupo
-                                        if (pName.includes(searchNormalized) || pDesc.includes(searchNormalized) || pGrupo.includes(searchNormalized)) {
-                                            return true;
-                                        }
-
-                                        // 2. Match por todas as palavras do termo (ex: "coca" e "zero")
-                                        if (searchWords.length > 1 && searchWords.every(w => pName.includes(w) || pDesc.includes(w) || pGrupo.includes(w))) {
-                                            return true;
-                                        }
-
-                                        // 3. Match Semântico de Sinônimos
-                                        if (isMarmitaSearch && (pGrupo.includes('refeic') || pGrupo.includes('almoc') || pGrupo.includes('prato') || pDesc.includes('refeicao') || pDesc.includes('refeicoes') || pName.includes('feijoada') || pName.includes('marmit'))) {
-                                            return true;
-                                        }
-                                        if (isBurgerSearch && (pGrupo.includes('lanch') || pGrupo.includes('burg') || pGrupo.includes('combo'))) {
-                                            return true;
-                                        }
-                                        if (isDrinkSearch && (pGrupo.includes('bebid') || pGrupo.includes('suc') || pGrupo.includes('drink') || pGrupo.includes('refrig') || pName.includes('coca') || pName.includes('refrigerante') || pName.includes('guarana') || pName.includes('suco') || pName.includes('bebida'))) {
-                                            return true;
-                                        }
-                                        if (isDessertSearch && (pGrupo.includes('sobremes') || pGrupo.includes('acai') || pGrupo.includes('milk'))) {
-                                            return true;
-                                        }
-                                        if (isPortionSearch && (pGrupo.includes('porc') || pGrupo.includes('petisc'))) {
-                                            return true;
-                                        }
-
-                                        return false;
-                                    });
-                                }
 
                                 let baseCardapioUrl = companySettings.link_cardapio || '';
                                 if (baseCardapioUrl) {
@@ -4180,7 +4327,6 @@ Responda APENAS com o ID exato do agente escolhido, sem markdown e sem aspas. Ex
                                     baseCardapioUrl = 'https://www.burguerplus.com.br/loja/burguerplus';
                                 }
 
-                                // Se a URL não contiver /loja/, adiciona o slug de forma inteligente
                                 if (baseCardapioUrl && !baseCardapioUrl.includes('/loja/')) {
                                     if (baseCardapioUrl.includes('burguerplus') || baseCardapioUrl.includes('burgerplus')) {
                                         baseCardapioUrl = `${baseCardapioUrl}/loja/burguerplus`;
@@ -4190,14 +4336,79 @@ Responda APENAS com o ID exato do agente escolhido, sem markdown e sem aspas. Ex
                                     }
                                 }
 
-                                const formattedProducts = filteredProducts.slice(0, 2000).map(p => ({
-                                    produto_id: p.id,
-                                    categoria: gruposMap[p.grupo_id] || 'Outros',
-                                    nome: p.name,
-                                    descricao: p.description || 'Sem descrição',
-                                    preco: Number(p.price || 0),
-                                    link_imagem: p.image || '',
-                                    link_produto: `${baseCardapioUrl}/produto/${p.id}`
+                                const termo = (call.args.termo_busca || '').trim();
+                                const activeProducts = productsList.filter(p => shouldKeepCatalogProduct(p, passosMap.get(p.id) || []));
+
+                                // 1. Busca semântica unificada (Produtos Pai + Subitens/Sabores/Acompanhamentos aninhados em cardapio_opcoes)
+                                const catalogSearch = searchCatalogAndSubitems({
+                                    produtos: activeProducts,
+                                    grupos: groupsList,
+                                    passosByProduto: passosMap,
+                                    termo,
+                                    limit: termo ? 25 : 200
+                                });
+
+                                // 2. Preserva expansão por sinônimos de categoria quando cliente busca por categoria ampla (ex: "bebidas", "marmita")
+                                const searchNormalized = normalizeSearchText(termo);
+                                const existingIds = new Set(catalogSearch.resultados.map(r => r.id));
+
+                                if (searchNormalized) {
+                                    const isMarmitaSearch = ['marmita', 'marmitas', 'marmitex', 'quentinha', 'quentinhas', 'almoco', 'almocos', 'refeicao', 'refeicoes', 'prato feito', 'pratos feitos', 'pf', 'comida', 'comida caseira', 'executivo', 'prato executivo', 'pratos', 'almocar'].some(syn => searchNormalized.includes(syn) || syn.includes(searchNormalized));
+                                    const isBurgerSearch = ['hamburguer', 'hamburgueres', 'burger', 'burgers', 'lanche', 'lanches', 'sanduiche', 'sanduiches', 'artesanal', 'combo', 'combos'].some(syn => searchNormalized.includes(syn) || syn.includes(searchNormalized));
+                                    const isDrinkSearch = ['bebida', 'bebidas', 'refrigerante', 'refrigerantes', 'refri', 'suco', 'sucos', 'cerveja', 'cervejas', 'agua', 'aguas', 'drink', 'drinks', 'chopp', 'coca', 'coca cola', 'coca zero', 'guarana', 'fanta', 'sprite', 'pepsi', 'lata', 'litro'].some(syn => searchNormalized.includes(syn) || syn.includes(searchNormalized));
+                                    const isDessertSearch = ['sobremesa', 'sobremesas', 'doce', 'doces', 'acai', 'acais', 'sorvete', 'sorvetes', 'milk shake', 'milkshake', 'milkshakes'].some(syn => searchNormalized.includes(syn) || syn.includes(searchNormalized));
+                                    const isPortionSearch = ['porcao', 'porcoes', 'petisco', 'petiscos', 'batata', 'fritas', 'mandioca', 'salame', 'frango a passarinho'].some(syn => searchNormalized.includes(syn) || syn.includes(searchNormalized));
+
+                                    const categoryMatches = activeProducts.filter(p => {
+                                        if (existingIds.has(p.id)) return false;
+                                        const pName = normalizeSearchText(p.name);
+                                        const pDesc = normalizeSearchText(p.description);
+                                        const pGrupo = normalizeSearchText(gruposMap[p.grupo_id]);
+
+                                        if (isMarmitaSearch && (pGrupo.includes('refeic') || pGrupo.includes('almoc') || pGrupo.includes('prato') || pDesc.includes('refeicao') || pDesc.includes('refeicoes') || pName.includes('feijoada') || pName.includes('marmit'))) return true;
+                                        if (isBurgerSearch && (pGrupo.includes('lanch') || pGrupo.includes('burg') || pGrupo.includes('combo'))) return true;
+                                        if (isDrinkSearch && (pGrupo.includes('bebid') || pGrupo.includes('suc') || pGrupo.includes('drink') || pGrupo.includes('refrig') || pName.includes('coca') || pName.includes('refrigerante') || pName.includes('guarana') || pName.includes('suco') || pName.includes('agua') || pName.includes('bebida'))) return true;
+                                        if (isDessertSearch && (pGrupo.includes('sobremes') || pGrupo.includes('acai') || pGrupo.includes('milk'))) return true;
+                                        if (isPortionSearch && (pGrupo.includes('porc') || pGrupo.includes('petisc'))) return true;
+                                        return false;
+                                    });
+
+                                    for (const p of categoryMatches.slice(0, 20)) {
+                                        const steps = passosMap.get(p.id) || [];
+                                        const minDisplay = computeProductMinDisplayPrice(p, steps);
+                                        catalogSearch.resultados.push({
+                                            id: p.id,
+                                            codigo: p.codigo || '',
+                                            codigo_pdv: p.codigo_pdv || '',
+                                            nome: p.name,
+                                            categoria: gruposMap[p.grupo_id] || 'Outros',
+                                            preco: Number(p.price || 0),
+                                            preco_exibicao: minDisplay,
+                                            preco_texto: Number(p.price || 0) === 0 && minDisplay > 0
+                                                ? `A partir de R$ ${minDisplay.toFixed(2).replace('.', ',')}`
+                                                : `R$ ${Number(p.price || 0).toFixed(2).replace('.', ',')}`,
+                                            descricao: p.description ? String(p.description).slice(0, 180) : '',
+                                            possui_passos: steps.length > 0,
+                                            passos_resumo: steps.map(st => `${st.pergunta || st.sub_titulo}${(st.obrigatorio || st.qtd_min > 0) ? ' [OBRIGATÓRIO]' : ''}${st.qtd_free > 0 ? ` [${st.qtd_free} grátis]` : ''}`),
+                                            subitens_correspondentes: []
+                                        });
+                                    }
+                                }
+
+                                const formattedProducts = catalogSearch.resultados.map(item => ({
+                                    produto_id: item.id,
+                                    codigo: item.codigo,
+                                    codigo_pdv: item.codigo_pdv,
+                                    categoria: item.categoria,
+                                    nome: item.nome,
+                                    descricao: item.descricao || 'Sem descrição',
+                                    preco: item.preco_exibicao,
+                                    preco_base: item.preco,
+                                    preco_texto: item.preco_texto,
+                                    possui_passos: item.possui_passos,
+                                    passos_resumo: item.passos_resumo,
+                                    subitens_correspondentes: item.subitens_correspondentes,
+                                    link_produto: `${baseCardapioUrl}/produto/${item.id}`
                                 }));
 
                                 if (productsList.length === 0) {
@@ -4208,10 +4419,10 @@ Responda APENAS com o ID exato do agente escolhido, sem markdown e sem aspas. Ex
                                         cardapio_em_atualizacao: true,
                                         orientacao: "O cardápio digital está temporariamente sendo atualizado no sistema. NÃO realize novas chamadas de busca de ferramentas nesta mesma mensagem. Informe com gentileza ao cliente que o cardápio está em atualização e envie o link oficial do cardápio digital."
                                     };
-                                } else if (formattedProducts.length === 0) {
-                                    const destaques = productsList.slice(0, 5).map(p => ({
+                                } else if (formattedProducts.length === 0 && catalogSearch.encontrados_como_sabores_ou_adicionais.length === 0) {
+                                    const destaques = activeProducts.slice(0, 5).map(p => ({
                                         nome: p.name,
-                                        preco: p.price,
+                                        preco: computeProductMinDisplayPrice(p, passosMap.get(p.id) || []),
                                         categoria: gruposMap[p.grupo_id] || 'Geral'
                                     }));
                                     functionResult = { 
@@ -4219,13 +4430,17 @@ Responda APENAS com o ID exato do agente escolhido, sem markdown e sem aspas. Ex
                                         total_encontrados: 0,
                                         produtos: [],
                                         produtos_destaque: destaques,
-                                        orientacao: "Nenhum produto correspondente foi encontrado no cardápio para este termo. ATENÇÃO: NÃO realize novas chamadas de busca de ferramentas nesta mesma mensagem para tentar variações deste item. Responda imediatamente ao cliente informando com carinho e educação que não dispomos dessa opção específica no momento, pergunte se ele deseja outra opção ou apresente os produtos principais/destaques da casa."
+                                        orientacao: "Nenhum produto nem subitem correspondente foi encontrado no cardápio para este termo. Responda ao cliente informando com educação que não dispomos dessa opção específica no momento e apresente alternativas reais."
                                     };
                                 } else {
                                     functionResult = { 
                                         origem: cache.origem,
-                                        total_encontrados: filteredProducts.length,
-                                        produtos: formattedProducts 
+                                        total_encontrados: formattedProducts.length,
+                                        encontrados_como_sabores_ou_adicionais: catalogSearch.encontrados_como_sabores_ou_adicionais,
+                                        produtos: formattedProducts,
+                                        orientacao_uso: catalogSearch.encontrados_como_sabores_ou_adicionais.length > 0
+                                            ? "IMPORTANTE: Se o cliente pediu um sabor/item aninhado (ex: Coca-Cola, Guaraná, Purê), ele está disponível dentro dos Produtos Pai listados em 'encontrados_como_sabores_ou_adicionais' e 'subitens_correspondentes'. Chame 'Consultar_adicionais_produto' no produto pai escolhido para confirmar as regras exatas!"
+                                            : "Se o produto possuir 'possui_passos: true', chame 'Consultar_adicionais_produto' antes de fechar o preço ou confirmar que não há adicionais."
                                     };
                                 }
                             } catch (errCard) {
@@ -4234,30 +4449,51 @@ Responda APENAS com o ID exato do agente escolhido, sem markdown e sem aspas. Ex
                             }
                         }
                         else if (call.name === "Consultar_adicionais_produto") {
-                            const nomeProduto = call.args.nome_produto;
-                            if (!nomeProduto || nomeProduto.trim() === '') {
-                                functionResult = { erro: "O nome do produto é obrigatório para consultar os adicionais." };
+                            const nomeProduto = String(call.args.nome_produto || '').trim();
+                            const produtoIdArg = String(call.args.produto_id || '').trim();
+                            if (!nomeProduto && !produtoIdArg) {
+                                functionResult = { erro: "O nome_produto ou produto_id é obrigatório para consultar os adicionais." };
                             } else {
                                 try {
-                                    console.log(`[AutomationWorker - Adicionais] Buscando adicionais de "${nomeProduto}"...`);
+                                    console.log(`[AutomationWorker - Adicionais] Buscando adicionais de "${nomeProduto || produtoIdArg}"...`);
                                     
                                     const cache = await getOrUpdateCardapioCache(tenantId, companySettings, botSettings);
+                                    if (!(cache.adicionais instanceof Map) || cache.adicionais.size === 0) {
+                                        cache.adicionais = await loadTenantPassosMap(tenantId);
+                                    }
                                     const productsList = cache.produtos || [];
-                                    
-                                    const searchLower = nomeProduto.toLowerCase();
-                                    const matchingProducts = productsList.filter(p => 
-                                        p.name && p.name.toLowerCase().includes(searchLower)
-                                    );
+                                    const passosMap = cache.adicionais instanceof Map ? cache.adicionais : new Map();
 
-                                    if (matchingProducts.length === 0) {
-                                        functionResult = { erro: `Produto "${nomeProduto}" não localizado no cardápio.` };
+                                    let produto = null;
+                                    if (produtoIdArg) {
+                                        produto = productsList.find(p => p.id === produtoIdArg || p.codigo === produtoIdArg);
+                                    }
+                                    if (!produto && nomeProduto) {
+                                        const qNorm = normalizeSearchText(nomeProduto);
+                                        // Prioriza match exato ou melhor correspondência em produtos válidos
+                                        const scored = productsList
+                                            .map(p => {
+                                                const pNorm = normalizeSearchText(p.name);
+                                                let s = 0;
+                                                if (pNorm === qNorm) s = 1000;
+                                                else if (pNorm.startsWith(qNorm) || qNorm.startsWith(pNorm)) s = 700;
+                                                else if (pNorm.includes(qNorm)) s = 550;
+                                                else if (qNorm.includes(pNorm) && pNorm.length >= 4) s = 450;
+                                                if (s > 0 && shouldKeepCatalogProduct(p, passosMap.get(p.id) || [])) s += 100;
+                                                return { p, s };
+                                            })
+                                            .filter(x => x.s > 0)
+                                            .sort((a, b) => b.s - a.s);
+                                        produto = scored[0]?.p || null;
+                                    }
+
+                                    if (!produto) {
+                                        functionResult = { erro: `Produto "${nomeProduto || produtoIdArg}" não localizado no cardápio.` };
                                     } else {
-                                        const produto = matchingProducts[0];
-                                        
-                                        let passosMapeados = cache.adicionais.get(produto.id);
-                                        
-                                        if (!passosMapeados) {
-                                            console.log(`[AutomationWorker - Adicionais] Cache MISS para adicionais do produto ${produto.name} (${produto.id}). Buscando do BD...`);
+                                        let passosAtivos = passosMap.get(produto.id);
+
+                                        if (!passosAtivos || passosAtivos.length === 0) {
+                                            console.log(`[AutomationWorker - Adicionais] Cache sem passos ativos para ${produto.name} (${produto.id}). Verificando BD...`);
                                             const { data: dbPassos, error: errPassos } = await supabase
                                                 .from('cardapio_passos')
                                                 .select('*')
@@ -4267,52 +4503,57 @@ Responda APENAS com o ID exato do agente escolhido, sem markdown e sem aspas. Ex
 
                                             if (errPassos) throw errPassos;
 
-                                            if (dbPassos && dbPassos.length > 0) {
-                                                passosMapeados = [];
-                                                for (const passo of dbPassos) {
-                                                    const { data: dbOpcoes, error: errOpcoes } = await supabase
-                                                        .from('cardapio_opcoes')
-                                                        .select('*')
-                                                        .eq('passo_id', passo.id)
-                                                        .eq('tenant_id', tenantId)
-                                                        .order('descricao', { ascending: true });
+                                            const realActivePassos = (dbPassos || []).filter(ps => ps.ativo !== false);
+                                            const hasDummyConfirmedNoSteps = (dbPassos || []).some(ps => String(ps.id || '').startsWith('no_steps_') && ps.ativo === false);
 
-                                                    if (errOpcoes) throw errOpcoes;
+                                            if (realActivePassos.length > 0) {
+                                                const stepIds = realActivePassos.map(s => s.id);
+                                                const { data: dbOpcoes, error: errOpcoes } = await supabase
+                                                    .from('cardapio_opcoes')
+                                                    .select('*')
+                                                    .eq('tenant_id', tenantId)
+                                                    .in('passo_id', stepIds)
+                                                    .eq('ativo', true)
+                                                    .order('ordem', { ascending: true });
 
-                                                    passosMapeados.push({
-                                                        passo_id: passo.id,
-                                                        pergunta_titulo: passo.pergunta || passo.sub_titulo || 'Opções',
-                                                        sub_titulo: passo.sub_titulo || '',
-                                                        qtd_minima: passo.qtd_min || 0,
-                                                        qtd_maxima: passo.qtd_max || 1,
-                                                        obrigatorio: (passo.qtd_min || 0) > 0,
-                                                        opcoes: (dbOpcoes || []).map(opt => ({
-                                                            opcao_id: opt.id,
-                                                            descricao: opt.descricao,
-                                                            preco: Number(opt.preco || 0),
-                                                            ativo: opt.ativo
-                                                        }))
-                                                    });
-                                                }
-                                                cache.adicionais.set(produto.id, passosMapeados);
+                                                if (errOpcoes) throw errOpcoes;
+
+                                                const opMap = new Map();
+                                                (dbOpcoes || []).forEach(op => {
+                                                    if (!opMap.has(op.passo_id)) opMap.set(op.passo_id, []);
+                                                    opMap.get(op.passo_id).push(op);
+                                                });
+
+                                                passosAtivos = realActivePassos.map(ps => ({
+                                                    ...ps,
+                                                    opcoes: opMap.get(ps.id) || []
+                                                }));
+                                                passosMap.set(produto.id, passosAtivos);
+                                            } else if (!hasDummyConfirmedNoSteps && companySettings?.cardapio_json_url) {
+                                                // FALLBACK JUST-IN-TIME NA API GASTROFOOD (ProdutoComPassos)
+                                                console.log(`[AutomationWorker - Adicionais JIT] Consultando ProdutoComPassos ao vivo para ${produto.name} (${produto.id})...`);
+                                                passosAtivos = await fetchAndPersistProductStepsJIT(tenantId, companySettings, produto, cache);
                                             } else {
-                                                passosMapeados = [];
+                                                passosAtivos = [];
                                             }
                                         } else {
-                                            console.log(`[AutomationWorker - Adicionais] Cache HIT para adicionais do produto ${produto.name} (${produto.id})`);
+                                            console.log(`[AutomationWorker - Adicionais] Cache HIT para adicionais do produto ${produto.name} (${produto.id}): ${passosAtivos.length} passos.`);
                                         }
 
-                                        if (passosMapeados.length === 0) {
+                                        if (!passosAtivos || passosAtivos.length === 0) {
                                             functionResult = { 
                                                 produto_id: produto.id,
+                                                codigo: produto.codigo || '',
                                                 produto_nome: produto.name,
-                                                mensagem: "Este produto não possui adicionais ou opcionais cadastrados no cardápio. Não consulte adicionais deste produto novamente nesta mensagem; responda ao cliente ou prossiga com o pedido." 
+                                                possui_passos: false,
+                                                mensagem: "Este produto realmente não possui adicionais ou passos obrigatórios no sistema GastroFood. Prossiga normalmente." 
                                             };
                                         } else {
+                                            const formatted = formatStepsForAITool(produto, passosAtivos);
                                             functionResult = {
-                                                produto_id: produto.id,
+                                                ...formatted,
                                                 produto_nome: produto.name,
-                                                passos_adicionais: passosMapeados
+                                                passos_adicionais: formatted.passos
                                             };
                                         }
                                     }
