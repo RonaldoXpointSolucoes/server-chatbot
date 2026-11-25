@@ -764,3 +764,17 @@ test('buildGeneralDiffSummary decomposes full diffTotalCents (-114,42) across ta
   assert.equal(summary.nonTableDiffCents, -6442);
   assert.equal(summary.explainedDiffTotalCents, -11442);
 });
+
+test('formatDateHeaderBadge formats single closing date with weekday and multi-day intervals clearly', async () => {
+  const { formatDateHeaderBadge } = await import('./cashReconciliationServiceHelper.mjs');
+  assert.equal(typeof formatDateHeaderBadge, 'function');
+
+  const single = formatDateHeaderBadge('2026-11-23', '2026-11-23');
+  assert.ok(single.includes('23/11/2026'));
+  assert.ok(/seg/i.test(single));
+
+  const range = formatDateHeaderBadge('2026-11-20', '2026-11-23');
+  assert.equal(range, '20/11/2026 a 23/11/2026');
+
+  assert.equal(formatDateHeaderBadge('', ''), '');
+});

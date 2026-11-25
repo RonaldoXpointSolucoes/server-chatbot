@@ -8,7 +8,8 @@ import {
   formatReopenedTableAudit,
   linkSoldItemsToPdvOperations,
   buildAuditInsights,
-  annotateMissingItemsWithOperationalHints
+  annotateMissingItemsWithOperationalHints,
+  linkPendingDebtorsToSystemItems
 } from './cashOperationItemsHelper.mjs';
 
 test('formatSoldProductName parses pipe-delimited DataDivas combos into readable names', () => {
@@ -233,4 +234,39 @@ test('annotateMissingItemsWithOperationalHints correlates reopened tables, rapid
   const m002 = annotated[2];
   assert.equal(m002.metadata.operationalAlerts.length, 1);
   assert.equal(m002.metadata.operationalAlerts[0].code, 'zero_receipt_on_table');
+});
+
+test('linkPendingDebtorsToSystemItems associa nomes inequívocos (inclusive repetidos) e lista candidatos quando distinto no mesmo valor', () => {
+  const systemItems = [
+    { id: 'p_189', category: 'pendente', amountCents: 18900, referenceCode: '007', description: 'MESA 007 • NOTA PENDENTE' },
+    { id: 'p_83_a', category: 'pendente', amountCents: 8300, referenceCode: '1', description: 'DELIVERY 1 • NOTA PENDENTE' },
+    { id: 'p_83_b', category: 'pendente', amountCents: 8300, referenceCode: '080', description: 'MESA 080 • NOTA PENDENTE' },
+    { id: 'p_450_a', category: 'pendente', amountCents: 450, referenceCode: '071', description: 'MESA 071 • NOTA PENDENTE' },
+    { id: 'p_450_b', category: 'pendente', amountCents: 450, referenceCode: '068', description: 'MESA 068 • NOTA PENDENTE' },
+    { id: 'p_pix', category: 'pix', amountCents: 18900, referenceCode: '010', description: 'MESA 010 • PIX' }
+  ];
+  const pendingDebtors = [
+    { debtor: 'CLEITON FERREIRA (', amountCents: 18900 },
+    { debtor: 'MARCENARIA XPOINT', amountCents: 8300 },
+    { debtor: 'MARCENARIA XPOINT', amountCents: 8300 },
+    { debtor: 'ALESSANDRO BURGUER', amountCents: 450 },
+    { debtor: 'RONALDO BURGUERPLUS', amountCents: 450 }
+  ];
+
+  const byId = linkPendingDebtorsToSystemItems({ systemItems, pendingDebtors });
+  assert.equal(byId.p_189.debtorName, 'CLEITON FERREIRA (');
+  assert.equal(byId.p_189.debtorMatchType, 'exact_amount');
+
+  // Mesmo valor repetido pertencendo ao mesmo devedor continua inequívoco
+  assert.equal(byId.p_83_a.debtorName, 'MARCENARIA XPOINT');
+  assert.equal(byId.p_83_b.debtorName, 'MARCENARIA XPOINT');
+
+  // Valores idênticos de devedores distintos viram lista transparente de candidatos sem chute silencioso
+  assert.equal(byId.p_450_a.debtorName, '');
+  assert.equal(byId.p_450_a.debtorMatchType, 'ambiguous_same_amount');
+  assert.deepEqual(byId.p_450_a.debtorCandidates, ['ALESSANDRO BURGUER', 'RONALDO BURGUERPLUS']);
+  assert.deepEqual(byId.p_450_b.debtorCandidates, ['ALESSANDRO BURGUER', 'RONALDO BURGUERPLUS']);
+
+  // Lançamentos não pendentes não são vinculados
+  assert.equal(byId.p_pix, undefined);
 });

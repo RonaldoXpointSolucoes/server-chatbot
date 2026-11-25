@@ -42,7 +42,7 @@ export const DEFAULT_ENDPOINT_INSTRUCTIONS: Record<SectionId, string> = {
   • e: Nome do Estabelecimento (ex: nomedaloja)
   • d: Nome da Impressora / Destino (ex: CAIXA)
   • m: Texto da Mensagem impressa (ex: Mensagem do Cliente)
-- Integração: O link gerado pode ser acionado por fluxos, webhook ou pela Luna IA.`,
+- Integração: Disparado automaticamente pela Luna IA ao concluir pedidos no GastroFood (para revisão) ou transferir para humano.`,
 
   cep: `📌 Instruções da Consulta de CEP:
 - Serviço: NuvemEnderecoService / ConsultaCEP
@@ -3619,7 +3619,7 @@ export default function AccountSettings() {
                   <span className="font-bold">Status da Automação: ATIVA & FUNCIONAL</span>
                 </div>
                 <span className="text-[11px] text-emerald-700 dark:text-emerald-400">
-                  A IA imprimirá o recado na impressora <strong>{avisoImpressaoImpressora}</strong> quando transferir para humano.
+                  A IA imprimirá o recado na impressora <strong>{avisoImpressaoImpressora}</strong> ao concluir pedido no GastroFood ou transferir para humano.
                 </span>
               </div>
             ) : (
@@ -3716,7 +3716,7 @@ export default function AccountSettings() {
                   className="w-full bg-[#f0f2f5] dark:bg-[#2a3942] border border-gray-200 dark:border-[#304046] rounded-xl px-3.5 py-2.5 text-xs text-gray-800 dark:text-[#d1d7db] outline-none focus:ring-2 focus:ring-amber-500/50 transition-all placeholder:text-gray-400 resize-y"
                 />
                 <p className="text-[11px] text-gray-500 dark:text-[#8696a0]">
-                  Campo exclusivo para teste pontual. Em atendimentos reais, a IA gera automaticamente um recado resumido (40 colunas) avisando que o cliente aguarda atendimento e dispara o link uma única vez.
+                  Campo exclusivo para teste pontual. Em atendimentos reais, a IA gera automaticamente um recado resumido (40 colunas) ao concluir pedidos no GastroFood (alertando para revisar) ou quando o cliente aguarda atendimento humano.
                 </p>
               </div>
             </div>

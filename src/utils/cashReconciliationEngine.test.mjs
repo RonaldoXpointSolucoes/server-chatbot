@@ -877,3 +877,149 @@ test('runCashReconciliation applies itemized manualCashAdjustments (ex.: Bolo da
     'Entrada justificada não deve ser listada em saidasDetalhadas como saída negativa'
   );
 });
+
+test('classifyTxtDrawerOutflows separa sangria intermediaria (R$ 100) da Sangria CX. RET sem subtrair em duplicidade', async () => {
+  const { classifyTxtDrawerOutflows, runCashReconciliation } = await import('./cashReconciliationEngine.mjs');
+  const { DEFAULT_FORMULA_CONFIG } = await import('./cashFormulaRules.mjs');
+  assert.equal(typeof classifyTxtDrawerOutflows, 'function');
+
+  // Caso 23/11: RelConferencia incluiu SANGRIA (R$ 100) dentro de Saídas Pagamentos (R$ 344,29 = 244,29 + 100,00)
+  // enquanto TXT listou SANGRIA (R$ 100) e SANGRIA CX. RET (R$ 724,45) somando R$ 824,45.
+  const nov23Outflows = classifyTxtDrawerOutflows({
+    txtSum: {
+      saidasPagamentosCents: 24429,
+      sangriaCents: 82445,
+      saidasDetalhadas: [
+        { label: 'SANGRIA', amountCents: 10000, isSangria: true },
+        { label: 'Baixa em Contas a Pagar Ref. 1938 - Pao', amountCents: 1980, isSangria: false },
+        { label: 'Baixa em Contas a Pagar Ref. 1939 - Bebidas', amountCents: 125, isSangria: false },
+        { label: 'Baixa em Contas a Pagar Ref. 1940 - Mercadinho', amountCents: 9386, isSangria: false },
+        { label: 'Baixa em Contas a Pagar Ref. 1941 - Carnes', amountCents: 12938, isSangria: false },
+        { label: 'SANGRIA CX. RET', amountCents: 72445, isSangria: true }
+      ]
+    },
+    relCash: { saidasPagamentosCents: 34429 },
+    summaryTxtFile: {
+      summary: {
+        controleRows: [
+          { method: 'DINHEIRO', sistemaCents: 77526, informadoCents: 72445, diffCents: -5081 },
+          { method: 'SANGRIA', sistemaCents: 10000, informadoCents: 10000, diffCents: 0 }
+        ]
+      }
+    }
+  });
+
+  assert.equal(nov23Outflows.saidasPagamentosCents, 24429);
+  assert.equal(nov23Outflows.sangriaIntermediariaCents, 10000);
+  assert.equal(nov23Outflows.sangriaFechamentoCents, 72445);
+  assert.equal(nov23Outflows.sangriaTotalTxtCents, 82445);
+  assert.equal(nov23Outflows.relConfIncludesIntermediateSangria, true);
+  assert.equal(nov23Outflows.caixaCegoDinheiro?.informadoCents, 72445);
+  assert.equal(nov23Outflows.caixaCegoSangria?.sistemaCents, 10000);
+
+  // Caso 20/11 (sem sangria intermediaria): não altera nada
+  const nov20Outflows = classifyTxtDrawerOutflows({
+    txtSum: {
+      saidasPagamentosCents: 2538,
+      sangriaCents: 75030,
+      saidasDetalhadas: [
+        { label: 'Baixa em Contas a Pagar Ref. 1920', amountCents: 2538, isSangria: false },
+        { label: 'SANGRIA CX. RET', amountCents: 75030, isSangria: true }
+      ]
+    },
+    relCash: { saidasPagamentosCents: 2538 }
+  });
+  assert.equal(nov20Outflows.saidasPagamentosCents, 2538);
+  assert.equal(nov20Outflows.sangriaIntermediariaCents, 0);
+  assert.equal(nov20Outflows.sangriaFechamentoCents, 75030);
+  assert.equal(nov20Outflows.relConfIncludesIntermediateSangria, false);
+
+  // Integração E2E 23/11: saldo em dinheiro real deve refletir 724,45 (-50,81) em vez de 824,45 (+49,19) e pendentes recebem devedor
+  const result23 = runCashReconciliation({
+    parsedFiles: [
+      {
+        fileType: 'pdv_vendas',
+        status: 'ok',
+        periodStart: '2026-11-23',
+        periodEnd: '2026-11-23',
+        rows: [
+          { dateStr: '2026-11-23', timeStr: '12:00:00', category: 'dinheiro', paymentMethodRaw: 'DINHEIRO', amountCents: 42230, tableOrOrder: '001' },
+          { dateStr: '2026-11-23', timeStr: '13:50:59', category: 'pendente', paymentMethodRaw: 'NOTA PENDENTE', amountCents: 18900, tableOrOrder: '007' },
+          { dateStr: '2026-11-23', timeStr: '21:58:21', category: 'pendente', paymentMethodRaw: 'NOTA PENDENTE', amountCents: 450, tableOrOrder: '071' },
+          { dateStr: '2026-11-23', timeStr: '22:01:00', category: 'pendente', paymentMethodRaw: 'NOTA PENDENTE', amountCents: 450, tableOrOrder: '068' }
+        ],
+        summary: {}
+      },
+      {
+        fileType: 'rel_conferencia',
+        status: 'ok',
+        summary: {
+          cashBlock: {
+            fundoManhaCents: 69725,
+            vendaDinheiroCents: 42230,
+            fundoNoiteCents: 0,
+            outrasEntradasCents: 0,
+            sangriaManhaCents: 0,
+            sangriaNoiteCents: 0,
+            saidasPagamentosCents: 34429,
+            outrasSaidasCents: 0
+          },
+          systemRows: { saldo_dinheiro: 77526, pendentes: 19800, pix: 0, cartao: 0 },
+          realRows: {}
+        }
+      },
+      {
+        fileType: 'fechamento_txt',
+        status: 'ok',
+        summary: {
+          referenceDate: '2026-11-23',
+          fundoCaixaCents: 69725,
+          saidasPagamentosCents: 24429,
+          sangriaCents: 82445,
+          saidasDetalhadas: [
+            { label: 'SANGRIA', amountCents: 10000, isSangria: true },
+            { label: 'Baixa em Contas a Pagar Ref. 1938 - Pao', amountCents: 1980, isSangria: false },
+            { label: 'Baixa em Contas a Pagar Ref. 1939 - Bebidas', amountCents: 125, isSangria: false },
+            { label: 'Baixa em Contas a Pagar Ref. 1940 - Mercadinho', amountCents: 9386, isSangria: false },
+            { label: 'Baixa em Contas a Pagar Ref. 1941 - Carnes', amountCents: 12938, isSangria: false },
+            { label: 'SANGRIA CX. RET', amountCents: 72445, isSangria: true }
+          ],
+          pendingDebtors: [
+            { debtor: 'CLEITON FERREIRA (', amountCents: 18900 },
+            { debtor: 'ALESSANDRO BURGUER', amountCents: 450 },
+            { debtor: 'RONALDO BURGUERPLUS', amountCents: 450 }
+          ]
+        }
+      },
+      {
+        fileType: 'fechamento_resumo_txt',
+        status: 'ok',
+        summary: {
+          controleRows: [
+            { method: 'DINHEIRO', sistemaCents: 77526, informadoCents: 72445, diffCents: -5081 },
+            { method: 'SANGRIA', sistemaCents: 10000, informadoCents: 10000, diffCents: 0 }
+          ]
+        }
+      }
+    ],
+    manualInputs: { cashCountedCents: 0 },
+    formulaConfig: DEFAULT_FORMULA_CONFIG
+  });
+
+  const cashRow = result23.mirrorRows.find((r) => r.key === 'saldo_dinheiro');
+  assert.equal(cashRow.systemCents, 77526);
+  assert.equal(cashRow.realCents, 72445);
+  assert.equal(cashRow.diffCents, -5081);
+
+  assert.equal(result23.cashDrawerSummary.saidasPagamentosCents, 24429);
+  assert.equal(result23.cashDrawerSummary.sangriaIntermediariaCents, 10000);
+  assert.equal(result23.cashDrawerSummary.sangriaCents, 72445);
+  assert.equal(result23.cashDrawerSummary.sangriaTotalTxtCents, 82445);
+  assert.equal(result23.cashDrawerSummary.expectedTotalCents, 77526);
+  assert.equal(result23.cashDrawerSummary.expectedAfterSangriaCents, 5081);
+
+  const p189 = result23.systemItems.find((i) => i.category === 'pendente' && i.amountCents === 18900);
+  const p450 = result23.systemItems.find((i) => i.category === 'pendente' && i.amountCents === 450);
+  assert.equal(p189.metadata.debtorName, 'CLEITON FERREIRA (');
+  assert.deepEqual(p450.metadata.debtorCandidates, ['ALESSANDRO BURGUER', 'RONALDO BURGUERPLUS']);
+});

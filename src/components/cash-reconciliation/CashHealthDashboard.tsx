@@ -19,7 +19,8 @@ import {
   ChevronUp,
   Trash2,
   User,
-  Filter
+  Filter,
+  Calendar
 } from 'lucide-react';
 
 import {
@@ -27,7 +28,7 @@ import {
   CashReconciliationResult,
   formatCents
 } from '../../types/cashReconciliation';
-import { buildMirrorRowDetails, formatDateBr, formatDateBrShort } from '../../utils/cashReconciliationServiceHelper.mjs';
+import { buildMirrorRowDetails, formatDateBr, formatDateBrShort, formatDateHeaderBadge } from '../../utils/cashReconciliationServiceHelper.mjs';
 import { CashSessionRow } from '../../services/cashReconciliationService';
 import { CashMetricDetailModal, HealthMetricKey } from './CashMetricDetailModal';
 import { GeneralDiffTabKey } from './CashGeneralDiffModal';
@@ -488,8 +489,10 @@ export function CashHealthDashboard({
                   {result.storeName}
                 </span>
               )}
-              <span className="text-xs font-mono text-slate-500 dark:text-[#8696a0] whitespace-nowrap">
-                Ref: {formatDateBr(result.referenceDate)}{result.operatorName ? ` • Op: ${result.operatorName}` : ''}
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#00a884]/15 border border-[#00a884]/40 text-xs font-black text-[#008f6f] dark:text-[#00e5a8] whitespace-nowrap shadow-xs">
+                <Calendar size={13} />
+                Caixa: {formatDateHeaderBadge(result.referenceDate, result.periodEnd || result.referenceDate)}
+                {result.operatorName ? ` • Op: ${result.operatorName}` : ''}
               </span>
             </div>
 
@@ -727,6 +730,7 @@ export function CashHealthDashboard({
             </span>
             <span className="text-[10px] font-bold text-slate-500 dark:text-[#8696a0] shrink-0 whitespace-nowrap">
               Sangria: {formatCents(drawer.sangriaCents)}
+              {(drawer.sangriaIntermediariaCents || 0) > 0 ? ` (+${formatCents(drawer.sangriaIntermediariaCents)} turno)` : ''}
             </span>
           </div>
           <div className="mt-2.5 flex items-baseline justify-between gap-2">

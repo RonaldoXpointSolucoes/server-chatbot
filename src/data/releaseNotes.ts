@@ -712,6 +712,61 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.4.3',
+    date: '2026-11-25',
+    summary: 'Raio-X Clicável da Gaveta e Sangria Intermediária na Conferência de Caixa + Responsividade das Telas de Login + Aviso de Impressão nos Pedidos IA',
+    notes: [
+      {
+        id: 'feat-cash-drawer-outflows-xray-843',
+        category: 'features',
+        title: 'Conferência de Caixa: Raio-X Clicável de Saídas da Gaveta, Sangria Intermediária e Data Permanente',
+        description: 'Adicionado modal detalhado (CashDrawerOutflowsModal) para inspecionar individualmente Saídas Pagamentos (Vales/Contas), Outras Saídas e Sangrias do Turno vs Fechamento (CX. RET) sem duplicar deduções no Saldo Sistema, além do badge permanente com a data do caixa selecionado em todas as abas.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+        guide: {
+          moduleGroup: 'system',
+          moduleLabel: 'Conferência Caixa • Gaveta & Auditoria de Saídas',
+          purpose: 'Dar transparência linha a linha sobre sangrias intermediárias de turno, vales/pagamentos na gaveta e saídas extras que afetam a diferença em dinheiro.',
+          whereToAccess: [
+            '1. Menu Lateral Esquerdo ➔ Conferência Caixa (/conferencia-caixa)',
+            '2. Abra uma conferência e clique nas linhas clicáveis "(-) Saídas Pagamentos", "(-) Sangria Intermediária" ou "(-) Outras Saídas" dentro do painel da Gaveta'
+          ],
+          howToTest: [
+            '1. Acesse Conferência Caixa (/conferencia-caixa) com uma conferência que tenha movimentação em dinheiro ou sangrias.',
+            '2. Clique sobre "(-) Saídas Pagamentos" ou "(-) Sangria do Turno" para abrir o modal Raio-X e navegue entre as abas Pagamentos, Sangria e Dinheiro.'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Tela: Conferência Caixa (/conferencia-caixa) ➔ Gaveta de Dinheiro',
+            contextElements: ['📅 Caixa: DD/MM/AAAA', '💵 Esperado na Gaveta', '🧾 Sangria do Turno', '↩️ Desfazer Último'],
+            targetButtonLabel: '(-) Saídas Pagamentos / Sangria do Turno',
+            targetButtonPosition: 'Card resumido da Gaveta dentro da Conferência de Caixa (linhas sublinhadas com seta)',
+            visualPreviewVariant: 'chat-history-sync'
+          },
+          quickAction: {
+            label: 'Abrir Conferência Caixa',
+            route: '/conferencia-caixa'
+          }
+        }
+      },
+      {
+        id: 'imp-cash-diff-audit-and-printer-copy-843',
+        category: 'improvements',
+        title: 'Detalhamento de Diferença Geral, Motor de Extração PDV e Painel de Impressora GastroFood',
+        description: 'Refinamentos no motor de conciliação e itens operacionais para separar corretamente sangria intermediária, itens manuais e pendências do PDV, além de atualizar o painel de Aviso de Impressão em Configurações informando o disparo automático do recado na conclusão de pedidos GastroFood pela IA.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
+      },
+      {
+        id: 'fix-login-responsive-scroll-843',
+        category: 'fixes',
+        title: 'Correção de Rolagem e Enquadramento Mobile nas Telas de Login (Cliente e Admin)',
+        description: 'Aplicado container rolável compatível com #root fixo em ClientLogin e AdminLogin (loginLayoutClasses), impedindo cortes verticais em telas pequenas ou quando o teclado virtual do celular é aberto.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      }
+    ]
+  },
+  {
     version: '8.4.2',
     date: '2026-11-24',
     summary: 'Blindagem Anti-Piscadas & Perda de Edição em Tempo Real (Mantendo Chat Ao Vivo) + Evoluções de Precisão na Conferência de Caixa (D+1, Fundo Noite, Breakdown por Origem e Alertas PDV)',

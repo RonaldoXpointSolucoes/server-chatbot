@@ -49,7 +49,10 @@ function matchesSearch(it: CashReconciliationItem, qLower: string): boolean {
   if (!qLower) return true;
   const brVal = (Number(it.amountCents || 0) / 100).toFixed(2).replace('.', ',');
   const dotVal = (Number(it.amountCents || 0) / 100).toFixed(2);
-  return `${it.description || ''} ${it.referenceCode || ''} ${it.operatorName || ''} ${it.terminalName || ''} ${it.source || ''} ${it.category || ''} ${it.timeStr || ''} ${brVal} ${dotVal}`
+  const debtorText = [it.metadata?.debtorName, ...(it.metadata?.debtorCandidates || [])]
+    .filter(Boolean)
+    .join(' ');
+  return `${it.description || ''} ${debtorText} ${it.referenceCode || ''} ${it.operatorName || ''} ${it.terminalName || ''} ${it.source || ''} ${it.category || ''} ${it.timeStr || ''} ${brVal} ${dotVal}`
     .toLowerCase()
     .includes(qLower);
 }
@@ -438,6 +441,19 @@ export function CashManualReconciliationTable({
                         </td>
                         <td className="py-2.5 px-2.5 align-middle min-w-[150px]">
                           <p className="font-bold text-slate-800 dark:text-[#e9edef] leading-snug">{it.description}</p>
+                          {(it.metadata?.debtorName || (it.metadata?.debtorCandidates?.length || 0) > 0) && (
+                            <p className="mt-0.5">
+                              {it.metadata?.debtorName ? (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-cyan-500/15 border border-cyan-500/30 text-[10px] font-black text-cyan-800 dark:text-cyan-200">
+                                  Cliente: {it.metadata.debtorName}
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-[10px] font-bold text-amber-800 dark:text-amber-200">
+                                  Possível: {it.metadata?.debtorCandidates?.join(' / ')}
+                                </span>
+                              )}
+                            </p>
+                          )}
                           <p className="text-[10.5px] text-slate-500 dark:text-[#8696a0]">
                             {formatDateBrShort(it.dateStr)} {it.timeStr}
                             {it.operatorName ? ` • ${it.operatorName}` : ''}

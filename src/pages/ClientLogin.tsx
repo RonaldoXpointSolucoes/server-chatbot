@@ -20,6 +20,12 @@ import {
   clearScopedRemoteStorageForTenant,
   writeScopedVerifiedGoogleEmail,
 } from '../utils/remoteAccess.mjs';
+import {
+  LOGIN_SCROLL_OUTER_CLASS,
+  LOGIN_SCROLL_INNER_CLASS,
+  MODAL_SCROLL_BACKDROP_CLASS,
+  MODAL_SCROLL_INNER_CLASS,
+} from '../utils/loginLayoutClasses.mjs';
 
 function syncRemoteAccessStorageForCompany(company: any, userEmail: string) {
   if (typeof window === 'undefined' || !company?.id) return;
@@ -1069,11 +1075,12 @@ export default function ClientLogin() {
   };
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-[100dvh] bg-[#f0f2f5] dark:bg-[#111b21] font-sans relative p-4 lg:p-8">
-      <div className="absolute top-6 right-6">
-         <ThemeToggle />
-      </div>
-      <div className="w-full max-w-sm p-8 bg-white dark:bg-[#202c33] rounded-3xl shadow-xl animate-in slide-in-from-bottom-4 fade-in duration-500">
+    <div className={`${LOGIN_SCROLL_OUTER_CLASS} bg-[#f0f2f5] dark:bg-[#111b21] font-sans`}>
+      <div className={`${LOGIN_SCROLL_INNER_CLASS} px-4 pt-16 pb-10 sm:px-6 sm:py-10 lg:p-8`}>
+        <div className="absolute top-4 right-4 sm:top-6 sm:right-6 z-10">
+           <ThemeToggle />
+        </div>
+        <div className="w-full max-w-sm p-6 sm:p-8 bg-white dark:bg-[#202c33] rounded-3xl shadow-xl animate-in slide-in-from-bottom-4 fade-in duration-500">
         <div className="flex flex-col items-center mb-6">
           <img src="/pwa-192x192.png" alt="Logo" className="w-16 h-16 object-contain rounded-2xl shadow-sm mb-4" />
           <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold uppercase tracking-wider mb-2">
@@ -1249,11 +1256,13 @@ export default function ClientLogin() {
           </div>
         </div>
       )}
+      </div>
 
       {/* Modal Premium de Login por Face ID */}
       {faceIdActive && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xl animate-in fade-in duration-300">
-          <div className="w-full max-w-md bg-white/95 dark:bg-[#1f2c34] border border-[#e9edef]/20 dark:border-white/5 rounded-3xl p-8 shadow-2xl relative flex flex-col items-center">
+        <div className={MODAL_SCROLL_BACKDROP_CLASS}>
+          <div className={MODAL_SCROLL_INNER_CLASS}>
+            <div className="w-full max-w-md bg-white/95 dark:bg-[#1f2c34] border border-[#e9edef]/20 dark:border-white/5 rounded-3xl p-8 shadow-2xl relative flex flex-col items-center">
             
             <button
               onClick={() => {
@@ -1465,13 +1474,15 @@ export default function ClientLogin() {
               </div>
             )}
           </div>
+          </div>
         </div>
       )}
 
       {/* Modal Premium de Registro/Cadastro de Face ID pós-login tradicional */}
       {faceRegisterModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xl animate-in fade-in duration-300">
-          <div className="w-full max-w-md bg-white/95 dark:bg-[#1f2c34] border border-[#e9edef]/20 dark:border-white/5 rounded-3xl p-8 shadow-2xl relative flex flex-col items-center">
+        <div className={MODAL_SCROLL_BACKDROP_CLASS}>
+          <div className={MODAL_SCROLL_INNER_CLASS}>
+            <div className="w-full max-w-md bg-white/95 dark:bg-[#1f2c34] border border-[#e9edef]/20 dark:border-white/5 rounded-3xl p-8 shadow-2xl relative flex flex-col items-center">
             
             {!faceScanning && !showFaceSuccess && (
               <button
@@ -1615,6 +1626,7 @@ export default function ClientLogin() {
                 )}
               </div>
             )}
+          </div>
           </div>
         </div>
       )}

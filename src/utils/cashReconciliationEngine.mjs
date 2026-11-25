@@ -4,8 +4,127 @@ import { assessCashReportCompleteness } from './cashReportCompleteness.mjs';
 import {
   annotateMissingItemsWithOperationalHints,
   buildAuditInsights,
+  linkPendingDebtorsToSystemItems,
   linkSoldItemsToPdvOperations
 } from './cashOperationItemsHelper.mjs';
+
+const CLOSING_SANGRIA_LABEL_RE = /\b(CX\.?\s*RET|RETIRADA|FECHAMENTO)\b/i;
+
+/**
+ * Classifica as saídas da fita de fechamento (.txt) evitando que sangrias intermediárias
+ * (já descontadas em `Saídas Pagamentos` do RelConferencia) sejam subtraídas em duplicidade
+ * junto com a `SANGRIA CX. RET` do fechamento do turno.
+ */
+export function classifyTxtDrawerOutflows({ txtSum = {}, relCash = {}, summaryTxtFile = null } = {}) {
+  const rawList = Array.isArray(txtSum?.saidasDetalhadas) ? txtSum.saidasDetalhadas : [];
+  const controleRows = Array.isArray(summaryTxtFile?.summary?.controleRows)
+    ? summaryTxtFile.summary.controleRows
+    : [];
+
+  const caixaCegoDinheiro =
+    controleRows.find((r) => /\bDINHEIRO\b/i.test(String(r?.method || ''))) || null;
+  const caixaCegoSangria =
+    controleRows.find((r) => /\bSANGRIA\b/i.test(String(r?.method || ''))) || null;
+
+  const nonSangriaVales = rawList.filter((it) => it && !it.isSangria);
+  const sangriaEntries = rawList.filter((it) => it && it.isSangria);
+
+  const valesSum =
+    nonSangriaVales.length > 0
+      ? nonSangriaVales.reduce((s, it) => s + Number(it.amountCents || 0), 0)
+      : Number(txtSum?.saidasPagamentosCents || 0);
+
+  const explicitClosingSangrias = sangriaEntries.filter((it) =>
+    CLOSING_SANGRIA_LABEL_RE.test(String(it.label || ''))
+  );
+  const nonClosingSangrias = sangriaEntries.filter(
+    (it) => !CLOSING_SANGRIA_LABEL_RE.test(String(it.label || ''))
+  );
+  const nonClosingSum = nonClosingSangrias.reduce((s, it) => s + Number(it.amountCents || 0), 0);
+
+  const relSaidasPagamentosCents =
+    relCash?.saidasPagamentosCents !== undefined && relCash?.saidasPagamentosCents !== null
+      ? Number(relCash.saidasPagamentosCents)
+      : null;
+
+  const relIncludesNonClosing =
+    relSaidasPagamentosCents !== null &&
+    nonClosingSum > 0 &&
+    relSaidasPagamentosCents >= valesSum + nonClosingSum;
+
+  const hasIntermediateSangria =
+    nonClosingSum > 0 &&
+    (explicitClosingSangrias.length > 0 ||
+      Boolean(caixaCegoSangria && Number(caixaCegoSangria.sistemaCents || 0) > 0) ||
+      relIncludesNonClosing);
+
+  const classifiedItems = [];
+  for (const it of rawList) {
+    if (!it) continue;
+    if (!it.isSangria) {
+      classifiedItems.push({
+        ...it,
+        kind: 'pagamento_vale',
+        source: 'Fechamento TXT',
+        includedInRelConfPagamentos: relSaidasPagamentosCents !== null
+      });
+    } else if (hasIntermediateSangria && !CLOSING_SANGRIA_LABEL_RE.test(String(it.label || ''))) {
+      classifiedItems.push({
+        ...it,
+        kind: 'sangria_intermediaria',
+        source: 'Fechamento TXT',
+        includedInRelConfPagamentos: relIncludesNonClosing
+      });
+    } else {
+      classifiedItems.push({
+        ...it,
+        kind: 'sangria_fechamento',
+        source: 'Fechamento TXT',
+        includedInRelConfPagamentos: false
+      });
+    }
+  }
+
+  const sangriaIntermediariaCents = classifiedItems
+    .filter((x) => x.kind === 'sangria_intermediaria')
+    .reduce((s, x) => s + Number(x.amountCents || 0), 0);
+
+  const sangriaFechamentoCents =
+    rawList.length > 0
+      ? classifiedItems
+          .filter((x) => x.kind === 'sangria_fechamento')
+          .reduce((s, x) => s + Number(x.amountCents || 0), 0)
+      : Number(txtSum?.sangriaCents || 0);
+
+  const sangriaTotalTxtCents =
+    rawList.length > 0
+      ? sangriaIntermediariaCents + sangriaFechamentoCents
+      : Number(txtSum?.sangriaCents || 0);
+
+  const relConfIncludesIntermediateSangria =
+    relSaidasPagamentosCents !== null &&
+    sangriaIntermediariaCents > 0 &&
+    relSaidasPagamentosCents - valesSum >= sangriaIntermediariaCents;
+
+  const saidasPagamentosCents =
+    relSaidasPagamentosCents !== null
+      ? relConfIncludesIntermediateSangria
+        ? relSaidasPagamentosCents - sangriaIntermediariaCents
+        : relSaidasPagamentosCents
+      : valesSum;
+
+  return {
+    saidasPagamentosCents,
+    relConfSaidasPagamentosCents: relSaidasPagamentosCents,
+    relConfIncludesIntermediateSangria,
+    sangriaIntermediariaCents,
+    sangriaFechamentoCents,
+    sangriaTotalTxtCents,
+    items: classifiedItems,
+    caixaCegoDinheiro,
+    caixaCegoSangria
+  };
+}
 
 function buildNormalizedInputs(parsedFiles) {
   let pdvFile = null;
@@ -816,6 +935,20 @@ export function runCashReconciliation({
     }
   }
 
+  // Vincular clientes devedores do fechamento TXT aos lançamentos "Pendentes" do PDV pelo valor exato
+  const pendingDebtorsList = txtFile?.summary?.pendingDebtors || [];
+  if (pendingDebtorsList.length > 0) {
+    const debtorsBySystemId = linkPendingDebtorsToSystemItems({
+      systemItems,
+      pendingDebtors: pendingDebtorsList
+    });
+    for (const sys of systemItems) {
+      if (debtorsBySystemId[sys.id]) {
+        sys.metadata = { ...(sys.metadata || {}), ...debtorsBySystemId[sys.id] };
+      }
+    }
+  }
+
   // 2. Itens Reais (OFX + Rede + C6Pay) filtrados estritamente ao período do caixa + deduplicação C6Pay PIX × OFX C6
   const ofxPixItems = [];
   const nonPdvItems = [];
@@ -1578,9 +1711,12 @@ export function runCashReconciliation({
   const relCash = relConfFile?.summary?.cashBlock || {};
   const txtSum = txtFile?.summary || {};
 
+  const outflowClassification = classifyTxtDrawerOutflows({ txtSum, relCash, summaryTxtFile });
+
   const baseFundoNoiteCents = relCash.fundoNoiteCents ?? 0;
   const baseOutrasEntradasCents = relCash.outrasEntradasCents ?? 0;
-  const baseSaidasPagamentosCents = relCash.saidasPagamentosCents ?? txtSum.saidasPagamentosCents ?? 0;
+  const baseSaidasPagamentosCents = outflowClassification.saidasPagamentosCents;
+  const baseSangriaIntermediariaCents = outflowClassification.sangriaIntermediariaCents;
   const baseOutrasSaidasCents = relCash.outrasSaidasCents ?? 0;
 
   const {
@@ -1595,8 +1731,11 @@ export function runCashReconciliation({
   const fundoNoiteCents = manualInputs.fundoNoiteOverrideCents ?? baseFundoNoiteCents;
   const outrasEntradasCents = (manualInputs.outrasEntradasOverrideCents ?? baseOutrasEntradasCents) + manualInflowsCents;
   const sangriaRelConfCents = (relCash.sangriaManhaCents || 0) + (relCash.sangriaNoiteCents || 0);
-  const sangriaCents = manualInputs.sangriaOverrideCents ?? (sangriaRelConfCents > 0 ? sangriaRelConfCents : (txtSum.sangriaCents || 0));
+  const sangriaCents =
+    manualInputs.sangriaOverrideCents ??
+    (sangriaRelConfCents > 0 ? sangriaRelConfCents : outflowClassification.sangriaFechamentoCents);
   const saidasPagamentosCents = manualInputs.saidasPagamentosOverrideCents ?? baseSaidasPagamentosCents;
+  const sangriaIntermediariaCents = baseSangriaIntermediariaCents;
   const outrasSaidasCents = (manualInputs.outrasSaidasOverrideCents ?? baseOutrasSaidasCents) + manualOutflowsCents;
 
   const drawerManualDeltaCents =
@@ -1605,8 +1744,30 @@ export function runCashReconciliation({
     (saidasPagamentosCents - baseSaidasPagamentosCents) -
     (outrasSaidasCents - baseOutrasSaidasCents);
 
-  const expectedTotalCents = fundoManhaCents + vendaDinheiroCents + fundoNoiteCents + outrasEntradasCents - sangriaRelConfCents - saidasPagamentosCents - outrasSaidasCents;
-  const expectedAfterSangriaCents = fundoManhaCents + vendaDinheiroCents + fundoNoiteCents + outrasEntradasCents - sangriaCents - saidasPagamentosCents - outrasSaidasCents;
+  // Evita subtrair em duplicidade caso RelConferencia já tenha lançado a sangria intermediária em sangriaManha/Noite
+  const sangriaIntermediariaToSubtract =
+    sangriaRelConfCents > 0 && sangriaRelConfCents === sangriaIntermediariaCents
+      ? 0
+      : sangriaIntermediariaCents;
+
+  const expectedTotalCents =
+    fundoManhaCents +
+    vendaDinheiroCents +
+    fundoNoiteCents +
+    outrasEntradasCents -
+    sangriaRelConfCents -
+    sangriaIntermediariaToSubtract -
+    saidasPagamentosCents -
+    outrasSaidasCents;
+  const expectedAfterSangriaCents =
+    fundoManhaCents +
+    vendaDinheiroCents +
+    fundoNoiteCents +
+    outrasEntradasCents -
+    sangriaCents -
+    sangriaIntermediariaToSubtract -
+    saidasPagamentosCents -
+    outrasSaidasCents;
 
   const swappedToDigitalCents = matchedPairs
     .filter(m => m.reasonType === 'swapped_method' && m.systemItems.some(s => s.category === 'dinheiro'))
@@ -1780,6 +1941,10 @@ export function runCashReconciliation({
       fundoNoiteCents,
       outrasEntradasCents,
       sangriaCents,
+      sangriaIntermediariaCents,
+      sangriaTotalTxtCents: outflowClassification.sangriaTotalTxtCents,
+      relConfSaidasPagamentosCents: outflowClassification.relConfSaidasPagamentosCents,
+      relConfIncludesIntermediateSangria: outflowClassification.relConfIncludesIntermediateSangria,
       saidasPagamentosCents,
       outrasSaidasCents,
       expectedTotalCents,
@@ -1790,7 +1955,12 @@ export function runCashReconciliation({
       manualOutflowsCents,
       manualInflowsCents,
       manualCashAdjustments,
-      saidasDetalhadas: [...(txtSum.saidasDetalhadas || []), ...manualOutflowDetails]
+      caixaCegoDinheiro: outflowClassification.caixaCegoDinheiro,
+      caixaCegoSangria: outflowClassification.caixaCegoSangria,
+      saidasDetalhadas: [
+        ...outflowClassification.items,
+        ...(manualOutflowDetails || []).map((m) => ({ ...m, kind: m?.kind || 'justificativa' }))
+      ]
     },
     systemItems,
     realItems,

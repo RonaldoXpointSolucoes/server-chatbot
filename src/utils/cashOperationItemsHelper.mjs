@@ -260,6 +260,61 @@ export function linkSoldItemsToPdvOperations({ systemItems = [], soldItems = [] 
 }
 
 /**
+ * Associa os devedores das notas pendentes do fechamento (.txt) aos lançamentos `pendente` do PDV
+ * pelo valor exato em centavos, listando candidatos quando houver empate entre pessoas distintas.
+ */
+export function linkPendingDebtorsToSystemItems({ systemItems = [], pendingDebtors = [] } = {}) {
+  const result = {};
+  if (!Array.isArray(systemItems) || !Array.isArray(pendingDebtors) || pendingDebtors.length === 0) {
+    return result;
+  }
+
+  const debtorsByAmount = new Map();
+  for (const entry of pendingDebtors) {
+    const rawName = String(entry?.debtor || entry?.debtorName || '').replace(/\s+/g, ' ').trim();
+    const amountCents = Math.round(Number(entry?.amountCents || 0));
+    if (!rawName || amountCents <= 0) continue;
+    if (!debtorsByAmount.has(amountCents)) {
+      debtorsByAmount.set(amountCents, []);
+    }
+    debtorsByAmount.get(amountCents).push(rawName);
+  }
+
+  for (const sys of systemItems) {
+    if (!sys || sys.category !== 'pendente') continue;
+    const amountCents = Math.round(Number(sys.amountCents || 0));
+    const names = debtorsByAmount.get(amountCents);
+    if (!names || names.length === 0) continue;
+
+    const uniqueNames = [];
+    const seenUpper = new Set();
+    for (const name of names) {
+      const upper = name.toUpperCase();
+      if (!seenUpper.has(upper)) {
+        seenUpper.add(upper);
+        uniqueNames.push(name);
+      }
+    }
+
+    if (uniqueNames.length === 1) {
+      result[sys.id] = {
+        debtorName: uniqueNames[0],
+        debtorMatchType: 'exact_amount',
+        debtorCandidates: [uniqueNames[0]]
+      };
+    } else if (uniqueNames.length > 1) {
+      result[sys.id] = {
+        debtorName: '',
+        debtorMatchType: 'ambiguous_same_amount',
+        debtorCandidates: uniqueNames
+      };
+    }
+  }
+
+  return result;
+}
+
+/**
  * Consolida todos os insights operacionais e alertas de auditoria dos 7 relatórios do DataDivas.
  */
 export function buildAuditInsights({

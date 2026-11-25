@@ -113,6 +113,13 @@ export function CashOperationDetailModal({
                     • <UserCheck size={11} /> Garçom: {orderDetail.waiters.join(', ')}
                   </span>
                 ) : null}
+                {(operationItem.metadata?.debtorName || (operationItem.metadata?.debtorCandidates?.length || 0) > 0) && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-cyan-500/15 border border-cyan-500/30 text-[10.5px] font-black text-cyan-700 dark:text-cyan-300">
+                    {operationItem.metadata?.debtorName
+                      ? `Cliente: ${operationItem.metadata.debtorName}`
+                      : `Possível devedor: ${operationItem.metadata?.debtorCandidates?.join(' / ')}`}
+                  </span>
+                )}
               </p>
             </div>
           </div>

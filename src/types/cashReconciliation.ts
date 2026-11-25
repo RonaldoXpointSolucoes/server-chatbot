@@ -202,6 +202,9 @@ export interface CashReconciliationItem {
   metadata?: {
     recebidoEmBranco?: boolean;
     changeCents?: number;
+    debtorName?: string;
+    debtorCandidates?: string[];
+    debtorMatchType?: 'exact_amount' | 'ambiguous_same_amount';
     orderDetail?: CashOperationOrderDetail;
     operationalAlerts?: Array<{
       code: 'reopened_table' | 'rapid_duplicate' | 'zero_receipt_on_table';
@@ -252,6 +255,10 @@ export interface CashDrawerSummary {
   fundoNoiteCents?: number;
   outrasEntradasCents?: number;
   sangriaCents?: number;
+  sangriaIntermediariaCents?: number;
+  sangriaTotalTxtCents?: number;
+  relConfSaidasPagamentosCents?: number | null;
+  relConfIncludesIntermediateSangria?: boolean;
   saidasPagamentosCents?: number;
   outrasSaidasCents?: number;
   expectedTotalCents?: number;
@@ -262,10 +269,25 @@ export interface CashDrawerSummary {
   manualOutflowsCents?: number;
   manualInflowsCents?: number;
   manualCashAdjustments?: CashManualCashAdjustment[];
+  caixaCegoDinheiro?: {
+    method: string;
+    sistemaCents: number;
+    informadoCents: number;
+    diffCents: number;
+  } | null;
+  caixaCegoSangria?: {
+    method: string;
+    sistemaCents: number;
+    informadoCents: number;
+    diffCents: number;
+  } | null;
   saidasDetalhadas?: Array<{
     label: string;
     amountCents: number;
     isSangria: boolean;
+    kind?: 'pagamento_vale' | 'sangria_intermediaria' | 'sangria_fechamento' | 'justificativa';
+    source?: string;
+    includedInRelConfPagamentos?: boolean;
     isManualAdjustment?: boolean;
     direction?: 'outflow' | 'inflow';
     operator?: string;

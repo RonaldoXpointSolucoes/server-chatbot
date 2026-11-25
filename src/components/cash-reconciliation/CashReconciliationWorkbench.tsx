@@ -39,8 +39,10 @@ import {
   buildLinkableSystemPool,
   filterVisibleMirrorRows,
   formatDateBr,
+  formatDateHeaderBadge,
   parseUiMoneyInputToCents
 } from '../../utils/cashReconciliationServiceHelper.mjs';
+import { CashDrawerOutflowsModal, DrawerOutflowModalTab } from './CashDrawerOutflowsModal';
 import { CashManualReconciliationTable } from './CashManualReconciliationTable';
 import {
   CashMirrorRowDetailPanel,
@@ -117,6 +119,7 @@ export function CashReconciliationWorkbench({
     else setInternalMirrorKey(key);
   };
   const [showZeroMirrorRows, setShowZeroMirrorRows] = useState(false);
+  const [drawerDetailTab, setDrawerDetailTab] = useState<DrawerOutflowModalTab | null>(null);
   const [editingMirrorKey, setEditingMirrorKey] = useState<string | null>(null);
   const [draftMirrorTexts, setDraftMirrorTexts] = useState<Record<string, string>>({});
   const [searchTerm, setSearchTerm] = useState('');
@@ -319,6 +322,8 @@ export function CashReconciliationWorkbench({
 
   const drawer = result.cashDrawerSummary || {};
   const metrics = result.financialMetrics || {};
+  const cashRow = (result.mirrorRows || []).find((r) => r.key === 'saldo_dinheiro') || null;
+  const dateBadge = formatDateHeaderBadge(result.referenceDate, result.periodEnd || result.referenceDate);
   const mirrorVisibility = useMemo(
     () => filterVisibleMirrorRows(result.mirrorRows || [], manualInputs.categoryRealOverrides || {}, showZeroMirrorRows),
     [result.mirrorRows, manualInputs.categoryRealOverrides, showZeroMirrorRows]
@@ -365,16 +370,23 @@ export function CashReconciliationWorkbench({
             );
           })}
         </div>
-        {manualResolutionsCount > 0 && onUndoLastResolution && (
-          <button
-            type="button"
-            onClick={onUndoLastResolution}
-            className="mb-1.5 px-2.5 py-1.5 rounded-lg border border-amber-500/35 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 text-[11px] font-bold flex items-center gap-1 shrink-0 whitespace-nowrap active:scale-95 transition-all"
-            title="Desfazer a última conciliação ou justificativa confirmada nesta conferência"
-          >
-            <RotateCcw size={12} /> Desfazer Último ({manualResolutionsCount})
-          </button>
-        )}
+        <div className="flex items-center gap-2 shrink-0">
+          {dateBadge && (
+            <span className="mb-1.5 inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#00a884]/15 border border-[#00a884]/35 text-[11px] font-black text-[#008f6f] dark:text-[#00e5a8] whitespace-nowrap">
+              <Calendar size={12} /> Caixa: {dateBadge}
+            </span>
+          )}
+          {manualResolutionsCount > 0 && onUndoLastResolution && (
+            <button
+              type="button"
+              onClick={onUndoLastResolution}
+              className="mb-1.5 px-2.5 py-1.5 rounded-lg border border-amber-500/35 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 text-[11px] font-bold flex items-center gap-1 shrink-0 whitespace-nowrap active:scale-95 transition-all"
+              title="Desfazer a última conciliação ou justificativa confirmada nesta conferência"
+            >
+              <RotateCcw size={12} /> Desfazer Último ({manualResolutionsCount})
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Conteúdo das Abas */}
@@ -409,20 +421,58 @@ export function CashReconciliationWorkbench({
                       <strong className="tabular-nums whitespace-nowrap shrink-0">{formatCents(drawer.outrasEntradasCents)}</strong>
                     </div>
                   )}
-                  <div className="flex justify-between gap-2">
-                    <span>(-) Saídas Pagamentos (Vales/Contas):</span>
+                  <button
+                    type="button"
+                    onClick={() => setDrawerDetailTab('pagamentos')}
+                    title="Clique para detalhar todas as baixas, vales e contas pagas pela gaveta"
+                    className="w-full flex justify-between items-center gap-2 text-left rounded-lg px-1.5 py-1 -mx-1.5 hover:bg-rose-500/10 transition-colors group"
+                  >
+                    <span className="inline-flex items-center gap-1 underline decoration-dotted underline-offset-2 group-hover:text-rose-500">
+                      (-) Saídas Pagamentos (Vales/Contas):
+                      <ChevronRight size={12} className="opacity-70 group-hover:translate-x-0.5 transition-transform" />
+                    </span>
                     <strong className="tabular-nums text-rose-500 whitespace-nowrap shrink-0">{`-${formatCents(drawer.saidasPagamentosCents)}`}</strong>
-                  </div>
-                  {(drawer.outrasSaidasCents || 0) > 0 && (
-                    <div className="flex justify-between gap-2">
-                      <span>(-) Outras Saídas (Não lançadas):</span>
-                      <strong className="tabular-nums text-rose-500 whitespace-nowrap shrink-0">{`-${formatCents(drawer.outrasSaidasCents)}`}</strong>
-                    </div>
+                  </button>
+                  {(drawer.sangriaIntermediariaCents || 0) > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setDrawerDetailTab('sangria')}
+                      title="Sangria realizada durante o turno (já abatida do Saldo Sistema, sem duplicar na CX. RET)"
+                      className="w-full flex justify-between items-center gap-2 text-left rounded-lg px-1.5 py-1 -mx-1.5 hover:bg-amber-500/10 transition-colors group"
+                    >
+                      <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-300 underline decoration-dotted underline-offset-2">
+                        (-) Sangria Intermediária (Turno):
+                        <ChevronRight size={12} className="opacity-70 group-hover:translate-x-0.5 transition-transform" />
+                      </span>
+                      <strong className="tabular-nums text-amber-600 dark:text-amber-400 whitespace-nowrap shrink-0">{`-${formatCents(drawer.sangriaIntermediariaCents)}`}</strong>
+                    </button>
                   )}
-                  <div className="flex justify-between gap-2">
-                    <span>(-) Sangria do Turno:</span>
+                  {(drawer.outrasSaidasCents || 0) > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setDrawerDetailTab('pagamentos')}
+                      title="Clique para ver justificativas e outras saídas da gaveta"
+                      className="w-full flex justify-between items-center gap-2 text-left rounded-lg px-1.5 py-1 -mx-1.5 hover:bg-rose-500/10 transition-colors group"
+                    >
+                      <span className="inline-flex items-center gap-1 underline decoration-dotted underline-offset-2">
+                        (-) Outras Saídas (Não lançadas):
+                        <ChevronRight size={12} className="opacity-70" />
+                      </span>
+                      <strong className="tabular-nums text-rose-500 whitespace-nowrap shrink-0">{`-${formatCents(drawer.outrasSaidasCents)}`}</strong>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setDrawerDetailTab('sangria')}
+                    title="Clique para detalhar Sangria do fechamento (CX. RET) e sangrias do turno"
+                    className="w-full flex justify-between items-center gap-2 text-left rounded-lg px-1.5 py-1 -mx-1.5 hover:bg-rose-500/10 transition-colors group"
+                  >
+                    <span className="inline-flex items-center gap-1 underline decoration-dotted underline-offset-2 group-hover:text-rose-500">
+                      (-) Sangria do Turno{(drawer.sangriaIntermediariaCents || 0) > 0 ? ' (CX. RET)' : ''}:
+                      <ChevronRight size={12} className="opacity-70 group-hover:translate-x-0.5 transition-transform" />
+                    </span>
                     <strong className="tabular-nums text-rose-500 whitespace-nowrap shrink-0">{`-${formatCents(drawer.sangriaCents)}`}</strong>
-                  </div>
+                  </button>
                   <div className="pt-1.5 border-t border-emerald-500/20 flex justify-between gap-2 font-bold text-slate-900 dark:text-white">
                     <span>Esperado na Gaveta:</span>
                     <span className="tabular-nums whitespace-nowrap shrink-0">{formatCents(drawer.expectedAfterSangriaCents)}</span>
@@ -497,6 +547,11 @@ export function CashReconciliationWorkbench({
                     placeholder={`Padrão do TXT: ${centsToInputStr(drawer.sangriaCents)}`}
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-[#2a3942] bg-white dark:bg-[#111b21] text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#00a884]"
                   />
+                  {(drawer.sangriaIntermediariaCents || 0) > 0 && (
+                    <p className="mt-1 text-[10px] font-semibold text-amber-700 dark:text-amber-300">
+                      Refere-se à retirada final CX. RET. A sangria intermediária ({formatCents(drawer.sangriaIntermediariaCents)}) já foi descontada acima.
+                    </p>
+                  )}
                 </div>
 
                 {/* Justificativas Manuais de Gaveta (ex.: saídas sem lançamento no PDV) */}
@@ -816,7 +871,7 @@ export function CashReconciliationWorkbench({
                           }`}
                         >
                           <td className="py-2.5 px-3">
-                            <div className="font-bold text-slate-800 dark:text-[#e9edef] flex items-center gap-1.5">
+                            <div className="font-bold text-slate-800 dark:text-[#e9edef] flex items-center gap-1.5 flex-wrap">
                               <ChevronRight
                                 size={14}
                                 className={isSelected ? 'text-[#00a884] shrink-0' : 'text-slate-400 shrink-0'}
@@ -826,6 +881,19 @@ export function CashReconciliationWorkbench({
                                 <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[9.5px] font-bold">
                                   AUTO
                                 </span>
+                              )}
+                              {row.key === 'saldo_dinheiro' && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setDrawerDetailTab('dinheiro');
+                                  }}
+                                  className="px-2 py-0.5 rounded-md bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-700 dark:text-emerald-300 text-[10px] font-black whitespace-nowrap"
+                                  title="Abrir detalhamento completo do Saldo em Dinheiro, Vales e Sangrias"
+                                >
+                                  Detalhar composição
+                                </button>
                               )}
                             </div>
                             {row.sourceNote && (
@@ -1600,6 +1668,17 @@ export function CashReconciliationWorkbench({
           </div>
         )}
       </div>
+
+      {drawerDetailTab !== null && (
+        <CashDrawerOutflowsModal
+          isOpen={drawerDetailTab !== null}
+          initialTab={drawerDetailTab}
+          drawer={drawer}
+          cashRow={cashRow}
+          dateBadge={dateBadge}
+          onClose={() => setDrawerDetailTab(null)}
+        />
+      )}
 
       {expandedMirrorKey && (() => {
         const selectedRow = (result.mirrorRows || []).find((r) => r.key === expandedMirrorKey);

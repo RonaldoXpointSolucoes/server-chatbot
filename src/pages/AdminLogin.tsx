@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ShieldAlert, Key, LogIn, Loader2 } from 'lucide-react';
 import { supabase } from '../services/supabase';
+import { LOGIN_SCROLL_OUTER_CLASS, LOGIN_SCROLL_INNER_CLASS } from '../utils/loginLayoutClasses.mjs';
 
 export default function AdminLogin() {
   const [email, setEmail] = useState('ronaldo.xpointsolucoes@gmail.com');
@@ -57,13 +58,16 @@ export default function AdminLogin() {
   };
 
   return (
-    <div className="flex items-center justify-center min-h-[100dvh] bg-gradient-to-br from-[#111b21] to-[#202c33] font-sans">
+    <div className={`${LOGIN_SCROLL_OUTER_CLASS} bg-gradient-to-br from-[#111b21] to-[#202c33] font-sans`}>
       
       {/* Decorative Blur Orbs */}
-      <div className="absolute top-0 right-0 w-96 h-96 bg-[#00a884] rounded-full mix-blend-multiply filter blur-[128px] opacity-20 animate-pulse"></div>
-      <div className="absolute bottom-0 left-0 w-96 h-96 bg-indigo-500 rounded-full mix-blend-multiply filter blur-[128px] opacity-20 animate-pulse" style={{ animationDelay: '2s' }}></div>
+      <div className="pointer-events-none fixed inset-0 overflow-hidden">
+        <div className="absolute top-0 right-0 w-96 h-96 bg-[#00a884] rounded-full mix-blend-multiply filter blur-[128px] opacity-20 animate-pulse"></div>
+        <div className="absolute bottom-0 left-0 w-96 h-96 bg-indigo-500 rounded-full mix-blend-multiply filter blur-[128px] opacity-20 animate-pulse" style={{ animationDelay: '2s' }}></div>
+      </div>
 
-      <div className="relative w-full max-w-md p-8 bg-white/10 dark:bg-black/30 backdrop-blur-xl border border-white/20 dark:border-white/10 rounded-3xl shadow-2xl animate-in slide-in-from-bottom-6 fade-in duration-700">
+      <div className={`${LOGIN_SCROLL_INNER_CLASS} p-4 sm:p-6 py-10`}>
+      <div className="relative w-full max-w-md p-6 sm:p-8 bg-white/10 dark:bg-black/30 backdrop-blur-xl border border-white/20 dark:border-white/10 rounded-3xl shadow-2xl animate-in slide-in-from-bottom-6 fade-in duration-700">
         <div className="flex flex-col items-center mb-8">
           <div className="w-16 h-16 bg-[#00a884]/20 rounded-2xl flex items-center justify-center mb-4 border border-[#00a884]/30">
              <ShieldAlert className="text-[#00a884] w-8 h-8" />
@@ -121,6 +125,7 @@ export default function AdminLogin() {
             {isLoading ? <Loader2 size={18} className="animate-spin" /> : <>Acessar Painel Global <LogIn size={18} /></>}
           </button>
         </form>
+      </div>
       </div>
     </div>
   );

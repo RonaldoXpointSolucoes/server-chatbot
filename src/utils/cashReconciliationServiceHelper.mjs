@@ -780,6 +780,27 @@ export function formatDateBrShort(rawDate) {
   return str;
 }
 
+const WEEKDAY_SHORT_PT = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
+
+/**
+ * Formata a data (ou intervalo) de referência do caixa com dia da semana para destaque visual no cabeçalho.
+ */
+export function formatDateHeaderBadge(startDate, endDate = '') {
+  const startBr = formatDateBr(startDate);
+  if (!startBr) return '';
+  const endBr = formatDateBr(endDate);
+  if (endBr && endBr !== startBr) {
+    return `${startBr} a ${endBr}`;
+  }
+  const isoMatch = String(startDate || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) {
+    const dt = new Date(Number(isoMatch[1]), Number(isoMatch[2]) - 1, Number(isoMatch[3]));
+    const weekday = WEEKDAY_SHORT_PT[dt.getDay()];
+    return weekday ? `${startBr} (${weekday})` : startBr;
+  }
+  return startBr;
+}
+
 /**
  * Extrai mensagem legível tanto de instâncias Error quanto de objetos PostgREST ({ message, details, hint, code }).
  */

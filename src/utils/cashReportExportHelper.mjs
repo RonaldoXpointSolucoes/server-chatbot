@@ -305,6 +305,7 @@ function resolveExportContext({ result = null, session = null, storeName = '', m
       fundoNoiteCents: safeInt(drawer.fundoNoiteCents, 0),
       outrasEntradasCents: safeInt(drawer.outrasEntradasCents, 0),
       sangriaCents,
+      sangriaIntermediariaCents: safeInt(drawer.sangriaIntermediariaCents, 0),
       saidasPagamentosCents: safeInt(drawer.saidasPagamentosCents, 0),
       outrasSaidasCents: safeInt(drawer.outrasSaidasCents, 0),
       swappedToDigitalCents: safeInt(drawer.swappedToDigitalCents, 0),
@@ -396,7 +397,7 @@ export function buildCashWhatsappSummaryMessage(params = {}) {
     '',
     '💵 *GAVETA DE DINHEIRO*',
     `• Fundo Manhã: ${formatCentsBr(ctx.drawer.fundoManhaCents)} | Venda Dinheiro: ${formatCentsBr(ctx.drawer.vendaDinheiroCents)}`,
-    `• Sangria: ${formatCentsBr(ctx.drawer.sangriaCents)} | Saídas/Pagtos: ${formatCentsBr(ctx.drawer.saidasPagamentosCents + ctx.drawer.outrasSaidasCents)}`,
+    `• Sangria: ${formatCentsBr(ctx.drawer.sangriaCents)}${ctx.drawer.sangriaIntermediariaCents > 0 ? ` | Sangria Turno: ${formatCentsBr(ctx.drawer.sangriaIntermediariaCents)}` : ''} | Saídas/Pagtos: ${formatCentsBr(ctx.drawer.saidasPagamentosCents + ctx.drawer.outrasSaidasCents)}`,
     `• Esperado em Gaveta: ${formatCentsBr(ctx.drawer.expectedCashCents)}`,
     `• Contado na Gaveta: ${ctx.drawer.countedCents !== null ? formatCentsBr(ctx.drawer.countedCents) : 'Não informado'} (Espelho PDV: ${formatCentsBr(cashRow.systemCents)})`
   );
@@ -912,6 +913,7 @@ export function buildCashPdfReportHtml(params = {}) {
         <div class="kv-row"><span>Venda em Dinheiro</span><strong class="num">${escapeHtml(formatCentsBr(ctx.drawer.vendaDinheiroCents))}</strong></div>
         <div class="kv-row"><span>Fundo Noite / Entradas</span><strong class="num">${escapeHtml(formatCentsBr(ctx.drawer.fundoNoiteCents + ctx.drawer.outrasEntradasCents))}</strong></div>
         <div class="kv-row"><span>Sangria</span><strong class="num">${escapeHtml(formatCentsBr(ctx.drawer.sangriaCents))}</strong></div>
+        ${ctx.drawer.sangriaIntermediariaCents > 0 ? `<div class="kv-row"><span>Sangria Intermediária (Turno)</span><strong class="num">${escapeHtml(formatCentsBr(ctx.drawer.sangriaIntermediariaCents))}</strong></div>` : ''}
         <div class="kv-row"><span>Saídas / Pagamentos</span><strong class="num">${escapeHtml(formatCentsBr(ctx.drawer.saidasPagamentosCents + ctx.drawer.outrasSaidasCents))}</strong></div>
         <div class="kv-row"><span>Esperado em Gaveta</span><strong class="num">${escapeHtml(formatCentsBr(ctx.drawer.expectedCashCents))}</strong></div>
         <div class="kv-row"><span>Contado na Gaveta</span><strong class="num">${ctx.drawer.countedCents !== null ? escapeHtml(formatCentsBr(ctx.drawer.countedCents)) : 'Não informado'}</strong></div>

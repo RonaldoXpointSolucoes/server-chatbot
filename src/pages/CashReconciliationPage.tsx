@@ -17,7 +17,8 @@ import {
   Loader2,
   Cloud,
   AlertCircle,
-  RefreshCw
+  RefreshCw,
+  Calendar
 } from 'lucide-react';
 import { useChatStore } from '../store/chatStore';
 import { parseUploadedCashFile } from '../utils/cashFileParsers.mjs';
@@ -52,7 +53,8 @@ import {
   clearPendingClosedPatchFromStorage,
   buildCashDraftSyncSignature,
   shouldPreferLocalDraftOverSession,
-  formatDateBr
+  formatDateBr,
+  formatDateHeaderBadge
 } from '../utils/cashReconciliationServiceHelper.mjs';
 import { geminiService } from '../services/geminiService';
 import {
@@ -1785,7 +1787,15 @@ export default function CashReconciliationPage() {
               <Scale size={20} />
             </div>
             <div className="min-w-0">
-              <h1 className="text-lg sm:text-xl font-black tracking-tight">Conferência Caixa</h1>
+              <div className="flex flex-wrap items-center gap-2.5">
+                <h1 className="text-lg sm:text-xl font-black tracking-tight">Conferência Caixa</h1>
+                {(reconciliationResult?.referenceDate || activeDraftDate) && (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#00a884]/15 border border-[#00a884]/40 text-xs font-black text-[#008f6f] dark:text-[#00e5a8] whitespace-nowrap">
+                    <Calendar size={13} />
+                    Caixa: {formatDateHeaderBadge(reconciliationResult?.referenceDate || activeDraftDate, reconciliationResult?.periodEnd || reconciliationResult?.referenceDate || activeDraftDate)}
+                  </span>
+                )}
+              </div>
               <p className="text-xs text-slate-500 dark:text-[#8696a0]">
                 Conciliação automática PDV × Bancos × Maquininhas com Fórmula 1 e Auditor IA
               </p>

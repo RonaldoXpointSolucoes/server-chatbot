@@ -14,7 +14,8 @@ import {
   Sparkles,
   ArrowUpDown,
   Clock,
-  Table2
+  Table2,
+  Calendar
 } from 'lucide-react';
 import {
   CashMirrorRow,
@@ -31,6 +32,7 @@ import {
   filterMatchedPairsForDetail,
   findBestCandidateForSobra,
   formatDateBr,
+  formatDateHeaderBadge,
   resolveDetailPanelDefaultTab
 } from '../../utils/cashReconciliationServiceHelper.mjs';
 import { CashManualReconciliationTable } from './CashManualReconciliationTable';
@@ -57,7 +59,10 @@ const SOURCE_LABELS: Record<string, string> = {
 function itemMatchesQuery(it: CashReconciliationItem, qLower: string): boolean {
   if (!qLower) return true;
   const brVal = (Number(it.amountCents || 0) / 100).toFixed(2).replace('.', ',');
-  return `${it.description} ${it.referenceCode} ${it.operatorName} ${it.terminalName} ${it.source} ${it.timeStr} ${(it.amountCents / 100).toFixed(2)} ${brVal}`
+  const debtorText = [it.metadata?.debtorName, ...(it.metadata?.debtorCandidates || [])]
+    .filter(Boolean)
+    .join(' ');
+  return `${it.description} ${debtorText} ${it.referenceCode} ${it.operatorName} ${it.terminalName} ${it.source} ${it.timeStr} ${(it.amountCents / 100).toFixed(2)} ${brVal}`
     .toLowerCase()
     .includes(qLower);
 }
@@ -337,6 +342,11 @@ export function CashMirrorRowDetailPanel({
               <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white">
                 Conciliação Detalhada — {row.label}
               </h3>
+              {result.referenceDate && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#00a884]/15 border border-[#00a884]/35 text-[11px] font-black text-[#008f6f] dark:text-[#00e5a8]">
+                  <Calendar size={11} /> Caixa: {formatDateHeaderBadge(result.referenceDate, result.periodEnd || result.referenceDate)}
+                </span>
+              )}
               <span
                 className={`px-2.5 py-0.5 rounded-full text-xs font-black tabular-nums ${
                   Math.abs(diff) <= 1
@@ -805,6 +815,19 @@ export function CashMirrorRowDetailPanel({
                           </span>
                         </div>
                         <p className="text-xs font-semibold text-slate-800 dark:text-[#e9edef]">{it.description}</p>
+                        {(it.metadata?.debtorName || (it.metadata?.debtorCandidates?.length || 0) > 0) && (
+                          <div>
+                            {it.metadata?.debtorName ? (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-cyan-500/15 border border-cyan-500/30 text-[10.5px] font-black text-cyan-800 dark:text-cyan-200">
+                                Cliente: {it.metadata.debtorName}
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-[10.5px] font-bold text-amber-800 dark:text-amber-200">
+                                Possível: {it.metadata?.debtorCandidates?.join(' / ')} (mesmo valor)
+                              </span>
+                            )}
+                          </div>
+                        )}
                         {it.metadata?.operationalAlerts?.length ? (
                           <div className="flex flex-wrap gap-1">
                             {it.metadata.operationalAlerts.map((al, alIdx) => (
@@ -1020,9 +1043,14 @@ export function CashMirrorRowDetailPanel({
 
                             <div className="md:col-span-4 min-w-0 space-y-0.5">
                               {(pair.systemItems || []).map((s) => (
-                                <div key={s.id} className="truncate">
-                                  <span className="font-mono text-[11px] text-slate-500 mr-1.5">{s.timeStr}</span>
+                                <div key={s.id} className="truncate flex items-center gap-1.5 flex-wrap">
+                                  <span className="font-mono text-[11px] text-slate-500">{s.timeStr}</span>
                                   <span className="font-semibold text-slate-800 dark:text-[#e9edef]">{s.description}</span>
+                                  {s.metadata?.debtorName && (
+                                    <span className="px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-800 dark:text-cyan-200 text-[10px] font-black">
+                                      {s.metadata.debtorName}
+                                    </span>
+                                  )}
                                 </div>
                               ))}
                             </div>
@@ -1094,6 +1122,15 @@ export function CashMirrorRowDetailPanel({
                                     {it.description}
                                   </span>
                                 </button>
+                                {it.metadata?.debtorName ? (
+                                  <span className="px-2 py-0.5 rounded-full bg-cyan-500/15 border border-cyan-500/30 text-cyan-800 dark:text-cyan-200 text-[10.5px] font-black">
+                                    Cliente: {it.metadata.debtorName}
+                                  </span>
+                                ) : (it.metadata?.debtorCandidates?.length || 0) > 0 ? (
+                                  <span className="px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-800 dark:text-amber-200 text-[10px] font-bold">
+                                    Possível: {it.metadata?.debtorCandidates?.join(' / ')} (mesmo valor)
+                                  </span>
+                                ) : null}
                                 {orderDetail && (
                                   <button
                                     type="button"
