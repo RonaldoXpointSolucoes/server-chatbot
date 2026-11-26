@@ -324,6 +324,10 @@ export interface CashValidationWarning {
   code:
     | 'multi_day_filtered'
     | 'wrong_day_real_file'
+    | 'wrong_day_system_file'
+    | 'pending_totals_mismatch'
+    | 'cash_drawer_cross_mismatch'
+    | 'digital_system_cross_mismatch'
     | 'multi_day_no_anchor'
     | 'missing_card_acquirers'
     | 'cash_drawer_txt_hint'
@@ -333,6 +337,27 @@ export interface CashValidationWarning {
   severity: 'info' | 'warning' | 'error';
   title: string;
   message: string;
+}
+
+export interface CashQuarantinedSystemFile {
+  fileName: string;
+  fileType: string;
+  periodStart: string;
+  periodEnd: string;
+  periodBr: string;
+  pendingCents: number;
+  pendingCount: number;
+  sangriaCents: number;
+}
+
+export interface CashCrossReportIntegrityChecks {
+  pdvPendentesCents: number | null;
+  relConfPendentesCents: number | null;
+  caixaCegoPendentesCents: number | null;
+  txtPendentesCents: number | null;
+  txtDebtorsSumCents: number | null;
+  txtDebtorsCount: number;
+  pendentesMatchAcrossReports: boolean;
 }
 
 export interface CashSourcePeriodStat {
@@ -373,6 +398,8 @@ export interface CashPeriodDiagnostics {
   outOfPeriodOtherCount: number;
   datesBreakdown: CashPeriodDateBreakdown[];
   sourcePeriodStats: CashSourcePeriodStat[];
+  quarantinedSystemFiles?: CashQuarantinedSystemFile[];
+  integrityChecks?: CashCrossReportIntegrityChecks;
   validationWarnings: CashValidationWarning[];
 }
 

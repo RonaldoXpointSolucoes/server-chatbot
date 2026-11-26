@@ -1369,9 +1369,16 @@ export function CashReconciliationWorkbench({
         {activeTab === 'auditoria' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
             <div className="rounded-2xl border border-slate-200 dark:border-[#2a3942] p-4 space-y-2">
-              <h4 className="font-black uppercase text-[11px] text-slate-600 dark:text-[#aebac1]">
-                Devedores — Vendas Pendentes ({metrics.pendingDebtors?.length || 0})
-              </h4>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h4 className="font-black uppercase text-[11px] text-slate-600 dark:text-[#aebac1]">
+                  Devedores — Vendas Pendentes ({metrics.pendingDebtors?.length || 0})
+                </h4>
+                {metrics.pendingDebtors?.length ? (
+                  <span className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[11px] font-black tabular-nums">
+                    Soma TXT: {formatCents(metrics.pendingDebtors.reduce((acc, d) => acc + Number(d.amountCents || 0), 0))}
+                  </span>
+                ) : null}
+              </div>
               {metrics.pendingDebtors?.length ? (
                 <div className="divide-y divide-slate-100 dark:divide-[#2a3942]">
                   {metrics.pendingDebtors.map((d, idx: number) => (
@@ -1382,7 +1389,11 @@ export function CashReconciliationWorkbench({
                   ))}
                 </div>
               ) : (
-                <p className="text-slate-400">Sem pendentes detalhados do .txt.</p>
+                <p className="text-slate-400">
+                  {(result.periodDiagnostics?.quarantinedSystemFiles || []).some((qf) => qf.fileType === 'fechamento_txt')
+                    ? 'O arquivo final.txt anexado pertencia a outra data e foi bloqueado automaticamente. Importe o final.txt do dia atual para listar os devedores.'
+                    : 'Sem pendentes detalhados do .txt.'}
+                </p>
               )}
             </div>
 

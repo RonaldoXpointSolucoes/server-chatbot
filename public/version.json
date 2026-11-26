@@ -1,5 +1,5 @@
 {
-  "version": "8.4.4",
-  "buildDate": "2026-11-25T23:55:20.873Z",
-  "summary": "Correção de PIX Automático (CPF/CNPJ do Pagador), Observações de Preparo GastroFood e Paginação Completa no Simulador do Cardápio"
+  "version": "8.4.5",
+  "buildDate": "2026-11-26T19:43:30.000Z",
+  "summary": "Blindagem de Integridade Financeira na Conferência de Caixa (Quarentena de Relatórios de Outra Data, Auditoria Cruzada de Pendentes e Isolamento de Fiado)"
 }

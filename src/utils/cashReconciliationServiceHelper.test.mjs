@@ -778,3 +778,21 @@ test('formatDateHeaderBadge formats single closing date with weekday and multi-d
 
   assert.equal(formatDateHeaderBadge('', ''), '');
 });
+
+test('buildLinkableSystemPool exclui NOTA PENDENTE (fiado ja resolvido) mantendo faltas digitais e dinheiro em aberto', async () => {
+  const { buildLinkableSystemPool, findBestCandidateForSobra } = await import('./cashReconciliationServiceHelper.mjs');
+  const result = {
+    missingInBank: [{ id: 'm_card', category: 'cartao', amountCents: 700, secondsOfDay: 49080 }],
+    systemItems: [
+      { id: 's_cash', category: 'dinheiro', amountCents: 1500, secondsOfDay: 48000 },
+      { id: 's_pend', category: 'pendente', amountCents: 3000, secondsOfDay: 49000 }
+    ],
+    matchedPairs: []
+  };
+
+  const pool = buildLinkableSystemPool(result, []);
+  assert.deepEqual(pool.map((i) => i.id), ['m_card', 's_cash']);
+
+  const extraCardSameAsPending = { id: 'e_30', source: 'c6pay', category: 'cartao', amountCents: 3000, secondsOfDay: 49100 };
+  assert.equal(findBestCandidateForSobra(extraCardSameAsPending, pool), null);
+});

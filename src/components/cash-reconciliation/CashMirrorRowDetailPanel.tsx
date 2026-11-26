@@ -1096,9 +1096,78 @@ export function CashMirrorRowDetailPanel({
               <div className="space-y-4">
                 {sortedSystemItems.length > 0 || reclassifiedOutItems.length > 0 ? (
                   <div className="rounded-2xl border border-slate-200 dark:border-[#2a3942] bg-white dark:bg-[#202c33]/75 p-4 space-y-3">
-                    <p className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-[#aebac1]">
-                      Lançamentos do PDV em {row.label} ({sortedSystemItems.length}) — ajuste a forma caso tenha sido lançado errado no caixa
-                    </p>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-[#aebac1]">
+                        Lançamentos do PDV em {row.label} ({sortedSystemItems.length}) — ajuste a forma caso tenha sido lançado errado no caixa
+                      </p>
+                      <span className="px-2.5 py-1 rounded-full bg-slate-100 dark:bg-[#111b21] border border-slate-200 dark:border-[#2a3942] text-xs font-black text-slate-800 dark:text-white tabular-nums">
+                        Soma listada: {formatCents(sortedSystemItems.reduce((acc, it) => acc + Number(it.amountCents || 0), 0))}
+                      </span>
+                    </div>
+                    {row.key === 'pendentes' && (
+                      <div className="space-y-2">
+                        <p className="text-[11px] font-medium text-cyan-800 dark:text-cyan-200 bg-cyan-500/10 border border-cyan-500/25 rounded-xl px-3 py-2">
+                          Notas Pendentes (fiado para recebimento posterior) já estão resolvidas no fechamento e não entram nas sugestões nem em vínculos de banco/maquininha. Só use os botões ao lado se o operador tiver registrado uma venda de Cartão/Pix/Dinheiro como Pendente por engano.
+                        </p>
+                        {result.periodDiagnostics?.integrityChecks && (
+                          <div className="flex flex-wrap items-center gap-2 text-[11px] bg-slate-50 dark:bg-[#111b21]/80 border border-slate-200 dark:border-[#2a3942] rounded-xl px-3 py-2">
+                            <span className="font-black uppercase text-slate-500 dark:text-[#8696a0]">Auditoria Cruzada de Pendentes:</span>
+                            {result.periodDiagnostics.integrityChecks.pdvPendentesCents !== null && (
+                              <span className="px-2 py-0.5 rounded-md bg-white dark:bg-[#202c33] border border-slate-200 dark:border-[#2a3942] font-bold tabular-nums">
+                                Planilha PDV: <strong>{formatCents(result.periodDiagnostics.integrityChecks.pdvPendentesCents)}</strong>
+                              </span>
+                            )}
+                            {result.periodDiagnostics.integrityChecks.relConfPendentesCents !== null && (
+                              <span className="px-2 py-0.5 rounded-md bg-white dark:bg-[#202c33] border border-slate-200 dark:border-[#2a3942] font-bold tabular-nums">
+                                RelConferencia: <strong>{formatCents(result.periodDiagnostics.integrityChecks.relConfPendentesCents)}</strong>
+                              </span>
+                            )}
+                            {result.periodDiagnostics.integrityChecks.caixaCegoPendentesCents !== null && (
+                              <span className="px-2 py-0.5 rounded-md bg-white dark:bg-[#202c33] border border-slate-200 dark:border-[#2a3942] font-bold tabular-nums">
+                                Caixa Cego: <strong>{formatCents(result.periodDiagnostics.integrityChecks.caixaCegoPendentesCents)}</strong>
+                              </span>
+                            )}
+                            {result.periodDiagnostics.integrityChecks.txtPendentesCents !== null && (
+                              <span className="px-2 py-0.5 rounded-md bg-white dark:bg-[#202c33] border border-slate-200 dark:border-[#2a3942] font-bold tabular-nums">
+                                Fechamento TXT: <strong>{formatCents(result.periodDiagnostics.integrityChecks.txtPendentesCents)}</strong>
+                              </span>
+                            )}
+                            {result.periodDiagnostics.integrityChecks.pendentesMatchAcrossReports ? (
+                              <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-black">
+                                ✓ Relatórios do dia 100% consistentes
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-700 dark:text-rose-300 font-black">
+                                ⚠ Divergência detectada entre relatórios
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        {(result.periodDiagnostics?.quarantinedSystemFiles || [])
+                          .filter((qf) => qf.pendingCents > 0 || qf.fileType === 'fechamento_txt')
+                          .map((qf, qIdx) => (
+                            <div
+                              key={`qf_pend_${qIdx}`}
+                              className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3.5 py-2.5 text-xs text-rose-900 dark:text-rose-100 space-y-1"
+                            >
+                              <p className="font-black text-rose-700 dark:text-rose-300">
+                                Arquivo "{qf.fileName}" de outra data ({qf.periodBr}) bloqueado automaticamente
+                              </p>
+                              <p className="text-[11px] leading-relaxed">
+                                O arquivo <strong>{qf.fileName}</strong> anexado pertence ao fechamento de{' '}
+                                <strong>{qf.periodBr}</strong>
+                                {qf.pendingCents > 0
+                                  ? ` (soma de ${formatCents(qf.pendingCents)} em ${qf.pendingCount} nota(s) pendente(s))`
+                                  : ''}
+                                , enquanto este caixa é de <strong>{formatDateBr(result.referenceDate)}</strong> (
+                                <strong>{formatCents(row.systemCents)}</strong> em {sortedSystemItems.length} venda(s) no PDV).
+                                Os dados de {qf.periodBr} foram isolados para evitar soma incorreta. Para exibir os nomes dos clientes de{' '}
+                                {formatDateBr(result.referenceDate)}, importe o arquivo <strong>final.txt</strong> correto deste dia.
+                              </p>
+                            </div>
+                          ))}
+                      </div>
+                    )}
 
                     <div className="divide-y divide-slate-100 dark:divide-[#2a3942]">
                       {sortedSystemItems.map((it) => {
@@ -1287,21 +1356,44 @@ export function CashMirrorRowDetailPanel({
                 </div>
               )}
 
-            {row.key === 'pendentes' && pendingDebtors.length > 0 && (
-              <div className="rounded-2xl border border-slate-200 dark:border-[#2a3942] bg-white dark:bg-[#202c33]/75 p-4 space-y-2">
-                <p className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-[#aebac1]">
-                  Notas Pendentes / Clientes no Fechamento TXT ({pendingDebtors.length})
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
-                  {pendingDebtors.map((p, idx) => (
-                    <div key={idx} className="flex items-center justify-between px-3 py-2 rounded-xl bg-slate-50 dark:bg-[#111b21]">
-                      <span className="text-slate-700 dark:text-[#d1d7db] truncate pr-2">{p.debtor}</span>
-                      <strong className="text-amber-600 dark:text-amber-400 tabular-nums shrink-0">{formatCents(p.amountCents)}</strong>
+            {row.key === 'pendentes' && pendingDebtors.length > 0 && (() => {
+              const txtPendingSumCents = pendingDebtors.reduce((acc, p) => acc + Number(p.amountCents || 0), 0);
+              const txtVsPdvDiffCents = txtPendingSumCents - Number(row.systemCents || 0);
+              const isTxtExactMatch = Math.abs(txtVsPdvDiffCents) <= 5;
+              return (
+                <div className="rounded-2xl border border-slate-200 dark:border-[#2a3942] bg-white dark:bg-[#202c33]/75 p-4 space-y-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-[#aebac1]">
+                      Notas Pendentes / Clientes no Fechamento TXT ({pendingDebtors.length})
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <span className="px-2.5 py-1 rounded-full bg-slate-100 dark:bg-[#111b21] border border-slate-200 dark:border-[#2a3942] font-black text-slate-900 dark:text-white tabular-nums">
+                        Soma TXT: {formatCents(txtPendingSumCents)}
+                      </span>
+                      <span
+                        className={`px-2.5 py-1 rounded-full font-black text-[11px] tabular-nums ${
+                          isTxtExactMatch
+                            ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                            : 'bg-rose-500/15 text-rose-700 dark:text-rose-300'
+                        }`}
+                      >
+                        {isTxtExactMatch
+                          ? `✓ Bate 100% com Sistema PDV (${formatCents(row.systemCents)})`
+                          : `⚠ Diverge do Sistema PDV (${formatCents(row.systemCents)}) • Dif: ${txtVsPdvDiffCents > 0 ? '+' : ''}${formatCents(txtVsPdvDiffCents)}`}
+                      </span>
                     </div>
-                  ))}
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
+                    {pendingDebtors.map((p, idx) => (
+                      <div key={idx} className="flex items-center justify-between px-3 py-2 rounded-xl bg-slate-50 dark:bg-[#111b21]">
+                        <span className="text-slate-700 dark:text-[#d1d7db] truncate pr-2">{p.debtor}</span>
+                        <strong className="text-amber-600 dark:text-amber-400 tabular-nums shrink-0">{formatCents(p.amountCents)}</strong>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
         </div>
       </div>

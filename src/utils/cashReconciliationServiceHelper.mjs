@@ -374,7 +374,7 @@ export function resolveDetailPanelDefaultTab({
 }
 
 /**
- * Sugere o candidato mais provável no PDV (faltas / dinheiro / pendente) para conciliar uma sobra em 1 clique.
+ * Sugere o candidato mais provável no PDV (faltas / dinheiro) para conciliar uma sobra em 1 clique.
  */
 export function findBestCandidateForSobra(sobraItem, systemPool = [], maxToleranceCents = 200) {
   if (!sobraItem || !Array.isArray(systemPool) || systemPool.length === 0) return null;
@@ -862,7 +862,8 @@ export const RECONCILIATION_GLOSSARY = {
 };
 
 /**
- * Monta o pool de vendas do PDV elegíveis para vínculo manual (faltas digitais + Dinheiro/Pendente em aberto).
+ * Monta o pool de vendas do PDV elegíveis para vínculo manual (faltas digitais + Dinheiro em aberto).
+ * Notas Pendentes (fiado) já estão resolvidas no fechamento e não entram em vínculos de banco/maquininha.
  */
 export function buildLinkableSystemPool(result = {}, manualResolutions = []) {
   const missing = Array.isArray(result?.missingInBank) ? result.missingInBank : [];
@@ -879,17 +880,17 @@ export function buildLinkableSystemPool(result = {}, manualResolutions = []) {
     }
   }
 
-  const dinheiroAndPendente = (result?.systemItems || []).filter(
+  const openCashItems = (result?.systemItems || []).filter(
     (s) =>
       s &&
       !matchedSysIds.has(s.id) &&
       !ignoredSysIds.has(s.id) &&
-      (s.category === 'dinheiro' || s.category === 'pendente')
+      s.category === 'dinheiro'
   );
 
   const seen = new Set();
   const combined = [];
-  for (const item of [...missing, ...dinheiroAndPendente]) {
+  for (const item of [...missing, ...openCashItems]) {
     if (item?.id && !seen.has(item.id)) {
       seen.add(item.id);
       combined.push(item);

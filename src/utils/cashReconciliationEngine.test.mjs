@@ -1023,3 +1023,212 @@ test('classifyTxtDrawerOutflows separa sangria intermediaria (R$ 100) da Sangria
   assert.equal(p189.metadata.debtorName, 'CLEITON FERREIRA (');
   assert.deepEqual(p450.metadata.debtorCandidates, ['ALESSANDRO BURGUER', 'RONALDO BURGUERPLUS']);
 });
+
+test('runCashReconciliation nunca inclui NOTA PENDENTE (fiado) em sugestões agrupadas N:1 ou trocas swapped_method', () => {
+  const parsedFiles = [
+    {
+      fileType: 'pdv_vendas',
+      status: 'ok',
+      periodStart: '2026-11-26',
+      periodEnd: '2026-11-26',
+      rows: [
+        // Reproduz exatamente o print: MESA 015 DEBITO (7,00) + MESA 030 NOTA PENDENTE (38,00) vs C6 Pay (45,00)
+        { rowIndex: 1, numero: '015', modulo: 'MESA', origem: 'MESA', amountCents: 700, receivedCents: 700, recebidoEmBranco: false, changeCents: 0, formaPagto: 'CARTÃO', administradora: 'DEBITO', category: 'cartao', subType: 'debito', dateStr: '2026-11-26', timeStr: '13:38:00', secondsOfDay: 13 * 3600 + 38 * 60, operador: 'Op1', nomeMaquina: 'SERVIDOR' },
+        { rowIndex: 2, numero: '030', modulo: 'MESA', origem: 'MESA', amountCents: 3800, receivedCents: 3800, recebidoEmBranco: false, changeCents: 0, formaPagto: 'NOTA PENDENTE', administradora: 'NOTA PENDENTE', category: 'pendente', subType: 'nota_pendente', dateStr: '2026-11-26', timeStr: '13:33:33', secondsOfDay: 13 * 3600 + 33 * 60 + 33, operador: 'Op1', nomeMaquina: 'SERVIDOR' },
+        // Reproduz falso swapped_method 1:1 (25/11): MESA 075 NOTA PENDENTE (13,00) vs C6 Pay DEBITO (13,00)
+        { rowIndex: 3, numero: '075', modulo: 'MESA', origem: 'MESA', amountCents: 1300, receivedCents: 1300, recebidoEmBranco: false, changeCents: 0, formaPagto: 'NOTA PENDENTE', administradora: 'NOTA PENDENTE', category: 'pendente', subType: 'nota_pendente', dateStr: '2026-11-26', timeStr: '22:07:38', secondsOfDay: 22 * 3600 + 7 * 60 + 38, operador: 'Op1', nomeMaquina: 'SERVIDOR' }
+      ]
+    },
+    {
+      fileType: 'adquirente_c6pay',
+      status: 'ok',
+      periodStart: '2026-11-26',
+      periodEnd: '2026-11-26',
+      rows: [
+        { rowIndex: 1, source: 'c6pay', isApproved: true, category: 'cartao', subType: 'debito', description: 'C6 Pay DEBITO VISA', amountCents: 4500, feeCents: 0, netCents: 4500, dateStr: '2026-11-26', timeStr: '13:37:07', secondsOfDay: 13 * 3600 + 37 * 60 + 7 },
+        { rowIndex: 2, source: 'c6pay', isApproved: true, category: 'cartao', subType: 'debito', description: 'C6 Pay DEBITO MASTERCARD', amountCents: 1300, feeCents: 0, netCents: 1300, dateStr: '2026-11-26', timeStr: '21:05:30', secondsOfDay: 21 * 3600 + 5 * 60 + 30 }
+      ]
+    }
+  ];
+
+  const res = runCashReconciliation({ parsedFiles, formulaConfig: DEFAULT_FORMULA_CONFIG });
+
+  const anyPendenteInSuggestions = res.suggestions.some((s) =>
+    (s.systemItems || []).some((it) => it.category === 'pendente')
+  );
+  assert.equal(anyPendenteInSuggestions, false);
+  assert.equal(res.suggestions.some((s) => s.reasonType === 'grouped_n_to_1' && s.amountCents === 4500), false);
+  assert.equal(res.suggestions.some((s) => s.reasonType === 'swapped_method' && s.amountCents === 1300), false);
+
+  // Pendentes continuam contabilizados no espelho e nunca vão para Faltas digitais
+  assert.equal(res.mirrorRows.find((r) => r.key === 'pendentes')?.systemCents, 5100);
+  assert.equal(res.missingInBank.some((m) => m.category === 'pendente'), false);
+
+  // Caso raro de erro operacional: se o usuário mover manualmente o pendente para Cartão, ele passa a conciliar normalmente
+  const pend13 = res.systemItems.find((s) => s.category === 'pendente' && s.amountCents === 1300);
+  const reclassified = runCashReconciliation({
+    parsedFiles,
+    formulaConfig: DEFAULT_FORMULA_CONFIG,
+    manualResolutions: [{ action: 'reclassify_system', systemIds: [pend13.id], targetCategory: 'cartao' }]
+  });
+  assert.equal(reclassified.matchedPairs.some((m) => m.amountCents === 1300), true);
+  assert.equal(reclassified.mirrorRows.find((r) => r.key === 'pendentes')?.systemCents, 3800);
+});
+
+test('runCashReconciliation isola final.txt de outra data (24/11 R$ 423,28) no caixa de 25/11 (R$ 336,38), preserva Dinheiro do Caixa Cego (R$ 330,10) e valida divergências cruzadas', () => {
+  // Cenário real de 25/11/2026 onde final.txt de 24/11/2026 foi anexado por engano
+  const result25 = runCashReconciliation({
+    parsedFiles: [
+      {
+        fileType: 'pdv_vendas',
+        fileName: 'PlanilhaRecebimento.xlsx',
+        status: 'ok',
+        periodStart: '2026-11-25',
+        periodEnd: '2026-11-25',
+        rows: [
+          { rowIndex: 1, numero: '001', modulo: 'MESA', origem: 'MESA', amountCents: 1700, receivedCents: 1700, formaPagto: 'NOTA PENDENTE', administradora: 'NOTA PENDENTE', category: 'pendente', subType: 'nota_pendente', dateStr: '2026-11-25', timeStr: '11:33:08', secondsOfDay: 41588 },
+          { rowIndex: 2, numero: '007', modulo: 'MESA', origem: 'MESA', amountCents: 31938, receivedCents: 31938, formaPagto: 'NOTA PENDENTE', administradora: 'NOTA PENDENTE', category: 'pendente', subType: 'nota_pendente', dateStr: '2026-11-25', timeStr: '14:05:45', secondsOfDay: 50745 },
+          { rowIndex: 3, numero: '010', modulo: 'MESA', origem: 'MESA', amountCents: 22807, receivedCents: 22807, formaPagto: 'DINHEIRO', administradora: 'DINHEIRO', category: 'dinheiro', subType: 'dinheiro', dateStr: '2026-11-25', timeStr: '15:00:00', secondsOfDay: 54000 }
+        ],
+        summary: {}
+      },
+      {
+        fileType: 'rel_conferencia',
+        fileName: 'RelConferencia.xlsx',
+        status: 'ok',
+        periodStart: '25 Nov',
+        periodEnd: '25 Nov',
+        summary: {
+          headerLabel: '25 Nov',
+          parsedCategoryCount: 10,
+          cashBlock: {
+            fundoManhaCents: 21585,
+            vendaDinheiroCents: 22807,
+            fundoNoiteCents: 0,
+            outrasEntradasCents: 10000,
+            sangriaManhaCents: 0,
+            sangriaNoiteCents: 0,
+            saidasPagamentosCents: 11673,
+            outrasSaidasCents: 0
+          },
+          systemRows: {
+            saldo_dinheiro: 42719,
+            cartao: 329010,
+            pix: 125552,
+            pendentes: 33638,
+            ifood: 0,
+            ticket: 0,
+            pago_online: 0,
+            sem_bandeira: 0,
+            outros: 0
+          },
+          realRows: {}
+        }
+      },
+      {
+        fileType: 'fechamento_resumo_txt',
+        fileName: 'CAIXA_CEGO_25-11-2026_230638000.txt',
+        status: 'ok',
+        periodStart: '2026-11-25',
+        periodEnd: '2026-11-25',
+        summary: {
+          storeName: 'BURGUER PLUS',
+          operatorName: 'MARCELA',
+          pendentesCents: 33638,
+          descontosCents: 7566,
+          consumoInternoCents: 39200,
+          pagamentoFornecedoresCents: 11673,
+          controleRows: [
+            { method: 'DINHEIRO', sistemaCents: 42719, informadoCents: 33010, diffCents: -9709 },
+            { method: 'PENDENTE', sistemaCents: 33638, informadoCents: 33638, diffCents: 0 }
+          ]
+        }
+      },
+      {
+        fileType: 'fechamento_txt',
+        fileName: 'final.txt',
+        status: 'ok',
+        periodStart: '2026-11-24',
+        periodEnd: '2026-11-24',
+        summary: {
+          startDate: '2026-11-24',
+          endDate: '2026-11-24',
+          operatorName: 'RONALDO',
+          fundoCaixaCents: 72445,
+          saidasPagamentosCents: 16662,
+          sangriaCents: 66585,
+          notaPendenteCents: 42328,
+          pendingDebtors: [
+            { debtor: 'ALESSANDRO BURGUER', amountCents: 200 },
+            { debtor: 'CLEITON FERREIRA (', amountCents: 27200 },
+            { debtor: 'DAVID BURGUERPLUS', amountCents: 1290 },
+            { debtor: 'JULIA GERENTE BURGU', amountCents: 800 },
+            { debtor: 'KARINA BURGUER', amountCents: 1500 },
+            { debtor: 'KARYN BURGUER', amountCents: 4900 },
+            { debtor: 'MARCIO (AMIGO DO JO', amountCents: 4790 },
+            { debtor: 'RONALDO BURGUERPLUS', amountCents: 1648 }
+          ],
+          saidasDetalhadas: [
+            { label: 'SANGRIA', amountCents: 45000, isSangria: true },
+            { label: 'SANGRIA CX. RET', amountCents: 21585, isSangria: true }
+          ]
+        }
+      }
+    ],
+    manualInputs: { cashCountedCents: 0, categoryRealOverrides: { pendentes: 33638 } },
+    formulaConfig: DEFAULT_FORMULA_CONFIG
+  });
+
+  assert.equal(result25.referenceDate, '2026-11-25');
+  assert.equal(result25.operatorName, 'MARCELA');
+  assert.equal(result25.financialMetrics.pendingDebtors.length, 0);
+  assert.equal(result25.periodDiagnostics.quarantinedSystemFiles?.length, 1);
+  assert.equal(result25.periodDiagnostics.quarantinedSystemFiles[0].fileName, 'final.txt');
+  assert.equal(result25.periodDiagnostics.quarantinedSystemFiles[0].pendingCents, 42328);
+
+  const wrongSysWarn = result25.periodDiagnostics.validationWarnings.find((w) => w.code === 'wrong_day_system_file');
+  assert.ok(wrongSysWarn);
+  assert.equal(wrongSysWarn.severity, 'error');
+  assert.match(wrongSysWarn.message, /24\/11\/2026/);
+  assert.match(wrongSysWarn.message, /423,28/);
+
+  // Dinheiro deve usar os R$ 330,10 do CAIXA_CEGO de 25/11 em vez dos R$ 215,85 do final.txt de 24/11
+  const cashRow = result25.mirrorRows.find((r) => r.key === 'saldo_dinheiro');
+  assert.equal(cashRow.systemCents, 42719);
+  assert.equal(cashRow.realCents, 33010);
+  assert.equal(cashRow.diffCents, -9709);
+
+  // Caso um TXT do MESMO dia tenha soma de devedores pendentes divergente do PDV, deve alertar pending_totals_mismatch
+  const sameDayMismatch = runCashReconciliation({
+    parsedFiles: [
+      {
+        fileType: 'pdv_vendas',
+        fileName: 'PlanilhaRecebimento.xlsx',
+        status: 'ok',
+        periodStart: '2026-11-25',
+        periodEnd: '2026-11-25',
+        rows: [
+          { rowIndex: 1, numero: '001', modulo: 'MESA', origem: 'MESA', amountCents: 33638, receivedCents: 33638, formaPagto: 'NOTA PENDENTE', administradora: 'NOTA PENDENTE', category: 'pendente', subType: 'nota_pendente', dateStr: '2026-11-25', timeStr: '11:33:08', secondsOfDay: 41588 }
+        ],
+        summary: {}
+      },
+      {
+        fileType: 'fechamento_txt',
+        fileName: 'final_25.txt',
+        status: 'ok',
+        periodStart: '2026-11-25',
+        periodEnd: '2026-11-25',
+        summary: {
+          startDate: '2026-11-25',
+          endDate: '2026-11-25',
+          notaPendenteCents: 42328,
+          pendingDebtors: [{ debtor: 'CLIENTE TESTE', amountCents: 42328 }]
+        }
+      }
+    ],
+    formulaConfig: DEFAULT_FORMULA_CONFIG
+  });
+  const pendWarn = sameDayMismatch.periodDiagnostics.validationWarnings.find((w) => w.code === 'pending_totals_mismatch');
+  assert.ok(pendWarn);
+  assert.equal(pendWarn.severity, 'error');
+});

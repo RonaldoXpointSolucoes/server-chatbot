@@ -32,7 +32,7 @@ export function classifyTxtDrawerOutflows({ txtSum = {}, relCash = {}, summaryTx
   const valesSum =
     nonSangriaVales.length > 0
       ? nonSangriaVales.reduce((s, it) => s + Number(it.amountCents || 0), 0)
-      : Number(txtSum?.saidasPagamentosCents || 0);
+      : Number(txtSum?.saidasPagamentosCents || summaryTxtFile?.summary?.pagamentoFornecedoresCents || 0);
 
   const explicitClosingSangrias = sangriaEntries.filter((it) =>
     CLOSING_SANGRIA_LABEL_RE.test(String(it.label || ''))
@@ -85,19 +85,46 @@ export function classifyTxtDrawerOutflows({ txtSum = {}, relCash = {}, summaryTx
     }
   }
 
+  // Fallback para Fita Caixa Cego do mesmo dia quando final.txt não foi importado ou foi isolado por outra data
+  if (rawList.length === 0 && Number(txtSum?.sangriaCents || 0) === 0) {
+    const cegoSangriaInterm = Number(caixaCegoSangria?.informadoCents ?? caixaCegoSangria?.sistemaCents ?? 0);
+    if (cegoSangriaInterm > 0) {
+      classifiedItems.push({
+        label: 'SANGRIA (Caixa Cego)',
+        amountCents: cegoSangriaInterm,
+        isSangria: true,
+        kind: 'sangria_intermediaria',
+        source: 'Caixa Cego TXT',
+        includedInRelConfPagamentos:
+          relSaidasPagamentosCents !== null && relSaidasPagamentosCents >= valesSum + cegoSangriaInterm
+      });
+    }
+    const cegoDinheiroInformado = Number(caixaCegoDinheiro?.informadoCents ?? 0);
+    if (cegoDinheiroInformado > 0) {
+      classifiedItems.push({
+        label: 'SANGRIA CX. RET (Informado no Caixa Cego)',
+        amountCents: cegoDinheiroInformado,
+        isSangria: true,
+        kind: 'sangria_fechamento',
+        source: 'Caixa Cego TXT',
+        includedInRelConfPagamentos: false
+      });
+    }
+  }
+
   const sangriaIntermediariaCents = classifiedItems
     .filter((x) => x.kind === 'sangria_intermediaria')
     .reduce((s, x) => s + Number(x.amountCents || 0), 0);
 
   const sangriaFechamentoCents =
-    rawList.length > 0
+    classifiedItems.length > 0
       ? classifiedItems
           .filter((x) => x.kind === 'sangria_fechamento')
           .reduce((s, x) => s + Number(x.amountCents || 0), 0)
       : Number(txtSum?.sangriaCents || 0);
 
   const sangriaTotalTxtCents =
-    rawList.length > 0
+    classifiedItems.length > 0
       ? sangriaIntermediariaCents + sangriaFechamentoCents
       : Number(txtSum?.sangriaCents || 0);
 
@@ -248,6 +275,14 @@ function findBestSubsetSums(targetCents, candidates, maxLen, tolCents, maxWindow
 
 function isIsoDateStr(val) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(val || '').trim());
+}
+
+/**
+ * Apenas canais liquidados no fechamento do turno (Pix, Cartão e Dinheiro) são elegíveis
+ * a conciliação automática e sugestões no banco/maquininha; Nota Pendente (fiado) já está resolvida.
+ */
+export function isReconcilablePdvCategory(category) {
+  return category === 'pix' || category === 'cartao' || category === 'dinheiro';
 }
 
 function formatIsoBr(isoDate) {
@@ -403,8 +438,137 @@ function parseTimeToSec(str) {
   return Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3] || 0);
 }
 
+const MONTH_NAME_TO_NUM = {
+  jan: '01',
+  fev: '02',
+  feb: '02',
+  mar: '03',
+  abr: '04',
+  apr: '04',
+  mai: '05',
+  may: '05',
+  jun: '06',
+  jul: '07',
+  ago: '08',
+  aug: '08',
+  set: '09',
+  sep: '09',
+  out: '10',
+  oct: '10',
+  nov: '11',
+  dez: '12',
+  dec: '12'
+};
+
+export function parseRelConfHeaderToIsoDate(rawLabel, referenceYear = '') {
+  const str = String(rawLabel || '').trim();
+  if (!str) return '';
+  if (isIsoDateStr(str)) return str;
+  const br = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (br) return `${br[3]}-${br[2].padStart(2, '0')}-${br[1].padStart(2, '0')}`;
+  const m = str.match(/^(\d{1,2})\s*(?:\/|-|\s+de\s+|\s+)\s*([A-Za-zÀ-ÿ]{3,}|\d{1,2})(?:\s*(?:\/|-|\s+de\s+|\s+)\s*(\d{2,4}))?$/i);
+  if (!m) return '';
+  const day = String(m[1]).padStart(2, '0');
+  const rawMonth = String(m[2]).toLowerCase().slice(0, 3);
+  const month = /^\d+$/.test(m[2]) ? String(m[2]).padStart(2, '0') : (MONTH_NAME_TO_NUM[rawMonth] || '');
+  if (!month || Number(month) < 1 || Number(month) > 12 || Number(day) < 1 || Number(day) > 31) return '';
+  const year = m[3]
+    ? (m[3].length === 2 ? `20${m[3]}` : m[3])
+    : (referenceYear && /^\d{4}$/.test(String(referenceYear)) ? String(referenceYear) : '');
+  if (!year) return '';
+  return `${year}-${month}-${day}`;
+}
+
+function extractSystemFileIsoRange(file, referenceYear = '') {
+  if (!file) return { start: '', end: '' };
+  if (file.fileType === 'rel_conferencia') {
+    const iso = parseRelConfHeaderToIsoDate(file.summary?.headerLabel || file.periodStart || '', referenceYear);
+    return { start: iso, end: iso };
+  }
+  const start = isIsoDateStr(file.periodStart)
+    ? file.periodStart
+    : isIsoDateStr(file.summary?.startDate)
+      ? file.summary.startDate
+      : isIsoDateStr(file.summary?.referenceDate)
+        ? file.summary.referenceDate
+        : '';
+  const rawEnd = isIsoDateStr(file.periodEnd)
+    ? file.periodEnd
+    : isIsoDateStr(file.summary?.endDate)
+      ? file.summary.endDate
+      : start;
+  const end = start && rawEnd && rawEnd >= start ? rawEnd : start;
+  return { start, end };
+}
+
+function sanitizeSystemFilesForTargetPeriod({
+  periodSpec,
+  relConfFile,
+  txtFile,
+  summaryTxtFile,
+  soldItemsFile,
+  cancelledFile,
+  discountsFile
+}) {
+  if (!periodSpec?.hasSystemPeriodAnchor || !isIsoDateStr(periodSpec.targetStartDate)) {
+    return {
+      relConfFile,
+      txtFile,
+      summaryTxtFile,
+      soldItemsFile,
+      cancelledFile,
+      discountsFile,
+      quarantinedSystemFiles: []
+    };
+  }
+  const targetStart = periodSpec.targetStartDate;
+  const targetEnd = isIsoDateStr(periodSpec.targetEndDate) ? periodSpec.targetEndDate : targetStart;
+  const refYear = targetStart.slice(0, 4);
+  const quarantinedSystemFiles = [];
+
+  const checkFile = (file, fallbackType) => {
+    if (!file) return null;
+    const { start, end } = extractSystemFileIsoRange(file, refYear);
+    if (!start) return file;
+    const overlaps = start <= targetEnd && end >= targetStart;
+    if (overlaps) return file;
+
+    const sum = file.summary || {};
+    const pendingDebtors = Array.isArray(sum.pendingDebtors) ? sum.pendingDebtors : [];
+    const debtorsSum = pendingDebtors.reduce((s, d) => s + Number(d?.amountCents || 0), 0);
+    const pendingCents = Number(
+      sum.notaPendenteCents || sum.pendentesCents || sum.systemRows?.pendentes || debtorsSum || 0
+    );
+    const sangriaCents = Number(sum.sangriaCents || 0);
+    const periodBr = start === end ? formatIsoBr(start) : `${formatIsoBr(start)} a ${formatIsoBr(end)}`;
+
+    quarantinedSystemFiles.push({
+      fileName: file.fileName || fallbackType,
+      fileType: file.fileType || fallbackType,
+      periodStart: start,
+      periodEnd: end,
+      periodBr,
+      pendingCents,
+      pendingCount: pendingDebtors.length,
+      sangriaCents
+    });
+    return null;
+  };
+
+  return {
+    relConfFile: checkFile(relConfFile, 'rel_conferencia'),
+    txtFile: checkFile(txtFile, 'fechamento_txt'),
+    summaryTxtFile: checkFile(summaryTxtFile, 'fechamento_resumo_txt'),
+    soldItemsFile: checkFile(soldItemsFile, 'pdv_itens_vendidos'),
+    cancelledFile: checkFile(cancelledFile, 'pdv_cancelamentos'),
+    discountsFile: checkFile(discountsFile, 'pdv_descontos'),
+    quarantinedSystemFiles
+  };
+}
+
 function resolveTargetClosingPeriod({
   pdvFile,
+  relConfFile,
   txtFile,
   summaryTxtFile,
   soldItemsFile,
@@ -414,14 +578,56 @@ function resolveTargetClosingPeriod({
   c6PayFiles,
   ofxFiles
 }) {
-  const systemAnchorCandidates = [pdvFile, txtFile, summaryTxtFile, soldItemsFile, cancelledFile, discountsFile].filter(
-    (f) => f && isIsoDateStr(f.periodStart)
-  );
-  let anchorFile = systemAnchorCandidates[0] || null;
-  const txtSingleAnchor = [txtFile, summaryTxtFile].find(
+  const weightedCandidates = [
+    { file: pdvFile, weight: 3 },
+    { file: summaryTxtFile, weight: 2 },
+    { file: txtFile, weight: 2 },
+    { file: soldItemsFile, weight: 1 },
+    { file: cancelledFile, weight: 1 },
+    { file: discountsFile, weight: 1 }
+  ]
+    .map((entry) => {
+      const { start, end } = extractSystemFileIsoRange(entry.file);
+      return start ? { file: entry.file, start, end, weight: entry.weight } : null;
+    })
+    .filter(Boolean);
+
+  const refYearForRel = weightedCandidates[0]?.start?.slice(0, 4) || '';
+  if (relConfFile && refYearForRel) {
+    const relRange = extractSystemFileIsoRange(relConfFile, refYearForRel);
+    if (relRange.start) {
+      weightedCandidates.push({ file: relConfFile, start: relRange.start, end: relRange.end, weight: 2 });
+    }
+  }
+
+  let anchorFile = weightedCandidates[0]?.file || null;
+  if (weightedCandidates.length > 1) {
+    // Voto ponderado por data única para evitar que um único arquivo anexado do dia errado desloque a âncora
+    const singleDayScores = new Map();
+    for (const c of weightedCandidates) {
+      const isSingle = !c.end || c.end === c.start || c.end === addDaysIso(c.start, 1);
+      if (isSingle) {
+        singleDayScores.set(c.start, (singleDayScores.get(c.start) || 0) + c.weight);
+      }
+    }
+    if (singleDayScores.size > 1) {
+      let bestDate = '';
+      let bestScore = -1;
+      for (const [dt, sc] of singleDayScores.entries()) {
+        if (sc > bestScore) {
+          bestScore = sc;
+          bestDate = dt;
+        }
+      }
+      const winner = weightedCandidates.find((c) => c.start === bestDate);
+      if (winner) anchorFile = winner.file;
+    }
+  }
+
+  const txtSingleAnchor = [summaryTxtFile, txtFile].find(
     (f) => f && isIsoDateStr(f.periodStart) && (!f.periodEnd || f.periodEnd === f.periodStart || f.periodEnd === addDaysIso(f.periodStart, 1))
   );
-  if (anchorFile === pdvFile && txtSingleAnchor && isIsoDateStr(pdvFile.periodEnd)) {
+  if (anchorFile === pdvFile && txtSingleAnchor && isIsoDateStr(pdvFile?.periodEnd)) {
     const dayAfterPdvStart2 = addDaysIso(pdvFile.periodStart, 2);
     if (
       pdvFile.periodEnd > dayAfterPdvStart2 &&
@@ -587,12 +793,17 @@ function buildPeriodDiagnostics({
   periodSpec,
   sourcePeriodStats,
   outOfPeriodItems,
+  quarantinedSystemFiles = [],
   ofxFiles,
   redeFiles,
   c6PayFiles,
+  pdvFile,
+  pdvTotals = {},
   relConfFile,
   txtFile,
   txtSum,
+  summaryTxtFile,
+  outflowClassification = {},
   countedCents,
   cashDrawerZeroConfirmed = false,
   expectedAfterSangriaCents,
@@ -739,7 +950,9 @@ function buildPeriodDiagnostics({
     (txtSum.vendasNoGeralCents || 0) === 0 &&
     (txtSum.fundoCaixaCents || 0) === 0 &&
     (txtSum.saidasTotalCents || 0) === 0 &&
-    (txtSum.saldoDinheiroCents || 0) === 0
+    (txtSum.saldoDinheiroCents || 0) === 0 &&
+    (txtSum.notaPendenteCents || 0) === 0 &&
+    !(txtSum.pendingDebtors?.length > 0)
   ) {
     validationWarnings.push({
       code: 'summary_file_warning',
@@ -747,6 +960,93 @@ function buildPeriodDiagnostics({
       title: 'Fita Mov.Caixa (.txt) sem totais financeiros',
       message: `O arquivo ${txtFile.fileName || 'Mov.Caixa.txt'} não trouxe totais financeiros reconhecíveis.`
     });
+  }
+
+  for (const qf of quarantinedSystemFiles || []) {
+    const detailParts = [];
+    if (qf.pendingCents > 0) {
+      detailParts.push(
+        `Notas Pendentes: ${formatBrlDiagnostic(qf.pendingCents)}${qf.pendingCount > 0 ? ` (${qf.pendingCount} cliente(s))` : ''}`
+      );
+    }
+    if (qf.sangriaCents > 0) {
+      detailParts.push(`Sangria: ${formatBrlDiagnostic(qf.sangriaCents)}`);
+    }
+    validationWarnings.push({
+      code: 'wrong_day_system_file',
+      severity: 'error',
+      title: `Arquivo do PDV de outra data bloqueado (${qf.fileName} — ${qf.periodBr})`,
+      message: `O arquivo "${qf.fileName}" pertence ao fechamento de ${qf.periodBr}${detailParts.length ? ` (${detailParts.join(' • ')})` : ''}, mas este caixa é de ${refBr}. Seus dados foram isolados automaticamente para não misturar Pendentes, Sangrias ou Saldos de outro dia.`
+    });
+  }
+
+  // Validações cruzadas de integridade financeira entre os relatórios ativos do mesmo dia
+  const pdvPendCents = pdvFile ? Number(pdvTotals.pendente || 0) : null;
+  const relSys = relConfFile?.summary?.systemRows || {};
+  const relPendCents = relSys.pendentes !== undefined ? Number(relSys.pendentes) : null;
+  const cegoCtrlRows = Array.isArray(summaryTxtFile?.summary?.controleRows)
+    ? summaryTxtFile.summary.controleRows
+    : [];
+  const cegoPendRow = cegoCtrlRows.find((r) => /\bPENDENTE\b/i.test(String(r?.method || '')));
+  const cegoPendCents =
+    summaryTxtFile?.summary?.pendentesCents !== undefined && summaryTxtFile?.summary?.pendentesCents > 0
+      ? Number(summaryTxtFile.summary.pendentesCents)
+      : cegoPendRow
+        ? Number(cegoPendRow.sistemaCents || 0)
+        : null;
+  const txtPendDebtors = Array.isArray(txtSum?.pendingDebtors) ? txtSum.pendingDebtors : [];
+  const txtDebtorsSumCents = txtPendDebtors.reduce((s, d) => s + Number(d?.amountCents || 0), 0);
+  const txtNotaPendenteCents = Number(txtSum?.notaPendenteCents || 0);
+  const effectiveTxtPendCents = txtFile
+    ? (txtDebtorsSumCents > 0 ? txtDebtorsSumCents : txtNotaPendenteCents)
+    : null;
+
+  if (effectiveTxtPendCents !== null && sysPendentes > 0 && Math.abs(effectiveTxtPendCents - sysPendentes) > 5) {
+    validationWarnings.push({
+      code: 'pending_totals_mismatch',
+      severity: 'error',
+      title: `Divergência em Notas Pendentes: PDV (${formatBrlDiagnostic(sysPendentes)}) × TXT (${formatBrlDiagnostic(effectiveTxtPendCents)})`,
+      message: `A soma das Notas Pendentes no Fechamento TXT (${formatBrlDiagnostic(effectiveTxtPendCents)} em ${txtPendDebtors.length} cliente(s)) difere do total de Pendentes do PDV (${formatBrlDiagnostic(sysPendentes)}) em ${formatBrlDiagnostic(Math.abs(effectiveTxtPendCents - sysPendentes))}. Verifique se o arquivo TXT corresponde ao mesmo turno.`
+    });
+  } else if (pdvPendCents !== null && relPendCents !== null && Math.abs(pdvPendCents - relPendCents) > 5) {
+    validationWarnings.push({
+      code: 'pending_totals_mismatch',
+      severity: 'error',
+      title: `Divergência em Pendentes: PlanilhaRecebimento (${formatBrlDiagnostic(pdvPendCents)}) × RelConferencia (${formatBrlDiagnostic(relPendCents)})`,
+      message: `O total de Notas Pendentes na PlanilhaRecebimento (${formatBrlDiagnostic(pdvPendCents)}) difere do RelConferencia (${formatBrlDiagnostic(relPendCents)}).`
+    });
+  }
+
+  if (txtFile && summaryTxtFile) {
+    const txtClosingSangria = Number(outflowClassification?.sangriaFechamentoCents || 0);
+    const cegoCashInformed = Number(outflowClassification?.caixaCegoDinheiro?.informadoCents || 0);
+    if (txtClosingSangria > 0 && cegoCashInformed > 0 && Math.abs(txtClosingSangria - cegoCashInformed) > 5) {
+      validationWarnings.push({
+        code: 'cash_drawer_cross_mismatch',
+        severity: 'warning',
+        title: `Divergência de Sangria: Fechamento TXT (${formatBrlDiagnostic(txtClosingSangria)}) × Caixa Cego (${formatBrlDiagnostic(cegoCashInformed)})`,
+        message: `A retirada final (SANGRIA CX. RET) no Fechamento TXT é ${formatBrlDiagnostic(txtClosingSangria)}, mas o valor informado em DINHEIRO no Caixa Cego é ${formatBrlDiagnostic(cegoCashInformed)}.`
+      });
+    }
+  }
+
+  if (pdvFile && relConfFile) {
+    if (relSys.cartao !== undefined && Math.abs(Number(pdvTotals.cartao || 0) - Number(relSys.cartao)) > 5) {
+      validationWarnings.push({
+        code: 'digital_system_cross_mismatch',
+        severity: 'warning',
+        title: `Divergência PDV em Cartão: Planilha (${formatBrlDiagnostic(pdvTotals.cartao)}) × RelConferencia (${formatBrlDiagnostic(relSys.cartao)})`,
+        message: `A soma de vendas em Cartão na PlanilhaRecebimento (${formatBrlDiagnostic(pdvTotals.cartao)}) difere do RelConferencia (${formatBrlDiagnostic(relSys.cartao)}).`
+      });
+    }
+    if (relSys.pix !== undefined && Math.abs(Number(pdvTotals.pix || 0) - Number(relSys.pix)) > 5) {
+      validationWarnings.push({
+        code: 'digital_system_cross_mismatch',
+        severity: 'warning',
+        title: `Divergência PDV em PIX: Planilha (${formatBrlDiagnostic(pdvTotals.pix)}) × RelConferencia (${formatBrlDiagnostic(relSys.pix)})`,
+        message: `A soma de vendas em PIX na PlanilhaRecebimento (${formatBrlDiagnostic(pdvTotals.pix)}) difere do RelConferencia (${formatBrlDiagnostic(relSys.pix)}).`
+      });
+    }
   }
 
   return {
@@ -762,6 +1062,18 @@ function buildPeriodDiagnostics({
     outOfPeriodOtherCount,
     datesBreakdown,
     sourcePeriodStats,
+    quarantinedSystemFiles,
+    integrityChecks: {
+      pdvPendentesCents: pdvPendCents,
+      relConfPendentesCents: relPendCents,
+      caixaCegoPendentesCents: cegoPendCents,
+      txtPendentesCents: effectiveTxtPendCents,
+      txtDebtorsSumCents: txtFile ? txtDebtorsSumCents : null,
+      txtDebtorsCount: txtFile ? txtPendDebtors.length : 0,
+      pendentesMatchAcrossReports:
+        (effectiveTxtPendCents === null || Math.abs(effectiveTxtPendCents - sysPendentes) <= 5) &&
+        (pdvPendCents === null || relPendCents === null || Math.abs(pdvPendCents - relPendCents) <= 5)
+    },
     validationWarnings
   };
 }
@@ -832,29 +1144,42 @@ export function runCashReconciliation({
 }) {
   const cfg = { ...DEFAULT_FORMULA_CONFIG, ...(rulesConfig || {}) };
   const tol = Number.isFinite(cfg.amountToleranceCents) ? cfg.amountToleranceCents : 1;
+  const rawInputs = buildNormalizedInputs(parsedFiles);
   const {
     pdvFile,
+    ofxFiles,
+    redeFiles,
+    c6PayFiles
+  } = rawInputs;
+  const nextId = createIdGenerator();
+  const periodSpec = resolveTargetClosingPeriod({
+    pdvFile,
+    relConfFile: rawInputs.relConfFile,
+    txtFile: rawInputs.txtFile,
+    summaryTxtFile: rawInputs.summaryTxtFile,
+    soldItemsFile: rawInputs.soldItemsFile,
+    cancelledFile: rawInputs.cancelledFile,
+    discountsFile: rawInputs.discountsFile,
+    redeFiles,
+    c6PayFiles,
+    ofxFiles
+  });
+  const {
     relConfFile,
     txtFile,
     summaryTxtFile,
     soldItemsFile,
     cancelledFile,
     discountsFile,
-    ofxFiles,
-    redeFiles,
-    c6PayFiles
-  } = buildNormalizedInputs(parsedFiles);
-  const nextId = createIdGenerator();
-  const periodSpec = resolveTargetClosingPeriod({
-    pdvFile,
-    txtFile,
-    summaryTxtFile,
-    soldItemsFile,
-    cancelledFile,
-    discountsFile,
-    redeFiles,
-    c6PayFiles,
-    ofxFiles
+    quarantinedSystemFiles
+  } = sanitizeSystemFilesForTargetPeriod({
+    periodSpec,
+    relConfFile: rawInputs.relConfFile,
+    txtFile: rawInputs.txtFile,
+    summaryTxtFile: rawInputs.summaryTxtFile,
+    soldItemsFile: rawInputs.soldItemsFile,
+    cancelledFile: rawInputs.cancelledFile,
+    discountsFile: rawInputs.discountsFile
   });
   const rolloverWindowSec = Number.isFinite(cfg.midnightRolloverSec)
     ? cfg.midnightRolloverSec
@@ -1520,7 +1845,7 @@ export function runCashReconciliation({
   const swapCandidates = [];
   for (const sys of systemItems) {
     if (usedSys.has(sys.id) || ignoredIds.has(sys.id)) continue;
-    if (sys.category === 'outros') continue;
+    if (!isReconcilablePdvCategory(sys.category)) continue;
 
     for (const real of realItems) {
       if (usedReal.has(real.id) || ignoredIds.has(real.id)) continue;
@@ -1541,7 +1866,7 @@ export function runCashReconciliation({
       }
       if (dt > maxSwapWindow) continue;
 
-      const prio = (sys.category === 'dinheiro' || sys.category === 'pendente') ? 0 : 900;
+      const prio = sys.category === 'dinheiro' ? 0 : 900;
       swapCandidates.push({ sys, real, dt, score: amtDiff * 100000 + prio + dt });
     }
   }
@@ -1591,7 +1916,7 @@ export function runCashReconciliation({
   // Split 1:N (1 venda PDV = soma de 2..4 entradas reais)
   for (const sys of systemItems) {
     if (usedSys.has(sys.id) || ignoredIds.has(sys.id) || reservedSugSys.has(sys.id)) continue;
-    if (sys.category !== 'pix' && sys.category !== 'cartao' && sys.category !== 'dinheiro') continue;
+    if (!isReconcilablePdvCategory(sys.category)) continue;
     const freeReal = realItems.filter(r => !usedReal.has(r.id) && !ignoredIds.has(r.id) && !reservedSugReal.has(r.id));
     const subset = findBestSubsetSums(sys.amountCents, freeReal, 4, tol, cfg.splitWindowSec, sys);
     if (!subset) continue;
@@ -1631,7 +1956,7 @@ export function runCashReconciliation({
   // Agrupado N:1 (soma de 2..4 vendas PDV = 1 entrada real)
   for (const real of realItems) {
     if (usedReal.has(real.id) || ignoredIds.has(real.id) || reservedSugReal.has(real.id)) continue;
-    const freeSys = systemItems.filter(s => !usedSys.has(s.id) && !ignoredIds.has(s.id) && !reservedSugSys.has(s.id) && s.category !== 'outros');
+    const freeSys = systemItems.filter(s => !usedSys.has(s.id) && !ignoredIds.has(s.id) && !reservedSugSys.has(s.id) && isReconcilablePdvCategory(s.category));
     const subset = findBestSubsetSums(real.amountCents, freeSys, 4, tol, cfg.splitWindowSec, real);
     if (!subset) continue;
 
@@ -1895,12 +2220,17 @@ export function runCashReconciliation({
     periodSpec,
     sourcePeriodStats,
     outOfPeriodItems,
+    quarantinedSystemFiles,
     ofxFiles,
     redeFiles,
     c6PayFiles,
+    pdvFile,
+    pdvTotals,
     relConfFile,
     txtFile,
     txtSum,
+    summaryTxtFile,
+    outflowClassification,
     countedCents,
     cashDrawerZeroConfirmed,
     expectedAfterSangriaCents,

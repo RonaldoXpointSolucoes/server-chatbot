@@ -712,6 +712,63 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.4.5',
+    date: '2026-11-26',
+    summary: 'Blindagem de Integridade Financeira na Conferência de Caixa (Quarentena de Relatórios de Outra Data, Auditoria Cruzada de Pendentes e Isolamento de Fiado)',
+    notes: [
+      {
+        id: 'feat-cash-cross-report-integrity-quarantine-845',
+        category: 'features',
+        title: 'Quarentena Automática de Relatórios de Outra Data e Auditoria Cruzada de Pendentes',
+        description: 'O motor de Conferência de Caixa agora valida a data de todos os relatórios do PDV (final.txt, CAIXA_CEGO, RelConferencia, Itens Vendidos e Cancelamentos), isola automaticamente arquivos anexados de outro dia com alerta vermelho explicativo, faz fallback automático para o Caixa Cego do dia e exibe a soma comparativa (PDV × RelConferencia × Caixa Cego × Fechamento TXT) dentro do modal de Pendentes.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+        guide: {
+          moduleGroup: 'system',
+          moduleLabel: 'Conferência de Caixa • Espelho & Auditoria de Pendentes',
+          purpose: 'Impedir que um arquivo final.txt ou relatório do PDV anexado de outra data contamine os devedores pendentes, a sangria ou o saldo em dinheiro do caixa atual, exibindo a soma auditada em tempo real entre todos os relatórios do turno.',
+          whereToAccess: [
+            '1. Menu Lateral Esquerdo ➔ Conferência Caixa (/conferencia-caixa)',
+            '2. Abra um fechamento ou carregue os relatórios do turno',
+            '3. Na aba "Espelho RelConferencia", clique na linha "Pendentes" ou no botão "Detalhar composição" em "Saldo em Dinheiro"'
+          ],
+          howToTest: [
+            '1. Abra o fechamento de 25/11/2026 em /conferencia-caixa.',
+            '2. Verifique o alerta vermelho no topo indicando que o final.txt de 24/11/2026 (R$ 423,28) foi bloqueado automaticamente e o Saldo em Dinheiro Real passou a usar R$ 330,10 do Caixa Cego de 25/11.',
+            '3. Clique na linha "Pendentes" (R$ 336,38) e confira a barra "Auditoria Cruzada de Pendentes" com a soma das 11 vendas do PDV.'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Conciliação Detalhada — Pendentes • Auditoria Cruzada',
+            contextElements: ['Planilha PDV: R$ 336,38', 'RelConferencia: R$ 336,38', 'Caixa Cego: R$ 336,38'],
+            targetButtonLabel: '👆 Clique Aqui: Linha Pendentes / Detalhar composição',
+            targetButtonPosition: 'Aba Espelho RelConferencia ➔ Linha Pendentes ou Saldo em Dinheiro',
+            visualPreviewVariant: 'hub-account-limits'
+          },
+          quickAction: {
+            label: 'Abrir Conferência de Caixa',
+            route: '/conferencia-caixa'
+          }
+        }
+      },
+      {
+        id: 'fix-cash-pendente-fiado-exclusion-845',
+        category: 'fixes',
+        title: 'Isolamento de Notas Pendentes (Fiado) das Sugestões e Vínculos de Cartão/PIX',
+        description: 'Vendas registradas no PDV como Nota Pendente (fiado para pagamento futuro) não entram mais em sugestões automáticas N:1 ou trocas de forma de pagamento (swapped_method) nem na lista de vínculos manuais de sobras bancárias.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      },
+      {
+        id: 'imp-cash-drawer-sangria-intermediaria-modal-845',
+        category: 'improvements',
+        title: 'Separação de Sangria Intermediária × Sangria CX. RET e Nomes nos Pendentes',
+        description: 'Isolada a sangria intermediária do turno (já deduzida em Saídas Pagamentos do RelConferencia) para evitar subtração dupla na gaveta, adicionado modal clicável de detalhamento de Vales/Sangrias/Dinheiro, destaque da data do caixa no topo e vínculo automático do nome do cliente devedor nas vendas pendentes.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
+      }
+    ]
+  },
+  {
     version: '8.4.4',
     date: '2026-11-25',
     summary: 'Correção de PIX Automático (CPF/CNPJ do Pagador), Observações de Preparo GastroFood e Paginação Completa no Simulador do Cardápio',
