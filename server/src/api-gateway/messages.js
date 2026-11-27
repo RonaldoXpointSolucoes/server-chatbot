@@ -597,17 +597,8 @@ router.post(['/resume-ai', '/messages/resume-ai'], requireTenant, async (req, re
         }
 
         if (!selectedBot) {
-            return res.json({ ok: true, triggered: false, reason: 'no_active_bot_for_instance' });
+            return res.json({ ok: true, cleared: true, triggered: false, reason: 'no_active_bot_for_instance' });
         }
-
-        const sock = await sessionManager.getSocketOrWake(tenantId, conv.instance_id, false).catch(() => null);
-        const rawTarget = conv.contacts?.whatsapp_jid || conv.contacts?.phone;
-        if (!rawTarget) {
-            return res.json({ ok: true, triggered: false, reason: 'missing_contact_jid' });
-        }
-        const jid = sock ? await resolveTargetJid(sock, rawTarget, tenantId) : (String(rawTarget).includes('@') ? rawTarget : `${String(rawTarget).replace(/\D/g, '')}@s.whatsapp.net`);
-
-        AutomationWorker.clearHumanPauseOverride?.(conversationId, jid, conv.contact_id);
 
         await AutomationWorker.processMessage({
             tenantId,
