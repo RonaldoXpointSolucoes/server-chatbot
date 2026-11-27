@@ -712,6 +712,29 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.4.7',
+    date: '2026-11-27',
+    summary: 'Hotfix Crítico de Produção: Eliminação do Loop Infinito de Requisições no Radar Ao Vivo de Fluxos (Typebot) com Trava de Concorrência e Debounce Realtime',
+    notes: [
+      {
+        id: 'fix-live-flow-diagnostic-infinite-loop-847',
+        category: 'fixes',
+        title: 'Correção do Loop Infinito de Telemetria em Fluxos de Bot (ERR_INSUFFICIENT_RESOURCES)',
+        description: 'Eliminado o ciclo reativo infinito entre resolveNodeAndBlockInfo, fetchDiagnosticData e useEffect no componente LiveFlowDiagnosticPanel que disparava milhares de requisições simultâneas ao Supabase ao abrir a tela de Fluxos de Bot (/settings/bots).',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      },
+      {
+        id: 'imp-live-flow-diagnostic-concurrency-debounce-847',
+        category: 'improvements',
+        title: 'Mutex de Concorrência (isFetchingRef), Debounce Realtime e Pausa em Aba Oculta',
+        description: 'Adicionada trava de requisição única em andamento (in-flight guard), debounce de 650ms para eventos Realtime de mensagens/estados, deduplicação por assinatura JSON de telemetria e suspensão automática do polling quando a aba está oculta.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-sky-500/20 text-sky-300 border-sky-500/30'
+      }
+    ]
+  },
+  {
     version: '8.4.6',
     date: '2026-11-27',
     summary: 'Radar Ao Vivo de Fluxos Typebot, HUD Boot On-Line & Ativo, Diagnóstico Técnico de Mensagens Bloqueadas com Desbloqueio em 1 Clique e Testador E2E WhatsApp FoodNext',

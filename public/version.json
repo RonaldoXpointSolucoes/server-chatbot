@@ -1,5 +1,5 @@
 {
-  "version": "8.4.6",
-  "buildDate": "2026-11-27T20:18:15.693Z",
-  "summary": "Radar Ao Vivo de Fluxos Typebot, HUD Boot On-Line & Ativo, Diagnóstico Técnico de Mensagens Bloqueadas com Desbloqueio em 1 Clique e Testador E2E WhatsApp FoodNext"
+  "version": "8.4.7",
+  "buildDate": "2026-11-27T20:45:00.000Z",
+  "summary": "Hotfix Crítico de Produção: Eliminação do Loop Infinito de Requisições no Radar Ao Vivo de Fluxos (Typebot) com Trava de Concorrência e Debounce Realtime"
 }

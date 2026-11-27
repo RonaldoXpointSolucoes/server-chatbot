@@ -89,13 +89,15 @@ function checkTriggerMatch(rules: any[], text: string): { matched: boolean; matc
   return { matched: false };
 }
 
+const EMPTY_ARRAY: any[] = [];
+
 export function LiveFlowDiagnosticPanel({
   tenantId,
   tenantName = 'Empresa Atual',
   currentFlowId,
   currentFlowName,
-  nodes = [],
-  edges = [],
+  nodes = EMPTY_ARRAY,
+  edges = EMPTY_ARRAY,
   flows: externalFlows,
   onFocusCanvasNode,
   onFlowsUpdated,
@@ -138,15 +140,27 @@ export function LiveFlowDiagnosticPanel({
     setE2eLogs(prev => [...prev, { time, step, status, detail }]);
   };
 
+  const nodesRef = useRef<any[]>(nodes);
+  nodesRef.current = nodes;
+  const edgesRef = useRef<any[]>(edges);
+  edgesRef.current = edges;
+  const allFlowsRef = useRef<any[]>(allFlows);
+  allFlowsRef.current = allFlows;
+  const isOpenRef = useRef<boolean>(isOpen);
+  isOpenRef.current = isOpen;
+  const isFetchingRef = useRef<boolean>(false);
+  const hasLoadedOnceRef = useRef<boolean>(false);
+  const lastTelemetrySignatureRef = useRef<string>('');
+
   // Resolve nome legível de um nó/bloco dentro do fluxo atual ou de qualquer fluxo da empresa
   const resolveNodeAndBlockInfo = useCallback((stateRef: string, flowId?: string) => {
     if (!stateRef) return { groupId: '', blockId: null, groupLabel: 'Início', blockLabel: 'Ponto de Entrada', hasOutgoingEdges: true, blockObj: null };
     const [groupId, blockId] = stateRef.includes(':') ? stateRef.split(':') : [stateRef, null];
 
-    let targetNodes = nodes;
-    let targetEdges = edges;
+    let targetNodes = nodesRef.current;
+    let targetEdges = edgesRef.current;
     if ((!targetNodes || targetNodes.length === 0) && flowId) {
-      const foundFlow = allFlows.find(f => f.id === flowId);
+      const foundFlow = allFlowsRef.current.find(f => f.id === flowId);
       const ver = foundFlow?.flow_versions || foundFlow?.latest_version;
       if (ver) {
         targetNodes = ver.nodes || [];
@@ -176,11 +190,15 @@ export function LiveFlowDiagnosticPanel({
       hasOutgoingEdges: hasMoreInGroup || hasOutgoing,
       blockObj: blk || null
     };
-  }, [nodes, edges, allFlows]);
+  }, []);
 
   const fetchDiagnosticData = useCallback(async () => {
     if (!tenantId) return;
-    setLoading(true);
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
+    if (!hasLoadedOnceRef.current) {
+      setLoading(true);
+    }
     try {
       const [
         { data: insts },
@@ -539,18 +557,38 @@ export function LiveFlowDiagnosticPanel({
           }
         }
 
-        telemetryCallbackRef.current(byGroup, byBlock);
+        const telemetrySig = JSON.stringify({ byGroup, byBlock });
+        if (telemetrySig !== lastTelemetrySignatureRef.current) {
+          lastTelemetrySignatureRef.current = telemetrySig;
+          telemetryCallbackRef.current(byGroup, byBlock);
+        }
       }
+      hasLoadedOnceRef.current = true;
     } catch (err) {
       console.warn('[LiveFlowDiagnosticPanel] Erro ao atualizar telemetria do fluxo:', err);
     } finally {
+      isFetchingRef.current = false;
       setLoading(false);
     }
   }, [tenantId, externalFlows, currentFlowId, currentFlowName, resolveNodeAndBlockInfo]);
 
+  const fetchDiagnosticDataRef = useRef(fetchDiagnosticData);
+  fetchDiagnosticDataRef.current = fetchDiagnosticData;
+
   useEffect(() => {
-    fetchDiagnosticData();
+    hasLoadedOnceRef.current = false;
+    fetchDiagnosticDataRef.current();
     if (!tenantId) return;
+
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleRealtimeRefresh = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+          fetchDiagnosticDataRef.current();
+        }
+      }, 650);
+    };
 
     // Assinatura Realtime para atualizar instantaneamente quando chegar mensagem ou mudar estado do fluxo
     const channel = supabase
@@ -558,24 +596,30 @@ export function LiveFlowDiagnosticPanel({
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'messages', filter: `tenant_id=eq.${tenantId}` },
-        () => fetchDiagnosticData()
+        scheduleRealtimeRefresh
       )
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'conversation_states', filter: `tenant_id=eq.${tenantId}` },
-        () => fetchDiagnosticData()
+        scheduleRealtimeRefresh
       )
       .subscribe();
 
     const interval = setInterval(() => {
-      if (isOpen) fetchDiagnosticData();
-    }, 4500);
+      if (
+        isOpenRef.current &&
+        (typeof document === 'undefined' || document.visibilityState === 'visible')
+      ) {
+        fetchDiagnosticDataRef.current();
+      }
+    }, 12000);
 
     return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
       clearInterval(interval);
       supabase.removeChannel(channel);
     };
-  }, [tenantId, currentFlowId, isOpen, fetchDiagnosticData]);
+  }, [tenantId, currentFlowId]);
 
   // Ação Técnica 1-Clique: Desbloquear Conversa + Contato + RAM no Servidor e Opcionalmente Injetar/Retomar no Fluxo
   const handleUnblockConversationAndInject = async (item: any, shouldReinject = true) => {
