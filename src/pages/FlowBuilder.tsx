@@ -82,6 +82,7 @@ import TestSimulator from '../components/Flow/TestSimulator';
 import FlowHelpModal from '../components/Flow/FlowHelpModal';
 import BlockHelpDrawer from '../components/Flow/BlockHelpDrawer';
 import FlowHealthModal from '../components/Flow/FlowHealthModal';
+import LiveFlowDiagnosticPanel, { type NodeLiveTelemetry } from '../components/Flow/LiveFlowDiagnosticPanel';
 import { parseTypebotToFlow } from '../utils/typebotParser';
 import { normalizeUrlsInText, extractUrlsFromText } from '../utils/urlHelper';
 import { FlowActionsContext, getBlockTheme } from '../context/FlowActionsContext';
@@ -165,6 +166,9 @@ function FlowBuilderContent() {
     const [paletteSubmenu, setPaletteSubmenu] = useState<{ type: string; label: string; top: number; left: number } | null>(null);
     const [helpBlockType, setHelpBlockType] = useState<string | null>(null);
     const [isHealthOpen, setIsHealthOpen] = useState(false);
+    const [isLiveRadarOpen, setIsLiveRadarOpen] = useState(true);
+    const [telemetryByGroup, setTelemetryByGroup] = useState<Record<string, NodeLiveTelemetry>>({});
+    const [telemetryByBlock, setTelemetryByBlock] = useState<Record<string, NodeLiveTelemetry>>({});
     const [builderNotice, setBuilderNotice] = useState<{ title: string; detail: string; focusGroupId?: string } | null>(null);
     const [inspectorTestResult, setInspectorTestResult] = useState<Record<string, string>>({});
 
@@ -1053,7 +1057,92 @@ function FlowBuilderContent() {
 
     const categories = Array.from(new Set(filteredNodeTypes.map(n => n.category)));
 
-    return (
+        const handleTelemetryMapChange = useCallback(
+            (byGroup: Record<string, NodeLiveTelemetry>, byBlock: Record<string, NodeLiveTelemetry>) => {
+                setTelemetryByGroup(byGroup);
+                setTelemetryByBlock(byBlock);
+            },
+            []
+        );
+
+        const handleAutoConnectOptions = useCallback(
+            (sourceGroupId: string, sourceBlockId: string, options: string[]) => {
+                const srcNode = nodes.find((n) => n.id === sourceGroupId);
+                if (!srcNode || !Array.isArray(options) || options.length === 0) return;
+
+                const baseX = (srcNode.position?.x || 380) + 460;
+                const baseY = (srcNode.position?.y || 80) - Math.max(0, (options.length - 1) * 90);
+                const createdNodes: Node[] = [];
+                const createdEdges: Edge[] = [];
+
+                options.forEach((optText, idx) => {
+                    const handleId = `${sourceBlockId}-opt-${idx}`;
+                    const alreadyConnected = edges.some(
+                        (e) => e.source === sourceGroupId && e.sourceHandle === handleId
+                    );
+                    if (alreadyConnected) return;
+
+                    const cleanOptLabel = String(optText || `Opção ${idx + 1}`).replace(/^\d+\s*[-.)]\s*/, '').trim();
+                    const newGrpId = `group-opt-${idx + 1}-${uuidv4().substring(0, 4)}`;
+                    const isAttendant = cleanOptLabel.toLowerCase().includes('atendente') || cleanOptLabel.toLowerCase().includes('humano');
+                    const blkId = `b-opt-${idx + 1}-${uuidv4().substring(0, 4)}`;
+
+                    createdNodes.push({
+                        id: newGrpId,
+                        type: 'typebot_group',
+                        position: { x: baseX, y: baseY + idx * 210 },
+                        data: {
+                            id: newGrpId,
+                            label: `Opção ${idx + 1} - ${cleanOptLabel}`,
+                            blocks: [
+                                isAttendant
+                                    ? {
+                                          id: blkId,
+                                          flowType: 'handoff',
+                                          label: 'Transferir para Atendente',
+                                          text: `Perfeito! Estou transferindo seu atendimento sobre *${cleanOptLabel}* para nossa equipe humana. Aguarde um instante! 👤`
+                                      }
+                                    : {
+                                          id: blkId,
+                                          flowType: 'send_message',
+                                          label: `Resposta: ${cleanOptLabel}`,
+                                          text: `Você escolheu *${idx + 1} - ${cleanOptLabel}*.\n\nConfira as informações de *${tenantInfo?.name || 'nossa empresa'}*:`
+                                      }
+                            ]
+                        }
+                    });
+
+                    createdEdges.push({
+                        id: `e-${sourceGroupId}-${handleId}-${newGrpId}`,
+                        source: sourceGroupId,
+                        sourceHandle: handleId,
+                        target: newGrpId,
+                        targetHandle: `${newGrpId}-in`,
+                        label: `${idx + 1} - ${cleanOptLabel}`,
+                        type: 'smoothstep',
+                        animated: true,
+                        style: { stroke: '#10b981', strokeWidth: 3 },
+                        markerEnd: {
+                            type: MarkerType.ArrowClosed,
+                            width: 15,
+                            height: 15,
+                            color: '#10b981'
+                        }
+                    });
+                });
+
+                if (createdNodes.length > 0) {
+                    setNodes((nds) => nds.concat(createdNodes));
+                    setEdges((eds) => eds.concat(createdEdges));
+                    setTimeout(() => {
+                        fitView({ duration: 600, padding: 0.25 });
+                    }, 120);
+                }
+            },
+            [nodes, edges, tenantInfo, setNodes, setEdges, fitView]
+        );
+
+        return (
         <FlowActionsContext.Provider
             value={{
                 onDuplicateGroup: handleDuplicateGroup,
@@ -1068,6 +1157,8 @@ function FlowBuilderContent() {
                 setSelectedBlockId,
                 onOpenBlockInstructions: (fType: string) => setHelpBlockType(fType),
                 onGenerateBlockExample: (fType: string) => handleGenerateBlockExample(fType, false),
+                telemetryByGroup,
+                telemetryByBlock,
             }}
         >
             <div className="flex flex-col h-full bg-[#0e0e11] text-zinc-200 select-none">
@@ -1084,18 +1175,23 @@ function FlowBuilderContent() {
                     </button>
                     
                     <div className="flex items-center gap-2 min-w-0">
-                        <div className="w-7 h-7 bg-indigo-600/30 border border-indigo-500/40 rounded-lg flex items-center justify-center text-indigo-400 font-black text-xs shrink-0">
+                        <div className={`w-7 h-7 rounded-lg flex items-center justify-center font-black text-xs shrink-0 border ${
+                            flowData?.active_version_id
+                                ? 'bg-emerald-500/25 border-emerald-400/60 text-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.4)]'
+                                : 'bg-indigo-600/30 border-indigo-500/40 text-indigo-400'
+                        }`}>
                             ⚡
                         </div>
-                        <h1 className="text-sm font-semibold text-zinc-100 max-w-[160px] xl:max-w-[220px] truncate" title={flowData?.name}>
+                        <h1 className="text-sm font-black text-zinc-100 max-w-[160px] xl:max-w-[220px] truncate" title={flowData?.name}>
                             {flowData?.name || 'Construtor de Fluxo'}
                         </h1>
-                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider border whitespace-nowrap shrink-0 ${
+                        <span className={`text-[10px] px-2.5 py-1 rounded-full font-black uppercase tracking-wider border whitespace-nowrap shrink-0 flex items-center gap-1.5 ${
                             flowData?.active_version_id
-                                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                                ? 'bg-emerald-500 text-slate-950 border-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.5)]'
                                 : 'bg-zinc-800 text-zinc-400 border-zinc-700'
                         }`}>
-                            {flowData?.active_version_id ? 'Ativo' : 'Pausado'}
+                            <span className={`w-2 h-2 rounded-full ${flowData?.active_version_id ? 'bg-slate-950 animate-ping' : 'bg-zinc-500'}`} />
+                            {flowData?.active_version_id ? '🟢 BOOT ON-LINE & ATIVO' : '⚪ BOOT PAUSADO'}
                         </span>
                     </div>
 
@@ -1106,6 +1202,20 @@ function FlowBuilderContent() {
                     >
                         <HelpCircle className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
                         <span>Ajuda</span>
+                    </button>
+
+                    <button
+                        type="button"
+                        onClick={() => setIsLiveRadarOpen(r => !r)}
+                        className={`flex items-center gap-1.5 text-xs font-extrabold px-3 py-1.5 rounded-lg transition-all border active:scale-95 shadow-sm cursor-pointer whitespace-nowrap shrink-0 ${
+                            isLiveRadarOpen
+                                ? 'bg-emerald-500/20 text-emerald-200 border-emerald-400/50 shadow-[0_0_15px_rgba(16,185,129,0.25)]'
+                                : 'bg-[#202024] text-zinc-300 hover:text-white border-zinc-800'
+                        }`}
+                        title="Abrir Radar Ao Vivo de Mensagens, Diagnóstico Técnico e Testador FoodNext"
+                    >
+                        <Terminal className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>📡 Radar Ao Vivo & Testar FoodNext</span>
                     </button>
                 </div>
 
@@ -1233,6 +1343,33 @@ function FlowBuilderContent() {
                     </button>
                 </div>
             </header>
+
+            {/* Painel Retrátil Superior: Radar Ao Vivo de Chegada de Mensagens, Diagnóstico Técnico e Testador FoodNext */}
+            {isLiveRadarOpen && (
+                <div className="px-3 py-2 bg-[#121318] border-b border-zinc-800/90 z-10 shrink-0 max-h-[44vh] overflow-y-auto styled-scrollbar">
+                    <LiveFlowDiagnosticPanel
+                        tenantId={tenant_id}
+                        tenantName={tenantInfo?.name || 'Empresa Atual'}
+                        currentFlowId={id}
+                        currentFlowName={flowData?.name || configFlowName}
+                        nodes={nodes}
+                        edges={edges}
+                        compactMode
+                        onTelemetryMapChange={handleTelemetryMapChange}
+                        onAutoConnectOptions={handleAutoConnectOptions}
+                        onFocusCanvasNode={(groupId, blockId) => {
+                            setActiveTab('fluxo');
+                            const target = nodes.find((n) => n.id === groupId);
+                            if (target) setSelectedNode(target);
+                            if (blockId) setSelectedBlockId(blockId);
+                            setTimeout(() => {
+                                fitView({ nodes: [{ id: groupId }], duration: 550, padding: 0.45 });
+                            }, 80);
+                        }}
+                        onFlowsUpdated={() => loadFlow()}
+                    />
+                </div>
+            )}
 
             {activeTab === 'config' ? (
                 <div className="flex-1 overflow-y-auto p-8 bg-[#0e0e11]">

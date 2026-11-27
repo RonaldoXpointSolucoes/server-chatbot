@@ -712,6 +712,62 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.4.6',
+    date: '2026-11-27',
+    summary: 'Radar Ao Vivo de Fluxos Typebot, HUD Boot On-Line & Ativo, Diagnóstico Técnico de Mensagens Bloqueadas com Desbloqueio em 1 Clique e Testador E2E WhatsApp FoodNext',
+    notes: [
+      {
+        id: 'feat-live-flow-diagnostic-radar-hud-846',
+        category: 'features',
+        title: 'Radar Ao Vivo de Mensagens no Fluxo, HUD "Boot On-Line & Ativo" e Testador E2E FoodNext',
+        description: 'Nova central de telemetria em tempo real (LiveFlowDiagnosticPanel) integrada à Lista de Fluxos Typebot e ao Construtor Visual (/flows/:id/edit). Exibe nitidamente quais instâncias WhatsApp estão conectadas e a hierarquia de prioridade dos fluxos ativos (1º Gatilhos Específicos > 2º Curinga ALL), rastreia cada mensagem que chega no WhatsApp indicando se entrou no fluxo, por quais blocos passou e em qual bloco está aguardando resposta (🔴 AO VIVO AQUI), diagnostica tecnicamente mensagens bloqueadas (ai_paused, status open, bot_status paused, gatilho não compatível) com botão de desbloqueio em 1 clique e inclui Testador E2E WhatsApp Real disparando da caixa FoodNext.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+        guide: {
+          moduleGroup: 'typebot-flow',
+          moduleLabel: 'Fluxos de Bot (Typebot) • Radar Ao Vivo & Testador FoodNext',
+          purpose: 'Mostrar com clareza qual Boot está On-Line e Ativo no WhatsApp, rastrear visualmente no canvas onde cada mensagem do cliente está entrando, passando ou parando no fluxo, diagnosticar a nível técnico por que uma mensagem recebida não entrou no fluxo (com correção em 1 clique) e disparar testes reais E2E usando a caixa FoodNext.',
+          whereToAccess: [
+            '1. Na Lista de Fluxos: Menu Lateral ➔ Robôs / Fluxos de Bot (/settings/bots?tab=typebot) ➔ Painel "BOOT ON-LINE & ATIVO" e abas do Radar de Mensagens / Testador E2E FoodNext',
+            '2. No Construtor do Fluxo: Abra qualquer fluxo (/flows/:id/edit) ➔ Barra Superior ➔ Botão pulsante "📡 Radar & Teste FoodNext" (e badges ao vivo nos blocos do canvas)'
+          ],
+          howToTest: [
+            '1. Acesse /settings/bots?tab=typebot ou abra um fluxo no Builder (/flows/:id/edit) e clique em "📡 Radar & Teste FoodNext".',
+            '2. Na aba "Radar de Mensagens & Bloqueios", envie uma mensagem para o WhatsApp da loja (ou veja as últimas recebidas): se estiver bloqueada por pausa humana (ai_paused / status open), clique em "Desbloquear e Ativar Fluxo (1-Clique)".',
+            '3. Na aba "Testador E2E (Via Caixa FoodNext)", clique em "⚡ Disparar Teste Real FoodNext" (ex.: "oi") e acompanhe os 4 passos até a resposta automática do fluxo e o destaque "🔴 AO VIVO AQUI" no bloco do canvas.'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Tela: Fluxos de Bot (/settings/bots?tab=typebot) & Builder (/flows/:id/edit)',
+            contextElements: ['🟢 BOOT ON-LINE & ATIVO', '📡 Radar de Mensagens', '🔴 AO VIVO AQUI', '🧪 Testador E2E FoodNext'],
+            targetButtonLabel: '📡 Radar & Teste FoodNext / Desbloquear (1-Clique)',
+            targetButtonPosition: 'Topo da tela de Fluxos Typebot e barra superior do Construtor de Fluxos (/flows/:id/edit)',
+            visualPreviewVariant: 'typebot-poll'
+          },
+          quickAction: {
+            label: 'Abrir Fluxos & Radar Ao Vivo',
+            route: '/settings/bots?tab=typebot'
+          }
+        }
+      },
+      {
+        id: 'fix-resume-ai-typebot-flows-without-bots-846',
+        category: 'fixes',
+        title: 'Correção de Retomada de Automação (/resume-ai) para Empresas com Fluxos Typebot sem Bot Gemini',
+        description: 'Corrigida a rota POST /api/v1/messages/resume-ai no backend (Server v8.3.0) que abortava antes de limpar o bloqueio de pausa humana (clearHumanPauseOverride) e de resetar ai_paused = false quando a empresa utilizava exclusivamente Fluxos Typebot (flows) sem registro na tabela bots. Adicionada também telemetria detalhada de diagnóstico em conversation_states e endpoint /api/v1/flows/diagnostic-summary.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      },
+      {
+        id: 'imp-flow-canvas-live-badges-and-orphan-alert-846',
+        category: 'improvements',
+        title: 'Badges Ao Vivo nos Blocos do Canvas e Alerta Visual de Opções sem Saída Conectada',
+        description: 'Os nós do Construtor Visual (GroupNode e CustomNode) agora destacam em tempo real com anel verde/rosa pulsante os blocos por onde mensagens reais do WhatsApp passaram ou onde estão paradas aguardando resposta do cliente, além de alertar visualmente quando botões/menus de opções não possuem conexão de saída.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
+      }
+    ]
+  },
+  {
     version: '8.4.5',
     date: '2026-11-26',
     summary: 'Blindagem de Integridade Financeira na Conferência de Caixa (Quarentena de Relatórios de Outra Data, Auditoria Cruzada de Pendentes e Isolamento de Fiado)',

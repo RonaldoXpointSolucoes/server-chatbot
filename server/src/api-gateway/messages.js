@@ -501,9 +501,12 @@ router.post(['/resume-ai', '/messages/resume-ai'], requireTenant, async (req, re
             return;
         }
 
+        const rawTarget = conv.contacts?.whatsapp_jid || conv.contacts?.phone;
+        // Sempre limpa o lock de pausa humana em memória RAM imediatamente ao retomar,
+        // mesmo que a empresa opere exclusivamente com Fluxos Typebot (0 robôs de IA).
+        AutomationWorker.clearHumanPauseOverride?.(conversationId, rawTarget || null, conv.contact_id);
+
         if (clearOnly) {
-            const rawTarget = conv.contacts?.whatsapp_jid || conv.contacts?.phone;
-            AutomationWorker.clearHumanPauseOverride?.(conversationId, rawTarget || null, conv.contact_id);
             return res.json({ ok: true, cleared: true, triggered: false });
         }
 
@@ -520,18 +523,44 @@ router.post(['/resume-ai', '/messages/resume-ai'], requireTenant, async (req, re
                 .limit(3)
         ]);
 
-        if (companyData && companyData.global_ai_enabled === false) {
-            return res.json({ ok: true, triggered: false, reason: 'global_ai_disabled' });
-        }
-
         const lastMsg = recentMsgs && recentMsgs.length > 0 ? recentMsgs[0] : null;
         if (!lastMsg || (lastMsg.direction !== 'inbound' && lastMsg.sender_type !== 'client') || !String(lastMsg.text_content || '').trim()) {
-            return res.json({ ok: true, triggered: false, reason: 'no_pending_inbound_message' });
+            return res.json({ ok: true, cleared: true, triggered: false, reason: 'no_pending_inbound_message' });
         }
 
         const msgAgeMs = Date.now() - new Date(lastMsg.timestamp).getTime();
         if (Number.isNaN(msgAgeMs) || msgAgeMs > 30 * 60 * 1000) {
-            return res.json({ ok: true, triggered: false, reason: 'inbound_message_too_old' });
+            return res.json({ ok: true, cleared: true, triggered: false, reason: 'inbound_message_too_old' });
+        }
+
+        const sock = await sessionManager.getSocketOrWake(tenantId, conv.instance_id, false).catch(() => null);
+        if (!rawTarget) {
+            return res.json({ ok: true, cleared: true, triggered: false, reason: 'missing_contact_jid' });
+        }
+        const jid = sock ? await resolveTargetJid(sock, rawTarget, tenantId) : (String(rawTarget).includes('@') ? rawTarget : `${String(rawTarget).replace(/\D/g, '')}@s.whatsapp.net`);
+        AutomationWorker.clearHumanPauseOverride?.(conversationId, jid, conv.contact_id);
+
+        // 1. Prioridade para o FlowEngine (Fluxos Typebot ativos na empresa)
+        try {
+            const { default: FlowEngine } = await import('../flow-runtime/index.js');
+            const handledByFlow = await FlowEngine.processIncomingMessage({
+                tenantId,
+                instanceId: conv.instance_id,
+                conversationId,
+                jid,
+                textMessage: lastMsg.text_content,
+                messageType: 'text',
+                sock
+            });
+            if (handledByFlow) {
+                return res.json({ ok: true, cleared: true, triggered: true, handledByFlow: true, botName: 'FlowEngine (Typebot)' });
+            }
+        } catch (flowErr) {
+            console.warn('[Messages API] Aviso ao acionar FlowEngine no resume-ai:', flowErr?.message || flowErr);
+        }
+
+        if (companyData && companyData.global_ai_enabled === false) {
+            return res.json({ ok: true, cleared: true, triggered: false, reason: 'global_ai_disabled' });
         }
 
         const isOrchestratorBot = (bot) => {

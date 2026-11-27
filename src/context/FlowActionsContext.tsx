@@ -81,6 +81,8 @@ export interface FlowActionsContextType {
     setSelectedBlockId: (id: string | null) => void;
     onOpenBlockInstructions?: (flowType: string) => void;
     onGenerateBlockExample?: (flowType: string) => void;
+    telemetryByGroup?: Record<string, any>;
+    telemetryByBlock?: Record<string, any>;
 }
 
 export const FlowActionsContext = createContext<FlowActionsContextType | null>(null);

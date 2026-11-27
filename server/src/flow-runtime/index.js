@@ -185,7 +185,7 @@ export class FlowEngine {
                     console.warn('[FlowEngine] Falha ao consultar nome do contato:', cErr.message);
                 }
 
-                // Calcula saudação com base no fuso horário de Brasília (America/Sao_Paulo)
+                 // Calcula saudação com base no fuso horário de Brasília (America/Sao_Paulo)
                 const now = new Date();
                 const brtHour = Number(
                     new Intl.DateTimeFormat('en-US', {
@@ -196,6 +196,17 @@ export class FlowEngine {
                 ) % 24;
                 const saudacao = brtHour >= 5 && brtHour < 12 ? 'Bom dia' : (brtHour >= 12 && brtHour < 18 ? 'Boa tarde' : 'Boa noite');
 
+                const initialHistoryEntry = {
+                    step: 1,
+                    groupId: startPoint.groupId,
+                    blockId: startPoint.blockId || null,
+                    flowId: flow.id,
+                    flowName: flow.name,
+                    action: 'TRIGGER_MATCHED',
+                    triggerText: String(textMessage || '').slice(0, 120),
+                    timestamp: now.toISOString()
+                };
+
                 const { data: newState, error: insertErr } = await this.db
                     .from('conversation_states')
                     .insert({
@@ -205,6 +216,9 @@ export class FlowEngine {
                         current_node_id: startPoint.blockId ? `${startPoint.groupId}:${startPoint.blockId}` : startPoint.groupId,
                         variables: {
                             __flow_id: flow.id,
+                            __flow_name: flow.name,
+                            __last_inbound_text: String(textMessage || '').slice(0, 200),
+                            __last_inbound_at: now.toISOString(),
                             pushName: customerName,
                             nome_cliente: customerName,
                             saudacao: saudacao,
@@ -222,7 +236,7 @@ export class FlowEngine {
                             hora_atual: now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })
                         },
                         status: 'BOT_ACTIVE',
-                        history: []
+                        history: [initialHistoryEntry]
                     })
                     .select('*')
                     .single();
@@ -334,7 +348,23 @@ export class FlowEngine {
         }
 
         const flowType = currBlock.flowType || currBlock.type;
-        const varName = currBlock.var_name || currBlock.data?.var_name || 'user_response';
+        let varName = currBlock.var_name || currBlock.data?.var_name || 'user_response';
+
+        // Caso tenha pausado em um send_message antes de um bloco condition, descobre a variável esperada pela condition
+        if (['send_message', 'message', 'text'].includes(flowType)) {
+            const candidateNext = this.resolveNextPoint(nodes, edges, parentGroup, currBlock, '', convState.variables || {});
+            if (candidateNext) {
+                const targetGrp = nodes.find(n => n.id === candidateNext.groupId);
+                const targetBlk = targetGrp?.data?.blocks?.find(b => b.id === candidateNext.blockId) || targetGrp?.data?.blocks?.[0];
+                if (targetBlk && (targetBlk.flowType === 'condition' || targetBlk.type === 'condition')) {
+                    const condVar = targetBlk.items?.[0]?.varName || targetBlk.var_name || targetBlk.variable;
+                    if (condVar) varName = condVar;
+                }
+            }
+        } else if (flowType === 'condition') {
+            const condVar = currBlock.items?.[0]?.varName || currBlock.var_name || currBlock.variable;
+            if (condVar) varName = condVar;
+        }
 
         const validation = validateAndFormatBlockInput(currBlock, {
             textMessage,
@@ -343,6 +373,8 @@ export class FlowEngine {
         });
 
         convState.variables = convState.variables || {};
+        convState.variables.__last_inbound_text = String(textMessage || '').slice(0, 200);
+        convState.variables.__last_inbound_at = new Date().toISOString();
 
         if (!validation.valid) {
             const currentRetries = Number(convState.variables.__retry_count || 0) + 1;
@@ -382,7 +414,29 @@ export class FlowEngine {
         if (varName) {
             convState.variables[varName] = sanitizedValue;
         }
-        await this.db.from('conversation_states').update({ variables: convState.variables }).eq('id', convState.id);
+        convState.variables['user_response'] = sanitizedValue;
+        convState.variables['NumeroMenu'] = sanitizedValue;
+
+        const prevHistory = Array.isArray(convState.history) ? convState.history : [];
+        convState.history = [
+            ...prevHistory.slice(-38),
+            {
+                step: prevHistory.length + 1,
+                groupId,
+                blockId,
+                groupLabel: parentGroup?.data?.label || groupId,
+                blockLabel: currBlock?.label || flowType,
+                flowType,
+                action: 'USER_INPUT_RECEIVED',
+                input: String(sanitizedValue).slice(0, 120),
+                varName,
+                timestamp: new Date().toISOString()
+            }
+        ];
+        await this.db.from('conversation_states').update({
+            variables: convState.variables,
+            history: convState.history
+        }).eq('id', convState.id);
 
         const nextPoint = this.resolveNextPoint(nodes, edges, parentGroup, currBlock, sanitizedValue, convState.variables);
 
@@ -556,12 +610,28 @@ export class FlowEngine {
                 break;
             }
 
-            // Atualiza checkpoint do estado
+            // Atualiza checkpoint do estado e trilha de passagem (history)
             const stateRef = currentPoint.blockId ? `${currentPoint.groupId}:${currentPoint.blockId}` : currentPoint.groupId;
             convState.current_node_id = stateRef;
-            await this.db.from('conversation_states').update({ current_node_id: stateRef }).eq('id', convState.id);
-
             const flowType = block.flowType || block.type;
+            const prevHistory = Array.isArray(convState.history) ? convState.history : [];
+            convState.history = [
+                ...prevHistory.slice(-38),
+                {
+                    step: prevHistory.length + 1,
+                    groupId: currentPoint.groupId,
+                    blockId: currentPoint.blockId || block.id || null,
+                    groupLabel: parentGroup?.data?.label || currentPoint.groupId,
+                    blockLabel: block?.label || flowType,
+                    flowType,
+                    action: 'NODE_EXECUTING',
+                    timestamp: new Date().toISOString()
+                }
+            ];
+            await this.db.from('conversation_states').update({
+                current_node_id: stateRef,
+                history: convState.history
+            }).eq('id', convState.id);
 
             try {
                 // 1. Mensagem de Texto
@@ -582,7 +652,30 @@ export class FlowEngine {
                         // Delay humanizado entre mensagens (1.5s)
                         await this.sleep(1500);
                     }
-                    currentPoint = this.resolveNextPoint(nodes, edges, parentGroup, block, '', convState.variables);
+                    const nextPt = this.resolveNextPoint(nodes, edges, parentGroup, block, '', convState.variables);
+                    // Se este bloco de texto aponta diretamente para um bloco de Condição (ex: Menu em texto -> Condição SE opcao_menu = 1..5),
+                    // pausa para aguardar a resposta do cliente antes de avaliar a condição!
+                    let shouldPauseForCondition = false;
+                    if (nextPt) {
+                        const nextGrp = nodes.find(n => n.id === nextPt.groupId);
+                        const nextBlk = nextGrp?.data?.blocks?.find(b => b.id === nextPt.blockId) || nextGrp?.data?.blocks?.[0];
+                        if (nextBlk && (nextBlk.flowType === 'condition' || nextBlk.type === 'condition')) {
+                            const condVar = nextBlk.items?.[0]?.varName || nextBlk.var_name || nextBlk.variable || 'opcao_menu';
+                            const systemAutoVars = new Set([
+                                'pushName', 'nome_cliente', 'saudacao', 'NomeEmpresa', 'cardapio', 'GoogleMaps',
+                                'EnderecoEmpresa', 'DiaFuncionamento', 'HoraFuncionamento', 'chave_pix',
+                                'telefone_empresa', 'remoteJid', 'telefone', 'data_atual', 'hora_atual', '__flow_id'
+                            ]);
+                            if (!systemAutoVars.has(condVar)) {
+                                shouldPauseForCondition = true;
+                            }
+                        }
+                    }
+                    if (shouldPauseForCondition) {
+                        isPaused = true;
+                    } else {
+                        currentPoint = nextPt;
+                    }
                 }
                 // 1.1 Mídia: Foto / Imagem
                 else if (flowType === 'image') {
@@ -812,7 +905,10 @@ export class FlowEngine {
                         }
                     }
 
-                    const formattedMenu = `${prompt}\n\n` + normalizedOptions.map((opt, i) => `*${i + 1}* - ${opt.label}`).join('\n');
+                    const formattedMenu = `${prompt}\n\n` + normalizedOptions.map((opt, i) => {
+                        const cleanLbl = String(opt.label || '').replace(/^\d+\s*[-.)]\s*/, '').trim() || opt.label;
+                        return `*${i + 1}* - ${cleanLbl}`;
+                    }).join('\n');
                     const parsedText = normalizeUrlsInText(this.parseVariables(formattedMenu, convState.variables));
 
                     if (parsedText) {

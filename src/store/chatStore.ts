@@ -8207,31 +8207,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
           console.warn('[updateConversationField] Aviso ao atualizar status de bot no contato:', contactUpdErr.message);
         }
 
-        if (payload.ai_paused && !knownConvId) {
-          triggerBackendCancelAiImmediately(tenant.id, {
-            conversationId: convId,
-            contactId: realContactId,
-            remoteJid: contact?.phone ? `${String(contact.phone).replace(/\D/g, '')}@s.whatsapp.net` : undefined,
-            reason: payload.ai_paused_until ? 'pausa_temporaria_ui' : 'pausa_definitiva_ui'
-          });
-        } else if (payload.ai_paused === false) {
-          try {
-            const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
-            fetch(`${API_URL}/api/v1/messages/resume-ai`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'x-tenant-id': tenant.id
-              },
-              body: JSON.stringify({
-                conversationId: convId
-              })
-            }).catch(err => console.warn('[ChatStore] Falha ao notificar resume-ai no backend:', err));
-          } catch (resumeErr) {
-            console.warn('[ChatStore] Erro ao disparar resume-ai:', resumeErr);
-          }
-        }
-
         // Insere log/mensagem de sistema apenas quando há mudança real de estado
         const isStateChanging = !prevContactSnapshot || prevAiPaused !== Boolean(payload.ai_paused);
 
@@ -8251,6 +8226,57 @@ export const useChatStore = create<ChatState>((set, get) => ({
             }
           }
           await emitConversationSystemMessage('system-aipaused', `${statusText} por ${operatorName}`);
+        }
+
+        if (payload.ai_paused && !knownConvId) {
+          triggerBackendCancelAiImmediately(tenant.id, {
+            conversationId: convId,
+            contactId: realContactId,
+            remoteJid: contact?.phone ? `${String(contact.phone).replace(/\D/g, '')}@s.whatsapp.net` : undefined,
+            reason: payload.ai_paused_until ? 'pausa_temporaria_ui' : 'pausa_definitiva_ui'
+          });
+        } else if (payload.ai_paused === false) {
+          try {
+            // Limpa eventuais sessões HANDOFF_HUMAN do FlowEngine para este contato voltar a entrar no fluxo
+            const cleanDigits = String(contact?.phone || '').replace(/\D/g, '');
+            if (cleanDigits) {
+              const jidCandidates = getBrPhoneVariations(cleanDigits).map(v => `${v}@s.whatsapp.net`);
+              await supabase
+                .from('conversation_states')
+                .update({ status: 'FINISHED', updated_at: new Date().toISOString() })
+                .eq('tenant_id', tenant.id)
+                .in('status', ['HANDOFF_HUMAN', 'PAUSED_BY_HUMAN'])
+                .in('remote_jid', jidCandidates);
+            }
+
+            const API_URL = import.meta.env.VITE_WHATSAPP_ENGINE_URL?.trim() || 'http://localhost:9000';
+            // 1. Limpa imediatamente o lock de 30min em RAM no servidor (funciona mesmo quando a empresa usa apenas Typebot e 0 bots de IA)
+            await fetch(`${API_URL}/api/v1/messages/resume-ai`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-tenant-id': tenant.id
+              },
+              body: JSON.stringify({
+                conversationId: convId,
+                clearOnly: true
+              })
+            }).catch(() => {});
+
+            // 2. Aciona retomada ativa caso haja mensagem pendente recente
+            fetch(`${API_URL}/api/v1/messages/resume-ai`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-tenant-id': tenant.id
+              },
+              body: JSON.stringify({
+                conversationId: convId
+              })
+            }).catch(err => console.warn('[ChatStore] Falha ao notificar resume-ai no backend:', err));
+          } catch (resumeErr) {
+            console.warn('[ChatStore] Erro ao disparar resume-ai:', resumeErr);
+          }
         }
       }
 

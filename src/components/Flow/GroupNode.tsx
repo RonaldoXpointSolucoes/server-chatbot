@@ -103,6 +103,7 @@ function renderFormattedTypebotText(text: string) {
 export default function GroupNode({ id, data, selected }: any) {
   const blocks = data.blocks || [];
   const actions = useFlowActions();
+  const groupTelemetry = actions?.telemetryByGroup?.[id];
 
   // Estados locais para edição inline
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -174,7 +175,11 @@ export default function GroupNode({ id, data, selected }: any) {
       className={`w-[330px] rounded-2xl bg-[#17171a] shadow-2xl transition-all relative border-2 
         ${selected 
           ? 'border-[#e06c3a] shadow-[0_0_0_1px_#e06c3a,0_10px_35px_rgba(224,108,58,0.22)]' 
-          : 'border-zinc-800/90 hover:border-zinc-700'
+          : groupTelemetry?.activeWaitingCount > 0
+            ? 'border-amber-400 shadow-[0_0_25px_rgba(245,158,11,0.25)]'
+            : groupTelemetry?.passedCount > 0
+              ? 'border-emerald-500/60 shadow-[0_0_20px_rgba(16,185,129,0.15)]'
+              : 'border-zinc-800/90 hover:border-zinc-700'
         }
         ${isDragOverGroup ? 'ring-2 ring-[#e06c3a] bg-[#1c1c22]' : ''}
       `}
@@ -189,6 +194,40 @@ export default function GroupNode({ id, data, selected }: any) {
       }}
       onDrop={handleContainerDrop}
     >
+      {/* BADGE DE TELEMETRIA AO VIVO NO TOPO DO GRUPO (ONDE PASSOU / ONDE PAROU) */}
+      {groupTelemetry && (groupTelemetry.activeWaitingCount > 0 || groupTelemetry.passedCount > 0) && (
+        <div
+          className={`px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider flex items-center justify-between gap-2 border-b rounded-t-2xl ${
+            groupTelemetry.activeWaitingCount > 0
+              ? 'bg-amber-500/20 text-amber-200 border-amber-500/40'
+              : groupTelemetry.status === 'FINISHED_HERE'
+                ? 'bg-indigo-500/20 text-indigo-200 border-indigo-500/40'
+                : 'bg-emerald-500/15 text-emerald-200 border-emerald-500/30'
+          }`}
+        >
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span
+              className={`w-2 h-2 rounded-full shrink-0 ${
+                groupTelemetry.activeWaitingCount > 0
+                  ? 'bg-amber-400 animate-ping'
+                  : 'bg-emerald-400'
+              }`}
+            />
+            <span className="truncate">
+              {groupTelemetry.activeWaitingCount > 0
+                ? `⏸️ PARADO AQUI (${groupTelemetry.activeWaitingCount}) • Aguardando Resposta`
+                : groupTelemetry.status === 'FINISHED_HERE'
+                  ? `🏁 PAROU AQUI • ${groupTelemetry.stopReason || 'Fim do Fluxo'}`
+                  : `🟢 PASSOU AQUI (${groupTelemetry.passedCount}x)`}
+            </span>
+          </div>
+          {groupTelemetry.lastContactName && (
+            <span className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-black/40 text-white/80 truncate max-w-[100px] shrink-0">
+              {groupTelemetry.lastContactName}
+            </span>
+          )}
+        </div>
+      )}
       {/* ========================================================================= */}
       {/* MENU FLUTUANTE SUPERIOR ESTILO TYPEBOT (IMAGENS 1 E 2)                     */}
       {/* ========================================================================= */}
@@ -302,12 +341,13 @@ export default function GroupNode({ id, data, selected }: any) {
            const theme = getBlockTheme(block.flowType);
            const isEditingThisBlock = editingBlockIndex === index;
            const isSelectedBlock = actions?.selectedBlockId === block.id;
+           const blockTelemetry = actions?.telemetryByBlock?.[block.id];
 
            return (
              <div 
                 key={block.id || index} 
                 className={`bg-[#1c1c20] rounded-xl border p-3 relative group transition-all cursor-grab active:cursor-grabbing
-                  ${isSelectedBlock ? 'border-orange-500/70 shadow-sm ring-1 ring-orange-500/30' : 'border-zinc-800/80 hover:border-zinc-700 hover:bg-[#222227]'}
+                  ${isSelectedBlock ? 'border-orange-500/70 shadow-sm ring-1 ring-orange-500/30' : blockTelemetry?.activeWaitingCount > 0 ? 'border-amber-400/80 ring-1 ring-amber-400/30 bg-amber-950/15' : blockTelemetry?.passedCount > 0 ? 'border-emerald-500/40' : 'border-zinc-800/80 hover:border-zinc-700 hover:bg-[#222227]'}
                   ${dragOverIndex === index ? 'border-t-2 border-t-orange-500' : ''}
                 `}
                 draggable
@@ -382,6 +422,27 @@ export default function GroupNode({ id, data, selected }: any) {
                         </button>
                     </div>
                 </div>
+
+                {/* Indicador Ao Vivo de Passagem / Parada Neste Bloco Específico */}
+                {blockTelemetry && (blockTelemetry.activeWaitingCount > 0 || blockTelemetry.passedCount > 0) && (
+                  <div
+                    className={`mb-2 px-2 py-1 rounded-lg text-[10px] font-bold flex items-center justify-between gap-1.5 border ${
+                      blockTelemetry.activeWaitingCount > 0
+                        ? 'bg-amber-500/20 text-amber-200 border-amber-500/40'
+                        : blockTelemetry.status === 'FINISHED_HERE'
+                          ? 'bg-indigo-500/20 text-indigo-200 border-indigo-500/35'
+                          : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                    }`}
+                  >
+                    <span className="truncate">
+                      {blockTelemetry.activeWaitingCount > 0
+                        ? `⏸️ Parado neste bloco (${blockTelemetry.lastContactName || 'Cliente'})`
+                        : blockTelemetry.status === 'FINISHED_HERE'
+                          ? `🏁 Parou aqui (${blockTelemetry.stopReason || 'Fim'})`
+                          : `✅ Passou por este bloco (${blockTelemetry.passedCount}x)`}
+                    </span>
+                  </div>
+                )}
                 
                 {/* Conteúdo do Bloco */}
                 <div className="text-xs text-zinc-300">

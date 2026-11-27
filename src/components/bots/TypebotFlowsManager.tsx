@@ -31,6 +31,7 @@ import { cn } from '../../lib/utils';
 import { parseTypebotToFlow } from '../../utils/typebotParser';
 import { OFFICIAL_FLOW_TEMPLATES } from '../../data/flowTemplates';
 import TestSimulator from '../Flow/TestSimulator';
+import LiveFlowDiagnosticPanel from '../Flow/LiveFlowDiagnosticPanel';
 
 interface TriggerRule {
   type: 'EXACT' | 'CONTAINS' | 'STARTS_WITH' | 'ALL';
@@ -704,8 +705,31 @@ export function TypebotFlowsManager({ onFlowsChange }: TypebotFlowsManagerProps)
 
   const activeCount = flows.filter(f => Boolean(f.active_version_id)).length;
 
+  // Calcula ordem de prioridade real de disparo entre os fluxos ativos
+  const activePriorityOrderIds = [...flows]
+    .filter(f => Boolean(f.active_version_id))
+    .sort((a, b) => {
+      const rA: TriggerRule[] = typeof a.trigger_rules === 'string' ? JSON.parse(a.trigger_rules || '[]') : (a.trigger_rules || []);
+      const rB: TriggerRule[] = typeof b.trigger_rules === 'string' ? JSON.parse(b.trigger_rules || '[]') : (b.trigger_rules || []);
+      const aSpec = Array.isArray(rA) && rA.some(r => r && ['EXACT', 'STARTS_WITH', 'CONTAINS'].includes(r.type));
+      const bSpec = Array.isArray(rB) && rB.some(r => r && ['EXACT', 'STARTS_WITH', 'CONTAINS'].includes(r.type));
+      return Number(bSpec) - Number(aSpec);
+    })
+    .map(f => f.id);
+
   return (
     <div className="flex flex-col gap-6 animate-in fade-in duration-300">
+      {/* PAINEL DE COMANDO AO VIVO: BOOT ONLINE, RADAR DE MENSAGENS, DIAGNÓSTICO E TESTADOR FOODNEXT */}
+      <LiveFlowDiagnosticPanel
+        tenantId={tenantId}
+        tenantName={tenantInfo?.name || 'Empresa Atual'}
+        flows={flows}
+        onFlowsUpdated={() => {
+          fetchFlows();
+          onFlowsChange?.();
+        }}
+      />
+
       {/* Top Banner de Destaque / Estatísticas da Empresa Selecionada */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="p-5 rounded-2xl bg-gradient-to-br from-emerald-500/10 via-emerald-500/5 to-transparent border border-emerald-500/20 backdrop-blur-md flex items-center justify-between">
@@ -721,13 +745,18 @@ export function TypebotFlowsManager({ onFlowsChange }: TypebotFlowsManagerProps)
           </div>
         </div>
 
-        <div className="p-5 rounded-2xl bg-gradient-to-br from-teal-500/10 via-teal-500/5 to-transparent border border-teal-500/20 backdrop-blur-md flex items-center justify-between">
+        <div className="p-5 rounded-2xl bg-gradient-to-br from-teal-500/15 via-emerald-500/10 to-transparent border-2 border-emerald-400/40 backdrop-blur-md flex items-center justify-between shadow-[0_0_25px_rgba(16,185,129,0.15)]">
           <div className="flex flex-col gap-1">
-            <span className="text-xs font-bold text-teal-400 uppercase tracking-wider">Fluxos Ativos (No Ar)</span>
+            <span className="text-xs font-black text-emerald-300 uppercase tracking-wider flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+              Boots Online (No Ar)
+            </span>
             <span className="text-2xl font-black text-white">{activeCount}</span>
-            <span className="text-[11px] text-white/50">Respondendo no WhatsApp da empresa</span>
+            <span className="text-[11px] text-emerald-200/80 font-semibold">
+              {activeCount > 0 ? 'Ativos e respondendo no WhatsApp agora' : 'Nenhum fluxo ativo no momento'}
+            </span>
           </div>
-          <div className="w-12 h-12 rounded-xl bg-teal-500/20 border border-teal-500/30 flex items-center justify-center text-teal-400 shadow-inner">
+          <div className="w-12 h-12 rounded-xl bg-emerald-500/25 border border-emerald-400/50 flex items-center justify-center text-emerald-300 shadow-inner">
             <Zap size={24} />
           </div>
         </div>
@@ -876,31 +905,62 @@ export function TypebotFlowsManager({ onFlowsChange }: TypebotFlowsManagerProps)
             const versionObj = flow.flow_versions || flow.latest_version;
             const nodesCount = versionObj?.nodes?.length || 0;
             const edgesCount = versionObj?.edges?.length || 0;
+            const priorityRank = isActive ? activePriorityOrderIds.indexOf(flow.id) + 1 : 0;
+            const hasSpecificRule = rules.some(r => r && ['EXACT', 'STARTS_WITH', 'CONTAINS'].includes(r.type));
 
             return (
               <div 
                 key={flow.id}
                 className={cn(
-                  "flex flex-col justify-between p-6 rounded-3xl border transition-all duration-300 relative group backdrop-blur-xl",
+                  "flex flex-col justify-between p-6 rounded-3xl transition-all duration-300 relative group backdrop-blur-xl overflow-hidden",
                   isActive
-                    ? "bg-[#14181c]/80 border-emerald-500/30 hover:border-emerald-500/50 shadow-lg shadow-black/40 hover:shadow-emerald-500/10"
-                    : "bg-[#141518]/70 border-white/10 hover:border-white/20 shadow-md shadow-black/40"
+                    ? "bg-gradient-to-br from-[#121e1a]/95 via-[#13191d]/95 to-[#101418]/95 border-2 border-emerald-400/70 ring-4 ring-emerald-500/15 shadow-[0_0_35px_rgba(16,185,129,0.2)] hover:shadow-[0_0_45px_rgba(16,185,129,0.3)] hover:-translate-y-0.5"
+                    : "bg-[#141518]/65 border border-white/10 hover:border-white/20 shadow-md shadow-black/40 opacity-85 hover:opacity-100"
                 )}
               >
                 <div>
+                  {/* Faixa Superior de Destaque Nítido do Boot Online */}
+                  {isActive ? (
+                    <div className="mb-4 -mx-6 -mt-6 px-5 py-2.5 bg-gradient-to-r from-emerald-500/30 via-teal-500/25 to-emerald-600/20 border-b border-emerald-400/40 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="relative flex h-2.5 w-2.5">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-300 opacity-90" />
+                          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400" />
+                        </span>
+                        <span className="text-[11px] font-black uppercase tracking-wider text-emerald-200">
+                          🟢 BOOT ON-LINE & ATIVO NO WHATSAPP
+                        </span>
+                      </div>
+                      <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-emerald-400 text-slate-950 shadow-sm">
+                        {priorityRank}º Prioridade {hasSpecificRule ? '(Gatilho Exato)' : '(Geral)'}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="mb-4 -mx-6 -mt-6 px-5 py-2 bg-white/[0.02] border-b border-white/5 flex items-center justify-between">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-white/40 flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-zinc-600" />
+                        ⚪ Boot Offline / Pausado
+                      </span>
+                      <span className="text-[9px] text-white/30 font-mono">Rascunho Seguro</span>
+                    </div>
+                  )}
+
                   {/* Header do Card */}
                   <div className="flex items-start justify-between gap-3 mb-3">
                     <div className="flex items-center gap-3 min-w-0">
                       <div className={cn(
-                        "w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 transition-all",
+                        "w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 transition-all",
                         isActive
-                          ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shadow-inner"
+                          ? "bg-emerald-500/25 text-emerald-300 border-2 border-emerald-400/50 shadow-[0_0_20px_rgba(16,185,129,0.25)]"
                           : "bg-white/5 text-white/40 border border-white/10"
                       )}>
-                        <Waypoints size={20} />
+                        <Waypoints size={22} />
                       </div>
                       <div className="flex flex-col min-w-0">
-                        <h4 className="text-sm font-bold text-white group-hover:text-emerald-300 transition-colors truncate" title={flow.name}>
+                        <h4 className={cn(
+                          "text-base font-black transition-colors truncate",
+                          isActive ? "text-white group-hover:text-emerald-300" : "text-white/80"
+                        )} title={flow.name}>
                           {flow.name}
                         </h4>
                         <div className="flex items-center gap-2 mt-0.5">
@@ -918,16 +978,16 @@ export function TypebotFlowsManager({ onFlowsChange }: TypebotFlowsManagerProps)
                     <button
                       type="button"
                       onClick={() => handleToggleFlowActive(flow)}
-                      title={isActive ? "Clique para Pausar este fluxo" : "Clique para Ativar este fluxo no WhatsApp"}
+                      title={isActive ? "Clique para Pausar este Boot" : "Clique para Ativar este Boot Online no WhatsApp"}
                       className={cn(
-                        "px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border transition-all flex items-center gap-1.5 cursor-pointer shrink-0",
+                        "px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider border transition-all flex items-center gap-1.5 cursor-pointer shrink-0 active:scale-95",
                         isActive
-                          ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/30"
-                          : "bg-white/5 text-white/40 border-white/10 hover:bg-white/10"
+                          ? "bg-emerald-500 text-slate-950 border-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.5)] hover:bg-emerald-400"
+                          : "bg-white/5 text-white/50 border-white/10 hover:bg-emerald-500/20 hover:text-emerald-300 hover:border-emerald-500/30"
                       )}
                     >
-                      <span className={cn("w-1.5 h-1.5 rounded-full", isActive ? "bg-emerald-400 animate-pulse" : "bg-white/30")} />
-                      {isActive ? 'Ativo' : 'Pausado'}
+                      <span className={cn("w-2 h-2 rounded-full", isActive ? "bg-slate-950 animate-ping" : "bg-white/30")} />
+                      {isActive ? 'ON-LINE' : 'ATIVAR'}
                     </button>
                   </div>
 

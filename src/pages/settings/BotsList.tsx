@@ -242,6 +242,7 @@ export default function BotsList() {
   const [ragDocsCount, setRagDocsCount] = useState(0);
   const [activeFlowsCount, setActiveFlowsCount] = useState<number>(0);
   const [activeFlowName, setActiveFlowName] = useState<string>('');
+  const [activeFlowsNames, setActiveFlowsNames] = useState<string[]>([]);
 
   // Estados para o Treinamento Multimodal do Robô (Áudio e Imagem)
   const [isTrainingOpen, setIsTrainingOpen] = useState(false);
@@ -856,15 +857,25 @@ export default function BotsList() {
     try {
       const { data: flowsData } = await supabase
         .from('flows')
-        .select('id, name, active_version_id')
+        .select('id, name, active_version_id, trigger_rules')
         .eq('tenant_id', tenantId);
 
-      const activeFlows = (flowsData || []).filter(f => Boolean(f.active_version_id));
+      const activeFlows = (flowsData || [])
+        .filter(f => Boolean(f.active_version_id))
+        .sort((a: any, b: any) => {
+          const rA = typeof a.trigger_rules === 'string' ? JSON.parse(a.trigger_rules || '[]') : (a.trigger_rules || []);
+          const rB = typeof b.trigger_rules === 'string' ? JSON.parse(b.trigger_rules || '[]') : (b.trigger_rules || []);
+          const aSpec = Array.isArray(rA) && rA.some((r: any) => r && ['EXACT', 'STARTS_WITH', 'CONTAINS'].includes(r.type));
+          const bSpec = Array.isArray(rB) && rB.some((r: any) => r && ['EXACT', 'STARTS_WITH', 'CONTAINS'].includes(r.type));
+          return Number(bSpec) - Number(aSpec);
+        });
       setActiveFlowsCount(activeFlows.length);
       if (activeFlows.length > 0) {
         setActiveFlowName(activeFlows[0].name);
+        setActiveFlowsNames(activeFlows.map((f: any) => f.name));
       } else {
         setActiveFlowName('');
+        setActiveFlowsNames([]);
       }
 
       // Se o usuário não passou um parâmetro explícito na URL e tem fluxo ativo mas 0 robôs de IA ativos,
@@ -1588,12 +1599,17 @@ Instruções importantes:
                 <span>Empresa: <strong className="text-indigo-300">{tenantInfo?.name || 'Empresa Atual'}</strong></span>
               </div>
               {activeFlowsCount > 0 ? (
-                <div className="flex items-center gap-2 text-xs font-semibold text-emerald-300 bg-emerald-950/50 border border-emerald-500/40 px-3 py-1.5 rounded-xl backdrop-blur-md shadow-lg shadow-emerald-950/50">
-                  <span className="relative flex h-2 w-2">
+                <div className="flex items-center gap-2 text-xs font-bold text-emerald-200 bg-gradient-to-r from-emerald-950/90 to-teal-950/80 border-2 border-emerald-400/60 px-3.5 py-1.5 rounded-xl backdrop-blur-md shadow-[0_0_20px_rgba(16,185,129,0.3)]">
+                  <span className="relative flex h-2.5 w-2.5">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400"></span>
                   </span>
-                  <span>WhatsApp: Fluxo <strong>"{activeFlowName || 'Atendimento'}"</strong> em Produção</span>
+                  <span>
+                    🟢 BOOT ON-LINE NO WHATSAPP:{' '}
+                    {activeFlowsNames.length > 1
+                      ? activeFlowsNames.map((n, i) => `${i + 1}º "${n}"`).join(' + ')
+                      : `Fluxo "${activeFlowName || 'Atendimento'}"`}
+                  </span>
                 </div>
               ) : activeBots.length > 0 ? (
                 <div className="flex items-center gap-2 text-xs font-semibold text-indigo-300 bg-indigo-950/50 border border-indigo-500/40 px-3 py-1.5 rounded-xl backdrop-blur-md shadow-lg shadow-indigo-950/50">

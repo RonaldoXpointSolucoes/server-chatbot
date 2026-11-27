@@ -368,6 +368,28 @@ export default function TestSimulator({ nodes, edges, onClose, startNodeId }: Te
           : `[Mídia: ${flowType}]`;
       const text = parseText(baseText, variables);
       pushMessage('bot', text);
+
+      // Se o próximo bloco for uma Condição que depende de resposta do cliente (ex: Menu em texto -> Condição SE opcao_menu = 1..5),
+      // pausa para aguardar a digitação/escolha do usuário!
+      const candidateNext = getNextBlock(currentBlock.id);
+      if (candidateNext && candidateNext.flowType === 'condition') {
+        const condVar = candidateNext.items?.[0]?.varName || candidateNext.var_name || candidateNext.variable || 'opcao_menu';
+        const systemAutoVars = new Set([
+          'pushName', 'saudacao', 'NomeEmpresa', 'NOME_DA_EMPRESA', 'cardapio', 'LINK_CARDAPIO',
+          'GoogleMaps', 'LINK_GOOGLE_MAPS', 'EnderecoEmpresa', 'ENDERECO_DA_EMPRESA',
+          'DiaFuncionamento', 'HoraFuncionamento', 'HORARIO_FUNCIONAMENTO', 'AbertoFechado'
+        ]);
+        if (!systemAutoVars.has(condVar)) {
+          if (Array.isArray(candidateNext.items) && candidateNext.items.length > 0) {
+            setActiveButtonOptions(candidateNext.items.map((it: any) => `${it.value} - Opção ${it.value}`));
+          } else {
+            setActiveButtonOptions([]);
+          }
+          setIsAwaitingInput(true);
+          return;
+        }
+      }
+
       autoAdvance(currentBlock.id, 650);
     }
     // 2. Reply (Citação simulada)
@@ -426,8 +448,9 @@ export default function TestSimulator({ nodes, edges, onClose, startNodeId }: Te
         ? currentBlock.options
         : ['Opção 1', 'Opção 2'];
       const formattedOpts = rawOpts.map((opt: any, idx: number) => {
-        const lbl = typeof opt === 'string' ? opt : (opt?.label || opt?.title || `Opção ${idx + 1}`);
-        return `${idx + 1} - ${parseText(lbl, variables)}`;
+        const rawLbl = typeof opt === 'string' ? opt : (opt?.label || opt?.title || `Opção ${idx + 1}`);
+        const cleanLbl = String(rawLbl).replace(/^\d+\s*[-.)]\s*/, '').trim() || rawLbl;
+        return `${idx + 1} - ${parseText(cleanLbl, variables)}`;
       });
       setActiveButtonOptions(formattedOpts);
       setIsAwaitingInput(true);
@@ -634,8 +657,13 @@ export default function TestSimulator({ nodes, edges, onClose, startNodeId }: Te
     setIsAwaitingInput(false);
     setLastUserInput(selectedValue);
 
-    const varName = currentBlock.var_name || currentBlock.variable || 'NumeroMenu';
-    const nextVars = { ...variables, [varName]: selectedValue, NumeroMenu: selectedValue };
+    let varName = currentBlock.var_name || currentBlock.variable || 'NumeroMenu';
+    const candidateNext = getNextBlock(currentBlock.id);
+    if (candidateNext && candidateNext.flowType === 'condition') {
+      const condVar = candidateNext.items?.[0]?.varName || candidateNext.var_name || candidateNext.variable;
+      if (condVar) varName = condVar;
+    }
+    const nextVars = { ...variables, [varName]: selectedValue, NumeroMenu: selectedValue, opcao_menu: selectedValue, user_response: selectedValue };
     setVariables(nextVars);
 
     autoAdvance(currentBlock.id, 300, selectedValue, undefined, nextVars);
@@ -678,8 +706,13 @@ export default function TestSimulator({ nodes, edges, onClose, startNodeId }: Te
     setIsAwaitingInput(false);
     setLastUserInput(text);
 
-    const varName = currentBlock.var_name || currentBlock.variable || 'NumeroMenu';
-    const nextVars = { ...variables, [varName]: text, NumeroMenu: text };
+    let varName = currentBlock.var_name || currentBlock.variable || 'NumeroMenu';
+    const candidateNext = getNextBlock(currentBlock.id);
+    if (candidateNext && candidateNext.flowType === 'condition') {
+      const condVar = candidateNext.items?.[0]?.varName || candidateNext.var_name || candidateNext.variable;
+      if (condVar) varName = condVar;
+    }
+    const nextVars = { ...variables, [varName]: text, NumeroMenu: text, opcao_menu: text, user_response: text };
     setVariables(nextVars);
 
     autoAdvance(currentBlock.id, 300, text, undefined, nextVars);
