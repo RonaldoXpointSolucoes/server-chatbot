@@ -159,6 +159,8 @@ export default function CashReconciliationPage() {
   const [rules, setRules] = useState<CashRuleRow[]>([]);
   const [localSavedPasswords, setLocalSavedPasswords] = useState<SavedCashFilePassword[]>([]);
   const [localRoutineOverride, setLocalRoutineOverride] = useState<CompanyCashRoutineProfile | null>(null);
+  const [openChecklistNonce, setOpenChecklistNonce] = useState<number>(0);
+  const dropzoneContainerRef = useRef<HTMLDivElement>(null);
   const [localSavedWhatsapp, setLocalSavedWhatsapp] = useState<string>('');
   const [schemaMissing, setSchemaMissing] = useState(false);
 
@@ -1302,10 +1304,14 @@ export default function CashReconciliationPage() {
     }
   };
 
-  const handleToggleRoutineBank = async (bankKey: string, enabled: boolean) => {
+  const persistRoutineProfileChange = async (
+    nextProfile: CompanyCashRoutineProfile,
+    context: Record<string, unknown>,
+    actionLabel: string,
+    successMessage = 'Rotina da empresa atualizada!'
+  ) => {
     const reqTenantId = tenantId;
     if (!reqTenantId) return;
-    const nextProfile = toggleRoutineBankExpected(routineProfile, bankKey, enabled) as CompanyCashRoutineProfile;
     setLocalRoutineOverride(nextProfile);
     try {
       const savedRes = await saveCompanyCashRoutine(reqTenantId, nextProfile);
@@ -1313,41 +1319,43 @@ export default function CashReconciliationPage() {
       if (savedRes.rule) {
         setRules((prev) => [savedRes.rule!, ...prev.filter((r) => r.id !== savedRes.rule!.id)]);
       }
-      notifyToast('Rotina da empresa atualizada!', 'success');
+      notifyToast(successMessage, 'success');
     } catch (err: unknown) {
       if (activeTenantRef.current !== reqTenantId) return;
       logCashUnexpectedError({
-        action: 'atualizar rotina bancária da empresa',
+        action: actionLabel,
         err,
         tenantId: reqTenantId,
-        context: { bankKey, enabled }
+        context
       });
       notifyToast(extractCashErrorMessage(err, 'Erro ao atualizar rotina da empresa.'), 'error');
     }
   };
 
+  const handleToggleRoutineBank = async (bankKey: string, enabled: boolean) => {
+    const nextProfile = toggleRoutineBankExpected(routineProfile, bankKey, enabled) as CompanyCashRoutineProfile;
+    await persistRoutineProfileChange(nextProfile, { bankKey, enabled }, 'atualizar rotina bancária da empresa');
+  };
+
   const handleToggleRoutineReport = async (fileType: string, enabled: boolean) => {
-    const reqTenantId = tenantId;
-    if (!reqTenantId) return;
     const nextProfile = toggleRoutineReportExpected(routineProfile, fileType, enabled) as CompanyCashRoutineProfile;
-    setLocalRoutineOverride(nextProfile);
-    try {
-      const savedRes = await saveCompanyCashRoutine(reqTenantId, nextProfile);
-      if (activeTenantRef.current !== reqTenantId) return;
-      if (savedRes.rule) {
-        setRules((prev) => [savedRes.rule!, ...prev.filter((r) => r.id !== savedRes.rule!.id)]);
-      }
-      notifyToast('Rotina da empresa atualizada!', 'success');
-    } catch (err: unknown) {
-      if (activeTenantRef.current !== reqTenantId) return;
-      logCashUnexpectedError({
-        action: 'atualizar rotina de relatórios da empresa',
-        err,
-        tenantId: reqTenantId,
-        context: { fileType, enabled }
-      });
-      notifyToast(extractCashErrorMessage(err, 'Erro ao atualizar rotina da empresa.'), 'error');
-    }
+    await persistRoutineProfileChange(nextProfile, { fileType, enabled }, 'atualizar rotina de relatórios da empresa');
+  };
+
+  const handleAddRoutineBank = async (bank: { bankCode: string; bankLabel: string; acctLast4?: string }) => {
+    const bankCode = String(bank.bankCode || '').trim();
+    const bankKey = bankCode ? `banco_${bankCode}` : `banco_${String(bank.bankLabel || 'ofx').toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
+    const nextProfile = toggleRoutineBankExpected(routineProfile, bankKey, true, {
+      bankCode,
+      bankLabel: bank.bankLabel,
+      acctLast4: bank.acctLast4 || ''
+    }) as CompanyCashRoutineProfile;
+    await persistRoutineProfileChange(
+      nextProfile,
+      { bankKey, acctLast4: bank.acctLast4 || '' },
+      'salvar banco esperado na rotina da empresa',
+      `${bank.bankLabel} salvo na rotina esperada da empresa!`
+    );
   };
 
   const handleConfirmDeleteSession = async (sessionId: string) => {
@@ -2025,26 +2033,32 @@ export default function CashReconciliationPage() {
             onDeleteSession={(session) => setDeleteTargetSession(session)}
             onToggleRoutineBank={(bankKey, enabled) => void handleToggleRoutineBank(bankKey, enabled)}
             onToggleRoutineReport={(fileType, enabled) => void handleToggleRoutineReport(fileType, enabled)}
+            onAddRoutineBank={(bank) => void handleAddRoutineBank(bank)}
           />
         ) : (
           <>
             {/* Área de Upload */}
-            <CashUploadDropzone
-              files={files}
-              isProcessing={isProcessingFiles}
-              savedPasswordsCount={savedFilePasswords.length}
-              reportCompleteness={reportCompleteness}
-              routineProfile={routineProfile}
-              onAddFiles={handleAddFiles}
-              onUnlockPasswordFile={handleUnlockPasswordFile}
-              onOpenPasswordModal={(id) => setPasswordModalFileId(id)}
-              onRemoveFile={(id) => {
-                if (passwordModalFileId === id) setPasswordModalFileId(null);
-                handleRemoveFile(id);
-              }}
-              onToggleRoutineBank={(bankKey, enabled) => void handleToggleRoutineBank(bankKey, enabled)}
-              onToggleRoutineReport={(fileType, enabled) => void handleToggleRoutineReport(fileType, enabled)}
-            />
+            <div ref={dropzoneContainerRef}>
+              <CashUploadDropzone
+                files={files}
+                isProcessing={isProcessingFiles}
+                savedPasswordsCount={savedFilePasswords.length}
+                reportCompleteness={reportCompleteness}
+                routineProfile={routineProfile}
+                sourcePeriodStats={reconciliationResult?.periodDiagnostics?.sourcePeriodStats}
+                openChecklistNonce={openChecklistNonce}
+                onAddFiles={handleAddFiles}
+                onUnlockPasswordFile={handleUnlockPasswordFile}
+                onOpenPasswordModal={(id) => setPasswordModalFileId(id)}
+                onRemoveFile={(id) => {
+                  if (passwordModalFileId === id) setPasswordModalFileId(null);
+                  handleRemoveFile(id);
+                }}
+                onToggleRoutineBank={(bankKey, enabled) => void handleToggleRoutineBank(bankKey, enabled)}
+                onToggleRoutineReport={(fileType, enabled) => void handleToggleRoutineReport(fileType, enabled)}
+                onAddRoutineBank={(bank) => void handleAddRoutineBank(bank)}
+              />
+            </div>
 
             {/* Conteúdo Principal vs Empty State */}
             {!reconciliationResult ? (
@@ -2142,6 +2156,10 @@ export default function CashReconciliationPage() {
                         onDeleteSession={(session) => setDeleteTargetSession(session)}
                         onOpenMirrorCategory={(mirrorKey) => setSelectedMirrorKey(mirrorKey)}
                         onOpenGeneralDiff={(tab) => setGeneralDiffTab(tab || 'tabela')}
+                        onOpenChecklist={() => {
+                          setOpenChecklistNonce((n) => n + 1);
+                          dropzoneContainerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        }}
                       />
 
                       <CashReconciliationWorkbench

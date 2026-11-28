@@ -35,6 +35,7 @@ import { formatDateBr } from '../../utils/cashReconciliationServiceHelper.mjs';
 import { normalizeBrazilWhatsappNumber } from '../../utils/cashReportExportHelper.mjs';
 import { DATADIVAS_REPORT_SPECS, BANK_REPORT_SPECS } from '../../utils/cashReportCompleteness.mjs';
 import { CashHealthHistoryCard, HistoricalStatsData } from './CashHealthDashboard';
+import { CashAddRoutineBankBar } from './CashAddRoutineBankBar';
 
 type DashboardFilterKey = 'all' | 'closed' | 'draft' | 'diff';
 
@@ -64,6 +65,7 @@ export interface CashDashboardOverviewProps {
   onDeleteSession: (session: CashSessionRow) => void;
   onToggleRoutineBank?: (bankKey: string, enabled: boolean) => void;
   onToggleRoutineReport?: (fileType: string, enabled: boolean) => void;
+  onAddRoutineBank?: (bank: { bankCode: string; bankLabel: string; acctLast4?: string }) => void;
 }
 
 function formatCreatedTimeHm(rawTimestamp?: string | null): string {
@@ -140,7 +142,8 @@ export function CashDashboardOverview({
   onExportPdf,
   onDeleteSession,
   onToggleRoutineBank,
-  onToggleRoutineReport
+  onToggleRoutineReport,
+  onAddRoutineBank
 }: CashDashboardOverviewProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<DashboardFilterKey>('all');
@@ -239,6 +242,10 @@ export function CashDashboardOverview({
   const netBalanceCents = historicalStats.totalSurplusCents - historicalStats.totalShortageCents;
   const formattedNetBalance = `${netBalanceCents > 0 ? '+' : netBalanceCents < 0 ? '-' : ''}${formatCents(Math.abs(netBalanceCents))}`;
   const activeBanksCount = learnedBanks.filter((b) => b.enabled !== false).length;
+  const activeAcquirers = routineReports.filter(
+    (r) => (r.fileType === 'adquirente_rede' || r.fileType === 'adquirente_c6pay') && r.enabled
+  );
+  const totalActiveBankAndAcquirerCount = activeBanksCount + activeAcquirers.length;
 
   return (
     <div className="space-y-5 min-w-0 max-w-full overflow-x-hidden">
@@ -410,32 +417,43 @@ export function CashDashboardOverview({
               Bancos & Rotina Aprendida
             </span>
             <span className="px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 text-[10px] font-black whitespace-nowrap">
-              {activeBanksCount} ativo(s)
+              {totalActiveBankAndAcquirerCount} ativo(s)
             </span>
           </div>
 
           <div className="flex flex-wrap items-center gap-1.5 min-h-[26px]">
-            {learnedBanks.length === 0 ? (
+            {learnedBanks.length === 0 && activeAcquirers.length === 0 ? (
               <span className="text-[11px] text-slate-500 dark:text-[#8696a0]">
                 Bancos serão aprendidos ao importar OFX.
               </span>
             ) : (
-              learnedBanks.slice(0, 4).map((bank) => {
-                const enabled = bank.enabled !== false;
-                return (
+              <>
+                {learnedBanks.slice(0, 3).map((bank) => {
+                  const enabled = bank.enabled !== false;
+                  return (
+                    <span
+                      key={bank.bankKey}
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg border text-[10.5px] font-bold ${
+                        enabled
+                          ? 'bg-[#00a884]/10 border-[#00a884]/30 text-[#008f6f] dark:text-[#00a884]'
+                          : 'bg-slate-100 dark:bg-[#111b21] border-slate-200 dark:border-[#2a3942] text-slate-500 dark:text-[#8696a0] line-through'
+                      }`}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full ${enabled ? 'bg-[#00a884]' : 'bg-slate-400'}`} />
+                      {bank.bankLabel}
+                    </span>
+                  );
+                })}
+                {activeAcquirers.map((acq) => (
                   <span
-                    key={bank.bankKey}
-                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg border text-[10.5px] font-bold ${
-                      enabled
-                        ? 'bg-[#00a884]/10 border-[#00a884]/30 text-[#008f6f] dark:text-[#00a884]'
-                        : 'bg-slate-100 dark:bg-[#111b21] border-slate-200 dark:border-[#2a3942] text-slate-500 dark:text-[#8696a0] line-through'
-                    }`}
+                    key={acq.fileType}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg border bg-indigo-500/10 border-indigo-500/30 text-indigo-700 dark:text-indigo-300 text-[10.5px] font-bold"
                   >
-                    <span className={`w-1.5 h-1.5 rounded-full ${enabled ? 'bg-[#00a884]' : 'bg-slate-400'}`} />
-                    {bank.bankLabel}
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                    {acq.label}
                   </span>
-                );
-              })
+                ))}
+              </>
             )}
           </div>
 
@@ -537,6 +555,14 @@ export function CashDashboardOverview({
                       </div>
                     );
                   })}
+                </div>
+              )}
+              {onAddRoutineBank && (
+                <div className="rounded-xl border border-slate-200/70 dark:border-[#2a3942] bg-slate-50/70 dark:bg-[#111b21]/60 p-2.5 space-y-1">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-[#8696a0]">
+                    Adicionar / Fixar Banco OFX na Rotina
+                  </p>
+                  <CashAddRoutineBankBar onAddRoutineBank={onAddRoutineBank} />
                 </div>
               )}
             </div>

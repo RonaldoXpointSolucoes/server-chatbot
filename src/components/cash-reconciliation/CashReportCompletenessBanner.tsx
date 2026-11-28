@@ -12,10 +12,12 @@ import {
 } from 'lucide-react';
 import {
   CashReportCompleteness,
+  CashSourcePeriodStat,
   CompanyCashRoutineProfile,
   LearnedBankRoutineEntry
 } from '../../types/cashReconciliation';
 import { DATADIVAS_REPORT_SPECS, BANK_REPORT_SPECS } from '../../utils/cashReportCompleteness.mjs';
+import { CashAddRoutineBankBar } from './CashAddRoutineBankBar';
 
 interface ReportSpecCatalogEntry {
   fileType: string;
@@ -27,15 +29,19 @@ interface ReportSpecCatalogEntry {
 interface CashReportCompletenessBannerProps {
   completeness?: CashReportCompleteness | null;
   routineProfile?: CompanyCashRoutineProfile | null;
+  sourcePeriodStats?: CashSourcePeriodStat[];
   onToggleRoutineBank?: (bankKey: string, enabled: boolean) => void;
   onToggleRoutineReport?: (fileType: string, enabled: boolean) => void;
+  onAddRoutineBank?: (bank: { bankCode: string; bankLabel: string; acctLast4?: string }) => void;
 }
 
 export function CashReportCompletenessBanner({
   completeness,
   routineProfile = null,
+  sourcePeriodStats = [],
   onToggleRoutineBank,
-  onToggleRoutineReport
+  onToggleRoutineReport,
+  onAddRoutineBank
 }: CashReportCompletenessBannerProps) {
   const [expanded, setExpanded] = useState(false);
 
@@ -319,21 +325,34 @@ export function CashReportCompletenessBanner({
                 const canToggleBank = Boolean(isLearned && item.bankKey && onToggleRoutineBank);
                 const canToggleAcquirer = Boolean(!item.isLearnedBank && item.fileType !== 'extrato_ofx' && onToggleRoutineReport);
                 const isBankEnabled = item.enabled !== false;
+                const zeroStatsForType = item.present
+                  ? (sourcePeriodStats || []).filter((st) => {
+                      const matchesType = item.acceptedTypes?.length
+                        ? item.acceptedTypes.includes(st.fileType)
+                        : st.fileType === item.fileType;
+                      return matchesType && (st.keptRows === 0 || Number(st.keptAmountCents || 0) <= 0);
+                    })
+                  : [];
+                const hasZeroValueIssue = zeroStatsForType.length > 0;
 
                 return (
                   <div
                     key={item.bankKey ? `${item.fileType}_${item.bankKey}` : item.fileType}
                     title={item.hint}
                     className={`rounded-xl border px-2.5 py-2 flex items-start justify-between gap-2 ${
-                      item.present
-                        ? 'bg-white/90 dark:bg-[#111b21] border-emerald-500/30'
-                        : isLearned
-                          ? 'bg-[#00a884]/5 dark:bg-[#202c33]/90 border-amber-500/40'
-                          : 'bg-amber-500/5 dark:bg-[#202c33]/80 border-amber-500/30'
+                      hasZeroValueIssue
+                        ? 'bg-rose-500/5 dark:bg-[#202c33]/90 border-rose-500/40'
+                        : item.present
+                          ? 'bg-white/90 dark:bg-[#111b21] border-emerald-500/30'
+                          : isLearned
+                            ? 'bg-[#00a884]/5 dark:bg-[#202c33]/90 border-amber-500/40'
+                            : 'bg-amber-500/5 dark:bg-[#202c33]/80 border-amber-500/30'
                     }`}
                   >
                     <div className="flex items-start gap-2 min-w-0">
-                      {item.present ? (
+                      {hasZeroValueIssue ? (
+                        <AlertTriangle size={13} className="text-rose-500 shrink-0 mt-0.5" />
+                      ) : item.present ? (
                         <CheckCircle2 size={13} className="text-emerald-500 shrink-0 mt-0.5" />
                       ) : (
                         <AlertTriangle size={13} className="text-amber-500 shrink-0 mt-0.5" />
@@ -341,6 +360,11 @@ export function CashReportCompletenessBanner({
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-1.5">
                           <p className="text-[11px] font-bold text-slate-800 dark:text-[#e9edef] truncate">{item.label}</p>
+                          {hasZeroValueIssue && (
+                            <span className="px-1.5 py-0.5 rounded-full bg-rose-500/15 text-rose-600 dark:text-rose-300 text-[9.5px] font-black">
+                              Sem valores na data
+                            </span>
+                          )}
                           {isLearned && (
                             <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-[#00a884]/15 text-[#008f6f] dark:text-[#00a884] text-[9.5px] font-black">
                               <Sparkles size={9} />
@@ -388,6 +412,15 @@ export function CashReportCompletenessBanner({
                 );
               })}
             </div>
+
+            {onAddRoutineBank && (
+              <div className="rounded-xl border border-slate-200/70 dark:border-[#2a3942] bg-white/75 dark:bg-[#111b21]/60 p-2.5 space-y-1">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-[#8696a0]">
+                  Cadastrar / Fixar Banco OFX na Rotina desta Empresa
+                </p>
+                <CashAddRoutineBankBar onAddRoutineBank={onAddRoutineBank} />
+              </div>
+            )}
 
             {(dismissedLearnedBanks.length > 0 || dismissedBankReports.length > 0) && (
               <div className="rounded-xl border border-slate-200/70 dark:border-[#2a3942] bg-white/60 dark:bg-[#111b21]/50 p-2 space-y-1.5">

@@ -34,6 +34,20 @@ function normalizeIsoDate(raw) {
   return '';
 }
 
+export function isSpuriousAcquirerBankEntry(bankKey = '', bankLabel = '') {
+  const hay = `${bankKey || ''} ${bankLabel || ''}`
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[_./\\-]+/g, ' ');
+  return (
+    /\bC6\s*PAY\b/.test(hay) ||
+    /\bC6PAY\b/.test(hay) ||
+    /\bRELATORIO\s+VENDAS\s+C6/.test(hay) ||
+    /\bREDE\s+REL\b/.test(hay)
+  );
+}
+
 export function normalizeRoutineProfile(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     return createEmptyRoutineProfile();
@@ -44,11 +58,13 @@ export function normalizeRoutineProfile(raw) {
     if (!entry || typeof entry !== 'object') continue;
     const bankKey = String(entry.bankKey || key || '').trim();
     if (!bankKey) continue;
+    const bankLabel = String(entry.bankLabel || bankKey).trim();
+    if (isSpuriousAcquirerBankEntry(bankKey, bankLabel)) continue;
     const count = Number(entry.seenCount);
     banks[bankKey] = {
       bankKey,
       bankCode: String(entry.bankCode || '').trim(),
-      bankLabel: String(entry.bankLabel || bankKey).trim(),
+      bankLabel,
       acctLast4: String(entry.acctLast4 || '').trim(),
       seenCount: Number.isFinite(count) && count >= 0 ? Math.round(count) : 0,
       lastSeenDate: normalizeIsoDate(entry.lastSeenDate),
@@ -95,6 +111,13 @@ export function extractBankMetaFromParsedFile(rawItem) {
   const rawAcctLast4 = String(sum.acctLast4 || row0.acctLast4 || '').trim();
   const rawAcctId = String(sum.acctId || row0.acctId || rawAcctLast4).trim();
   const rawFileName = String(file.fileName || rawItem?.fileName || '').trim();
+
+  if (
+    isSpuriousAcquirerBankEntry(explicitKey, rawLabel) ||
+    isSpuriousAcquirerBankEntry(rawFileName, rawLabel)
+  ) {
+    return null;
+  }
 
   const identified = identifyBankInstitution({
     bankName: rawLabel,

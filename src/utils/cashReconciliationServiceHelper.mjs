@@ -1,7 +1,64 @@
 /**
  * Helpers puros de serialização, validação e agregação histórica para Conferência de Caixa.
  */
-import { parseMoneyToCents } from './cashFileParsers.mjs';
+import { addDaysIso, parseMoneyToCents } from './cashFileParsers.mjs';
+
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function compactParsedFileForClosingPeriod(file, referenceDate, periodDiag) {
+  const baseRows = Array.isArray(file?.rows) ? file.rows : [];
+  const targetStart = ISO_DATE_RE.test(String(periodDiag?.targetStartDate || ''))
+    ? periodDiag.targetStartDate
+    : (ISO_DATE_RE.test(String(referenceDate || '')) ? referenceDate : '');
+  const targetEnd = ISO_DATE_RE.test(String(periodDiag?.targetEndDate || ''))
+    ? periodDiag.targetEndDate
+    : targetStart;
+
+  if (!targetStart || baseRows.length === 0) {
+    return {
+      fileName: file.fileName,
+      fileType: file.fileType,
+      status: file.status,
+      periodStart: file.periodStart || '',
+      periodEnd: file.periodEnd || '',
+      warnings: file.warnings || [],
+      rows: baseRows,
+      summary: file.summary || {}
+    };
+  }
+
+  const nextDayAfterEnd = addDaysIso(targetEnd, 1);
+  let hasDatedRows = false;
+  let hasOutOfRange = false;
+  for (const r of baseRows) {
+    const dt = String(r?.dateStr || '');
+    if (!ISO_DATE_RE.test(dt)) continue;
+    hasDatedRows = true;
+    if (dt < targetStart || dt > nextDayAfterEnd) {
+      hasOutOfRange = true;
+      break;
+    }
+  }
+
+  const normalizedRows = hasDatedRows && hasOutOfRange
+    ? baseRows.filter((r) => {
+        const dt = String(r?.dateStr || '');
+        if (!ISO_DATE_RE.test(dt)) return true;
+        return dt >= targetStart && dt <= nextDayAfterEnd;
+      })
+    : baseRows;
+
+  return {
+    fileName: file.fileName,
+    fileType: file.fileType,
+    status: file.status,
+    periodStart: hasDatedRows && hasOutOfRange ? targetStart : (file.periodStart || ''),
+    periodEnd: hasDatedRows && hasOutOfRange ? targetEnd : (file.periodEnd || ''),
+    warnings: file.warnings || [],
+    rows: normalizedRows,
+    summary: file.summary || {}
+  };
+}
 
 export const SESSION_LIST_COLUMNS = [
   'id',
@@ -61,19 +118,10 @@ export function buildSessionPersistencePayload({
   const cleanTenantId = String(tenantId).trim();
   const nowIso = new Date().toISOString();
 
-  // Guarda snapshot compacto dos arquivos parseados para permitir reabrir e ajustar uma conferência salva
+  // Guarda snapshot compacto dos arquivos parseados normalizado para a competência do fechamento
   const parsedFilesSnapshot = (parsedFiles || [])
     .filter(f => f && f.status === 'ok')
-    .map(f => ({
-      fileName: f.fileName,
-      fileType: f.fileType,
-      status: f.status,
-      periodStart: f.periodStart || '',
-      periodEnd: f.periodEnd || '',
-      warnings: f.warnings || [],
-      rows: f.rows || [],
-      summary: f.summary || {}
-    }));
+    .map(f => compactParsedFileForClosingPeriod(f, result?.referenceDate, result?.periodDiagnostics));
 
   const sessionPayload = {
     tenant_id: cleanTenantId,
@@ -107,18 +155,25 @@ export function buildSessionPersistencePayload({
     closed_at: markClosed ? (preservedClosedAt || nowIso) : null
   };
 
-  const filePayloads = (parsedFiles || []).map(f => ({
-    tenant_id: cleanTenantId,
-    file_name: f.fileName || 'arquivo',
-    file_type: f.fileType || 'unknown',
-    file_size_bytes: Number(f.fileSizeBytes || 0),
-    period_start: f.periodStart || '',
-    period_end: f.periodEnd || '',
-    row_count: Array.isArray(f.rows) ? f.rows.length : 0,
-    parse_status: f.status === 'ok' ? (f.warnings?.length ? 'warning' : 'ok') : 'error',
-    parse_warnings: f.warnings || [],
-    raw_summary: f.summary || {}
-  }));
+  const filePayloads = (parsedFiles || []).map((f, idx) => {
+    const snap = f?.status === 'ok'
+      ? compactParsedFileForClosingPeriod(f, result?.referenceDate, result?.periodDiagnostics)
+      : null;
+    const rowsForCount = snap ? snap.rows : f.rows;
+    return {
+      tenant_id: cleanTenantId,
+      file_name: f.fileName || 'arquivo',
+      file_type: f.fileType || 'unknown',
+      file_size_bytes: Number(f.fileSizeBytes || 0),
+      period_start: (snap?.periodStart || f.periodStart || ''),
+      period_end: (snap?.periodEnd || f.periodEnd || ''),
+      row_count: Array.isArray(rowsForCount) ? rowsForCount.length : 0,
+      parse_status: f.status === 'ok' ? (f.warnings?.length ? 'warning' : 'ok') : 'error',
+      parse_warnings: f.warnings || [],
+      raw_summary: f.summary || {},
+      _idx: idx
+    };
+  }).map(({ _idx, ...rest }) => rest);
 
   const itemPayloads = [];
   const pushItem = (item, matchStatus, groupId = null, reason = null) => {

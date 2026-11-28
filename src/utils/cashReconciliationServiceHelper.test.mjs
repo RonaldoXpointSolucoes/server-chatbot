@@ -69,6 +69,42 @@ test('buildSessionPersistencePayload requires tenantId and produces clean Supaba
   assert.equal(bundle.filePayloads.length, 1);
   assert.equal(bundle.itemPayloads.length, 3);
   assert.ok(bundle.itemPayloads.every(it => it.tenant_id === 'tenant-abc'));
+
+  // Snapshot persistido deve normalizar arquivos multi-dias mantendo somente linhas da competência do caixa
+  const multiDayBundle = buildSessionPersistencePayload({
+    tenantId: 'tenant-abc',
+    parsedFiles: [
+      {
+        fileName: 'Extrato_01_a_10.ofx',
+        fileType: 'extrato_ofx',
+        status: 'ok',
+        periodStart: '2026-11-01',
+        periodEnd: '2026-11-10',
+        warnings: [],
+        rows: [
+          { dateStr: '2026-11-01', amountCents: 1000 },
+          { dateStr: '2026-11-05', amountCents: 2500 },
+          { dateStr: '2026-11-06', amountCents: 500 },
+          { dateStr: '2026-11-10', amountCents: 9900 }
+        ],
+        summary: { totalRows: 4 }
+      }
+    ],
+    result: {
+      referenceDate: '2026-11-05',
+      periodDiagnostics: { targetStartDate: '2026-11-05', targetEndDate: '2026-11-05', hasSystemPeriodAnchor: true },
+      mirrorRows: [],
+      matchedPairs: [],
+      suggestions: [],
+      missingInBank: [],
+      extraInBank: []
+    },
+    manualInputs: {}
+  });
+  const snapFile = multiDayBundle.sessionPayload.reconciled_summary.parsedFilesSnapshot[0];
+  assert.equal(snapFile.rows.length, 2, 'Snapshot deve preservar apenas linhas do dia de referência (05/11) e virada D+1 (06/11)');
+  assert.deepEqual(snapFile.rows.map(r => r.dateStr), ['2026-11-05', '2026-11-06']);
+  assert.equal(multiDayBundle.filePayloads[0].row_count, 2);
 });
 
 test('computeHistoricalHealthStats aggregates balanced rate, shortage/surplus totals and chronological chart series', () => {

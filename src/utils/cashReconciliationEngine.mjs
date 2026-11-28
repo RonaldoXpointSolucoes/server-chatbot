@@ -503,6 +503,8 @@ function extractSystemFileIsoRange(file, referenceYear = '') {
 
 function sanitizeSystemFilesForTargetPeriod({
   periodSpec,
+  rolloverWindowSec = Math.round(5.5 * 3600),
+  pdvFile,
   relConfFile,
   txtFile,
   summaryTxtFile,
@@ -512,6 +514,7 @@ function sanitizeSystemFilesForTargetPeriod({
 }) {
   if (!periodSpec?.hasSystemPeriodAnchor || !isIsoDateStr(periodSpec.targetStartDate)) {
     return {
+      pdvFile,
       relConfFile,
       txtFile,
       summaryTxtFile,
@@ -523,16 +526,22 @@ function sanitizeSystemFilesForTargetPeriod({
   }
   const targetStart = periodSpec.targetStartDate;
   const targetEnd = isIsoDateStr(periodSpec.targetEndDate) ? periodSpec.targetEndDate : targetStart;
+  const nextDayAfterEnd = periodSpec.nextDayAfterEnd || addDaysIso(targetEnd, 1);
+  const allowMidnightRollover = Boolean(periodSpec.allowMidnightRollover);
   const refYear = targetStart.slice(0, 4);
   const quarantinedSystemFiles = [];
 
-  const checkFile = (file, fallbackType) => {
-    if (!file) return null;
-    const { start, end } = extractSystemFileIsoRange(file, refYear);
-    if (!start) return file;
-    const overlaps = start <= targetEnd && end >= targetStart;
-    if (overlaps) return file;
+  const isRowInTargetPeriod = (row) => {
+    const dt = row?.dateStr;
+    if (!isIsoDateStr(dt)) return false;
+    if (dt >= targetStart && dt <= targetEnd) return true;
+    if (allowMidnightRollover && dt === nextDayAfterEnd && (row?.secondsOfDay || 0) <= rolloverWindowSec) {
+      return true;
+    }
+    return false;
+  };
 
+  const buildQuarantineEntry = (file, fallbackType, start, end) => {
     const sum = file.summary || {};
     const pendingDebtors = Array.isArray(sum.pendingDebtors) ? sum.pendingDebtors : [];
     const debtorsSum = pendingDebtors.reduce((s, d) => s + Number(d?.amountCents || 0), 0);
@@ -542,7 +551,7 @@ function sanitizeSystemFilesForTargetPeriod({
     const sangriaCents = Number(sum.sangriaCents || 0);
     const periodBr = start === end ? formatIsoBr(start) : `${formatIsoBr(start)} a ${formatIsoBr(end)}`;
 
-    quarantinedSystemFiles.push({
+    return {
       fileName: file.fileName || fallbackType,
       fileType: file.fileType || fallbackType,
       periodStart: start,
@@ -551,11 +560,91 @@ function sanitizeSystemFilesForTargetPeriod({
       pendingCents,
       pendingCount: pendingDebtors.length,
       sangriaCents
-    });
+    };
+  };
+
+  const normalizeTabularSystemFile = (file, fallbackType) => {
+    const rows = Array.isArray(file.rows) ? file.rows : [];
+    if (rows.length === 0) return file;
+
+    let datedCount = 0;
+    let needsFiltering = false;
+    for (const r of rows) {
+      if (isIsoDateStr(r?.dateStr)) {
+        datedCount += 1;
+        if (!isRowInTargetPeriod(r)) needsFiltering = true;
+      }
+    }
+    if (datedCount === 0 || !needsFiltering) return file;
+
+    let keptDatedCount = 0;
+    const datedFiltered = [];
+    for (const r of rows) {
+      if (isIsoDateStr(r?.dateStr)) {
+        if (isRowInTargetPeriod(r)) {
+          keptDatedCount += 1;
+          datedFiltered.push(r);
+        }
+      } else if (fallbackType === 'pdv_itens_vendidos' && r?.isAggregateRow) {
+        datedFiltered.push(r);
+      }
+    }
+
+    if (keptDatedCount === 0) {
+      const { start, end } = extractSystemFileIsoRange(file, refYear);
+      quarantinedSystemFiles.push(buildQuarantineEntry(file, fallbackType, start || targetStart, end || targetEnd));
+      return null;
+    }
+
+    const prevSummary = file.summary || {};
+    let nextSummary = { ...prevSummary, totalRows: datedFiltered.length };
+    if (fallbackType === 'pdv_itens_vendidos') {
+      nextSummary = {
+        ...prevSummary,
+        totalRows: datedFiltered.filter((r) => !r.isAggregateRow).length,
+        complementsCents: datedFiltered.filter((r) => r.isAggregateRow).reduce((s, r) => s + Number(r.totalCents || 0), 0),
+        feeRemovalsCount: datedFiltered.filter((r) => Boolean(r.feeRemovalReason || r.feeRemovalDetails)).length
+      };
+    } else if (fallbackType === 'pdv_cancelamentos') {
+      nextSummary = {
+        ...prevSummary,
+        totalRows: datedFiltered.length,
+        totalCancelledCents: datedFiltered.reduce((s, r) => s + Number(r.totalCents || 0), 0)
+      };
+    } else if (fallbackType === 'pdv_descontos') {
+      nextSummary = {
+        ...prevSummary,
+        totalRows: datedFiltered.length,
+        totalDiscountCents: datedFiltered.reduce((s, r) => s + Number(r.discountCents || 0), 0)
+      };
+    }
+
+    return {
+      ...file,
+      periodStart: targetStart,
+      periodEnd: targetEnd,
+      rows: datedFiltered,
+      summary: nextSummary
+    };
+  };
+
+  const checkFile = (file, fallbackType) => {
+    if (!file) return null;
+    if (Array.isArray(file.rows) && file.rows.length > 0 && ['pdv_vendas', 'pdv_itens_vendidos', 'pdv_cancelamentos', 'pdv_descontos'].includes(fallbackType)) {
+      return normalizeTabularSystemFile(file, fallbackType);
+    }
+
+    const { start, end } = extractSystemFileIsoRange(file, refYear);
+    if (!start) return file;
+    const overlaps = start <= targetEnd && end >= targetStart;
+    if (overlaps) return file;
+
+    quarantinedSystemFiles.push(buildQuarantineEntry(file, fallbackType, start, end));
     return null;
   };
 
   return {
+    pdvFile: checkFile(pdvFile, 'pdv_vendas'),
     relConfFile: checkFile(relConfFile, 'rel_conferencia'),
     txtFile: checkFile(txtFile, 'fechamento_txt'),
     summaryTxtFile: checkFile(summaryTxtFile, 'fechamento_resumo_txt'),
@@ -624,18 +713,37 @@ function resolveTargetClosingPeriod({
     }
   }
 
-  const txtSingleAnchor = [summaryTxtFile, txtFile].find(
-    (f) => f && isIsoDateStr(f.periodStart) && (!f.periodEnd || f.periodEnd === f.periodStart || f.periodEnd === addDaysIso(f.periodStart, 1))
-  );
-  if (anchorFile === pdvFile && txtSingleAnchor && isIsoDateStr(pdvFile?.periodEnd)) {
-    const dayAfterPdvStart2 = addDaysIso(pdvFile.periodStart, 2);
-    if (
-      pdvFile.periodEnd > dayAfterPdvStart2 &&
-      txtSingleAnchor.periodStart >= pdvFile.periodStart &&
-      txtSingleAnchor.periodStart <= pdvFile.periodEnd
-    ) {
-      anchorFile = txtSingleAnchor;
+  const pdvRange = extractSystemFileIsoRange(pdvFile);
+  const relConfRange = relConfFile ? extractSystemFileIsoRange(relConfFile, refYearForRel || new Date().getFullYear().toString()) : { start: '', end: '' };
+  const singleDayAnchorCandidates = [summaryTxtFile, txtFile, relConfFile]
+    .map((f) => {
+      if (!f) return null;
+      const r = extractSystemFileIsoRange(f, refYearForRel || String(new Date().getFullYear()));
+      if (!r.start) return null;
+      const isSingle = !r.end || r.end === r.start || r.end === addDaysIso(r.start, 1);
+      return isSingle ? { file: f, start: r.start, end: r.end } : null;
+    })
+    .filter(Boolean);
+
+  if (anchorFile === pdvFile && pdvRange.start && pdvRange.end) {
+    const dayAfterPdvStart = addDaysIso(pdvRange.start, 1);
+    if (pdvRange.end > dayAfterPdvStart) {
+      const matchingSingle = singleDayAnchorCandidates.find(
+        (c) => c.start >= pdvRange.start && c.start <= pdvRange.end
+      );
+      if (matchingSingle) {
+        anchorFile = {
+          ...matchingSingle.file,
+          periodStart: matchingSingle.start,
+          periodEnd: matchingSingle.end
+        };
+      }
     }
+  }
+
+  // Fallback extra se o único âncora de dia único for RelConferencia completo (ex: dd/mm/yyyy)
+  if (!anchorFile && relConfRange.start) {
+    anchorFile = { ...relConfFile, periodStart: relConfRange.start, periodEnd: relConfRange.end };
   }
 
   if (!anchorFile) {
@@ -712,7 +820,14 @@ function resolveTargetClosingPeriod({
   };
 }
 
-function classifyRealIngestionDate(dateStr, secondsOfDay, periodSpec, rolloverWindowSec, sourceKind = '') {
+function classifyRealIngestionDate(
+  dateStr,
+  secondsOfDay,
+  periodSpec,
+  rolloverWindowSec,
+  sourceKind = '',
+  { hasTime = true, fileHasGranularTimes = true } = {}
+) {
   if (!periodSpec.hasSystemPeriodAnchor || !isIsoDateStr(dateStr)) {
     return 'in_period';
   }
@@ -726,10 +841,13 @@ function classifyRealIngestionDate(dateStr, secondsOfDay, periodSpec, rolloverWi
     allowMidnightRollover
   } = periodSpec;
   if (dateStr === targetStartDate) {
-    // OFX e C6 Pay usam relógio 24h: lançamentos de madrugada pré-abertura pertencem ao atraso bancário do caixa anterior
+    // OFX e C6 Pay usam relógio 24h: só isola madrugada pré-abertura quando o registro realmente tem horário intra-dia
+    const hasReliablePreOpeningTime =
+      hasTime && ((secondsOfDay || 0) > 0 || fileHasGranularTimes);
     if (
       (sourceKind === 'ofx' || sourceKind === 'c6pay') &&
       preOpeningCutoffSec > 0 &&
+      hasReliablePreOpeningTime &&
       (secondsOfDay || 0) < preOpeningCutoffSec
     ) {
       return 'out_of_period';
@@ -759,8 +877,12 @@ function createSourcePeriodStat(f, fallbackType) {
     fileType: f?.fileType || fallbackType,
     periodStart: f?.periodStart || '',
     periodEnd: f?.periodEnd || '',
+    isSummaryReport: Boolean(f?.summary?.isSummaryReport),
     totalRows: 0,
     keptRows: 0,
+    keptValidCount: 0,
+    keptAmountCents: 0,
+    keptNonZeroOtherCount: 0,
     ignoredRows: 0,
     ignoredPixCount: 0,
     ignoredPixCents: 0,
@@ -768,6 +890,18 @@ function createSourcePeriodStat(f, fallbackType) {
     ignoredCardCents: 0,
     ignoredOtherCount: 0
   };
+}
+
+function recordKeptFileStatItem(fileStat, amountCents, isValidReceipt = true) {
+  if (!fileStat) return;
+  fileStat.keptRows += 1;
+  const amt = Number(amountCents || 0);
+  if (isValidReceipt && amt > 0) {
+    fileStat.keptValidCount += 1;
+    fileStat.keptAmountCents += amt;
+  } else {
+    fileStat.keptNonZeroOtherCount += 1;
+  }
 }
 
 function recordOutOfPeriodItem(outOfPeriodItems, fileStat, baseItem) {
@@ -794,6 +928,7 @@ function buildPeriodDiagnostics({
   sourcePeriodStats,
   outOfPeriodItems,
   quarantinedSystemFiles = [],
+  reportCompleteness = null,
   ofxFiles,
   redeFiles,
   c6PayFiles,
@@ -809,6 +944,8 @@ function buildPeriodDiagnostics({
   expectedAfterSangriaCents,
   sysSaldoDinheiro,
   sysCartao,
+  sysPix = 0,
+  realCartaoCents = 0,
   cardSysCount,
   sysPendentes,
   overrides
@@ -853,37 +990,48 @@ function buildPeriodDiagnostics({
   const validationWarnings = [];
   const refBr = formatIsoBr(periodSpec.targetStartDate);
 
-  if (outOfPeriodItems.length > 0) {
-    const affectedFiles = sourcePeriodStats.filter((s) => s.ignoredRows > 0);
-    const fileNames = affectedFiles.map((s) => s.fileName).join(', ');
-    const digitalSummaryParts = [];
-    if (outOfPeriodPixCount > 0) {
-      digitalSummaryParts.push(`${outOfPeriodPixCount} PIX (${formatBrlDiagnostic(outOfPeriodPixCents)})`);
-    }
-    if (outOfPeriodCardCount > 0) {
-      digitalSummaryParts.push(`${outOfPeriodCardCount} cartão(ões) (${formatBrlDiagnostic(outOfPeriodCardCents)})`);
-    }
-    if (outOfPeriodOtherCount > 0) {
-      digitalSummaryParts.push(`${outOfPeriodOtherCount} outros/débitos`);
-    }
-    validationWarnings.push({
-      code: 'multi_day_filtered',
-      severity: 'info',
-      title: `Filtro multi-dias ativo para ${refBr}`,
-      message: `${fileNames} continha ${outOfPeriodItems.length} lançamento(s) fora do dia ${refBr} (${digitalSummaryParts.join(' • ')}), que foram isolados automaticamente em "Fora do Período" para não inflar este caixa.`
-    });
-  }
-
+  // Relatórios multi-dias que contêm lançamentos da competência do dia são normalizados silenciosamente;
+  // alertamos quando o arquivo vem vazio, sem NENHUM dado da data ou com R$ 0,00 em recebimentos válidos na data.
   for (const stat of sourcePeriodStats) {
-    if (stat.totalRows > 0 && stat.keptRows === 0 && stat.ignoredRows > 0) {
-      const rangeText = stat.periodStart
-        ? `${formatIsoBr(stat.periodStart)}${stat.periodEnd && stat.periodEnd !== stat.periodStart ? ` a ${formatIsoBr(stat.periodEnd)}` : ''}`
-        : 'outra data';
+    if (stat.totalRows === 0) {
       validationWarnings.push({
         code: 'wrong_day_real_file',
         severity: 'error',
-        title: `Arquivo de outra data (${stat.fileName})`,
-        message: `O arquivo "${stat.fileName}" (${rangeText}) possui ${stat.totalRows} lançamento(s), mas nenhum pertence a ${refBr}. Verifique se você anexou o relatório do dia errado.`
+        title: `Arquivo sem lançamentos (${stat.fileName})`,
+        message: `O arquivo "${stat.fileName}" não trouxe nenhuma linha válida para ${refBr}. Verifique se você exportou o relatório vazio ou da data errada.`
+      });
+    } else if (stat.totalRows > 0 && stat.keptRows === 0 && stat.ignoredRows > 0) {
+      const rangeText = stat.periodStart
+        ? `${formatIsoBr(stat.periodStart)}${stat.periodEnd && stat.periodEnd !== stat.periodStart ? ` a ${formatIsoBr(stat.periodEnd)}` : ''}`
+        : 'outra data';
+      const touchesTargetDate =
+        stat.periodStart &&
+        stat.periodStart <= periodSpec.targetStartDate &&
+        (stat.periodEnd || stat.periodStart) >= periodSpec.targetStartDate;
+      validationWarnings.push({
+        code: 'wrong_day_real_file',
+        severity: 'error',
+        title: `Arquivo sem dados de ${refBr} (${stat.fileName})`,
+        message: touchesTargetDate
+          ? `O arquivo "${stat.fileName}" (${rangeText}) possui ${stat.totalRows} lançamento(s), mas nenhum pertence ao turno operacional de ${refBr} (apenas madrugada pré-abertura ou dias fora da competência).`
+          : `O arquivo "${stat.fileName}" (${rangeText}) possui ${stat.totalRows} lançamento(s), mas nenhum pertence a ${refBr}. Verifique se você anexou o relatório do dia errado.`
+      });
+    } else if (stat.keptRows > 0 && stat.keptAmountCents <= 0) {
+      const isBankStmt = stat.fileType === 'extrato_ofx' || stat.fileType === 'extrato_generico';
+      validationWarnings.push({
+        code: 'zero_value_date_file',
+        severity: 'error',
+        title: `Relatório sem valores válidos em ${refBr} (${stat.fileName})`,
+        message: isBankStmt
+          ? `O extrato "${stat.fileName}" possui ${stat.keptRows} lançamento(s) em ${refBr}, mas soma R$ 0,00 em recebimentos PIX/créditos (apenas débitos ou saídas). Confira se exportou a conta ou o filtro correto.`
+          : `O relatório "${stat.fileName}" possui ${stat.keptRows} linha(s) em ${refBr}, mas somou R$ 0,00 em vendas aprovadas. Verifique se todas foram recusadas/canceladas ou se exportou o arquivo incorreto.`
+      });
+    } else if (stat.isSummaryReport && stat.keptValidCount > 0) {
+      validationWarnings.push({
+        code: 'summary_acquirer_file',
+        severity: 'warning',
+        title: `Modelo Resumido da C6 Pay enviado (${stat.fileName})`,
+        message: `O arquivo "${stat.fileName}" é o relatório Resumido (sem horário venda a venda e NSU), somando ${formatBrlDiagnostic(stat.keptAmountCents)} em ${refBr}. O consolidado foi considerado, mas para dar baixa item a item envie o "Relatorio-Vendas-C6Pay_Detalhado.xlsx".`
       });
     }
   }
@@ -902,10 +1050,38 @@ function buildPeriodDiagnostics({
     }
   }
 
+  const missingBankItems = reportCompleteness?.bank?.missing || [];
+  const missingHabitualAcquirers = missingBankItems.filter(
+    (m) => (m.fileType === 'adquirente_rede' || m.fileType === 'adquirente_c6pay') && m.isHabitual && m.enabled !== false
+  );
+  const bothAcquirersMissingOnCardSales = sysCartao > 0 && redeFiles.length === 0 && c6PayFiles.length === 0;
+  const cardGapCents = Math.max(0, Number(sysCartao || 0) - Number(realCartaoCents || 0));
+
+  for (const item of missingBankItems) {
+    if (item.isLearnedBank && item.enabled !== false) {
+      validationWarnings.push({
+        code: 'missing_routine_report',
+        severity: (sysPix > 0 || ofxFiles.length === 0) ? 'error' : 'warning',
+        title: `Falta extrato salvo na rotina: ${item.bankLabel || item.shortLabel}`,
+        message: `Para esta empresa é esperado enviar "${item.label}" nos fechamentos, mas ele não foi anexado em ${refBr}. Verifique se faltou baixar este extrato ou se enviou outro arquivo.`
+      });
+      continue;
+    }
+    if ((item.fileType === 'adquirente_rede' || item.fileType === 'adquirente_c6pay') && item.isHabitual && item.enabled !== false) {
+      if (bothAcquirersMissingOnCardSales && missingHabitualAcquirers.length >= 2) continue;
+      validationWarnings.push({
+        code: 'missing_routine_report',
+        severity: (sysCartao > 0 && (cardGapCents > 100 || cardSysCount > 0)) ? 'error' : 'warning',
+        title: `Falta maquininha salva na rotina: ${item.shortLabel || item.label}`,
+        message: `A "${item.label}" está salva na rotina da empresa, mas não foi anexada em ${refBr}.${cardGapCents > 100 ? ` Faltam ${formatBrlDiagnostic(cardGapCents)} no canal Cartões (possível relatório esquecido ou enviado incorretamente).` : ''}`
+      });
+    }
+  }
+
   if (sysCartao > 0 && redeFiles.length === 0 && c6PayFiles.length === 0) {
     validationWarnings.push({
       code: 'missing_card_acquirers',
-      severity: 'warning',
+      severity: missingHabitualAcquirers.length > 0 ? 'error' : 'warning',
       title: 'Maquininhas Rede / C6 Pay não importadas',
       message: `O PDV registrou ${cardSysCount} venda(s) em cartão (${formatBrlDiagnostic(sysCartao)}), mas nenhum arquivo da Rede ou C6 Pay foi enviado. Esses ${formatBrlDiagnostic(sysCartao)} ficam como falta até você importar os relatórios das maquininhas.`
     });
@@ -1146,14 +1322,16 @@ export function runCashReconciliation({
   const tol = Number.isFinite(cfg.amountToleranceCents) ? cfg.amountToleranceCents : 1;
   const rawInputs = buildNormalizedInputs(parsedFiles);
   const {
-    pdvFile,
     ofxFiles,
     redeFiles,
     c6PayFiles
   } = rawInputs;
   const nextId = createIdGenerator();
+  const rolloverWindowSec = Number.isFinite(cfg.midnightRolloverSec)
+    ? cfg.midnightRolloverSec
+    : Math.round(5.5 * 3600);
   const periodSpec = resolveTargetClosingPeriod({
-    pdvFile,
+    pdvFile: rawInputs.pdvFile,
     relConfFile: rawInputs.relConfFile,
     txtFile: rawInputs.txtFile,
     summaryTxtFile: rawInputs.summaryTxtFile,
@@ -1165,6 +1343,7 @@ export function runCashReconciliation({
     ofxFiles
   });
   const {
+    pdvFile,
     relConfFile,
     txtFile,
     summaryTxtFile,
@@ -1174,6 +1353,8 @@ export function runCashReconciliation({
     quarantinedSystemFiles
   } = sanitizeSystemFilesForTargetPeriod({
     periodSpec,
+    rolloverWindowSec,
+    pdvFile: rawInputs.pdvFile,
     relConfFile: rawInputs.relConfFile,
     txtFile: rawInputs.txtFile,
     summaryTxtFile: rawInputs.summaryTxtFile,
@@ -1181,9 +1362,6 @@ export function runCashReconciliation({
     cancelledFile: rawInputs.cancelledFile,
     discountsFile: rawInputs.discountsFile
   });
-  const rolloverWindowSec = Number.isFinite(cfg.midnightRolloverSec)
-    ? cfg.midnightRolloverSec
-    : Math.round(5.5 * 3600);
   const lateEveningCutoffSec =
     periodSpec.hasSystemPeriodAnchor && periodSpec.latestSystemSec >= 18 * 3600
       ? Math.max(18 * 3600, periodSpec.latestSystemSec - 5 * 3600)
@@ -1286,6 +1464,7 @@ export function runCashReconciliation({
     const fileSum = f.summary || {};
     const fileStat = createSourcePeriodStat(f, 'extrato_ofx');
     sourcePeriodStats.push(fileStat);
+    const ofxHasGranularTimes = (f.rows || []).some((r) => (r?.secondsOfDay || 0) > 0);
     for (const row of (f.rows || [])) {
       fileStat.totalRows += 1;
       const bankKey = row.bankKey || fileSum.bankKey || '';
@@ -1320,7 +1499,11 @@ export function runCashReconciliation({
           acctLast4
         }
       };
-      const dateClass = classifyRealIngestionDate(row.dateStr, row.secondsOfDay, periodSpec, rolloverWindowSec, 'ofx');
+      const rowHasTime = row.hasTime !== undefined ? Boolean(row.hasTime) : Boolean(row.timeStr);
+      const dateClass = classifyRealIngestionDate(row.dateStr, row.secondsOfDay, periodSpec, rolloverWindowSec, 'ofx', {
+        hasTime: rowHasTime,
+        fileHasGranularTimes: ofxHasGranularTimes
+      });
       if (dateClass === 'out_of_period') {
         recordOutOfPeriodItem(outOfPeriodItems, fileStat, base);
         continue;
@@ -1333,7 +1516,8 @@ export function runCashReconciliation({
         }
         continue;
       }
-      fileStat.keptRows += 1;
+      const isValidOfxReceipt = row.ofxClass === 'pix_cliente' || (Boolean(row.isCredit) && row.amountCents > 0);
+      recordKeptFileStatItem(fileStat, row.amountCents, isValidOfxReceipt);
       if (row.ofxClass === 'pix_cliente') ofxPixItems.push(base);
       else if (row.ofxClass === 'debito_saida') debitAuditItems.push({ ...base, side: 'audit', matchStatus: 'audit_only' });
       else nonPdvItems.push({ ...base, matchStatus: 'ignored_non_pdv' });
@@ -1394,7 +1578,7 @@ export function runCashReconciliation({
         }
         continue;
       }
-      fileStat.keptRows += 1;
+      recordKeptFileStatItem(fileStat, row.amountCents, row.isApproved && row.amountCents > 0);
       if (row.isApproved && row.amountCents > 0) redeApproved.push(item);
       else notAuthorizedItems.push({ ...item, side: 'audit', matchStatus: 'not_authorized' });
     }
@@ -1405,6 +1589,7 @@ export function runCashReconciliation({
   for (const f of c6PayFiles) {
     const fileStat = createSourcePeriodStat(f, 'adquirente_c6pay');
     sourcePeriodStats.push(fileStat);
+    const c6pHasGranularTimes = (f.rows || []).some((r) => (r?.secondsOfDay || 0) > 0);
     const reportSingleDay =
       f.summary?.isSingleDayVirada !== false && f.periodStart && f.periodStart === f.periodEnd
         ? f.periodStart
@@ -1434,7 +1619,11 @@ export function runCashReconciliation({
         operatorName: '',
         metadata: { statusRaw: row.statusRaw, bandeira: row.bandeira, idPdc: row.idPdc, rawDateStr: row.dateStr }
       };
-      const dateClass = classifyRealIngestionDate(effectiveDateStr, row.secondsOfDay, periodSpec, rolloverWindowSec, 'c6pay');
+      const rowHasTime = row.hasTime !== undefined ? Boolean(row.hasTime) : Boolean(row.timeStr);
+      const dateClass = classifyRealIngestionDate(effectiveDateStr, row.secondsOfDay, periodSpec, rolloverWindowSec, 'c6pay', {
+        hasTime: rowHasTime,
+        fileHasGranularTimes: c6pHasGranularTimes
+      });
       if (dateClass === 'out_of_period') {
         if (
           periodSpec.hasSystemPeriodAnchor &&
@@ -1468,12 +1657,18 @@ export function runCashReconciliation({
         }
         continue;
       }
-      fileStat.keptRows += 1;
+      recordKeptFileStatItem(fileStat, row.amountCents, row.isApproved && row.amountCents > 0);
       if (!row.isApproved) {
         notAuthorizedItems.push({ ...item, side: 'audit', matchStatus: 'not_authorized' });
       } else if (row.amountCents > 0) {
-        if (row.category === 'pix') c6PayApprovedPix.push(item);
-        else c6PayApprovedCards.push(item);
+        if (row.category === 'pix') {
+          c6PayApprovedPix.push({
+            ...item,
+            fromSummaryReport: Boolean(f.summary?.isSummaryReport)
+          });
+        } else {
+          c6PayApprovedCards.push(item);
+        }
       }
     }
   }
@@ -1509,7 +1704,19 @@ export function runCashReconciliation({
     });
   }
 
-  const c6PayPostCutoffPix = c6PayApprovedPix.filter(c => !usedC6pDedup.has(c.id));
+  const c6PayPostCutoffPix = [];
+  for (const c of c6PayApprovedPix) {
+    if (usedC6pDedup.has(c.id)) continue;
+    if (c.fromSummaryReport && ofxFiles.length > 0) {
+      deduplicatedItems.push({
+        ...c,
+        matchStatus: 'deduplicated_ofx',
+        matchReason: 'PIX agrupado do C6 Pay Resumido já coberto pelo Extrato OFX'
+      });
+      continue;
+    }
+    c6PayPostCutoffPix.push(c);
+  }
   const realItems = [...ofxPixItems, ...redeApproved, ...c6PayApprovedCards, ...c6PayPostCutoffPix];
 
   // Aplicar reclassificações manuais de forma de pagamento no PDV antes do pareamento automático
@@ -1567,7 +1774,7 @@ export function runCashReconciliation({
       for (const cand of deferredRolloverCandidates) {
         if (!cand.admitted && res.realIds.includes(cand.item.id)) {
           cand.admitted = true;
-          cand.fileStat.keptRows += 1;
+          recordKeptFileStatItem(cand.fileStat, cand.item.amountCents, true);
           realItems.push(cand.item);
         }
       }
@@ -1690,7 +1897,7 @@ export function runCashReconciliation({
       if (bestInPeriod) {
         usedOfxDedup.add(bestInPeriod.id);
         cand.admitted = true;
-        cand.fileStat.keptRows += 1;
+        recordKeptFileStatItem(cand.fileStat, cand.item.amountCents, true);
         bestInPeriod.metadata.linkedC6PayId = cand.item.id;
         bestInPeriod.description = `${bestInPeriod.description} (Confirmado C6 Pay)`;
         deduplicatedItems.push({
@@ -1729,7 +1936,7 @@ export function runCashReconciliation({
       for (const c6Cand of linked) {
         if (c6Cand.admitted) continue;
         c6Cand.admitted = true;
-        c6Cand.fileStat.keptRows += 1;
+        recordKeptFileStatItem(c6Cand.fileStat, c6Cand.item.amountCents, true);
         ofxCand.item.metadata.linkedC6PayId = c6Cand.item.id;
         ofxCand.item.description = `${ofxCand.item.description} (Confirmado C6 Pay)`;
         deduplicatedItems.push({
@@ -1783,7 +1990,7 @@ export function runCashReconciliation({
     for (const match of postCloseExactCandidates) {
       if (usedSys.has(match.sys.id) || match.cand.admitted) continue;
       match.cand.admitted = true;
-      match.cand.fileStat.keptRows += 1;
+      recordKeptFileStatItem(match.cand.fileStat, match.cand.item.amountCents, true);
       realItems.push(match.cand.item);
       admitLinkedC6pForOfx(match.cand);
       usedSys.add(match.sys.id);
@@ -1817,7 +2024,7 @@ export function runCashReconciliation({
       });
       if (hasLateSwapMatch) {
         cand.admitted = true;
-        cand.fileStat.keptRows += 1;
+        recordKeptFileStatItem(cand.fileStat, cand.item.amountCents, true);
         realItems.push(real);
         swapEligiblePostCloseIds.add(real.id);
         admitLinkedC6pForOfx(cand);
@@ -2221,6 +2428,7 @@ export function runCashReconciliation({
     sourcePeriodStats,
     outOfPeriodItems,
     quarantinedSystemFiles,
+    reportCompleteness,
     ofxFiles,
     redeFiles,
     c6PayFiles,
@@ -2236,6 +2444,8 @@ export function runCashReconciliation({
     expectedAfterSangriaCents,
     sysSaldoDinheiro,
     sysCartao,
+    sysPix,
+    realCartaoCents,
     cardSysCount,
     sysPendentes,
     overrides

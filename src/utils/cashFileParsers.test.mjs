@@ -490,7 +490,32 @@ test('parseUploadedCashFile distinguishes true multi-day C6 Pay exports from D+1
   assert.equal(multiC6Res.periodStart, '2026-11-18');
   assert.equal(multiC6Res.periodEnd, '2026-11-20');
   assert.equal(multiC6Res.summary.isSingleDayVirada, false);
-  assert.ok(multiC6Res.warnings.some((w) => /múltiplos dias/i.test(w)));
+  assert.equal(
+    multiC6Res.warnings.some((w) => /múltiplos dias/i.test(w)),
+    false,
+    'Relatórios C6 Pay multi-dias não devem gerar aviso desnecessário no parser'
+  );
+
+  // Relatório Resumido C6Pay sem coluna HORA DA VENDA ou com data+hora juntas
+  const wbResumido = XLSXLib.utils.book_new();
+  const wsResumido = XLSXLib.utils.aoa_to_sheet([
+    ['Data da Venda', 'Modalidade', 'Bandeira', 'Status da Venda', 'Valor da Venda Bruta', 'Valor Líquido da Venda', 'Taxas (R$)'],
+    ['24/11/2026', 'Crédito', 'Visa', 'Aprovada', '85,00', '83,00', '2,00'],
+    ['24/11/2026 21:15:00', 'PIX', 'PIX', 'Aprovada', '45,00', '45,00', '0,00'],
+    ['25/11/2026', 'Débito', 'Elo', 'Aprovada', '30,00', '29,50', '0,50']
+  ]);
+  XLSXLib.utils.book_append_sheet(wbResumido, wsResumido, 'Resumido');
+  const resumidoRes = await parseUploadedCashFile({
+    fileName: 'Relatorio-Vendas-C6Pay_Resumido.xlsx',
+    arrayBuffer: XLSXLib.write(wbResumido, { type: 'array', bookType: 'xlsx' })
+  });
+  assert.equal(resumidoRes.status, 'ok');
+  assert.equal(resumidoRes.fileType, 'adquirente_c6pay');
+  assert.equal(resumidoRes.rows.length, 3);
+  assert.equal(resumidoRes.rows[0].hasTime, false);
+  assert.equal(resumidoRes.rows[1].hasTime, true);
+  assert.equal(resumidoRes.rows[1].timeStr, '21:15:00');
+  assert.equal(resumidoRes.warnings.length, 0);
 
   // OFX com lançamento negativo marcado erroneamente como CREDIT nunca deve entrar como pix_cliente
   const strangeOfx = `<OFX><BANKMSGSRSV1><STMTTRNRS><STMTRS>
@@ -503,4 +528,34 @@ test('parseUploadedCashFile distinguishes true multi-day C6 Pay exports from D+1
   const strangeRes = await parseUploadedCashFile({ fileName: 'strange.ofx', textContent: strangeOfx });
   assert.equal(strangeRes.rows.filter((r) => r.ofxClass === 'pix_cliente').length, 1);
   assert.equal(strangeRes.rows.find((r) => r.amountCents === -4500).ofxClass, 'debito_saida');
+});
+
+test('parseUploadedCashFile lê Relatorio-Vendas-C6Pay_Resumido sem STATUS DA VENDA e ignora linha TOTAL sem zerar vendas aprovadas', async () => {
+  const XLSX = await import('xlsx');
+  const XLSXLib = XLSX.utils ? XLSX : XLSX.default || XLSX;
+  const wb = XLSXLib.utils.book_new();
+  const ws = XLSXLib.utils.aoa_to_sheet([
+    ['Data da Venda', 'Modalidade', 'Bandeira', 'Valor da Venda Bruta', 'Valor Líquido da Venda', 'Taxas (R$)'],
+    ['24/11/2026', 'Crédito', 'Mastercard', '300,59', '291,50', '9,09'],
+    ['24/11/2026', 'Débito', 'Mastercard', '322,50', '318,00', '4,50'],
+    ['24/11/2026', 'Crédito', 'Visa', '126,00', '122,00', '4,00'],
+    ['24/11/2026', 'Débito', 'Visa', '67,10', '66,00', '1,10'],
+    ['24/11/2026', 'Voucher', 'Alelo', '159,00', '152,00', '7,00'],
+    ['24/11/2026', 'PIX', 'PIX', '182,50', '182,50', '0,00'],
+    ['Total', '', '', '1.157,69', '1.132,00', '25,69']
+  ]);
+  XLSXLib.utils.book_append_sheet(wb, ws, 'Resumido');
+
+  const res = await parseUploadedCashFile({
+    fileName: 'Relatorio-Vendas-C6Pay_Resumido.xlsx',
+    arrayBuffer: XLSXLib.write(wb, { type: 'array', bookType: 'xlsx' })
+  });
+
+  assert.equal(res.status, 'ok');
+  assert.equal(res.fileType, 'adquirente_c6pay');
+  assert.equal(res.summary.isSummaryReport, true);
+  assert.equal(res.rows.length, 6, 'Linha Total de rodapé deve ser ignorada');
+  assert.equal(res.rows.filter((r) => r.isApproved).length, 6, 'Sem coluna STATUS, lançamentos positivos devem vir aprovados');
+  const cardSumCents = res.rows.filter((r) => r.category === 'cartao' && r.isApproved).reduce((s, r) => s + r.amountCents, 0);
+  assert.equal(cardSumCents, 97519);
 });

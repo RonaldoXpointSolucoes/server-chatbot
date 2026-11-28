@@ -302,3 +302,23 @@ export function assessCashReportCompleteness(parsedFiles = [], companyProfile = 
     warnings
   };
 }
+
+/**
+ * Resolve se o painel de Alertas de Auditoria deve estar expandido, permitindo
+ * recolher ("Ocultar Detalhes") mesmo quando houver erro crítico ativo.
+ */
+export function resolveAuditWarningsExpandState(hasCriticalError, userOverride = null) {
+  if (typeof userOverride === 'boolean') return userOverride;
+  return Boolean(hasCriticalError);
+}
+
+/**
+ * Preserva o estado escolhido pelo usuário enquanto a assinatura de erros críticos
+ * não mudar; só reseta para automático quando surgem novos erros ou todos somem.
+ */
+export function resolveNextAuditWarningsUserOverride(prevCriticalSig, nextCriticalSig, prevUserOverride = null) {
+  if (String(prevCriticalSig || '') === String(nextCriticalSig || '')) {
+    return prevUserOverride;
+  }
+  return null;
+}

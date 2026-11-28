@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CheckCircle2,
   AlertTriangle,
@@ -19,7 +19,6 @@ import {
   ChevronUp,
   Trash2,
   User,
-  Filter,
   Calendar
 } from 'lucide-react';
 
@@ -29,6 +28,10 @@ import {
   formatCents
 } from '../../types/cashReconciliation';
 import { buildMirrorRowDetails, formatDateBr, formatDateBrShort, formatDateHeaderBadge } from '../../utils/cashReconciliationServiceHelper.mjs';
+import {
+  resolveAuditWarningsExpandState,
+  resolveNextAuditWarningsUserOverride
+} from '../../utils/cashReportCompleteness.mjs';
 import { CashSessionRow } from '../../services/cashReconciliationService';
 import { CashMetricDetailModal, HealthMetricKey } from './CashMetricDetailModal';
 import { GeneralDiffTabKey } from './CashGeneralDiffModal';
@@ -326,6 +329,7 @@ interface CashHealthDashboardProps {
   onDeleteSession?: (session: CashSessionRow) => void;
   onOpenMirrorCategory?: (mirrorKey: string) => void;
   onOpenGeneralDiff?: (tab?: GeneralDiffTabKey) => void;
+  onOpenChecklist?: () => void;
 }
 
 const STATUS_BADGE: Record<string, { label: string; badgeClass: string; barClass: string; icon: React.ReactNode }> = {
@@ -362,10 +366,12 @@ export function CashHealthDashboard({
   onSelectSession,
   onDeleteSession,
   onOpenMirrorCategory,
-  onOpenGeneralDiff
+  onOpenGeneralDiff,
+  onOpenChecklist
 }: CashHealthDashboardProps) {
   const [activeMetricKey, setActiveMetricKey] = useState<HealthMetricKey | null>(null);
-  const [showAllValidationWarnings, setShowAllValidationWarnings] = useState(false);
+  const [validationExpandOverride, setValidationExpandOverride] = useState<boolean | null>(null);
+  const prevCriticalSigRef = useRef<string>('');
   const statusMeta = STATUS_BADGE[result.status] || STATUS_BADGE.attention;
   const getMirror = (key: string): CashMirrorRow =>
     result.mirrorRows?.find((r) => r.key === key) || {
@@ -412,8 +418,25 @@ export function CashHealthDashboard({
   const periodDiag = result.periodDiagnostics;
   const validationWarnings = periodDiag?.validationWarnings || [];
   const hasMissingCardAcquirers = validationWarnings.some((w) => w.code === 'missing_card_acquirers');
-  const hasCriticalValidationError = validationWarnings.some((w) => w.severity === 'error');
-  const isValidationExpanded = showAllValidationWarnings || hasCriticalValidationError;
+  const hasRoutineOrFileIssue = validationWarnings.some((w) =>
+    w.code === 'missing_routine_report' ||
+    w.code === 'wrong_day_real_file' ||
+    w.code === 'zero_value_date_file' ||
+    w.code === 'summary_acquirer_file' ||
+    w.code === 'missing_card_acquirers'
+  );
+  const criticalErrors = validationWarnings.filter((w) => w.severity === 'error');
+  const hasCriticalValidationError = criticalErrors.length > 0;
+  const criticalSig = criticalErrors.map((w) => `${w.code}:${w.title}`).join('|');
+
+  useEffect(() => {
+    setValidationExpandOverride((prev) =>
+      resolveNextAuditWarningsUserOverride(prevCriticalSigRef.current, criticalSig, prev)
+    );
+    prevCriticalSigRef.current = criticalSig;
+  }, [criticalSig]);
+
+  const isValidationExpanded = resolveAuditWarningsExpandState(hasCriticalValidationError, validationExpandOverride);
   const diffCents = Number(result.diffTotalCents || 0);
   const formattedDiff = `${diffCents > 0 ? '+' : diffCents < 0 ? '-' : ''}${formatCents(Math.abs(diffCents))}`;
   const cashDrawerRow = (result.mirrorRows || []).find((r) => r.key === 'saldo_dinheiro');
@@ -435,11 +458,7 @@ export function CashHealthDashboard({
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2 min-w-0 flex-1 flex-wrap">
-              {validationWarnings.some((w) => w.code === 'multi_day_filtered') ? (
-                <Filter size={15} className="shrink-0" />
-              ) : (
-                <AlertTriangle size={15} className="shrink-0" />
-              )}
+              <AlertTriangle size={15} className="shrink-0" />
               <span className="font-black">
                 {validationWarnings.length} alerta(s) de auditoria:
               </span>
@@ -447,14 +466,26 @@ export function CashHealthDashboard({
                 {validationWarnings.map((w) => w.title).join(' • ')}
               </span>
             </div>
-            <button
-              type="button"
-              onClick={() => setShowAllValidationWarnings((v) => !v)}
-              className="px-2.5 py-1 rounded-lg bg-white/80 dark:bg-[#111b21]/80 border border-current/20 text-[11px] font-bold flex items-center gap-1 shrink-0 active:scale-95 transition-all"
-            >
-              <span>{isValidationExpanded ? 'Ocultar Detalhes' : 'Ver Detalhes'}</span>
-              {isValidationExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-            </button>
+            <div className="flex items-center gap-1.5 shrink-0">
+              {hasRoutineOrFileIssue && onOpenChecklist && (
+                <button
+                  type="button"
+                  onClick={onOpenChecklist}
+                  className="px-2.5 py-1 rounded-lg bg-[#00a884]/15 hover:bg-[#00a884]/25 border border-[#00a884]/35 text-[#008f6f] dark:text-[#00a884] text-[11px] font-bold shrink-0 active:scale-95 transition-all"
+                >
+                  Rotina & Checklist
+                </button>
+              )}
+              <button
+                type="button"
+                aria-expanded={isValidationExpanded}
+                onClick={() => setValidationExpandOverride(!isValidationExpanded)}
+                className="px-2.5 py-1 rounded-lg bg-white/80 dark:bg-[#111b21]/80 border border-current/20 text-[11px] font-bold flex items-center gap-1 shrink-0 active:scale-95 transition-all"
+              >
+                <span>{isValidationExpanded ? 'Ocultar Detalhes' : 'Ver Detalhes'}</span>
+                {isValidationExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+              </button>
+            </div>
           </div>
 
           {isValidationExpanded && (
@@ -589,14 +620,6 @@ export function CashHealthDashboard({
                   <span>•</span>
                   <span className="text-cyan-600 dark:text-cyan-400">
                     <strong>{result.deduplicatedItems.length}</strong> PIX C6 Pay deduplicados c/ OFX
-                  </span>
-                </>
-              )}
-              {(periodDiag?.totalOutOfPeriodCount || 0) > 0 && (
-                <>
-                  <span>•</span>
-                  <span className="text-cyan-600 dark:text-cyan-400 font-semibold">
-                    <strong>{periodDiag?.totalOutOfPeriodCount}</strong> fora da data (filtrados)
                   </span>
                 </>
               )}

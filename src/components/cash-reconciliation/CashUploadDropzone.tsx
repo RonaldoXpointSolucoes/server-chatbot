@@ -19,6 +19,7 @@ import {
 import {
   ParsedCashFileResult,
   CashReportCompleteness,
+  CashSourcePeriodStat,
   CompanyCashRoutineProfile,
   formatCents
 } from '../../types/cashReconciliation';
@@ -132,12 +133,15 @@ interface CashUploadDropzoneProps {
   savedPasswordsCount?: number;
   reportCompleteness?: CashReportCompleteness | null;
   routineProfile?: CompanyCashRoutineProfile | null;
+  sourcePeriodStats?: CashSourcePeriodStat[];
+  openChecklistNonce?: number;
   onAddFiles: (fileList: FileList | File[]) => void;
   onUnlockPasswordFile: (fileId: string, password: string, saveFixed?: boolean) => Promise<boolean> | void;
   onOpenPasswordModal?: (fileId: string) => void;
   onRemoveFile: (fileId: string) => void;
   onToggleRoutineBank?: (bankKey: string, enabled: boolean) => void;
   onToggleRoutineReport?: (fileType: string, enabled: boolean) => void;
+  onAddRoutineBank?: (bank: { bankCode: string; bankLabel: string; acctLast4?: string }) => void;
 }
 
 export function CashUploadDropzone({
@@ -146,12 +150,15 @@ export function CashUploadDropzone({
   savedPasswordsCount = 0,
   reportCompleteness = null,
   routineProfile = null,
+  sourcePeriodStats = [],
+  openChecklistNonce = 0,
   onAddFiles,
   onUnlockPasswordFile,
   onOpenPasswordModal,
   onRemoveFile,
   onToggleRoutineBank,
-  onToggleRoutineReport
+  onToggleRoutineReport,
+  onAddRoutineBank
 }: CashUploadDropzoneProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -166,21 +173,17 @@ export function CashUploadDropzone({
     [files]
   );
 
-  const multiDayFilesCount = useMemo(
-    () =>
-      files.filter(
-        (f) =>
-          f.parsed?.status === 'ok' &&
-          Boolean(f.parsed.periodStart && f.parsed.periodEnd && f.parsed.periodStart !== f.parsed.periodEnd)
-      ).length,
-    [files]
-  );
-
   useEffect(() => {
     if (pendingActionCount > 0) {
       setIsFilesMenuOpen(true);
     }
   }, [pendingActionCount]);
+
+  useEffect(() => {
+    if (openChecklistNonce > 0) {
+      setIsFilesMenuOpen(true);
+    }
+  }, [openChecklistNonce]);
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -276,11 +279,6 @@ export function CashUploadDropzone({
                     Checklist {reportCompleteness.totalPresent}/{reportCompleteness.totalExpected} ({reportCompleteness.percent}%)
                   </span>
                 )}
-                {multiDayFilesCount > 0 && (
-                  <span className="px-2 py-0.5 rounded-full bg-cyan-500/15 border border-cyan-500/30 text-[10.5px] font-bold text-cyan-700 dark:text-cyan-300">
-                    {multiDayFilesCount} multi-dias filtrado(s)
-                  </span>
-                )}
                 {pendingActionCount > 0 && (
                   <span className="px-2 py-0.5 rounded-full bg-rose-500/15 border border-rose-500/30 text-[10.5px] font-bold text-rose-700 dark:text-rose-300">
                     {pendingActionCount} requer ação/senha
@@ -324,8 +322,10 @@ export function CashUploadDropzone({
             <CashReportCompletenessBanner
               completeness={reportCompleteness}
               routineProfile={routineProfile}
+              sourcePeriodStats={sourcePeriodStats}
               onToggleRoutineBank={onToggleRoutineBank}
               onToggleRoutineReport={onToggleRoutineReport}
+              onAddRoutineBank={onAddRoutineBank}
             />
           )}
 
@@ -358,14 +358,6 @@ export function CashUploadDropzone({
                         >
                           <KeyRound size={10} />
                           Auto-desbloqueada
-                        </span>
-                      )}
-                      {parsed.status === 'ok' && Boolean(parsed.periodStart && parsed.periodEnd && parsed.periodStart !== parsed.periodEnd) && (
-                        <span
-                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-cyan-500/10 border border-cyan-500/25 text-[10px] font-bold text-cyan-700 dark:text-cyan-300"
-                          title="Arquivo abrange múltiplos dias — somente o período do caixa será contabilizado"
-                        >
-                          Multi-dias (filtrado)
                         </span>
                       )}
                       {isPwd && <Lock size={14} className="text-amber-500 shrink-0" />}

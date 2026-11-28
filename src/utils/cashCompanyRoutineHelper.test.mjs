@@ -5,6 +5,7 @@ import {
   buildCompanyRoutineStorageKey,
   isCompanyRoutineRule,
   createEmptyRoutineProfile,
+  normalizeRoutineProfile,
   parseRoutineProfileFromRules,
   loadRoutineProfileFromStorage,
   saveRoutineProfileToStorage,
@@ -391,4 +392,40 @@ test('mergeRoutineProfiles respeita precedência de enabled pelo updatedAt mais 
   assert.equal(mergedReversed.banks.banco_336.enabled, false);
   assert.equal(mergedReversed.banks.banco_336.seenCount, 4);
   assert.equal(mergedReversed.banks.banco_336.acctLast4, '0726');
+});
+
+test('normalizeRoutineProfile remove entradas espúrias de adquirentes aprendidas por engano como banco (ex.: Relatorio-Vendas-C6Pay_Resumido)', () => {
+  const dirty = {
+    version: 1,
+    updatedAt: '2026-11-26T16:21:14.845Z',
+    banks: {
+      banco_336: { bankKey: 'banco_336', bankCode: '336', bankLabel: 'Banco C6', acctLast4: '0726', seenCount: 5, lastSeenDate: '2026-11-25', enabled: true },
+      banco_relatorio_vendas_c6pay_resumido: {
+        bankKey: 'banco_relatorio_vendas_c6pay_resumido',
+        bankCode: '',
+        bankLabel: 'Relatorio-Vendas-C6Pay_Resumido',
+        acctLast4: '',
+        seenCount: 1,
+        lastSeenDate: '2026-11-24',
+        enabled: true
+      }
+    },
+    reports: {
+      adquirente_c6pay: { fileType: 'adquirente_c6pay', seenCount: 4, lastSeenDate: '2026-11-25', enabled: true },
+      adquirente_rede: { fileType: 'adquirente_rede', seenCount: 5, lastSeenDate: '2026-11-25', enabled: true }
+    }
+  };
+
+  const cleaned = normalizeRoutineProfile(dirty);
+  assert.ok(cleaned.banks.banco_336, 'Banco C6 legítimo deve ser mantido');
+  assert.equal(cleaned.banks.banco_relatorio_vendas_c6pay_resumido, undefined, 'Arquivo C6Pay Resumido não pode permanecer salvo como extrato bancário');
+
+  // Cadastro explícito manual de um banco esperado (ex.: Banco C6 + Itaú) funciona antes de qualquer upload
+  const manualAdded = toggleRoutineBankExpected(createEmptyRoutineProfile(), 'banco_341', true, {
+    bankCode: '341',
+    bankLabel: 'Banco Itaú',
+    acctLast4: '1234'
+  });
+  assert.equal(manualAdded.banks.banco_341.bankLabel, 'Banco Itaú');
+  assert.equal(manualAdded.banks.banco_341.enabled, true);
 });

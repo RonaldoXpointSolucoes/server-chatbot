@@ -324,6 +324,9 @@ export interface CashValidationWarning {
   code:
     | 'multi_day_filtered'
     | 'wrong_day_real_file'
+    | 'zero_value_date_file'
+    | 'summary_acquirer_file'
+    | 'missing_routine_report'
     | 'wrong_day_system_file'
     | 'pending_totals_mismatch'
     | 'cash_drawer_cross_mismatch'
@@ -365,8 +368,12 @@ export interface CashSourcePeriodStat {
   fileType: string;
   periodStart: string;
   periodEnd: string;
+  isSummaryReport?: boolean;
   totalRows: number;
   keptRows: number;
+  keptValidCount?: number;
+  keptAmountCents?: number;
+  keptNonZeroOtherCount?: number;
   ignoredRows: number;
   ignoredPixCount: number;
   ignoredPixCents: number;

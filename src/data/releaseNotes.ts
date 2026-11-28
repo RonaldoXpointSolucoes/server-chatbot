@@ -712,6 +712,63 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.4.8',
+    date: '2026-11-27',
+    summary: 'Conferência de Caixa: Normalização Silenciosa Multi-Dias, Leitura C6 Pay Resumido, Rotina Bancária Salva com Alertas Operacionais e Correção de Ocultar Detalhes',
+    notes: [
+      {
+        id: 'feat-cash-company-routine-bank-alerts-848',
+        category: 'features',
+        title: 'Rotina Salva de Bancos/Maquininhas por Empresa + Alertas de Relatório Ausente ou Zerado na Data',
+        description: 'Agora a Conferência de Caixa permite cadastrar e fixar diretamente os bancos OFX e adquirentes esperados na rotina de cada empresa (ex.: Banco C6 OFX + C6 Pay + Rede), limpa entradas antigas mal classificadas e emite alertas específicos de auditoria quando faltar um relatório habitual no fechamento ou quando o arquivo vier sem valores válidos na data (R$ 0,00).',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+        guide: {
+          moduleGroup: 'system',
+          moduleLabel: 'Conferência de Caixa • Rotina Bancária & Auditoria de Arquivos',
+          purpose: 'Mapear erros operacionais de fechamento alertando imediatamente quando faltar o envio de um extrato bancário/maquininha habitual da empresa (como um dos arquivos do C6 ou da Rede) ou quando o arquivo anexado não possuir valores válidos para a data do caixa.',
+          whereToAccess: [
+            '1. Menu Lateral Esquerdo ➔ Conferência Caixa (/conferencia-caixa)',
+            '2. Na Visão Executiva (ou dentro do Checklist em "Gerenciar Arquivos & Checklist"), clique em "Gerenciar rotina"',
+            '3. Selecione o banco OFX esperado (ex.: Banco C6 336) e clique em "Salvar Banco na Rotina", além de manter ativas as maquininhas habituais (C6 Pay / Rede)'
+          ],
+          howToTest: [
+            '1. Em /conferencia-caixa, abra "Gerenciar rotina" e verifique se os bancos e maquininhas esperados da empresa estão salvos e ativos.',
+            '2. Inicie uma conferência omitindo propositalmente um dos relatórios salvos (ou enviando um arquivo de outro dia / sem movimento aprovado na data).',
+            '3. Confirme os alertas claros no painel de auditoria apontando exatamente qual relatório faltou ou veio zerado na data, e clique em "Ocultar Detalhes" para recolher o painel livremente.'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Tela: Conferência de Caixa (/conferencia-caixa) ➔ Rotina & Alertas de Auditoria',
+            contextElements: ['🏦 Banco C6 (OFX)', '💳 Maquininha C6 Pay', '💳 Maquininha Rede', '⚠️ Relatório ausente / zerado'],
+            targetButtonLabel: '👆 Clique Aqui: Salvar Banco na Rotina / Rotina & Checklist',
+            targetButtonPosition: 'Painel "Gerenciar rotina" na Visão Executiva ou Checklist de Arquivos na Conferência',
+            visualPreviewVariant: 'hub-account-limits'
+          },
+          quickAction: {
+            label: 'Abrir Conferência de Caixa',
+            route: '/conferencia-caixa'
+          }
+        }
+      },
+      {
+        id: 'imp-cash-silent-multiday-and-c6pay-resumido-848',
+        category: 'improvements',
+        title: 'Normalização Silenciosa Multi-Dias, Otimização de Leitura e Suporte ao C6 Pay Resumido',
+        description: 'Planilhas e extratos com vários dias de movimento agora são normalizados silenciosamente apenas para a competência do dia do caixa sem gerar avisos desnecessários; leitura otimizada para menor uso de memória/banco; e planilhas Relatorio-Vendas-C6Pay_Resumido sem colunas HORA/STATUS passaram a ser reconhecidas e alertadas sem descartar vendas válidas por corte de madrugada.',
+        tag: 'MELHORIA',
+        badgeColor: 'bg-sky-500/20 text-sky-300 border-sky-500/30'
+      },
+      {
+        id: 'fix-cash-hide-audit-details-and-cutoff-848',
+        category: 'fixes',
+        title: 'Correção do Botão "Ocultar Detalhes" e Preservação de Lançamentos Sem Hora (00:00:00)',
+        description: 'Corrigido o bug que impedia recolher os Alertas de Auditoria ao clicar em "Ocultar Detalhes" quando havia alertas críticos ativos, e corrigido o descarte indevido de transações OFX / C6 Pay sem granularidade de horário (00:00:00) no dia do caixa.',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      }
+    ]
+  },
+  {
     version: '8.4.7',
     date: '2026-11-27',
     summary: 'Hotfix Crítico de Produção: Eliminação do Loop Infinito de Requisições no Radar Ao Vivo de Fluxos (Typebot) com Trava de Concorrência e Debounce Realtime',

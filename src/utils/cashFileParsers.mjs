@@ -88,13 +88,21 @@ function formatIsoToBrShortDate(isoDate) {
 }
 
 /**
- * Normaliza datas/horas provenientes de seriais numéricos do Excel ou strings DD/MM/YYYY e YYYY-MM-DD.
+ * Normaliza datas/horas provenientes de seriais numéricos do Excel, objetos Date ou strings DD/MM/YYYY e YYYY-MM-DD.
  */
 export function parseCashDateTime(dateVal, timeVal) {
   let dateStr = '';
   let timeStr = '';
 
-  if (typeof dateVal === 'number' && Number.isFinite(dateVal) && dateVal > 1) {
+  if (dateVal instanceof Date && !Number.isNaN(dateVal.getTime())) {
+    dateStr = `${dateVal.getFullYear()}-${pad2(dateVal.getMonth() + 1)}-${pad2(dateVal.getDate())}`;
+    const hh = dateVal.getHours();
+    const mm = dateVal.getMinutes();
+    const ss = dateVal.getSeconds();
+    if (hh || mm || ss) {
+      timeStr = `${pad2(hh)}:${pad2(mm)}:${pad2(ss)}`;
+    }
+  } else if (typeof dateVal === 'number' && Number.isFinite(dateVal) && dateVal > 1) {
     const d = XLSXLib.SSF.parse_date_code(dateVal);
     if (d && d.y && d.m && d.d) {
       dateStr = `${d.y}-${pad2(d.m)}-${pad2(d.d)}`;
@@ -110,7 +118,9 @@ export function parseCashDateTime(dateVal, timeVal) {
     else if (br) dateStr = `${br[3]}-${br[2]}-${br[1]}`;
   }
 
-  if (typeof timeVal === 'number' && Number.isFinite(timeVal)) {
+  if (timeVal instanceof Date && !Number.isNaN(timeVal.getTime())) {
+    timeStr = `${pad2(timeVal.getHours())}:${pad2(timeVal.getMinutes())}:${pad2(timeVal.getSeconds())}`;
+  } else if (typeof timeVal === 'number' && Number.isFinite(timeVal)) {
     const frac = timeVal - Math.floor(timeVal);
     const totalSec = Math.round(frac * 86400) % 86400;
     const hh = Math.floor(totalSec / 3600);
@@ -125,13 +135,22 @@ export function parseCashDateTime(dateVal, timeVal) {
     }
   }
 
+  // Fallback para timestamps completos na própria coluna de data (ex.: "24/11/2026 21:15:00")
+  if (!timeStr && typeof dateVal === 'string') {
+    const embeddedTime = dateVal.match(/(?:\s|T)(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+    if (embeddedTime) {
+      timeStr = `${pad2(Number(embeddedTime[1]))}:${embeddedTime[2]}:${embeddedTime[3] || '00'}`;
+    }
+  }
+
+  const hasTime = Boolean(timeStr);
   let secondsOfDay = 0;
   if (timeStr) {
     const [hh, mm, ss] = timeStr.split(':').map(Number);
     secondsOfDay = (hh || 0) * 3600 + (mm || 0) * 60 + (ss || 0);
   }
 
-  return { dateStr, timeStr, secondsOfDay };
+  return { dateStr, timeStr, secondsOfDay, hasTime };
 }
 
 function decodeTextBuffer(buffer) {
@@ -214,15 +233,49 @@ function buildColumnMap(headerRow) {
   return map;
 }
 
-function getCell(row, colMap, ...candidates) {
+function findColumnIndex(colMap, ...candidates) {
   for (const cand of candidates) {
     const target = normalizeAsciiUpper(cand);
-    if (colMap.has(target)) return row[colMap.get(target)];
+    if (colMap.has(target)) return colMap.get(target);
     for (const [k, idx] of colMap.entries()) {
-      if (k.includes(target)) return row[idx];
+      if (k.includes(target)) return idx;
     }
   }
-  return undefined;
+  return -1;
+}
+
+/**
+ * Pré-resolve índices numéricos das colunas uma única vez por planilha,
+ * evitando normalização repetida e varreduras no Map em arquivos multi-dias extensos.
+ */
+function resolveColumnIndices(colMap, schema) {
+  const colEntries = Array.from(colMap.entries());
+  const indices = {};
+  for (const [key, candidates] of Object.entries(schema)) {
+    let foundIdx = -1;
+    const candList = Array.isArray(candidates) ? candidates : [candidates];
+    for (const cand of candList) {
+      const target = normalizeAsciiUpper(cand);
+      if (colMap.has(target)) {
+        foundIdx = colMap.get(target);
+        break;
+      }
+      for (const [k, idx] of colEntries) {
+        if (k.includes(target)) {
+          foundIdx = idx;
+          break;
+        }
+      }
+      if (foundIdx !== -1) break;
+    }
+    indices[key] = foundIdx;
+  }
+  return indices;
+}
+
+function getCell(row, colMap, ...candidates) {
+  const idx = findColumnIndex(colMap, ...candidates);
+  return idx !== -1 ? row[idx] : undefined;
 }
 
 function isRowEmpty(row) {
@@ -231,7 +284,21 @@ function isRowEmpty(row) {
 
 function parsePdvVendasMatrix(rawMatrix, fmtMatrix, rulesConfig) {
   const headerIdx = findHeaderRowIndex(rawMatrix, ['VALOR', 'FORMA PAGTO', 'ADMINISTRADORA']);
-  const colMap = buildColumnMap(rawMatrix[headerIdx]);
+  const col = resolveColumnIndices(buildColumnMap(rawMatrix[headerIdx]), {
+    numero: 'NUMERO',
+    modulo: 'MODULO',
+    origem: 'ORIGEM',
+    valor: 'VALOR',
+    recebido: 'RECEBIDO',
+    formaPagto: 'FORMA PAGTO',
+    administradora: 'ADMINISTRADORA',
+    data: 'DATA',
+    hora: 'HORA',
+    operador: 'OPERADOR',
+    nomeMaquina: 'NOME MAQUINA',
+    turno: 'TURNO',
+    descontoCasa: 'DESCONTO CASA'
+  });
   const rows = [];
   let minDate = '';
   let maxDate = '';
@@ -241,19 +308,19 @@ function parsePdvVendasMatrix(rawMatrix, fmtMatrix, rulesConfig) {
     const fmt = fmtMatrix[i] || raw;
     if (isRowEmpty(raw)) continue;
 
-    const numero = String(getCell(fmt, colMap, 'NUMERO') ?? '').trim();
-    const modulo = String(getCell(fmt, colMap, 'MODULO') ?? '').trim();
-    const origem = String(getCell(fmt, colMap, 'ORIGEM') ?? '').trim();
-    const valorRaw = getCell(raw, colMap, 'VALOR');
-    const recebidoRaw = getCell(raw, colMap, 'RECEBIDO');
-    const formaPagto = String(getCell(fmt, colMap, 'FORMA PAGTO') ?? '').trim();
-    const administradora = String(getCell(fmt, colMap, 'ADMINISTRADORA') ?? '').trim();
-    const dataRaw = getCell(raw, colMap, 'DATA');
-    const horaRaw = getCell(raw, colMap, 'HORA');
-    const operador = String(getCell(fmt, colMap, 'OPERADOR') ?? '').trim();
-    const nomeMaquina = String(getCell(fmt, colMap, 'NOME MAQUINA') ?? '').trim();
-    const turno = String(getCell(fmt, colMap, 'TURNO') ?? '1').trim();
-    const descontoCasaCents = parseMoneyToCents(getCell(raw, colMap, 'DESCONTO CASA'));
+    const numero = col.numero !== -1 ? String(fmt[col.numero] ?? '').trim() : '';
+    const modulo = col.modulo !== -1 ? String(fmt[col.modulo] ?? '').trim() : '';
+    const origem = col.origem !== -1 ? String(fmt[col.origem] ?? '').trim() : '';
+    const valorRaw = col.valor !== -1 ? raw[col.valor] : undefined;
+    const recebidoRaw = col.recebido !== -1 ? raw[col.recebido] : undefined;
+    const formaPagto = col.formaPagto !== -1 ? String(fmt[col.formaPagto] ?? '').trim() : '';
+    const administradora = col.administradora !== -1 ? String(fmt[col.administradora] ?? '').trim() : '';
+    const dataRaw = col.data !== -1 ? raw[col.data] : undefined;
+    const horaRaw = col.hora !== -1 ? raw[col.hora] : undefined;
+    const operador = col.operador !== -1 ? String(fmt[col.operador] ?? '').trim() : '';
+    const nomeMaquina = col.nomeMaquina !== -1 ? String(fmt[col.nomeMaquina] ?? '').trim() : '';
+    const turno = col.turno !== -1 ? String(fmt[col.turno] ?? '1').trim() : '1';
+    const descontoCasaCents = parseMoneyToCents(col.descontoCasa !== -1 ? raw[col.descontoCasa] : undefined);
 
     const amountCents = parseMoneyToCents(valorRaw);
     const hasRecebidoValue = recebidoRaw !== undefined && recebidoRaw !== null && String(recebidoRaw).trim() !== '' && String(recebidoRaw).trim() !== '-';
@@ -288,6 +355,7 @@ function parsePdvVendasMatrix(rawMatrix, fmtMatrix, rulesConfig) {
       dateStr: dt.dateStr,
       timeStr: dt.timeStr,
       secondsOfDay: dt.secondsOfDay,
+      hasTime: dt.hasTime,
       operador,
       nomeMaquina,
       turno,
@@ -383,9 +451,20 @@ function parseRelConferenciaMatrix(rawMatrix) {
 
 function parseRedeMatrix(rawMatrix, fmtMatrix) {
   const headerIdx = findHeaderRowIndex(rawMatrix, ['DATA DA VENDA', 'HORA DA VENDA', 'STATUS DA VENDA']);
-  const colMap = buildColumnMap(rawMatrix[headerIdx]);
+  const col = resolveColumnIndices(buildColumnMap(rawMatrix[headerIdx]), {
+    status: 'STATUS DA VENDA',
+    data: 'DATA DA VENDA',
+    hora: 'HORA DA VENDA',
+    modalidade: 'MODALIDADE',
+    valor: ['VALOR DA VENDA ATUALIZADO', 'VALOR DA VENDA ORIGINAL'],
+    taxas: 'VALOR TOTAL DAS TAXAS DESCONTADAS',
+    liquido: 'VALOR LIQUIDO',
+    bandeira: 'BANDEIRA',
+    nsu: 'NSU/CV',
+    transactionId: 'ID TRANSACAO',
+    terminalCode: 'CODIGO DA MAQUININHA'
+  });
   const rows = [];
-  const warnings = [];
   const distinctDates = new Set();
   let minDate = '';
   let maxDate = '';
@@ -395,23 +474,26 @@ function parseRedeMatrix(rawMatrix, fmtMatrix) {
     const fmt = fmtMatrix[i] || raw;
     if (isRowEmpty(raw)) continue;
 
-    const status = String(getCell(fmt, colMap, 'STATUS DA VENDA') ?? '').trim().toLowerCase();
+    const status = col.status !== -1 ? String(fmt[col.status] ?? '').trim().toLowerCase() : '';
     const isApproved = status === 'aprovada' || status === 'pago';
-    const dt = parseCashDateTime(getCell(raw, colMap, 'DATA DA VENDA'), getCell(raw, colMap, 'HORA DA VENDA'));
+    const dt = parseCashDateTime(
+      col.data !== -1 ? raw[col.data] : undefined,
+      col.hora !== -1 ? raw[col.hora] : undefined
+    );
     if (dt.dateStr) {
       distinctDates.add(dt.dateStr);
       if (!minDate || dt.dateStr < minDate) minDate = dt.dateStr;
       if (!maxDate || dt.dateStr > maxDate) maxDate = dt.dateStr;
     }
 
-    const modalidadeRaw = String(getCell(fmt, colMap, 'MODALIDADE') ?? '').trim();
+    const modalidadeRaw = col.modalidade !== -1 ? String(fmt[col.modalidade] ?? '').trim() : '';
     const modUpper = normalizeAsciiUpper(modalidadeRaw);
     const category = modUpper.includes('PIX') ? 'pix' : 'cartao';
     const subType = modUpper.includes('PIX') ? 'pix' : modUpper.includes('DEBIT') ? 'debito' : 'credito';
 
-    const amountCents = parseMoneyToCents(getCell(raw, colMap, 'VALOR DA VENDA ATUALIZADO', 'VALOR DA VENDA ORIGINAL'));
-    const feeCents = Math.abs(parseMoneyToCents(getCell(raw, colMap, 'VALOR TOTAL DAS TAXAS DESCONTADAS')));
-    const netRaw = getCell(raw, colMap, 'VALOR LIQUIDO');
+    const amountCents = parseMoneyToCents(col.valor !== -1 ? raw[col.valor] : undefined);
+    const feeCents = Math.abs(parseMoneyToCents(col.taxas !== -1 ? raw[col.taxas] : undefined));
+    const netRaw = col.liquido !== -1 ? raw[col.liquido] : undefined;
     const netCents = netRaw !== undefined && String(netRaw).trim() !== '-' && String(netRaw).trim() !== ''
       ? parseMoneyToCents(netRaw)
       : amountCents - feeCents;
@@ -423,23 +505,18 @@ function parseRedeMatrix(rawMatrix, fmtMatrix) {
       statusRaw: status,
       category,
       subType,
-      bandeira: String(getCell(fmt, colMap, 'BANDEIRA') ?? '').trim(),
+      bandeira: col.bandeira !== -1 ? String(fmt[col.bandeira] ?? '').trim() : '',
       amountCents,
       feeCents,
       netCents,
-      nsu: String(getCell(fmt, colMap, 'NSU/CV') ?? '').trim(),
-      transactionId: String(getCell(fmt, colMap, 'ID TRANSACAO') ?? '').trim(),
-      terminalCode: String(getCell(fmt, colMap, 'CODIGO DA MAQUININHA') ?? '').trim(),
+      nsu: col.nsu !== -1 ? String(fmt[col.nsu] ?? '').trim() : '',
+      transactionId: col.transactionId !== -1 ? String(fmt[col.transactionId] ?? '').trim() : '',
+      terminalCode: col.terminalCode !== -1 ? String(fmt[col.terminalCode] ?? '').trim() : '',
       dateStr: dt.dateStr,
       timeStr: dt.timeStr,
-      secondsOfDay: dt.secondsOfDay
+      secondsOfDay: dt.secondsOfDay,
+      hasTime: dt.hasTime
     });
-  }
-
-  if (minDate && maxDate && minDate !== maxDate) {
-    warnings.push(
-      `Relatório Rede abrange múltiplos dias (${formatIsoToBrShortDate(minDate)} a ${formatIsoToBrShortDate(maxDate)} — ${distinctDates.size} dia(s)). Somente o dia de referência do caixa será contabilizado.`
-    );
   }
 
   return {
@@ -447,7 +524,7 @@ function parseRedeMatrix(rawMatrix, fmtMatrix) {
     status: 'ok',
     periodStart: minDate,
     periodEnd: maxDate,
-    warnings,
+    warnings: [],
     rows,
     summary: {
       totalRows: rows.length,
@@ -458,10 +535,35 @@ function parseRedeMatrix(rawMatrix, fmtMatrix) {
 }
 
 function parseC6PayMatrix(rawMatrix, fmtMatrix) {
-  const headerIdx = findHeaderRowIndex(rawMatrix, ['DATA DA VENDA', 'HORA DA VENDA', 'VALOR DA VENDA BRUTA']);
-  const colMap = buildColumnMap(rawMatrix[headerIdx]);
+  let headerIdx = findHeaderRowIndex(rawMatrix, ['DATA DA VENDA', 'HORA DA VENDA', 'VALOR DA VENDA BRUTA']);
+  if (headerIdx === -1) {
+    headerIdx = findHeaderRowIndex(rawMatrix, ['DATA DA VENDA', 'VALOR DA VENDA BRUTA', 'MODALIDADE']);
+  }
+  if (headerIdx === -1) {
+    headerIdx = findHeaderRowIndex(rawMatrix, ['DATA DA VENDA', 'VALOR BRUTO', 'MODALIDADE']);
+  }
+  if (headerIdx === -1) {
+    headerIdx = findHeaderRowIndex(rawMatrix, ['DATA DA VENDA', 'VALOR BRUTO', 'BANDEIRA']);
+  }
+  if (headerIdx === -1) {
+    headerIdx = findHeaderRowIndex(rawMatrix, ['DATA', 'MODALIDADE', 'BANDEIRA', 'VALOR BRUTO']);
+  }
+  const col = resolveColumnIndices(buildColumnMap(rawMatrix[headerIdx]), {
+    status: ['STATUS DA VENDA', 'STATUS'],
+    data: ['DATA DA VENDA', 'DATA'],
+    hora: 'HORA DA VENDA',
+    modalidade: ['MODALIDADE', 'TIPO DE VENDA', 'FORMA DE PAGAMENTO'],
+    valorBruto: ['VALOR DA VENDA BRUTA', 'VALOR BRUTO'],
+    taxas: ['TAXAS (R$)', 'TAXA (R$)', 'TAXAS', 'TAXA', 'VALOR DA TAXA'],
+    liquido: ['VALOR LIQUIDO DA VENDA', 'VALOR LIQUIDO'],
+    bandeira: 'BANDEIRA',
+    nsu: 'NSU',
+    idPdc: 'ID PDC',
+    terminalCode: ['N SERIE MAQUININHA', 'Nº SERIE MAQUININHA', 'ID PDC']
+  });
+  const hasStatusCol = col.status !== -1;
+  const isSummaryReport = col.hora === -1 && col.nsu === -1;
   const rows = [];
-  const warnings = [];
   const dateCounts = new Map();
   let minDate = '';
   let maxDate = '';
@@ -471,26 +573,65 @@ function parseC6PayMatrix(rawMatrix, fmtMatrix) {
     const fmt = fmtMatrix[i] || raw;
     if (isRowEmpty(raw)) continue;
 
-    const status = String(getCell(fmt, colMap, 'STATUS DA VENDA') ?? '').trim();
-    const isApproved = normalizeAsciiUpper(status) === 'APROVADA';
-    const dt = parseCashDateTime(getCell(raw, colMap, 'DATA DA VENDA'), getCell(raw, colMap, 'HORA DA VENDA'));
+    const dateCellUpper = col.data !== -1 ? normalizeAsciiUpper(fmt[col.data] ?? '') : '';
+    const modCellUpper = col.modalidade !== -1 ? normalizeAsciiUpper(fmt[col.modalidade] ?? '') : '';
+    const bandCellUpper = col.bandeira !== -1 ? normalizeAsciiUpper(fmt[col.bandeira] ?? '') : '';
+    if (
+      dateCellUpper.startsWith('TOTAL') ||
+      dateCellUpper.startsWith('SUBTOTAL') ||
+      modCellUpper.startsWith('TOTAL') ||
+      bandCellUpper.startsWith('TOTAL')
+    ) {
+      continue;
+    }
+
+    const status = hasStatusCol ? String(fmt[col.status] ?? '').trim() : '';
+    const statusUpper = normalizeAsciiUpper(status);
+    if (statusUpper.startsWith('TOTAL')) continue;
+
+    const dt = parseCashDateTime(
+      col.data !== -1 ? raw[col.data] : undefined,
+      col.hora !== -1 ? raw[col.hora] : undefined
+    );
     if (dt.dateStr) {
       dateCounts.set(dt.dateStr, (dateCounts.get(dt.dateStr) || 0) + 1);
       if (!minDate || dt.dateStr < minDate) minDate = dt.dateStr;
       if (!maxDate || dt.dateStr > maxDate) maxDate = dt.dateStr;
     }
 
-    const modalidadeRaw = String(getCell(fmt, colMap, 'MODALIDADE') ?? '').trim();
+    const modalidadeRaw = col.modalidade !== -1 ? String(fmt[col.modalidade] ?? '').trim() : '';
     const modUpper = normalizeAsciiUpper(modalidadeRaw);
     const category = modUpper.includes('PIX') ? 'pix' : 'cartao';
     const subType = modUpper.includes('PIX') ? 'pix' : modUpper.includes('DEBIT') ? 'debito' : 'credito';
 
-    const amountCents = parseMoneyToCents(getCell(raw, colMap, 'VALOR DA VENDA BRUTA'));
-    const feeCents = Math.abs(parseMoneyToCents(getCell(raw, colMap, 'TAXAS (R$)')));
-    const netRaw = getCell(raw, colMap, 'VALOR LIQUIDO DA VENDA');
+    const amountCents = parseMoneyToCents(col.valorBruto !== -1 ? raw[col.valorBruto] : undefined);
+    const feeCents = Math.abs(parseMoneyToCents(col.taxas !== -1 ? raw[col.taxas] : undefined));
+    const netRaw = col.liquido !== -1 ? raw[col.liquido] : undefined;
     const netCents = netRaw !== undefined && String(netRaw).trim() !== '-' && String(netRaw).trim() !== ''
       ? parseMoneyToCents(netRaw)
       : amountCents - feeCents;
+
+    if (!dt.dateStr && amountCents === 0) continue;
+
+    const isExplicitRejected =
+      statusUpper.includes('CANCEL') ||
+      statusUpper.includes('NEGAD') ||
+      statusUpper.includes('RECUSAD') ||
+      statusUpper.includes('ESTORN') ||
+      statusUpper.includes('FALHA') ||
+      statusUpper.includes('NAO AUTORIZ');
+    const isApproved = hasStatusCol
+      ? (
+          !isExplicitRejected &&
+          (
+            statusUpper === 'APROVADA' ||
+            statusUpper === 'APROVADO' ||
+            statusUpper === 'PAGO' ||
+            statusUpper === 'CONFIRMADA' ||
+            (!statusUpper && amountCents > 0)
+          )
+        )
+      : amountCents > 0;
 
     rows.push({
       rowIndex: i + 1,
@@ -499,16 +640,17 @@ function parseC6PayMatrix(rawMatrix, fmtMatrix) {
       statusRaw: status,
       category,
       subType,
-      bandeira: String(getCell(fmt, colMap, 'BANDEIRA') ?? '').trim(),
+      bandeira: col.bandeira !== -1 ? String(fmt[col.bandeira] ?? '').trim() : '',
       amountCents,
       feeCents,
       netCents,
-      nsu: String(getCell(fmt, colMap, 'NSU') ?? '').trim(),
-      idPdc: String(getCell(fmt, colMap, 'ID PDC') ?? '').trim(),
-      terminalCode: String(getCell(fmt, colMap, 'N SERIE MAQUININHA', 'Nº SERIE MAQUININHA', 'ID PDC') ?? '').trim(),
+      nsu: col.nsu !== -1 ? String(fmt[col.nsu] ?? '').trim() : '',
+      idPdc: col.idPdc !== -1 ? String(fmt[col.idPdc] ?? '').trim() : '',
+      terminalCode: col.terminalCode !== -1 ? String(fmt[col.terminalCode] ?? '').trim() : '',
       dateStr: dt.dateStr,
       timeStr: dt.timeStr,
-      secondsOfDay: dt.secondsOfDay
+      secondsOfDay: dt.secondsOfDay,
+      hasTime: dt.hasTime
     });
   }
 
@@ -522,35 +664,25 @@ function parseC6PayMatrix(rawMatrix, fmtMatrix) {
       datesSorted[1][0] === expectedNextDay &&
       datesSorted[1][1] <= Math.max(5, Math.floor(totalDatedRows * 0.25)));
 
-  if (datesSorted.length > 1) {
-    if (isSingleDayVirada) {
-      const extraDatesBr = datesSorted.slice(1).map(([iso]) => formatIsoToBrShortDate(iso));
-      warnings.push(`C6 Pay contém lançamento(s) com data de virada (${extraDatesBr.join(', ')}), mantidos na conferência.`);
-    } else {
-      warnings.push(
-        `Relatório C6 Pay abrange múltiplos dias (${formatIsoToBrShortDate(minDate)} a ${formatIsoToBrShortDate(maxDate)} — ${dateCounts.size} dia(s)). Somente o dia de referência do caixa será contabilizado.`
-      );
-    }
-  }
-
   return {
     fileType: 'adquirente_c6pay',
     status: 'ok',
     periodStart: isSingleDayVirada ? mainDate : minDate,
     periodEnd: isSingleDayVirada ? mainDate : maxDate,
-    warnings,
+    warnings: [],
     rows,
     summary: {
       totalRows: rows.length,
       approvedRows: rows.filter(r => r.isApproved).length,
       deniedRows: rows.filter(r => !r.isApproved).length,
       distinctDatesCount: dateCounts.size,
-      isSingleDayVirada
+      isSingleDayVirada,
+      isSummaryReport
     }
   };
 }
 
-const CANONICAL_BRAZILIAN_BANKS = [
+export const CANONICAL_BRAZILIAN_BANKS = [
   { code: '336', label: 'Banco C6', patterns: [/\bC6\b/, /\bC6BANK\b/, /BANCO C6/] },
   { code: '341', label: 'Banco Itaú', patterns: [/\bITAU/, /UNIBANCO/] },
   { code: '001', label: 'Banco do Brasil', patterns: [/BANCO DO BRASIL/, /\bBB\b/] },
@@ -665,13 +797,19 @@ function parseOfxText(text, rulesConfig, fileName = '') {
   const dtEndRaw = (text.match(/<DTEND>([^<\r\n]+)/i) || [])[1]?.trim() || '';
 
   const formatOfxDate = (raw) => {
-    const m = String(raw || '').match(/^(\d{4})(\d{2})(\d{2})(\d{2})?(\d{2})?(\d{2})?/);
-    if (!m) return { dateStr: '', timeStr: '', secondsOfDay: 0 };
+    const m = String(raw || '').match(/^(\d{4})(\d{2})(\d{2})(?:(\d{2})(\d{2})?(\d{2})?)?/);
+    if (!m) return { dateStr: '', timeStr: '', secondsOfDay: 0, hasTime: false };
     const dateStr = `${m[1]}-${m[2]}-${m[3]}`;
+    const hasTime = m[4] !== undefined;
     const hh = Number(m[4] || 0);
     const mm = Number(m[5] || 0);
     const ss = Number(m[6] || 0);
-    return { dateStr, timeStr: `${pad2(hh)}:${pad2(mm)}:${pad2(ss)}`, secondsOfDay: hh * 3600 + mm * 60 + ss };
+    return {
+      dateStr,
+      timeStr: hasTime ? `${pad2(hh)}:${pad2(mm)}:${pad2(ss)}` : '',
+      secondsOfDay: hh * 3600 + mm * 60 + ss,
+      hasTime
+    };
   };
 
   const rows = [];
@@ -715,7 +853,8 @@ function parseOfxText(text, rulesConfig, fileName = '') {
       amountCents,
       dateStr: dt.dateStr,
       timeStr: dt.timeStr,
-      secondsOfDay: dt.secondsOfDay
+      secondsOfDay: dt.secondsOfDay,
+      hasTime: dt.hasTime
     });
   }
 
@@ -723,19 +862,13 @@ function parseOfxText(text, rulesConfig, fileName = '') {
   const endDt = formatOfxDate(dtEndRaw);
   const periodStart = [startDt.dateStr, txMinDate].filter(Boolean).sort()[0] || '';
   const periodEnd = [endDt.dateStr, txMaxDate].filter(Boolean).sort().slice(-1)[0] || periodStart;
-  const warnings = [];
-  if (distinctDates.size > 1 || (periodStart && periodEnd && periodStart !== periodEnd)) {
-    warnings.push(
-      `Extrato bancário abrange múltiplos dias (${formatIsoToBrShortDate(periodStart)} a ${formatIsoToBrShortDate(periodEnd)} — ${distinctDates.size || 1} dia(s) c/ movimento). Somente os lançamentos do período do caixa serão contabilizados.`
-    );
-  }
 
   return {
     fileType: 'extrato_ofx',
     status: 'ok',
     periodStart,
     periodEnd,
-    warnings,
+    warnings: [],
     rows,
     summary: {
       bankName,
@@ -1034,7 +1167,34 @@ function parseFechamentoResumoTxt(text) {
 
 function parsePdvItensVendidosMatrix(rawMatrix, fmtMatrix) {
   const headerIdx = findHeaderRowIndex(rawMatrix, ['CODIGO', 'PRODUTO', 'QTD', 'TOTAL']);
-  const colMap = buildColumnMap(rawMatrix[headerIdx]);
+  const col = resolveColumnIndices(buildColumnMap(rawMatrix[headerIdx]), {
+    code: 'CODIGO',
+    product: 'PRODUTO',
+    qty: 'QTD',
+    unitCents: 'UNITARIO',
+    totalCents: 'TOTAL',
+    bonusCents: 'BONUS (R$)',
+    serviceFeeCents: 'TAXA SERVICO',
+    discountCents: 'DESCONTO',
+    orderNumber: 'NUMERO',
+    module: 'MODULO',
+    origin: 'ORIGEM',
+    data: 'DATA',
+    hora: 'HORA',
+    unit: 'UN',
+    group: 'GRUPO',
+    subGroup: 'SUB-GRUPO',
+    waiter: 'GARCON',
+    operator: 'OPERADOR',
+    machineName: 'NOME MAQUINA',
+    turn: 'TURNO',
+    feeRemovalReason: 'MOTIVO REMOCAO TAXA',
+    feeRemovalDetails: 'DETALHES REMOCAO TAXA',
+    feeRemovalOperator: 'OPERADOR REMOCAO TAXA',
+    discountReason: 'MOTIVO APLICACAO DESCONTO',
+    discountDetails: 'DETALHES APLICACAO DESCONTO',
+    discountOperator: 'OPERADOR APLICACAO DESCONTO'
+  });
   const rows = [];
   let minDate = '';
   let maxDate = '';
@@ -1044,20 +1204,23 @@ function parsePdvItensVendidosMatrix(rawMatrix, fmtMatrix) {
     const fmt = fmtMatrix[i] || raw;
     if (isRowEmpty(raw)) continue;
 
-    const code = String(getCell(fmt, colMap, 'CODIGO') ?? '').trim();
-    const product = String(getCell(fmt, colMap, 'PRODUTO') ?? '').trim();
+    const code = col.code !== -1 ? String(fmt[col.code] ?? '').trim() : '';
+    const product = col.product !== -1 ? String(fmt[col.product] ?? '').trim() : '';
     if (!product) continue;
 
-    const qtyRaw = Number(String(getCell(raw, colMap, 'QTD') ?? 0).replace(',', '.'));
-    const unitCents = parseMoneyToCents(getCell(raw, colMap, 'UNITARIO'));
-    const totalCents = parseMoneyToCents(getCell(raw, colMap, 'TOTAL'));
-    const bonusCents = parseMoneyToCents(getCell(raw, colMap, 'BONUS (R$)'));
-    const serviceFeeCents = parseMoneyToCents(getCell(raw, colMap, 'TAXA SERVICO'));
-    const discountCents = parseMoneyToCents(getCell(raw, colMap, 'DESCONTO'));
-    const orderNumber = String(getCell(fmt, colMap, 'NUMERO') ?? '').trim();
-    const module = String(getCell(fmt, colMap, 'MODULO') ?? '').trim();
-    const origin = String(getCell(fmt, colMap, 'ORIGEM') ?? '').trim();
-    const dt = parseCashDateTime(getCell(raw, colMap, 'DATA'), getCell(raw, colMap, 'HORA'));
+    const qtyRaw = Number(String((col.qty !== -1 ? raw[col.qty] : undefined) ?? 0).replace(',', '.'));
+    const unitCents = parseMoneyToCents(col.unitCents !== -1 ? raw[col.unitCents] : undefined);
+    const totalCents = parseMoneyToCents(col.totalCents !== -1 ? raw[col.totalCents] : undefined);
+    const bonusCents = parseMoneyToCents(col.bonusCents !== -1 ? raw[col.bonusCents] : undefined);
+    const serviceFeeCents = parseMoneyToCents(col.serviceFeeCents !== -1 ? raw[col.serviceFeeCents] : undefined);
+    const discountCents = parseMoneyToCents(col.discountCents !== -1 ? raw[col.discountCents] : undefined);
+    const orderNumber = col.orderNumber !== -1 ? String(fmt[col.orderNumber] ?? '').trim() : '';
+    const module = col.module !== -1 ? String(fmt[col.module] ?? '').trim() : '';
+    const origin = col.origin !== -1 ? String(fmt[col.origin] ?? '').trim() : '';
+    const dt = parseCashDateTime(
+      col.data !== -1 ? raw[col.data] : undefined,
+      col.hora !== -1 ? raw[col.hora] : undefined
+    );
     const isAggregateRow = code === '000000' || (!orderNumber && !dt.dateStr && qtyRaw === 0);
 
     if (dt.dateStr && !isAggregateRow) {
@@ -1068,31 +1231,32 @@ function parsePdvItensVendidosMatrix(rawMatrix, fmtMatrix) {
     rows.push({
       code,
       product,
-      unit: String(getCell(fmt, colMap, 'UN') ?? '').trim(),
+      unit: col.unit !== -1 ? String(fmt[col.unit] ?? '').trim() : '',
       qty: Number.isFinite(qtyRaw) && qtyRaw > 0 ? qtyRaw : (isAggregateRow ? 0 : 1),
       unitCents,
       totalCents,
       bonusCents,
       serviceFeeCents,
       discountCents,
-      group: String(getCell(fmt, colMap, 'GRUPO') ?? '').trim(),
-      subGroup: String(getCell(fmt, colMap, 'SUB-GRUPO') ?? '').trim(),
+      group: col.group !== -1 ? String(fmt[col.group] ?? '').trim() : '',
+      subGroup: col.subGroup !== -1 ? String(fmt[col.subGroup] ?? '').trim() : '',
       orderNumber,
       module,
       origin,
       dateStr: dt.dateStr,
       timeStr: dt.timeStr,
       secondsOfDay: dt.secondsOfDay,
-      waiter: String(getCell(fmt, colMap, 'GARCON') ?? '').trim(),
-      operator: String(getCell(fmt, colMap, 'OPERADOR') ?? '').trim(),
-      machineName: String(getCell(fmt, colMap, 'NOME MAQUINA') ?? '').trim(),
-      turn: String(getCell(fmt, colMap, 'TURNO') ?? '1').trim(),
-      feeRemovalReason: String(getCell(fmt, colMap, 'MOTIVO REMOCAO TAXA') ?? '').trim(),
-      feeRemovalDetails: String(getCell(fmt, colMap, 'DETALHES REMOCAO TAXA') ?? '').trim(),
-      feeRemovalOperator: String(getCell(fmt, colMap, 'OPERADOR REMOCAO TAXA') ?? '').trim(),
-      discountReason: String(getCell(fmt, colMap, 'MOTIVO APLICACAO DESCONTO') ?? '').trim(),
-      discountDetails: String(getCell(fmt, colMap, 'DETALHES APLICACAO DESCONTO') ?? '').trim(),
-      discountOperator: String(getCell(fmt, colMap, 'OPERADOR APLICACAO DESCONTO') ?? '').trim(),
+      hasTime: dt.hasTime,
+      waiter: col.waiter !== -1 ? String(fmt[col.waiter] ?? '').trim() : '',
+      operator: col.operator !== -1 ? String(fmt[col.operator] ?? '').trim() : '',
+      machineName: col.machineName !== -1 ? String(fmt[col.machineName] ?? '').trim() : '',
+      turn: col.turn !== -1 ? String(fmt[col.turn] ?? '1').trim() : '1',
+      feeRemovalReason: col.feeRemovalReason !== -1 ? String(fmt[col.feeRemovalReason] ?? '').trim() : '',
+      feeRemovalDetails: col.feeRemovalDetails !== -1 ? String(fmt[col.feeRemovalDetails] ?? '').trim() : '',
+      feeRemovalOperator: col.feeRemovalOperator !== -1 ? String(fmt[col.feeRemovalOperator] ?? '').trim() : '',
+      discountReason: col.discountReason !== -1 ? String(fmt[col.discountReason] ?? '').trim() : '',
+      discountDetails: col.discountDetails !== -1 ? String(fmt[col.discountDetails] ?? '').trim() : '',
+      discountOperator: col.discountOperator !== -1 ? String(fmt[col.discountOperator] ?? '').trim() : '',
       isAggregateRow
     });
   }
@@ -1114,7 +1278,23 @@ function parsePdvItensVendidosMatrix(rawMatrix, fmtMatrix) {
 
 function parsePdvCancelamentosMatrix(rawMatrix, fmtMatrix) {
   const headerIdx = findHeaderRowIndex(rawMatrix, ['CODIGO', 'PRODUTO', 'TOTAL', 'MOTIVO']);
-  const colMap = buildColumnMap(rawMatrix[headerIdx]);
+  const col = resolveColumnIndices(buildColumnMap(rawMatrix[headerIdx]), {
+    product: 'PRODUTO',
+    data: 'DATA',
+    hora: 'HORA',
+    qty: 'QTD',
+    code: 'CODIGO',
+    totalCents: 'TOTAL',
+    group: 'GRUPO',
+    subGroup: 'SUB-GRUPO',
+    orderNumber: 'NUMERO',
+    waiter: 'GARCON',
+    operator: 'OPERADOR',
+    machineName: 'NOME MAQUINA',
+    turn: 'TURNO',
+    reason: 'MOTIVO',
+    reasonDetails: 'DETALHES DO MOTIVO'
+  });
   const rows = [];
   let minDate = '';
   let maxDate = '';
@@ -1123,33 +1303,37 @@ function parsePdvCancelamentosMatrix(rawMatrix, fmtMatrix) {
     const raw = rawMatrix[i];
     const fmt = fmtMatrix[i] || raw;
     if (isRowEmpty(raw)) continue;
-    const product = String(getCell(fmt, colMap, 'PRODUTO') ?? '').trim();
+    const product = col.product !== -1 ? String(fmt[col.product] ?? '').trim() : '';
     if (!product) continue;
 
-    const dt = parseCashDateTime(getCell(raw, colMap, 'DATA'), getCell(raw, colMap, 'HORA'));
+    const dt = parseCashDateTime(
+      col.data !== -1 ? raw[col.data] : undefined,
+      col.hora !== -1 ? raw[col.hora] : undefined
+    );
     if (dt.dateStr) {
       if (!minDate || dt.dateStr < minDate) minDate = dt.dateStr;
       if (!maxDate || dt.dateStr > maxDate) maxDate = dt.dateStr;
     }
 
-    const qtyRaw = Number(String(getCell(raw, colMap, 'QTD') ?? 1).replace(',', '.'));
+    const qtyRaw = Number(String((col.qty !== -1 ? raw[col.qty] : undefined) ?? 1).replace(',', '.'));
     rows.push({
-      code: String(getCell(fmt, colMap, 'CODIGO') ?? '').trim(),
+      code: col.code !== -1 ? String(fmt[col.code] ?? '').trim() : '',
       product,
       qty: Number.isFinite(qtyRaw) && qtyRaw > 0 ? qtyRaw : 1,
-      totalCents: parseMoneyToCents(getCell(raw, colMap, 'TOTAL')),
-      group: String(getCell(fmt, colMap, 'GRUPO') ?? '').trim(),
-      subGroup: String(getCell(fmt, colMap, 'SUB-GRUPO') ?? '').trim(),
-      orderNumber: String(getCell(fmt, colMap, 'NUMERO') ?? '').trim(),
+      totalCents: parseMoneyToCents(col.totalCents !== -1 ? raw[col.totalCents] : undefined),
+      group: col.group !== -1 ? String(fmt[col.group] ?? '').trim() : '',
+      subGroup: col.subGroup !== -1 ? String(fmt[col.subGroup] ?? '').trim() : '',
+      orderNumber: col.orderNumber !== -1 ? String(fmt[col.orderNumber] ?? '').trim() : '',
       dateStr: dt.dateStr,
       timeStr: dt.timeStr,
       secondsOfDay: dt.secondsOfDay,
-      waiter: String(getCell(fmt, colMap, 'GARCON') ?? '').trim(),
-      operator: String(getCell(fmt, colMap, 'OPERADOR') ?? '').trim(),
-      machineName: String(getCell(fmt, colMap, 'NOME MAQUINA') ?? '').trim(),
-      turn: String(getCell(fmt, colMap, 'TURNO') ?? '1').trim(),
-      reason: String(getCell(fmt, colMap, 'MOTIVO') ?? '').trim(),
-      reasonDetails: String(getCell(fmt, colMap, 'DETALHES DO MOTIVO') ?? '').trim()
+      hasTime: dt.hasTime,
+      waiter: col.waiter !== -1 ? String(fmt[col.waiter] ?? '').trim() : '',
+      operator: col.operator !== -1 ? String(fmt[col.operator] ?? '').trim() : '',
+      machineName: col.machineName !== -1 ? String(fmt[col.machineName] ?? '').trim() : '',
+      turn: col.turn !== -1 ? String(fmt[col.turn] ?? '1').trim() : '1',
+      reason: col.reason !== -1 ? String(fmt[col.reason] ?? '').trim() : '',
+      reasonDetails: col.reasonDetails !== -1 ? String(fmt[col.reasonDetails] ?? '').trim() : ''
     });
   }
 
@@ -1169,7 +1353,17 @@ function parsePdvCancelamentosMatrix(rawMatrix, fmtMatrix) {
 
 function parsePdvDescontosMatrix(rawMatrix, fmtMatrix) {
   const headerIdx = findHeaderRowIndex(rawMatrix, ['MOTIVO', 'DESCONTO', 'NUMERO', 'FUNCIONARIO']);
-  const colMap = buildColumnMap(rawMatrix[headerIdx]);
+  const col = resolveColumnIndices(buildColumnMap(rawMatrix[headerIdx]), {
+    data: 'DATA',
+    hora: 'HORA',
+    reason: 'MOTIVO',
+    discountCents: 'DESCONTO',
+    orderNumber: 'NUMERO',
+    employee: 'FUNCIONARIO',
+    turn: 'TURNO',
+    origin: 'ORIGEM',
+    details: 'DETALHES MOTIVO'
+  });
   const rows = [];
   let minDate = '';
   let maxDate = '';
@@ -1179,23 +1373,27 @@ function parsePdvDescontosMatrix(rawMatrix, fmtMatrix) {
     const fmt = fmtMatrix[i] || raw;
     if (isRowEmpty(raw)) continue;
 
-    const dt = parseCashDateTime(getCell(raw, colMap, 'DATA'), getCell(raw, colMap, 'HORA'));
+    const dt = parseCashDateTime(
+      col.data !== -1 ? raw[col.data] : undefined,
+      col.hora !== -1 ? raw[col.hora] : undefined
+    );
     if (dt.dateStr) {
       if (!minDate || dt.dateStr < minDate) minDate = dt.dateStr;
       if (!maxDate || dt.dateStr > maxDate) maxDate = dt.dateStr;
     }
 
     rows.push({
-      reason: String(getCell(fmt, colMap, 'MOTIVO') ?? '').trim(),
-      discountCents: parseMoneyToCents(getCell(raw, colMap, 'DESCONTO')),
-      orderNumber: String(getCell(fmt, colMap, 'NUMERO') ?? '').trim(),
+      reason: col.reason !== -1 ? String(fmt[col.reason] ?? '').trim() : '',
+      discountCents: parseMoneyToCents(col.discountCents !== -1 ? raw[col.discountCents] : undefined),
+      orderNumber: col.orderNumber !== -1 ? String(fmt[col.orderNumber] ?? '').trim() : '',
       dateStr: dt.dateStr,
       timeStr: dt.timeStr,
       secondsOfDay: dt.secondsOfDay,
-      employee: String(getCell(fmt, colMap, 'FUNCIONARIO') ?? '').trim(),
-      turn: String(getCell(fmt, colMap, 'TURNO') ?? '1').trim(),
-      origin: String(getCell(fmt, colMap, 'ORIGEM') ?? '').trim(),
-      details: String(getCell(fmt, colMap, 'DETALHES MOTIVO') ?? '').trim()
+      hasTime: dt.hasTime,
+      employee: col.employee !== -1 ? String(fmt[col.employee] ?? '').trim() : '',
+      turn: col.turn !== -1 ? String(fmt[col.turn] ?? '1').trim() : '1',
+      origin: col.origin !== -1 ? String(fmt[col.origin] ?? '').trim() : '',
+      details: col.details !== -1 ? String(fmt[col.details] ?? '').trim() : ''
     });
   }
 
@@ -1219,7 +1417,13 @@ function detectSpreadsheetKind(matrix) {
   if (findHeaderRowIndex(matrix, ['CODIGO', 'PRODUTO', 'TOTAL', 'MOTIVO']) !== -1) return 'pdv_cancelamentos';
   if (findHeaderRowIndex(matrix, ['MOTIVO', 'DESCONTO', 'NUMERO', 'FUNCIONARIO']) !== -1) return 'pdv_descontos';
   if (findHeaderRowIndex(matrix, ['DATA DA VENDA', 'HORA DA VENDA', 'STATUS DA VENDA', 'VALOR DA VENDA ATUALIZADO']) !== -1) return 'adquirente_rede';
-  if (findHeaderRowIndex(matrix, ['DATA DA VENDA', 'HORA DA VENDA', 'VALOR DA VENDA BRUTA']) !== -1) return 'adquirente_c6pay';
+  if (
+    findHeaderRowIndex(matrix, ['DATA DA VENDA', 'HORA DA VENDA', 'VALOR DA VENDA BRUTA']) !== -1 ||
+    findHeaderRowIndex(matrix, ['DATA DA VENDA', 'VALOR DA VENDA BRUTA', 'MODALIDADE']) !== -1 ||
+    findHeaderRowIndex(matrix, ['DATA DA VENDA', 'VALOR BRUTO', 'MODALIDADE']) !== -1 ||
+    findHeaderRowIndex(matrix, ['DATA DA VENDA', 'VALOR BRUTO', 'BANDEIRA']) !== -1 ||
+    findHeaderRowIndex(matrix, ['DATA', 'MODALIDADE', 'BANDEIRA', 'VALOR BRUTO']) !== -1
+  ) return 'adquirente_c6pay';
 
   const flatHead = matrix.slice(0, 15).flat().map(c => normalizeAsciiUpper(c)).join(' | ');
   if (flatHead.includes('ENTRADA EM DINHEIRO') && flatHead.includes('SAIDAS DINHEIRO')) {
@@ -1247,7 +1451,11 @@ function parseGenericBankMatrix(rawMatrix, fmtMatrix, rulesConfig, fileName = ''
     .filter(Boolean)
     .join(' ');
   const bankInfo = identifyBankInstitution({ fileName, headerText });
-  const colMap = buildColumnMap(rawMatrix[headerIdx]);
+  const col = resolveColumnIndices(buildColumnMap(rawMatrix[headerIdx]), {
+    data: 'DATA',
+    memo: ['DESCRICAO', 'HISTORICO', 'LANCAMENTO'],
+    valor: ['VALOR', 'CREDITO']
+  });
   const rows = [];
   const distinctDates = new Set();
   let minDate = '';
@@ -1256,9 +1464,9 @@ function parseGenericBankMatrix(rawMatrix, fmtMatrix, rulesConfig, fileName = ''
     const raw = rawMatrix[i];
     const fmt = fmtMatrix[i] || raw;
     if (isRowEmpty(raw)) continue;
-    const dt = parseCashDateTime(getCell(raw, colMap, 'DATA'));
-    const memo = String(getCell(fmt, colMap, 'DESCRICAO', 'HISTORICO', 'LANCAMENTO') ?? '').trim();
-    const amountCents = parseMoneyToCents(getCell(raw, colMap, 'VALOR', 'CREDITO'));
+    const dt = parseCashDateTime(col.data !== -1 ? raw[col.data] : undefined);
+    const memo = col.memo !== -1 ? String(fmt[col.memo] ?? '').trim() : '';
+    const amountCents = parseMoneyToCents(col.valor !== -1 ? raw[col.valor] : undefined);
     if (amountCents <= 0) continue;
     if (dt.dateStr) {
       distinctDates.add(dt.dateStr);
@@ -1279,15 +1487,11 @@ function parseGenericBankMatrix(rawMatrix, fmtMatrix, rulesConfig, fileName = ''
       amountCents,
       dateStr: dt.dateStr,
       timeStr: dt.timeStr,
-      secondsOfDay: dt.secondsOfDay
+      secondsOfDay: dt.secondsOfDay,
+      hasTime: dt.hasTime
     });
   }
   const warnings = ['Extrato importado pelo mapeador genérico de colunas (Data/Descrição/Valor).'];
-  if (distinctDates.size > 1 || (minDate && maxDate && minDate !== maxDate)) {
-    warnings.push(
-      `Extrato em planilha abrange múltiplos dias (${formatIsoToBrShortDate(minDate)} a ${formatIsoToBrShortDate(maxDate)} — ${distinctDates.size} dia(s)). Somente o dia de referência do caixa será contabilizado.`
-    );
-  }
   return {
     fileType: 'extrato_generico',
     status: 'ok',
@@ -1393,10 +1597,12 @@ function parseBinaryWorkbookAcrossSheets(workingBytes, rulesConfig, baseDiag, fi
     const expandedRange = computeExpandedSheetRange(sheet);
     const sheetOpts = expandedRange ? { header: 1, defval: '', range: expandedRange } : { header: 1, defval: '' };
     const rawMatrix = XLSXLib.utils.sheet_to_json(sheet, { ...sheetOpts, raw: true });
-    const fmtMatrix = XLSXLib.utils.sheet_to_json(sheet, { ...sheetOpts, raw: false });
+    if (rawMatrix.length === 0) continue;
 
     let kind = detectSpreadsheetKind(rawMatrix);
-    if (kind === 'unknown') {
+    const needsFmtMatrix = kind !== 'rel_conferencia';
+    const fmtMatrix = needsFmtMatrix ? XLSXLib.utils.sheet_to_json(sheet, { ...sheetOpts, raw: false }) : rawMatrix;
+    if (kind === 'unknown' && needsFmtMatrix) {
       kind = detectSpreadsheetKind(fmtMatrix);
     }
 

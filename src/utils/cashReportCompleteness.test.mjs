@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import {
   DATADIVAS_REPORT_SPECS,
   BANK_REPORT_SPECS,
-  assessCashReportCompleteness
+  assessCashReportCompleteness,
+  resolveAuditWarningsExpandState,
+  resolveNextAuditWarningsUserOverride
 } from './cashReportCompleteness.mjs';
 import {
   createEmptyRoutineProfile,
@@ -204,4 +206,20 @@ test('runCashReconciliation propaga companyRoutineProfile para result.reportComp
   assert.ok(itau);
   assert.equal(itau.present, false);
   assert.ok(result.reportCompleteness.warnings.some((w) => /Banco Ita[uú]/i.test(w)));
+});
+
+test('resolveAuditWarningsExpandState permite recolher com "Ocultar Detalhes" mesmo havendo erro crítico ativo', () => {
+  // Sem erro: recolhido por padrão, usuário pode expandir
+  assert.equal(resolveAuditWarningsExpandState(false, null), false);
+  assert.equal(resolveAuditWarningsExpandState(false, true), true);
+
+  // Com erro crítico: expandido por padrão (userOverride === null), MAS recolhe se usuário clicou Ocultar (false)
+  assert.equal(resolveAuditWarningsExpandState(true, null), true);
+  assert.equal(resolveAuditWarningsExpandState(true, false), false, 'Clique em Ocultar Detalhes deve recolher mesmo com erro crítico');
+  assert.equal(resolveAuditWarningsExpandState(true, true), true);
+
+  // Mudança de assinatura de erros reseta override para null apenas quando os erros mudarem
+  assert.equal(resolveNextAuditWarningsUserOverride('err_a', 'err_a', false), false);
+  assert.equal(resolveNextAuditWarningsUserOverride('err_a', 'err_a|err_b', false), null);
+  assert.equal(resolveNextAuditWarningsUserOverride('err_a', '', false), null);
 });

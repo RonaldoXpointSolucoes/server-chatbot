@@ -458,7 +458,7 @@ test('runCashReconciliation isolates 20/11 target date from 07/11–22/11 multi-
   });
   assert.equal(multiOfx.periodStart, '2026-11-07');
   assert.equal(multiOfx.periodEnd, '2026-11-22');
-  assert.ok(multiOfx.warnings.some((w) => /múltiplos dias/i.test(w)));
+  assert.equal(multiOfx.warnings.some((w) => /múltiplos dias/i.test(w)), false);
 
   const res = runCashReconciliation({
     parsedFiles: [txt20, pdv20, conf20, multiOfx],
@@ -478,7 +478,7 @@ test('runCashReconciliation isolates 20/11 target date from 07/11–22/11 multi-
   assert.equal(res.periodDiagnostics.outOfPeriodPixCents, 1414283);
 
   const warningCodes = res.periodDiagnostics.validationWarnings.map((w) => w.code);
-  assert.ok(warningCodes.includes('multi_day_filtered'));
+  assert.equal(warningCodes.includes('multi_day_filtered'), false, 'Relatórios multi-dias com dados do dia não devem gerar alerta');
   assert.ok(warningCodes.includes('missing_card_acquirers'));
   assert.ok(warningCodes.includes('cash_drawer_txt_hint'));
 });
@@ -1231,4 +1231,207 @@ test('runCashReconciliation isola final.txt de outra data (24/11 R$ 423,28) no c
   const pendWarn = sameDayMismatch.periodDiagnostics.validationWarnings.find((w) => w.code === 'pending_totals_mismatch');
   assert.ok(pendWarn);
   assert.equal(pendWarn.severity, 'error');
+});
+
+test('runCashReconciliation silently normalizes multi-day PDV/acquirer/OFX exports (days 01..10) to day 05 and preserves timestamp-less C6Pay/OFX rows', () => {
+  const multiDayPdv = {
+    fileType: 'pdv_vendas',
+    fileName: 'PlanilhaRecebimento_01_a_10.xlsx',
+    status: 'ok',
+    periodStart: '2026-11-01',
+    periodEnd: '2026-11-10',
+    rows: [
+      { rowIndex: 1, numero: '100', modulo: 'MESA', origem: 'MESA', amountCents: 9900, receivedCents: 9900, formaPagto: 'CARTAO', administradora: 'CREDITO', category: 'cartao', subType: 'credito', dateStr: '2026-11-01', timeStr: '12:00:00', secondsOfDay: 43200 },
+      { rowIndex: 2, numero: '105', modulo: 'MESA', origem: 'MESA', amountCents: 8500, receivedCents: 8500, formaPagto: 'CARTAO', administradora: 'CREDITO', category: 'cartao', subType: 'credito', dateStr: '2026-11-05', timeStr: '12:30:00', secondsOfDay: 45000 },
+      { rowIndex: 3, numero: '106', modulo: 'DELIVERY', origem: 'DELIVERY', amountCents: 4500, receivedCents: 4500, formaPagto: 'PIX', administradora: 'PIX', category: 'pix', subType: 'pix', dateStr: '2026-11-05', timeStr: '13:00:00', secondsOfDay: 46800 },
+      { rowIndex: 4, numero: '110', modulo: 'MESA', origem: 'MESA', amountCents: 7700, receivedCents: 7700, formaPagto: 'PIX', administradora: 'PIX', category: 'pix', subType: 'pix', dateStr: '2026-11-10', timeStr: '19:00:00', secondsOfDay: 68400 }
+    ]
+  };
+  const relConf05 = {
+    fileType: 'rel_conferencia',
+    fileName: 'RelConferencia_05_11.xlsx',
+    status: 'ok',
+    periodStart: '05/11/2026',
+    periodEnd: '05/11/2026',
+    summary: {
+      headerLabel: '05/11/2026',
+      parsedCategoryCount: 2,
+      cashBlock: {},
+      systemRows: { cartao: 8500, pix: 4500 },
+      realRows: {}
+    }
+  };
+  // Simula C6Pay Resumido e OFX sem granularidade de horário (timeStr vazio ou 00:00:00 em todo arquivo)
+  const c6ResumidoRange = {
+    fileType: 'adquirente_c6pay',
+    fileName: 'Relatorio-Vendas-C6Pay_Resumido.xlsx',
+    status: 'ok',
+    periodStart: '2026-11-01',
+    periodEnd: '2026-11-10',
+    rows: [
+      { rowIndex: 1, source: 'c6pay', isApproved: true, category: 'cartao', subType: 'credito', amountCents: 9900, netCents: 9700, feeCents: 200, dateStr: '2026-11-01', timeStr: '', secondsOfDay: 0, hasTime: false },
+      { rowIndex: 2, source: 'c6pay', isApproved: true, category: 'cartao', subType: 'credito', amountCents: 8500, netCents: 8300, feeCents: 200, dateStr: '2026-11-05', timeStr: '00:00:00', secondsOfDay: 0, hasTime: true },
+      { rowIndex: 3, source: 'c6pay', isApproved: true, category: 'cartao', subType: 'debito', amountCents: 3000, netCents: 2950, feeCents: 50, dateStr: '2026-11-10', timeStr: '00:00:00', secondsOfDay: 0, hasTime: true }
+    ]
+  };
+  const ofxRangeNoTime = {
+    fileType: 'extrato_ofx',
+    fileName: 'Extrato_01_a_10.ofx',
+    status: 'ok',
+    periodStart: '2026-11-01',
+    periodEnd: '2026-11-10',
+    rows: [
+      { source: 'ofx', ofxClass: 'pix_cliente', category: 'pix', amountCents: 4500, dateStr: '2026-11-05', timeStr: '00:00:00', secondsOfDay: 0, hasTime: false },
+      { source: 'ofx', ofxClass: 'pix_cliente', category: 'pix', amountCents: 7700, dateStr: '2026-11-10', timeStr: '00:00:00', secondsOfDay: 0, hasTime: false }
+    ]
+  };
+
+  const res = runCashReconciliation({
+    parsedFiles: [multiDayPdv, relConf05, c6ResumidoRange, ofxRangeNoTime],
+    formulaConfig: DEFAULT_FORMULA_CONFIG
+  });
+
+  assert.equal(res.referenceDate, '2026-11-05');
+  assert.equal(res.systemTotalCents, 13000, 'PDV multi-dias deve ser normalizado apenas para a competência 05/11 (8500 + 4500)');
+  assert.equal(res.realTotalCents, 13000, 'C6Pay Resumido e OFX sem horário intra-dia de 05/11 NÃO devem ser descartados por preOpeningCutoffSec');
+  assert.equal(res.diffTotalCents, 0);
+  const codes = res.periodDiagnostics.validationWarnings.map((w) => w.code);
+  assert.equal(codes.includes('multi_day_filtered'), false);
+  assert.equal(codes.includes('wrong_day_real_file'), false);
+  assert.equal(codes.includes('wrong_day_system_file'), false);
+
+  // Arquivo realmente sem nenhum dado do dia 05/11 deve continuar avisando
+  const emptyDayRede = {
+    fileType: 'adquirente_rede',
+    fileName: 'Rede_01_a_03.xlsx',
+    status: 'ok',
+    periodStart: '2026-11-01',
+    periodEnd: '2026-11-03',
+    rows: [
+      { rowIndex: 1, source: 'rede', isApproved: true, category: 'cartao', subType: 'credito', amountCents: 5000, netCents: 4900, dateStr: '2026-11-02', timeStr: '12:00:00', secondsOfDay: 43200 }
+    ]
+  };
+  const resMissingDay = runCashReconciliation({
+    parsedFiles: [multiDayPdv, relConf05, c6ResumidoRange, ofxRangeNoTime, emptyDayRede],
+    formulaConfig: DEFAULT_FORMULA_CONFIG
+  });
+  assert.ok(
+    resMissingDay.periodDiagnostics.validationWarnings.some((w) => w.code === 'wrong_day_real_file' && w.fileName !== '' && w.message.includes('Rede_01_a_03.xlsx')),
+    'Arquivo sem nenhum lançamento do dia de competência deve gerar alerta wrong_day_real_file'
+  );
+});
+
+test('auditoria de rotina esperada alerta falta de relatório salvo (2 C6 + 1 Rede), arquivo com R$ 0,00 na data e C6Pay Resumido', () => {
+  const routineProfile = {
+    version: 1,
+    updatedAt: '2026-11-26T16:00:00Z',
+    banks: {
+      banco_336: {
+        bankKey: 'banco_336',
+        bankCode: '336',
+        bankLabel: 'Banco C6',
+        acctLast4: '0726',
+        seenCount: 5,
+        lastSeenDate: '2026-11-25',
+        enabled: true
+      }
+    },
+    reports: {
+      adquirente_rede: { fileType: 'adquirente_rede', seenCount: 5, lastSeenDate: '2026-11-25', enabled: true },
+      adquirente_c6pay: { fileType: 'adquirente_c6pay', seenCount: 4, lastSeenDate: '2026-11-25', enabled: true }
+    }
+  };
+
+  const pdvFile = {
+    fileType: 'pdv_vendas',
+    fileName: 'PlanilhaRecebimento.xlsx',
+    status: 'ok',
+    periodStart: '2026-11-24',
+    periodEnd: '2026-11-24',
+    rows: [
+      { category: 'cartao', methodRaw: 'CREDITO', dateStr: '2026-11-24', timeStr: '11:00:00', secondsOfDay: 39600, amountCents: 10000 },
+      { category: 'cartao', methodRaw: 'DEBITO', dateStr: '2026-11-24', timeStr: '12:00:00', secondsOfDay: 43200, amountCents: 97519 },
+      { category: 'pix', methodRaw: 'PIX', dateStr: '2026-11-24', timeStr: '13:00:00', secondsOfDay: 46800, amountCents: 5000 }
+    ]
+  };
+  const ofxC6 = {
+    fileType: 'extrato_ofx',
+    fileName: 'Extrato_C6_24.ofx',
+    status: 'ok',
+    periodStart: '2026-11-24',
+    periodEnd: '2026-11-24',
+    summary: { bankKey: 'banco_336', bankCode: '336', bankLabel: 'Banco C6', acctLast4: '0726' },
+    rows: [
+      { source: 'ofx', ofxClass: 'pix_cliente', category: 'pix', bankKey: 'banco_336', bankCode: '336', bankLabel: 'Banco C6', acctLast4: '0726', dateStr: '2026-11-24', timeStr: '13:00:00', secondsOfDay: 46800, amountCents: 5000, hasTime: true }
+    ]
+  };
+  const redeFile = {
+    fileType: 'adquirente_rede',
+    fileName: 'Rede_24.csv',
+    status: 'ok',
+    periodStart: '2026-11-24',
+    periodEnd: '2026-11-24',
+    rows: [
+      { rowIndex: 1, source: 'rede', isApproved: true, category: 'cartao', subType: 'credito', amountCents: 10000, netCents: 9700, dateStr: '2026-11-24', timeStr: '11:00:00', secondsOfDay: 39600 }
+    ]
+  };
+
+  // Cenário 1: Mandou Rede + Banco C6, mas faltou Maquininha C6 Pay esperada na rotina
+  const missingC6pRes = runCashReconciliation({
+    parsedFiles: [pdvFile, ofxC6, redeFile],
+    formulaConfig: DEFAULT_FORMULA_CONFIG,
+    companyRoutineProfile: routineProfile
+  });
+  const missingC6pWarn = missingC6pRes.periodDiagnostics.validationWarnings.find((w) => w.code === 'missing_routine_report');
+  assert.ok(missingC6pWarn, 'Deve alertar quando C6 Pay salva na rotina não for enviada mesmo tendo Rede');
+  assert.match(missingC6pWarn.title + ' ' + missingC6pWarn.message, /C6 Pay/i);
+  assert.equal(missingC6pWarn.severity, 'error');
+
+  // Cenário 2: Arquivo C6 Pay enviado no dia mas sem NENHUM valor válido aprovado (R$ 0,00 em 24/11)
+  const zeroC6PayFile = {
+    fileType: 'adquirente_c6pay',
+    fileName: 'C6Pay_Negadas.xlsx',
+    status: 'ok',
+    periodStart: '2026-11-24',
+    periodEnd: '2026-11-24',
+    rows: [
+      { rowIndex: 1, source: 'c6pay', isApproved: false, statusRaw: 'Negada', category: 'cartao', subType: 'credito', amountCents: 97519, netCents: 0, dateStr: '2026-11-24', timeStr: '12:00:00', secondsOfDay: 43200, hasTime: true }
+    ]
+  };
+  const zeroRes = runCashReconciliation({
+    parsedFiles: [pdvFile, ofxC6, redeFile, zeroC6PayFile],
+    formulaConfig: DEFAULT_FORMULA_CONFIG,
+    companyRoutineProfile: routineProfile
+  });
+  const zeroWarn = zeroRes.periodDiagnostics.validationWarnings.find((w) => w.code === 'zero_value_date_file');
+  assert.ok(zeroWarn, 'Arquivo com linhas na data porém R$ 0,00 em vendas aprovadas/recebimentos deve emitir zero_value_date_file');
+  assert.equal(zeroWarn.severity, 'error');
+  assert.match(zeroWarn.message, /C6Pay_Negadas\.xlsx/);
+
+  // Cenário 3: Mandou C6Pay_Resumido agrupado com R$ 975,19 em cartões e R$ 182,50 de PIX agrupado (já coberto pelo OFX)
+  const resumidoC6PayFile = {
+    fileType: 'adquirente_c6pay',
+    fileName: 'Relatorio-Vendas-C6Pay_Resumido.xlsx',
+    status: 'ok',
+    periodStart: '2026-11-24',
+    periodEnd: '2026-11-24',
+    summary: { isSummaryReport: true },
+    rows: [
+      { rowIndex: 1, source: 'c6pay', isApproved: true, category: 'cartao', subType: 'debito', amountCents: 97519, netCents: 96000, dateStr: '2026-11-24', timeStr: '', secondsOfDay: 0, hasTime: false },
+      { rowIndex: 2, source: 'c6pay', isApproved: true, category: 'pix', subType: 'pix', amountCents: 18250, netCents: 18250, dateStr: '2026-11-24', timeStr: '', secondsOfDay: 0, hasTime: false }
+    ]
+  };
+  const resumidoRes = runCashReconciliation({
+    parsedFiles: [pdvFile, ofxC6, redeFile, resumidoC6PayFile],
+    formulaConfig: DEFAULT_FORMULA_CONFIG,
+    companyRoutineProfile: routineProfile
+  });
+  const cartaoRow = resumidoRes.mirrorRows.find((r) => r.key === 'cartao');
+  const pixRow = resumidoRes.mirrorRows.find((r) => r.key === 'pix');
+  assert.equal(cartaoRow.realCents, 107519, 'Cartões devem somar Rede + C6Pay Resumido');
+  assert.equal(pixRow.realCents, 5000, 'PIX agrupado do C6Pay Resumido não deve duplicar sobre o extrato OFX presente');
+  assert.ok(
+    resumidoRes.periodDiagnostics.validationWarnings.some((w) => w.code === 'summary_acquirer_file'),
+    'C6Pay Resumido deve alertar operador para enviar o modelo Detalhado'
+  );
 });

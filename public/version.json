@@ -1,5 +1,5 @@
 {
-  "version": "8.4.7",
-  "buildDate": "2026-11-27T20:45:00.000Z",
-  "summary": "Hotfix Crítico de Produção: Eliminação do Loop Infinito de Requisições no Radar Ao Vivo de Fluxos (Typebot) com Trava de Concorrência e Debounce Realtime"
+  "version": "8.4.8",
+  "buildDate": "2026-11-28T00:18:33.183Z",
+  "summary": "Conferência de Caixa: Normalização Silenciosa Multi-Dias, Leitura C6 Pay Resumido, Rotina Bancária Salva com Alertas Operacionais e Correção de Ocultar Detalhes"
 }
