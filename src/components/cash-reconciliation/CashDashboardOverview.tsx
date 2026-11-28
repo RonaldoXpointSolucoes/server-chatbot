@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { CashSessionRow } from '../../services/cashReconciliationService';
 import {
+  CashPendingAgendaItem,
   CompanyCashRoutineProfile,
   LearnedBankRoutineEntry,
   formatCents
@@ -40,6 +41,7 @@ import { normalizeBrazilWhatsappNumber } from '../../utils/cashReportExportHelpe
 import { DATADIVAS_REPORT_SPECS, BANK_REPORT_SPECS } from '../../utils/cashReportCompleteness.mjs';
 import { CashHealthHistoryCard, HistoricalStatsData } from './CashHealthDashboard';
 import { CashAddRoutineBankBar } from './CashAddRoutineBankBar';
+import { CashPendingAgendaBanner } from './CashPendingAgendaBanner';
 
 type DashboardFilterKey = 'all' | 'closed' | 'draft' | 'diff';
 
@@ -70,6 +72,8 @@ export interface CashDashboardOverviewProps {
   onToggleRoutineBank?: (bankKey: string, enabled: boolean) => void;
   onToggleRoutineReport?: (fileType: string, enabled: boolean) => void;
   onAddRoutineBank?: (bank: { bankCode: string; bankLabel: string; acctLast4?: string }) => void;
+  agendaItems?: CashPendingAgendaItem[];
+  onOpenAgenda?: (focusItemId?: string, quickSettle?: boolean) => void;
 }
 
 function formatCreatedTimeHm(rawTimestamp?: string | null): string {
@@ -147,7 +151,9 @@ export function CashDashboardOverview({
   onDeleteSession,
   onToggleRoutineBank,
   onToggleRoutineReport,
-  onAddRoutineBank
+  onAddRoutineBank,
+  agendaItems = [],
+  onOpenAgenda
 }: CashDashboardOverviewProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<DashboardFilterKey>('all');
@@ -282,6 +288,11 @@ export function CashDashboardOverview({
           + Nova Conferência
         </button>
       </div>
+
+      {/* Alertas Cross-Dias da Agenda de Pendências (Clientes p/ pagar & Cupons pendentes) */}
+      {onOpenAgenda && (
+        <CashPendingAgendaBanner items={agendaItems} onOpenAgenda={onOpenAgenda} />
+      )}
 
       {/* Banner de Recuperação de Rascunho Ativo */}
       {hasActiveDraft && (

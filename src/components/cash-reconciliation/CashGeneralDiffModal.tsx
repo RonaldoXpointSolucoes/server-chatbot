@@ -12,6 +12,7 @@ import {
   XCircle
 } from 'lucide-react';
 import {
+  CashPendingAgendaItem,
   CashReconciliationItem,
   CashReconciliationResult,
   CashResolutionAction,
@@ -34,6 +35,7 @@ export type GeneralDiffTabKey = 'tabela' | 'sugestoes' | 'canais' | 'conciliados
 interface CashGeneralDiffModalProps {
   result: CashReconciliationResult;
   manualResolutions?: CashResolutionAction[];
+  agendaItems?: CashPendingAgendaItem[];
   initialTab?: GeneralDiffTabKey;
   onConfirmSuggestion: (suggestionId: string) => void;
   onRejectSuggestion: (suggestionId: string) => void;
@@ -41,6 +43,8 @@ interface CashGeneralDiffModalProps {
   onIgnoreItem: (side: 'system' | 'real', id: string) => void;
   onReclassifySystemItem?: (systemId: string, targetCategory: CashSystemCategoryTarget | null) => void;
   onReclassifySystemItems?: (systemIds: string[], targetCategory: CashSystemCategoryTarget) => void;
+  onScheduleAgendaFromItem?: (item: CashReconciliationItem) => void;
+  onSettleCrossDayAgendaMatch?: (agendaItem: CashPendingAgendaItem, bankItem: CashReconciliationItem) => void;
   onUndoLastResolution?: () => void;
   onOpenMirrorCategory?: (mirrorKey: string) => void;
   onClose: () => void;
@@ -55,6 +59,7 @@ function formatSignedCents(cents: number): string {
 export function CashGeneralDiffModal({
   result,
   manualResolutions = [],
+  agendaItems = [],
   initialTab,
   onConfirmSuggestion,
   onRejectSuggestion,
@@ -62,6 +67,8 @@ export function CashGeneralDiffModal({
   onIgnoreItem,
   onReclassifySystemItem,
   onReclassifySystemItems,
+  onScheduleAgendaFromItem,
+  onSettleCrossDayAgendaMatch,
   onUndoLastResolution,
   onOpenMirrorCategory,
   onClose
@@ -424,8 +431,12 @@ export function CashGeneralDiffModal({
                   missingItems={summary.missingItems}
                   extraItems={summary.extraItems}
                   extraSystemPoolItems={systemPoolItems}
+                  agendaItems={agendaItems}
+                  currentReferenceDate={result.referenceDate}
                   onManualLink={onManualLink}
                   onIgnoreItem={onIgnoreItem}
+                  onScheduleAgendaFromItem={onScheduleAgendaFromItem}
+                  onSettleCrossDayAgendaMatch={onSettleCrossDayAgendaMatch}
                   onInspectOperation={(it) => setInspectedOp({ item: it, paired: pairedByItemId.get(it.id) || [] })}
                 />
               </div>
@@ -590,6 +601,7 @@ export function CashGeneralDiffModal({
         pairedItems={inspectedOp?.paired || []}
         result={result}
         onReclassifySystemItem={onReclassifySystemItem}
+        onScheduleAgendaFromItem={onScheduleAgendaFromItem}
         onClose={() => setInspectedOp(null)}
       />
     </div>

@@ -11,7 +11,8 @@ import {
   Clock,
   Receipt,
   ArrowRightLeft,
-  RotateCcw
+  RotateCcw,
+  CalendarClock
 } from 'lucide-react';
 import {
   CashReconciliationItem,
@@ -35,6 +36,7 @@ interface CashOperationDetailModalProps {
   pairedItems?: CashReconciliationItem[];
   result: CashReconciliationResult;
   onReclassifySystemItem?: (systemId: string, targetCategory: CashSystemCategoryTarget | null) => void;
+  onScheduleAgendaFromItem?: (item: CashReconciliationItem) => void;
   onClose: () => void;
 }
 
@@ -43,6 +45,7 @@ export function CashOperationDetailModal({
   pairedItems = [],
   result,
   onReclassifySystemItem,
+  onScheduleAgendaFromItem,
   onClose
 }: CashOperationDetailModalProps) {
   useEffect(() => {
@@ -170,15 +173,30 @@ export function CashOperationDetailModal({
                   )}
                 </div>
 
-                {systemAnchor.category === 'dinheiro' && (
-                  <button
-                    type="button"
-                    onClick={() => onReclassifySystemItem(systemAnchor.id, 'pendente')}
-                    className="px-3 py-1.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-[11px] font-black inline-flex items-center gap-1.5 shadow-sm active:scale-95 transition-all"
-                  >
-                    <ArrowRightLeft size={12} /> Dinheiro → Nota Pendente
-                  </button>
-                )}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {systemAnchor.category === 'dinheiro' && (
+                    <button
+                      type="button"
+                      onClick={() => onReclassifySystemItem(systemAnchor.id, 'pendente')}
+                      className="px-3 py-1.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-[11px] font-black inline-flex items-center gap-1.5 shadow-sm active:scale-95 transition-all"
+                    >
+                      <ArrowRightLeft size={12} /> Dinheiro → Nota Pendente
+                    </button>
+                  )}
+                  {onScheduleAgendaFromItem && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onScheduleAgendaFromItem(systemAnchor);
+                        onClose();
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500 border border-amber-500/45 text-amber-700 hover:text-white dark:text-amber-300 text-[11px] font-black inline-flex items-center gap-1.5 active:scale-95 transition-all"
+                      title="Documentar falha no pagamento e deixar em espera na Agenda até o cliente pagar em outro dia"
+                    >
+                      <CalendarClock size={12} /> Deixar Em Espera (Agenda)
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="flex flex-wrap items-center gap-1.5">

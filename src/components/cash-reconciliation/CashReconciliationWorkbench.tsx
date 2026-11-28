@@ -17,6 +17,8 @@ import {
   EyeOff,
   AlertTriangle,
   Calendar,
+  CalendarClock,
+  Receipt,
   Table2,
   RotateCcw,
   ShoppingBag
@@ -26,6 +28,7 @@ import {
   CashAuditInsights,
   CashManualInputs,
   CashMirrorRow,
+  CashPendingAgendaItem,
   CashReconciliationItem,
   CashReconciliationResult,
   CashSuggestion,
@@ -35,6 +38,8 @@ import {
 import { CashRuleRow } from '../../services/cashReconciliationService';
 import { filterVisibleFormulaRules } from '../../utils/cashFilePasswordHelper.mjs';
 import { formatReopenedTableAudit } from '../../utils/cashOperationItemsHelper.mjs';
+import { findCrossDayAgendaMatchesForExtras } from '../../utils/cashPendingAgendaHelper.mjs';
+import { CashAgendaInitialDraft } from './CashPendingAgendaModal';
 import {
   RECONCILIATION_GLOSSARY,
   buildLinkableSystemPool,
@@ -74,6 +79,11 @@ interface CashReconciliationWorkbenchProps {
   onIgnoreItem: (side: 'system' | 'real', id: string) => void;
   onReclassifySystemItem: (systemId: string, targetCategory: CashSystemCategoryTarget | null) => void;
   onReclassifySystemItems?: (systemIds: string[], targetCategory: CashSystemCategoryTarget) => void;
+  agendaItems?: CashPendingAgendaItem[];
+  onOpenScheduleAgenda?: (draft?: CashAgendaInitialDraft) => void;
+  onScheduleAgendaFromItem?: (item: CashReconciliationItem) => void;
+  onSettleCrossDayAgendaMatch?: (agendaItem: CashPendingAgendaItem, bankItem: CashReconciliationItem) => void;
+  onOpenAgendaItem?: (itemId: string, quickSettle?: boolean) => void;
   manualResolutionsCount?: number;
   onUndoLastResolution?: () => void;
   rules: CashRuleRow[];
@@ -111,6 +121,11 @@ export function CashReconciliationWorkbench({
   onIgnoreItem,
   onReclassifySystemItem,
   onReclassifySystemItems,
+  agendaItems = [],
+  onOpenScheduleAgenda,
+  onScheduleAgendaFromItem,
+  onSettleCrossDayAgendaMatch,
+  onOpenAgendaItem,
   manualResolutionsCount = 0,
   onUndoLastResolution,
   rules,
@@ -528,20 +543,78 @@ export function CashReconciliationWorkbench({
                         Justificativas de Gaveta ({manualAdjustments.length})
                       </span>
                       <span className="block text-[10px] text-slate-500 dark:text-[#8696a0]">
-                        Saídas ou reforços não lançados no PDV (ex.: Bolo da Marcela)
+                        Saídas ou reforços não lançados no PDV (ex.: Bolo da Marcela ou cupom pendente)
                       </span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAdjFormError('');
-                        setShowAdjustmentForm((v) => !v);
-                      }}
-                      className="px-2.5 py-1 rounded-lg bg-[#00a884] hover:bg-[#008f6f] text-white text-[10.5px] font-bold flex items-center gap-1 shrink-0 transition-all active:scale-95"
-                    >
-                      <Plus size={12} /> {showAdjustmentForm ? 'Fechar' : 'Justificar'}
-                    </button>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {onOpenScheduleAgenda && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const gapCents =
+                              Math.abs(Number(cashRow?.diffCents || 0)) > 100
+                                ? Math.abs(Number(cashRow?.diffCents || 0))
+                                : Math.max(0, Number(drawer.expectedAfterSangriaCents || 0));
+                            onOpenScheduleAgenda({
+                              kind: 'missing_receipt',
+                              amountCents: gapCents,
+                              originDate: result.referenceDate,
+                              title: 'Nota / Cupom Fiscal Pendente (Gaveta)',
+                              description:
+                                'Falta de dinheiro na gaveta aguardando entrega de nota ou cupom fiscal de compra para registrar depois.',
+                              operatorName: result.operatorName || '',
+                              sourceCategory: 'dinheiro'
+                            });
+                          }}
+                          className="px-2 py-1 rounded-lg border border-amber-500/45 bg-amber-500/15 hover:bg-amber-500 text-amber-700 hover:text-white dark:text-amber-300 text-[10px] font-black flex items-center gap-1 transition-all"
+                          title="Agendar falta da gaveta como Nota/Cupom Fiscal pendente para registrar depois"
+                        >
+                          <CalendarClock size={11} /> Nota Depois
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAdjFormError('');
+                          setShowAdjustmentForm((v) => !v);
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-[#00a884] hover:bg-[#008f6f] text-white text-[10.5px] font-bold flex items-center gap-1 transition-all active:scale-95"
+                      >
+                        <Plus size={12} /> {showAdjustmentForm ? 'Fechar' : 'Justificar'}
+                      </button>
+                    </div>
                   </div>
+
+                  {(() => {
+                    const openReceipts = (agendaItems || []).filter(
+                      (ag) => ag.status === 'waiting' && ag.kind === 'missing_receipt'
+                    );
+                    if (openReceipts.length === 0) return null;
+                    return (
+                      <div className="space-y-1 pt-0.5">
+                        {openReceipts.slice(0, 3).map((rec) => (
+                          <div
+                            key={rec.id}
+                            className="flex items-center justify-between gap-2 rounded-lg border border-orange-500/35 bg-orange-500/10 px-2.5 py-1.5 text-[10.5px]"
+                          >
+                            <span className="min-w-0 truncate font-semibold text-orange-900 dark:text-orange-200 flex items-center gap-1">
+                              <Receipt size={11} className="shrink-0" />
+                              <span className="truncate">{rec.title} ({formatCents(rec.amountCents)})</span>
+                            </span>
+                            {onOpenAgendaItem && (
+                              <button
+                                type="button"
+                                onClick={() => onOpenAgendaItem(rec.id, true)}
+                                className="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black shrink-0"
+                              >
+                                Chegou Nota!
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
 
                   {manualAdjustments.length > 0 && (
                     <div className="space-y-1.5">
@@ -1011,8 +1084,12 @@ export function CashReconciliationWorkbench({
             missingItems={result.missingInBank || []}
             extraItems={result.extraInBank || []}
             extraSystemPoolItems={buildLinkableSystemPool(result) as CashReconciliationItem[]}
+            agendaItems={agendaItems}
+            currentReferenceDate={result.referenceDate}
             onManualLink={onManualLink}
             onIgnoreItem={onIgnoreItem}
+            onScheduleAgendaFromItem={onScheduleAgendaFromItem}
+            onSettleCrossDayAgendaMatch={onSettleCrossDayAgendaMatch}
             onInspectOperation={(it) => setInspectedOp({ item: it, paired: pairedByItemId.get(it.id) || [] })}
           />
         )}
@@ -1209,13 +1286,25 @@ export function CashReconciliationWorkbench({
                         </div>
                       ) : null}
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => onIgnoreItem('system', it.id)}
-                      className="self-start sm:self-center px-3 py-1.5 rounded-lg border border-slate-200 dark:border-[#2a3942] hover:bg-slate-100 dark:hover:bg-[#111b21] text-[11px] font-bold text-slate-600 dark:text-[#aebac1]"
-                    >
-                      Justificar / Ocultar
-                    </button>
+                    <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                      {onScheduleAgendaFromItem && (
+                        <button
+                          type="button"
+                          onClick={() => onScheduleAgendaFromItem(it)}
+                          className="self-start sm:self-center px-3 py-1.5 rounded-lg border border-amber-500/40 bg-amber-500/15 hover:bg-amber-500 text-amber-700 hover:text-white dark:text-amber-300 text-[11px] font-black inline-flex items-center gap-1 transition-all"
+                          title="Documentar falha no pagamento e deixar em espera na Agenda até o cliente pagar"
+                        >
+                          <CalendarClock size={12} /> Deixar Em Espera
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => onIgnoreItem('system', it.id)}
+                        className="self-start sm:self-center px-3 py-1.5 rounded-lg border border-slate-200 dark:border-[#2a3942] hover:bg-slate-100 dark:hover:bg-[#111b21] text-[11px] font-bold text-slate-600 dark:text-[#aebac1]"
+                      >
+                        Justificar / Ocultar
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1260,31 +1349,50 @@ export function CashReconciliationWorkbench({
               </p>
             ) : (
               <div className="divide-y divide-slate-100 dark:divide-[#2a3942]">
-                {filteredExtra.map((it: CashReconciliationItem) => (
-                  <div key={it.id} className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-black text-indigo-600 dark:text-indigo-400 tabular-nums">
-                          {formatCents(it.amountCents)}
-                        </span>
-                        <span className="text-xs font-bold text-slate-800 dark:text-[#e9edef]">{it.description}</span>
-                        <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-[#111b21] text-[10px] font-bold uppercase text-slate-500">
-                          {it.source}
-                        </span>
+                {filteredExtra.map((it: CashReconciliationItem) => {
+                  const crossDayMatch = (
+                    findCrossDayAgendaMatchesForExtras([it], agendaItems, result.referenceDate) as Array<{
+                      agendaItem: CashPendingAgendaItem;
+                    }>
+                  )[0];
+
+                  return (
+                    <div key={it.id} className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-black text-indigo-600 dark:text-indigo-400 tabular-nums">
+                            {formatCents(it.amountCents)}
+                          </span>
+                          <span className="text-xs font-bold text-slate-800 dark:text-[#e9edef]">{it.description}</span>
+                          <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-[#111b21] text-[10px] font-bold uppercase text-slate-500">
+                            {it.source}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 dark:text-[#8696a0]">
+                          {formatDateBr(it.dateStr)} {it.timeStr} • Ref: {it.referenceCode || '-'} • Terminal: {it.terminalName || '-'}
+                        </p>
                       </div>
-                      <p className="text-[11px] text-slate-500 dark:text-[#8696a0]">
-                        {formatDateBr(it.dateStr)} {it.timeStr} • Ref: {it.referenceCode || '-'} • Terminal: {it.terminalName || '-'}
-                      </p>
+                      <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                        {crossDayMatch && onSettleCrossDayAgendaMatch && (
+                          <button
+                            type="button"
+                            onClick={() => onSettleCrossDayAgendaMatch(crossDayMatch.agendaItem, it)}
+                            className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-[11px] font-black inline-flex items-center gap-1 shadow-sm animate-pulse"
+                          >
+                            <CalendarClock size={12} /> Quitar Pendência ({formatDateBr(crossDayMatch.agendaItem.originDate)})
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => onIgnoreItem('real', it.id)}
+                          className="self-start sm:self-center px-3 py-1.5 rounded-lg border border-slate-200 dark:border-[#2a3942] hover:bg-slate-100 dark:hover:bg-[#111b21] text-[11px] font-bold text-slate-600 dark:text-[#aebac1]"
+                        >
+                          Ignorar (Não-PDV)
+                        </button>
+                      </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => onIgnoreItem('real', it.id)}
-                      className="self-start sm:self-center px-3 py-1.5 rounded-lg border border-slate-200 dark:border-[#2a3942] hover:bg-slate-100 dark:hover:bg-[#111b21] text-[11px] font-bold text-slate-600 dark:text-[#aebac1]"
-                    >
-                      Ignorar (Não-PDV)
-                    </button>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
 
@@ -1909,6 +2017,7 @@ function CashAuditInsightsSection({ insights }: { insights: CashAuditInsights })
         pairedItems={inspectedOp?.paired || []}
         result={result}
         onReclassifySystemItem={onReclassifySystemItem}
+        onScheduleAgendaFromItem={onScheduleAgendaFromItem}
         onClose={() => setInspectedOp(null)}
       />
     </div>

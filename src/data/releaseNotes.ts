@@ -712,6 +712,91 @@ export const BAILEYS_18_FEATURES_NOTES: ReleaseNoteItem[] = [
  */
 export const APP_RELEASES: VersionRelease[] = [
   {
+    version: '8.5.1',
+    date: '2026-11-27',
+    summary: 'Agenda Financeira Cross-Dias: Pagamentos Em Espera, Quitação Automática em Dias Futuros e Pendência de Notas/Cupons Fiscais na Gaveta',
+    notes: [
+      {
+        id: 'feat-cash-pending-agenda-cross-day-851',
+        category: 'features',
+        title: 'Agenda Financeira Cross-Dias (Clientes Em Espera + Notificações até Resolver)',
+        description: 'Nova ferramenta para documentar vendas cujo pagamento falhou (ex.: cartão recusado na mesa) e acompanhar entre dias e fechamentos até o cliente pagar: cria alertas pulsantes no topo da tela e no Dashboard, notifica itens vencidos/para hoje, detecta automaticamente recebimentos compatíveis em extratos de dias futuros para quitação em 1 clique ("Quitar (XX/XX)"), gera link de cobrança WhatsApp e registra trilha de histórico por empresa.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+        guide: {
+          moduleGroup: 'system',
+          moduleLabel: 'Conferência de Caixa • Agenda Cross-Dias (Pagamentos em Espera)',
+          purpose: 'Garantir que nenhuma venda sem pagamento (como falha na maquininha ou cliente que ficou de pagar depois) seja esquecida quando o dia vira, notificando em todos os fechamentos até a quitação efetiva no caixa ou no banco.',
+          whereToAccess: [
+            '1. Menu Lateral Esquerdo ➔ Conferência Caixa (/conferencia-caixa)',
+            '2. Na barra superior ou no Banner do Dashboard, clique em "Agenda" / "Abrir Agenda & Notificações"',
+            '3. Para agendar direto de uma venda sem recebimento, clique no botão "Em Espera" na tabela lado a lado, na aba "Faltam" ou em "Deixar Em Espera (Agenda)" nos detalhes do pedido',
+            '4. Quando o pagamento entrar em outro dia como sobra no banco, clique no botão pulsante "Quitar (XX/XX)" na coluna de sobras ou abra a Agenda para marcar como pago'
+          ],
+          howToTest: [
+            '1. Abra um fechamento com uma venda pendente na coluna da esquerda (ex.: MESA 002 • DEBITO R$ 72,00) e clique em "Em Espera".',
+            '2. Escolha o vencimento (ex.: Amanhã ou +3d), salve e observe o Banner pulsante da Agenda Financeira no topo da Conferência de Caixa e no Dashboard.',
+            '3. Abra o modal da Agenda, confira os filtros ("Em Espera", "Vencidas / Hoje", "Resolvidas") e finalize clicando em "Pagamento Realizado".'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Tela: Conferência de Caixa (/conferencia-caixa) ➔ Cabeçalho, Banner & Tabela Conciliação',
+            contextElements: ['🔔 Banner Agenda Cross-Dias (Pulsante)', '⚠️ Falta PDV: Em Espera', '💚 Sobra Banco Futura: Quitar (XX/XX)', '📅 Botão Agenda no Topo'],
+            targetButtonLabel: '👆 Clique Aqui: Em Espera / Botão Agenda',
+            targetButtonPosition: 'Coluna de ações de Vendas sem Recebimento ou barra superior / banner da Conferência de Caixa',
+            visualPreviewVariant: 'hub-account-limits'
+          },
+          quickAction: {
+            label: 'Abrir Conferência de Caixa (Agenda)',
+            route: '/conferencia-caixa'
+          }
+        }
+      },
+      {
+        id: 'feat-cash-missing-receipt-drawer-agenda-851',
+        category: 'features',
+        title: 'Registro Posterior de Notas e Cupons Fiscais Faltantes na Gaveta ("Nota Depois")',
+        description: 'Permite registrar pendências de nota ou cupom fiscal quando houver falta de dinheiro em gaveta por compra ainda sem comprovante: anexe fotos ou PDF do cupom posteriormente, controle o prazo na mesma Agenda Cross-Dias e lance automaticamente a justificativa correspondente na gaveta ao dar baixa.',
+        tag: 'NOVIDADE',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+        guide: {
+          moduleGroup: 'system',
+          moduleLabel: 'Conferência de Caixa • Gaveta & Notas/Cupons Pendentes',
+          purpose: 'Evitar que faltas de dinheiro na gaveta referentes a compras sem nota/cupom no fechamento fiquem sem rastreio, permitindo documentar no momento da conferência e anexar a nota depois com abatimento automático.',
+          whereToAccess: [
+            '1. Menu Lateral Esquerdo ➔ Conferência Caixa (/conferencia-caixa)',
+            '2. Na aba "Espelho RelConferencia", coluna esquerda "Fechamento Físico da Gaveta" ➔ bloco "Justificativas de Gaveta"',
+            '3. Clique no botão "Nota Depois" para agendar o valor faltante como pendência de comprovante fiscal',
+            '4. Quando o cupom fiscal chegar, anexe o arquivo na Agenda e confirme para lançar a justificativa na gaveta'
+          ],
+          howToTest: [
+            '1. Em um caixa com falta esperada em dinheiro (ex.: R$ 50,81), clique em "Nota Depois" no card de Justificativas de Gaveta.',
+            '2. Informe a descrição da compra/fornecedor e salve na Agenda.',
+            '3. Reabra a pendência pelo badge da gaveta ou Banner, anexe uma imagem de teste e clique em registrar o comprovante.'
+          ],
+          uiSnapshot: {
+            screenTitle: 'Tela: Espelho RelConferencia ➔ Fechamento Físico da Gaveta',
+            contextElements: ['💵 Esperado Pós-Sangria', '🧾 Justificativas de Gaveta', '➕ + Justificar', '📎 Anexo Foto/PDF'],
+            targetButtonLabel: '👆 Clique Aqui: Nota Depois',
+            targetButtonPosition: 'Cartão Justificativas de Gaveta na coluna esquerda da aba Espelho',
+            visualPreviewVariant: 'hub-quick-replies'
+          },
+          quickAction: {
+            label: 'Abrir Conferência de Caixa',
+            route: '/conferencia-caixa'
+          }
+        }
+      },
+      {
+        id: 'fix-cash-health-roadmap-operation-detail-props-851',
+        category: 'fixes',
+        title: 'Correção na Abertura do Modal de Detalhes via Roteiro de Saúde',
+        description: 'Corrigido o repasse de propriedades para o modal de detalhes de operação dentro do modal "Saúde do Caixa", garantindo exibição completa do pedido, troca de forma de pagamento e acesso ao botão "Deixar Em Espera (Agenda)".',
+        tag: 'CORREÇÃO',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+      }
+    ]
+  },
+  {
     version: '8.5.0',
     date: '2026-11-27',
     summary: 'Conferência de Caixa Turbinada: Botão Saúde do Caixa Clicável (Roteiro p/ 100% + Batimento Rápido + Caixas Forçados Pulsantes), Reclassificação Dinheiro → Pendente, Máscara BRL Automática e Comparativo de Economia entre Maquininhas',

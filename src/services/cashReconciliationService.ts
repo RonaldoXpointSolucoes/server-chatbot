@@ -29,6 +29,14 @@ import {
   saveRoutineProfileToStorage
 } from '../utils/cashCompanyRoutineHelper.mjs';
 import {
+  CASH_AGENDA_RULE_PATTERN,
+  loadCashAgendaFromStorage,
+  mergeCashAgendaLists,
+  normalizeCashAgendaItem,
+  parseCashAgendaFromRules,
+  saveCashAgendaToStorage
+} from '../utils/cashPendingAgendaHelper.mjs';
+import {
   CASH_WHATSAPP_RULE_PATTERN,
   extractCashWhatsappNumberFromRules,
   normalizeBrazilWhatsappNumber
@@ -41,6 +49,7 @@ import {
   CashMirrorRow,
   CashDrawerSummary,
   CashFinancialMetrics,
+  CashPendingAgendaItem,
   CashReconciliationResult,
   CashReportCompleteness,
   CashResolutionAction,
@@ -865,6 +874,51 @@ export async function saveCompanyCashRoutine(
   });
 
   return { rule };
+}
+
+export function getCompanyCashAgenda(
+  tenantId: string,
+  rules: CashRuleRow[] = []
+): CashPendingAgendaItem[] {
+  const cleanTenantId = String(tenantId || '').trim();
+  if (!cleanTenantId) return [];
+
+  const tenantRules = Array.isArray(rules)
+    ? rules.filter((r) => !r?.tenant_id || r.tenant_id === cleanTenantId)
+    : [];
+
+  const storage = getBrowserStorage();
+  const localItems = loadCashAgendaFromStorage(storage, cleanTenantId);
+  const remoteItems = parseCashAgendaFromRules(tenantRules, cleanTenantId);
+  return mergeCashAgendaLists(localItems, remoteItems) as CashPendingAgendaItem[];
+}
+
+export async function saveCompanyCashAgenda(
+  tenantId: string,
+  items: CashPendingAgendaItem[]
+): Promise<{ items: CashPendingAgendaItem[]; rule: CashRuleRow | null }> {
+  const cleanTenantId = String(tenantId || '').trim();
+  if (!cleanTenantId) {
+    return { items: [], rule: null };
+  }
+
+  const normalized = (Array.isArray(items) ? items : [])
+    .map((it) => normalizeCashAgendaItem({ ...it, tenantId: cleanTenantId }))
+    .filter(Boolean) as CashPendingAgendaItem[];
+
+  const storage = getBrowserStorage();
+  if (storage) {
+    saveCashAgendaToStorage(storage, cleanTenantId, normalized);
+  }
+
+  const { rule } = await upsertEngineSettingRule(cleanTenantId, {
+    pattern: CASH_AGENDA_RULE_PATTERN,
+    targetValue: JSON.stringify(normalized),
+    notes: 'Agenda Cross-Dias de Pendências & Notas Fiscais de Caixa',
+    label: 'Agenda de pendências'
+  });
+
+  return { items: normalized, rule };
 }
 
 interface FoodNextInstanceRow {

@@ -552,6 +552,54 @@ export interface CashAiAnalysis {
   }>;
 }
 
+export type CashAgendaItemKind = 'payment_awaiting' | 'missing_receipt';
+export type CashAgendaItemStatus = 'waiting' | 'resolved' | 'cancelled';
+
+export interface CashAgendaAttachment {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  dataUrl: string;
+  uploadedAt: string;
+}
+
+export interface CashAgendaHistoryLog {
+  id: string;
+  at: string;
+  action: 'created' | 'contacted' | 'rescheduled' | 'resolved' | 'reopened' | 'note';
+  text: string;
+  author?: string;
+}
+
+export interface CashPendingAgendaItem {
+  id: string;
+  tenantId: string;
+  kind: CashAgendaItemKind;
+  status: CashAgendaItemStatus;
+  amountCents: number;
+  originDate: string;
+  dueDate: string;
+  title: string;
+  description: string;
+  customerOrSupplier: string;
+  contactPhone?: string;
+  operatorName?: string;
+  sourceSessionId?: string | null;
+  sourceItemId?: string | null;
+  sourceCategory?: string;
+  attachments?: CashAgendaAttachment[];
+  history?: CashAgendaHistoryLog[];
+  resolvedAt?: string | null;
+  resolvedDate?: string | null;
+  resolvedMethod?: 'pix' | 'cartao' | 'dinheiro' | 'transferencia' | 'nota_fiscal' | 'outros';
+  resolvedSessionId?: string | null;
+  resolvedBankItemId?: string | null;
+  resolvedReceiptNumber?: string;
+  resolvedNotes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export function formatCents(cents: number | null | undefined): string {
   const value = Number(cents || 0) / 100;
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });

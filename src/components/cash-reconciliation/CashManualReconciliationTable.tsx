@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
+  CalendarClock,
   Check,
   CheckCircle2,
   EyeOff,
@@ -11,7 +12,12 @@ import {
   Sparkles,
   X
 } from 'lucide-react';
-import { CashReconciliationItem, formatCents } from '../../types/cashReconciliation';
+import {
+  CashPendingAgendaItem,
+  CashReconciliationItem,
+  formatCents
+} from '../../types/cashReconciliation';
+import { findCrossDayAgendaMatchesForExtras } from '../../utils/cashPendingAgendaHelper.mjs';
 import {
   RECONCILIATION_GLOSSARY,
   computeSelectionDiffMeta,
@@ -37,9 +43,13 @@ export interface CashManualReconciliationTableProps {
   missingItems: CashReconciliationItem[];
   extraItems: CashReconciliationItem[];
   extraSystemPoolItems?: CashReconciliationItem[];
+  agendaItems?: CashPendingAgendaItem[];
+  currentReferenceDate?: string;
   onManualLink: (systemIds: string[], realIds: string[], note?: string) => void;
   onIgnoreItem: (side: 'system' | 'real', id: string) => void;
   onInspectOperation?: (item: CashReconciliationItem) => void;
+  onScheduleAgendaFromItem?: (item: CashReconciliationItem) => void;
+  onSettleCrossDayAgendaMatch?: (agendaItem: CashPendingAgendaItem, bankItem: CashReconciliationItem) => void;
   defaultIncludeCashPool?: boolean;
   emptyMissingMessage?: string;
   emptyExtraMessage?: string;
@@ -61,13 +71,41 @@ export function CashManualReconciliationTable({
   missingItems,
   extraItems,
   extraSystemPoolItems = [],
+  agendaItems = [],
+  currentReferenceDate = '',
   onManualLink,
   onIgnoreItem,
   onInspectOperation,
+  onScheduleAgendaFromItem,
+  onSettleCrossDayAgendaMatch,
   defaultIncludeCashPool = false,
   emptyMissingMessage = 'Todas as vendas digitais do PDV já estão conciliadas!',
   emptyExtraMessage = 'Todos os recebimentos do banco/maquininha já têm venda vinculada!'
 }: CashManualReconciliationTableProps) {
+  const waitingAgendaBySysId = useMemo(() => {
+    const map = new Map<string, CashPendingAgendaItem>();
+    for (const ag of agendaItems || []) {
+      if (ag?.status === 'waiting' && ag.sourceItemId) {
+        map.set(ag.sourceItemId, ag);
+      }
+    }
+    return map;
+  }, [agendaItems]);
+
+  const crossDayMatchByRealId = useMemo(() => {
+    const matches = findCrossDayAgendaMatchesForExtras(extraItems, agendaItems, currentReferenceDate) as Array<{
+      realItem: CashReconciliationItem;
+      agendaItem: CashPendingAgendaItem;
+      similarityPct: number;
+    }>;
+    const map = new Map<string, { agendaItem: CashPendingAgendaItem; similarityPct: number }>();
+    for (const m of matches) {
+      if (m?.realItem?.id && m?.agendaItem) {
+        map.set(m.realItem.id, { agendaItem: m.agendaItem, similarityPct: m.similarityPct });
+      }
+    }
+    return map;
+  }, [extraItems, agendaItems, currentReferenceDate]);
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<'all' | 'pix' | 'cartao'>('all');
   const [includeCashPool, setIncludeCashPool] = useState(defaultIncludeCashPool);
@@ -496,7 +534,7 @@ export function CashManualReconciliationTable({
                           className="py-2.5 px-3 align-middle text-right whitespace-nowrap"
                           onClick={(e) => e.stopPropagation()}
                         >
-                          <div className="inline-flex items-center gap-1">
+                          <div className="inline-flex items-center gap-1 flex-wrap justify-end">
                             {onInspectOperation && (
                               <button
                                 type="button"
@@ -507,6 +545,23 @@ export function CashManualReconciliationTable({
                                 <ShoppingBag size={12} />
                               </button>
                             )}
+                            {waitingAgendaBySysId.has(it.id) ? (
+                              <span
+                                className="px-2 py-1 rounded-lg bg-amber-500/15 border border-amber-500/35 text-[10px] font-black text-amber-700 dark:text-amber-300 inline-flex items-center gap-1"
+                                title="Esta venda já está documentada na Agenda Financeira em espera"
+                              >
+                                <CalendarClock size={11} /> Na Agenda ({formatDateBrShort(waitingAgendaBySysId.get(it.id)?.dueDate)})
+                              </span>
+                            ) : onScheduleAgendaFromItem ? (
+                              <button
+                                type="button"
+                                onClick={() => onScheduleAgendaFromItem(it)}
+                                className="px-2 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500 border border-amber-500/35 text-amber-700 hover:text-white dark:text-amber-300 text-[10.5px] font-black inline-flex items-center gap-1 transition-all"
+                                title="Documentar falha no pagamento e deixar em espera na Agenda até o cliente pagar em outro dia"
+                              >
+                                <CalendarClock size={11} /> Em Espera
+                              </button>
+                            ) : null}
                             <button
                               type="button"
                               onClick={() => onIgnoreItem('system', it.id)}
@@ -634,7 +689,20 @@ export function CashManualReconciliationTable({
                           className="py-2.5 px-3 align-middle text-right whitespace-nowrap"
                           onClick={(e) => e.stopPropagation()}
                         >
-                          <div className="inline-flex items-center gap-1">
+                          <div className="inline-flex items-center gap-1 flex-wrap justify-end">
+                            {crossDayMatchByRealId.has(it.id) && onSettleCrossDayAgendaMatch && (() => {
+                              const match = crossDayMatchByRealId.get(it.id)!;
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={() => onSettleCrossDayAgendaMatch(match.agendaItem, it)}
+                                  className="px-2 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-[10.5px] font-black inline-flex items-center gap-1 shadow-sm active:scale-95 transition-all animate-pulse"
+                                  title={`Quita pendência de ${formatDateBrShort(match.agendaItem.originDate)}: ${match.agendaItem.title} (${formatCents(match.agendaItem.amountCents)})`}
+                                >
+                                  <CalendarClock size={11} /> Quitar ({formatDateBrShort(match.agendaItem.originDate)})
+                                </button>
+                              );
+                            })()}
                             {matchRank === 'exact' && selectedSysIds.length >= 1 && selectedRealIds.length === 0 && (
                               <button
                                 type="button"

@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import {
   CashManualInputs,
+  CashPendingAgendaItem,
   CashReconciliationItem,
   CashReconciliationResult,
   CashResolutionAction,
@@ -41,6 +42,7 @@ interface CashHealthRoadmapModalProps {
   result: CashReconciliationResult;
   manualInputs: CashManualInputs;
   manualResolutions?: CashResolutionAction[];
+  agendaItems?: CashPendingAgendaItem[];
   initialTab?: HealthRoadmapTabKey;
   onUpdateManualInputs: (patch: Partial<CashManualInputs>) => void;
   onConfirmSuggestion: (suggestionId: string) => void;
@@ -49,6 +51,8 @@ interface CashHealthRoadmapModalProps {
   onIgnoreItem: (side: 'system' | 'real', id: string) => void;
   onReclassifySystemItem?: (systemId: string, targetCategory: CashSystemCategoryTarget | null) => void;
   onReclassifySystemItems?: (systemIds: string[], targetCategory: CashSystemCategoryTarget) => void;
+  onScheduleAgendaFromItem?: (item: CashReconciliationItem) => void;
+  onSettleCrossDayAgendaMatch?: (agendaItem: CashPendingAgendaItem, bankItem: CashReconciliationItem) => void;
   onUndoLastResolution?: () => void;
   onOpenMirrorCategory?: (mirrorKey: string) => void;
   onOpenChecklist?: () => void;
@@ -73,6 +77,7 @@ export function CashHealthRoadmapModal({
   result,
   manualInputs,
   manualResolutions = [],
+  agendaItems = [],
   initialTab,
   onUpdateManualInputs,
   onConfirmSuggestion,
@@ -81,6 +86,8 @@ export function CashHealthRoadmapModal({
   onIgnoreItem,
   onReclassifySystemItem,
   onReclassifySystemItems,
+  onScheduleAgendaFromItem,
+  onSettleCrossDayAgendaMatch,
   onUndoLastResolution,
   onOpenMirrorCategory,
   onOpenChecklist,
@@ -717,8 +724,12 @@ export function CashHealthRoadmapModal({
                   missingItems={missingItems}
                   extraItems={extraItems}
                   extraSystemPoolItems={systemPoolItems}
+                  agendaItems={agendaItems}
+                  currentReferenceDate={result.referenceDate}
                   onManualLink={onManualLink}
                   onIgnoreItem={onIgnoreItem}
+                  onScheduleAgendaFromItem={onScheduleAgendaFromItem}
+                  onSettleCrossDayAgendaMatch={onSettleCrossDayAgendaMatch}
                   onInspectOperation={(item) =>
                     setInspectedOp({ item, paired: pairedByItemId.get(item.id) || [] })
                   }
@@ -815,21 +826,21 @@ export function CashHealthRoadmapModal({
         </div>
       </div>
 
-      {inspectedOp && (
-        <CashOperationDetailModal
-          item={inspectedOp.item}
-          pairedItems={inspectedOp.paired}
-          onReclassify={
-            onReclassifySystemItem
-              ? (itemId, targetCat) => {
-                  onReclassifySystemItem(itemId, targetCat);
-                  setInspectedOp(null);
-                }
-              : undefined
-          }
-          onClose={() => setInspectedOp(null)}
-        />
-      )}
+      <CashOperationDetailModal
+        operationItem={inspectedOp?.item || null}
+        pairedItems={inspectedOp?.paired || []}
+        result={result}
+        onReclassifySystemItem={
+          onReclassifySystemItem
+            ? (itemId, targetCat) => {
+                onReclassifySystemItem(itemId, targetCat);
+                setInspectedOp(null);
+              }
+            : undefined
+        }
+        onScheduleAgendaFromItem={onScheduleAgendaFromItem}
+        onClose={() => setInspectedOp(null)}
+      />
     </div>
   );
 

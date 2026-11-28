@@ -18,7 +18,8 @@ import {
   Cloud,
   AlertCircle,
   RefreshCw,
-  Calendar
+  Calendar,
+  CalendarClock
 } from 'lucide-react';
 import { useChatStore } from '../store/chatStore';
 import { parseUploadedCashFile } from '../utils/cashFileParsers.mjs';
@@ -79,8 +80,14 @@ import {
   upsertCashWhatsappNumber,
   getCompanyCashRoutine,
   saveCompanyCashRoutine,
+  getCompanyCashAgenda,
+  saveCompanyCashAgenda,
   sendCashSummaryViaFoodNext
 } from '../services/cashReconciliationService';
+import {
+  buildSettlementAdjustmentFromReceipt,
+  evaluateAgendaNotifications
+} from '../utils/cashPendingAgendaHelper.mjs';
 import {
   extractSavedPasswordsFromRules,
   loadSavedFilePasswordsFromStorage,
@@ -95,9 +102,13 @@ import { CashReconciliationWorkbench } from '../components/cash-reconciliation/C
 import { CashDashboardOverview } from '../components/cash-reconciliation/CashDashboardOverview';
 import { CashWhatsappSendModal } from '../components/cash-reconciliation/CashWhatsappSendModal';
 import { CashDeleteConfirmModal } from '../components/cash-reconciliation/CashDeleteConfirmModal';
+import { CashPendingAgendaBanner } from '../components/cash-reconciliation/CashPendingAgendaBanner';
+import { CashAgendaInitialDraft, CashPendingAgendaModal } from '../components/cash-reconciliation/CashPendingAgendaModal';
 import {
   CashAiAnalysis,
   CashManualInputs,
+  CashPendingAgendaItem,
+  CashReconciliationItem,
   CashReconciliationResult,
   CashReportCompleteness,
   CashResolutionAction,
@@ -185,6 +196,14 @@ export default function CashReconciliationPage() {
   const [selectedMirrorKey, setSelectedMirrorKey] = useState<string | null>(null);
   const [generalDiffTab, setGeneralDiffTab] = useState<GeneralDiffTabKey | null>(null);
   const [healthRoadmapOpen, setHealthRoadmapOpen] = useState(false);
+  const [localAgendaOverride, setLocalAgendaOverride] = useState<CashPendingAgendaItem[] | null>(null);
+  const [agendaModalState, setAgendaModalState] = useState<{
+    isOpen: boolean;
+    draft?: CashAgendaInitialDraft | null;
+    focusItemId?: string | null;
+    quickSettle?: boolean;
+  }>({ isOpen: false });
+  const remindedAgendaTenantRef = useRef<string>('');
   const [workbenchResetKey, setWorkbenchResetKey] = useState(0);
   const [autoSaveState, setAutoSaveState] = useState<{
     status: 'idle' | 'pending' | 'saving' | 'saved' | 'local_only' | 'error';
@@ -237,6 +256,28 @@ export default function CashReconciliationPage() {
     () => localSavedWhatsapp || getSavedCashWhatsappNumber(tenantId, rules),
     [tenantId, rules, localSavedWhatsapp]
   );
+
+  const agendaItems = useMemo<CashPendingAgendaItem[]>(() => {
+    if (localAgendaOverride !== null) return localAgendaOverride;
+    return getCompanyCashAgenda(tenantId, rules);
+  }, [localAgendaOverride, tenantId, rules]);
+
+  const agendaSummary = useMemo(() => evaluateAgendaNotifications(agendaItems), [agendaItems]);
+
+  useEffect(() => {
+    if (!tenantId || hydratedTenantId !== tenantId) return;
+    if (remindedAgendaTenantRef.current === tenantId) return;
+    const dueCount = agendaSummary.overdueCount + agendaSummary.dueTodayCount;
+    if (dueCount > 0) {
+      remindedAgendaTenantRef.current = tenantId;
+      notifyToast(
+        `🔔 Agenda Financeira: ${dueCount} pendência(s) vencida(s) ou para hoje (${formatCents(
+          agendaSummary.totalOverdueOrTodayCents
+        )}) aguardando resolução!`,
+        'warning'
+      );
+    }
+  }, [tenantId, hydratedTenantId, agendaSummary.overdueCount, agendaSummary.dueTodayCount, agendaSummary.totalOverdueOrTodayCents, notifyToast]);
 
   const reconciliationResult = useMemo<CashReconciliationResult | null>(() => {
     const validParsed = files.map(f => f.parsed).filter(p => p && p.status === 'ok');
@@ -551,6 +592,7 @@ export default function CashReconciliationPage() {
     setIsAnalyzingAi(false);
     setIsDeletingSession(false);
     setLocalRoutineOverride(null);
+    setLocalAgendaOverride(null);
     setLocalSavedWhatsapp('');
     setSessions([]);
     setRules([]);
@@ -1202,6 +1244,7 @@ export default function CashReconciliationPage() {
     setSelectedMirrorKey(null);
     setGeneralDiffTab(null);
     setHealthRoadmapOpen(false);
+    setAgendaModalState({ isOpen: false });
     setAutoSaveState({ status: 'idle', lastSavedAt: null });
     setWorkbenchResetKey((k) => k + 1);
   };
@@ -1858,6 +1901,33 @@ export default function CashReconciliationPage() {
               </button>
             )}
 
+            <button
+              type="button"
+              onClick={() => setAgendaModalState({ isOpen: true })}
+              className={`px-3 py-2 min-h-[38px] rounded-xl border text-xs font-black flex items-center gap-1.5 active:scale-95 transition-all ${
+                agendaSummary.urgency === 'urgent'
+                  ? 'border-amber-500/70 bg-amber-500/15 text-amber-700 dark:text-amber-300 animate-pulse'
+                  : agendaSummary.openCount > 0
+                    ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300'
+                    : 'border-slate-200 dark:border-[#2a3942] bg-white dark:bg-[#202c33] text-slate-600 dark:text-[#aebac1] hover:border-[#00a884]'
+              }`}
+              title="Abrir Agenda Cross-Dias de Clientes em Espera e Notas Fiscais Pendentes"
+            >
+              <CalendarClock size={14} />
+              Agenda
+              {agendaSummary.openCount > 0 && (
+                <span
+                  className={`px-1.5 py-0.5 rounded-full text-[10px] font-black tabular-nums ${
+                    agendaSummary.urgency === 'urgent'
+                      ? 'bg-rose-600 text-white'
+                      : 'bg-cyan-600 text-white'
+                  }`}
+                >
+                  {agendaSummary.openCount}
+                </span>
+              )}
+            </button>
+
             {sessions.length > 0 && (
               <div className="flex items-center gap-1.5 bg-white dark:bg-[#202c33] border border-slate-200 dark:border-[#2a3942] rounded-xl px-2.5 py-1.5">
                 <History size={14} className="text-[#00a884] shrink-0" />
@@ -2043,290 +2113,405 @@ export default function CashReconciliationPage() {
           </div>
         )}
 
-        {viewMode === 'dashboard' ? (
-          <CashDashboardOverview
-            sessions={sessions}
-            historicalStats={historicalStats}
-            routineProfile={routineProfile}
-            savedWhatsappPhone={savedWhatsappPhone}
-            hasActiveDraft={hasActiveDraft}
-            activeDraftFilesCount={files.length}
-            activeDraftDate={activeDraftDate}
-            busySessionId={busySessionId}
-            isActionLocked={isActionLocked}
-            onNewConference={() => {
-              handleResetNew();
-              setViewMode('workspace');
-            }}
-            onContinueDraft={() => setViewMode('workspace')}
-            onDiscardDraft={() => {
-              handleResetNew();
-              setViewMode('dashboard');
-            }}
-            onOpenSession={(sessionId) => void handleLoadSession(sessionId)}
-            onSendWhatsapp={(session) => void handleTriggerWhatsappSend(session, false)}
-            onChangeWhatsappNumber={() => void handleOpenWhatsappNumberEditor()}
-            onExportPdf={(session) => void handleExportPdf(session)}
-            onDeleteSession={(session) => setDeleteTargetSession(session)}
-            onToggleRoutineBank={(bankKey, enabled) => void handleToggleRoutineBank(bankKey, enabled)}
-            onToggleRoutineReport={(fileType, enabled) => void handleToggleRoutineReport(fileType, enabled)}
-            onAddRoutineBank={(bank) => void handleAddRoutineBank(bank)}
-          />
-        ) : (
-          <>
-            {/* Área de Upload */}
-            <div ref={dropzoneContainerRef}>
-              <CashUploadDropzone
-                files={files}
-                isProcessing={isProcessingFiles}
-                savedPasswordsCount={savedFilePasswords.length}
-                reportCompleteness={reportCompleteness}
-                routineProfile={routineProfile}
-                sourcePeriodStats={reconciliationResult?.periodDiagnostics?.sourcePeriodStats}
-                wrongDayWarnings={reconciliationResult?.periodDiagnostics?.validationWarnings?.filter(
-                  (w) => w.code === 'wrong_day_real_file' || w.code === 'wrong_day_system_file'
-                )}
-                quarantinedSystemFiles={reconciliationResult?.periodDiagnostics?.quarantinedSystemFiles}
-                openChecklistNonce={openChecklistNonce}
-                onAddFiles={handleAddFiles}
-                onUnlockPasswordFile={handleUnlockPasswordFile}
-                onOpenPasswordModal={(id) => setPasswordModalFileId(id)}
-                onRemoveFile={(id) => {
-                  if (passwordModalFileId === id) setPasswordModalFileId(null);
-                  handleRemoveFile(id);
-                }}
-                onToggleRoutineBank={(bankKey, enabled) => void handleToggleRoutineBank(bankKey, enabled)}
-                onToggleRoutineReport={(fileType, enabled) => void handleToggleRoutineReport(fileType, enabled)}
-                onAddRoutineBank={(bank) => void handleAddRoutineBank(bank)}
-              />
-            </div>
+        {(() => {
+          const handleSaveAgendaItems = async (nextItems: CashPendingAgendaItem[]) => {
+            const reqTenantId = tenantId;
+            if (!reqTenantId) return;
+            setLocalAgendaOverride(nextItems);
+            const saved = await saveCompanyCashAgenda(reqTenantId, nextItems);
+            if (activeTenantRef.current !== reqTenantId) return;
+            setLocalAgendaOverride(saved.items);
+            if (saved.rule) {
+              setRules((prev) => [saved.rule!, ...prev.filter((r) => r.id !== saved.rule!.id)]);
+            }
+            notifyToast('Agenda de pendências atualizada!', 'success');
+          };
 
-            {/* Conteúdo Principal vs Empty State */}
-            {!reconciliationResult ? (
-              <div className="space-y-5">
-                <div className="rounded-3xl border border-slate-200/80 dark:border-[#2a3942] bg-white/80 dark:bg-[#202c33]/80 backdrop-blur-md p-6 sm:p-10 text-center space-y-4">
-                  <div className="w-16 h-16 mx-auto rounded-3xl bg-[#00a884]/10 border border-[#00a884]/25 text-[#00a884] flex items-center justify-center">
-                    <FileCheck2 size={30} />
-                  </div>
-                  <div className="max-w-lg mx-auto space-y-1.5">
-                    <h2 className="text-base sm:text-lg font-black text-slate-800 dark:text-white">
-                      Suba os arquivos do dia para iniciar a auditoria automática
-                    </h2>
-                    <p className="text-xs sm:text-sm text-slate-500 dark:text-[#8696a0]">
-                      Carregue juntos a <strong>PlanilhaRecebimento</strong>, a <strong>RelConferencia</strong>, o <strong>Fechamento .txt</strong>, os extratos <strong>OFX (C6 / Itaú)</strong> e os relatórios da <strong>Rede</strong> e <strong>C6 Pay</strong>. O sistema cruza tudo em segundos e mostra exatamente o que bateu, faltou ou sobrou.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-5">
-                {(() => {
-                  const onConfirmSuggestionAction = (suggestionId: string) => {
-                    setManualResolutions((prev) => [...prev, { action: 'confirm_suggestion', suggestionId }]);
-                    notifyToast('Dica confirmada! Transações e diferença atualizadas.', 'success');
-                  };
-                  const onRejectSuggestionAction = (suggestionId: string) => {
-                    setManualResolutions((prev) => [...prev, { action: 'reject_suggestion', suggestionId }]);
-                    notifyToast('Dica rejeitada e removida das sugestões.', 'info');
-                  };
-                  const onManualLinkAction = (systemIds: string[], realIds: string[], note?: string) => {
-                    const cleanNote = typeof note === 'string' && note.trim() ? note.trim() : undefined;
-                    setManualResolutions((prev) => [
-                      ...prev,
-                      { action: 'manual_link', systemIds, realIds, ...(cleanNote ? { note: cleanNote } : {}) }
-                    ]);
-                    notifyToast('Vínculo confirmado! Tela e saldo atualizados.', 'success');
-                  };
-                  const onIgnoreItemAction = (side: 'system' | 'real', id: string) => {
-                    setManualResolutions((prev) => [
-                      ...prev,
-                      {
-                        action: 'ignore_item',
-                        systemIds: side === 'system' ? [id] : [],
-                        realIds: side === 'real' ? [id] : []
-                      }
-                    ]);
-                    notifyToast(
-                      side === 'real' ? 'Recebimento marcado como Não-PDV. Totais atualizados.' : 'Venda justificada. Totais atualizados.',
-                      'info'
-                    );
-                  };
-                  const onReclassifySystemItemAction = (
-                    systemId: string,
-                    targetCategory: 'dinheiro' | 'cartao' | 'pix' | 'pendente' | null
-                  ) => {
-                    setManualResolutions((prev) => {
-                      const withoutPrior = prev.filter(
-                        (r) => !(r.action === 'reclassify_system' && r.systemIds?.includes(systemId))
-                      );
-                      if (!targetCategory) return withoutPrior;
-                      return [
-                        ...withoutPrior,
-                        { action: 'reclassify_system', systemIds: [systemId], targetCategory }
-                      ];
-                    });
-                    notifyToast(
-                      targetCategory ? `Forma ajustada para ${targetCategory.toUpperCase()}. Totais atualizados.` : 'Ajuste desfeito.',
-                      'success'
-                    );
-                  };
-                  const onReclassifySystemItemsAction = (
-                    systemIds: string[],
-                    targetCategory: 'dinheiro' | 'cartao' | 'pix' | 'pendente'
-                  ) => {
-                    const idSet = new Set(systemIds);
-                    if (idSet.size === 0) return;
-                    setManualResolutions((prev) => {
-                      const withoutPrior = prev.filter(
-                        (r) => !(r.action === 'reclassify_system' && (r.systemIds || []).some((sid) => idSet.has(sid)))
-                      );
-                      return [
-                        ...withoutPrior,
-                        { action: 'reclassify_system', systemIds, targetCategory }
-                      ];
-                    });
-                    notifyToast(
-                      `${systemIds.length} lançamento(s) ajustado(s) para ${targetCategory.toUpperCase()}. Totais atualizados.`,
-                      'success'
-                    );
-                  };
-                  const onUndoLastResolutionAction = () => {
-                    setManualResolutions((prev) => {
-                      if (prev.length === 0) return prev;
-                      notifyToast('Último ajuste desfeito! Tela restaurada.', 'info');
-                      return prev.slice(0, -1);
-                    });
-                  };
+          const handleScheduleAgendaFromItem = (item: CashReconciliationItem) => {
+            setAgendaModalState({
+              isOpen: true,
+              draft: {
+                kind: 'payment_awaiting',
+                amountCents: Number(item.amountCents || 0),
+                originDate: item.dateStr || reconciliationResult?.referenceDate || '',
+                title: item.description || `${String(item.category || '').toUpperCase()} ${item.referenceCode || ''}`,
+                description: `Falha no pagamento (${String(item.category || '').toUpperCase()} às ${item.timeStr || '-'}) — venda deixada em espera até o cliente realizar o pagamento.`,
+                customerOrSupplier: item.metadata?.debtorName || '',
+                operatorName: item.operatorName || reconciliationResult?.operatorName || '',
+                sourceSessionId: activeSessionId,
+                sourceItemId: item.id,
+                sourceCategory: item.category
+              }
+            });
+          };
 
-                  return (
-                    <>
-                      <CashHealthDashboard
-                        result={reconciliationResult}
-                        onOpenMirrorCategory={(mirrorKey) => setSelectedMirrorKey(mirrorKey)}
-                        onOpenGeneralDiff={(tab) => setGeneralDiffTab(tab || 'tabela')}
-                        onOpenHealthRoadmap={() => setHealthRoadmapOpen(true)}
-                        onOpenChecklist={() => {
-                          setOpenChecklistNonce((n) => n + 1);
-                          dropzoneContainerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                        }}
-                      />
+          const handleSettleCrossDayAgendaMatch = (agendaItem: CashPendingAgendaItem) => {
+            setAgendaModalState({
+              isOpen: true,
+              focusItemId: agendaItem.id,
+              quickSettle: true
+            });
+          };
 
-                      <CashReconciliationWorkbench
-                        key={workbenchResetKey}
-                        result={reconciliationResult}
-                        manualInputs={manualInputs}
-                        selectedMirrorKey={selectedMirrorKey}
-                        onSelectMirrorKey={setSelectedMirrorKey}
-                        onUpdateManualInputs={(patch) => {
-                          setManualInputs((prev) => ({ ...prev, ...patch }));
-                        }}
-                        onConfirmSuggestion={onConfirmSuggestionAction}
-                        onRejectSuggestion={onRejectSuggestionAction}
-                        onManualLink={onManualLinkAction}
-                        onIgnoreItem={onIgnoreItemAction}
-                        onReclassifySystemItem={onReclassifySystemItemAction}
-                        onReclassifySystemItems={onReclassifySystemItemsAction}
-                        manualResolutionsCount={manualResolutions.length}
-                        onUndoLastResolution={onUndoLastResolutionAction}
-                  rules={rules}
-                  savedPasswords={savedFilePasswords}
-                  onDeleteSavedPassword={async (patternKey, ruleId) => {
-                    const reqTenantId = tenantId;
-                    if (!reqTenantId) return;
-                    await deleteCashSavedFilePassword(reqTenantId, patternKey, ruleId);
-                    if (activeTenantRef.current !== reqTenantId) return;
-                    if (typeof window !== 'undefined') {
-                      setLocalSavedPasswords(loadSavedFilePasswordsFromStorage(window.localStorage, reqTenantId) as SavedCashFilePassword[]);
-                    }
-                    if (ruleId) {
-                      setRules(prev => prev.filter(r => r.id !== ruleId));
-                    } else {
-                      setRules(prev => prev.filter(r => r.pattern !== patternKey && r.pattern !== `file_password:${patternKey}`));
-                    }
-                    notifyToast('Senha fixa removida. Será solicitada no próximo envio protegido.', 'info');
+          const openAgendaAt = (focusItemId?: string, quickSettle?: boolean) => {
+            setAgendaModalState({
+              isOpen: true,
+              focusItemId: focusItemId || null,
+              quickSettle: Boolean(quickSettle)
+            });
+          };
+
+          return (
+            <>
+              {viewMode === 'dashboard' ? (
+                <CashDashboardOverview
+                  sessions={sessions}
+                  historicalStats={historicalStats}
+                  routineProfile={routineProfile}
+                  savedWhatsappPhone={savedWhatsappPhone}
+                  hasActiveDraft={hasActiveDraft}
+                  activeDraftFilesCount={files.length}
+                  activeDraftDate={activeDraftDate}
+                  busySessionId={busySessionId}
+                  isActionLocked={isActionLocked}
+                  agendaItems={agendaItems}
+                  onOpenAgenda={openAgendaAt}
+                  onNewConference={() => {
+                    handleResetNew();
+                    setViewMode('workspace');
                   }}
-                  onCreateRule={async (rule) => {
-                    const reqTenantId = tenantId;
-                    if (!reqTenantId) return;
-                    const saved = await saveCashFormulaRule(reqTenantId, rule);
-                    if (activeTenantRef.current !== reqTenantId) return;
-                    setRules(prev => [saved.rule, ...prev]);
-                    notifyToast('Regra salva na Fórmula 1 e aplicada!', 'success');
+                  onContinueDraft={() => setViewMode('workspace')}
+                  onDiscardDraft={() => {
+                    handleResetNew();
+                    setViewMode('dashboard');
                   }}
-                  onToggleRule={async (ruleId, isActive) => {
-                    const reqTenantId = tenantId;
-                    if (!reqTenantId) return;
-                    await toggleCashFormulaRule(reqTenantId, ruleId, isActive);
-                    if (activeTenantRef.current !== reqTenantId) return;
-                    setRules(prev => prev.map(r => (r.id === ruleId ? { ...r, is_active: isActive } : r)));
-                  }}
-                  onDeleteRule={async (ruleId) => {
-                    const reqTenantId = tenantId;
-                    if (!reqTenantId) return;
-                    await deleteCashFormulaRule(reqTenantId, ruleId);
-                    if (activeTenantRef.current !== reqTenantId) return;
-                    setRules(prev => prev.filter(r => r.id !== ruleId));
-                  }}
-                  aiAnalysis={aiAnalysis}
-                  isAnalyzingAi={isAnalyzingAi}
-                  onRunAiAnalysis={handleRunAiAnalysis}
+                  onOpenSession={(sessionId) => void handleLoadSession(sessionId)}
+                  onSendWhatsapp={(session) => void handleTriggerWhatsappSend(session, false)}
+                  onChangeWhatsappNumber={() => void handleOpenWhatsappNumberEditor()}
+                  onExportPdf={(session) => void handleExportPdf(session)}
+                  onDeleteSession={(session) => setDeleteTargetSession(session)}
+                  onToggleRoutineBank={(bankKey, enabled) => void handleToggleRoutineBank(bankKey, enabled)}
+                  onToggleRoutineReport={(fileType, enabled) => void handleToggleRoutineReport(fileType, enabled)}
+                  onAddRoutineBank={(bank) => void handleAddRoutineBank(bank)}
                 />
+              ) : (
+                <>
+                  <CashPendingAgendaBanner items={agendaItems} onOpenAgenda={openAgendaAt} />
 
-                      {generalDiffTab !== null && (
-                        <CashGeneralDiffModal
-                          result={reconciliationResult}
-                          manualResolutions={manualResolutions}
-                          initialTab={generalDiffTab}
-                          onConfirmSuggestion={onConfirmSuggestionAction}
-                          onRejectSuggestion={onRejectSuggestionAction}
-                          onManualLink={onManualLinkAction}
-                          onIgnoreItem={onIgnoreItemAction}
-                          onReclassifySystemItem={onReclassifySystemItemAction}
-                          onReclassifySystemItems={onReclassifySystemItemsAction}
-                          onUndoLastResolution={onUndoLastResolutionAction}
-                          onOpenMirrorCategory={(mirrorKey) => setSelectedMirrorKey(mirrorKey)}
-                          onClose={() => setGeneralDiffTab(null)}
-                        />
+                  {/* Área de Upload */}
+                  <div ref={dropzoneContainerRef}>
+                    <CashUploadDropzone
+                      files={files}
+                      isProcessing={isProcessingFiles}
+                      savedPasswordsCount={savedFilePasswords.length}
+                      reportCompleteness={reportCompleteness}
+                      routineProfile={routineProfile}
+                      sourcePeriodStats={reconciliationResult?.periodDiagnostics?.sourcePeriodStats}
+                      wrongDayWarnings={reconciliationResult?.periodDiagnostics?.validationWarnings?.filter(
+                        (w) => w.code === 'wrong_day_real_file' || w.code === 'wrong_day_system_file'
                       )}
+                      quarantinedSystemFiles={reconciliationResult?.periodDiagnostics?.quarantinedSystemFiles}
+                      openChecklistNonce={openChecklistNonce}
+                      onAddFiles={handleAddFiles}
+                      onUnlockPasswordFile={handleUnlockPasswordFile}
+                      onOpenPasswordModal={(id) => setPasswordModalFileId(id)}
+                      onRemoveFile={(id) => {
+                        if (passwordModalFileId === id) setPasswordModalFileId(null);
+                        handleRemoveFile(id);
+                      }}
+                      onToggleRoutineBank={(bankKey, enabled) => void handleToggleRoutineBank(bankKey, enabled)}
+                      onToggleRoutineReport={(fileType, enabled) => void handleToggleRoutineReport(fileType, enabled)}
+                      onAddRoutineBank={(bank) => void handleAddRoutineBank(bank)}
+                    />
+                  </div>
 
-                      {healthRoadmapOpen && (
-                        <CashHealthRoadmapModal
-                          result={reconciliationResult}
-                          manualInputs={manualInputs}
-                          manualResolutions={manualResolutions}
-                          onUpdateManualInputs={(patch) => {
-                            setManualInputs((prev) => ({ ...prev, ...patch }));
-                            if (patch.forcedBalanced !== undefined) {
-                              notifyToast(
-                                patch.forcedBalanced?.enabled
-                                  ? 'Caixa marcado como 100% Forçado! Sobra/Falta real preservada com aviso pulsante.'
-                                  : 'Forçamento a 100% revertido para a saúde técnica real.',
-                                patch.forcedBalanced?.enabled ? 'warning' : 'info'
-                              );
+                  {/* Conteúdo Principal vs Empty State */}
+                  {!reconciliationResult ? (
+                    <div className="space-y-5">
+                      <div className="rounded-3xl border border-slate-200/80 dark:border-[#2a3942] bg-white/80 dark:bg-[#202c33]/80 backdrop-blur-md p-6 sm:p-10 text-center space-y-4">
+                        <div className="w-16 h-16 mx-auto rounded-3xl bg-[#00a884]/10 border border-[#00a884]/25 text-[#00a884] flex items-center justify-center">
+                          <FileCheck2 size={30} />
+                        </div>
+                        <div className="max-w-lg mx-auto space-y-1.5">
+                          <h2 className="text-base sm:text-lg font-black text-slate-800 dark:text-white">
+                            Suba os arquivos do dia para iniciar a auditoria automática
+                          </h2>
+                          <p className="text-xs sm:text-sm text-slate-500 dark:text-[#8696a0]">
+                            Carregue juntos a <strong>PlanilhaRecebimento</strong>, a <strong>RelConferencia</strong>, o <strong>Fechamento .txt</strong>, os extratos <strong>OFX (C6 / Itaú)</strong> e os relatórios da <strong>Rede</strong> e <strong>C6 Pay</strong>. O sistema cruza tudo em segundos e mostra exatamente o que bateu, faltou ou sobrou.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-5">
+                      {(() => {
+                        const onConfirmSuggestionAction = (suggestionId: string) => {
+                          setManualResolutions((prev) => [...prev, { action: 'confirm_suggestion', suggestionId }]);
+                          notifyToast('Dica confirmada! Transações e diferença atualizadas.', 'success');
+                        };
+                        const onRejectSuggestionAction = (suggestionId: string) => {
+                          setManualResolutions((prev) => [...prev, { action: 'reject_suggestion', suggestionId }]);
+                          notifyToast('Dica rejeitada e removida das sugestões.', 'info');
+                        };
+                        const onManualLinkAction = (systemIds: string[], realIds: string[], note?: string) => {
+                          const cleanNote = typeof note === 'string' && note.trim() ? note.trim() : undefined;
+                          setManualResolutions((prev) => [
+                            ...prev,
+                            { action: 'manual_link', systemIds, realIds, ...(cleanNote ? { note: cleanNote } : {}) }
+                          ]);
+                          notifyToast('Vínculo confirmado! Tela e saldo atualizados.', 'success');
+                        };
+                        const onIgnoreItemAction = (side: 'system' | 'real', id: string) => {
+                          setManualResolutions((prev) => [
+                            ...prev,
+                            {
+                              action: 'ignore_item',
+                              systemIds: side === 'system' ? [id] : [],
+                              realIds: side === 'real' ? [id] : []
                             }
-                          }}
-                          onConfirmSuggestion={onConfirmSuggestionAction}
-                          onRejectSuggestion={onRejectSuggestionAction}
-                          onManualLink={onManualLinkAction}
-                          onIgnoreItem={onIgnoreItemAction}
-                          onReclassifySystemItem={onReclassifySystemItemAction}
-                          onReclassifySystemItems={onReclassifySystemItemsAction}
-                          onUndoLastResolution={onUndoLastResolutionAction}
-                          onOpenMirrorCategory={(mirrorKey) => setSelectedMirrorKey(mirrorKey)}
-                          onOpenChecklist={() => {
-                            setOpenChecklistNonce((n) => n + 1);
-                            dropzoneContainerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                          }}
-                          onClose={() => setHealthRoadmapOpen(false)}
-                        />
-                      )}
-                    </>
-                  );
-                })()}
-              </div>
-            )}
-          </>
-        )}
+                          ]);
+                          notifyToast(
+                            side === 'real' ? 'Recebimento marcado como Não-PDV. Totais atualizados.' : 'Venda justificada. Totais atualizados.',
+                            'info'
+                          );
+                        };
+                        const onReclassifySystemItemAction = (
+                          systemId: string,
+                          targetCategory: 'dinheiro' | 'cartao' | 'pix' | 'pendente' | null
+                        ) => {
+                          setManualResolutions((prev) => {
+                            const withoutPrior = prev.filter(
+                              (r) => !(r.action === 'reclassify_system' && r.systemIds?.includes(systemId))
+                            );
+                            if (!targetCategory) return withoutPrior;
+                            return [
+                              ...withoutPrior,
+                              { action: 'reclassify_system', systemIds: [systemId], targetCategory }
+                            ];
+                          });
+                          notifyToast(
+                            targetCategory ? `Forma ajustada para ${targetCategory.toUpperCase()}. Totais atualizados.` : 'Ajuste desfeito.',
+                            'success'
+                          );
+                        };
+                        const onReclassifySystemItemsAction = (
+                          systemIds: string[],
+                          targetCategory: 'dinheiro' | 'cartao' | 'pix' | 'pendente'
+                        ) => {
+                          const idSet = new Set(systemIds);
+                          if (idSet.size === 0) return;
+                          setManualResolutions((prev) => {
+                            const withoutPrior = prev.filter(
+                              (r) => !(r.action === 'reclassify_system' && (r.systemIds || []).some((sid) => idSet.has(sid)))
+                            );
+                            return [
+                              ...withoutPrior,
+                              { action: 'reclassify_system', systemIds, targetCategory }
+                            ];
+                          });
+                          notifyToast(
+                            `${systemIds.length} lançamento(s) ajustado(s) para ${targetCategory.toUpperCase()}. Totais atualizados.`,
+                            'success'
+                          );
+                        };
+                        const onUndoLastResolutionAction = () => {
+                          setManualResolutions((prev) => {
+                            if (prev.length === 0) return prev;
+                            notifyToast('Último ajuste desfeito! Tela restaurada.', 'info');
+                            return prev.slice(0, -1);
+                          });
+                        };
+
+                        return (
+                          <>
+                            <CashHealthDashboard
+                              result={reconciliationResult}
+                              onOpenMirrorCategory={(mirrorKey) => setSelectedMirrorKey(mirrorKey)}
+                              onOpenGeneralDiff={(tab) => setGeneralDiffTab(tab || 'tabela')}
+                              onOpenHealthRoadmap={() => setHealthRoadmapOpen(true)}
+                              onOpenChecklist={() => {
+                                setOpenChecklistNonce((n) => n + 1);
+                                dropzoneContainerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                              }}
+                            />
+
+                            <CashReconciliationWorkbench
+                              key={workbenchResetKey}
+                              result={reconciliationResult}
+                              manualInputs={manualInputs}
+                              selectedMirrorKey={selectedMirrorKey}
+                              onSelectMirrorKey={setSelectedMirrorKey}
+                              onUpdateManualInputs={(patch) => {
+                                setManualInputs((prev) => ({ ...prev, ...patch }));
+                              }}
+                              onConfirmSuggestion={onConfirmSuggestionAction}
+                              onRejectSuggestion={onRejectSuggestionAction}
+                              onManualLink={onManualLinkAction}
+                              onIgnoreItem={onIgnoreItemAction}
+                              onReclassifySystemItem={onReclassifySystemItemAction}
+                              onReclassifySystemItems={onReclassifySystemItemsAction}
+                              agendaItems={agendaItems}
+                              onOpenScheduleAgenda={(draft) => setAgendaModalState({ isOpen: true, draft: draft || null })}
+                              onScheduleAgendaFromItem={handleScheduleAgendaFromItem}
+                              onSettleCrossDayAgendaMatch={handleSettleCrossDayAgendaMatch}
+                              onOpenAgendaItem={(itemId, quickSettle) => openAgendaAt(itemId, quickSettle)}
+                              manualResolutionsCount={manualResolutions.length}
+                              onUndoLastResolution={onUndoLastResolutionAction}
+                              rules={rules}
+                              savedPasswords={savedFilePasswords}
+                              onDeleteSavedPassword={async (patternKey, ruleId) => {
+                                const reqTenantId = tenantId;
+                                if (!reqTenantId) return;
+                                await deleteCashSavedFilePassword(reqTenantId, patternKey, ruleId);
+                                if (activeTenantRef.current !== reqTenantId) return;
+                                if (typeof window !== 'undefined') {
+                                  setLocalSavedPasswords(loadSavedFilePasswordsFromStorage(window.localStorage, reqTenantId) as SavedCashFilePassword[]);
+                                }
+                                if (ruleId) {
+                                  setRules(prev => prev.filter(r => r.id !== ruleId));
+                                } else {
+                                  setRules(prev => prev.filter(r => r.pattern !== patternKey && r.pattern !== `file_password:${patternKey}`));
+                                }
+                                notifyToast('Senha fixa removida. Será solicitada no próximo envio protegido.', 'info');
+                              }}
+                              onCreateRule={async (rule) => {
+                                const reqTenantId = tenantId;
+                                if (!reqTenantId) return;
+                                const saved = await saveCashFormulaRule(reqTenantId, rule);
+                                if (activeTenantRef.current !== reqTenantId) return;
+                                setRules(prev => [saved.rule, ...prev]);
+                                notifyToast('Regra salva na Fórmula 1 e aplicada!', 'success');
+                              }}
+                              onToggleRule={async (ruleId, isActive) => {
+                                const reqTenantId = tenantId;
+                                if (!reqTenantId) return;
+                                await toggleCashFormulaRule(reqTenantId, ruleId, isActive);
+                                if (activeTenantRef.current !== reqTenantId) return;
+                                setRules(prev => prev.map(r => (r.id === ruleId ? { ...r, is_active: isActive } : r)));
+                              }}
+                              onDeleteRule={async (ruleId) => {
+                                const reqTenantId = tenantId;
+                                if (!reqTenantId) return;
+                                await deleteCashFormulaRule(reqTenantId, ruleId);
+                                if (activeTenantRef.current !== reqTenantId) return;
+                                setRules(prev => prev.filter(r => r.id !== ruleId));
+                              }}
+                              aiAnalysis={aiAnalysis}
+                              isAnalyzingAi={isAnalyzingAi}
+                              onRunAiAnalysis={handleRunAiAnalysis}
+                            />
+
+                            {generalDiffTab !== null && (
+                              <CashGeneralDiffModal
+                                result={reconciliationResult}
+                                manualResolutions={manualResolutions}
+                                agendaItems={agendaItems}
+                                initialTab={generalDiffTab}
+                                onConfirmSuggestion={onConfirmSuggestionAction}
+                                onRejectSuggestion={onRejectSuggestionAction}
+                                onManualLink={onManualLinkAction}
+                                onIgnoreItem={onIgnoreItemAction}
+                                onReclassifySystemItem={onReclassifySystemItemAction}
+                                onReclassifySystemItems={onReclassifySystemItemsAction}
+                                onScheduleAgendaFromItem={handleScheduleAgendaFromItem}
+                                onSettleCrossDayAgendaMatch={handleSettleCrossDayAgendaMatch}
+                                onUndoLastResolution={onUndoLastResolutionAction}
+                                onOpenMirrorCategory={(mirrorKey) => setSelectedMirrorKey(mirrorKey)}
+                                onClose={() => setGeneralDiffTab(null)}
+                              />
+                            )}
+
+                            {healthRoadmapOpen && (
+                              <CashHealthRoadmapModal
+                                result={reconciliationResult}
+                                manualInputs={manualInputs}
+                                manualResolutions={manualResolutions}
+                                agendaItems={agendaItems}
+                                onUpdateManualInputs={(patch) => {
+                                  setManualInputs((prev) => ({ ...prev, ...patch }));
+                                  if (patch.forcedBalanced !== undefined) {
+                                    notifyToast(
+                                      patch.forcedBalanced?.enabled
+                                        ? 'Caixa marcado como 100% Forçado! Sobra/Falta real preservada com aviso pulsante.'
+                                        : 'Forçamento a 100% revertido para a saúde técnica real.',
+                                      patch.forcedBalanced?.enabled ? 'warning' : 'info'
+                                    );
+                                  }
+                                }}
+                                onConfirmSuggestion={onConfirmSuggestionAction}
+                                onRejectSuggestion={onRejectSuggestionAction}
+                                onManualLink={onManualLinkAction}
+                                onIgnoreItem={onIgnoreItemAction}
+                                onReclassifySystemItem={onReclassifySystemItemAction}
+                                onReclassifySystemItems={onReclassifySystemItemsAction}
+                                onScheduleAgendaFromItem={handleScheduleAgendaFromItem}
+                                onSettleCrossDayAgendaMatch={handleSettleCrossDayAgendaMatch}
+                                onUndoLastResolution={onUndoLastResolutionAction}
+                                onOpenMirrorCategory={(mirrorKey) => setSelectedMirrorKey(mirrorKey)}
+                                onOpenChecklist={() => {
+                                  setOpenChecklistNonce((n) => n + 1);
+                                  dropzoneContainerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                }}
+                                onClose={() => setHealthRoadmapOpen(false)}
+                              />
+                            )}
+                          </>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </>
+              )}
+
+              <CashPendingAgendaModal
+                isOpen={agendaModalState.isOpen}
+                tenantId={tenantId}
+                items={agendaItems}
+                initialDraft={agendaModalState.draft}
+                initialFocusItemId={agendaModalState.focusItemId}
+                initialQuickSettle={agendaModalState.quickSettle}
+                currentReferenceDate={reconciliationResult?.referenceDate || ''}
+                currentSessionId={activeSessionId}
+                extraInBank={reconciliationResult?.extraInBank || []}
+                onSaveAgendaItems={handleSaveAgendaItems}
+                onAfterCreateFromSale={({ sourceItemId, mode }) => {
+                  if (mode === 'move_to_pending') {
+                    setManualResolutions((prev) => {
+                      const withoutPrior = prev.filter(
+                        (r) => !(r.action === 'reclassify_system' && r.systemIds?.includes(sourceItemId))
+                      );
+                      return [
+                        ...withoutPrior,
+                        { action: 'reclassify_system', systemIds: [sourceItemId], targetCategory: 'pendente' }
+                      ];
+                    });
+                    notifyToast('Venda documentada na Agenda e movida para Nota Pendente neste caixa!', 'success');
+                  } else {
+                    notifyToast('Pendência salva e agendada! Ela continuará notificando até ser paga.', 'warning');
+                  }
+                }}
+                onAfterSettleItem={(settledItem, extraOpts) => {
+                  if (extraOpts.linkBankItemId) {
+                    setManualResolutions((prev) => [
+                      ...prev,
+                      { action: 'ignore_item', systemIds: [], realIds: [extraOpts.linkBankItemId!] }
+                    ]);
+                    notifyToast('Pagamento confirmado na Agenda e recebimento vinculado como quitação cross-dias!', 'success');
+                  }
+                  if (extraOpts.addDrawerJustification && settledItem.kind === 'missing_receipt') {
+                    const adj = buildSettlementAdjustmentFromReceipt(settledItem);
+                    setManualInputs((prev) => ({
+                      ...prev,
+                      manualCashAdjustments: [...(prev.manualCashAdjustments || []), adj]
+                    }));
+                    notifyToast('Nota/Cupom fiscal registrado e lançado automaticamente na gaveta!', 'success');
+                  }
+                }}
+                onClose={() => setAgendaModalState({ isOpen: false })}
+              />
+            </>
+          );
+        })()}
       </div>
 
       <CashPasswordPromptModal
